@@ -1,6 +1,7 @@
-import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
-import { userInfo } from 'node:os'
-import { join } from 'node:path'
+import { spawn } from 'node:child_process'
+import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { homedir, userInfo } from 'node:os'
+import { delimiter, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   app,
@@ -50,6 +51,12 @@ import { registerShellIpc } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
 import { IPC_CHANNELS, type AutomationStatus, type BoardSyncEvent } from '../shared/ipc-contract'
 import { SecureStore } from './storage/secure-store'
+import { ClaudeService, type ClaudeServiceDeps } from './claude/claude.service'
+import { detectClaude } from './claude/detect'
+import { ClaudeRun } from './claude/runner'
+import { RunService } from './claude/run.service'
+import { WorktreeService } from './claude/worktree.service'
+import { registerClaudeIpc } from './ipc/claude.ipc'
 import appIcon from '../../resources/icon.png?asset'
 
 const RENDERER_HTML = join(__dirname, '../renderer/index.html')
@@ -312,6 +319,19 @@ function registerIpc(): void {
       projectsReady
     )
 
+    // Claude Code (4A): CLI do usuário (assinatura dele), worktree por tarefa, permissões pelo Orkio.
+    claudeRuns = createClaude({
+      boardStore,
+      git,
+      configStore,
+      listTasks: (projectId) => notionWorkspace.listTasks(projectId),
+      signals: (projectId) => signals.get(projectId),
+      getBlockChildren: (id, cursor) => notion.getBlockChildren(id, cursor),
+      send,
+      isTrustedSender,
+      ready: projectsReady
+    })
+
     void projectsReady.then(async () => {
       // Retoma o que ficou pendente quando o app fechou.
       writeQueue?.start()
@@ -328,6 +348,98 @@ function registerIpc(): void {
 let projects: ProjectsService | null = null
 let writeQueue: NotionWriteQueue | null = null
 let scheduler: AutomationScheduler | null = null
+let claudeRuns: RunService | null = null
+
+/**
+ * Apps abertos pelo Finder/menu não herdam o PATH do terminal: acrescenta as pastas usuais do
+ * Claude Code e dos editores (instalador nativo, npm global, Homebrew).
+ */
+function toolEnv(): NodeJS.ProcessEnv {
+  const home = homedir()
+  const extra = [
+    join(home, '.local', 'bin'),
+    join(home, '.claude', 'local'),
+    join(home, '.npm-global', 'bin'),
+    '/opt/homebrew/bin',
+    '/usr/local/bin'
+  ]
+  const current = (process.env['PATH'] ?? '').split(delimiter).filter(Boolean)
+  const path = [...current, ...extra.filter((d) => !current.includes(d))].join(delimiter)
+  return { ...process.env, PATH: path }
+}
+
+function createClaude(deps: {
+  boardStore: BoardStore
+  git: ReturnType<typeof createGit>
+  configStore: ReturnType<typeof createOrkioConfigStore>
+  listTasks: ClaudeServiceDeps['listTasks']
+  signals: ClaudeServiceDeps['signals']
+  getBlockChildren: ClaudeServiceDeps['getBlockChildren']
+  send: (channel: string, payload: unknown) => void
+  isTrustedSender: ReturnType<typeof createSenderGuard>
+  ready: Promise<void>
+}): RunService {
+  const userData = app.getPath('userData')
+  const tmpDir = join(userData, 'run-tmp')
+  const env = toolEnv()
+  const worktrees = new WorktreeService({
+    git: deps.git,
+    db: deps.boardStore.db,
+    root: join(userData, 'worktrees')
+  })
+  let service: ClaudeService | null = null
+  const runs = new RunService({
+    db: deps.boardStore.db,
+    store: deps.boardStore,
+    worktrees,
+    git: deps.git,
+    runsDir: join(userData, 'runs'),
+    createRun: (options) =>
+      new ClaudeRun({
+        ...options,
+        claudeCommand: 'claude',
+        // O servidor MCP de permissões roda no Node do próprio Electron.
+        nodePath: process.execPath,
+        bridgeScript: join(__dirname, 'permission-mcp.js'),
+        tmpDir,
+        env
+      }),
+    emit: (message) => {
+      service?.onRunEvent(message.event)
+      deps.send(IPC_CHANNELS.claude.runEvent, message)
+    },
+    notify: (title, body, ref) =>
+      showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, deps.send)
+  })
+  service = new ClaudeService({
+    config: deps.configStore,
+    worktrees,
+    runs,
+    git: deps.git,
+    listTasks: deps.listTasks,
+    signals: deps.signals,
+    getBlockChildren: deps.getBlockChildren,
+    detect: () => detectClaude({ env }),
+    openEditor: (editor, path) =>
+      new Promise<void>((resolve, reject) => {
+        const child = spawn(editor, [path], {
+          detached: true,
+          stdio: 'ignore',
+          shell: false,
+          windowsHide: true,
+          env
+        })
+        child.once('error', reject)
+        child.once('spawn', () => {
+          child.unref()
+          resolve()
+        })
+      })
+  })
+  void mkdir(tmpDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
+  registerClaudeIpc(ipcMain, service, deps.isTrustedSender, deps.ready)
+  return runs
+}
 
 /** Notificação de desktop (opcional por regra). Clique: foca o Orkio e abre a tarefa. */
 function showNotification(
@@ -416,6 +528,7 @@ void app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  claudeRuns?.cancelAll()
   projects?.dispose()
   writeQueue?.stop()
   scheduler?.stop()

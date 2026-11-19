@@ -78,6 +78,8 @@ export interface Git {
   commitsSince(dir: string, base: string): Promise<{ hash: string; subject: string }[]>
   /** Commit atual (hash completo). */
   headCommit(dir: string): Promise<string>
+  /** `git diff <base>` (commits + mudanças no worktree), texto puro, sem cor. */
+  diffText(dir: string, base: string): Promise<string>
 }
 
 export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = {}): Git {
@@ -206,6 +208,9 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
           const [hash, ...rest] = l.split('\t')
           return { hash: hash ?? '', subject: rest.join('\t') }
         })
+    },
+    async diffText(dir, base) {
+      return git(dir, ['diff', '--no-color', '--no-ext-diff', base])
     },
     async headCommit(dir) {
       return (await git(dir, ['rev-parse', 'HEAD'])).trim()

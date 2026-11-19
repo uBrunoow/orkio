@@ -83,3 +83,47 @@ export interface ClaudeCodeStatus {
   meetsMinimum: boolean
   minimumVersion: string
 }
+
+/** Resultado das operações do Claude Code no renderer (erros já em pt-BR). */
+export type ClaudeResult<T> =
+  { ok: true; value: T } | { ok: false; error: { code: string; message: string; files?: string[] } }
+
+/** Ambiente (worktree) da tarefa, para exibição. */
+export interface TaskWorkspace {
+  branch: string
+  path: string
+  /** Mudanças não commitadas (`null` = não deu para ler). */
+  changes: number | null
+}
+
+/** Estado da tarefa para o painel: execuções e ambiente (local, sem rede). */
+export interface TaskRunsState {
+  runs: AgentRunView[]
+  activeRunId: string | null
+  workspace: TaskWorkspace | null
+}
+
+/** Antes de rodar: briefing montado do Notion (editável) e a branch que será usada. */
+export interface RunPreparation extends TaskRunsState {
+  taskId: string
+  displayId: string
+  title: string
+  briefing: string
+  /** Tipos de bloco do Notion não convertidos. */
+  unsupported: string[]
+  /** Branch existente da tarefa ou a que será criada. */
+  branch: string
+  /** Comandos vistos na última sessão do Claude Code (system/init). */
+  commands: string[]
+}
+
+export interface StartRunRequest {
+  projectId: string
+  taskId: string
+  mode: RunMode
+  command: string | null
+  text: string
+  briefing: string
+}
+
+export type EditorId = 'cursor' | 'code'

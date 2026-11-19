@@ -118,6 +118,11 @@ export class RunService {
     this.maxParallel = deps.maxParallel ?? 2
     this.keepPerTask = deps.keepPerTask ?? 10
     this.approvalTimeoutMs = deps.approvalTimeoutMs ?? 10 * 60_000
+    // Execuções que ficaram "em andamento" (app fechado/derrubado): o processo não existe mais.
+    deps.db.run(
+      `UPDATE agent_runs SET status = 'failed', ended_at = ? WHERE status IN ('queued', 'running')`,
+      this.now().toISOString()
+    )
   }
 
   private now(): Date {
@@ -196,6 +201,17 @@ export class RunService {
     this.log(run, { kind: 'status', status: 'queued' })
     this.pump()
     return this.view(id)!
+  }
+
+  /** Ao fechar o app: cancela tudo (o processo do Claude Code não sobrevive ao Orkio). */
+  cancelAll(): void {
+    for (const id of [...this.queue.map((r) => r.id), ...this.active.keys()]) {
+      try {
+        this.cancel(id)
+      } catch {
+        // já terminou
+      }
+    }
   }
 
   cancel(runId: string): void {

@@ -15,6 +15,8 @@ export const EXTERNAL_URL_RULES: readonly {
   { host: 'www.notion.so' },
   { host: 'developers.notion.com' },
   { host: 'docs.github.com' },
+  // Instalação/login do Claude Code (Etapa 4A).
+  { host: 'code.claude.com', pathPrefix: '/docs' },
   { host: 'github.com', pathPrefix: '/login/device' },
   // Acesso de organizações (restrição de OAuth Apps / fine-grained PATs) e SSO (SAML).
   { host: 'github.com', pathPrefix: '/settings/connections/applications' },

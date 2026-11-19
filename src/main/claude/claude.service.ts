@@ -1,0 +1,377 @@
+/**
+ * Fachada do Claude Code (Etapa 4A) para o IPC: detecção, preparo (briefing do Notion + branch),
+ * execução, permissões, ambiente (worktree), editor e diff.
+ *
+ * O renderer só manda ids (projeto, tarefa, execução); caminhos e nomes de branch são resolvidos
+ * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
+ */
+import type {
+  ClaudeCodeStatus,
+  ClaudeResult,
+  EditorId,
+  PermissionAnswer,
+  RunLogEvent,
+  RunPreparation,
+  StartRunRequest,
+  TaskRunsState,
+  TaskWorkspace
+} from '../../shared/agent-run'
+import { blocksToMarkdown, buildBriefing, type NotionBlock } from '../../shared/briefing'
+import type { NotionResult, NotionTask, TaskSignalsResult } from '../../shared/ipc-contract'
+import { taskBranchName } from '../../shared/slug'
+import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
+import type { OrkioConfig, StoredProject } from '../config/orkio-config'
+import type { Git } from '../git/git'
+import { errorName } from '../ipc/payload'
+import { RUN_MESSAGES, type RunService } from './run.service'
+import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
+
+export const CLAUDE_MESSAGES = {
+  projectNotFound: 'Projeto não encontrado. Atualize a lista de projetos.',
+  noRepo: 'Este projeto não tem repositório do GitHub detectado.',
+  taskNotFound: 'Tarefa não encontrada no Notion. Atualize o quadro.',
+  noTaskId: 'A tarefa não tem ID com prefixo (ex.: ORK-142). Defina um prefixo no Notion.',
+  notInstalled: 'Claude Code não encontrado. Instale o CLI e faça login para rodar tarefas.',
+  notLoggedIn: 'O Claude Code não está logado. Rode `claude` no terminal e faça login.',
+  tooOld: 'Atualize o Claude Code para rodar tarefas pelo Orkio.',
+  noWorkspace: 'Esta tarefa ainda não tem ambiente. Rode o Claude Code primeiro.',
+  editor: 'Não foi possível abrir o editor. Confira se o comando está instalado no PATH.',
+  invalidCommand: 'Nome de comando inválido.',
+  emptyPrompt: 'Escreva o que o Claude Code deve fazer.',
+  pageUnavailable: 'Não deu para ler a página da tarefa no Notion; o briefing usa só os campos.',
+  generic: 'Algo deu errado. Tente novamente.'
+} as const
+
+/** Limites da leitura da página: profundidade e total de blocos. */
+const MAX_DEPTH = 3
+const MAX_BLOCKS = 400
+const MAX_DIFF_CHARS = 400_000
+const COMMAND_NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
+
+export interface ClaudeServiceDeps {
+  config: { get(): OrkioConfig }
+  worktrees: WorktreeService
+  runs: RunService
+  git: Pick<Git, 'statusPorcelain' | 'diffText' | 'localBranches' | 'remoteBranches'>
+  listTasks(projectId: string): Promise<NotionResult<{ tasks: NotionTask[] }>>
+  signals(projectId: string): Promise<NotionResult<TaskSignalsResult>>
+  /** Leitura dos blocos de uma página (o token fica no conector). */
+  getBlockChildren(
+    id: string,
+    cursor: string | null
+  ): Promise<{ results: unknown[]; nextCursor: string | null }>
+  detect(): Promise<ClaudeCodeStatus>
+  /** Abre a pasta no editor (execFile, sem shell). */
+  openEditor(editor: EditorId, path: string): Promise<void>
+}
+
+export class ClaudeService {
+  private status: ClaudeCodeStatus | null = null
+  private commands: string[] = []
+
+  constructor(private readonly deps: ClaudeServiceDeps) {}
+
+  async getStatus(force = false): Promise<ClaudeCodeStatus> {
+    if (!this.status || force) this.status = await this.deps.detect()
+    return this.status
+  }
+
+  /** Chamado a cada evento das execuções: guarda os comandos vistos no `init`. */
+  onRunEvent(event: RunLogEvent): void {
+    if (event.kind === 'init' && event.commands.length > 0) this.commands = [...event.commands]
+  }
+
+  state(projectId: string, taskId: string): Promise<ClaudeResult<TaskRunsState>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      return ok(await this.taskState(taskId))
+    })
+  }
+
+  prepare(projectId: string, taskId: string): Promise<ClaudeResult<RunPreparation>> {
+    return this.wrap(async () => {
+      const project = this.project(projectId)
+      const task = await this.task(projectId, taskId)
+      const parsed = task.displayId ? parseDisplayId(task.displayId) : null
+      if (!task.displayId || !parsed) return fail('no_task_id', CLAUDE_MESSAGES.noTaskId)
+
+      const state = await this.taskState(taskId)
+      const branch =
+        state.workspace?.branch ??
+        (await this.existingBranch(project, task.displayId)) ??
+        taskBranchName(task.displayId, task.title)
+
+      let pageMarkdown = ''
+      let unsupported: string[] = []
+      let pageWarning: string | null = null
+      try {
+        const blocks = await this.pageBlocks(task.id)
+        const md = blocksToMarkdown(blocks)
+        pageMarkdown = md.markdown
+        unsupported = md.unsupported
+      } catch (error) {
+        console.error(`[orkio] briefing: página indisponível: ${errorName(error)}`)
+        pageWarning = CLAUDE_MESSAGES.pageUnavailable
+      }
+
+      let pr: { number: number; state: string; url: string } | null = null
+      const signals = await this.deps.signals(projectId).catch(() => null)
+      if (signals?.ok) {
+        const p = signals.value.signals[taskId]?.pr
+        if (p) pr = { number: p.number, state: p.state, url: p.url }
+      }
+
+      const properties = [
+        { name: 'Status', value: task.status?.name ?? '' },
+        { name: 'Prioridade', value: task.priority?.name ?? '' },
+        { name: 'Responsáveis', value: task.assignees.join(', ') }
+      ]
+      const briefing = buildBriefing({
+        displayId: task.displayId,
+        title: task.title,
+        url: task.url,
+        properties,
+        pageMarkdown: pageWarning ? `> ${pageWarning}` : pageMarkdown,
+        unsupported,
+        project: {
+          name: project.name,
+          repo: project.repo ? `${project.repo.owner}/${project.repo.name}` : null,
+          branch,
+          worktree: state.workspace?.path ?? '(será criado ao rodar)'
+        },
+        pr
+      })
+      return ok({
+        ...state,
+        taskId,
+        displayId: task.displayId,
+        title: task.title,
+        briefing,
+        unsupported: [...new Set(unsupported)],
+        branch,
+        commands: this.commands
+      })
+    })
+  }
+
+  start(req: StartRunRequest): Promise<ClaudeResult<TaskRunsState>> {
+    return this.wrap(async () => {
+      const project = this.project(req.projectId)
+      const status = await this.getStatus(true)
+      if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
+      if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
+      if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
+      if (req.mode === 'command' && !(req.command && COMMAND_NAME.test(req.command))) {
+        return fail('invalid', CLAUDE_MESSAGES.invalidCommand)
+      }
+      if (req.mode === 'prompt' && !req.text.trim()) {
+        return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
+      }
+      const task = await this.task(req.projectId, req.taskId)
+      if (!task.displayId) return fail('no_task_id', CLAUDE_MESSAGES.noTaskId)
+      const wtProject = this.worktreeProject(project)
+      const taskRef = { id: task.id, displayId: task.displayId, title: task.title }
+      await this.deps.worktrees.ensure(wtProject, taskRef)
+      await this.deps.runs.start({
+        project: { ...wtProject, name: project.name },
+        task: taskRef,
+        mode: req.mode,
+        command: req.mode === 'command' ? req.command : null,
+        text: req.text,
+        briefing: req.briefing
+      })
+      return ok(await this.taskState(req.taskId))
+    })
+  }
+
+  cancel(runId: string): void {
+    try {
+      this.deps.runs.cancel(runId)
+    } catch {
+      // Já terminou: nada a cancelar.
+    }
+  }
+
+  answerPermission(runId: string, requestId: string, answer: PermissionAnswer): void {
+    this.deps.runs.answerPermission(runId, requestId, answer)
+  }
+
+  answerQuestion(runId: string, requestId: string, answers: Record<string, string>): void {
+    this.deps.runs.answerQuestion(runId, requestId, answers)
+  }
+
+  async readLog(runId: string): Promise<RunLogEvent[]> {
+    return this.deps.runs.readLog(runId)
+  }
+
+  /** "Limpar ambiente": remove o worktree (a branch fica). Mudanças pendentes pedem `force`. */
+  cleanup(projectId: string, taskId: string, force: boolean): Promise<ClaudeResult<TaskRunsState>> {
+    return this.wrap(async () => {
+      const project = this.project(projectId)
+      if (this.deps.runs.isRunning(taskId)) {
+        return fail('busy', 'Cancele a execução em andamento antes de limpar o ambiente.')
+      }
+      await this.deps.worktrees.remove(this.worktreeProject(project), taskId, force)
+      return ok(await this.taskState(taskId))
+    })
+  }
+
+  openEditor(projectId: string, taskId: string, editor: EditorId): Promise<ClaudeResult<null>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      const wt = this.deps.worktrees.get(taskId)
+      if (!wt) return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
+      try {
+        await this.deps.openEditor(editor, wt.path)
+      } catch (error) {
+        console.error(`[orkio] editor: ${errorName(error)}`)
+        return fail('editor', CLAUDE_MESSAGES.editor)
+      }
+      return ok(null)
+    })
+  }
+
+  diff(
+    projectId: string,
+    taskId: string
+  ): Promise<ClaudeResult<{ diff: string; truncated: boolean; untracked: string[] }>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      const wt = this.deps.worktrees.get(taskId)
+      if (!wt) return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
+      const text = await this.deps.git.diffText(wt.path, wt.baseRef)
+      const untracked = (await this.deps.git.statusPorcelain(wt.path))
+        .filter((l) => l.startsWith('??'))
+        .map((l) => l.slice(3))
+      return ok({
+        diff: text.slice(0, MAX_DIFF_CHARS),
+        truncated: text.length > MAX_DIFF_CHARS,
+        untracked
+      })
+    })
+  }
+
+  // ---------- Interno ----------
+
+  private project(projectId: string): StoredProject & { repo: NonNullable<StoredProject['repo']> } {
+    const project = this.deps.config.get().projects.find((p) => p.id === projectId)
+    if (!project) throw new ClaudeFailure('not_found', CLAUDE_MESSAGES.projectNotFound)
+    if (!project.repo) throw new ClaudeFailure('no_repo', CLAUDE_MESSAGES.noRepo)
+    return project as StoredProject & { repo: NonNullable<StoredProject['repo']> }
+  }
+
+  private worktreeProject(
+    project: StoredProject & { repo: NonNullable<StoredProject['repo']> }
+  ): WorktreeProject {
+    return {
+      id: project.id,
+      localPath: project.localPath,
+      remoteName: project.repo.remoteName,
+      defaultBranch: project.repo.defaultBranch ?? 'main'
+    }
+  }
+
+  private async task(projectId: string, taskId: string): Promise<NotionTask> {
+    const result = await this.deps.listTasks(projectId)
+    if (!result.ok) throw new ClaudeFailure(result.error.code, result.error.message)
+    const task = result.value.tasks.find((t) => t.id === taskId)
+    if (!task) throw new ClaudeFailure('task_not_found', CLAUDE_MESSAGES.taskNotFound)
+    return task
+  }
+
+  private async taskState(taskId: string): Promise<TaskRunsState> {
+    const runs = this.deps.runs.list(taskId)
+    const active = runs.find((r) => r.status === 'queued' || r.status === 'running')
+    const wt = this.deps.worktrees.get(taskId)
+    let workspace: TaskWorkspace | null = null
+    if (wt) {
+      const changes = await this.deps.git
+        .statusPorcelain(wt.path)
+        .then((l) => l.length)
+        .catch(() => null)
+      workspace = { branch: wt.branch, path: wt.path, changes }
+    }
+    return { runs, activeRunId: active?.id ?? null, workspace }
+  }
+
+  /** Branch local/remota já existente para a tarefa (só para exibir antes de rodar). */
+  private async existingBranch(project: StoredProject, displayId: string): Promise<string | null> {
+    const parsed = parseDisplayId(displayId)
+    if (!parsed) return null
+    const matches = (b: string): boolean => mentionsTask(b, parsed.prefix, parsed.number)
+    try {
+      const local = await this.deps.git.localBranches(project.localPath)
+      const hit = local.find(matches)
+      if (hit) return hit
+      const remote = project.repo?.remoteName ?? 'origin'
+      const remotes = await this.deps.git.remoteBranches(project.localPath, remote)
+      const r = remotes.find(matches)
+      return r ? r.slice(remote.length + 1) : null
+    } catch {
+      return null
+    }
+  }
+
+  /** Blocos da página (filhos até MAX_DEPTH, no máximo MAX_BLOCKS no total). */
+  private async pageBlocks(pageId: string): Promise<NotionBlock[]> {
+    let budget = MAX_BLOCKS
+    const load = async (id: string, depth: number): Promise<NotionBlock[]> => {
+      const out: NotionBlock[] = []
+      let cursor: string | null = null
+      do {
+        const page = await this.deps.getBlockChildren(id, cursor)
+        for (const raw of page.results) {
+          if (budget <= 0) return out
+          if (!isBlock(raw)) continue
+          budget--
+          const block: NotionBlock = { ...raw }
+          if (raw.has_children === true && depth < MAX_DEPTH && typeof raw.id === 'string') {
+            block.children = await load(raw.id, depth + 1)
+          }
+          out.push(block)
+        }
+        cursor = page.nextCursor
+      } while (cursor && budget > 0)
+      return out
+    }
+    return load(pageId, 0)
+  }
+
+  private async wrap<T>(run: () => Promise<ClaudeResult<T>>): Promise<ClaudeResult<T>> {
+    try {
+      return await run()
+    } catch (error) {
+      if (error instanceof ClaudeFailure) return fail(error.code, error.message)
+      if (error instanceof WorktreeError) {
+        return fail(error.code, error.message, error.files.length ? error.files : undefined)
+      }
+      if (error instanceof Error && error.message === RUN_MESSAGES.busy) {
+        return fail('busy', error.message)
+      }
+      console.error(`[orkio] claude: ${errorName(error)}`)
+      return fail('unexpected', CLAUDE_MESSAGES.generic)
+    }
+  }
+}
+
+class ClaudeFailure extends Error {
+  constructor(
+    readonly code: string,
+    message: string
+  ) {
+    super(message)
+    this.name = 'ClaudeFailure'
+  }
+}
+
+function ok<T>(value: T): ClaudeResult<T> {
+  return { ok: true, value }
+}
+
+function fail<T>(code: string, message: string, files?: string[]): ClaudeResult<T> {
+  return { ok: false, error: { code, message, ...(files ? { files } : {}) } }
+}
+
+function isBlock(v: unknown): v is NotionBlock {
+  return typeof v === 'object' && v !== null && typeof (v as { type?: unknown }).type === 'string'
+}

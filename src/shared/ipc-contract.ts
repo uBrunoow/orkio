@@ -6,6 +6,17 @@
 import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
 import type { FlowDraft } from './flow'
 import type { TaskSignals } from './task-signals'
+import type {
+  ClaudeCodeStatus,
+  ClaudeResult,
+  EditorId,
+  PermissionAnswer,
+  RunEventMessage,
+  RunLogEvent,
+  RunPreparation,
+  StartRunRequest,
+  TaskRunsState
+} from './agent-run'
 
 export type { BoardConfig, BoardStage, StageIssue, StatusOption, TaskSignals }
 
@@ -31,6 +42,21 @@ export const IPC_CHANNELS = {
   },
   signals: {
     get: 'signals:get'
+  },
+  claude: {
+    status: 'claude:status',
+    state: 'claude:state',
+    prepare: 'claude:prepare',
+    start: 'claude:start',
+    cancel: 'claude:cancel',
+    answerPermission: 'claude:answer-permission',
+    answerQuestion: 'claude:answer-question',
+    readLog: 'claude:read-log',
+    cleanup: 'claude:cleanup',
+    openEditor: 'claude:open-editor',
+    diff: 'claude:diff',
+    /** Evento main → renderer: evento normalizado de uma execução. */
+    runEvent: 'claude:run-event'
   },
   flow: {
     save: 'flow:save',
@@ -611,6 +637,30 @@ export interface OrkioApi {
     /** "Pausar todas" / "Retomar". */
     setPaused(paused: boolean): Promise<AutomationStatus>
   }
+  /** Claude Code (4A): CLI do usuário rodando a tarefa num worktree isolado. */
+  claude: {
+    /** Instalado, versão e login (nunca credenciais). `force` detecta de novo. */
+    status(options?: { force?: boolean }): Promise<ClaudeCodeStatus>
+    /** Execuções e ambiente da tarefa (local, sem rede). */
+    state(projectId: string, taskId: string): Promise<ClaudeResult<TaskRunsState>>
+    /** Briefing do Notion (editável) e a branch que será usada. Não cria nada. */
+    prepare(projectId: string, taskId: string): Promise<ClaudeResult<RunPreparation>>
+    /** Cria/reutiliza o worktree e inicia (ou enfileira) a execução. */
+    start(request: StartRunRequest): Promise<ClaudeResult<TaskRunsState>>
+    cancel(runId: string): Promise<void>
+    answerPermission(runId: string, requestId: string, answer: PermissionAnswer): Promise<void>
+    answerQuestion(runId: string, requestId: string, answers: Record<string, string>): Promise<void>
+    readLog(runId: string): Promise<RunLogEvent[]>
+    /** Remove o worktree (a branch fica). Com mudanças pendentes, exige `force`. */
+    cleanup(projectId: string, taskId: string, force: boolean): Promise<ClaudeResult<TaskRunsState>>
+    openEditor(projectId: string, taskId: string, editor: EditorId): Promise<ClaudeResult<null>>
+    diff(
+      projectId: string,
+      taskId: string
+    ): Promise<ClaudeResult<{ diff: string; truncated: boolean; untracked: string[] }>>
+    /** Assina os eventos das execuções. Devolve a função para cancelar a inscrição. */
+    onRunEvent(listener: (message: RunEventMessage) => void): () => void
+  }
   /** Branches e PRs ligadas às tarefas de um projeto pelo ID (só leitura). */
   signals: {
     get(projectId: string, options?: { force?: boolean }): Promise<NotionResult<TaskSignalsResult>>
@@ -660,6 +710,8 @@ export interface OrkioApi {
 
 export const NOTION_TOKEN_DOCS_URL =
   'https://developers.notion.com/guides/get-started/personal-access-tokens'
+
+export const CLAUDE_CODE_DOCS_URL = 'https://code.claude.com/docs/en/setup'
 
 export const GITHUB_TOKEN_DOCS_URL =
   'https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token'

@@ -5,9 +5,20 @@ import {
   type BranchChangedEvent,
   type OrkioApi
 } from '../shared/ipc-contract'
+import type { RunEventMessage } from '../shared/agent-run'
 
-const { notion, github, notionWorkspace, signals, board, flow, automation, projects, shell } =
-  IPC_CHANNELS
+const {
+  notion,
+  github,
+  notionWorkspace,
+  signals,
+  board,
+  flow,
+  automation,
+  projects,
+  shell,
+  claude
+} = IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
 const api: OrkioApi = {
@@ -128,6 +139,40 @@ const api: OrkioApi = {
     runNow: (projectId) => ipcRenderer.invoke(automation.runNow, projectId),
     setPaused: (paused) => ipcRenderer.invoke(automation.setPaused, paused === true)
   },
+  claude: {
+    status: (options) => ipcRenderer.invoke(claude.status, { force: options?.force === true }),
+    state: (projectId, taskId) => ipcRenderer.invoke(claude.state, projectId, taskId),
+    prepare: (projectId, taskId) => ipcRenderer.invoke(claude.prepare, projectId, taskId),
+    start: (request) =>
+      ipcRenderer.invoke(claude.start, {
+        projectId: request.projectId,
+        taskId: request.taskId,
+        mode: request.mode,
+        command: request.command,
+        text: request.text,
+        briefing: request.briefing
+      }),
+    cancel: (runId) => ipcRenderer.invoke(claude.cancel, runId),
+    answerPermission: (runId, requestId, answer) =>
+      ipcRenderer.invoke(claude.answerPermission, runId, requestId, answer),
+    answerQuestion: (runId, requestId, answers) =>
+      ipcRenderer.invoke(claude.answerQuestion, runId, requestId, { ...answers }),
+    readLog: (runId) => ipcRenderer.invoke(claude.readLog, runId),
+    cleanup: (projectId, taskId, force) =>
+      ipcRenderer.invoke(claude.cleanup, projectId, taskId, force === true),
+    openEditor: (projectId, taskId, editor) =>
+      ipcRenderer.invoke(claude.openEditor, projectId, taskId, editor),
+    diff: (projectId, taskId) => ipcRenderer.invoke(claude.diff, projectId, taskId),
+    onRunEvent: (listener) => {
+      const handler = (_event: unknown, payload: unknown): void => {
+        if (isRunEventMessage(payload)) listener(payload)
+      }
+      ipcRenderer.on(claude.runEvent, handler)
+      return () => {
+        ipcRenderer.removeListener(claude.runEvent, handler)
+      }
+    }
+  },
   signals: {
     get: (projectId, options) =>
       ipcRenderer.invoke(signals.get, projectId, { force: options?.force === true })
@@ -181,6 +226,17 @@ function isBoardSyncEvent(value: unknown): value is BoardSyncEvent {
     (v['stageId'] === null || typeof v['stageId'] === 'string') &&
     typeof v['blocked'] === 'boolean' &&
     (v['message'] === undefined || typeof v['message'] === 'string')
+  )
+}
+
+function isRunEventMessage(value: unknown): value is RunEventMessage {
+  if (!isRecord(value)) return false
+  return (
+    typeof value['runId'] === 'string' &&
+    typeof value['projectId'] === 'string' &&
+    typeof value['taskId'] === 'string' &&
+    isRecord(value['event']) &&
+    typeof value['event']['kind'] === 'string'
   )
 }
 
