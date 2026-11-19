@@ -1,0 +1,24 @@
+/*
+ * Exceção documentada às regras da Astryx: só a marca Orkio (logo/wordmark e títulos de
+ * destaque em Jost, BRAND.md). Usa apenas tokens do tema; nada de cor/medida de layout fixa.
+ */
+@layer orkio-brand {
+  .orkio-display {
+    font-family: 'Jost', var(--font-family-heading, system-ui), sans-serif;
+    font-weight: 300;
+  }
+
+  .orkio-slogan {
+    font-family: 'Jost', var(--font-family-body, system-ui), sans-serif;
+    font-weight: 400;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: var(--color-text-accent);
+  }
+
+  .orkio-mono,
+  .orkio-mono-input,
+  .orkio-mono-input input {
+    font-family: var(--font-family-code);
+  }
+}

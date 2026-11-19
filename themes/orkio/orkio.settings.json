@@ -1,0 +1,91 @@
+{
+  "name": "orkio",
+  "like": "neutral",
+  "mode": "dark-only",
+  "settings": [
+    {
+      "thing": "accent",
+      "value": "#FF5B1F",
+      "source": "dial"
+    },
+    {
+      "thing": "success",
+      "value": "#3DD68C",
+      "source": "dial"
+    },
+    {
+      "thing": "warning",
+      "value": "#F5C518",
+      "source": "dial"
+    },
+    {
+      "thing": "danger",
+      "value": "#F0445C",
+      "source": "dial"
+    },
+    {
+      "thing": "--color-background-body",
+      "value": "#0A0A0B",
+      "source": "token"
+    },
+    {
+      "thing": "--color-background-surface",
+      "value": "#141416",
+      "source": "token"
+    },
+    {
+      "thing": "--color-background-card",
+      "value": "#141416",
+      "source": "token"
+    },
+    {
+      "thing": "--color-background-popover",
+      "value": "#1E1E21",
+      "source": "token",
+      "note": "no part of this Core reads --color-background-popover, and no token it feeds is read, so it changes nothing you see now; it is set as asked because a dial writes it too"
+    },
+    {
+      "thing": "--color-background-muted",
+      "value": "#1E1E21",
+      "source": "token"
+    },
+    {
+      "thing": "--color-border",
+      "value": "#2C2C30",
+      "source": "token"
+    },
+    {
+      "thing": "--color-text-primary",
+      "value": "#F2F2F0",
+      "source": "token"
+    },
+    {
+      "thing": "--color-text-secondary",
+      "value": "#8F8F94",
+      "source": "token"
+    },
+    {
+      "thing": "--color-on-accent",
+      "value": "#0A0A0B",
+      "source": "token"
+    },
+    {
+      "thing": "--color-accent-muted",
+      "value": "#3A1A0E",
+      "source": "token"
+    },
+    {
+      "thing": "font",
+      "value": "inter",
+      "source": "dial"
+    },
+    {
+      "thing": "font",
+      "value": "jetbrains-mono",
+      "source": "dial",
+      "on": "code"
+    }
+  ],
+  "lifted": [],
+  "palette": "206bff76df4bc577a4032883914df29d59dc81442b260d90317a499e2a6b548b"
+}

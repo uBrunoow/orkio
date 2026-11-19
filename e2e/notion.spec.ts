@@ -11,7 +11,8 @@ import {
   removeDir,
   setFakes,
   type FakeServices,
-  type OrkioApp
+  type OrkioApp,
+  alerts
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_SECRET_TOKEN_abcdef123456'
@@ -102,6 +103,9 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
   // Fontes locais, logo e botão primário.
   await notionCard(page).getByLabel('Token do Notion').fill('x')
   await page.waitForTimeout(300) // fim da transição de cor do botão
+  await notionCard(page)
+    .getByRole('button', { name: 'Conectar', exact: true })
+    .evaluate((el) => el.setAttribute('data-primary-probe', ''))
   const visual = await page.evaluate(async () => {
     await Promise.all([
       document.fonts.load('300 30px Jost'),
@@ -113,20 +117,23 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       const el = document.querySelector(selector)
       return el ? String(getComputedStyle(el)[prop]) : ''
     }
-    const sidebarLogo = document.querySelector<HTMLElement>('.sidebar .orkio-logo')
-    const heroLogo = document.querySelector<HTMLElement>('.empty-hero .orkio-logo')
+    const sidebarLogo = document.querySelector<HTMLElement>('nav .orkio-logo')
+    const heroLogo = document.querySelector<HTMLElement>('[data-testid="empty-hero"] .orkio-logo')
     return {
       fonts: [...document.fonts]
         .filter((f) => f.status === 'loaded')
         .map((f) => `${f.family} ${f.weight}`),
       body: css('body', 'fontFamily'),
-      input: css('.input', 'fontFamily'),
-      primary: [css('.button--primary', 'backgroundColor'), css('.button--primary', 'color')],
+      input: css('input[type="password"]', 'fontFamily'),
+      primary: [
+        css('[data-primary-probe]', 'backgroundColor'),
+        css('[data-primary-probe]', 'color')
+      ],
       sidebarVariant: sidebarLogo?.dataset['variant'],
-      sidebarColor: css('.sidebar .orkio-logo', 'color'),
+      sidebarColor: css('nav .orkio-logo', 'color'),
       wordmark: [
-        css('.sidebar .orkio-logo__wordmark', 'fontFamily'),
-        css('.sidebar .orkio-logo__wordmark', 'fontWeight')
+        css('nav .orkio-logo__wordmark', 'fontFamily'),
+        css('nav .orkio-logo__wordmark', 'fontWeight')
       ],
       heroVariant: heroLogo?.dataset['variant']
     }
@@ -177,7 +184,7 @@ test('token inválido → erro claro e nada é salvo', async () => {
   await expect(notionCard(page).getByLabel('Token do Notion')).toHaveAttribute('type', 'password')
   await notionCard(page).getByRole('button', { name: 'Conectar', exact: true }).click()
 
-  await expect(notionCard(page).getByRole('alert')).toContainText('Token inválido ou revogado')
+  await expect(alerts(notionCard(page))).toContainText('Token inválido ou revogado')
   expect(secretFiles()).toEqual([])
 })
 
@@ -186,8 +193,8 @@ test('token válido → conectado, salvo criptografado, token fora do renderer',
   await setFakes(app, { notion: 'ok' })
   await notionCard(page).getByRole('button', { name: 'Tentar novamente' }).click()
 
-  await expect(notionCard(page).getByText('Ada Lovelace')).toBeVisible()
-  await expect(page.locator('.empty-hero')).toHaveCount(0)
+  await expect(notionCard(page).getByText('Ada Lovelace', { exact: true }).first()).toBeVisible()
+  await expect(page.getByTestId('empty-hero')).toHaveCount(0)
   await expect(notionCard(page).getByLabel('Token do Notion')).toHaveCount(0)
 
   const calls = await externalCalls(app)
@@ -210,7 +217,7 @@ test('token válido → conectado, salvo criptografado, token fora do renderer',
 
 test('reabrir o app mantém a conexão e revalida em segundo plano', async () => {
   const { page } = await open('ok')
-  await expect(notionCard(page).getByText('Ada Lovelace')).toBeVisible()
+  await expect(notionCard(page).getByText('Ada Lovelace', { exact: true }).first()).toBeVisible()
   await expect(notionCard(page).getByText(/Verificado às/)).toBeVisible()
 })
 
@@ -219,14 +226,14 @@ test('falha transitória (503) mantém conectado com aviso', async () => {
   await setFakes(app, { notion: '503' })
   await notionCard(page).getByRole('button', { name: 'Testar conexão' }).click()
   await expect(notionCard(page).getByRole('status').filter({ hasText: '503' })).toBeVisible()
-  await expect(notionCard(page).getByText('Ada Lovelace')).toBeVisible()
+  await expect(notionCard(page).getByText('Ada Lovelace', { exact: true }).first()).toBeVisible()
 })
 
 test('token revogado (401) na revalidação → erro com opções', async () => {
   const { app, page } = orkio!
   await setFakes(app, { notion: '401' })
   await notionCard(page).getByRole('button', { name: 'Testar conexão' }).click()
-  await expect(notionCard(page).getByRole('alert')).toBeVisible()
+  await expect(alerts(notionCard(page))).toBeVisible()
   await expect(notionCard(page).getByRole('button', { name: 'Tentar novamente' })).toBeVisible()
   expect(secretFiles()).toEqual(['notion.bin'])
 })

@@ -76,20 +76,22 @@ pnpm dist:dir    # só a pasta do app, sem instalador
 
 Sem assinatura de código nem auto-update por enquanto.
 
-## Identidade visual
+## Identidade visual e UI
 
-A fonte da verdade da marca é a pasta [`brand/`](brand/BRAND.md) (símbolos, ícone e tokens).
+A interface usa o design system **[Astryx](https://github.com/meta/astryx)** (`@astryxdesign/core`)
+com o **tema Orkio** (dark, laranja da marca com texto preto, Inter na UI, JetBrains Mono em
+código). A fonte da verdade da marca continua em [`brand/`](brand/BRAND.md).
 
-- **Tokens:** `src/renderer/src/styles/tokens.css` é o único arquivo de tokens do app
-  (une `brand/tokens.css` com espaçamentos e tamanhos da UI).
-- **Fontes:** empacotadas via `@fontsource` (Inter na UI, Jost na logo e em títulos grandes,
-  JetBrains Mono em IDs e tokens). Nada vem de CDN.
-- **Logo:** `<OrkioLogo variant="full|simple" withWordmark size />` em
-  `src/renderer/src/components/OrkioLogo/`.
-- **Ícones:** `pnpm icons` gera `build/icon.icns`, `build/icon.ico`, `build/icon.png` e
-  `resources/icon.png` a partir de `brand/orkio-app-icon-1024.png`, usando
-  [png2icons](https://github.com/idesis-gmbh/png2icons) (JavaScript puro, sem dependências
-  nativas).
+- **Tema:** `themes/orkio/` (editado com `pnpm exec astryx experimental theme editor …`) gera a
+  cópia em `src/themes/orkio/` e `src/astryx-themes.ts`. O tema é CSS estático (pré-compilado).
+- **CSP estrita:** a Astryx injetaria alguns estilos em runtime; o Orkio entrega esse CSS como
+  arquivo estático (`pnpm astryx:static-css`, rode após atualizar a Astryx) e não usa componentes
+  que dependem de injeção. Detalhes no `CLAUDE.md`.
+- **Fontes:** locais via `@fontsource` (Inter, Jost no logo e em títulos de destaque, JetBrains Mono).
+- **Ícones:** [Tabler Icons](https://tabler.io/icons) (`@tabler/icons-react`), inclusive os logos do GitHub e do Notion.
+- **Logo:** `<OrkioLogo variant="full|simple" withWordmark size />`.
+- **Ícones do app:** `pnpm icons` gera `build/icon.icns`, `build/icon.ico`, `build/icon.png` e
+  `resources/icon.png` a partir de `brand/orkio-app-icon-1024.png` (png2icons).
 
 ## Conectar o Notion (OAuth)
 

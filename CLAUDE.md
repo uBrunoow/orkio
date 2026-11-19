@@ -6,6 +6,7 @@ Claude Code. Hoje existem:
 - **Conectores:** Notion (OAuth via `broker/` + token) e GitHub (OAuth Device Flow + fine-grained PAT).
 - **Projetos:** pasta local → repositório GitHub detectado (git local + API), saúde do projeto e
   branch atual ao vivo. Config não secreta em `userData/orkio-config.json` (`ConfigStore`).
+- **UI:** design system Astryx com o tema Orkio, CSP estrita.
 - Ainda não existem: tarefas do Notion, vínculo Notion ↔ projeto, PRs, automações, Claude Code.
 
 ## Comandos
@@ -20,6 +21,7 @@ pnpm lint         # ESLint
 pnpm build        # build em out/
 pnpm icons        # regenera ícones a partir de brand/orkio-app-icon-1024.png
 pnpm dist         # empacota (electron-builder.yml)
+pnpm astryx:static-css  # regenera o CSS estático das camadas da Astryx (após upgrade)
 ```
 
 Antes de dar uma tarefa por concluída: `pnpm typecheck && pnpm lint && pnpm test`.
@@ -47,10 +49,15 @@ src/
     features/<feature>/    # componentes + hooks por funcionalidade
       integrations/connection-ui.tsx  # peças comuns dos cards (conectado, erro, token, desconectar)
       projects/            # tela Projetos (useProjects, AddProjectPanel, ActionLink)
-    components/Alert.tsx   # alerta comum
+    components/Alert.tsx   # mensagens (Banner da Astryx)
+    components/PageHeader.tsx  # título da página + ação
     components/OrkioLogo/  # logo (símbolo full/simple + wordmark)
-    styles/tokens.css      # ÚNICO arquivo de tokens (cores, fontes, raios, espaçamento)
+    styles/astryx.css      # reset + CSS pré-compilado da Astryx
+    styles/brand.css       # camada orkio-brand: só Jost/mono da marca, com tokens do tema
     styles/fonts.css       # fontes locais via @fontsource
+  astryx-themes.ts         # GERADO por `astryx theme add` (tema Orkio)
+  themes/orkio/            # GERADO: cópia do tema no app (CSS estático + módulo)
+themes/orkio/              # fonte do tema (editor de temas da Astryx)
 brand/                     # fonte da verdade da marca (BRAND.md, SVGs, ícone 1024, tokens)
 build/                     # ícones do empacotador (gerados por pnpm icons)
 resources/icon.png         # ícone da janela em runtime
@@ -167,28 +174,40 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 
 Leia `brand/BRAND.md` antes de mexer em UI.
 
-- Cores só via tokens de `styles/tokens.css`. Nada de hex/rgb fora dele. Única exceção:
-  `backgroundColor` do `BrowserWindow` no main (espelha `--bg`).
-- Inter = UI; Jost (`--font-brand`) só para logo e títulos grandes; mono para IDs e tokens.
-- Fontes vêm de `@fontsource` (importadas em `styles/fonts.css`). Nunca use CDN. O build
-  não transforma fontes em `data:` URI (`assetsInlineLimit` no `electron.vite.config.ts`).
-- Logo: use `<OrkioLogo>`. Abaixo de 48 px ele usa a versão simple automaticamente.
-  Wordmark "ORKIO" em Jost 300, letter-spacing 0.25em (Jost 400 se ≤ 18 px).
-  Não distorcer, girar nem aplicar gradiente/sombra.
-- Laranja com parcimônia: ação principal, símbolo, estados de agente.
-- Texto sobre laranja é sempre `--on-accent` (preto). Nunca branco.
-- Ícones: não edite `build/` à mão; troque `brand/orkio-app-icon-1024.png` e rode `pnpm icons`.
+- **Tema Orkio** (Astryx): `themes/orkio/` (fonte, editado só pelo editor de temas) gera a cópia
+  do app em `src/themes/orkio/` e `src/astryx-themes.ts` (não edite à mão). Cores da marca, dark
+  only, Inter na UI e JetBrains Mono em código. Mude com
+  `pnpm exec astryx experimental theme editor set orkio <coisa> <valor>` e confira o PNG
+  (`… editor show orkio --png`).
+- Cores e medidas: só tokens do tema (`var(--color-*)`, `--spacing-*`, `--radius-*`). Nada de
+  hex/px. Única exceção: `backgroundColor` do `BrowserWindow` no main (espelha o fundo do tema).
+- Inter = UI; **Jost só para logo e títulos de destaque** (`brand.css`: `.orkio-display`,
+  `.orkio-slogan`); mono para IDs e tokens (`Code`, ou `.orkio-mono-input` em campos).
+- Fontes vêm de `@fontsource` (`styles/fonts.css` + o `orkio.fonts.css` do tema). Nunca CDN. O
+  build não transforma fontes em `data:` URI (`assetsInlineLimit`).
+- Logo: `<OrkioLogo>` (SVG da marca; abaixo de 48 px usa a versão simple). Wordmark em Jost 300,
+  letter-spacing 0.25em (Jost 400 se ≤ 18 px). Não distorcer, girar nem aplicar gradiente/sombra.
+- Laranja com parcimônia: ação principal (`Button variant="primary"`), símbolo, estados de agente.
+  Texto sobre laranja é sempre preto (`--color-on-accent`), nunca branco.
+- Ícones de interface: **Tabler** (`@tabler/icons-react`), sempre via `components/icons.tsx`
+  (adaptador para o `Icon` da Astryx; inclui os logos `GitHubLogo` e `NotionLogo`). Use
+  `<Icon icon={X} />` ou a prop `icon` dos componentes. Novo ícone? Exporte-o de `icons.tsx`.
+- Ícones do app: não edite `build/` à mão; troque `brand/orkio-app-icon-1024.png` e rode `pnpm icons`.
 
 ## Estilo
 
 - TypeScript strict (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
 - Prettier: sem ponto e vírgula, aspas simples, 100 colunas.
-- UI: dark mode, CSS puro com os tokens de `styles/tokens.css`; sem bibliotecas de UI.
-  Botão primário: fundo `--accent` com texto `--on-accent` (preto). Mono (`--font-mono`)
-  para IDs e tokens.
-- CSP: nada de `<style>`/`<script>` inline nem atributo `style` no HTML em produção.
-  `style-src` só é relaxado no dev server (`electron.vite.config.ts`). A prop `style` do React
-  (aplicada via CSSOM) é permitida para variáveis CSS dinâmicas, como no `OrkioLogo`.
+- **UI com Astryx** (`@astryxdesign/core`). Leia as props com `pnpm exec astryx component <Nome>`
+  antes de usar. Layout com `VStack`/`HStack`/`Grid`/`Card`, texto com `Text`/`Heading`, nada de
+  `<div>`/`<span>` cru. Dados densos em `List`/`Item`. Status em `Token` (`Badge` só para contagens).
+  Mensagens: `components/Alert.tsx` (Banner; erro = `role="alert"`, aviso = `role="status"`).
+- CSS próprio só na camada `orkio-brand` (`styles/brand.css`, `OrkioLogo.css`), apenas para a
+  marca e com tokens do tema. Nada de CSS de layout.
+- Ganchos de teste: papéis/nomes acessíveis primeiro; `data-testid` quando não houver (ex.:
+  `device-code`, `project-branch`, `empty-hero`). Nunca classes da Astryx (`astryx-*`, `x…`).
+- CSP: nada de `<style>`/`<script>` inline em produção. `style-src` só é relaxado no dev server.
+  A prop `style` do React (CSSOM) é permitida. Ver "Astryx e CSP" abaixo.
 - Textos de UI em pt-BR.
 
 ## Testes
@@ -227,16 +246,30 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 | GitHub Enterprise salvo como "não verificado"                                                               | A conta conectada é do github.com; não há como validar acesso/push no GHE ainda.                                                                                                                                                                            |
 | App abre em **Projetos**                                                                                    | Com GitHub conectado, é a tela de trabalho; a dica leva a Integrações quando falta conexão.                                                                                                                                                                 |
 | Watcher no diretório do git (não no arquivo HEAD)                                                           | O git troca o HEAD via rename (HEAD.lock → HEAD), o que quebra watchers de arquivo.                                                                                                                                                                         |
+| UI em Astryx com tema Orkio compilado                                                                       | Pedido do produto. Tema estático (`astryx theme build`) mantém a CSP estrita.                                                                                                                                                                               |
+| CSS das camadas da Astryx como arquivo estático                                                             | `ensureSlideRules` só injeta `<style>` se não achar o id; o arquivo estático (gerado e testado contra a versão instalada) evita relaxar a CSP.                                                                                                              |
+| Confirmações inline em vez de `AlertDialog`                                                                 | Diálogos usam camadas sobrepostas; inline é suficiente e mantém o risco de CSP baixo.                                                                                                                                                                       |
 | Peças de UI dos cards em `connection-ui.tsx`                                                                | Notion e GitHub compartilham conectado/erro/token/desconectar; cada card só implementa o próprio fluxo de login.                                                                                                                                            |
 
-## Astryx (migração planejada — ainda NÃO iniciada)
+## Astryx e CSP (regra inegociável)
 
-O bloco abaixo foi gerado por `astryx init --features agents` (não edite entre os marcadores;
-o CLI o regenera). A migração da UI para `@astryxdesign/core` é uma etapa própria, depois da 2B.
-**Até ela acontecer, valem as regras de "Identidade visual" e "Estilo" acima** (CSS com tokens).
-Restrição já conhecida: a CSP de produção bloqueia `<style>` injetado em runtime — o tema Orkio
-deve ser compilado com `astryx theme build` (CSS estático, `__built: true`), e componentes que
-injetam `<style>` (camadas deslizantes, CodeBlock) precisam de decisão antes de serem usados.
+A UI usa Astryx com a **CSP de produção estrita** (`style-src 'self'`). Componentes que injetam
+`<style>` em runtime quebram isso. O E2E falha com qualquer violação (`securitypolicyviolation`).
+
+- **Tema** sempre pré-compilado (`__built: true`): o `<Theme>` não injeta nada.
+- **Camadas (Layer: popovers, tooltips)** injetariam `astryx-layer-slide-rules`. Entregamos esse
+  CSS como arquivo estático (`src/renderer/public/astryx-layer-slide-rules.css`, carregado no
+  `index.html` com o mesmo id), gerado por `pnpm astryx:static-css`. Depois de atualizar
+  `@astryxdesign/core`, rode o comando de novo; `test/astryx-static-css.test.ts` falha se divergir.
+- **Evitar** (injetam `<style>` sem saída estática): `CodeBlock` (destaque), `Chat` (scroll
+  anchoring), segmentos nativos do `DateInput`, e a gaveta mobile do `AppShell`
+  (`mobileNav={false}`). Diálogos/gavetas: confirmar no E2E antes de usar.
+- Dúvida se um componente injeta estilo? `grep -rl "createElement('style')" node_modules/@astryxdesign/core/dist`.
+- `astryx doctor --built src/renderer` deve terminar sem falhas. Os avisos restantes são as
+  exceções da marca (logo/ícones SVG, classes Jost/mono) e as fontes locais do `@fontsource`.
+
+O bloco abaixo foi gerado por `astryx init --features agents` (não edite entre os marcadores; o
+CLI o regenera). Onde ele conflitar com as regras acima (CSP, exceções da marca), valem as acima.
 
 <!-- prettier-ignore-start -->
 <!-- ASTRYX:START -->

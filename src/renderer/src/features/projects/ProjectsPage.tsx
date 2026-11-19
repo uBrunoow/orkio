@@ -1,28 +1,41 @@
 import { useEffect, useState } from 'react'
+import { Button } from '@astryxdesign/core/Button'
+import { Icon } from '@astryxdesign/core/Icon'
+import { FolderPlusIcon, FolderSearchIcon, TrashIcon } from '../../components/icons'
+import { Code } from '@astryxdesign/core/Code'
+import { EmptyState } from '@astryxdesign/core/EmptyState'
+import { HStack } from '@astryxdesign/core/HStack'
+import { Item } from '@astryxdesign/core/Item'
+import { List } from '@astryxdesign/core/List'
+import { Skeleton } from '@astryxdesign/core/Skeleton'
+import { Text } from '@astryxdesign/core/Text'
+import { Token } from '@astryxdesign/core/Token'
+import { VStack } from '@astryxdesign/core/VStack'
 import type {
   ProjectError,
   ProjectHealthState,
+  ProjectMutationResult,
   ProjectSelection,
   ProjectView
 } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
+import { PageHeader } from '../../components/PageHeader'
 import { ActionLink } from './ActionLink'
 import { AddProjectPanel } from './AddProjectPanel'
 import { useProjects } from './useProjects'
 
-const HEALTH: Record<
-  ProjectHealthState,
-  { label: string; tone: '' | 'success' | 'warning' | 'danger' }
-> = {
-  checking: { label: 'Verificando…', tone: '' },
-  ok: { label: 'OK', tone: 'success' },
-  missing_folder: { label: 'Pasta não encontrada', tone: 'danger' },
-  not_a_repo: { label: 'Não é repositório', tone: 'danger' },
-  repo_mismatch: { label: 'Outro repositório', tone: 'danger' },
-  no_access: { label: 'Sem acesso', tone: 'danger' },
-  github_disconnected: { label: 'GitHub desconectado', tone: 'warning' },
-  unverified: { label: 'Não verificado', tone: 'warning' },
-  git_error: { label: 'Erro do git', tone: 'danger' }
+type TokenColor = 'default' | 'green' | 'yellow' | 'red'
+
+const HEALTH: Record<ProjectHealthState, { label: string; color: TokenColor }> = {
+  checking: { label: 'Verificando…', color: 'default' },
+  ok: { label: 'OK', color: 'green' },
+  missing_folder: { label: 'Pasta não encontrada', color: 'red' },
+  not_a_repo: { label: 'Não é repositório', color: 'red' },
+  repo_mismatch: { label: 'Outro repositório', color: 'red' },
+  no_access: { label: 'Sem acesso', color: 'red' },
+  github_disconnected: { label: 'GitHub desconectado', color: 'yellow' },
+  unverified: { label: 'Não verificado', color: 'yellow' },
+  git_error: { label: 'Erro do git', color: 'red' }
 }
 
 export function ProjectsPage({
@@ -50,89 +63,94 @@ export function ProjectsPage({
   const list = projects.projects
 
   return (
-    <div className="page page--wide">
-      <header className="page__header page__header--row">
-        <div>
-          <h1 className="page__title">Projetos</h1>
-          <p className="page__subtitle">
-            Pastas locais ligadas a repositórios do GitHub. O Orkio acompanha a branch atual.
-          </p>
-        </div>
-        <button
-          type="button"
-          className="button button--primary"
-          onClick={() => void addProject()}
-          disabled={picking || selection !== null}
-        >
-          {picking && <span className="spinner" aria-hidden="true" />}
-          {picking ? 'Analisando pasta…' : 'Adicionar projeto'}
-        </button>
-      </header>
-
-      <div className="stack">
-        {projects.warning && <Alert tone="warning">{projects.warning}</Alert>}
-
-        {githubConnected === false && (
-          <Alert tone="warning">
-            Conecte sua conta do GitHub para adicionar e verificar projetos.{' '}
-            <button type="button" className="link-button action-link" onClick={onOpenIntegrations}>
-              Ir para Integrações
-            </button>
-          </Alert>
-        )}
-
-        {pickError && (
-          <Alert tone="danger">
-            {pickError.message}
-            {pickError.action && <ActionLink action={pickError.action} />}
-          </Alert>
-        )}
-
-        {selection && (
-          <AddProjectPanel
-            key={selection.selectionId}
-            selection={selection}
-            onCreate={async (input) => {
-              const result = await projects.create(input)
-              setGithubCheck((n) => n + 1)
-              if (result.ok) setSelection(null)
-              return result
-            }}
-            onCancel={() => setSelection(null)}
+    <VStack gap={5} maxWidth={1080}>
+      <PageHeader
+        title="Projetos"
+        subtitle="Pastas locais ligadas a repositórios do GitHub. O Orkio acompanha a branch atual."
+        action={
+          <Button
+            variant="primary"
+            label={picking ? 'Analisando pasta…' : 'Adicionar projeto'}
+            icon={<Icon icon={FolderPlusIcon} />}
+            isLoading={picking}
+            isDisabled={selection !== null}
+            onClick={() => void addProject()}
           />
-        )}
+        }
+      />
 
-        {list === null ? (
-          <div className="project-list" aria-label="Carregando projetos">
-            <div className="skeleton skeleton--row" />
-            <div className="skeleton skeleton--row" />
-          </div>
-        ) : list.length === 0 ? (
-          !selection && (
-            <section className="empty-state" aria-labelledby="projects-empty-title">
-              <h2 className="empty-state__title" id="projects-empty-title">
-                Nenhum projeto ainda
-              </h2>
-              <p className="muted">
-                Escolha a pasta de um repositório clonado no seu computador. O Orkio detecta o
-                repositório do GitHub automaticamente.
-              </p>
-            </section>
-          )
-        ) : (
-          <ul className="project-list" aria-label="Projetos" aria-busy={projects.revalidating}>
-            {list.map((project) => (
-              <ProjectRow
-                key={project.id}
-                project={project}
-                onRelocate={() => projects.relocate(project.id)}
-                onRemove={() => projects.remove(project.id)}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-    </div>
+      {projects.warning && <Alert tone="warning">{projects.warning}</Alert>}
+
+      {githubConnected === false && (
+        <Alert
+          tone="warning"
+          action={
+            <Button
+              variant="ghost"
+              size="sm"
+              label="Ir para Integrações"
+              onClick={onOpenIntegrations}
+            />
+          }
+        >
+          Conecte sua conta do GitHub para adicionar e verificar projetos.
+        </Alert>
+      )}
+
+      {pickError && (
+        <Alert
+          tone="danger"
+          {...(pickError.action ? { action: <ActionLink action={pickError.action} /> } : {})}
+        >
+          {pickError.message}
+        </Alert>
+      )}
+
+      {selection && (
+        <AddProjectPanel
+          key={selection.selectionId}
+          selection={selection}
+          onCreate={async (input) => {
+            const result = await projects.create(input)
+            setGithubCheck((n) => n + 1)
+            if (result.ok) setSelection(null)
+            return result
+          }}
+          onCancel={() => setSelection(null)}
+        />
+      )}
+
+      {list === null ? (
+        <VStack gap={3} aria-label="Carregando projetos">
+          <Skeleton height={72} />
+          <Skeleton height={72} index={1} />
+        </VStack>
+      ) : list.length === 0 ? (
+        !selection && (
+          <EmptyState
+            title="Nenhum projeto ainda"
+            description="Escolha a pasta de um repositório clonado no seu computador. O Orkio detecta o repositório do GitHub automaticamente."
+            headingLevel={2}
+          />
+        )
+      ) : (
+        <List
+          hasDividers
+          density="balanced"
+          aria-label="Projetos"
+          aria-busy={projects.revalidating}
+        >
+          {list.map((project) => (
+            <ProjectRow
+              key={project.id}
+              project={project}
+              onRelocate={() => projects.relocate(project.id)}
+              onRemove={() => projects.remove(project.id)}
+            />
+          ))}
+        </List>
+      )}
+    </VStack>
   )
 }
 
@@ -142,7 +160,7 @@ function ProjectRow({
   onRemove
 }: {
   project: ProjectView
-  onRelocate(): Promise<unknown>
+  onRelocate(): Promise<ProjectMutationResult>
   onRemove(): Promise<boolean>
 }): React.JSX.Element {
   const [busy, setBusy] = useState<'relocate' | 'remove' | null>(null)
@@ -157,86 +175,88 @@ function ProjectRow({
   async function relocate(): Promise<void> {
     setBusy('relocate')
     setRelocateError(null)
-    const result = (await onRelocate()) as
-      { ok: true } | { ok: false; cancelled: boolean; error?: ProjectError }
+    const result = await onRelocate()
     setBusy(null)
-    if (!result.ok && !result.cancelled && result.error) setRelocateError(result.error)
+    if (!result.ok && !result.cancelled) setRelocateError(result.error)
   }
 
   return (
-    <li className="project" aria-label={project.name}>
-      <div className="project__main">
-        <div className="project__title-row">
-          <h3 className="project__name">{project.name}</h3>
-          <span
-            className={`badge${health.tone ? ` badge--${health.tone}` : ''}`}
+    <Item
+      as="li"
+      aria-label={project.name}
+      align="start"
+      label={
+        <HStack gap={2} vAlign="center">
+          <Text weight="semibold" type="large">
+            {project.name}
+          </Text>
+          <Token
+            label={health.label}
+            color={health.color}
+            size="sm"
             data-health={project.health.state}
-          >
-            {health.label}
-          </span>
-        </div>
-        <div className="project__meta">
-          {project.repo && (
-            <span>
-              {project.repo.owner}/{project.repo.name}
-            </span>
+          />
+        </HStack>
+      }
+      description={
+        <VStack gap={1}>
+          <HStack gap={3} vAlign="center" wrap="wrap">
+            {project.repo && (
+              <Text type="supporting">
+                {project.repo.owner}/{project.repo.name}
+              </Text>
+            )}
+            {project.local && (
+              <>
+                <Code data-testid="project-branch">
+                  {project.local.branch ?? '(detached HEAD)'}
+                </Code>
+                {project.local.dirty && (
+                  <Token label="alterações não commitadas" color="yellow" size="sm" />
+                )}
+              </>
+            )}
+          </HStack>
+          <Text type="supporting">
+            <Code color="secondary">{project.localPath}</Code>
+          </Text>
+          {project.health.message && project.health.state !== 'ok' && (
+            <HStack gap={2} vAlign="center" wrap="wrap">
+              <Text type="supporting">{project.health.message}</Text>
+              {project.health.action && <ActionLink action={project.health.action} />}
+            </HStack>
           )}
-          {project.local && (
-            <>
-              <span className="project__branch mono" title="Branch atual">
-                {project.local.branch ?? '(detached HEAD)'}
-              </span>
-              {project.local.dirty && (
-                <span className="project__dirty" title="Há alterações não commitadas">
-                  ● alterações não commitadas
-                </span>
-              )}
-            </>
+          {project.notices.map((notice) => (
+            <Text key={notice.code} type="supporting">
+              {notice.message}
+            </Text>
+          ))}
+          {relocateError && (
+            <Alert
+              tone="danger"
+              {...(relocateError.action
+                ? { action: <ActionLink action={relocateError.action} /> }
+                : {})}
+            >
+              {relocateError.message}
+            </Alert>
           )}
-        </div>
-        <div className="project__path mono">{project.localPath}</div>
-
-        {project.health.message && project.health.state !== 'ok' && (
-          <p className={`project__message project__message--${health.tone || 'neutral'}`}>
-            {project.health.message}
-            {project.health.action && <ActionLink action={project.health.action} />}
-          </p>
-        )}
-        {project.notices.map((notice) => (
-          <p key={notice.code} className="project__message project__message--warning">
-            {notice.message}
-          </p>
-        ))}
-        {relocateError && (
-          <Alert tone="danger">
-            {relocateError.message}
-            {relocateError.action && <ActionLink action={relocateError.action} />}
-          </Alert>
-        )}
-      </div>
-
-      <div className="project__actions">
-        <button
-          type="button"
-          className={`button${folderProblem ? ' button--primary' : ''}`}
-          onClick={() => void relocate()}
-          disabled={busy !== null}
-        >
-          {busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
-        </button>
-        {confirmingRemove ? (
-          <span
-            className="confirm"
+        </VStack>
+      }
+      endContent={
+        confirmingRemove ? (
+          <HStack
+            gap={2}
+            vAlign="center"
             role="group"
             aria-label={`Confirmar remoção de ${project.name}`}
           >
-            <span>Remover do Orkio? Nenhum arquivo será apagado.</span>
-            <button type="button" className="button" onClick={() => setConfirmingRemove(false)}>
-              Cancelar
-            </button>
-            <button
-              type="button"
-              className="button button--danger-solid"
+            <Text type="supporting">Remover do Orkio? Nenhum arquivo será apagado.</Text>
+            <Button label="Cancelar" onClick={() => setConfirmingRemove(false)} />
+            <Button
+              variant="destructive"
+              label="Remover"
+              isLoading={busy === 'remove'}
               onClick={() => {
                 setBusy('remove')
                 void onRemove().finally(() => {
@@ -244,24 +264,29 @@ function ProjectRow({
                   setConfirmingRemove(false)
                 })
               }}
-              disabled={busy !== null}
-              autoFocus
-            >
-              Remover
-            </button>
-          </span>
+            />
+          </HStack>
         ) : (
-          <button
-            type="button"
-            className="button button--danger"
-            onClick={() => setConfirmingRemove(true)}
-            disabled={busy !== null}
-          >
-            Remover
-          </button>
-        )}
-      </div>
-    </li>
+          <HStack gap={2}>
+            <Button
+              variant={folderProblem ? 'primary' : 'secondary'}
+              label={busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
+              icon={<Icon icon={FolderSearchIcon} />}
+              isLoading={busy === 'relocate'}
+              isDisabled={busy !== null && busy !== 'relocate'}
+              onClick={() => void relocate()}
+            />
+            <Button
+              variant="destructive"
+              label="Remover"
+              icon={<Icon icon={TrashIcon} />}
+              isDisabled={busy !== null}
+              onClick={() => setConfirmingRemove(true)}
+            />
+          </HStack>
+        )
+      }
+    />
   )
 }
 

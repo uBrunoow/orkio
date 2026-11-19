@@ -1,0 +1,6 @@
+/*
+ * Base da Astryx (reset + estilos pré-compilados dos componentes) em camadas de cascata.
+ * O tema Orkio (CSS estático gerado por `astryx theme`) é importado via src/astryx-themes.ts.
+ */
+@import '@astryxdesign/core/reset.css';
+@import '@astryxdesign/core/astryx.css';

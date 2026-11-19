@@ -1,8 +1,18 @@
 /**
- * Peças de UI compartilhadas pelos cards de integração (Notion, GitHub, ...).
+ * Peças de UI compartilhadas pelos cards de integração (Notion, GitHub, ...), em Astryx.
  * Cada card monta seu fluxo de conexão; estado conectado/erro/desconectar é igual para todos.
  */
-import { useId, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { Avatar } from '@astryxdesign/core/Avatar'
+import { Button } from '@astryxdesign/core/Button'
+import { HStack } from '@astryxdesign/core/HStack'
+import { Item } from '@astryxdesign/core/Item'
+import { Link } from '@astryxdesign/core/Link'
+import { Text } from '@astryxdesign/core/Text'
+import { TextInput } from '@astryxdesign/core/TextInput'
+import { StackItem } from '@astryxdesign/core/Stack'
+import { Token } from '@astryxdesign/core/Token'
+import { VStack } from '@astryxdesign/core/VStack'
 import type { ConnectedAccount, ConnectionStatus } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 
@@ -26,21 +36,22 @@ export function StatusBadge({
   waitingLabel: string
 }): React.JSX.Element | null {
   if (status === null) return null
-  if (activity === 'testing') return <span className="badge">Verificando…</span>
-  if (activity === 'authorizing') return <span className="badge">{waitingLabel}</span>
+  const token = (label: string, color: 'default' | 'green' | 'yellow' | 'red') => (
+    <Token label={label} color={color} size="sm" data-status={label} />
+  )
+  if (activity === 'testing') return token('Verificando…', 'default')
+  if (activity === 'authorizing') return token(waitingLabel, 'default')
   switch (status.state) {
     case 'connected':
-      return status.warning ? (
-        <span className="badge badge--warning">Conectado (sem verificação)</span>
-      ) : (
-        <span className="badge badge--success">Conectado</span>
-      )
+      return status.warning
+        ? token('Conectado (sem verificação)', 'yellow')
+        : token('Conectado', 'green')
     case 'connecting':
-      return <span className="badge">Conectando…</span>
+      return token('Conectando…', 'default')
     case 'error':
-      return <span className="badge badge--danger">Erro</span>
+      return token('Erro', 'red')
     case 'disconnected':
-      return <span className="badge">Desconectado</span>
+      return token('Desconectado', 'default')
   }
 }
 
@@ -64,11 +75,8 @@ export function TokenForm({
   onConnect: (token: string) => Promise<ConnectionStatus>
 }): React.JSX.Element {
   const [token, setToken] = useState('')
-  const inputId = useId()
-  const hintId = useId()
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault()
+  async function submit(): Promise<void> {
     if (connecting || token.trim() === '') return
     const result = await onConnect(token)
     // Não mantemos o token na memória da UI depois de conectar.
@@ -76,53 +84,48 @@ export function TokenForm({
   }
 
   return (
-    <form className="card__body" onSubmit={(e) => void handleSubmit(e)} noValidate>
-      <p className="muted">{copy.description}</p>
-
+    <VStack
+      as="form"
+      gap={4}
+      onSubmit={(e: FormEvent) => {
+        e.preventDefault()
+        void submit()
+      }}
+    >
+      <Text color="secondary">{copy.description}</Text>
       {error && <Alert tone="danger">{error}</Alert>}
-
-      <div className="field">
-        <div className="field__label-row">
-          <label className="field__label" htmlFor={inputId}>
-            {copy.label}
-          </label>
-          <button
-            type="button"
-            className="link-button"
-            onClick={() => void window.orkio.openExternal(copy.docsUrl)}
-          >
-            Como criar um token ↗
-          </button>
-        </div>
-        <input
-          id={inputId}
-          className="input"
+      <VStack gap={1}>
+        <TextInput
           type="password"
-          autoComplete="off"
-          spellCheck={false}
-          placeholder={copy.placeholder}
+          label={copy.label}
           value={token}
-          onChange={(e) => setToken(e.target.value)}
-          disabled={connecting}
-          aria-describedby={hintId}
-          aria-invalid={error ? true : undefined}
+          onChange={(value) => setToken(value)}
+          placeholder={copy.placeholder}
+          description={copy.hint}
+          autoComplete="off"
+          hasSpellCheck={false}
+          isDisabled={connecting}
+          // Tokens em fonte mono (BRAND.md): classe da camada da marca, com token do tema.
+          controlClassName="orkio-mono-input"
+          {...(error ? { status: { type: 'error' as const } } : {})}
         />
-        <span className="field__hint" id={hintId}>
-          {copy.hint}
-        </span>
-      </div>
-
-      <div className="card__actions">
-        <button
-          type="submit"
-          className="button button--primary"
-          disabled={connecting || token.trim() === ''}
+        <Link
+          label="Como criar um token"
+          onClick={() => void window.orkio.openExternal(copy.docsUrl)}
         >
-          {connecting && <span className="spinner" aria-hidden="true" />}
-          {connecting ? 'Conectando…' : error ? 'Tentar novamente' : 'Conectar'}
-        </button>
-      </div>
-    </form>
+          Como criar um token ↗
+        </Link>
+      </VStack>
+      <HStack gap={2}>
+        <Button
+          type="submit"
+          variant="primary"
+          label={error ? 'Tentar novamente' : 'Conectar'}
+          isLoading={connecting}
+          isDisabled={!connecting && token.trim() === ''}
+        />
+      </HStack>
+    </VStack>
   )
 }
 
@@ -150,32 +153,36 @@ export function ConnectedView({
     `Conectado em ${formatDate(connectedAt)}`
   ].filter(Boolean)
   return (
-    <>
-      <div className="account">
-        <Avatar account={account} />
-        <div>
-          <div className="account__name">{account.userName}</div>
-          <div className="account__meta">{meta.join(' · ')}</div>
-        </div>
-      </div>
-
+    <VStack gap={4}>
+      <Item
+        startContent={
+          <Avatar
+            name={account.userName}
+            size="md"
+            {...(account.avatarUrl ? { src: account.avatarUrl } : {})}
+          />
+        }
+        label={account.userName}
+        description={meta.join(' · ')}
+      />
       {warning && <Alert tone="warning">{warning}</Alert>}
-
-      <div className="card__actions">
-        <button type="button" className="button" onClick={() => void onTest()} disabled={busy}>
-          {activity === 'testing' && <span className="spinner" aria-hidden="true" />}
-          {activity === 'testing' ? 'Testando…' : 'Testar conexão'}
-        </button>
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <Button
+          label={activity === 'testing' ? 'Testando…' : 'Testar conexão'}
+          onClick={() => void onTest()}
+          isLoading={activity === 'testing'}
+          isDisabled={busy && activity !== 'testing'}
+        />
         <DisconnectButton
           busy={busy}
           disconnecting={activity === 'disconnecting'}
           onConfirm={onDisconnect}
         />
         {lastVerifiedAt && !warning && activity === 'idle' && (
-          <span className="muted">Verificado às {timeFormatter.format(lastVerifiedAt)}</span>
+          <Text type="supporting">Verificado às {timeFormatter.format(lastVerifiedAt)}</Text>
         )}
-      </div>
-    </>
+      </HStack>
+    </VStack>
   )
 }
 
@@ -197,38 +204,39 @@ export function StoredCredentialErrorView({
 }): React.JSX.Element {
   const busy = activity !== 'idle'
   return (
-    <>
+    <VStack gap={4}>
       <Alert tone="danger">{message}</Alert>
-      <p className="muted">
+      <Text color="secondary">
         {onReconnect
           ? 'Reconecte para autorizar o Orkio de novo, ou desconecte para remover a conexão.'
           : 'Se o token foi revogado, desconecte e conecte de novo com um token novo.'}
-      </p>
-      <div className="card__actions">
+      </Text>
+      <HStack gap={2} wrap="wrap">
         {onReconnect && (
-          <button
-            type="button"
-            className="button button--primary"
+          <Button
+            variant="primary"
+            label={reconnectLabel}
             onClick={() => void onReconnect()}
-            disabled={busy}
-          >
-            {reconnectLabel}
-          </button>
+            isDisabled={busy}
+          />
         )}
-        <button type="button" className="button" onClick={() => void onRetry()} disabled={busy}>
-          {activity === 'testing' && <span className="spinner" aria-hidden="true" />}
-          {activity === 'testing' ? 'Testando…' : 'Tentar novamente'}
-        </button>
+        <Button
+          label={activity === 'testing' ? 'Testando…' : 'Tentar novamente'}
+          onClick={() => void onRetry()}
+          isLoading={activity === 'testing'}
+          isDisabled={busy && activity !== 'testing'}
+        />
         <DisconnectButton
           busy={busy}
           disconnecting={activity === 'disconnecting'}
           onConfirm={onDisconnect}
         />
-      </div>
-    </>
+      </HStack>
+    </VStack>
   )
 }
 
+/** Confirmação inline (sem diálogo: camadas sobrepostas da Astryx injetam <style>). */
 export function DisconnectButton({
   busy,
   disconnecting,
@@ -242,59 +250,26 @@ export function DisconnectButton({
 
   if (!confirming && !disconnecting) {
     return (
-      <button
-        type="button"
-        className="button button--danger"
+      <Button
+        variant="destructive"
+        label="Desconectar"
         onClick={() => setConfirming(true)}
-        disabled={busy}
-      >
-        Desconectar
-      </button>
-    )
-  }
-
-  return (
-    <span className="confirm" role="group" aria-label="Confirmar desconexão">
-      <span>Remover a conexão deste computador?</span>
-      <button
-        type="button"
-        className="button"
-        onClick={() => setConfirming(false)}
-        disabled={disconnecting}
-      >
-        Cancelar
-      </button>
-      <button
-        type="button"
-        className="button button--danger-solid"
-        onClick={() => void onConfirm().finally(() => setConfirming(false))}
-        disabled={disconnecting}
-        autoFocus
-      >
-        {disconnecting && <span className="spinner" aria-hidden="true" />}
-        {disconnecting ? 'Desconectando…' : 'Desconectar'}
-      </button>
-    </span>
-  )
-}
-
-export function Avatar({ account }: { account: ConnectedAccount }): React.JSX.Element {
-  const [broken, setBroken] = useState(false)
-  if (account.avatarUrl && !broken) {
-    return (
-      <img
-        className="avatar"
-        src={account.avatarUrl}
-        alt=""
-        referrerPolicy="no-referrer"
-        onError={() => setBroken(true)}
+        isDisabled={busy}
       />
     )
   }
+
   return (
-    <span className="avatar" aria-hidden="true">
-      {initials(account.userName)}
-    </span>
+    <HStack gap={2} vAlign="center" role="group" aria-label="Confirmar desconexão">
+      <Text>Remover a conexão deste computador?</Text>
+      <Button label="Cancelar" onClick={() => setConfirming(false)} isDisabled={disconnecting} />
+      <Button
+        variant="destructive"
+        label={disconnecting ? 'Desconectando…' : 'Desconectar'}
+        isLoading={disconnecting}
+        onClick={() => void onConfirm().finally(() => setConfirming(false))}
+      />
+    </HStack>
   )
 }
 
@@ -313,23 +288,49 @@ export function TokenFallbackFooter({
   onBack: () => void
 }): React.JSX.Element {
   return oauthAvailable ? (
-    <button
-      type="button"
-      className="link-button link-button--muted"
-      onClick={onBack}
-      disabled={connecting}
-    >
-      ← Voltar para “{primaryLabel}”
-    </button>
+    <HStack>
+      <Button
+        variant="ghost"
+        size="sm"
+        label={`← Voltar para “${primaryLabel}”`}
+        onClick={onBack}
+        isDisabled={connecting}
+      />
+    </HStack>
   ) : (
-    <p className="field__hint">{unavailableMessage}</p>
+    <Text type="supporting">{unavailableMessage}</Text>
   )
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean)
-  const letters = parts.length > 1 ? [parts[0], parts[parts.length - 1]] : parts.slice(0, 1)
-  return letters.map((p) => p?.[0]?.toUpperCase() ?? '').join('') || '?'
+/** Cabeçalho comum dos cards: ícone, título/descrição e status. */
+export function CardHeader({
+  titleId,
+  title,
+  description,
+  icon,
+  badge
+}: {
+  titleId: string
+  title: string
+  description: string
+  icon: React.ReactNode
+  badge: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <HStack gap={3} vAlign="center">
+      {icon}
+      <StackItem size="fill">
+        <VStack gap={0}>
+          <Text as="h2" id={titleId} type="large" weight="semibold">
+            {title}
+          </Text>
+          <Text type="supporting">{description}</Text>
+        </VStack>
+      </StackItem>
+      {/* O status mantém o tamanho natural (não é truncado). */}
+      <StackItem>{badge}</StackItem>
+    </HStack>
+  )
 }
 
 function formatDate(iso: string): string {

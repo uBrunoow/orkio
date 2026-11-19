@@ -1,4 +1,15 @@
 import { useEffect, useState } from 'react'
+import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import { Code } from '@astryxdesign/core/Code'
+import { HStack } from '@astryxdesign/core/HStack'
+import { Icon } from '@astryxdesign/core/Icon'
+import { ExternalLinkIcon, GitHubLogo } from '../../components/icons'
+import { Item } from '@astryxdesign/core/Item'
+import { Skeleton } from '@astryxdesign/core/Skeleton'
+import { Spinner } from '@astryxdesign/core/Spinner'
+import { Text } from '@astryxdesign/core/Text'
+import { VStack } from '@astryxdesign/core/VStack'
 import {
   GITHUB_TOKEN_DOCS_URL,
   type ConnectionStatus,
@@ -6,6 +17,7 @@ import {
 } from '../../../../shared/ipc-contract'
 import {
   Alert,
+  CardHeader,
   ConnectedView,
   StatusBadge,
   StoredCredentialErrorView,
@@ -32,55 +44,51 @@ export function GitHubConnectionCard({
   const { status, activity } = github
 
   return (
-    <section className="card" aria-labelledby="github-card-title" aria-busy={activity !== 'idle'}>
-      <header className="card__header">
-        <div className="card__icon" aria-hidden="true">
-          <BranchMark />
-        </div>
-        <div>
-          <h2 className="card__title" id="github-card-title">
-            GitHub
-          </h2>
-          <p className="card__description">Código: repositórios, branches e PRs.</p>
-        </div>
-        <StatusBadge status={status} activity={activity} waitingLabel="Aguardando…" />
-      </header>
-
-      <div className="card__body" aria-live="polite">
-        {status === null ? (
-          <div className="skeleton" aria-label="Carregando status da conexão" />
-        ) : activity === 'authorizing' ? (
-          <DeviceFlowView flow={github.deviceFlow} onCancel={github.cancelDeviceFlow} />
-        ) : status.state === 'connected' ? (
-          <ConnectedView
-            account={status.account}
-            connectedAt={status.connectedAt}
-            warning={status.warning}
-            activity={activity}
-            lastVerifiedAt={github.lastVerifiedAt}
-            onTest={github.testConnection}
-            onDisconnect={github.disconnect}
-          />
-        ) : status.state === 'error' && status.hasStoredCredentials ? (
-          <StoredCredentialErrorView
-            message={status.message}
-            activity={activity}
-            onRetry={github.testConnection}
-            onDisconnect={github.disconnect}
-            onReconnect={github.authOptions?.oauth ? github.startDeviceFlow : undefined}
-            reconnectLabel="Reconectar com GitHub"
-          />
-        ) : (
-          <DisconnectedView
-            error={status.state === 'error' ? status.message : null}
-            connecting={activity === 'connecting'}
-            oauthAvailable={github.authOptions ? github.authOptions.oauth : null}
-            onConnectToken={github.connect}
-            onStartDeviceFlow={github.startDeviceFlow}
-          />
-        )}
-      </div>
-    </section>
+    <Card role="region" aria-labelledby="github-card-title" aria-busy={activity !== 'idle'}>
+      <VStack gap={4}>
+        <CardHeader
+          titleId="github-card-title"
+          title="GitHub"
+          description="Código: repositórios, branches e PRs."
+          icon={<Icon icon={GitHubLogo} color="primary" size="lg" />}
+          badge={<StatusBadge status={status} activity={activity} waitingLabel="Aguardando…" />}
+        />
+        <VStack gap={4} aria-live="polite">
+          {status === null ? (
+            <Skeleton height={40} aria-label="Carregando status da conexão" />
+          ) : activity === 'authorizing' ? (
+            <DeviceFlowView flow={github.deviceFlow} onCancel={github.cancelDeviceFlow} />
+          ) : status.state === 'connected' ? (
+            <ConnectedView
+              account={status.account}
+              connectedAt={status.connectedAt}
+              warning={status.warning}
+              activity={activity}
+              lastVerifiedAt={github.lastVerifiedAt}
+              onTest={github.testConnection}
+              onDisconnect={github.disconnect}
+            />
+          ) : status.state === 'error' && status.hasStoredCredentials ? (
+            <StoredCredentialErrorView
+              message={status.message}
+              activity={activity}
+              onRetry={github.testConnection}
+              onDisconnect={github.disconnect}
+              onReconnect={github.authOptions?.oauth ? github.startDeviceFlow : undefined}
+              reconnectLabel="Reconectar com GitHub"
+            />
+          ) : (
+            <DisconnectedView
+              error={status.state === 'error' ? status.message : null}
+              connecting={activity === 'connecting'}
+              oauthAvailable={github.authOptions ? github.authOptions.oauth : null}
+              onConnectToken={github.connect}
+              onStartDeviceFlow={github.startDeviceFlow}
+            />
+          )}
+        </VStack>
+      </VStack>
+    </Card>
   )
 }
 
@@ -100,12 +108,12 @@ function DisconnectedView({
   const [useToken, setUseToken] = useState(false)
 
   if (oauthAvailable === null) {
-    return <div className="skeleton" aria-label="Carregando opções de conexão" />
+    return <Skeleton height={40} aria-label="Carregando opções de conexão" />
   }
 
   if (useToken || !oauthAvailable) {
     return (
-      <>
+      <VStack gap={3}>
         <TokenForm
           copy={TOKEN_COPY}
           error={error}
@@ -119,35 +127,27 @@ function DisconnectedView({
           unavailableMessage="O login com GitHub não está disponível nesta versão do Orkio."
           onBack={() => setUseToken(false)}
         />
-      </>
+      </VStack>
     )
   }
 
   return (
-    <>
-      <p className="muted">
+    <VStack gap={4}>
+      <Text color="secondary">
         Autorize o Orkio na sua conta do GitHub digitando um código no navegador. O Orkio pede
-        acesso aos seus repositórios (escopo <code className="mono">repo</code>) para ler código e
-        PRs e, mais tarde, abrir PRs.
-      </p>
+        acesso aos seus repositórios (escopo <Code>repo</Code>) para ler código e PRs e, mais tarde,
+        abrir PRs.
+      </Text>
       {error && <Alert tone="danger">{error}</Alert>}
-      <div className="card__actions">
-        <button
-          type="button"
-          className="button button--primary"
+      <HStack gap={2} vAlign="center">
+        <Button
+          variant="primary"
+          label={error ? 'Tentar novamente' : 'Conectar com GitHub'}
           onClick={() => void onStartDeviceFlow()}
-        >
-          {error ? 'Tentar novamente' : 'Conectar com GitHub'}
-        </button>
-        <button
-          type="button"
-          className="link-button link-button--muted"
-          onClick={() => setUseToken(true)}
-        >
-          Usar token
-        </button>
-      </div>
-    </>
+        />
+        <Button variant="ghost" label="Usar token" onClick={() => setUseToken(true)} />
+      </HStack>
+    </VStack>
   )
 }
 
@@ -163,10 +163,11 @@ function DeviceFlowView({
 
   if (!flow) {
     return (
-      <div className="authorizing" role="status">
-        <span className="spinner" aria-hidden="true" />
-        <div className="account__name">Pedindo um código ao GitHub…</div>
-      </div>
+      <Item
+        role="status"
+        startContent={<Spinner size="md" aria-label="Aguardando" />}
+        label="Pedindo um código ao GitHub…"
+      />
     )
   }
 
@@ -180,41 +181,45 @@ function DeviceFlowView({
   }
 
   return (
-    <>
-      <p className="muted">
-        Abra o GitHub, digite o código abaixo e clique em <strong>Authorize</strong>. O Orkio
-        conecta sozinho assim que você autorizar.
-      </p>
-      <div className="device-code">
-        <code className="device-code__value" aria-label={`Código: ${flow.userCode}`}>
-          {flow.userCode}
-        </code>
-        <button type="button" className="button" onClick={() => void copyCode()}>
-          {copy === 'copied' ? 'Copiado' : 'Copiar'}
-        </button>
-      </div>
+    <VStack gap={4}>
+      <Text color="secondary">
+        Abra o GitHub, digite o código abaixo e clique em <Text weight="semibold">Authorize</Text>.
+        O Orkio conecta sozinho assim que você autorizar.
+      </Text>
+      <Card variant="muted" padding={3}>
+        <HStack gap={3} vAlign="center" justify="between">
+          <Text type="display-3" aria-label={`Código: ${flow.userCode}`}>
+            <Code size="inherit" data-testid="device-code">
+              {flow.userCode}
+            </Code>
+          </Text>
+          <Button
+            label={copy === 'copied' ? 'Copiado' : 'Copiar'}
+            onClick={() => void copyCode()}
+          />
+        </HStack>
+      </Card>
       {copy === 'failed' && (
-        <p className="field__hint">Não foi possível copiar. Selecione o código e copie à mão.</p>
+        <Text type="supporting">Não foi possível copiar. Selecione o código e copie à mão.</Text>
       )}
-      <div className="card__actions">
-        <button
-          type="button"
-          className="button button--primary"
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <Button
+          variant="primary"
+          label="Abrir GitHub"
+          icon={<Icon icon={ExternalLinkIcon} />}
           onClick={() => void window.orkio.openExternal(flow.verificationUri)}
-        >
-          Abrir GitHub ↗
-        </button>
-        <button type="button" className="button" onClick={() => void onCancel()}>
-          Cancelar
-        </button>
-        <span className="muted device-code__timer" role="timer">
-          <span className="spinner" aria-hidden="true" />{' '}
-          {remaining > 0
-            ? `Aguardando · expira em ${formatRemaining(remaining)}`
-            : 'Código expirado'}
-        </span>
-      </div>
-    </>
+        />
+        <Button label="Cancelar" onClick={() => void onCancel()} />
+        <HStack gap={2} vAlign="center" role="timer">
+          <Spinner size="sm" aria-label="Aguardando autorização" />
+          <Text type="supporting">
+            {remaining > 0
+              ? `Aguardando · expira em ${formatRemaining(remaining)}`
+              : 'Código expirado'}
+          </Text>
+        </HStack>
+      </HStack>
+    </VStack>
   )
 }
 
@@ -235,26 +240,4 @@ function formatRemaining(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
   return `${m}:${String(s).padStart(2, '0')}`
-}
-
-/** Ícone genérico de branch (não usamos a marca do GitHub). */
-function BranchMark(): React.JSX.Element {
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="6" cy="5" r="2" />
-      <circle cx="6" cy="19" r="2" />
-      <circle cx="18" cy="7" r="2" />
-      <path d="M6 7v10M18 9c0 5-6 4-11.5 8.5" />
-    </svg>
-  )
 }

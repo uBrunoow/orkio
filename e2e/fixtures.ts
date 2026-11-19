@@ -263,7 +263,9 @@ export async function launchOrkio(
     const w = window as unknown as { __csp: string[] }
     w.__csp = []
     document.addEventListener('securitypolicyviolation', (e) =>
-      w.__csp.push(`${e.violatedDirective} ${e.blockedURI}`)
+      w.__csp.push(
+        `${e.violatedDirective} ${e.blockedURI} ${e.sourceFile}:${e.lineNumber} ${e.sample}`
+      )
     )
   })
   await page.setViewportSize({ width: 1100, height: 720 })
@@ -315,4 +317,12 @@ export async function queueFolderPicks(app: ElectronApplication, paths: string[]
   await app.evaluate((_electron, next) => {
     ;(globalThis as unknown as FakeGlobals).__picks.push(...next)
   }, paths)
+}
+
+/**
+ * Alertas visíveis do app. Ignora a região `aria-live` global da Astryx (sempre presente,
+ * vazia e escondida), que também tem role="alert".
+ */
+export function alerts(scope: Page | Locator): Locator {
+  return scope.locator('[role="alert"]:not([data-astryx-live-region])')
 }

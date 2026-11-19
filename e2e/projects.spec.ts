@@ -17,7 +17,8 @@ import {
   queueFolderPicks,
   removeDir,
   setFakes,
-  type OrkioApp
+  type OrkioApp,
+  alerts
 } from './fixtures'
 
 const PAT = 'github_pat_E2E_PROJECTS_TOKEN_0123456789'
@@ -112,9 +113,7 @@ test('GitHub desconectado → erro claro ao adicionar', async () => {
     .getByRole('region', { name: 'Adicionar projeto' })
     .getByRole('button', { name: 'Adicionar projeto' })
     .click()
-  await expect(app.page.getByRole('alert')).toContainText(
-    'Conecte sua conta do GitHub em Integrações'
-  )
+  await expect(alerts(app.page)).toContainText('Conecte sua conta do GitHub em Integrações')
   await app.page.getByRole('button', { name: 'Cancelar' }).click()
 
   // Conecta o GitHub (token; API simulada) para os próximos testes.
@@ -140,7 +139,7 @@ test('erros ao escolher a pasta: não é repo, sem remote, remote fora do GitHub
   ]
   for (const [folder, message] of cases) {
     await pick(app, folder)
-    await expect(app.page.getByRole('alert')).toContainText(message)
+    await expect(alerts(app.page)).toContainText(message)
   }
   // Cancelar o seletor não muda nada.
   await app.page.getByRole('button', { name: 'Adicionar projeto' }).first().click()
@@ -163,7 +162,7 @@ test('subpasta de um fork → usa a raiz, escolhe o remote e cria o projeto', as
   const row = projectRow(app.page, 'orkio')
   await expect(row).toBeVisible()
   await expect(row.getByText('uBrunoow/orkio')).toBeVisible()
-  await expect(row.locator('.project__branch')).toHaveText('main')
+  await expect(row.locator('[data-testid="project-branch"]')).toHaveText('main')
   await expect(row.locator('[data-health]')).toHaveText('OK')
   await expect(panel).toHaveCount(0)
 
@@ -181,11 +180,13 @@ test('trocar de branch no terminal atualiza a UI em até ~2 s', async () => {
   const row = projectRow(page, 'orkio')
   const started = Date.now()
   git(repoDir(), 'checkout', '-q', '-b', 'ORK-142/sync-notion')
-  await expect(row.locator('.project__branch')).toHaveText('ORK-142/sync-notion', { timeout: 2000 })
+  await expect(row.locator('[data-testid="project-branch"]')).toHaveText('ORK-142/sync-notion', {
+    timeout: 2000
+  })
   expect(Date.now() - started).toBeLessThan(2500)
 
   git(repoDir(), 'checkout', '-q', 'main')
-  await expect(row.locator('.project__branch')).toHaveText('main', { timeout: 2000 })
+  await expect(row.locator('[data-testid="project-branch"]')).toHaveText('main', { timeout: 2000 })
 })
 
 test('alterações não commitadas aparecem ao voltar para a janela', async () => {
@@ -207,9 +208,7 @@ test('organização com restrição de OAuth Apps e com SSO → mensagem + link 
 
   await pick(app, join(work, 'org-restrita'))
   await panel.getByRole('button', { name: 'Adicionar projeto' }).click()
-  await expect(panel.getByRole('alert')).toContainText(
-    'Um admin da organização precisa aprovar o Orkio'
-  )
+  await expect(alerts(panel)).toContainText('Um admin da organização precisa aprovar o Orkio')
   await panel.getByRole('button', { name: /Abrir configurações de acesso do GitHub/ }).click()
   await expect
     .poll(() => openedUrls(app.app))
@@ -219,7 +218,7 @@ test('organização com restrição de OAuth Apps e com SSO → mensagem + link 
 
   await pick(app, join(work, 'org-sso'))
   await panel.getByRole('button', { name: 'Adicionar projeto' }).click()
-  await expect(panel.getByRole('alert')).toContainText('usa SSO (SAML)')
+  await expect(alerts(panel)).toContainText('usa SSO (SAML)')
   await panel.getByRole('button', { name: /Autorizar SSO da organização/ }).click()
   await expect
     .poll(() => openedUrls(app.app))
@@ -258,7 +257,7 @@ test('pasta movida → "Pasta não encontrada" → Reapontar pasta', async () =>
   // Pasta de outro repositório é recusada.
   await queueFolderPicks(app.app, [join(work, 'arquivado')])
   await row.getByRole('button', { name: 'Reapontar pasta' }).click()
-  await expect(row.getByRole('alert')).toContainText('não de uBrunoow/orkio')
+  await expect(alerts(row)).toContainText('não de uBrunoow/orkio')
 
   await queueFolderPicks(app.app, [moved])
   await row.getByRole('button', { name: 'Reapontar pasta' }).click()

@@ -7,3 +7,7 @@ build
 resources
 AGENTS.md
 GEMINI.md
+themes
+src/themes
+src/astryx-themes.ts
+src/renderer/public/astryx-layer-slide-rules.css

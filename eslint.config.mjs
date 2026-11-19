@@ -4,7 +4,17 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 
 export default tseslint.config(
-  { ignores: ['out/**', 'dist/**', 'node_modules/**'] },
+  {
+    // Gerados pelo `astryx theme` (não editar à mão).
+    ignores: [
+      'out/**',
+      'dist/**',
+      'node_modules/**',
+      'themes/**',
+      'src/themes/**',
+      'src/astryx-themes.ts'
+    ]
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

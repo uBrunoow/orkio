@@ -11,7 +11,8 @@ import {
   removeDir,
   setFakes,
   type FakeServices,
-  type OrkioApp
+  type OrkioApp,
+  alerts
 } from './fixtures'
 
 const PAT = 'github_pat_E2E_SECRET_TOKEN_0123456789'
@@ -64,7 +65,7 @@ test('Device Flow: mostra o código, copia, abre o GitHub e conecta ao autorizar
   await card.getByRole('button', { name: 'Conectar com GitHub' }).click()
 
   // Código grande em mono, contagem regressiva e ações.
-  const code = card.locator('.device-code__value')
+  const code = card.locator('[data-testid="device-code"]')
   await expect(code).toHaveText('WDJB-MJHT')
   expect(await code.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/JetBrains Mono/)
   await expect(card.getByRole('timer')).toContainText(/expira em 1[45]:\d\d/)
@@ -79,7 +80,9 @@ test('Device Flow: mostra o código, copia, abre o GitHub e conecta ao autorizar
 
   // O usuário autoriza no GitHub: o polling no main conecta sozinho.
   await setFakes(app, { githubDevice: 'approve' })
-  await expect(card.getByText('The Octocat')).toBeVisible({ timeout: 15_000 })
+  await expect(card.getByText('The Octocat', { exact: true }).first()).toBeVisible({
+    timeout: 15_000
+  })
   await expect(card.getByText(/@octocat/)).toBeVisible()
   await shot(page, 'github-3-conectado')
 
@@ -110,7 +113,7 @@ test('Device Flow: mostra o código, copia, abre o GitHub e conecta ao autorizar
 test('reabrir o app mantém a conexão do GitHub', async () => {
   const { page } = await open()
   const card = githubCard(page)
-  await expect(card.getByText('The Octocat')).toBeVisible()
+  await expect(card.getByText('The Octocat', { exact: true }).first()).toBeVisible()
   await expect(card.getByText(/Verificado às/)).toBeVisible()
 })
 
@@ -119,8 +122,10 @@ test('rate limit primário ao testar → continua conectado com aviso', async ()
   const card = githubCard(page)
   await setFakes(app, { githubUser: 'rate_limited' })
   await card.getByRole('button', { name: 'Testar conexão' }).click()
-  await expect(card.getByRole('status')).toContainText('Limite de requisições do GitHub')
-  await expect(card.getByText('The Octocat')).toBeVisible()
+  await expect(
+    card.getByRole('status').filter({ hasText: 'Limite de requisições do GitHub' })
+  ).toBeVisible()
+  await expect(card.getByText('The Octocat', { exact: true }).first()).toBeVisible()
   await setFakes(app, { githubUser: 'ok' })
 })
 
@@ -141,7 +146,7 @@ test('usuário recusa no GitHub → mensagem clara e nada salvo', async () => {
   const card = githubCard(page)
   await setFakes(app, { githubDevice: 'deny' })
   await card.getByRole('button', { name: 'Conectar com GitHub' }).click()
-  await expect(card.getByRole('alert')).toContainText('Você cancelou a autorização no GitHub')
+  await expect(alerts(card)).toContainText('Você cancelou a autorização no GitHub')
   expect(secretFiles()).not.toContain('github.bin')
 })
 
@@ -150,7 +155,7 @@ test('código expirado → mensagem para gerar outro', async () => {
   const card = githubCard(page)
   await setFakes(app, { githubDevice: 'expire' })
   await card.getByRole('button', { name: 'Tentar novamente' }).click()
-  await expect(card.getByRole('alert')).toContainText('O código expirou')
+  await expect(alerts(card)).toContainText('O código expirou')
 })
 
 test('cancelar o Device Flow volta ao início sem salvar nada', async () => {
@@ -158,9 +163,9 @@ test('cancelar o Device Flow volta ao início sem salvar nada', async () => {
   const card = githubCard(page)
   await setFakes(app, { githubDevice: 'pending' })
   await card.getByRole('button', { name: 'Tentar novamente' }).click()
-  await expect(card.locator('.device-code__value')).toHaveText('WDJB-MJHT')
+  await expect(card.locator('[data-testid="device-code"]')).toHaveText('WDJB-MJHT')
   await card.getByRole('button', { name: 'Cancelar' }).click()
-  await expect(card.locator('.device-code__value')).toHaveCount(0)
+  await expect(card.locator('[data-testid="device-code"]')).toHaveCount(0)
   await expect(
     card.getByRole('button', { name: /Conectar com GitHub|Tentar novamente/ })
   ).toBeVisible()
@@ -177,13 +182,13 @@ test('token colado: inválido mostra erro e não salva; válido conecta', async 
   await setFakes(app, { githubUser: '401' })
   await input.fill(PAT)
   await card.getByRole('button', { name: 'Conectar', exact: true }).click()
-  await expect(card.getByRole('alert')).toContainText('inválido, expirado ou revogado')
+  await expect(alerts(card)).toContainText('inválido, expirado ou revogado')
   expect(secretFiles()).not.toContain('github.bin')
   await shot(page, 'github-4-token-invalido')
 
   await setFakes(app, { githubUser: 'ok' })
   await card.getByRole('button', { name: 'Tentar novamente' }).click()
-  await expect(card.getByText('The Octocat')).toBeVisible()
+  await expect(card.getByText('The Octocat', { exact: true }).first()).toBeVisible()
   expect(secretFiles()).toContain('github.bin')
   expect(readFileSync(join(userDataDir, 'secrets', 'github.bin')).includes(PAT)).toBe(false)
   expect(await cspViolations(page)).toEqual([])

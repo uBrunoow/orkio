@@ -12,7 +12,8 @@ import {
   removeDir,
   setFakes,
   type FakeServices,
-  type OrkioApp
+  type OrkioApp,
+  alerts
 } from './fixtures'
 
 const REDIRECT_URI = 'http://127.0.0.1:47821/oauth/notion/callback'
@@ -62,9 +63,9 @@ test('"Conectar com Notion" autoriza no navegador e conecta via intermediário',
 
   await notionCard(page).getByRole('button', { name: 'Conectar com Notion' }).click()
 
-  await expect(notionCard(page).getByText('Grace Hopper')).toBeVisible()
+  await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
   await expect(notionCard(page).getByText(/Acme Labs/)).toBeVisible()
-  await expect(page.locator('.empty-hero')).toHaveCount(0)
+  await expect(page.getByTestId('empty-hero')).toHaveCount(0)
   await shot(page, 'oauth-2-conectado')
 
   // Página de autorização aberta no navegador com os parâmetros certos.
@@ -98,7 +99,7 @@ test('"Conectar com Notion" autoriza no navegador e conecta via intermediário',
 
 test('reabrir o app mantém a conexão OAuth', async () => {
   const { page } = await open()
-  await expect(notionCard(page).getByText('Grace Hopper')).toBeVisible()
+  await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
   await expect(notionCard(page).getByText(/Verificado às/)).toBeVisible()
 })
 
@@ -109,7 +110,7 @@ test('token de acesso expirado → renova pelo intermediário automaticamente', 
   await notionCard(page).getByRole('button', { name: 'Testar conexão' }).click()
 
   await expect(notionCard(page).getByText(/Verificado às/)).toBeVisible()
-  await expect(notionCard(page).getByRole('alert')).toHaveCount(0)
+  await expect(alerts(notionCard(page))).toHaveCount(0)
   const refresh = (await externalCalls(app)).find((c) => c.url.endsWith('/notion/refresh'))
   expect(JSON.parse(refresh!.body!)).toEqual({ refresh_token: 'nrt_E2E_OAUTH_REFRESH_1' })
 })
@@ -119,14 +120,14 @@ test('autorização revogada → erro com "Reconectar com Notion"', async () => 
   await setFakes(app, { validTokens: [], broker: 'invalid_grant' })
   await notionCard(page).getByRole('button', { name: 'Testar conexão' }).click()
 
-  await expect(notionCard(page).getByRole('alert')).toContainText('expirou ou foi revogada')
+  await expect(alerts(notionCard(page))).toContainText('expirou ou foi revogada')
   await shot(page, 'oauth-3-revogado')
   expect(secretFiles()).toEqual(['notion.bin'])
 
   await setFakes(app, { validTokens: null, broker: 'ok' })
   await notionCard(page).getByRole('button', { name: 'Reconectar com Notion' }).click()
-  await expect(notionCard(page).getByText('Grace Hopper')).toBeVisible()
-  await expect(notionCard(page).getByRole('alert')).toHaveCount(0)
+  await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
+  await expect(alerts(notionCard(page))).toHaveCount(0)
 })
 
 test('desconectar apaga os tokens do disco', async () => {
@@ -145,7 +146,7 @@ test('usuário recusa no Notion → mensagem clara e nada salvo', async () => {
   await setFakes(app, { browser: 'deny' })
   await notionCard(page).getByRole('button', { name: 'Conectar com Notion' }).click()
 
-  await expect(notionCard(page).getByRole('alert')).toContainText('Você não autorizou o acesso')
+  await expect(alerts(notionCard(page))).toContainText('Você não autorizou o acesso')
   expect(secretFiles()).toEqual([])
 })
 
@@ -167,7 +168,7 @@ test('cancelar enquanto aguarda o navegador volta ao início e libera a porta', 
   await notionCard(page)
     .getByRole('button', { name: /Conectar com Notion|Tentar novamente/ })
     .click()
-  await expect(notionCard(page).getByText('Grace Hopper')).toBeVisible()
+  await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
   await close()
 })

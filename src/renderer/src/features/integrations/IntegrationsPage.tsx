@@ -1,5 +1,11 @@
+import { Card } from '@astryxdesign/core/Card'
+import { Grid } from '@astryxdesign/core/Grid'
+import { HStack } from '@astryxdesign/core/HStack'
+import { Text } from '@astryxdesign/core/Text'
+import { VStack } from '@astryxdesign/core/VStack'
 import type { ConnectionStatus } from '../../../../shared/ipc-contract'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
+import { PageHeader } from '../../components/PageHeader'
 import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
 import { useGitHubConnection } from './useGitHubConnection'
@@ -11,34 +17,41 @@ export function IntegrationsPage(): React.JSX.Element {
   const nothingConnected = [notion.status, github.status].every(isEmpty)
 
   return (
-    <div className="page page--wide">
-      <header className="page__header">
-        <h1 className="page__title">Integrações</h1>
-        <p className="page__subtitle">
-          Conecte as ferramentas que o Orkio usa para planejar e executar o desenvolvimento.
-        </p>
-      </header>
+    <VStack gap={6} maxWidth={1080}>
+      <PageHeader
+        title="Integrações"
+        subtitle="Conecte as ferramentas que o Orkio usa para planejar e executar o desenvolvimento."
+      />
 
       {nothingConnected && (
-        <section className="empty-hero" aria-labelledby="empty-hero-title">
-          <OrkioLogo variant="full" size={88} />
-          <div>
-            <p className="slogan">Do contexto ao commit</p>
-            <h2 className="display-title" id="empty-hero-title">
-              Conecte suas ferramentas
-            </h2>
-            <p className="muted">
-              Notion para o planejamento, GitHub para o código. O Orkio liga os dois.
-            </p>
-          </div>
-        </section>
+        <Card
+          variant="transparent"
+          role="region"
+          aria-labelledby="empty-hero-title"
+          data-testid="empty-hero"
+        >
+          <HStack gap={6} vAlign="center">
+            <OrkioLogo variant="full" size={88} />
+            <VStack gap={2}>
+              <Text type="supporting" className="orkio-slogan">
+                Do contexto ao commit
+              </Text>
+              <Text as="h2" id="empty-hero-title" type="display-3" className="orkio-display">
+                Conecte suas ferramentas
+              </Text>
+              <Text color="secondary">
+                Notion para o planejamento, GitHub para o código. O Orkio liga os dois.
+              </Text>
+            </VStack>
+          </HStack>
+        </Card>
       )}
 
-      <div className="integrations-grid">
+      <Grid columns={{ minWidth: 380, repeat: 'fit' }} gap={4} align="start">
         <NotionConnectionCard notion={notion} />
         <GitHubConnectionCard github={github} />
-      </div>
-    </div>
+      </Grid>
+    </VStack>
   )
 }
 

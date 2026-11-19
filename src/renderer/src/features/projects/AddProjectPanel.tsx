@@ -1,10 +1,18 @@
-import { useId, useState } from 'react'
+import { useState } from 'react'
+import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
+import { Code } from '@astryxdesign/core/Code'
+import { HStack } from '@astryxdesign/core/HStack'
+import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
+import { Text } from '@astryxdesign/core/Text'
+import { TextInput } from '@astryxdesign/core/TextInput'
+import { VStack } from '@astryxdesign/core/VStack'
 import type {
   CreateProjectInput,
   ProjectError,
   ProjectMutationResult,
-  ProjectSelection,
-  RemoteCandidate
+  ProjectSelection
 } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { ActionLink } from './ActionLink'
@@ -27,14 +35,16 @@ export function AddProjectPanel({
   const [nameEdited, setNameEdited] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<ProjectError | null>(null)
-  const nameId = useId()
   const needsConfirmation = candidate.hostKind !== 'github'
+  const isFork = selection.candidates.some((c) => c.remoteName === 'upstream')
 
-  function chooseRemote(next: RemoteCandidate): void {
-    setRemoteName(next.remoteName)
+  function chooseRemote(next: string): void {
+    const chosen = selection.candidates.find((c) => c.remoteName === next)
+    if (!chosen) return
+    setRemoteName(chosen.remoteName)
     setConfirmed(false)
     setError(null)
-    if (!nameEdited) setName(next.name)
+    if (!nameEdited) setName(chosen.name)
   }
 
   async function submit(): Promise<void> {
@@ -51,138 +61,111 @@ export function AddProjectPanel({
   }
 
   return (
-    <section className="card add-project" aria-labelledby="add-project-title">
-      <header className="card__header">
-        <div>
-          <h2 className="card__title" id="add-project-title">
+    <Card role="region" aria-labelledby="add-project-title" elevation="low">
+      <VStack gap={4}>
+        <VStack gap={1}>
+          <Text as="h2" id="add-project-title" type="large" weight="semibold">
             Adicionar projeto
-          </h2>
-          <p className="card__description mono">{selection.rootPath}</p>
-        </div>
-      </header>
+          </Text>
+          <Text type="supporting">
+            <Code>{selection.rootPath}</Code>
+          </Text>
+        </VStack>
 
-      <div className="card__body">
         {selection.resolvedFromSubfolder && (
           <Alert tone="warning">
             Você escolheu uma subpasta. O Orkio vai usar a raiz do repositório:{' '}
-            <span className="mono">{selection.folderName}</span>.
+            <Code>{selection.folderName}</Code>.
           </Alert>
         )}
 
-        <p className="muted">
-          Branch atual: <span className="mono">{selection.branch ?? '(detached HEAD)'}</span>
+        <Text color="secondary">
+          Branch atual: <Code>{selection.branch ?? '(detached HEAD)'}</Code>
           {selection.dirty && ' · com alterações não commitadas'}
-        </p>
+        </Text>
 
-        {selection.candidates.length > 1 && (
-          <fieldset className="remote-choice">
-            <legend className="field__label">Qual repositório o Orkio deve acompanhar?</legend>
-            {selection.candidates.some((c) => c.remoteName === 'upstream') && (
-              <p className="field__hint">
-                Parece um fork: “origin” é a sua cópia e “upstream” o repositório original.
-              </p>
-            )}
+        {selection.candidates.length > 1 ? (
+          <RadioList
+            label="Qual repositório o Orkio deve acompanhar?"
+            value={remoteName}
+            onChange={chooseRemote}
+            isDisabled={saving}
+            {...(isFork
+              ? {
+                  description:
+                    'Parece um fork: “origin” é a sua cópia e “upstream” o repositório original.'
+                }
+              : {})}
+          >
             {selection.candidates.map((c) => (
-              <label key={c.remoteName} className="remote-choice__option">
-                <input
-                  type="radio"
-                  name="remote"
-                  checked={c.remoteName === remoteName}
-                  onChange={() => chooseRemote(c)}
-                  disabled={saving}
-                />
-                <span>
-                  <span className="mono">{c.remoteName}</span> —{' '}
-                  <strong>
-                    {c.owner}/{c.name}
-                  </strong>{' '}
-                  <span className="muted">({c.host})</span>
-                </span>
-              </label>
+              <RadioListItem
+                key={c.remoteName}
+                value={c.remoteName}
+                label={`${c.remoteName} — ${c.owner}/${c.name} (${c.host})`}
+              />
             ))}
-          </fieldset>
-        )}
-
-        {selection.candidates.length === 1 && (
-          <p>
+          </RadioList>
+        ) : (
+          <Text>
             Repositório:{' '}
-            <strong>
+            <Text weight="semibold">
               {candidate.owner}/{candidate.name}
-            </strong>{' '}
-            <span className="muted">
+            </Text>{' '}
+            <Text type="supporting">
               ({candidate.remoteName} · {candidate.host})
-            </span>
-          </p>
+            </Text>
+          </Text>
         )}
 
         {needsConfirmation && (
-          <label className="confirm-host">
-            <input
-              type="checkbox"
-              checked={confirmed}
-              onChange={(e) => setConfirmed(e.target.checked)}
-              disabled={saving}
-            />
-            <span>
-              {candidate.hostKind === 'ssh-alias' ? (
-                <>
-                  Confirmo que <span className="mono">{candidate.host}</span> é um alias do meu
-                  ~/.ssh/config para o github.com.
-                </>
-              ) : (
-                <>
-                  Confirmo que <span className="mono">{candidate.host}</span> é um GitHub
-                  Enterprise.
-                  <span className="field__hint">
-                    {' '}
-                    O Orkio ainda não verifica repositórios do GitHub Enterprise: o projeto fica
-                    como “não verificado”.
-                  </span>
-                </>
-              )}
-            </span>
-          </label>
+          <CheckboxInput
+            value={confirmed}
+            onChange={(checked) => setConfirmed(checked)}
+            isDisabled={saving}
+            label={
+              candidate.hostKind === 'ssh-alias'
+                ? `Confirmo que ${candidate.host} é um alias do meu ~/.ssh/config para o github.com.`
+                : `Confirmo que ${candidate.host} é um GitHub Enterprise.`
+            }
+            {...(candidate.hostKind === 'enterprise'
+              ? {
+                  description:
+                    'O Orkio ainda não verifica repositórios do GitHub Enterprise: o projeto fica como “não verificado”.'
+                }
+              : {})}
+          />
         )}
 
-        <div className="field">
-          <label className="field__label" htmlFor={nameId}>
-            Nome no Orkio
-          </label>
-          <input
-            id={nameId}
-            className="input input--text"
-            value={name}
-            maxLength={80}
-            onChange={(e) => {
-              setName(e.target.value)
-              setNameEdited(true)
-            }}
-            disabled={saving}
-          />
-        </div>
+        <TextInput
+          label="Nome no Orkio"
+          value={name}
+          onChange={(value) => {
+            setName(value.slice(0, 80))
+            setNameEdited(true)
+          }}
+          isDisabled={saving}
+        />
 
         {error && (
-          <Alert tone="danger">
+          <Alert
+            tone="danger"
+            {...(error.action ? { action: <ActionLink action={error.action} /> } : {})}
+          >
             {error.message}
-            {error.action && <ActionLink action={error.action} />}
           </Alert>
         )}
 
-        <div className="card__actions">
-          <button
-            type="button"
-            className="button button--primary"
+        <HStack gap={2}>
+          <Button
+            variant="primary"
+            label={saving ? 'Verificando no GitHub…' : 'Adicionar projeto'}
+            isLoading={saving}
+            isDisabled={needsConfirmation && !confirmed}
             onClick={() => void submit()}
-            disabled={saving || (needsConfirmation && !confirmed)}
-          >
-            {saving && <span className="spinner" aria-hidden="true" />}
-            {saving ? 'Verificando no GitHub…' : 'Adicionar projeto'}
-          </button>
-          <button type="button" className="button" onClick={onCancel} disabled={saving}>
-            Cancelar
-          </button>
-        </div>
-      </div>
-    </section>
+          />
+          <Button label="Cancelar" onClick={onCancel} isDisabled={saving} />
+        </HStack>
+      </VStack>
+    </Card>
   )
 }

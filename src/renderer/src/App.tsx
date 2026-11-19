@@ -1,45 +1,51 @@
 import { useState } from 'react'
+import { AppShell } from '@astryxdesign/core/AppShell'
+import { IntegrationsIcon, ProjectsIcon, type SvgIcon } from './components/icons'
+import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
 
 type Page = 'projects' | 'integrations'
 
-const PAGES: { id: Page; label: string }[] = [
-  { id: 'projects', label: 'Projetos' },
-  { id: 'integrations', label: 'Integrações' }
+const PAGES: { id: Page; label: string; icon: SvgIcon }[] = [
+  { id: 'projects', label: 'Projetos', icon: ProjectsIcon },
+  { id: 'integrations', label: 'Integrações', icon: IntegrationsIcon }
 ]
 
 export function App(): React.JSX.Element {
   const [page, setPage] = useState<Page>('projects')
 
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <OrkioLogo variant="simple" withWordmark size={26} />
-        </div>
-        <nav className="nav" aria-label="Navegação principal">
-          {PAGES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav__item${page === item.id ? ' nav__item--active' : ''}`}
-              aria-current={page === item.id ? 'page' : undefined}
-              onClick={() => setPage(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
-      </aside>
-      <main className="main">
-        {page === 'projects' ? (
-          <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
-        ) : (
-          <IntegrationsPage />
-        )}
-      </main>
-    </div>
+    <AppShell
+      height="fill"
+      contentPadding={6}
+      // Sem gaveta mobile: as camadas deslizantes da Astryx injetam <style> (bloqueado pela CSP).
+      mobileNav={false}
+      sideNav={
+        <SideNav
+          aria-label="Navegação principal"
+          header={<OrkioLogo variant="simple" withWordmark size={26} />}
+        >
+          <SideNavSection title="Orkio" isHeaderHidden>
+            {PAGES.map((item) => (
+              <SideNavItem
+                key={item.id}
+                label={item.label}
+                icon={item.icon}
+                isSelected={page === item.id}
+                onClick={() => setPage(item.id)}
+              />
+            ))}
+          </SideNavSection>
+        </SideNav>
+      }
+    >
+      {page === 'projects' ? (
+        <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
+      ) : (
+        <IntegrationsPage />
+      )}
+    </AppShell>
   )
 }

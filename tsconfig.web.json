@@ -6,5 +6,11 @@
     "jsx": "react-jsx",
     "types": []
   },
-  "include": ["src/renderer/src/**/*", "src/preload/*.d.ts", "src/shared/**/*"]
+  "include": [
+    "src/renderer/src/**/*",
+    "src/preload/*.d.ts",
+    "src/shared/**/*",
+    "src/astryx-themes.ts",
+    "src/themes/**/*"
+  ]
 }
