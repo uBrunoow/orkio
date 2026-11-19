@@ -9,8 +9,9 @@
  * - Nada do conteúdo da página vai para o SQLite: só ids, status, datas, custo e resumo técnico.
  */
 import { randomUUID } from 'node:crypto'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type {
   AgentRunView,
   PermissionAnswer,
@@ -22,7 +23,8 @@ import type {
 import type { BoardStore } from '../board/board.store'
 import type { Db } from '../db/database'
 import type { Git } from '../git/git'
-import { evaluatePermission, type AllowRule } from './policy'
+import { evaluatePermission, isInside, type AllowRule } from './policy'
+import { envFileValues, isEnvFile, redactSecrets, redactValues } from './redact'
 import { PermissionBroker, type BridgeDecision, type BridgeRequest } from './runner'
 import type {
   WorktreeProject,
@@ -76,6 +78,7 @@ interface Pending {
   resolve(decision: BridgeDecision): void
   timer: NodeJS.Timeout
   tool: string
+  summary: string
   input: Record<string, unknown>
   suggestion: string | null
 }
@@ -92,6 +95,8 @@ interface ActiveRun {
   tests: Set<string>
   costUsd: number | null
   ok: boolean | null
+  /** Valores lidos de arquivos .env do worktree: escondidos em tudo que vai para o log. */
+  secrets: Set<string>
   start: () => Promise<void>
 }
 
@@ -178,12 +183,14 @@ export class RunService {
       tests: new Set(),
       costUsd: null,
       ok: null,
+      secrets: new Set(),
       start: async () => {
         run.status = 'running'
         this.setStatus(run, 'running')
         this.taskEvent(run, 'run_started', { mode: input.mode, command: input.command })
         // Briefing também em arquivo (fora do git: .git/info/exclude do worktree).
         await this.writeBriefing(worktree.path, input.briefing).catch(() => undefined)
+        this.collectEnvSecrets(run, worktree.path)
         const broker = new PermissionBroker((req) => this.onPermission(run, req))
         await broker.open()
         run.handle = this.deps.createRun({
@@ -250,7 +257,7 @@ export class RunService {
       kind: 'permission',
       requestId,
       tool: p.tool,
-      summary: '',
+      summary: p.summary,
       state: answer === 'deny' ? 'denied' : 'allowed',
       ...(answer === 'allow_always' && p.suggestion
         ? { reason: `sempre neste projeto: ${p.suggestion}` }
@@ -401,6 +408,7 @@ export class RunService {
         resolve,
         timer,
         tool: req.toolName,
+        summary,
         input: req.input,
         suggestion: decision.decision === 'ask' ? decision.suggestion : null
       })
@@ -446,6 +454,10 @@ export class RunService {
   }
 
   private onEvent(run: ActiveRun, event: RunLogEvent): void {
+    // O agente leu/escreveu um .env: os valores dele passam a ser escondidos dali em diante.
+    if (event.kind === 'tool' && event.file && isEnvFile(event.file)) {
+      this.readEnvSecrets(run, resolve(run.worktree.path, event.file))
+    }
     if (event.kind === 'tool' && event.tool === 'Bash' && TEST_COMMAND.test(event.summary)) {
       run.tests.add(event.summary.slice(0, 120))
     }
@@ -523,7 +535,29 @@ export class RunService {
     this.log(run, { kind: 'status', status })
   }
 
+  /** .env* na raiz do worktree (antes de rodar). */
+  private collectEnvSecrets(run: ActiveRun, dir: string): void {
+    try {
+      for (const name of readdirSync(dir)) {
+        if (isEnvFile(name)) this.readEnvSecrets(run, join(dir, name))
+      }
+    } catch {
+      // sem acesso: nada a coletar
+    }
+  }
+
+  private readEnvSecrets(run: ActiveRun, path: string): void {
+    if (!isInside(path, run.worktree.path)) return
+    try {
+      if (statSync(path).size > 64 * 1024) return
+      for (const v of envFileValues(readFileSync(path, 'utf8'))) run.secrets.add(v)
+    } catch {
+      // arquivo sumiu/ilegível
+    }
+  }
+
   private log(run: ActiveRun, event: RunLogEvent): void {
+    event = scrubEvent(event, run.secrets)
     // Escritas encadeadas por execução: a ordem do arquivo é a ordem dos eventos.
     const line = `${JSON.stringify(event)}\n`
     const path = this.logPath(run.id)
@@ -573,4 +607,19 @@ export class RunService {
     )
     for (const r of old) await rm(this.logPath(r.id), { force: true }).catch(() => undefined)
   }
+}
+
+/** Aplica a redação de segredos em todos os textos do evento (antes do disco e da tela). */
+function scrubEvent(event: RunLogEvent, secrets: ReadonlySet<string>): RunLogEvent {
+  const clean = (v: unknown): unknown =>
+    typeof v === 'string'
+      ? redactValues(redactSecrets(v), secrets)
+      : Array.isArray(v)
+        ? v.map(clean)
+        : typeof v === 'object' && v !== null
+          ? Object.fromEntries(
+              Object.entries(v).map(([k, x]) => [k, k === 'requestId' || k === 'id' ? x : clean(x)])
+            )
+          : v
+  return clean(event) as RunLogEvent
 }

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -275,5 +275,27 @@ describe('RunService', () => {
     }
     expect(service.list('task-1').map((r) => r.status)).toEqual(['failed', 'failed', 'failed'])
     expect((await readdir(join(dir, 'runs'))).length).toBe(2)
+  })
+
+  it('valores de .env do worktree nunca vão para o log (nem repetidos pelo agente)', async () => {
+    const wt = join(dir, 'wt', 'ORK-1')
+    await mkdir(wt, { recursive: true })
+    await writeFile(join(wt, '.env'), 'DB_URL="postgres://u:senha-forte-9@h/db"\nDEBUG=true\n')
+    const view = await start(1)
+    await tick()
+    const run = runs[0]!
+    run.emit({ kind: 'text', text: 'conectei em postgres://u:senha-forte-9@h/db com DEBUG=true' })
+    // Arquivo .env criado depois: lido quando o agente o usa.
+    await writeFile(join(wt, '.env.local'), 'SEGREDO_X=abc-123-xyz\n')
+    run.emit({ kind: 'tool', id: 't', tool: 'Read', summary: '.env.local', file: '.env.local' })
+    run.emit({ kind: 'text', text: 'o valor é abc-123-xyz e SENHA=qualquer' })
+    run.exit(0)
+    await tick()
+    const raw = JSON.stringify(await service.readLog(view.id))
+    expect(raw).not.toContain('senha-forte-9')
+    expect(raw).not.toContain('abc-123-xyz')
+    expect(raw).not.toContain('qualquer')
+    expect(raw).toContain('DEBUG=true')
+    expect(JSON.stringify(messages)).not.toContain('abc-123-xyz')
   })
 })

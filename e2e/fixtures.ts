@@ -1,6 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import {
   _electron as electron,
   type ElectronApplication,
@@ -153,6 +153,7 @@ export function createUserDataDir(): string {
 
 export function removeDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true })
+  rmSync(`${dir}-bin`, { recursive: true, force: true })
 }
 
 /**
@@ -163,11 +164,20 @@ export function removeDir(dir: string): void {
 export async function launchOrkio(
   userDataDir: string,
   fakes: Partial<FakeServices> = {},
-  options: { startPage?: 'projects' | 'integrations' } = {}
+  options: {
+    startPage?: 'projects' | 'integrations'
+    /** Claude Code simulado: `installed: false` tira o CLI do PATH. */
+    claude?: { loggedIn?: boolean; installed?: boolean }
+  } = {}
 ): Promise<OrkioApp> {
   const env = { ...process.env } as Record<string, string>
   // Opções do Node que o Electron rejeita (ex.: --use-openssl-ca) poluem o log.
   delete env['NODE_OPTIONS']
+  // Claude Code SIMULADO sempre primeiro no PATH: o E2E nunca chama o CLI real (4A).
+  const fakeBin = fakeClaudeBin(userDataDir, options.claude ?? { loggedIn: true })
+  env['PATH'] = `${fakeBin}${delimiter}${env['PATH'] ?? ''}`
+  // Chave "vazada" no ambiente: o Orkio precisa filtrá-la antes de abrir o CLI.
+  env['ANTHROPIC_API_KEY'] = 'sk-ant-api03-E2E-NAO-PODE-VAZAR'
 
   const args = ['.', `--user-data-dir=${userDataDir}`]
   // Chromium não roda como root sem --no-sandbox (containers de CI).
@@ -582,6 +592,33 @@ export async function launchOrkio(
               next_cursor: null
             })
           }
+          // Conteúdo da página da tarefa (4A: briefing).
+          const children = /^\/blocks\/([0-9a-f-]+)\/children/.exec(path)
+          if (children) {
+            const para = (text: string): unknown => ({
+              type: 'paragraph',
+              paragraph: { rich_text: rich(text) }
+            })
+            const blocks =
+              children[1] === 'cccccccc-0000-4000-8000-000000000001'
+                ? [para('Detalhe aninhado')]
+                : [
+                    para('Exportar as tarefas em CSV.'),
+                    {
+                      type: 'heading_2',
+                      heading_2: { rich_text: rich('Critérios de aceite') }
+                    },
+                    {
+                      id: 'cccccccc-0000-4000-8000-000000000001',
+                      type: 'bulleted_list_item',
+                      has_children: true,
+                      bulleted_list_item: { rich_text: rich('Gera um arquivo .csv') }
+                    },
+                    { type: 'audio', audio: {} }
+                  ]
+            return json({ object: 'list', results: blocks, next_cursor: null, has_more: false })
+          }
+
           if (path === `/data_sources/${ids.tasksDs}/query`) {
             const filter = body['filter'] as
               { property?: string; relation?: { contains?: string } } | undefined
@@ -743,4 +780,27 @@ export async function queueSavePaths(app: ElectronApplication, paths: string[]):
   await app.evaluate((_electron, next) => {
     ;(globalThis as unknown as FakeGlobals).__savePaths.push(...next)
   }, paths)
+}
+
+/** Pasta com o `claude` simulado (e2e/fake-claude) e o estado de login dele. */
+function fakeClaudeBin(
+  userDataDir: string,
+  claude: { loggedIn?: boolean; installed?: boolean }
+): string {
+  const dir = `${userDataDir}-bin`
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  if (claude.installed !== false) {
+    copyFileSync(join(ROOT, 'e2e', 'fake-claude', 'claude'), join(dir, 'claude'))
+    chmodSync(join(dir, 'claude'), 0o755)
+    writeFileSync(
+      join(dir, 'auth.json'),
+      JSON.stringify(
+        claude.loggedIn === false
+          ? { loggedIn: false, authMethod: 'none' }
+          : { loggedIn: true, authMethod: 'claude.ai' }
+      )
+    )
+  }
+  return dir
 }

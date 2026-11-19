@@ -6,6 +6,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 import type { ConnectionStatus } from '../../../../shared/ipc-contract'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
 import { PageHeader } from '../../components/PageHeader'
+import { ClaudeCodeCard } from '../claude/ClaudeCodeCard'
 import { NotionWorkspaceCard } from '../notion-workspace/NotionWorkspaceCard'
 import { useNotionWorkspace } from '../notion-workspace/useNotionWorkspace'
 import { GitHubConnectionCard } from './GitHubConnectionCard'
@@ -54,6 +55,7 @@ export function IntegrationsPage(): React.JSX.Element {
       <Grid columns={{ minWidth: 380, repeat: 'fit' }} gap={4} align="start">
         <NotionConnectionCard notion={notion} />
         <GitHubConnectionCard github={github} />
+        <ClaudeCodeCard />
       </Grid>
 
       <NotionWorkspaceCard

@@ -1,0 +1,222 @@
+#!/usr/bin/env node
+/* eslint-disable */
+/**
+ * Claude Code SIMULADO para o E2E (nunca chamamos o CLI real no CI).
+ *
+ * - `claude --version` / `claude auth status`: login lido de `auth.json` ao lado deste arquivo.
+ * - `claude -p ... --mcp-config <arquivo>`: emite stream-json, edita arquivos no cwd (worktree),
+ *   e pede permissões pela ponte MCP REAL do Orkio (o mesmo `permission-mcp.js` do app).
+ *
+ * O cenário vem de palavras no prompt: "pedir-shell", "tentar-push", "perguntar", "demorar",
+ * "ler-env".
+ */
+const { spawn, execFileSync } = require('node:child_process')
+const { mkdirSync, readFileSync, writeFileSync, existsSync } = require('node:fs')
+const { join } = require('node:path')
+const readline = require('node:readline')
+
+const args = process.argv.slice(2)
+const authFile = join(__dirname, 'auth.json')
+
+if (args[0] === '--version') {
+  process.stdout.write('2.1.9 (Claude Code)\n')
+  process.exit(0)
+}
+if (args[0] === 'auth' && args[1] === 'status') {
+  const auth = existsSync(authFile)
+    ? JSON.parse(readFileSync(authFile, 'utf8'))
+    : { loggedIn: true, authMethod: 'claude.ai' }
+  process.stdout.write(JSON.stringify({ ...auth, email: 'nao-mostrar@example.com' }) + '\n')
+  process.exit(auth.loggedIn ? 0 : 1)
+}
+
+const out = (msg) => process.stdout.write(JSON.stringify(msg) + '\n')
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+let turns = 0
+const assistant = (content) => {
+  turns++
+  out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content } })
+}
+const toolResult = (id, isError) =>
+  out({
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content: 'x' }]
+    }
+  })
+
+/** Cliente MCP mínimo para a ponte do Orkio. */
+function bridge(config) {
+  const server = config.mcpServers.orkio
+  const child = spawn(server.command, server.args, {
+    env: { ...process.env, ...server.env },
+    stdio: ['pipe', 'pipe', 'inherit']
+  })
+  const waiting = new Map()
+  readline.createInterface({ input: child.stdout }).on('line', (line) => {
+    const msg = JSON.parse(line)
+    waiting.get(msg.id)?.(msg)
+    waiting.delete(msg.id)
+  })
+  let next = 1
+  const request = (method, params) =>
+    new Promise((resolve) => {
+      const id = next++
+      waiting.set(id, resolve)
+      child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n')
+    })
+  return {
+    init: () => request('initialize', { protocolVersion: '2025-06-18', capabilities: {} }),
+    async approve(toolName, input, toolUseId) {
+      const res = await request('tools/call', {
+        name: 'approve',
+        arguments: { tool_name: toolName, input, tool_use_id: toolUseId }
+      })
+      return JSON.parse(res.result.content[0].text)
+    },
+    close: () => child.kill()
+  }
+}
+
+async function main() {
+  const configPath = args[args.indexOf('--mcp-config') + 1]
+  const config = JSON.parse(readFileSync(configPath, 'utf8'))
+  let killed = false
+  process.on('SIGINT', () => {
+    killed = true
+    process.exit(130)
+  })
+
+  const first = await new Promise((resolve) => {
+    readline.createInterface({ input: process.stdin }).once('line', resolve)
+  })
+  const prompt = JSON.parse(first).message.content[0].text
+
+  out({
+    type: 'system',
+    subtype: 'init',
+    model: 'claude-simulado',
+    cwd: process.cwd(),
+    slash_commands: ['revisar', 'spec'],
+    plugins: [{ name: 'plugin-simulado', path: '/x' }]
+  })
+  const leaked = ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'].filter((k) => process.env[k])
+  assistant([
+    {
+      type: 'text',
+      text: leaked.length
+        ? `VAZOU: ${leaked.join(',')}`
+        : `Li o briefing (${prompt.includes('Critérios de aceite') ? 'com critérios' : 'sem critérios'}).`
+    }
+  ])
+
+  const mcp = bridge(config)
+  await mcp.init()
+
+  // Edição dentro do worktree (acceptEdits: não passa pela ponte).
+  mkdirSync(join(process.cwd(), 'src'), { recursive: true })
+  writeFileSync(join(process.cwd(), 'src', 'exportar.ts'), 'export const csv = true\n')
+  assistant([
+    {
+      type: 'tool_use',
+      id: 'toolu_edit',
+      name: 'Write',
+      input: { file_path: join(process.cwd(), 'src', 'exportar.ts'), content: 'x' }
+    }
+  ])
+  toolResult('toolu_edit', false)
+
+  if (prompt.includes('ler-env')) {
+    writeFileSync(join(process.cwd(), '.env'), 'SEGREDO_E2E=valor-super-secreto-123\n')
+    assistant([
+      {
+        type: 'tool_use',
+        id: 'toolu_env',
+        name: 'Read',
+        input: { file_path: join(process.cwd(), '.env') }
+      }
+    ])
+    toolResult('toolu_env', false)
+    assistant([
+      {
+        type: 'text',
+        text: 'Achei SEGREDO_E2E=valor-super-secreto-123 e sk-ant-api03-abcdefghijklmnopqrstuvwxyz'
+      }
+    ])
+  }
+
+  if (prompt.includes('tentar-push')) {
+    const r = await mcp.approve('Bash', { command: 'git push origin HEAD' }, 'toolu_push')
+    assistant([{ type: 'text', text: `push: ${r.behavior}` }])
+    const o = await mcp.approve('Write', { file_path: '/etc/orkio-fora.txt' }, 'toolu_out')
+    assistant([{ type: 'text', text: `fora: ${o.behavior}` }])
+  }
+
+  if (prompt.includes('pedir-shell')) {
+    const r = await mcp.approve('Bash', { command: 'npm test' }, 'toolu_shell')
+    assistant([
+      { type: 'tool_use', id: 'toolu_shell', name: 'Bash', input: { command: 'npm test' } }
+    ])
+    toolResult('toolu_shell', r.behavior !== 'allow')
+    assistant([{ type: 'text', text: `shell: ${r.behavior}` }])
+  }
+
+  if (prompt.includes('perguntar')) {
+    const input = {
+      questions: [
+        {
+          question: 'Qual separador usar?',
+          header: 'CSV',
+          options: [{ label: 'Vírgula' }, { label: 'Ponto e vírgula' }],
+          multiSelect: false
+        }
+      ]
+    }
+    const r = await mcp.approve('AskUserQuestion', input, 'toolu_q')
+    const answer =
+      r.updatedInput && r.updatedInput.answers
+        ? Object.values(r.updatedInput.answers).join(',')
+        : 'nenhuma'
+    assistant([{ type: 'text', text: `resposta: ${answer}` }])
+  }
+
+  if (prompt.includes('demorar')) {
+    assistant([{ type: 'text', text: 'Trabalhando por um bom tempo…' }])
+    while (!killed) await sleep(200)
+  }
+
+  execFileSync('git', ['add', '-A'], { cwd: process.cwd() })
+  execFileSync(
+    'git',
+    [
+      '-c',
+      'user.name=Fake',
+      '-c',
+      'user.email=fake@example.com',
+      'commit',
+      '-q',
+      '-m',
+      'feat: exportar CSV (simulado)'
+    ],
+    { cwd: process.cwd() }
+  )
+  mcp.close()
+  out({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    duration_ms: 1234,
+    total_cost_usd: 0.0123,
+    num_turns: turns,
+    result: 'Pronto: exportação implementada.'
+  })
+  // O Orkio fecha a entrada após o result; o CLI termina.
+  process.stdin.on('end', () => process.exit(0))
+  setTimeout(() => process.exit(0), 2000)
+}
+
+main().catch((e) => {
+  process.stderr.write(String(e && e.message) + '\n')
+  process.exit(1)
+})

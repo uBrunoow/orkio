@@ -22,6 +22,7 @@ import type {
 } from '../../../../shared/ipc-contract'
 import { EVENT_LABELS, type EventKind } from '../../../../shared/automation'
 import { CloseIcon, ExternalLinkIcon } from '../../components/icons'
+import { TaskClaudeSection } from '../claude/TaskClaudeSection'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { tokenColor } from '../notion-workspace/notion-colors'
 
@@ -46,6 +47,21 @@ export function TaskPanel({
   onClose(): void
 }): React.JSX.Element {
   const [history, setHistory] = useState<BoardHistoryEntry[] | null>(null)
+  // Execuções do Claude Code também escrevem no histórico (início, fim, bloqueios).
+  const [runTick, setRunTick] = useState(0)
+  useEffect(
+    () =>
+      window.orkio.claude.onRunEvent((m) => {
+        if (
+          m.taskId === card.taskId &&
+          (m.event.kind === 'status' ||
+            (m.event.kind === 'permission' && m.event.state === 'blocked'))
+        ) {
+          setRunTick((n) => n + 1)
+        }
+      }),
+    [card.taskId]
+  )
   const stageName = (id: string | null): string =>
     id ? (stages.find((s) => s.id === id)?.name ?? 'etapa removida') : 'Sem etapa'
 
@@ -63,7 +79,15 @@ export function TaskPanel({
     return () => {
       active = false
     }
-  }, [projectId, card.taskId, card.stageId, card.blocked, card.automationPaused, card.sync.state])
+  }, [
+    projectId,
+    card.taskId,
+    card.stageId,
+    card.blocked,
+    card.automationPaused,
+    card.sync.state,
+    runTick
+  ])
 
   return (
     <Card role="complementary" aria-label={`Detalhes de ${card.displayId ?? card.title}`}>
@@ -137,6 +161,12 @@ export function TaskPanel({
             <Text type="supporting">Abrir no Notion</Text>
           </HStack>
         )}
+
+        <TaskClaudeSection
+          projectId={projectId}
+          taskId={card.taskId}
+          stageName={card.stageId ? stageName(card.stageId) : null}
+        />
 
         <VStack gap={2}>
           <Heading level={3}>Histórico</Heading>
@@ -241,6 +271,16 @@ function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string
       return e.source === 'notion' ? 'Desbloqueada no Notion' : 'Desbloqueada'
     case 'sync_ok':
       return 'Sincronizada com o Notion'
+    case 'run_started':
+      return 'Claude Code iniciou uma execução'
+    case 'run_finished':
+      return `Claude Code terminou (${Number(e.detail?.['files'] ?? 0)} arquivo(s) alterado(s))`
+    case 'run_cancelled':
+      return 'Execução do Claude Code cancelada'
+    case 'run_failed':
+      return 'Execução do Claude Code falhou'
+    case 'run_blocked':
+      return `Claude Code bloqueado: ${String(e.detail?.['reason'] ?? 'ação não permitida')}`
     case 'rolled_back':
       return `O Notion recusou a mudança; voltou para ${stageName(e.toStage)}`
     default:

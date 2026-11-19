@@ -17,7 +17,9 @@ Claude Code. Hoje existem:
   declarativas, em segundo plano, com idempotência no SQLite.
 - **Fluxo do projeto (3C):** tela para editar etapas e automações (frases, formulário),
   validação, simulação, restaurar padrão, exportar/importar e histórico de alterações.
-- Ainda não existem: Claude Code (4A/4B), webhooks.
+- **Claude Code (4A):** roda a tarefa com o CLI `claude` do usuário (login/assinatura dele) num
+  worktree isolado por tarefa, com briefing do Notion, permissões pelo Orkio e log ao vivo.
+- Ainda não existem: catálogo de comandos/artefatos/contexto (4B), webhooks.
 
 ## Comandos
 
@@ -47,6 +49,9 @@ src/
   shared/task-signals.ts   # TaskSignals, buildTaskSignals, diffSignals (base da Etapa 3)
   shared/board.ts          # etapas, template, validação e reconciliação do quadro (puras)
   shared/automation.ts     # snapshot, deriveEvents, regras padrão, evaluate (motor puro)
+  shared/agent-run.ts      # tipos das execuções do Claude Code (log normalizado, resumo, status)
+  shared/briefing.ts       # blocos do Notion → markdown e montagem do briefing (puro)
+  shared/slug.ts           # slug e nome da branch da tarefa (<ID>/<slug>)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -66,6 +71,9 @@ src/
     db/database.ts         # SQLite (node:sqlite) + migrações por PRAGMA user_version
     board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
+    claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
+                           # policy, redact, run.service, claude.service; bridge/permission-mcp.ts
+                           # (servidor MCP stdio → out/main/permission-mcp.js)
   preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
     features/<feature>/    # componentes + hooks por funcionalidade
@@ -360,6 +368,41 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 - Histórico de configuração: `config_events` (SQLite v3) com quem (`os.userInfo().username`),
   quando e o quê (`diffFlow`). Também registra a criação do quadro.
 
+## Claude Code (Etapa 4A)
+
+- **CLI, não SDK:** `claude -p --output-format stream-json --verbose --input-format stream-json`
+  via `spawn` sem shell, cwd = worktree. Usa o login do usuário (assinatura). O Orkio **não pede nem
+  guarda** chave da Anthropic; `sanitizeEnv` tira `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `ELECTRON_*`, `ORKIO_*`, `MAIN_VITE_*` do ambiente do processo.
+  O PATH ganha as pastas usuais (`~/.local/bin`, `~/.claude/local`, Homebrew...), pois apps
+  abertos pelo Finder não herdam o PATH do terminal.
+- Detecção (`detect.ts`): `claude --version` (mínimo `CLAUDE_MIN_VERSION`) e `claude auth status`
+  (JSON; só `loggedIn`/`authMethod` são lidos; e-mail nunca).
+- **Worktree** (`worktree.service.ts`): `<userData>/worktrees/<projectId>/<ID>`; reutiliza worktree
+  registrado → branch local da tarefa → branch remota → cria `<ID>/<slug>` a partir de
+  `<remote>/<default>` (fetch antes). Branch já em checkout na pasta principal → erro claro.
+  A pasta principal do usuário nunca é tocada. "Limpar ambiente" remove só o worktree (a branch
+  fica); com mudanças pendentes exige confirmação (`force`).
+- **Permissões em camadas:** `--permission-mode acceptEdits`, `--settings` (bloqueio de escrita fora
+  do diretório + deny de push/`gh pr`/`gh api`) e `--permission-prompt-tool mcp__orkio__approve`.
+  A ponte (`bridge/permission-mcp.ts`, roda no Node do Electron com `ELECTRON_RUN_AS_NODE`) fala com
+  o main por socket local (0600, token aleatório no mcp-config 0600 apagado no fim).
+  `policy.ts`: push (qualquer forma, inclusive `env X=1 git push`), `gh pr|api|release` e caminhos
+  fora do worktree → bloqueio sem perguntar (evento `run_blocked`); shell → pergunta (uma vez /
+  sempre neste projeto por prefixo em `permission_rules` / negar), com notificação; 10 min sem
+  resposta → nega. `AskUserQuestion` → card de pergunta; respostas voltam em `updatedInput.answers`.
+- **Execuções** (`run.service.ts`): no máximo 2 em paralelo, 1 por tarefa (fila). `agent_runs`
+  (SQLite v4) + `<userData>/runs/<id>.jsonl` só com eventos normalizados (nunca o stream cru),
+  mantendo 10 por tarefa. Todo texto passa por `redactSecrets` + valores lidos dos `.env*` do
+  worktree (só em memória). Ao abrir o app, execuções "em andamento" viram `failed`; ao fechar,
+  todas são canceladas (SIGINT → SIGTERM 5 s → SIGKILL 10 s).
+- Briefing: blocos da página (até 3 níveis, 400 blocos) → markdown + campos + PR; editável antes
+  de rodar e gravado em `.orkio/briefing.md` (com `.orkio/.gitignore` = `*`). Não vai ao Notion.
+- Resumo ao terminar: `git diff --stat`/arquivos e commits desde a base e comandos de teste vistos.
+  "Abrir no Cursor/VS Code" (`spawn` sem shell, `cursor`/`code` no PATH) e "Ver diff".
+- Eventos ao renderer: `claude:run-event` (`onRunEvent` → unsubscribe). Histórico da tarefa ganha
+  `run_started|finished|cancelled|failed|blocked`.
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -371,6 +414,11 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   do app para isso. No Linux sem keyring, o fixture liga a criptografia básica do Electron
   só no teste.
 - Para novos conectores: adicione o modo fake correspondente no fixture e um spec em `e2e/`.
+- Claude Code simulado (4A): `e2e/fake-claude/claude` (script Node) é copiado para uma pasta
+  temporária e posto **primeiro no PATH** em todo E2E (o CLI real nunca roda). Login por
+  `launchOrkio(..., { claude: { loggedIn, installed } })`. Cenário por palavras no prompt
+  (`pedir-shell`, `perguntar`, `tentar-push`, `ler-env`, `demorar`); usa a ponte MCP real.
+  O fixture põe uma `ANTHROPIC_API_KEY` falsa no ambiente para provar o filtro.
 - Diálogos simulados: `queueFolderPicks` (abrir) e `queueSavePaths` ("Salvar como…").
 - GitHub simulado (3B): `githubPrDetails[n].reviews`/`reviewRequests` e `FakePull.updatedAt` (o
   Orkio só relê detalhes quando `updated_at` muda). `notionInitialStatus` mantém o Notion
@@ -422,6 +470,9 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 | Automações: primeira observação é linha de base                                                             | Ligar o quadro (ou um projeto novo) não pode mover tudo pelo histórico antigo de PRs. Depois disso, eventos ocorridos com o app fechado disparam ao abrir (diff com o snapshot salvo).                                                                      |
 | Evento ignorado (bloqueada/pausada/conflito) é consumido                                                    | Despausar não deve aplicar de uma vez movimentos antigos; o histórico mostra o que foi ignorado e por quê.                                                                                                                                                  |
 | Movimento manual depois do horário do evento vence                                                          | O usuário decidiu depois do GitHub; a automação não desfaz uma escolha mais recente.                                                                                                                                                                        |
+| Claude Code via CLI (`claude -p`), não Agent SDK                                                            | O SDK exige chave de API; o CLI usa a assinatura/login do usuário e carrega os plugins dele. O Orkio não guarda credenciais da Anthropic.                                                                                                                   |
+| Permissões pelo `--permission-prompt-tool` (servidor MCP do Orkio + socket local)                           | Única forma de o CLI em `-p` perguntar ao app. Bloqueios (push, fora do worktree) ficam no main, não só nas regras do CLI.                                                                                                                                  |
+| Log da execução normalizado e redigido                                                                      | Nunca gravamos o stream cru (traria conteúdo de arquivos lidos, inclusive `.env`).                                                                                                                                                                          |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 
 ## Astryx e CSP (regra inegociável)

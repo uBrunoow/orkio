@@ -16,12 +16,39 @@ const PATTERNS: RegExp[] = [
 
 /** NOME_COM_KEY/TOKEN/SECRET/PASSWORD = valor → NOME=[omitido]. */
 const ASSIGNMENT =
-  /\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)[A-Za-z0-9_]*)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"']+)/gi
+  /\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|SENHA|SEGREDO|CHAVE)[A-Za-z0-9_]*)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"']+)/gi
 
 export function redactSecrets(text: string): string {
   // Atribuições primeiro (o valor inteiro some); depois os formatos conhecidos soltos no texto.
   let out = text.replace(ASSIGNMENT, (_m, name: string, sep: string) => `${name}${sep}[omitido]`)
   for (const p of PATTERNS) out = out.replace(p, '[segredo omitido]')
+  return out
+}
+
+/**
+ * Valores de um arquivo .env (`NOME=valor`), para esconder no log mesmo quando o agente os repete
+ * em texto. Valores curtos (< 4) ou booleanos/números pequenos não entram (falsos positivos).
+ */
+export function envFileValues(content: string): string[] {
+  const values: string[] = []
+  for (const line of content.split(/\r?\n/)) {
+    const m = /^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_.-]*\s*=\s*(.*)$/.exec(line)
+    if (!m) continue
+    let v = (m[1] ?? '').trim()
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1)
+    } else {
+      v = v.replace(/\s+#.*$/, '')
+    }
+    if (v.length >= 4 && !/^(true|false|null|\d{1,5})$/i.test(v)) values.push(v)
+  }
+  return values
+}
+
+/** Troca valores conhecidos (ex.: lidos de .env) por um marcador. */
+export function redactValues(text: string, values: Iterable<string>): string {
+  let out = text
+  for (const v of values) if (out.includes(v)) out = out.split(v).join('[segredo omitido]')
   return out
 }
 

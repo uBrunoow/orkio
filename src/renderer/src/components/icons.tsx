@@ -29,6 +29,12 @@ import {
   IconPlugConnected,
   IconRefresh,
   IconTrash,
+  IconTerminal2,
+  IconPlayerPlay,
+  IconPlayerStop,
+  IconCode,
+  IconFileDiff,
+  IconEraser,
   type Icon as TablerIcon,
   type IconProps as TablerIconProps
 } from '@tabler/icons-react'
@@ -68,3 +74,9 @@ export const PlusIcon = adapt(IconPlus)
 export const CloseIcon = adapt(IconX)
 export const PauseIcon = adapt(IconPlayerPause)
 export const AutomationIcon = adapt(IconBolt)
+export const TerminalIcon = adapt(IconTerminal2)
+export const PlayIcon = adapt(IconPlayerPlay)
+export const StopIcon = adapt(IconPlayerStop)
+export const EditorIcon = adapt(IconCode)
+export const DiffIcon = adapt(IconFileDiff)
+export const CleanIcon = adapt(IconEraser)
