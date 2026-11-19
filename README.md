@@ -263,6 +263,26 @@ A lista se atualiza sozinha a cada minuto enquanto o Orkio está em primeiro pla
 responde "nada mudou" na maioria das vezes, sem gastar o limite de requisições) e ao clicar em
 **Atualizar**. Sem GitHub conectado, aparecem só as branches locais, com um aviso.
 
+## Quadro
+
+Em **Quadro**, cada projeto vinculado ao Notion tem um kanban com as **suas etapas**. Ao criar o
+quadro, o Orkio propõe Prioridades, Em andamento, Revisando, Revisado e Finalizada e liga cada
+uma a uma opção do status das Tarefas no Notion (você confirma; várias etapas podem usar a mesma
+opção, ex.: Revisando e Revisado → "Em andamento").
+
+- **Mover** um card (arrastando ou pelo menu "Mover para…") atualiza o status no Notion só quando
+  ele muda. Mover para Revisando mantém "Em andamento" no Notion e guarda a etapa no Orkio.
+- Opcionalmente, **"Mostrar a etapa do Orkio no Notion"** grava a etapa numa propriedade de
+  seleção (existente ou criada como "Etapa Orkio", sempre com sua confirmação).
+- **Sem internet**, a mudança fica pendente ("Sincronizando") e é enviada sozinha depois, mesmo
+  se você fechar o Orkio. Se o Notion recusar, o card volta e uma mensagem explica.
+- Mudou o status direto no Notion? Clique em **Atualizar**: o card vai para a etapa certa.
+- **Bloqueada** é uma marca no card (com filtro); pode ser sincronizada com uma caixa de seleção do
+  Notion. O painel lateral mostra detalhes, branch/PR e o histórico da tarefa.
+
+Para escrever no Notion, a integração precisa da capacidade **Update content** (Inserir/atualizar
+conteúdo). O estado local fica em `<userData>/orkio.db` (só ids, etapas e histórico).
+
 ## Segurança
 
 - Todas as chamadas ao Notion e ao GitHub são feitas no **processo main**. O renderer não tem

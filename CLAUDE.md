@@ -10,8 +10,10 @@ Claude Code. Hoje existem:
   mapeia propriedades; cada projeto local se vincula a uma página de Projetos e lista as tarefas
   ligadas a ela (**só leitura**).
 - **Sinais (2D):** branch local/remota e PR de cada tarefa, casadas pelo ID (ex.: ORK-142).
+- **Quadro (3A):** kanban por projeto com etapas próprias ligadas ao status do Notion; mover
+  card escreve no Notion (fila persistente); estado local e histórico em SQLite.
 - **UI:** design system Astryx com o tema Orkio, CSP estrita, textos da Astryx em pt-BR.
-- Ainda não existem: escrita no Notion, kanban, PRs, automações, Claude Code.
+- Ainda não existem: automações (3B/3C), editor de regras, Claude Code.
 
 ## Comandos
 
@@ -39,6 +41,7 @@ src/
   shared/notion-mapping.ts # regras do mapeamento (tipos por campo, obrigatórios) p/ main e renderer
   shared/task-id-match.ts  # casamento puro de IDs (ORK-142) em branches/títulos
   shared/task-signals.ts   # TaskSignals, buildTaskSignals, diffSignals (base da Etapa 3)
+  shared/board.ts          # etapas, template, validação e reconciliação do quadro (puras)
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
     connectors/types.ts    # interface Connector
@@ -49,17 +52,20 @@ src/
     ipc/                   # handlers finos: validam origem e payload, delegam ao conector/serviço
     storage/secure-store.ts  # SEGREDOS (safeStorage)
     storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações)
-    config/orkio-config.ts   # formato do orkio-config.json (schema v2: projects + notion)
+    config/orkio-config.ts   # formato do orkio-config.json (schema v3: projects, notion, boards)
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
     notion/                # notion-workspace.service.ts (bancos, mapeamento, vínculo, tarefas)
     signals/               # github-signals.source.ts (ETag, GraphQL) + task-signals.service.ts
+    db/database.ts         # SQLite (node:sqlite) + migrações por PRAGMA user_version
+    board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
   preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
     features/<feature>/    # componentes + hooks por funcionalidade
       integrations/connection-ui.tsx  # peças comuns dos cards (conectado, erro, token, desconectar)
       projects/            # tela Projetos (useProjects, AddProjectPanel, ActionLink)
       notion-workspace/    # card "Bancos do Notion" (assistente) e seção Notion de cada projeto
+      board/               # tela Quadro (colunas com arrasto, card, painel, ajuste de etapas)
     components/Alert.tsx   # mensagens (Banner da Astryx)
     components/PageHeader.tsx  # título da página + ação
     components/OrkioLogo/  # logo (símbolo full/simple + wordmark)
@@ -272,6 +278,36 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   em foco, e quando a branch atual muda. Allowlist: `github.com/<owner>/<repo>/pull/<n>`.
 - `diffSignals` gera eventos (branch criada, PR aberta/mergeada, revisão mudou...) para a Etapa 3.
 
+## Quadro (Etapa 3A)
+
+- Etapas por projeto em `orkio-config.json` → `boards[projectId]`:
+  `{ stages: [{ id, name, order, notionStatus: { id, name }, color }], orkioStageProperty,
+blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamento/Revisando/
+  Revisado→"Em andamento", Finalizada→"Finalizadas"; a sugestão casa por nome (sem acento/caixa)
+  com as opções reais do status. Opção inexistente → erro e não salva; renomeada (mesmo id) → aviso.
+- **SQLite via `node:sqlite`** (`main/db/database.ts`), arquivo `<userData>/orkio.db`: sem módulo
+  nativo nem rebuild. Só essa camada conhece `node:sqlite`. Migrações em `MIGRATIONS` (nunca
+  edite uma publicada; acrescente). Versão futura → quadro indisponível, nada é apagado.
+  Tabelas: `task_state`, `task_events`, `pending_writes`. **Nada de conteúdo de páginas**.
+- Reconciliação (`shared/board.ts` `reconcile`): pendente → fica; status compatível com a etapa
+  salva → fica; senão "Etapa Orkio" compatível ou primeira etapa com o status (evento
+  `source='notion'`); nenhuma etapa → "Sem etapa". Depois de confirmar uma escrita, 30 s de
+  tolerância a leitura atrasada do Notion; "Atualizar" (force) zera essa tolerância.
+- Escrita: `PATCH /v1/pages/{id}` `{ properties: { <id>: { status|select: { name } } } }` (status
+  existente por nome; escrita **não cria** opção de status). Só se o status mudar; "Etapa Orkio" e
+  checkbox de "Bloqueada" no mesmo PATCH. Precisa da capacidade **Update content** (sem ela: 403;
+  reconectar não resolve). 404 em OAuth → "Reconectar com Notion".
+- `NotionWriteQueue`: uma pendência por tarefa (a última vence; o rollback é o da primeira),
+  calculada contra os últimos valores conhecidos do Notion (mover e voltar cancela). Transitório
+  (rede/5xx/429/sem conexão) → backoff 1 s…5 min sem limite; 400/403/404 → rollback + evento.
+  Retoma ao abrir o app. Resultado ao renderer por `board:sync-changed` (`onSyncChanged`).
+- "Etapa Orkio": select existente (opções faltando só com confirmação) ou criar via
+  `PATCH /v1/data_sources/{id}` (só com confirmação explícita). "Bloqueada": local; opcionalmente
+  sincronizada com um checkbox existente (aí o Notion manda na reconciliação).
+- UI: tela **Quadro** (projetos vinculados). Arrasto por ponteiro adaptado do template
+  `kanban-board` (sem StyleX; `style` só no card arrastável/flutuante e no `flexShrink` da coluna)
+  e "Mover para…" no menu do card e no painel (teclado). Painel lateral dentro da página (sem gaveta).
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -283,6 +319,8 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   do app para isso. No Linux sem keyring, o fixture liga a criptografia básica do Electron
   só no teste.
 - Para novos conectores: adicione o modo fake correspondente no fixture e um spec em `e2e/`.
+- Notion simulado com escrita (3A): `notionNetwork: 'down'` (sem internet), `notionWrites:
+'reject'` (400); `setNotionStatus` muda o status "por fora"; `notionState` lê o estado.
 - GitHub simulado (2D): `githubBranches`, `githubPulls`, `githubPrDetails`; listas com ETag
   (304 quando `If-None-Match` bate) e GraphQL por alias. `__calls` registra `ifNoneMatch`/`status`.
 - Notion simulado: `notionTasks` (`ok`, `no_unique_id`, `renamed`, `status_deleted`) e ids fixos
@@ -321,6 +359,10 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 | Tarefas do Notion só em memória (cache 60 s, até 500)                                                       | Nada de conteúdo do Notion no disco; o Notion continua a fonte da verdade. 60 s equilibra rate limit (~3 req/s) e frescor; "Atualizar" força.                                                                                                               |
 | Config v2 com bloco `notion` inválido → "não configurado" com aviso                                         | Um mapeamento corrompido não pode derrubar a lista de projetos.                                                                                                                                                                                             |
 | `InternationalizationProvider` pt-BR da Astryx                                                              | Textos internos dos componentes (Obrigatório, Limpar, busca) seguem a regra de UI em pt-BR.                                                                                                                                                                 |
+| SQLite via `node:sqlite` (não `better-sqlite3`)                                                             | Embutido no Node do Electron 45 (Node 24): sem módulo nativo, rebuild nem mudança no empacotamento. API ainda "release candidate": isolada em `db/database.ts`.                                                                                             |
+| Escritas pendentes no SQLite, calculadas contra o último valor conhecido do Notion                          | Sobrevivem a fechar o app; mover e voltar antes de sincronizar não gera escrita; rollback restaura o estado anterior à primeira mudança.                                                                                                                    |
+| "Bloqueada" local, com checkbox do Notion opcional                                                          | Nem todo banco tem a propriedade; não criamos checkbox sem pedir. Com mapeamento, o Notion é a fonte da verdade.                                                                                                                                            |
+| Coluna "Sem etapa"                                                                                          | Status do Notion que nenhuma etapa usa não pode sumir do quadro nem ser forçado numa etapa errada.                                                                                                                                                          |
 
 ## Astryx e CSP (regra inegociável)
 

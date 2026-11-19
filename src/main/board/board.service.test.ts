@@ -302,6 +302,21 @@ describe('BoardService', () => {
     expect(notion.invalidated).toBeGreaterThan(0)
   })
 
+  it('logo depois de sincronizar, uma leitura atrasada do Notion não desfaz o card; "Atualizar" confia no Notion', async () => {
+    const view = await createBoard()
+    const fin = stageId(view, 'Finalizada')
+    await service.move('p1', T1, fin)
+    await queue.idle()
+    // Notion ainda devolve o valor antigo (consistência eventual).
+    notion.status[T1] = 'Em andamento'
+    const quick = await service.get('p1')
+    expect(quick.ok && quick.value.cards.find((c) => c.taskId === T1)?.stageId).toBe(fin)
+    const forced = await service.get('p1', { force: true })
+    expect(forced.ok && forced.value.cards.find((c) => c.taskId === T1)?.stageId).toBe(
+      stageId(view, 'Em andamento')
+    )
+  })
+
   it('critério 4: mudança direto no Notion reposiciona o card ao atualizar', async () => {
     const view = await createBoard()
     await service.move('p1', T1, stageId(view, 'Revisado'))

@@ -188,6 +188,8 @@ export class BoardService {
     // Reconciliação.
     const pending = new Set(this.deps.store.pendingForProject(projectId).map((w) => w.taskPageId))
     const nowMs = this.now().getTime()
+    // "Atualizar" (force) é um pedido explícito pela verdade do Notion: sem janela de espera.
+    if (force) this.recent.clear()
     for (const [taskId, recent] of this.recent) {
       if (recent.until < nowMs || this.notionHas(data.values[taskId], recent.properties)) {
         this.recent.delete(taskId)

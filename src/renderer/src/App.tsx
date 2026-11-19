@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { AppShell } from '@astryxdesign/core/AppShell'
-import { IntegrationsIcon, ProjectsIcon, type SvgIcon } from './components/icons'
+import { BoardIcon, IntegrationsIcon, ProjectsIcon, type SvgIcon } from './components/icons'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
+import { BoardPage } from './features/board/BoardPage'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
 
-type Page = 'projects' | 'integrations'
+type Page = 'projects' | 'board' | 'integrations'
 
 const PAGES: { id: Page; label: string; icon: SvgIcon }[] = [
   { id: 'projects', label: 'Projetos', icon: ProjectsIcon },
+  { id: 'board', label: 'Quadro', icon: BoardIcon },
   { id: 'integrations', label: 'Integrações', icon: IntegrationsIcon }
 ]
 
@@ -43,6 +45,11 @@ export function App(): React.JSX.Element {
     >
       {page === 'projects' ? (
         <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
+      ) : page === 'board' ? (
+        <BoardPage
+          onOpenIntegrations={() => setPage('integrations')}
+          onOpenProjects={() => setPage('projects')}
+        />
       ) : (
         <IntegrationsPage />
       )}

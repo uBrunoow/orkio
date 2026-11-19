@@ -16,6 +16,14 @@ import {
   IconLink,
   IconLinkOff,
   IconListCheck,
+  IconLayoutKanban,
+  IconLock,
+  IconCloudUpload,
+  IconSettings,
+  IconArrowUp,
+  IconArrowDown,
+  IconPlus,
+  IconX,
   IconPlugConnected,
   IconRefresh,
   IconTrash,
@@ -48,3 +56,11 @@ export const TasksIcon = adapt(IconListCheck)
 export const RefreshIcon = adapt(IconRefresh)
 export const GitBranchIcon = adapt(IconGitBranch)
 export const PullRequestIcon = adapt(IconGitPullRequest)
+export const BoardIcon = adapt(IconLayoutKanban)
+export const LockIcon = adapt(IconLock)
+export const SyncIcon = adapt(IconCloudUpload)
+export const SettingsIcon = adapt(IconSettings)
+export const ArrowUpIcon = adapt(IconArrowUp)
+export const ArrowDownIcon = adapt(IconArrowDown)
+export const PlusIcon = adapt(IconPlus)
+export const CloseIcon = adapt(IconX)

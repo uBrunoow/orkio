@@ -35,6 +35,10 @@ export interface FakeServices {
    * sem propriedade de ID, Status renomeado ou Status apagado.
    */
   notionTasks: 'ok' | 'no_unique_id' | 'renamed' | 'status_deleted'
+  /** Rede até api.notion.com (bancos/tarefas/escritas): 'down' simula sem internet. */
+  notionNetwork: 'up' | 'down'
+  /** PATCH de páginas: 'ok' aplica no estado simulado; 'reject' devolve 400. */
+  notionWrites: 'ok' | 'reject'
   /** Branches remotas (GET /repos/{o}/{r}/branches), iguais para todo repositório. */
   githubBranches: string[]
   /** PRs (GET /repos/{o}/{r}/pulls). `updatedDaysAgo` padrão: 1. */
@@ -72,6 +76,8 @@ export const DEFAULT_FAKES: FakeServices = {
   githubUser: 'ok',
   githubRepos: {},
   notionTasks: 'ok',
+  notionNetwork: 'up',
+  notionWrites: 'ok',
   githubBranches: [],
   githubPulls: [],
   githubPrDetails: {}
@@ -91,6 +97,33 @@ interface FakeGlobals {
   }[]
   __opened: string[]
   __tokenSeq: number
+  /** Estado mutável do Notion simulado (status por página, checkbox/select extras, schema). */
+  __notion: {
+    status: Record<string, string>
+    extra: Record<string, Record<string, unknown>>
+    addedProperties: Record<string, unknown>
+  }
+}
+
+const TASK_PAGE = (n: number): string => `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`
+export const NOTION_TASK_IDS = { ork1: TASK_PAGE(1), ork2: TASK_PAGE(2), ork3: TASK_PAGE(3) }
+
+/** Muda o Notion simulado "por fora" (como se alguém editasse no Notion). */
+export async function setNotionStatus(
+  app: ElectronApplication,
+  pageId: string,
+  status: string
+): Promise<void> {
+  await app.evaluate(
+    (_e, [id, value]) => {
+      ;(globalThis as unknown as FakeGlobals).__notion.status[id] = value
+    },
+    [pageId, status] as const
+  )
+}
+
+export async function notionState(app: ElectronApplication): Promise<FakeGlobals['__notion']> {
+  return app.evaluate(() => (globalThis as unknown as FakeGlobals).__notion)
 }
 
 export interface OrkioApp {
@@ -148,6 +181,15 @@ export async function launchOrkio(
       g.__calls = []
       g.__opened = []
       g.__tokenSeq = 0
+      g.__notion = {
+        status: {
+          [`bbbbbbbb-0000-4000-8000-${'1'.padStart(12, '0')}`]: 'Concluída',
+          [`bbbbbbbb-0000-4000-8000-${'2'.padStart(12, '0')}`]: 'Em andamento',
+          [`bbbbbbbb-0000-4000-8000-${'3'.padStart(12, '0')}`]: 'A fazer'
+        },
+        extra: {},
+        addedProperties: {}
+      }
       const realFetch = globalThis.fetch
       const json = (body: unknown, status = 200): Response =>
         new Response(JSON.stringify(body), { status })
@@ -369,9 +411,63 @@ export async function launchOrkio(
           if (notion === '401' || !token || (validTokens && !validTokens.includes(token))) {
             return json({ object: 'error', code: 'unauthorized' }, 401)
           }
+          if (g.__fakes.notionNetwork === 'down') throw new TypeError('fetch failed')
           const rich = (text: string): unknown[] => [{ type: 'text', plain_text: text }]
           const path = url.slice('https://api.notion.com/v1'.length)
           const body = call.body ? (JSON.parse(call.body) as Record<string, unknown>) : {}
+          const STATUS_OPTIONS = [
+            { id: 'o1', name: 'A fazer', color: 'gray' },
+            { id: 'o4', name: 'Prioridades', color: 'orange' },
+            { id: 'o2', name: 'Em andamento', color: 'blue' },
+            { id: 'o5', name: 'Finalizadas', color: 'green' },
+            { id: 'o3', name: 'Concluída', color: 'green' }
+          ]
+
+          // Escrita numa página (3A).
+          const pagePatch = /^\/pages\/([0-9a-f-]+)$/.exec(path)
+          if (pagePatch && init?.method === 'PATCH') {
+            if (g.__fakes.notionWrites === 'reject') {
+              return json({ object: 'error', code: 'validation_error', message: 'x' }, 400)
+            }
+            const pageId = pagePatch[1]!
+            const props = (body['properties'] ?? {}) as Record<string, Record<string, unknown>>
+            for (const [propId, value] of Object.entries(props)) {
+              const status = value['status'] as { name?: string } | undefined
+              if (propId === 'st%3A' && status?.name) {
+                if (!STATUS_OPTIONS.some((o) => o.name === status.name)) {
+                  return json({ object: 'error', code: 'validation_error' }, 400)
+                }
+                g.__notion.status[pageId] = status.name
+              } else {
+                g.__notion.extra[pageId] ??= {}
+                g.__notion.extra[pageId][propId] = value
+              }
+            }
+            return json({ object: 'page', id: pageId })
+          }
+          // Nova propriedade no data source de Tarefas (3A: "Etapa Orkio").
+          if (path === `/data_sources/${ids.tasksDs}` && init?.method === 'PATCH') {
+            const props = (body['properties'] ?? {}) as Record<string, Record<string, unknown>>
+            const result: Record<string, unknown> = {}
+            for (const [name, value] of Object.entries(props)) {
+              const select = value['select'] as { options: { name: string; color?: string }[] }
+              const prop = {
+                id: `added-${Object.keys(g.__notion.addedProperties).length + 1}`,
+                name,
+                type: 'select',
+                select: {
+                  options: select.options.map((o, i) => ({
+                    id: `opt-${i}`,
+                    name: o.name,
+                    color: o.color ?? 'default'
+                  }))
+                }
+              }
+              g.__notion.addedProperties[name] = prop
+              result[name] = prop
+            }
+            return json({ object: 'data_source', id: ids.tasksDs, properties: result })
+          }
 
           if (path === '/search') {
             const all = [
@@ -399,13 +495,7 @@ export async function launchOrkio(
             id: 'st%3A',
             name: notionTasks === 'renamed' ? 'Etapa' : 'Status',
             type: 'status',
-            status: {
-              options: [
-                { id: 'o1', name: 'A fazer', color: 'gray' },
-                { id: 'o2', name: 'Em andamento', color: 'blue' },
-                { id: 'o3', name: 'Concluída', color: 'green' }
-              ]
-            }
+            status: { options: STATUS_OPTIONS }
           }
           const tasksProperties: Record<string, unknown> = {
             Nome: { id: 'title', name: 'Nome', type: 'title', title: {} },
@@ -425,7 +515,9 @@ export async function launchOrkio(
               type: 'select',
               select: { options: [{ id: 'p1', name: 'Alta', color: 'red' }] }
             },
-            Responsável: { id: 'ppl', name: 'Responsável', type: 'people', people: {} }
+            Responsável: { id: 'ppl', name: 'Responsável', type: 'people', people: {} },
+            Bloqueada: { id: 'blk', name: 'Bloqueada', type: 'checkbox', checkbox: {} },
+            ...g.__notion.addedProperties
           }
 
           if (path === `/data_sources/${ids.projectsDs}`) {
@@ -469,24 +561,45 @@ export async function launchOrkio(
               n: number,
               title: string,
               project: string,
-              status: { name: string; color: string },
+              _initial: { name: string; color: string },
               priority: boolean
-            ): unknown => ({
-              object: 'page',
-              id: `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`,
-              url: `https://www.notion.so/ORK-${n}-bbbb${n}`,
-              properties: {
-                Nome: { id: 'title', type: 'title', title: rich(title) },
-                Status: { id: 'st%3A', type: 'status', status: status },
-                ID: { id: 'uid', type: 'unique_id', unique_id: { prefix: 'ORK', number: n } },
-                Projeto: { id: 'rel', type: 'relation', relation: [{ id: project }] },
-                Prioridade: {
-                  id: 'pri',
-                  type: 'select',
-                  select: priority ? { name: 'Alta', color: 'red' } : null
+            ): unknown => {
+              const id = `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`
+              const name = g.__notion.status[id] ?? _initial.name
+              const option = STATUS_OPTIONS.find((o) => o.name === name)
+              const extras: Record<string, unknown> = {}
+              for (const [propId, value] of Object.entries(g.__notion.extra[id] ?? {})) {
+                const v = value as { checkbox?: boolean; select?: { name: string } }
+                extras[`extra-${propId}`] =
+                  typeof v.checkbox === 'boolean'
+                    ? { id: propId, type: 'checkbox', checkbox: v.checkbox }
+                    : { id: propId, type: 'select', select: v.select ?? null }
+              }
+              return {
+                object: 'page',
+                id: `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`,
+                url: `https://www.notion.so/ORK-${n}-bbbb${n}`,
+                properties: {
+                  Nome: { id: 'title', type: 'title', title: rich(title) },
+                  Status: {
+                    id: 'st%3A',
+                    type: 'status',
+                    status: option
+                      ? { id: option.id, name: option.name, color: option.color }
+                      : null
+                  },
+                  ID: { id: 'uid', type: 'unique_id', unique_id: { prefix: 'ORK', number: n } },
+                  Projeto: { id: 'rel', type: 'relation', relation: [{ id: project }] },
+                  Prioridade: {
+                    id: 'pri',
+                    type: 'select',
+                    select: priority ? { name: 'Alta', color: 'red' } : null
+                  },
+                  Bloqueada: { id: 'blk', type: 'checkbox', checkbox: false },
+                  ...extras
                 }
               }
-            })
+            }
             const all = [
               task(
                 2,
