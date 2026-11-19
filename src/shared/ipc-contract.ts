@@ -295,6 +295,8 @@ export interface BoardCard {
   /** `null` = "Sem etapa" (nenhuma etapa usa o status atual do Notion). */
   stageId: string | null
   blocked: boolean
+  /** Automações pausadas nesta tarefa (3B). */
+  automationPaused: boolean
   sync: { state: CardSyncState; message?: string }
 }
 

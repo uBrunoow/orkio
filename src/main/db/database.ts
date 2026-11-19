@@ -58,6 +58,19 @@ export const MIGRATIONS: readonly string[] = [
     last_error_code TEXT,
     created_at TEXT NOT NULL
   );
+  `,
+  // v2 (Etapa 3B): idempotência das automações, pausa por tarefa e snapshot dos sinais.
+  `
+  ALTER TABLE task_events ADD COLUMN event_key TEXT;
+  CREATE UNIQUE INDEX task_events_key ON task_events (event_key) WHERE event_key IS NOT NULL;
+  ALTER TABLE task_state ADD COLUMN automation_paused INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE signal_snapshots (
+    task_page_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE INDEX signal_snapshots_project ON signal_snapshots (project_id);
   `
 ]
 

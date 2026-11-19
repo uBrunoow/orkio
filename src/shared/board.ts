@@ -2,6 +2,7 @@
  * Quadro kanban por projeto (Etapa 3A): etapas do Orkio, mapeamento para as opções do status do
  * Notion e reconciliação com o status atual das tarefas. Funções puras (main e renderer).
  */
+import type { AutomationRule } from './automation'
 import type { NotionColor } from './ipc-contract'
 
 export interface BoardStage {
@@ -20,6 +21,8 @@ export interface BoardConfig {
   orkioStageProperty: { id: string; name: string } | null
   /** Checkbox do Notion sincronizada com "Bloqueada" (opcional). Sem ela, é só local. */
   blockedProperty: { id: string; name: string } | null
+  /** Regras de automação (3B), avaliadas nesta ordem. Editor completo na 3C. */
+  rules: AutomationRule[]
   updatedAt: string
 }
 

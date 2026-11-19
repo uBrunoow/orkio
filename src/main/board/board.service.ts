@@ -7,6 +7,7 @@
  * - Mover/bloquear: grava localmente na hora (otimista) e enfileira a escrita no Notion
  *   (NotionWriteQueue), que confirma, tenta de novo ou desfaz.
  */
+import { defaultRules } from '../../shared/automation'
 import {
   findOption,
   reconcile,
@@ -274,6 +275,7 @@ export class BoardService {
         assignees: t.assignees,
         stageId: d.stageId,
         blocked: d.blocked,
+        automationPaused: states.get(t.id)?.automationPaused ?? false,
         sync: pendingNow.has(t.id)
           ? { state: 'pending', message: this.retryMessages.get(t.id) ?? BOARD_MESSAGES.pending }
           : { state: 'synced' }
@@ -294,39 +296,110 @@ export class BoardService {
 
   async move(projectId: string, taskId: string, stageId: string): Promise<NotionResult<BoardCard>> {
     return this.wrap(async () => {
-      const { board, snapshot, task } = this.context(projectId, taskId)
-      const stage = board.stages.find((s) => s.id === stageId)
-      if (!stage) throw new BoardError({ code: 'not_found', message: BOARD_MESSAGES.stageNotFound })
-      const before = this.localState(projectId, taskId)
-      if (before.stageId === stageId) return this.card(projectId, taskId)
+      const moved = this.deps.store.transaction(() =>
+        this.applyMove(projectId, taskId, stageId, { source: 'manual' })
+      )
+      if (moved) this.queue?.kick()
+      return this.card(projectId, taskId)
+    })
+  }
+
+  /**
+   * Mesmo caminho do movimento manual, para as automações (3B): estado local, evento com a chave
+   * de idempotência e a regra, e a escrita pendente no Notion. Chame dentro de uma transação
+   * (junto com o snapshot e a chave). Devolve se moveu.
+   */
+  applyAutomationMove(
+    projectId: string,
+    taskId: string,
+    stageId: string,
+    event: { key: string; detail: Record<string, unknown> }
+  ): boolean {
+    return this.applyMove(projectId, taskId, stageId, {
+      source: 'automation',
+      eventKey: event.key,
+      detail: event.detail
+    })
+  }
+
+  /** Depois de um ciclo de automações: envia as escritas e avisa a tela. */
+  flushWrites(): void {
+    this.queue?.kick()
+  }
+
+  /** As tarefas já foram carregadas nesta sessão (necessário para mover)? */
+  hasSnapshot(projectId: string): boolean {
+    return this.snapshots.has(projectId)
+  }
+
+  private applyMove(
+    projectId: string,
+    taskId: string,
+    stageId: string,
+    options: {
+      source: 'manual' | 'automation'
+      eventKey?: string
+      detail?: Record<string, unknown>
+    }
+  ): boolean {
+    const { board, snapshot, task } = this.context(projectId, taskId)
+    const stage = board.stages.find((s) => s.id === stageId)
+    if (!stage) throw new BoardError({ code: 'not_found', message: BOARD_MESSAGES.stageNotFound })
+    const before = this.localState(projectId, taskId)
+    if (before.stageId === stageId) return false
+    const at = this.now().toISOString()
+    const statusChange = stageMatchesStatus(
+      stage,
+      task.status ? { id: task.status.id ?? null, name: task.status.name } : null
+    )
+      ? {}
+      : { notionStatus: stage.notionStatus.name }
+    this.deps.store.upsertState({
+      taskPageId: taskId,
+      projectId,
+      stageId,
+      blocked: before.blocked,
+      updatedAt: at,
+      source: options.source
+    })
+    const detail = { ...options.detail, ...statusChange }
+    this.deps.store.addEvent({
+      taskPageId: taskId,
+      projectId,
+      at,
+      kind: 'moved',
+      source: options.source,
+      fromStage: before.stageId,
+      toStage: stageId,
+      detail: Object.keys(detail).length > 0 ? detail : null,
+      eventKey: options.eventKey ?? null
+    })
+    this.syncDesired(projectId, taskId, board, snapshot, before)
+    return true
+  }
+
+  /** Pausa/retoma as automações de uma tarefa (registrado no histórico). */
+  async setAutomationPaused(
+    projectId: string,
+    taskId: string,
+    paused: boolean
+  ): Promise<NotionResult<BoardCard>> {
+    return this.wrap(async () => {
+      this.context(projectId, taskId)
       const at = this.now().toISOString()
       this.deps.store.transaction(() => {
-        this.deps.store.upsertState({
-          taskPageId: taskId,
-          projectId,
-          stageId,
-          blocked: before.blocked,
-          updatedAt: at,
-          source: 'manual'
-        })
+        this.deps.store.setAutomationPaused(taskId, projectId, paused, at)
         this.deps.store.addEvent({
           taskPageId: taskId,
           projectId,
           at,
-          kind: 'moved',
+          kind: paused ? 'automation_paused' : 'automation_resumed',
           source: 'manual',
-          fromStage: before.stageId,
-          toStage: stageId,
-          detail: stageMatchesStatus(
-            stage,
-            task.status ? { id: task.status.id ?? null, name: task.status.name } : null
-          )
-            ? null
-            : { notionStatus: stage.notionStatus.name }
+          fromStage: null,
+          toStage: null,
+          detail: null
         })
-        this.syncDesired(projectId, taskId, board, snapshot, before)
       })
-      this.queue?.kick()
       return this.card(projectId, taskId)
     })
   }
@@ -625,6 +698,8 @@ export class BoardService {
         stages,
         orkioStageProperty,
         blockedProperty,
+        // Quadro novo ganha as regras padrão; ajustar etapas mantém as regras (editor na 3C).
+        rules: previous?.rules ?? defaultRules(stages).rules,
         updatedAt: this.now().toISOString()
       }
       try {
@@ -692,6 +767,7 @@ export class BoardService {
       assignees: task.assignees,
       stageId: state.stageId,
       blocked: state.blocked,
+      automationPaused: this.deps.store.state(taskId)?.automationPaused ?? false,
       sync: pending
         ? { state: 'pending', message: this.retryMessages.get(taskId) ?? BOARD_MESSAGES.pending }
         : { state: 'synced' }

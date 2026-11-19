@@ -45,7 +45,8 @@ describe('orkio-config v2/v3', () => {
     expect(data).toEqual({
       projects: [{ ...PROJECT, notionProject: null }],
       notion: null,
-      boards: {}
+      boards: {},
+      automation: { paused: false }
     })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
     expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
@@ -66,7 +67,86 @@ describe('orkio-config v2/v3', () => {
     expect(data.boards).toEqual({})
     expect(data.notion).toEqual(NOTION)
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(3)
+    expect(saved['schemaVersion']).toBe(4)
+  })
+
+  it('migra v3 → v4: quadros ganham as regras padrão e a pausa global começa desligada', async () => {
+    const stage = (id: string, name: string, status: string) => ({
+      id,
+      name,
+      order: 0,
+      notionStatus: { id: status, name: status }
+    })
+    const board = {
+      stages: [
+        stage('s1', 'Prioridades', 'Prioridades'),
+        stage('s2', 'Em andamento', 'Em andamento'),
+        stage('s3', 'Revisando', 'Em andamento'),
+        stage('s4', 'Revisado', 'Em andamento'),
+        stage('s5', 'Finalizada', 'Finalizadas')
+      ],
+      orkioStageProperty: null,
+      blockedProperty: null,
+      updatedAt: 'x'
+    }
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 3,
+        projects: [PROJECT],
+        notion: NOTION,
+        boards: { p1: board }
+      })
+    )
+    const { data, warning } = await createOrkioConfigStore(file).load()
+    expect(warning).toBeUndefined()
+    expect(data.automation).toEqual({ paused: false })
+    const rules = data.boards['p1']!.rules
+    expect(rules.map((r) => [r.trigger, r.action])).toContainEqual([
+      'pr.merged',
+      { type: 'move_to_stage', stageId: 's5' }
+    ])
+    expect(rules.find((r) => r.id === 'default-rerequest')?.conditions?.fromStages).toEqual(['s4'])
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(4)
+  })
+
+  it('regra inválida é descartada sem perder o quadro', () => {
+    const result = validateConfig({
+      projects: [],
+      notion: null,
+      boards: {
+        p1: {
+          stages: [{ id: 's1', name: 'A', notionStatus: { id: 'o', name: 'A' } }],
+          rules: [
+            {
+              id: 'ok',
+              name: 'ok',
+              enabled: true,
+              trigger: 'pr.merged',
+              action: { type: 'move_to_stage', stageId: 's1' }
+            },
+            {
+              id: 'x',
+              name: 'x',
+              enabled: true,
+              trigger: 'pr.hacked',
+              action: { type: 'move_to_stage', stageId: 's1' }
+            },
+            {
+              id: 'y',
+              name: 'y',
+              enabled: true,
+              trigger: 'pr.merged',
+              action: { type: 'exec', cmd: 'rm' }
+            }
+          ]
+        }
+      },
+      automation: { paused: true }
+    })
+    expect(result?.value.boards['p1']?.rules.map((r) => r.id)).toEqual(['ok'])
+    expect(result?.value.automation.paused).toBe(true)
   })
 
   it('quadros: válido é lido; inválido é descartado com aviso', () => {

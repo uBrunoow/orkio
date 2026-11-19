@@ -26,7 +26,9 @@ describe('database (node:sqlite)', () => {
   it('migra de forma incremental e idempotente ao reabrir', () => {
     const file = join(dir, 'orkio.db')
     const v1 = openDatabase(file, MIGRATIONS.slice(0, 1))
-    v1.run("INSERT INTO task_state VALUES ('p1', 'proj', 'st', 0, '2026-01-01', 'manual')")
+    v1.run(
+      "INSERT INTO task_state (task_page_id, project_id, stage_id, blocked, updated_at, source) VALUES ('p1', 'proj', 'st', 0, '2026-01-01', 'manual')"
+    )
     v1.close()
     const extra = [...MIGRATIONS, 'ALTER TABLE task_state ADD COLUMN note TEXT']
     const v2 = openDatabase(file, extra)
@@ -63,9 +65,13 @@ describe('database (node:sqlite)', () => {
     const db = openDatabase(':memory:')
     expect(() =>
       db.transaction(() => {
-        db.run("INSERT INTO task_state VALUES ('a', 'p', null, 0, 'x', 'manual')")
+        db.run(
+          "INSERT INTO task_state (task_page_id, project_id, stage_id, blocked, updated_at, source) VALUES ('a', 'p', null, 0, 'x', 'manual')"
+        )
         db.transaction(() =>
-          db.run("INSERT INTO task_state VALUES ('b', 'p', null, 0, 'x', 'manual')")
+          db.run(
+            "INSERT INTO task_state (task_page_id, project_id, stage_id, blocked, updated_at, source) VALUES ('b', 'p', null, 0, 'x', 'manual')"
+          )
         )
         throw new Error('falhou')
       })
@@ -75,6 +81,48 @@ describe('database (node:sqlite)', () => {
 
   it('CHECK de source recusa valores inválidos', () => {
     const db = openDatabase(':memory:')
-    expect(() => db.run("INSERT INTO task_state VALUES ('a', 'p', null, 0, 'x', 'hack')")).toThrow()
+    expect(() =>
+      db.run(
+        "INSERT INTO task_state (task_page_id, project_id, stage_id, blocked, updated_at, source) VALUES ('a', 'p', null, 0, 'x', 'hack')"
+      )
+    ).toThrow()
+  })
+})
+
+describe('migração v2 (3B)', () => {
+  it('v1 com dados → v2 preserva eventos e garante chave única', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v2-'))
+    const file = join(dir, 'orkio.db')
+    const v1 = openDatabase(file, MIGRATIONS.slice(0, 1))
+    v1.run(
+      "INSERT INTO task_events (task_page_id, project_id, at, kind, source) VALUES ('t', 'p', 'x', 'moved', 'manual')"
+    )
+    v1.run(
+      "INSERT INTO task_state (task_page_id, project_id, stage_id, blocked, updated_at, source) VALUES ('t', 'p', 's', 0, 'x', 'manual')"
+    )
+    v1.close()
+    const db = openDatabase(file)
+    expect(db.version).toBe(2)
+    expect(db.get('SELECT event_key, kind FROM task_events')).toEqual({
+      event_key: null,
+      kind: 'moved'
+    })
+    expect(
+      db.get<{ automation_paused: number }>('SELECT automation_paused FROM task_state')
+    ).toEqual({
+      automation_paused: 0
+    })
+    const insert = (key: string | null) =>
+      db.run(
+        "INSERT INTO task_events (task_page_id, project_id, at, kind, source, event_key) VALUES ('t', 'p', 'x', 'automation', 'automation', ?)",
+        key
+      )
+    insert('pr#1:merged')
+    expect(() => insert('pr#1:merged')).toThrow()
+    // Eventos sem chave (manuais) continuam livres.
+    insert(null)
+    insert(null)
+    db.close()
+    await rm(dir, { recursive: true, force: true })
   })
 })

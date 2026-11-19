@@ -13,6 +13,8 @@ export interface TaskStateRow {
   blocked: boolean
   updatedAt: string
   source: StateSource
+  /** Automações pausadas nesta tarefa (3B). */
+  automationPaused: boolean
 }
 
 export type TaskEventKind =
@@ -24,6 +26,10 @@ export type TaskEventKind =
   | 'sync_ok'
   | 'sync_failed'
   | 'rolled_back'
+  /** Evento do git/GitHub processado pelo motor (3B): regra, resultado, motivo. */
+  | 'automation'
+  | 'automation_paused'
+  | 'automation_resumed'
 
 export interface TaskEventRow {
   id: number
@@ -34,6 +40,7 @@ export interface TaskEventRow {
   fromStage: string | null
   toStage: string | null
   detail: Record<string, unknown> | null
+  eventKey: string | null
 }
 
 /** Valores desejados no Notion (por id de propriedade) e como desfazer localmente. */
@@ -56,6 +63,7 @@ interface StateDbRow {
   blocked: number
   updated_at: string
   source: StateSource
+  automation_paused: number
 }
 
 interface PendingDbRow {
@@ -102,7 +110,8 @@ export class BoardStore {
           stageId: r.stage_id,
           blocked: r.blocked === 1,
           updatedAt: r.updated_at,
-          source: r.source
+          source: r.source,
+          automationPaused: r.automation_paused === 1
         }
       ])
     )
@@ -117,12 +126,13 @@ export class BoardStore {
           stageId: r.stage_id,
           blocked: r.blocked === 1,
           updatedAt: r.updated_at,
-          source: r.source
+          source: r.source,
+          automationPaused: r.automation_paused === 1
         }
       : null
   }
 
-  upsertState(row: TaskStateRow): void {
+  upsertState(row: Omit<TaskStateRow, 'automationPaused'>): void {
     this.db.run(
       `INSERT INTO task_state (task_page_id, project_id, stage_id, blocked, updated_at, source)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -138,10 +148,12 @@ export class BoardStore {
     )
   }
 
-  addEvent(event: Omit<TaskEventRow, 'id'> & { projectId: string }): void {
+  addEvent(
+    event: Omit<TaskEventRow, 'id' | 'eventKey'> & { projectId: string; eventKey?: string | null }
+  ): void {
     this.db.run(
-      `INSERT INTO task_events (task_page_id, project_id, at, kind, source, from_stage, to_stage, detail_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO task_events (task_page_id, project_id, at, kind, source, from_stage, to_stage, detail_json, event_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       event.taskPageId,
       event.projectId,
       event.at,
@@ -149,7 +161,63 @@ export class BoardStore {
       event.source,
       event.fromStage,
       event.toStage,
-      event.detail ? JSON.stringify(event.detail) : null
+      event.detail ? JSON.stringify(event.detail) : null,
+      event.eventKey ?? null
+    )
+  }
+
+  /** Esta chave de evento (idempotência das automações) já foi processada? */
+  hasEventKey(key: string): boolean {
+    return this.db.get('SELECT 1 AS x FROM task_events WHERE event_key = ?', key) !== undefined
+  }
+
+  /** Último movimento manual da tarefa (para conflito com eventos mais antigos). */
+  lastManualMoveAt(taskPageId: string): string | null {
+    return (
+      this.db.get<{ at: string }>(
+        `SELECT at FROM task_events WHERE task_page_id = ? AND source = 'manual' AND kind = 'moved'
+         ORDER BY id DESC LIMIT 1`,
+        taskPageId
+      )?.at ?? null
+    )
+  }
+
+  setAutomationPaused(taskPageId: string, projectId: string, paused: boolean, at: string): void {
+    this.db.run(
+      `INSERT INTO task_state (task_page_id, project_id, stage_id, blocked, updated_at, source, automation_paused)
+       VALUES (?, ?, NULL, 0, ?, 'manual', ?)
+       ON CONFLICT (task_page_id) DO UPDATE SET automation_paused = excluded.automation_paused`,
+      taskPageId,
+      projectId,
+      at,
+      paused ? 1 : 0
+    )
+  }
+
+  // ---------- Snapshots dos sinais (3B) ----------
+
+  snapshots(projectId: string): Map<string, unknown> {
+    return new Map(
+      this.db
+        .all<{ task_page_id: string; snapshot_json: string }>(
+          'SELECT task_page_id, snapshot_json FROM signal_snapshots WHERE project_id = ?',
+          projectId
+        )
+        .map((r) => [r.task_page_id, JSON.parse(r.snapshot_json) as unknown])
+    )
+  }
+
+  saveSnapshot(taskPageId: string, projectId: string, snapshot: unknown, at: string): void {
+    this.db.run(
+      `INSERT INTO signal_snapshots (task_page_id, project_id, snapshot_json, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (task_page_id) DO UPDATE SET
+         project_id = excluded.project_id, snapshot_json = excluded.snapshot_json,
+         updated_at = excluded.updated_at`,
+      taskPageId,
+      projectId,
+      JSON.stringify(snapshot),
+      at
     )
   }
 
@@ -164,6 +232,7 @@ export class BoardStore {
         from_stage: string | null
         to_stage: string | null
         detail_json: string | null
+        event_key: string | null
       }>(
         'SELECT * FROM task_events WHERE task_page_id = ? ORDER BY id DESC LIMIT ?',
         taskPageId,
@@ -177,7 +246,8 @@ export class BoardStore {
         source: r.source,
         fromStage: r.from_stage,
         toStage: r.to_stage,
-        detail: r.detail_json ? (JSON.parse(r.detail_json) as Record<string, unknown>) : null
+        detail: r.detail_json ? (JSON.parse(r.detail_json) as Record<string, unknown>) : null,
+        eventKey: r.event_key
       }))
   }
 

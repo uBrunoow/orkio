@@ -17,6 +17,8 @@ export interface PullRequestSummary {
   merged: boolean
   headRef: string
   updatedAt: string
+  /** Quando foi fechada/mergeada (REST `closed_at`); `null` se aberta. */
+  closedAt?: string | null
 }
 
 /** Detalhes que vêm do GraphQL (podem faltar: sem permissão, falha, ainda não carregados). */
@@ -25,6 +27,12 @@ export interface PullRequestDetails {
   /** Threads de review não resolvidas; `null` = indisponível. */
   unresolvedComments: number | null
   checks: ChecksState | null
+  /** Pedidos de review (ids do GitHub, inclusive re-pedidos). Só para automações (3B). */
+  reviewRequests?: { id: string; at: string }[]
+  /** Reviews com decisão (APPROVED / CHANGES_REQUESTED). */
+  reviews?: { id: string; state: 'approved' | 'changes_requested'; at: string }[]
+  /** Ids das threads de review não resolvidas. */
+  unresolvedThreadIds?: string[]
 }
 
 export interface TaskPullRequest extends PullRequestSummary, PullRequestDetails {}
@@ -116,7 +124,12 @@ export function buildTaskSignals(
             ...main,
             reviewDecision: details?.reviewDecision ?? null,
             unresolvedComments: details?.unresolvedComments ?? null,
-            checks: details?.checks ?? null
+            checks: details?.checks ?? null,
+            ...(details?.reviewRequests ? { reviewRequests: details.reviewRequests } : {}),
+            ...(details?.reviews ? { reviews: details.reviews } : {}),
+            ...(details?.unresolvedThreadIds
+              ? { unresolvedThreadIds: details.unresolvedThreadIds }
+              : {})
           }
         : null,
       otherPrs: Math.max(0, pulls.length - 1)

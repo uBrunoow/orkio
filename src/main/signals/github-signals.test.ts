@@ -210,7 +210,7 @@ describe('GitHubRepoSignals', () => {
     }))
     const repo = new GitHubRepoSignals(api, 'acme', 'app', () => now)
     const p1 = parsePullItem(pull(1))!
-    expect((await repo.pullDetails([p1])).get(1)).toEqual({
+    expect((await repo.pullDetails([p1])).get(1)).toMatchObject({
       reviewDecision: 'approved',
       unresolvedComments: 2,
       checks: 'success'
@@ -235,6 +235,53 @@ describe('GitHubRepoSignals', () => {
         { repository: { pr7: { reviewDecision: null, reviewThreads: null, commits: null } } },
         [7, 8]
       )
-    ).toEqual(new Map([[7, { reviewDecision: null, unresolvedComments: null, checks: null }]]))
+    ).toEqual(
+      new Map([
+        [
+          7,
+          {
+            reviewDecision: null,
+            unresolvedComments: null,
+            checks: null,
+            reviewRequests: [],
+            reviews: [],
+            unresolvedThreadIds: []
+          }
+        ]
+      ])
+    )
+  })
+
+  it('3B: ids de pedidos de review, reviews com decisão e threads não resolvidas', () => {
+    expect(detailsQuery([3])).toContain('REVIEW_REQUESTED_EVENT')
+    const parsed = parseDetails(
+      {
+        repository: {
+          pr3: {
+            reviewDecision: 'CHANGES_REQUESTED',
+            reviewThreads: {
+              nodes: [
+                { id: 'th1', isResolved: false },
+                { id: 'th2', isResolved: true }
+              ]
+            },
+            timelineItems: { nodes: [{ id: 'rr1', createdAt: '2026-11-19T10:00:00Z' }, {}] },
+            reviews: {
+              nodes: [
+                { id: 'rv1', state: 'CHANGES_REQUESTED', submittedAt: '2026-11-19T11:00:00Z' },
+                { id: 'rv2', state: 'COMMENTED', submittedAt: '2026-11-19T11:30:00Z' }
+              ]
+            }
+          }
+        }
+      },
+      [3]
+    ).get(3)
+    expect(parsed).toMatchObject({
+      unresolvedComments: 1,
+      unresolvedThreadIds: ['th1'],
+      reviewRequests: [{ id: 'rr1', at: '2026-11-19T10:00:00Z' }],
+      reviews: [{ id: 'rv1', state: 'changes_requested', at: '2026-11-19T11:00:00Z' }]
+    })
   })
 })

@@ -2,6 +2,12 @@
  * Formato do arquivo de configuração não secreta do Orkio (userData/orkio-config.json).
  * Nada de tokens aqui: segredos vão no SecureStore.
  */
+import {
+  EVENT_KINDS,
+  defaultRules,
+  type AutomationRule,
+  type EventKind
+} from '../../shared/automation'
 import type { BoardConfig, BoardStage } from '../../shared/board'
 import type {
   NotionColor,
@@ -17,8 +23,9 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  * v1: projects. v2: `notion` (bancos de Projetos/Tarefas + mapeamento) e `notionProject` em cada
  * projeto (vínculo com uma página do banco de Projetos). Só ids e nomes, nunca conteúdo.
  * v3: `boards` (quadro kanban por projeto: etapas ↔ opções do status do Notion).
+ * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
  */
-export const ORKIO_CONFIG_VERSION = 3
+export const ORKIO_CONFIG_VERSION = 4
 
 export interface StoredProject {
   id: string
@@ -36,10 +43,12 @@ export interface OrkioConfig {
   notion: NotionWorkspaceConfig | null
   /** Quadro de cada projeto (chave: id do projeto). */
   boards: Record<string, BoardConfig>
+  /** Automações (3B): pausa global ("Pausar todas"). */
+  automation: { paused: boolean }
 }
 
 export function emptyConfig(): OrkioConfig {
-  return { projects: [], notion: null, boards: {} }
+  return { projects: [], notion: null, boards: {}, automation: { paused: false } }
 }
 
 export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
@@ -58,7 +67,20 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
           : []
       }),
       // v2 → v3: nenhum quadro ainda.
-      2: (data) => ({ ...data, boards: {} })
+      2: (data) => ({ ...data, boards: {} }),
+      // v3 → v4: quadros existentes ganham as regras padrão (etapas resolvidas pelo nome).
+      3: (data) => {
+        const boards: Record<string, unknown> = {}
+        const raw = isRecord(data['boards']) ? data['boards'] : {}
+        for (const [projectId, board] of Object.entries(raw)) {
+          const parsed = parseBoard({ ...(isRecord(board) ? board : {}), rules: [] })
+          boards[projectId] =
+            parsed && isRecord(board)
+              ? { ...board, rules: defaultRules(parsed.stages).rules }
+              : board
+        }
+        return { ...data, boards, automation: { paused: false } }
+      }
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -94,7 +116,11 @@ export function validateConfig(
     }
   }
 
-  const value: OrkioConfig = { projects, notion, boards }
+  const automationRaw = data['automation']
+  const automation = {
+    paused: isRecord(automationRaw) && automationRaw['paused'] === true
+  }
+  const value: OrkioConfig = { projects, notion, boards, automation }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
 }
 
@@ -226,6 +252,46 @@ export function parseBoard(value: unknown): BoardConfig | null {
     stages: stages as BoardStage[],
     orkioStageProperty: nameRef(value['orkioStageProperty']),
     blockedProperty: nameRef(value['blockedProperty']),
+    rules: Array.isArray(value['rules'])
+      ? value['rules'].map(parseRule).filter((r): r is AutomationRule => r !== null)
+      : [],
     updatedAt: typeof value['updatedAt'] === 'string' ? value['updatedAt'] : ''
   }
+}
+
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : undefined
+}
+
+/** Regra inválida é descartada (as outras continuam). */
+export function parseRule(value: unknown): AutomationRule | null {
+  if (!isRecord(value)) return null
+  const { id, name, trigger } = value
+  if (typeof id !== 'string' || !id || typeof name !== 'string') return null
+  if (typeof trigger !== 'string' || !(EVENT_KINDS as readonly string[]).includes(trigger))
+    return null
+  const action = value['action']
+  if (!isRecord(action)) return null
+  let parsedAction: AutomationRule['action']
+  if (action['type'] === 'move_to_stage' && typeof action['stageId'] === 'string') {
+    parsedAction = { type: 'move_to_stage', stageId: action['stageId'] }
+  } else if (action['type'] === 'notify' && typeof action['message'] === 'string') {
+    parsedAction = { type: 'notify', message: action['message'] }
+  } else return null
+  const c = isRecord(value['conditions']) ? value['conditions'] : {}
+  const fromStages = stringList(c['fromStages'])
+  const rule: AutomationRule = {
+    id,
+    name,
+    enabled: value['enabled'] === true,
+    trigger: trigger as EventKind,
+    conditions: {
+      ...(fromStages ? { fromStages } : {}),
+      ...(c['notBlocked'] === true ? { notBlocked: true } : {}),
+      ...(c['onlyForward'] === true ? { onlyForward: true } : {})
+    },
+    action: parsedAction
+  }
+  if (value['notify'] === true) rule.notify = true
+  return rule
 }

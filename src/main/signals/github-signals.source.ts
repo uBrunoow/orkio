@@ -212,8 +212,11 @@ export function detailsQuery(numbers: readonly number[]): string {
     .map(
       (n) =>
         `pr${n}: pullRequest(number: ${n}) { number reviewDecision ` +
-        `reviewThreads(first: 100) { nodes { isResolved } } ` +
-        `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }`
+        `reviewThreads(first: 100) { nodes { id isResolved } } ` +
+        `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
+        // 3B: ids estáveis para eventos idempotentes (pedidos de review e reviews com decisão).
+        `timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) { nodes { ... on ReviewRequestedEvent { id createdAt } } } ` +
+        `reviews(last: 20, states: [APPROVED, CHANGES_REQUESTED]) { nodes { id state submittedAt } } }`
     )
     .join(' ')
   return `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`
@@ -255,10 +258,37 @@ export function parseDetails(
       isRecord(commit) && isRecord(commit['statusCheckRollup']) ? commit['statusCheckRollup'] : null
     const checks =
       rollup && typeof rollup['state'] === 'string' ? CHECKS[rollup['state']] : undefined
+    const timeline = isRecord(pr['timelineItems']) ? pr['timelineItems']['nodes'] : null
+    const reviewNodes = isRecord(pr['reviews']) ? pr['reviews']['nodes'] : null
     result.set(n, {
       reviewDecision: review ?? null,
       unresolvedComments: unresolved,
-      checks: checks ?? null
+      checks: checks ?? null,
+      reviewRequests: Array.isArray(timeline)
+        ? timeline.flatMap((t) =>
+            isRecord(t) && typeof t['id'] === 'string' && typeof t['createdAt'] === 'string'
+              ? [{ id: t['id'], at: t['createdAt'] }]
+              : []
+          )
+        : [],
+      reviews: Array.isArray(reviewNodes)
+        ? reviewNodes.flatMap((r) => {
+            if (!isRecord(r) || typeof r['id'] !== 'string') return []
+            const state =
+              r['state'] === 'APPROVED'
+                ? 'approved'
+                : r['state'] === 'CHANGES_REQUESTED'
+                  ? 'changes_requested'
+                  : null
+            const at = typeof r['submittedAt'] === 'string' ? r['submittedAt'] : null
+            return state && at ? [{ id: r['id'], state, at } as const] : []
+          })
+        : [],
+      unresolvedThreadIds: Array.isArray(threads)
+        ? threads.flatMap((t) =>
+            isRecord(t) && t['isResolved'] === false && typeof t['id'] === 'string' ? [t['id']] : []
+          )
+        : []
     })
   }
   return result

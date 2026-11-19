@@ -469,6 +469,7 @@ export interface GitHubPullItem {
   merged: boolean
   headRef: string
   updatedAt: string
+  closedAt: string | null
 }
 
 /** Item de GET /repos/{o}/{r}/pulls. URL só se for uma PR em github.com. */
@@ -499,7 +500,16 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
       : merged
         ? 'merged'
         : 'closed'
-  return { number, title, url, state, merged, headRef: head ?? '', updatedAt }
+  return {
+    number,
+    title,
+    url,
+    state,
+    merged,
+    headRef: head ?? '',
+    updatedAt,
+    closedAt: stringOrNull(value['closed_at'])
+  }
 }
 
 /** Item de GET /repos/{o}/{r}/branches. */
