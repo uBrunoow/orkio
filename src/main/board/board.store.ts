@@ -30,6 +30,12 @@ export type TaskEventKind =
   | 'automation'
   | 'automation_paused'
   | 'automation_resumed'
+  /** Execuções do Claude Code (4A). */
+  | 'run_started'
+  | 'run_finished'
+  | 'run_cancelled'
+  | 'run_failed'
+  | 'run_blocked'
 
 export interface TaskEventRow {
   id: number

@@ -90,7 +90,8 @@ describe('NotionConnector — OAuth', () => {
       getDataSource: vi.fn<NotionClient['getDataSource']>(),
       queryDataSource: vi.fn<NotionClient['queryDataSource']>(),
       updatePage: vi.fn<NotionClient['updatePage']>(),
-      updateDataSource: vi.fn<NotionClient['updateDataSource']>()
+      updateDataSource: vi.fn<NotionClient['updateDataSource']>(),
+      getBlockChildren: vi.fn<NotionClient['getBlockChildren']>()
     }
     broker = {
       exchangeCode: vi.fn<NotionOAuthBroker['exchangeCode']>(),

@@ -21,7 +21,16 @@ function devOnlyRelaxedStyleCsp(): Plugin {
 
 export default defineConfig({
   main: {
-    build: { externalizeDeps: true }
+    build: {
+      externalizeDeps: true,
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          // Servidor MCP de permissões do Claude Code (4A): processo separado, sem dependências.
+          'permission-mcp': resolve('src/main/claude/bridge/permission-mcp.ts')
+        }
+      }
+    }
   },
   preload: {
     build: { externalizeDeps: true }

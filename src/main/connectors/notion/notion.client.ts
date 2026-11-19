@@ -106,6 +106,8 @@ export interface NotionClient {
   updatePage(token: string, id: string, properties: Record<string, unknown>): Promise<void>
   /** PATCH /v1/data_sources/{id} com `{ properties }` (adicionar/alterar propriedades do schema). */
   updateDataSource(token: string, id: string, properties: Record<string, unknown>): Promise<unknown>
+  /** GET /v1/blocks/{id}/children (conteúdo de uma página; paginado). */
+  getBlockChildren(token: string, id: string, startCursor?: string | null): Promise<NotionListPage>
 }
 
 interface RequestOptions {
@@ -223,6 +225,16 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
         body: { properties },
         kind: 'write'
       })
+    },
+
+    async getBlockChildren(token, id, startCursor) {
+      const query = new URLSearchParams({ page_size: String(NOTION_MAX_PAGE_SIZE) })
+      if (startCursor) query.set('start_cursor', startCursor)
+      return parseListPage(
+        await dataRequest(`/blocks/${encodeURIComponent(id)}/children?${query}`, token, {
+          method: 'GET'
+        })
+      )
     },
 
     async updateDataSource(token, id, properties) {

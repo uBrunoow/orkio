@@ -71,3 +71,15 @@ export interface RunEventMessage {
 }
 
 export type PermissionAnswer = 'allow_once' | 'allow_always' | 'deny'
+
+/** Card "Claude Code" em Integrações. Nunca contém e-mail, token ou credenciais. */
+export interface ClaudeCodeStatus {
+  installed: boolean
+  version: string | null
+  /** `null` = não deu para verificar. */
+  loggedIn: boolean | null
+  /** Só o tipo (ex.: "claude.ai" = assinatura). */
+  authMethod: string | null
+  meetsMinimum: boolean
+  minimumVersion: string
+}

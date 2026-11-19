@@ -1,0 +1,560 @@
+/**
+ * Execuções do Claude Code por tarefa (Etapa 4A): worktree → briefing → `claude -p` → log ao vivo
+ * → resumo (diff/commits/testes) → histórico. Sem push/PR nesta etapa.
+ *
+ * - Uma execução por tarefa; até `maxParallel` em paralelo (fila FIFO além disso).
+ * - Permissões: política pura (`policy.ts`) + pergunta ao usuário (10 min sem resposta → negar).
+ * - Log: eventos normalizados em `<runsDir>/<id>.jsonl` (sem conteúdo de arquivos; segredos
+ *   redigidos), mantendo os `keepPerTask` mais recentes por tarefa.
+ * - Nada do conteúdo da página vai para o SQLite: só ids, status, datas, custo e resumo técnico.
+ */
+import { randomUUID } from 'node:crypto'
+import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import type {
+  AgentRunView,
+  PermissionAnswer,
+  RunLogEvent,
+  RunMode,
+  RunStatus,
+  RunSummary
+} from '../../shared/agent-run'
+import type { BoardStore } from '../board/board.store'
+import type { Db } from '../db/database'
+import type { Git } from '../git/git'
+import { evaluatePermission, type AllowRule } from './policy'
+import { PermissionBroker, type BridgeDecision, type BridgeRequest } from './runner'
+import type {
+  WorktreeProject,
+  WorktreeRecord,
+  WorktreeService,
+  WorktreeTask
+} from './worktree.service'
+
+export interface RunHandle {
+  start(): Promise<void>
+  cancel(): void
+}
+
+export interface RunServiceDeps {
+  db: Db
+  store: BoardStore
+  worktrees: WorktreeService
+  git: Pick<Git, 'diffStat' | 'commitsSince'>
+  /** Cria o processo do Claude Code (real: ClaudeRun; testes: falso). */
+  createRun(options: {
+    cwd: string
+    prompt: string
+    sessionId: string
+    broker: PermissionBroker
+    onEvent(event: RunLogEvent): void
+    onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
+  }): RunHandle
+  runsDir: string
+  emit(message: { runId: string; projectId: string; taskId: string; event: RunLogEvent }): void
+  /** Notificação de desktop (pedido de aprovação/pergunta). */
+  notify(title: string, body: string, ref: { projectId: string; taskId: string }): void
+  maxParallel?: number
+  keepPerTask?: number
+  approvalTimeoutMs?: number
+  now?: () => Date
+  newId?: () => string
+}
+
+export interface StartRunInput {
+  project: WorktreeProject & { name: string }
+  task: WorktreeTask
+  mode: RunMode
+  /** Comando instalado (sem a barra), quando mode = 'command'. */
+  command: string | null
+  /** Texto livre (prompt) ou argumentos do comando. */
+  text: string
+  briefing: string
+}
+
+interface Pending {
+  resolve(decision: BridgeDecision): void
+  timer: NodeJS.Timeout
+  tool: string
+  input: Record<string, unknown>
+  suggestion: string | null
+}
+
+interface ActiveRun {
+  id: string
+  projectId: string
+  taskId: string
+  handle: RunHandle | null
+  worktree: WorktreeRecord
+  status: RunStatus
+  cancelled: boolean
+  pending: Map<string, Pending>
+  tests: Set<string>
+  costUsd: number | null
+  ok: boolean | null
+  start: () => Promise<void>
+}
+
+export const RUN_MESSAGES = {
+  busy: 'Esta tarefa já tem uma execução em andamento. Espere terminar ou cancele.',
+  timeout: 'Sem resposta em 10 minutos: o Orkio negou o pedido.',
+  denied: 'Negado por você no Orkio.',
+  cancelled: 'Execução cancelada.',
+  notFound: 'Execução não encontrada.'
+} as const
+
+const TEST_COMMAND =
+  /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|e2e|vitest|jest)\b|\b(vitest|jest|pytest|go test|cargo test|playwright test)\b/
+
+export class RunService {
+  private readonly active = new Map<string, ActiveRun>()
+  private readonly queue: ActiveRun[] = []
+  private readonly maxParallel: number
+  private readonly keepPerTask: number
+  private readonly logWrites = new Map<string, Promise<void>>()
+  private readonly approvalTimeoutMs: number
+
+  constructor(private readonly deps: RunServiceDeps) {
+    this.maxParallel = deps.maxParallel ?? 2
+    this.keepPerTask = deps.keepPerTask ?? 10
+    this.approvalTimeoutMs = deps.approvalTimeoutMs ?? 10 * 60_000
+  }
+
+  private now(): Date {
+    return this.deps.now?.() ?? new Date()
+  }
+
+  /** Comando final enviado ao Claude: comando instalado + argumentos, e o briefing junto. */
+  static composePrompt(
+    mode: RunMode,
+    command: string | null,
+    text: string,
+    briefing: string
+  ): string {
+    const brief = `Briefing da tarefa (também em .orkio/briefing.md no worktree):\n\n${briefing}`
+    if (mode === 'command' && command) {
+      return `/${command}${text.trim() ? ` ${text.trim()}` : ''}\n\n${brief}`
+    }
+    return `${text.trim()}\n\n---\n\n${brief}`
+  }
+
+  isRunning(taskId: string): boolean {
+    return [...this.active.values(), ...this.queue].some((r) => r.taskId === taskId)
+  }
+
+  /** Inicia (ou enfileira) uma execução. O worktree precisa ter sido preparado antes. */
+  async start(input: StartRunInput): Promise<AgentRunView> {
+    if (this.isRunning(input.task.id)) throw new Error(RUN_MESSAGES.busy)
+    const worktree = this.deps.worktrees.get(input.task.id)
+    if (!worktree) throw new Error('Prepare o ambiente da tarefa antes de rodar.')
+    const id = this.deps.newId?.() ?? randomUUID()
+    const startedAt = this.now().toISOString()
+    this.deps.db.run(
+      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?)`,
+      id,
+      input.task.id,
+      input.project.id,
+      input.mode,
+      input.command,
+      startedAt
+    )
+    await mkdir(this.deps.runsDir, { recursive: true })
+
+    const run: ActiveRun = {
+      id,
+      projectId: input.project.id,
+      taskId: input.task.id,
+      handle: null,
+      worktree,
+      status: 'queued',
+      cancelled: false,
+      pending: new Map(),
+      tests: new Set(),
+      costUsd: null,
+      ok: null,
+      start: async () => {
+        run.status = 'running'
+        this.setStatus(run, 'running')
+        this.taskEvent(run, 'run_started', { mode: input.mode, command: input.command })
+        // Briefing também em arquivo (fora do git: .git/info/exclude do worktree).
+        await this.writeBriefing(worktree.path, input.briefing).catch(() => undefined)
+        const broker = new PermissionBroker((req) => this.onPermission(run, req))
+        await broker.open()
+        run.handle = this.deps.createRun({
+          cwd: worktree.path,
+          prompt: RunService.composePrompt(input.mode, input.command, input.text, input.briefing),
+          sessionId: randomUUID(),
+          broker,
+          onEvent: (event) => this.onEvent(run, event),
+          onExit: (result) => void this.onExit(run, result)
+        })
+        await run.handle.start()
+      }
+    }
+    this.queue.push(run)
+    this.log(run, { kind: 'status', status: 'queued' })
+    this.pump()
+    return this.view(id)!
+  }
+
+  cancel(runId: string): void {
+    const queued = this.queue.findIndex((r) => r.id === runId)
+    if (queued >= 0) {
+      const [run] = this.queue.splice(queued, 1)
+      run!.cancelled = true
+      void this.finish(run!, 'cancelled', RUN_MESSAGES.cancelled)
+      return
+    }
+    const run = this.active.get(runId)
+    if (!run) throw new Error(RUN_MESSAGES.notFound)
+    run.cancelled = true
+    for (const [requestId, p] of run.pending)
+      this.resolvePending(run, requestId, p, { behavior: 'deny', message: RUN_MESSAGES.cancelled })
+    run.handle?.cancel()
+  }
+
+  /** Resposta do usuário a um pedido de permissão. */
+  answerPermission(runId: string, requestId: string, answer: PermissionAnswer): void {
+    const run = this.active.get(runId)
+    const p = run?.pending.get(requestId)
+    if (!run || !p) throw new Error(RUN_MESSAGES.notFound)
+    if (answer === 'allow_always' && p.suggestion) {
+      this.deps.db.run(
+        `INSERT OR IGNORE INTO permission_rules (project_id, tool, pattern, created_at) VALUES (?, ?, ?, ?)`,
+        run.projectId,
+        p.tool,
+        p.suggestion,
+        this.now().toISOString()
+      )
+    }
+    const decision: BridgeDecision =
+      answer === 'deny' ? { behavior: 'deny', message: RUN_MESSAGES.denied } : { behavior: 'allow' }
+    this.log(run, {
+      kind: 'permission',
+      requestId,
+      tool: p.tool,
+      summary: '',
+      state: answer === 'deny' ? 'denied' : 'allowed',
+      ...(answer === 'allow_always' && p.suggestion
+        ? { reason: `sempre neste projeto: ${p.suggestion}` }
+        : {})
+    })
+    this.resolvePending(run, requestId, p, decision)
+  }
+
+  /** Respostas às perguntas do Claude (AskUserQuestion): pergunta → opção(ões) escolhida(s). */
+  answerQuestion(runId: string, requestId: string, answers: Record<string, string>): void {
+    const run = this.active.get(runId)
+    const p = run?.pending.get(requestId)
+    if (!run || !p) throw new Error(RUN_MESSAGES.notFound)
+    this.log(run, { kind: 'question', requestId, questions: [], state: 'answered' })
+    this.resolvePending(run, requestId, p, {
+      behavior: 'allow',
+      updatedInput: { ...p.input, answers }
+    })
+  }
+
+  allowRules(projectId: string): AllowRule[] {
+    return this.deps.db.all<AllowRule>(
+      'SELECT tool, pattern FROM permission_rules WHERE project_id = ?',
+      projectId
+    )
+  }
+
+  list(taskId: string): AgentRunView[] {
+    return this.deps.db
+      .all<{ id: string }>(
+        'SELECT id FROM agent_runs WHERE task_page_id = ? ORDER BY started_at DESC',
+        taskId
+      )
+      .map((r) => this.view(r.id)!)
+  }
+
+  async readLog(runId: string): Promise<RunLogEvent[]> {
+    await this.logWrites.get(runId)
+    const text = await readFile(this.logPath(runId), 'utf8').catch(() => '')
+    return text
+      .split('\n')
+      .filter(Boolean)
+      .flatMap((l) => {
+        try {
+          return [JSON.parse(l) as RunLogEvent]
+        } catch {
+          return []
+        }
+      })
+  }
+
+  view(runId: string): AgentRunView | null {
+    const r = this.deps.db.get<{
+      id: string
+      task_page_id: string
+      project_id: string
+      mode: RunMode
+      command: string | null
+      status: RunStatus
+      started_at: string
+      ended_at: string | null
+      cost: number | null
+      summary: string | null
+    }>('SELECT * FROM agent_runs WHERE id = ?', runId)
+    if (!r) return null
+    const wt = this.deps.worktrees.get(r.task_page_id)
+    return {
+      id: r.id,
+      projectId: r.project_id,
+      taskId: r.task_page_id,
+      mode: r.mode,
+      command: r.command,
+      status: r.status,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      costUsd: r.cost,
+      branch: wt?.branch ?? null,
+      worktreePath: wt?.path ?? null,
+      summary: r.summary ? (JSON.parse(r.summary) as RunSummary) : null
+    }
+  }
+
+  // ---------- Interno ----------
+
+  private pump(): void {
+    while (this.active.size < this.maxParallel && this.queue.length > 0) {
+      const run = this.queue.shift()!
+      this.active.set(run.id, run)
+      run.start().catch(() => {
+        void this.finish(run, 'failed', 'Não foi possível iniciar o Claude Code.')
+      })
+    }
+  }
+
+  private async onPermission(run: ActiveRun, req: BridgeRequest): Promise<BridgeDecision> {
+    if (run.cancelled) return { behavior: 'deny', message: RUN_MESSAGES.cancelled }
+    const decision = evaluatePermission(
+      { tool: req.toolName, input: req.input },
+      { worktree: run.worktree.path, allowRules: this.allowRules(run.projectId) }
+    )
+    const requestId = req.toolUseId ?? randomUUID()
+    const summary =
+      req.toolName === 'Bash' && typeof req.input['command'] === 'string'
+        ? req.input['command'].slice(0, 300)
+        : typeof req.input['file_path'] === 'string'
+          ? req.input['file_path']
+          : req.toolName
+    if (decision.decision === 'allow') {
+      if (decision.reason) {
+        this.log(run, {
+          kind: 'permission',
+          requestId,
+          tool: req.toolName,
+          summary,
+          state: 'allowed',
+          reason: decision.reason
+        })
+      }
+      return { behavior: 'allow' }
+    }
+    if (decision.decision === 'deny') {
+      this.log(run, {
+        kind: 'permission',
+        requestId,
+        tool: req.toolName,
+        summary,
+        state: 'blocked',
+        reason: decision.reason
+      })
+      this.taskEvent(run, 'run_blocked', { tool: req.toolName, reason: decision.reason })
+      return { behavior: 'deny', message: decision.reason }
+    }
+    return new Promise<BridgeDecision>((resolve) => {
+      const timer = setTimeout(() => {
+        const p = run.pending.get(requestId)
+        if (!p) return
+        this.log(run, {
+          kind: 'permission',
+          requestId,
+          tool: req.toolName,
+          summary,
+          state: 'denied',
+          reason: RUN_MESSAGES.timeout
+        })
+        this.resolvePending(run, requestId, p, { behavior: 'deny', message: RUN_MESSAGES.timeout })
+      }, this.approvalTimeoutMs)
+      run.pending.set(requestId, {
+        resolve,
+        timer,
+        tool: req.toolName,
+        input: req.input,
+        suggestion: decision.decision === 'ask' ? decision.suggestion : null
+      })
+      if (decision.decision === 'question') {
+        const questions = Array.isArray(req.input['questions'])
+          ? (req.input['questions'] as Record<string, unknown>[]).map((q) => ({
+              question: typeof q['question'] === 'string' ? q['question'] : '',
+              options: Array.isArray(q['options'])
+                ? (q['options'] as Record<string, unknown>[]).map((o) => String(o['label'] ?? ''))
+                : [],
+              multiSelect: q['multiSelect'] === true
+            }))
+          : []
+        this.log(run, { kind: 'question', requestId, questions, state: 'pending' })
+        this.deps.notify(
+          'O Claude Code tem uma pergunta',
+          questions[0]?.question ?? 'Responda no Orkio.',
+          run
+        )
+      } else {
+        this.log(run, {
+          kind: 'permission',
+          requestId,
+          tool: req.toolName,
+          summary,
+          state: 'pending',
+          suggestion: decision.suggestion
+        })
+        this.deps.notify('O Claude Code pede aprovação', summary, run)
+      }
+    })
+  }
+
+  private resolvePending(
+    run: ActiveRun,
+    requestId: string,
+    p: Pending,
+    decision: BridgeDecision
+  ): void {
+    clearTimeout(p.timer)
+    run.pending.delete(requestId)
+    p.resolve(decision)
+  }
+
+  private onEvent(run: ActiveRun, event: RunLogEvent): void {
+    if (event.kind === 'tool' && event.tool === 'Bash' && TEST_COMMAND.test(event.summary)) {
+      run.tests.add(event.summary.slice(0, 120))
+    }
+    if (event.kind === 'result') {
+      run.costUsd = event.costUsd
+      run.ok = event.ok
+    }
+    this.log(run, event)
+  }
+
+  private async onExit(
+    run: ActiveRun,
+    result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }
+  ): Promise<void> {
+    for (const [requestId, p] of run.pending) {
+      this.resolvePending(run, requestId, p, { behavior: 'deny', message: RUN_MESSAGES.cancelled })
+    }
+    const status: RunStatus = run.cancelled
+      ? 'cancelled'
+      : run.ok === true && result.code === 0
+        ? 'succeeded'
+        : 'failed'
+    const message =
+      status === 'failed'
+        ? result.stderr.trim()
+          ? `O Claude Code terminou com erro: ${result.stderr.trim().slice(-300)}`
+          : 'O Claude Code terminou com erro.'
+        : status === 'cancelled'
+          ? RUN_MESSAGES.cancelled
+          : undefined
+    await this.finish(run, status, message)
+  }
+
+  private async finish(run: ActiveRun, status: RunStatus, message?: string): Promise<void> {
+    if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled') return
+    run.status = status
+    this.active.delete(run.id)
+    let summary: RunSummary | null = null
+    try {
+      const diff = await this.deps.git.diffStat(run.worktree.path, run.worktree.baseRef)
+      const commits = await this.deps.git.commitsSince(run.worktree.path, run.worktree.baseRef)
+      summary = {
+        files: diff.files.filter((f) => !f.startsWith('.orkio/')),
+        diffStat: diff.stat,
+        commits,
+        tests: [...run.tests]
+      }
+    } catch {
+      // Worktree removido ou git indisponível: sem resumo.
+    }
+    this.deps.db.run(
+      'UPDATE agent_runs SET status = ?, ended_at = ?, cost = ?, summary = ? WHERE id = ?',
+      status,
+      this.now().toISOString(),
+      run.costUsd,
+      summary ? JSON.stringify(summary) : null,
+      run.id
+    )
+    this.log(run, { kind: 'status', status, ...(message ? { message } : {}) })
+    this.taskEvent(
+      run,
+      status === 'succeeded'
+        ? 'run_finished'
+        : status === 'cancelled'
+          ? 'run_cancelled'
+          : 'run_failed',
+      { files: summary?.files.length ?? 0, costUsd: run.costUsd }
+    )
+    await this.prune(run.taskId)
+    this.pump()
+  }
+
+  private setStatus(run: ActiveRun, status: RunStatus): void {
+    this.deps.db.run('UPDATE agent_runs SET status = ? WHERE id = ?', status, run.id)
+    this.log(run, { kind: 'status', status })
+  }
+
+  private log(run: ActiveRun, event: RunLogEvent): void {
+    // Escritas encadeadas por execução: a ordem do arquivo é a ordem dos eventos.
+    const line = `${JSON.stringify(event)}\n`
+    const path = this.logPath(run.id)
+    const prev = this.logWrites.get(run.id) ?? Promise.resolve()
+    const next = prev.then(() => appendFile(path, line, { mode: 0o600 })).catch(() => undefined)
+    this.logWrites.set(run.id, next)
+    void next.then(() => {
+      if (this.logWrites.get(run.id) === next) this.logWrites.delete(run.id)
+    })
+    this.deps.emit({ runId: run.id, projectId: run.projectId, taskId: run.taskId, event })
+  }
+
+  private logPath(runId: string): string {
+    return join(this.deps.runsDir, `${runId.replace(/[^A-Za-z0-9-]/g, '')}.jsonl`)
+  }
+
+  private taskEvent(
+    run: ActiveRun,
+    kind: 'run_started' | 'run_finished' | 'run_cancelled' | 'run_failed' | 'run_blocked',
+    detail: Record<string, unknown>
+  ): void {
+    this.deps.store.addEvent({
+      taskPageId: run.taskId,
+      projectId: run.projectId,
+      at: this.now().toISOString(),
+      kind,
+      source: 'manual',
+      fromStage: null,
+      toStage: null,
+      detail: { runId: run.id, ...detail }
+    })
+  }
+
+  private async writeBriefing(worktree: string, briefing: string): Promise<void> {
+    await mkdir(join(worktree, '.orkio'), { recursive: true })
+    await writeFile(join(worktree, '.orkio', 'briefing.md'), briefing, 'utf8')
+    // Exclusão local do git (no worktree, `.git` é um arquivo; usamos o .gitignore local da pasta).
+    await writeFile(join(worktree, '.orkio', '.gitignore'), '*\n', 'utf8')
+  }
+
+  /** Mantém só os `keepPerTask` logs mais recentes da tarefa. */
+  private async prune(taskId: string): Promise<void> {
+    const old = this.deps.db.all<{ id: string }>(
+      'SELECT id FROM agent_runs WHERE task_page_id = ? ORDER BY started_at DESC LIMIT -1 OFFSET ?',
+      taskId,
+      this.keepPerTask
+    )
+    for (const r of old) await rm(this.logPath(r.id), { force: true }).catch(() => undefined)
+  }
+}

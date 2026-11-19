@@ -205,6 +205,10 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
     return this.callApi((token) => this.deps.client.updatePage(token, id, properties))
   }
 
+  getBlockChildren(id: string, startCursor?: string | null): Promise<NotionListPage> {
+    return this.callApi((token) => this.deps.client.getBlockChildren(token, id, startCursor))
+  }
+
   updateDataSource(id: string, properties: Record<string, unknown>): Promise<unknown> {
     return this.callApi((token) => this.deps.client.updateDataSource(token, id, properties))
   }
