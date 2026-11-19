@@ -1,8 +1,5 @@
 import type { ConnectedAccount } from '../../../shared/ipc-contract'
-import {
-  EncryptionUnavailableError,
-  type SecretStore
-} from '../../storage/secure-store'
+import { EncryptionUnavailableError, type SecretStore } from '../../storage/secure-store'
 import type { ConnectionStatus, Connector, ConnectorCredentials } from '../types'
 import { NotionApiError, type NotionClient, type NotionSelf } from './notion.client'
 

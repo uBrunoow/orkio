@@ -1,8 +1,4 @@
-import type {
-  ConnectionStatus,
-  ConnectorCredentials,
-  ConnectorId
-} from '../../shared/ipc-contract'
+import type { ConnectionStatus, ConnectorCredentials, ConnectorId } from '../../shared/ipc-contract'
 
 export type { ConnectionStatus, ConnectorCredentials, ConnectorId }
 

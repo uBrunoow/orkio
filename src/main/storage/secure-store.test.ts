@@ -91,7 +91,10 @@ describe('SecureStore', () => {
 
     it('aceita backends reais do Linux (gnome_libsecret, kwallet)', () => {
       for (const backend of ['gnome_libsecret', 'kwallet5', 'kwallet6']) {
-        const store = new SecureStore(dir, fakeSafeStorage({ getSelectedStorageBackend: () => backend }))
+        const store = new SecureStore(
+          dir,
+          fakeSafeStorage({ getSelectedStorageBackend: () => backend })
+        )
         expect(store.isAvailable()).toBe(true)
       }
     })

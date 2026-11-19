@@ -217,7 +217,9 @@ describe('createNotionClient().getSelf', () => {
   })
 
   it('JSON inválido ou formato desconhecido → erro unexpected', async () => {
-    const notJson = createNotionClient({ fetch: async () => new Response('<html>', { status: 200 }) })
+    const notJson = createNotionClient({
+      fetch: async () => new Response('<html>', { status: 200 })
+    })
     await expect(notJson.getSelf(TOKEN)).rejects.toMatchObject({ code: 'unexpected' })
 
     const wrongShape = createNotionClient({ fetch: async () => jsonResponse({ object: 'list' }) })
@@ -238,8 +240,12 @@ describe('parseRetryAfterMs', () => {
 
 describe('parseSelf', () => {
   it('ignora avatar que não é https', () => {
-    expect(parseSelf({ ...PERSON_RESPONSE, avatar_url: 'javascript:alert(1)' })?.avatarUrl).toBeNull()
-    expect(parseSelf({ ...PERSON_RESPONSE, avatar_url: 'http://x.com/a.png' })?.avatarUrl).toBeNull()
+    expect(
+      parseSelf({ ...PERSON_RESPONSE, avatar_url: 'javascript:alert(1)' })?.avatarUrl
+    ).toBeNull()
+    expect(
+      parseSelf({ ...PERSON_RESPONSE, avatar_url: 'http://x.com/a.png' })?.avatarUrl
+    ).toBeNull()
   })
 
   it('bot de workspace (sem dono usuário)', () => {

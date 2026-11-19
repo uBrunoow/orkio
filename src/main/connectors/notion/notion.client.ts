@@ -13,13 +13,7 @@ export const NOTION_REQUEST_TIMEOUT_MS = 10_000
 export const NOTION_MAX_RETRY_WAIT_MS = 5_000
 
 export type NotionErrorCode =
-  | 'unauthorized'
-  | 'forbidden'
-  | 'rate_limited'
-  | 'timeout'
-  | 'network'
-  | 'server'
-  | 'unexpected'
+  'unauthorized' | 'forbidden' | 'rate_limited' | 'timeout' | 'network' | 'server' | 'unexpected'
 
 /** Erro com mensagem segura para o usuário (pt-BR). Nunca contém o token nem a exceção original. */
 export class NotionApiError extends Error {
@@ -63,7 +57,12 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
 
   async function request(path: string, token: string): Promise<unknown> {
     for (let attempt = 0; ; attempt++) {
-      const response = await fetchWithTimeout(doFetch, `${NOTION_API_BASE_URL}${path}`, token, timeoutMs)
+      const response = await fetchWithTimeout(
+        doFetch,
+        `${NOTION_API_BASE_URL}${path}`,
+        token,
+        timeoutMs
+      )
 
       if (response.ok) {
         try {

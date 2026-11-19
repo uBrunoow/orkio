@@ -1,3 +1,18 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
+import { IPC_CHANNELS, type OrkioApi } from '../shared/ipc-contract'
 
-contextBridge.exposeInMainWorld('orkio', {})
+const { notion, shell } = IPC_CHANNELS
+
+// API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
+const api: OrkioApi = {
+  notion: {
+    getStatus: () => ipcRenderer.invoke(notion.getStatus),
+    connect: (credentials) =>
+      ipcRenderer.invoke(notion.connect, { kind: credentials.kind, token: credentials.token }),
+    disconnect: () => ipcRenderer.invoke(notion.disconnect),
+    testConnection: () => ipcRenderer.invoke(notion.testConnection)
+  },
+  openExternal: (url) => ipcRenderer.invoke(shell.openExternal, url)
+}
+
+contextBridge.exposeInMainWorld('orkio', api)
