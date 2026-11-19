@@ -28,6 +28,12 @@ import { createGit } from './git/git'
 import { registerNotionWorkspaceIpc } from './ipc/notion-workspace.ipc'
 import { registerProjectsIpc } from './ipc/projects.ipc'
 import { registerSignalsIpc } from './ipc/signals.ipc'
+import { registerBoardIpc } from './ipc/board.ipc'
+import { errorName } from './ipc/payload'
+import { BoardService } from './board/board.service'
+import { BoardStore } from './board/board.store'
+import { NotionWriteQueue } from './board/write-queue'
+import { openDatabase } from './db/database'
 import { TaskSignalsService } from './signals/task-signals.service'
 import { NotionWorkspaceService } from './notion/notion-workspace.service'
 import { authorizeViaLoopback } from './oauth/loopback'
@@ -36,7 +42,7 @@ import { registerGitHubIpc } from './ipc/github.ipc'
 import { registerNotionIpc } from './ipc/notion.ipc'
 import { registerShellIpc } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
-import { IPC_CHANNELS } from '../shared/ipc-contract'
+import { IPC_CHANNELS, type BoardSyncEvent } from '../shared/ipc-contract'
 import { SecureStore } from './storage/secure-store'
 import appIcon from '../../resources/icon.png?asset'
 
@@ -174,10 +180,77 @@ function registerIpc(): void {
     listTasks: (projectId) => notionWorkspace.listTasks(projectId)
   })
   registerSignalsIpc(ipcMain, signals, isTrustedSender, projectsReady)
+
+  // Quadro (3A): SQLite local + fila de escrita persistente no Notion.
+  const boardStore = openBoardStore()
+  if (boardStore) {
+    const broadcast = (event: BoardSyncEvent): void => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.board.syncChanged, event)
+      }
+    }
+    const board = new BoardService({
+      config: configStore,
+      store: boardStore,
+      notion: {
+        boardTasks: (projectId, options) => notionWorkspace.boardTasks(projectId, options),
+        statusOptions: () => notionWorkspace.statusOptions(),
+        invalidateTasks: (projectId) => notionWorkspace.invalidateTasks(projectId),
+        updateDataSource: (id, properties) => notion.updateDataSource(id, properties),
+        connectionMethod: () => notion.connectionMethod()
+      },
+      onSync: broadcast
+    })
+    writeQueue = new NotionWriteQueue({
+      store: boardStore,
+      // O token fica no conector.
+      updatePage: (pageId, properties) => notion.updatePage(pageId, properties),
+      onSynced: (w) => board.onSynced(w),
+      onRejected: (w, e) => void board.onRejected(w, e),
+      onRetry: (w, e) => board.onRetry(w, e)
+    })
+    board.attachQueue(writeQueue)
+    registerBoardIpc(ipcMain, board, isTrustedSender, projectsReady)
+    // Retoma o que ficou pendente quando o app fechou.
+    void projectsReady.then(() => writeQueue?.start())
+  } else {
+    registerBoardIpc(ipcMain, unavailableBoard(), isTrustedSender, projectsReady)
+  }
   registerShellIpc(ipcMain, (url) => shell.openExternal(url), isTrustedSender)
 }
 
 let projects: ProjectsService | null = null
+let writeQueue: NotionWriteQueue | null = null
+
+/** Abre o banco local; versão futura ou arquivo ilegível → quadro indisponível (sem apagar nada). */
+function openBoardStore(): BoardStore | null {
+  try {
+    return new BoardStore(openDatabase(join(app.getPath('userData'), 'orkio.db')))
+  } catch (error) {
+    console.error(`[orkio] banco local indisponível: ${errorName(error)}`)
+    return null
+  }
+}
+
+function unavailableBoard(): Parameters<typeof registerBoardIpc>[1] {
+  const error = {
+    ok: false as const,
+    error: {
+      code: 'db_unavailable',
+      message:
+        'O banco local do quadro não pôde ser aberto (pode ser de uma versão mais nova do Orkio).'
+    }
+  }
+  const fail = async (): Promise<typeof error> => error
+  return {
+    get: fail,
+    save: fail,
+    move: fail,
+    setBlocked: fail,
+    history: fail,
+    retryNow: () => {}
+  }
+}
 
 /** OAuth do Notion só existe se o build tiver client ID e URL do intermediário. */
 function createNotionOAuthDeps(): NotionOAuthDeps | null {
@@ -216,7 +289,10 @@ void app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', () => projects?.dispose())
+app.on('before-quit', () => {
+  projects?.dispose()
+  writeQueue?.stop()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

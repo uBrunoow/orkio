@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC_CHANNELS, type BranchChangedEvent, type OrkioApi } from '../shared/ipc-contract'
+import {
+  IPC_CHANNELS,
+  type BoardSyncEvent,
+  type BranchChangedEvent,
+  type OrkioApi
+} from '../shared/ipc-contract'
 
-const { notion, github, notionWorkspace, signals, projects, shell } = IPC_CHANNELS
+const { notion, github, notionWorkspace, signals, board, projects, shell } = IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
 const api: OrkioApi = {
@@ -48,6 +53,36 @@ const api: OrkioApi = {
     listTasks: (projectId, options) =>
       ipcRenderer.invoke(notionWorkspace.listTasks, projectId, { force: options?.force === true })
   },
+  board: {
+    get: (projectId, options) =>
+      ipcRenderer.invoke(board.get, projectId, { force: options?.force === true }),
+    save: (projectId, input) =>
+      ipcRenderer.invoke(board.save, projectId, {
+        stages: input.stages.map((s) => ({
+          id: s.id,
+          name: s.name,
+          notionStatusId: s.notionStatusId
+        })),
+        orkioStage: { ...input.orkioStage },
+        addMissingOptions: input.addMissingOptions === true,
+        blockedPropertyId: input.blockedPropertyId
+      }),
+    move: (projectId, taskId, stageId) =>
+      ipcRenderer.invoke(board.move, projectId, taskId, stageId),
+    setBlocked: (projectId, taskId, blocked) =>
+      ipcRenderer.invoke(board.setBlocked, projectId, taskId, blocked === true),
+    history: (projectId, taskId) => ipcRenderer.invoke(board.history, projectId, taskId),
+    retryNow: () => ipcRenderer.invoke(board.retryNow),
+    onSyncChanged: (listener) => {
+      const handler = (_event: unknown, payload: unknown): void => {
+        if (isBoardSyncEvent(payload)) listener(payload)
+      }
+      ipcRenderer.on(board.syncChanged, handler)
+      return () => {
+        ipcRenderer.removeListener(board.syncChanged, handler)
+      }
+    }
+  },
   signals: {
     get: (projectId, options) =>
       ipcRenderer.invoke(signals.get, projectId, { force: options?.force === true })
@@ -88,5 +123,18 @@ function isBranchChangedEvent(value: unknown): value is BranchChangedEvent {
   const v = value as Record<string, unknown>
   return (
     typeof v['projectId'] === 'string' && (v['branch'] === null || typeof v['branch'] === 'string')
+  )
+}
+
+function isBoardSyncEvent(value: unknown): value is BoardSyncEvent {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    typeof v['projectId'] === 'string' &&
+    typeof v['taskId'] === 'string' &&
+    (v['state'] === 'synced' || v['state'] === 'pending' || v['state'] === 'failed') &&
+    (v['stageId'] === null || typeof v['stageId'] === 'string') &&
+    typeof v['blocked'] === 'boolean' &&
+    (v['message'] === undefined || typeof v['message'] === 'string')
   )
 }

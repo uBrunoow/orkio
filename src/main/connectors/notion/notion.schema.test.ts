@@ -8,6 +8,7 @@ import {
   parseProjectPage,
   parseTaskPage,
   sameId,
+  simplePropertyValues,
   suggestMapping
 } from './notion.schema'
 
@@ -262,7 +263,12 @@ describe('páginas', () => {
           status: { id: 'o2', name: 'Em andamento', color: 'blue' }
         },
         ID: { id: 'uid', type: 'unique_id', unique_id: { prefix: 'ORK', number: 142 } },
-        Prioridade: { id: 'pri', type: 'select', select: { name: 'Alta', color: 'red' } }
+        Prioridade: { id: 'pri', type: 'select', select: { name: 'Alta', color: 'red' } },
+        Dono: {
+          id: 'ppl',
+          type: 'people',
+          people: [{ object: 'user', name: 'Ada Lovelace' }, { object: 'user' }]
+        }
       }
     }
     expect(parseTaskPage(page, mapping)).toEqual({
@@ -270,8 +276,9 @@ describe('páginas', () => {
       url: 'https://www.notion.so/Sync-abc',
       displayId: 'ORK-142',
       title: 'Sincronizar Notion',
-      status: { name: 'Em andamento', color: 'blue' },
-      priority: { name: 'Alta', color: 'red' }
+      status: { id: 'o2', name: 'Em andamento', color: 'blue' },
+      priority: { name: 'Alta', color: 'red' },
+      assignees: ['Ada Lovelace']
     })
   })
 
@@ -292,6 +299,23 @@ describe('páginas', () => {
       priority: null
     })
     expect(parseTaskPage({ ...page, in_trash: true }, mapping)).toBeNull()
+  })
+
+  it('simplePropertyValues: select, status e checkbox por id', () => {
+    expect(
+      simplePropertyValues({
+        properties: {
+          A: { id: 'a', type: 'select', select: { id: 'x', name: 'Revisando' } },
+          B: { id: 'b', type: 'checkbox', checkbox: true },
+          C: { id: 'c', type: 'status', status: null },
+          D: { id: 'd', type: 'title', title: [] }
+        }
+      })
+    ).toEqual({
+      a: { type: 'select', id: 'x', name: 'Revisando' },
+      b: { type: 'checkbox', checked: true },
+      c: { type: 'status', id: null, name: null }
+    })
   })
 
   it('parseProjectPage usa a propriedade title', () => {

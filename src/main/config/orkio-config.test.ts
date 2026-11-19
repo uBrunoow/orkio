@@ -26,7 +26,7 @@ const NOTION = {
   updatedAt: '2026-11-19T00:00:00.000Z'
 }
 
-describe('orkio-config v2', () => {
+describe('orkio-config v2/v3', () => {
   let dir: string
   let file: string
   beforeEach(async () => {
@@ -42,10 +42,70 @@ describe('orkio-config v2', () => {
     const store = createOrkioConfigStore(file)
     const { data, warning } = await store.load()
     expect(warning).toBeUndefined()
-    expect(data).toEqual({ projects: [{ ...PROJECT, notionProject: null }], notion: null })
+    expect(data).toEqual({
+      projects: [{ ...PROJECT, notionProject: null }],
+      notion: null,
+      boards: {}
+    })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
     expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
     expect(saved['notion']).toBeNull()
+  })
+
+  it('migra v2 → v3: acrescenta boards vazio sem mexer no resto', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 2,
+        projects: [{ ...PROJECT, notionProject: null }],
+        notion: NOTION
+      })
+    )
+    const { data, warning } = await createOrkioConfigStore(file).load()
+    expect(warning).toBeUndefined()
+    expect(data.boards).toEqual({})
+    expect(data.notion).toEqual(NOTION)
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(3)
+  })
+
+  it('quadros: válido é lido; inválido é descartado com aviso', () => {
+    const board = {
+      stages: [
+        {
+          id: 's1',
+          name: 'Prioridades',
+          order: 9,
+          notionStatus: { id: 'o1', name: 'Prioridades' },
+          color: 'gray'
+        },
+        {
+          id: 's2',
+          name: 'Revisando',
+          order: 0,
+          notionStatus: { id: null, name: 'Em andamento' },
+          color: 'neon'
+        }
+      ],
+      orkioStageProperty: { id: 'eo', name: 'Etapa Orkio' },
+      blockedProperty: null,
+      updatedAt: 'x'
+    }
+    const result = validateConfig({
+      projects: [PROJECT],
+      notion: null,
+      boards: { p1: board, p2: { stages: [] }, p3: { stages: [{ id: 'a', name: 'x' }] } }
+    })
+    expect(result?.value.boards['p1']?.stages.map((s) => [s.order, s.color])).toEqual([
+      [0, 'gray'],
+      [1, undefined]
+    ])
+    expect(result?.value.boards['p1']?.orkioStageProperty).toEqual({
+      id: 'eo',
+      name: 'Etapa Orkio'
+    })
+    expect(Object.keys(result?.value.boards ?? {})).toEqual(['p1'])
+    expect(result?.warning).toMatch(/quadro .* descartado/)
   })
 
   it('lê a configuração do Notion e o vínculo do projeto', async () => {

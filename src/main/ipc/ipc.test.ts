@@ -5,6 +5,7 @@ import type { DeviceFlowConnector, OAuthConnector } from '../connectors/types'
 import { registerGitHubIpc } from './github.ipc'
 import { registerProjectsIpc } from './projects.ipc'
 import { registerSignalsIpc } from './signals.ipc'
+import { registerBoardIpc } from './board.ipc'
 import { registerNotionIpc } from './notion.ipc'
 import { registerNotionWorkspaceIpc } from './notion-workspace.ipc'
 import { isAllowedExternalUrl, registerShellIpc } from './shell.ipc'
@@ -492,5 +493,47 @@ describe('allowlist: PRs do GitHub', () => {
     expect(isAllowedExternalUrl('https://github.com/acme/app/pull/12/files')).toBe(false)
     expect(isAllowedExternalUrl('https://github.com/acme/app/issues/12')).toBe(false)
     expect(isAllowedExternalUrl('https://gist.github.com/acme/app/pull/12')).toBe(false)
+  })
+})
+
+describe('registerBoardIpc', () => {
+  const TASK = '11111111-1111-4111-8111-000000000001'
+  it('valida ids, etapas e o formato do salvar', async () => {
+    const ipc = fakeIpc()
+    const ok = async () => ({ ok: true as const, value: null as never })
+    const service = {
+      get: vi.fn(ok),
+      save: vi.fn(ok),
+      move: vi.fn(ok),
+      setBlocked: vi.fn(ok),
+      history: vi.fn(ok),
+      retryNow: vi.fn()
+    }
+    registerBoardIpc(ipc, service, guard)
+    const ch = IPC_CHANNELS.board
+    const invalid = { ok: false, error: { code: 'invalid' } }
+
+    expect(await ipc.invoke(ch.move, 'p1', 'não-é-id', 'stage-1')).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.move, 'p1', TASK, '../x')).toMatchObject(invalid)
+    await ipc.invoke(ch.move, 'p1', TASK, 'stage-1')
+    expect(service.move).toHaveBeenCalledWith('p1', TASK, 'stage-1')
+
+    expect(await ipc.invoke(ch.setBlocked, 'p1', TASK, 'sim')).toMatchObject(invalid)
+    const input = {
+      stages: [{ id: null, name: 'Prioridades', notionStatusId: 'o1' }],
+      orkioStage: { mode: 'existing', propertyId: 'sel' },
+      addMissingOptions: false,
+      blockedPropertyId: null
+    }
+    await ipc.invoke(ch.save, 'p1', input)
+    expect(service.save).toHaveBeenCalledWith('p1', input)
+    expect(
+      await ipc.invoke(ch.save, 'p1', { ...input, orkioStage: { mode: 'hack' } })
+    ).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.save, 'p1', { ...input, stages: [] })).toMatchObject(invalid)
+    expect(service.save).toHaveBeenCalledTimes(1)
+
+    ipc.trusted = false
+    await expect(ipc.invoke(ch.get, 'p1')).rejects.toThrow('não autorizada')
   })
 })

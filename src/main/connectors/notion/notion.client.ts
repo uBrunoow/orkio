@@ -99,13 +99,20 @@ export interface NotionClient {
   getDataSource(token: string, id: string): Promise<unknown>
   /** POST /v1/data_sources/{id}/query. */
   queryDataSource(token: string, id: string, options?: NotionQueryOptions): Promise<NotionListPage>
+  /**
+   * PATCH /v1/pages/{id} com `{ properties }` (ex.: `{ "<id>": { status: { name } } }`).
+   * Exige a capacidade "Update content" da conexão (sem ela: 403).
+   */
+  updatePage(token: string, id: string, properties: Record<string, unknown>): Promise<void>
+  /** PATCH /v1/data_sources/{id} com `{ properties }` (adicionar/alterar propriedades do schema). */
+  updateDataSource(token: string, id: string, properties: Record<string, unknown>): Promise<unknown>
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PATCH'
   body?: unknown
   /** Contexto da mensagem de 403/404. */
-  kind?: 'self' | 'data'
+  kind?: 'self' | 'data' | 'write'
 }
 
 export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
@@ -158,7 +165,8 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
     options: RequestOptions
   ): Promise<unknown> {
     for (let attempt = 0; ; attempt++) {
-      const response = await queue.run(() => send(path, token, { ...options, kind: 'data' }))
+      const kind = options.kind === 'write' ? 'write' : 'data'
+      const response = await queue.run(() => send(path, token, { ...options, kind }))
       if (response.ok) return readJson(response)
 
       if (response.status === 429) {
@@ -171,7 +179,7 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
         throw rateLimited(waitMs)
       }
 
-      throw errorForStatus(response.status, 'data')
+      throw errorForStatus(response.status, kind)
     }
   }
 
@@ -207,6 +215,22 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
       if (options.startCursor) body['start_cursor'] = options.startCursor
       const path = `/data_sources/${encodeURIComponent(id)}/query`
       return parseListPage(await dataRequest(path, token, { method: 'POST', body }))
+    },
+
+    async updatePage(token, id, properties) {
+      await dataRequest(`/pages/${encodeURIComponent(id)}`, token, {
+        method: 'PATCH',
+        body: { properties },
+        kind: 'write'
+      })
+    },
+
+    async updateDataSource(token, id, properties) {
+      return dataRequest(`/data_sources/${encodeURIComponent(id)}`, token, {
+        method: 'PATCH',
+        body: { properties },
+        kind: 'write'
+      })
     }
   }
 }
@@ -256,7 +280,38 @@ async function fetchWithTimeout(
   }
 }
 
-function errorForStatus(status: number, kind: 'self' | 'data'): NotionApiError {
+function errorForStatus(status: number, kind: 'self' | 'data' | 'write'): NotionApiError {
+  if (kind === 'write') {
+    if (status === 403) {
+      return new NotionApiError(
+        'forbidden',
+        'O Notion não deixou o Orkio editar: a conexão precisa da capacidade “Update content” ' +
+          '(Inserir/atualizar conteúdo) e acesso a esta página.',
+        status
+      )
+    }
+    if (status === 404) {
+      return new NotionApiError(
+        'not_found',
+        'O Notion não encontrou a página: ela foi apagada ou não está mais compartilhada com o Orkio.',
+        status
+      )
+    }
+    if (status === 400) {
+      return new NotionApiError(
+        'bad_request',
+        'O Notion recusou a alteração (a opção de status pode não existir mais). Revise o quadro.',
+        status
+      )
+    }
+    if (status === 409) {
+      return new NotionApiError(
+        'server',
+        'O Notion detectou uma edição simultânea. Vamos tentar de novo.',
+        status
+      )
+    }
+  }
   if (status === 401) {
     return new NotionApiError(
       'unauthorized',

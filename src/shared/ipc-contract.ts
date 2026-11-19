@@ -3,9 +3,10 @@
  * Só tipos e constantes — nada aqui pode depender de Node ou do DOM.
  */
 
+import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
 import type { TaskSignals } from './task-signals'
 
-export type { TaskSignals }
+export type { BoardConfig, BoardStage, StageIssue, StatusOption, TaskSignals }
 
 export const IPC_CHANNELS = {
   notion: {
@@ -29,6 +30,16 @@ export const IPC_CHANNELS = {
   },
   signals: {
     get: 'signals:get'
+  },
+  board: {
+    get: 'board:get',
+    save: 'board:save',
+    move: 'board:move',
+    setBlocked: 'board:set-blocked',
+    history: 'board:history',
+    retryNow: 'board:retry-now',
+    /** Evento main → renderer: resultado/estado de uma escrita no Notion. */
+    syncChanged: 'board:sync-changed'
   },
   notionWorkspace: {
     getStatus: 'notion-workspace:get-status',
@@ -213,8 +224,11 @@ export interface NotionTask {
   /** Ex.: "ORK-142". */
   displayId: string | null
   title: string
-  status: { name: string; color: NotionColor } | null
+  /** `id` da opção (estável a renomeações), quando o Notion informa. */
+  status: { id?: string | null; name: string; color: NotionColor } | null
   priority: { name: string; color: NotionColor } | null
+  /** Nomes dos responsáveis (se mapeado). */
+  assignees: string[]
 }
 
 export interface NotionTasksResult {
@@ -264,6 +278,77 @@ export interface TaskSignalsResult {
   /** Tarefas cujo ID não tem prefixo (não dá para casar com branches/PRs). */
   tasksWithoutPrefix: number
   fetchedAt: string
+}
+
+// ---------- Quadro (Etapa 3A) ----------
+
+export type CardSyncState = 'synced' | 'pending' | 'failed'
+
+export interface BoardCard {
+  taskId: string
+  displayId: string | null
+  title: string
+  url: string | null
+  status: { name: string; color: NotionColor } | null
+  priority: { name: string; color: NotionColor } | null
+  assignees: string[]
+  /** `null` = "Sem etapa" (nenhuma etapa usa o status atual do Notion). */
+  stageId: string | null
+  blocked: boolean
+  sync: { state: CardSyncState; message?: string }
+}
+
+export interface BoardView {
+  projectId: string
+  projectName: string
+  /** `null` = quadro ainda não criado: use `setup`. */
+  config: BoardConfig | null
+  /** Sugestão do template padrão contra as opções reais (só quando `config` é null). */
+  suggestion: BoardStage[] | null
+  /** Opções atuais do status mapeado na 2C. */
+  statusOptions: StatusOption[]
+  /** Propriedades do banco de Tarefas elegíveis para "Etapa Orkio" (select) e "Bloqueada" (checkbox). */
+  selectProperties: { id: string; name: string; options: StatusOption[] }[]
+  checkboxProperties: { id: string; name: string }[]
+  issues: StageIssue[]
+  cards: BoardCard[]
+  truncated: boolean
+  pendingCount: number
+  fetchedAt: string
+}
+
+export type OrkioStageChoice =
+  | { mode: 'none' }
+  | { mode: 'existing'; propertyId: string }
+  /** Cria a propriedade select "Etapa Orkio" no banco de Tarefas (só com confirmação). */
+  | { mode: 'create' }
+
+export interface BoardSaveInput {
+  stages: { id: string | null; name: string; notionStatusId: string }[]
+  orkioStage: OrkioStageChoice
+  /** Autoriza adicionar ao select "Etapa Orkio" as opções que faltam. */
+  addMissingOptions: boolean
+  blockedPropertyId: string | null
+}
+
+export interface BoardSyncEvent {
+  projectId: string
+  taskId: string
+  state: CardSyncState
+  stageId: string | null
+  blocked: boolean
+  message?: string
+  canReconnect?: boolean
+}
+
+export interface BoardHistoryEntry {
+  id: number
+  at: string
+  kind: string
+  source: 'manual' | 'notion' | 'automation'
+  fromStage: string | null
+  toStage: string | null
+  detail: Record<string, unknown> | null
 }
 
 // ---------- Projetos ----------
@@ -434,6 +519,21 @@ export interface OrkioApi {
     /** Resolve quando o fluxo termina: conectado, erro ou cancelado (status salvo). */
     waitDeviceFlow(): Promise<ConnectionStatus>
     cancelDeviceFlow(): Promise<void>
+  }
+  /** Quadro kanban por projeto (Etapa 3A). */
+  board: {
+    get(projectId: string, options?: { force?: boolean }): Promise<NotionResult<BoardView>>
+    save(projectId: string, input: BoardSaveInput): Promise<NotionResult<BoardView>>
+    move(projectId: string, taskId: string, stageId: string): Promise<NotionResult<BoardCard>>
+    setBlocked(
+      projectId: string,
+      taskId: string,
+      blocked: boolean
+    ): Promise<NotionResult<BoardCard>>
+    history(projectId: string, taskId: string): Promise<NotionResult<BoardHistoryEntry[]>>
+    /** Tenta agora as escritas pendentes. */
+    retryNow(): Promise<void>
+    onSyncChanged(listener: (event: BoardSyncEvent) => void): () => void
   }
   /** Branches e PRs ligadas às tarefas de um projeto pelo ID (só leitura). */
   signals: {

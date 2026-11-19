@@ -2,7 +2,9 @@
  * Formato do arquivo de configuração não secreta do Orkio (userData/orkio-config.json).
  * Nada de tokens aqui: segredos vão no SecureStore.
  */
+import type { BoardConfig, BoardStage } from '../../shared/board'
 import type {
+  NotionColor,
   NotionMapping,
   NotionPropertyRef,
   NotionWorkspaceConfig,
@@ -14,8 +16,9 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
 /**
  * v1: projects. v2: `notion` (bancos de Projetos/Tarefas + mapeamento) e `notionProject` em cada
  * projeto (vínculo com uma página do banco de Projetos). Só ids e nomes, nunca conteúdo.
+ * v3: `boards` (quadro kanban por projeto: etapas ↔ opções do status do Notion).
  */
-export const ORKIO_CONFIG_VERSION = 2
+export const ORKIO_CONFIG_VERSION = 3
 
 export interface StoredProject {
   id: string
@@ -31,10 +34,12 @@ export interface StoredProject {
 export interface OrkioConfig {
   projects: StoredProject[]
   notion: NotionWorkspaceConfig | null
+  /** Quadro de cada projeto (chave: id do projeto). */
+  boards: Record<string, BoardConfig>
 }
 
 export function emptyConfig(): OrkioConfig {
-  return { projects: [], notion: null }
+  return { projects: [], notion: null, boards: {} }
 }
 
 export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
@@ -51,7 +56,9 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
         projects: Array.isArray(data['projects'])
           ? data['projects'].map((p: unknown) => (isRecord(p) ? { ...p, notionProject: null } : p))
           : []
-      })
+      }),
+      // v2 → v3: nenhum quadro ainda.
+      2: (data) => ({ ...data, boards: {} })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -76,7 +83,18 @@ export function validateConfig(
     }
   }
 
-  const value: OrkioConfig = { projects, notion }
+  // Quadros: um inválido é descartado sozinho, com aviso.
+  const boards: Record<string, BoardConfig> = {}
+  const rawBoards = data['boards']
+  if (isRecord(rawBoards)) {
+    for (const [projectId, raw] of Object.entries(rawBoards)) {
+      const board = parseBoard(raw)
+      if (board) boards[projectId] = board
+      else warnings.push('Um quadro com dados inválidos foi descartado e precisa ser recriado.')
+    }
+  }
+
+  const value: OrkioConfig = { projects, notion, boards }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
 }
 
@@ -162,4 +180,52 @@ function parseRepo(value: unknown): ProjectRepo | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+const COLORS = [
+  'default',
+  'gray',
+  'brown',
+  'orange',
+  'yellow',
+  'green',
+  'blue',
+  'purple',
+  'pink',
+  'red'
+]
+
+function parseStage(value: unknown, index: number): BoardStage | null {
+  if (!isRecord(value)) return null
+  const { id, name } = value
+  const status = value['notionStatus']
+  if (typeof id !== 'string' || !id || typeof name !== 'string' || !isRecord(status)) return null
+  if (typeof status['name'] !== 'string') return null
+  const stage: BoardStage = {
+    id,
+    name,
+    order: index,
+    notionStatus: {
+      id: typeof status['id'] === 'string' && status['id'] ? status['id'] : null,
+      name: status['name']
+    }
+  }
+  if (typeof value['color'] === 'string' && COLORS.includes(value['color'])) {
+    stage.color = value['color'] as NotionColor
+  }
+  return stage
+}
+
+export function parseBoard(value: unknown): BoardConfig | null {
+  if (!isRecord(value) || !Array.isArray(value['stages'])) return null
+  const stages = value['stages'].map(parseStage)
+  if (stages.some((s) => s === null) || stages.length === 0) return null
+  const ids = new Set(stages.map((s) => s!.id))
+  if (ids.size !== stages.length) return null
+  return {
+    stages: stages as BoardStage[],
+    orkioStageProperty: nameRef(value['orkioStageProperty']),
+    blockedProperty: nameRef(value['blockedProperty']),
+    updatedAt: typeof value['updatedAt'] === 'string' ? value['updatedAt'] : ''
+  }
 }

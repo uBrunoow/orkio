@@ -399,3 +399,54 @@ describe('leituras de dados (data sources)', () => {
     expect(peak).toBe(2)
   })
 })
+
+describe('escritas (Etapa 3A)', () => {
+  function setup(responses: (() => Response)[]) {
+    const fetchMock = vi.fn<typeof fetch>(async () => responses.shift()!())
+    const client = createNotionClient({
+      fetch: fetchMock,
+      queue: new RateQueue({ concurrency: 1, minIntervalMs: 0 })
+    })
+    return { client, fetchMock }
+  }
+
+  it('updatePage: PATCH /pages/{id} com { properties } e versão da API', async () => {
+    const { client, fetchMock } = setup([() => jsonResponse({ object: 'page', id: 'p' })])
+    await client.updatePage(TOKEN, 'page-1', { 'st%3A': { status: { name: 'Finalizadas' } } })
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('https://api.notion.com/v1/pages/page-1')
+    expect(init?.method).toBe('PATCH')
+    expect((init?.headers as Record<string, string>)['Notion-Version']).toBe(NOTION_VERSION)
+    expect(JSON.parse(String(init?.body))).toEqual({
+      properties: { 'st%3A': { status: { name: 'Finalizadas' } } }
+    })
+  })
+
+  it('updateDataSource: PATCH /data_sources/{id}', async () => {
+    const { client, fetchMock } = setup([() => jsonResponse({ object: 'data_source' })])
+    await client.updateDataSource(TOKEN, 'ds', { 'Etapa Orkio': { select: { options: [] } } })
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://api.notion.com/v1/data_sources/ds')
+    expect(fetchMock.mock.calls[0]![1]?.method).toBe('PATCH')
+  })
+
+  it('403/404/400/409 de escrita viram mensagens próprias, sem vazar token', async () => {
+    const { client } = setup([
+      () => new Response('{}', { status: 403 }),
+      () => new Response('{}', { status: 404 }),
+      () => new Response(JSON.stringify({ message: TOKEN }), { status: 400 }),
+      () => new Response('{}', { status: 409 })
+    ])
+    const codes: [string, RegExp][] = [
+      ['forbidden', /Update content/],
+      ['not_found', /não encontrou a página/],
+      ['bad_request', /recusou a alteração/],
+      ['server', /edição simultânea/]
+    ]
+    for (const [code, message] of codes) {
+      const error = await client.updatePage(TOKEN, 'p', {}).catch((e: unknown) => e)
+      expect(error).toMatchObject({ code })
+      expect((error as Error).message).toMatch(message)
+      expectNoTokenLeak(error)
+    }
+  })
+})

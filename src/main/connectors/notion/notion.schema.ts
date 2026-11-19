@@ -296,12 +296,50 @@ export function parseTaskPage(body: unknown, mapping: NotionMapping): NotionTask
     url: httpsUrlOrNull(body['url']),
     displayId,
     title,
-    status: optionValue(propertyValue(body, mapping.status.id)),
-    priority: mapping.priority ? optionValue(propertyValue(body, mapping.priority.id)) : null
+    status: optionValue(propertyValue(body, mapping.status.id), true),
+    priority: mapping.priority ? optionValue(propertyValue(body, mapping.priority.id)) : null,
+    assignees: mapping.assignee ? peopleNames(propertyValue(body, mapping.assignee.id)) : []
   }
 }
 
-function optionValue(value: Record<string, unknown> | null): NotionTask['status'] {
+function peopleNames(value: Record<string, unknown> | null): string[] {
+  const people = value?.['people']
+  if (!Array.isArray(people)) return []
+  return people
+    .map((p) => (isRecord(p) ? stringOrNull(p['name']) : null))
+    .filter((n): n is string => n !== null)
+}
+
+/** Valor simples de uma propriedade select/status/checkbox (para o quadro; só em memória). */
+export type SimplePropertyValue =
+  | { type: 'select' | 'status'; id: string | null; name: string | null }
+  | { type: 'checkbox'; checked: boolean }
+
+/** Valores select/status/checkbox da página, por id da propriedade. */
+export function simplePropertyValues(body: unknown): Record<string, SimplePropertyValue> {
+  const result: Record<string, SimplePropertyValue> = {}
+  const props = isRecord(body) ? body['properties'] : null
+  if (!isRecord(props)) return result
+  for (const value of Object.values(props)) {
+    if (!isRecord(value)) continue
+    const id = stringOrNull(value['id'])
+    const type = value['type']
+    if (!id) continue
+    if (type === 'checkbox') {
+      result[id] = { type, checked: value['checkbox'] === true }
+    } else if (type === 'select' || type === 'status') {
+      const option = value[type]
+      result[id] = {
+        type,
+        id: isRecord(option) ? stringOrNull(option['id']) : null,
+        name: isRecord(option) ? stringOrNull(option['name']) : null
+      }
+    }
+  }
+  return result
+}
+
+function optionValue(value: Record<string, unknown> | null, withId = false): NotionTask['status'] {
   if (!value) return null
   const type = value['type']
   if (type === 'number') {
@@ -312,7 +350,10 @@ function optionValue(value: Record<string, unknown> | null): NotionTask['status'
   const option = typeof type === 'string' ? value[type] : null
   if (!isRecord(option)) return null
   const name = stringOrNull(option['name'])
-  return name ? { name, color: color(option['color']) } : null
+  if (!name) return null
+  return withId
+    ? { id: stringOrNull(option['id']), name, color: color(option['color']) }
+    : { name, color: color(option['color']) }
 }
 
 // ---------- Similaridade de nomes (vínculo projeto local ↔ Notion) ----------

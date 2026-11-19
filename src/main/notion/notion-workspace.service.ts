@@ -12,6 +12,7 @@ import type {
   NotionMappingField,
   NotionProjectChoice,
   NotionProjectPage,
+  NotionPropertySummary,
   NotionResult,
   NotionTask,
   NotionTasksResult,
@@ -20,6 +21,7 @@ import type {
   NotionWorkspaceInput,
   NotionWorkspaceStatus
 } from '../../shared/ipc-contract'
+import type { StatusOption } from '../../shared/board'
 import type { OrkioConfig } from '../config/orkio-config'
 import {
   NotionApiError,
@@ -35,6 +37,8 @@ import {
   parseDataSourceSummary,
   parseProjectPage,
   parseTaskPage,
+  simplePropertyValues,
+  type SimplePropertyValue,
   sameId,
   suggestMapping,
   toRef,
@@ -93,6 +97,14 @@ class WorkspaceError extends Error {
   }
 }
 
+export interface CachedTasks {
+  tasks: NotionTask[]
+  /** Valores select/status/checkbox por id da página e da propriedade. */
+  values: Record<string, Record<string, SimplePropertyValue>>
+  truncated: boolean
+  fetchedAt: string
+}
+
 interface CacheEntry<T> {
   value: T
   expiresAt: number
@@ -103,7 +115,7 @@ export class NotionWorkspaceService {
   private readonly ttl: number
   private status: NotionWorkspaceStatus | null = null
   private checking: Promise<NotionWorkspaceStatus> | null = null
-  private readonly tasksCache = new Map<string, CacheEntry<Omit<NotionTasksResult, 'fromCache'>>>()
+  private readonly tasksCache = new Map<string, CacheEntry<CachedTasks>>()
   private projectsCache: CacheEntry<{ pages: NotionProjectPage[]; truncated: boolean }> | null =
     null
   private configVersion = 0
@@ -403,41 +415,111 @@ export class NotionWorkspaceService {
     options: { force?: boolean } = {}
   ): Promise<NotionResult<NotionTasksResult>> {
     return this.wrap(async () => {
-      const config = this.requireConfig()
-      const project = this.findProject(projectId)
-      if (!project.notionProject) {
-        throw new WorkspaceError({ code: 'not_linked', message: WORKSPACE_MESSAGES.notLinked })
+      const { value, fromCache } = await this.loadTasks(projectId, options.force === true)
+      return {
+        tasks: value.tasks,
+        truncated: value.truncated,
+        fetchedAt: value.fetchedAt,
+        fromCache
       }
-      const status = await this.getStatus()
-      if (status.health === 'broken') {
-        throw new WorkspaceError({
-          code: 'broken',
-          message: [WORKSPACE_MESSAGES.broken, ...status.messages].join(' ')
-        })
-      }
-      const mapping = status.config?.mapping ?? config.mapping
-
-      const key = `${projectId}:${project.notionProject.id}:${this.configVersion}`
-      const cached = this.tasksCache.get(key)
-      if (!options.force && cached && cached.expiresAt > this.now().getTime()) {
-        return { ...cached.value, fromCache: true }
-      }
-
-      const pageId = project.notionProject.id
-      const { items, truncated } = await this.paginate((cursor) =>
-        this.deps.notion.queryDataSource(config.tasksDataSource.id, {
-          filter: { property: mapping.project.id, relation: { contains: pageId } },
-          sorts: [{ timestamp: 'created_time', direction: 'descending' }],
-          startCursor: cursor
-        })
-      )
-      const tasks = items
-        .map((item) => parseTaskPage(item, mapping))
-        .filter((t): t is NotionTask => t !== null)
-      const value = { tasks, truncated, fetchedAt: this.now().toISOString() }
-      this.tasksCache.set(key, { value, expiresAt: this.now().getTime() + this.ttl })
-      return { ...value, fromCache: false }
     })
+  }
+
+  /**
+   * Para o quadro (3A): tarefas + valores select/status/checkbox por página (só em memória),
+   * o mapeamento em uso e o data source das Tarefas.
+   */
+  async boardTasks(
+    projectId: string,
+    options: { force?: boolean } = {}
+  ): Promise<
+    NotionResult<
+      CachedTasks & {
+        fromCache: boolean
+        mapping: NotionMapping
+        tasksDataSourceId: string
+      }
+    >
+  > {
+    return this.wrap(async () => {
+      const { value, fromCache } = await this.loadTasks(projectId, options.force === true)
+      const config = this.requireConfig()
+      const mapping = this.status?.config?.mapping ?? config.mapping
+      return { ...value, fromCache, mapping, tasksDataSourceId: config.tasksDataSource.id }
+    })
+  }
+
+  /** Opções atuais do status mapeado (relê o schema das Tarefas). */
+  async statusOptions(): Promise<
+    NotionResult<{
+      options: StatusOption[]
+      statusType: string
+      properties: NotionPropertySummary[]
+    }>
+  > {
+    return this.wrap(async () => {
+      const config = this.requireConfig()
+      const schema = await this.loadSchema(config.tasksDataSource.id)
+      const property = schema.properties.find((p) => p.id === config.mapping.status.id)
+      if (!property) {
+        throw new WorkspaceError({ code: 'broken', message: WORKSPACE_MESSAGES.broken })
+      }
+      return {
+        options: (property.options ?? []).map((o) => ({ id: o.id, name: o.name, color: o.color })),
+        statusType: property.type,
+        properties: schema.properties
+      }
+    })
+  }
+
+  /** Esquece as tarefas em cache de um projeto (ex.: depois de escrever no Notion). */
+  invalidateTasks(projectId: string): void {
+    this.dropTasksCache(projectId)
+  }
+
+  private async loadTasks(
+    projectId: string,
+    force: boolean
+  ): Promise<{ value: CachedTasks; fromCache: boolean }> {
+    const config = this.requireConfig()
+    const project = this.findProject(projectId)
+    if (!project.notionProject) {
+      throw new WorkspaceError({ code: 'not_linked', message: WORKSPACE_MESSAGES.notLinked })
+    }
+    const status = await this.getStatus()
+    if (status.health === 'broken') {
+      throw new WorkspaceError({
+        code: 'broken',
+        message: [WORKSPACE_MESSAGES.broken, ...status.messages].join(' ')
+      })
+    }
+    const mapping = status.config?.mapping ?? config.mapping
+
+    const key = `${projectId}:${project.notionProject.id}:${this.configVersion}`
+    const cached = this.tasksCache.get(key)
+    if (!force && cached && cached.expiresAt > this.now().getTime()) {
+      return { value: cached.value, fromCache: true }
+    }
+
+    const pageId = project.notionProject.id
+    const { items, truncated } = await this.paginate((cursor) =>
+      this.deps.notion.queryDataSource(config.tasksDataSource.id, {
+        filter: { property: mapping.project.id, relation: { contains: pageId } },
+        sorts: [{ timestamp: 'created_time', direction: 'descending' }],
+        startCursor: cursor
+      })
+    )
+    const tasks: NotionTask[] = []
+    const values: Record<string, Record<string, SimplePropertyValue>> = {}
+    for (const item of items) {
+      const task = parseTaskPage(item, mapping)
+      if (!task) continue
+      tasks.push(task)
+      values[task.id] = simplePropertyValues(item)
+    }
+    const value: CachedTasks = { tasks, values, truncated, fetchedAt: this.now().toISOString() }
+    this.tasksCache.set(key, { value, expiresAt: this.now().getTime() + this.ttl })
+    return { value, fromCache: false }
   }
 
   // ---------- Auxiliares ----------
