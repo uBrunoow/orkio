@@ -11,6 +11,7 @@ import type {
 import {
   GitHubApiError,
   isTransientGitHubError,
+  type ConditionalPage,
   type GitHubClient,
   type GitHubRepo,
   type GitHubUser
@@ -170,6 +171,25 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
    */
   async getRepository(owner: string, name: string): Promise<GitHubRepo> {
     return this.withAccessToken((token) => this.deps.client.getRepository(token, owner, name))
+  }
+
+  /**
+   * GET condicional (ETag) de uma página da API de repositórios, para os sinais da 2D.
+   * Só caminhos de repositório; o token nunca sai do conector.
+   */
+  async getConditional(path: string, etag: string | null): Promise<ConditionalPage> {
+    if (!/^\/(repos|repositories)\//.test(path)) {
+      throw new GitHubApiError('unexpected', 'Caminho da API do GitHub não permitido.')
+    }
+    return this.withAccessToken((token) => this.deps.client.getConditional(token, path, etag))
+  }
+
+  /** Consulta GraphQL (detalhes de PRs: revisão, threads, checks). */
+  async graphql(
+    query: string,
+    variables: Record<string, unknown>
+  ): Promise<{ data: unknown; errors: { type: string | null; path: string[] }[] }> {
+    return this.withAccessToken((token) => this.deps.client.graphql(token, query, variables))
   }
 
   /**

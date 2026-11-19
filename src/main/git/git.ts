@@ -50,6 +50,8 @@ export interface Git {
   isDirty(root: string): Promise<boolean>
   /** Branch padrão conhecida localmente (refs/remotes/<remote>/HEAD), se houver. */
   remoteDefaultBranch(root: string, remote: string): Promise<string | null>
+  /** Nomes das branches locais (refs/heads). */
+  localBranches(root: string): Promise<string[]>
 }
 
 export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = {}): Git {
@@ -95,6 +97,13 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
     },
     async isDirty(root) {
       return (await git(root, ['status', '--porcelain'])).trim() !== ''
+    },
+    async localBranches(root) {
+      const out = await git(root, ['for-each-ref', '--format=%(refname:short)', 'refs/heads'])
+      return out
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
     },
     async remoteDefaultBranch(root, remote) {
       try {

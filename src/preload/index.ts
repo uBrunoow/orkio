@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS, type BranchChangedEvent, type OrkioApi } from '../shared/ipc-contract'
 
-const { notion, github, notionWorkspace, projects, shell } = IPC_CHANNELS
+const { notion, github, notionWorkspace, signals, projects, shell } = IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
 const api: OrkioApi = {
@@ -47,6 +47,10 @@ const api: OrkioApi = {
     unlink: (projectId) => ipcRenderer.invoke(notionWorkspace.unlink, projectId),
     listTasks: (projectId, options) =>
       ipcRenderer.invoke(notionWorkspace.listTasks, projectId, { force: options?.force === true })
+  },
+  signals: {
+    get: (projectId, options) =>
+      ipcRenderer.invoke(signals.get, projectId, { force: options?.force === true })
   },
   projects: {
     list: () => ipcRenderer.invoke(projects.list),

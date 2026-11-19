@@ -81,9 +81,25 @@ export interface GitHubClientDeps {
   now?: () => number
 }
 
+/** Resultado de um GET condicional (ETag/If-None-Match). */
+export type ConditionalPage =
+  | { notModified: true }
+  | { notModified: false; body: unknown; etag: string | null; nextPath: string | null }
+
 export interface GitHubClient {
   getUser(token: string): Promise<GitHubUser>
   getRepository(token: string, owner: string, name: string): Promise<GitHubRepo>
+  /**
+   * GET de uma página da API REST com `If-None-Match`. 304 → `notModified` (não gasta o rate
+   * limit primário). `nextPath` vem do header `Link` (rel="next"), só em api.github.com.
+   */
+  getConditional(token: string, path: string, etag: string | null): Promise<ConditionalPage>
+  /** POST /graphql. Devolve `data` (pode ser parcial; erros por campo vêm em `errors`). */
+  graphql(
+    token: string,
+    query: string,
+    variables: Record<string, unknown>
+  ): Promise<{ data: unknown; errors: { type: string | null; path: string[] }[] }>
 }
 
 export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
@@ -92,15 +108,20 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
   const timeoutMs = deps.timeoutMs ?? GITHUB_REQUEST_TIMEOUT_MS
   const now = deps.now ?? Date.now
 
-  async function request(path: string, token: string): Promise<Response> {
+  async function request(
+    path: string,
+    token: string,
+    options: RequestOptions = {}
+  ): Promise<Response> {
     for (let attempt = 0; ; attempt++) {
       const response = await fetchWithTimeout(
         doFetch,
         `${GITHUB_API_BASE_URL}${path}`,
         token,
-        timeoutMs
+        timeoutMs,
+        options
       )
-      if (response.ok) return response
+      if (response.ok || response.status === 304) return response
 
       const body = await response.text().catch(() => '')
       const rateLimitWait = rateLimitWaitMs(response, body, now())
@@ -137,8 +158,78 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
       const repo = parseRepository(await json(response))
       if (!repo) throw unexpected(response.status)
       return repo
+    },
+
+    async getConditional(token, path, etag) {
+      const response = await request(
+        path,
+        token,
+        etag ? { headers: { 'If-None-Match': etag } } : {}
+      )
+      if (response.status === 304) return { notModified: true }
+      return {
+        notModified: false,
+        body: await json(response),
+        etag: response.headers.get('etag'),
+        nextPath: parseNextLink(response.headers.get('link'))
+      }
+    },
+
+    async graphql(token, query, variables) {
+      const response = await request('/graphql', token, {
+        method: 'POST',
+        body: JSON.stringify({ query, variables })
+      })
+      const body = await json(response)
+      if (!isRecord(body)) throw unexpected(response.status)
+      const errors = Array.isArray(body['errors'])
+        ? body['errors'].filter(isRecord).map((e) => ({
+            type: stringOrNull(e['type']),
+            path: Array.isArray(e['path']) ? e['path'].map(String) : []
+          }))
+        : []
+      if (!isRecord(body['data'])) {
+        // Sem dados: erro geral (ex.: token sem acesso ao recurso).
+        throw errors.some((e) => e.type === 'INSUFFICIENT_SCOPES' || e.type === 'FORBIDDEN')
+          ? new GitHubApiError(
+              'forbidden',
+              'O token do GitHub não tem permissão para ler os detalhes das PRs.',
+              response.status
+            )
+          : errors.some((e) => e.type === 'NOT_FOUND')
+            ? new GitHubApiError(
+                'not_found',
+                'O GitHub não encontrou este repositório com a conta conectada: ele não existe ou a conta não tem acesso.',
+                response.status
+              )
+            : unexpected(response.status)
+      }
+      return { data: body['data'], errors }
     }
   }
+}
+
+interface RequestOptions {
+  method?: 'GET' | 'POST'
+  body?: string
+  headers?: Record<string, string>
+}
+
+/** Link: <https://api.github.com/repositories/1/pulls?page=2>; rel="next" → caminho validado. */
+export function parseNextLink(header: string | null): string | null {
+  if (!header) return null
+  for (const part of header.split(',')) {
+    const match = /<([^>]+)>\s*;\s*rel="?next"?/i.exec(part)
+    if (!match) continue
+    try {
+      const url = new URL(match[1]!)
+      if (url.protocol !== 'https:' || url.hostname !== 'api.github.com') return null
+      return `${url.pathname}${url.search}`
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 export function githubHeaders(token: string): Record<string, string> {
@@ -154,14 +245,18 @@ async function fetchWithTimeout(
   doFetch: typeof fetch,
   url: string,
   token: string,
-  timeoutMs: number
+  timeoutMs: number,
+  options: RequestOptions = {}
 ): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const headers = { ...githubHeaders(token), ...options.headers }
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   try {
     return await doFetch(url, {
-      method: 'GET',
-      headers: githubHeaders(token),
+      method: options.method ?? 'GET',
+      headers,
+      ...(options.body !== undefined ? { body: options.body } : {}),
       signal: controller.signal
     })
   } catch {
@@ -362,4 +457,52 @@ export function parseRepository(body: unknown): GitHubRepo | null {
     archived: body['archived'] === true,
     canPush: permissions['push'] === true || permissions['admin'] === true
   }
+}
+
+// ---------- Parsing de branches e PRs (REST) ----------
+
+export interface GitHubPullItem {
+  number: number
+  title: string
+  url: string
+  state: 'draft' | 'open' | 'merged' | 'closed'
+  merged: boolean
+  headRef: string
+  updatedAt: string
+}
+
+/** Item de GET /repos/{o}/{r}/pulls. URL só se for uma PR em github.com. */
+export function parsePullItem(value: unknown): GitHubPullItem | null {
+  if (!isRecord(value)) return null
+  const number = value['number']
+  const title = typeof value['title'] === 'string' ? value['title'] : ''
+  const htmlUrl = httpsUrlOrNull(value['html_url'])
+  const updatedAt = stringOrNull(value['updated_at'])
+  const head = isRecord(value['head']) ? stringOrNull(value['head']['ref']) : null
+  if (typeof number !== 'number' || !htmlUrl || !updatedAt) return null
+  let url: string
+  try {
+    const parsed = new URL(htmlUrl)
+    if (parsed.hostname !== 'github.com' || !/^\/[^/]+\/[^/]+\/pull\/\d+$/.test(parsed.pathname)) {
+      return null
+    }
+    url = parsed.toString()
+  } catch {
+    return null
+  }
+  const merged = typeof value['merged_at'] === 'string' && value['merged_at'] !== ''
+  const state =
+    value['state'] === 'open'
+      ? value['draft'] === true
+        ? 'draft'
+        : 'open'
+      : merged
+        ? 'merged'
+        : 'closed'
+  return { number, title, url, state, merged, headRef: head ?? '', updatedAt }
+}
+
+/** Item de GET /repos/{o}/{r}/branches. */
+export function parseBranchItem(value: unknown): string | null {
+  return isRecord(value) ? stringOrNull(value['name']) : null
 }

@@ -27,6 +27,8 @@ import { ORKIO_CONFIG_FILE, createOrkioConfigStore } from './config/orkio-config
 import { createGit } from './git/git'
 import { registerNotionWorkspaceIpc } from './ipc/notion-workspace.ipc'
 import { registerProjectsIpc } from './ipc/projects.ipc'
+import { registerSignalsIpc } from './ipc/signals.ipc'
+import { TaskSignalsService } from './signals/task-signals.service'
 import { NotionWorkspaceService } from './notion/notion-workspace.service'
 import { authorizeViaLoopback } from './oauth/loopback'
 import { ProjectsService } from './projects/projects.service'
@@ -158,6 +160,20 @@ function registerIpc(): void {
   registerGitHubIpc(ipcMain, github, isTrustedSender, { onDeviceFlowFinished: focusSender })
   registerProjectsIpc(ipcMain, projects, isTrustedSender, projectsReady)
   registerNotionWorkspaceIpc(ipcMain, notionWorkspace, isTrustedSender, projectsReady)
+
+  const signals = new TaskSignalsService({
+    store: configStore,
+    git: createGit(),
+    // O token fica no conector; o serviço só faz leituras de repositório.
+    github: {
+      isConnected: () => github.isConnected(),
+      accessSettingsUrl: () => github.accessSettingsUrl(),
+      getConditional: (path, etag) => github.getConditional(path, etag),
+      graphql: (query, variables) => github.graphql(query, variables)
+    },
+    listTasks: (projectId) => notionWorkspace.listTasks(projectId)
+  })
+  registerSignalsIpc(ipcMain, signals, isTrustedSender, projectsReady)
   registerShellIpc(ipcMain, (url) => shell.openExternal(url), isTrustedSender)
 }
 

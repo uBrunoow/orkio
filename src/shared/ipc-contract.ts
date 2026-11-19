@@ -3,6 +3,10 @@
  * Só tipos e constantes — nada aqui pode depender de Node ou do DOM.
  */
 
+import type { TaskSignals } from './task-signals'
+
+export type { TaskSignals }
+
 export const IPC_CHANNELS = {
   notion: {
     getStatus: 'notion:get-status',
@@ -22,6 +26,9 @@ export const IPC_CHANNELS = {
     startDeviceFlow: 'github:device-flow-start',
     waitDeviceFlow: 'github:device-flow-wait',
     cancelDeviceFlow: 'github:device-flow-cancel'
+  },
+  signals: {
+    get: 'signals:get'
   },
   notionWorkspace: {
     getStatus: 'notion-workspace:get-status',
@@ -230,6 +237,35 @@ export type NotionResult<T> =
       }
     }
 
+// ---------- Sinais das tarefas (Etapa 2D) ----------
+
+/** Situação da parte do GitHub nos sinais. */
+export type SignalsGitHubState =
+  | 'ok'
+  | 'disconnected'
+  | 'no_repo'
+  | 'enterprise'
+  | 'no_access'
+  | 'sso'
+  | 'restricted'
+  | 'rate_limited'
+  | 'unverified'
+
+export interface TaskSignalsResult {
+  /** Por id da página da tarefa no Notion. */
+  signals: Record<string, TaskSignals>
+  github: SignalsGitHubState
+  /** Branches locais lidas? (pasta/git indisponível → false) */
+  local: boolean
+  /** Avisos curtos em pt-BR (sem GitHub, sem acesso, detalhes indisponíveis...). */
+  messages: string[]
+  /** Link sugerido (autorizar SSO, pedir aprovação da organização). */
+  action?: ProjectAction
+  /** Tarefas cujo ID não tem prefixo (não dá para casar com branches/PRs). */
+  tasksWithoutPrefix: number
+  fetchedAt: string
+}
+
 // ---------- Projetos ----------
 
 export interface ProjectRepo {
@@ -398,6 +434,10 @@ export interface OrkioApi {
     /** Resolve quando o fluxo termina: conectado, erro ou cancelado (status salvo). */
     waitDeviceFlow(): Promise<ConnectionStatus>
     cancelDeviceFlow(): Promise<void>
+  }
+  /** Branches e PRs ligadas às tarefas de um projeto pelo ID (só leitura). */
+  signals: {
+    get(projectId: string, options?: { force?: boolean }): Promise<NotionResult<TaskSignalsResult>>
   }
   /** Bancos do Notion (Projetos/Tarefas), vínculo com projetos locais e tarefas (só leitura). */
   notionWorkspace: {

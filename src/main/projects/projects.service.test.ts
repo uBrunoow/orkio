@@ -40,7 +40,8 @@ function fakeGit(repos: Record<string, FakeRepo>, opts: { gitMissing?: boolean }
     remotes: vi.fn(async (root: string) => repo(root).remotes),
     currentBranch: vi.fn(async (root: string) => repo(root).branch),
     isDirty: vi.fn(async (root: string) => repo(root).dirty),
-    remoteDefaultBranch: vi.fn(async () => 'main')
+    remoteDefaultBranch: vi.fn(async () => 'main'),
+    localBranches: vi.fn(async () => [])
   }
 }
 

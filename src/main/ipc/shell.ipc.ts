@@ -19,7 +19,9 @@ export const EXTERNAL_URL_RULES: readonly {
   // Acesso de organizações (restrição de OAuth Apps / fine-grained PATs) e SSO (SAML).
   { host: 'github.com', pathPrefix: '/settings/connections/applications' },
   { host: 'github.com', pathPrefix: '/settings/personal-access-tokens' },
-  { host: 'github.com', pathPattern: /^\/orgs\/[A-Za-z0-9-]+\/sso$/ }
+  { host: 'github.com', pathPattern: /^\/orgs\/[A-Za-z0-9-]+\/sso$/ },
+  // PRs ligadas às tarefas (Etapa 2D).
+  { host: 'github.com', pathPattern: /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/\d+$/ }
 ]
 
 export function isAllowedExternalUrl(value: unknown): value is string {

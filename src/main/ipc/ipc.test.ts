@@ -4,6 +4,7 @@ import { IPC_CHANNELS, type ConnectionStatus } from '../../shared/ipc-contract'
 import type { DeviceFlowConnector, OAuthConnector } from '../connectors/types'
 import { registerGitHubIpc } from './github.ipc'
 import { registerProjectsIpc } from './projects.ipc'
+import { registerSignalsIpc } from './signals.ipc'
 import { registerNotionIpc } from './notion.ipc'
 import { registerNotionWorkspaceIpc } from './notion-workspace.ipc'
 import { isAllowedExternalUrl, registerShellIpc } from './shell.ipc'
@@ -460,5 +461,36 @@ describe('registerNotionWorkspaceIpc', () => {
     ipc.trusted = false
     await expect(ipc.invoke(ch.getStatus)).rejects.toThrow('não autorizada')
     expect(service.getStatus).not.toHaveBeenCalled()
+  })
+})
+
+describe('registerSignalsIpc', () => {
+  it('valida o id do projeto, normaliza force e não vaza erro', async () => {
+    const ipc = fakeIpc()
+    const service = {
+      get: vi.fn(async () => {
+        throw new Error('gho_SECRET')
+      })
+    }
+    registerSignalsIpc(ipc, service as never, guard)
+    expect(await ipc.invoke(IPC_CHANNELS.signals.get, '../x')).toMatchObject({
+      ok: false,
+      error: { code: 'invalid' }
+    })
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const result = await ipc.invoke(IPC_CHANNELS.signals.get, 'proj-1', { force: 1 })
+    expect(service.get).toHaveBeenCalledWith('proj-1', { force: false })
+    expect(JSON.stringify(result)).not.toContain('SECRET')
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('SECRET')
+    errors.mockRestore()
+  })
+})
+
+describe('allowlist: PRs do GitHub', () => {
+  it('aceita só /<owner>/<repo>/pull/<n>', () => {
+    expect(isAllowedExternalUrl('https://github.com/acme/app.js/pull/12')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/pull/12/files')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/issues/12')).toBe(false)
+    expect(isAllowedExternalUrl('https://gist.github.com/acme/app/pull/12')).toBe(false)
   })
 })
