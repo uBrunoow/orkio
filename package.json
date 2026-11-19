@@ -25,6 +25,7 @@
     "typecheck:broker": "tsc --noEmit -p tsconfig.broker.json"
   },
   "devDependencies": {
+    "@astryxdesign/cli": "^0.7.16",
     "@eslint/js": "^10.0.1",
     "@fontsource/inter": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",

@@ -4,6 +4,9 @@
  */
 import { useId, useState, type FormEvent } from 'react'
 import type { ConnectedAccount, ConnectionStatus } from '../../../../shared/ipc-contract'
+import { Alert } from '../../components/Alert'
+
+export { Alert }
 
 /** O que está acontecendo agora, além do status persistido. */
 export type ConnectionActivity =
@@ -292,23 +295,6 @@ export function Avatar({ account }: { account: ConnectedAccount }): React.JSX.El
     <span className="avatar" aria-hidden="true">
       {initials(account.userName)}
     </span>
-  )
-}
-
-export function Alert({
-  tone,
-  children
-}: {
-  tone: 'danger' | 'warning'
-  children: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className={`alert alert--${tone}`} role={tone === 'danger' ? 'alert' : 'status'}>
-      <span className="alert__icon" aria-hidden="true">
-        !
-      </span>
-      <span>{children}</span>
-    </div>
   )
 }
 
