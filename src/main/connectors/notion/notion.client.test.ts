@@ -7,6 +7,7 @@ import {
   parseRetryAfterMs,
   parseSelf
 } from './notion.client'
+import { RateQueue } from '../../net/rate-queue'
 
 const TOKEN = 'ntn_test_token_SHOULD_NEVER_LEAK'
 
@@ -254,5 +255,150 @@ describe('parseSelf', () => {
       bot: { owner: { type: 'workspace', workspace: true }, workspace_name: 'Acme' }
     })
     expect(parsed).toMatchObject({ ownerName: null, workspaceName: 'Acme' })
+  })
+})
+
+describe('leituras de dados (data sources)', () => {
+  const DS = '22222222-2222-2222-2222-222222222222'
+
+  function setup(responses: (() => Response)[], random = () => 0) {
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      const next = responses.shift()
+      if (!next) throw new Error('sem resposta')
+      return next()
+    })
+    const queue = new RateQueue({ concurrency: 1, minIntervalMs: 0 })
+    const client = createNotionClient({ fetch: fetchMock, queue, random })
+    const call = (i: number) => {
+      const [url, init] = fetchMock.mock.calls[i]!
+      return {
+        url: String(url),
+        method: init?.method,
+        headers: init?.headers as Record<string, string>,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined
+      }
+    }
+    return { client, fetchMock, call }
+  }
+
+  const page = (results: unknown[], next: string | null) =>
+    jsonResponse({ object: 'list', results, has_more: next !== null, next_cursor: next })
+
+  it('searchDataSources: POST /search filtrando data sources, com cursor e busca', async () => {
+    const { client, call } = setup([() => page([{ id: 'a' }], 'c2')])
+    const result = await client.searchDataSources(TOKEN, { query: 'Tarefas', startCursor: 'c1' })
+    expect(result).toEqual({ results: [{ id: 'a' }], nextCursor: 'c2' })
+    const req = call(0)
+    expect(req.url).toBe('https://api.notion.com/v1/search')
+    expect(req.method).toBe('POST')
+    expect(req.headers['Notion-Version']).toBe(NOTION_VERSION)
+    expect(req.headers['Content-Type']).toBe('application/json')
+    expect(req.body).toMatchObject({
+      query: 'Tarefas',
+      start_cursor: 'c1',
+      filter: { property: 'object', value: 'data_source' },
+      page_size: 100
+    })
+  })
+
+  it('queryDataSource: filtro de relação, ordenação e filter_properties', async () => {
+    const { client, call } = setup([() => page([], null)])
+    const filter = { property: 'rel', relation: { contains: 'proj-1' } }
+    const result = await client.queryDataSource(TOKEN, DS, {
+      filter,
+      sorts: [{ property: 'uid', direction: 'ascending' }],
+      startCursor: 'next',
+      filterProperties: ['title', 'st%3A']
+    })
+    expect(result).toEqual({ results: [], nextCursor: null })
+    const req = call(0)
+    expect(req.url).toBe(
+      `https://api.notion.com/v1/data_sources/${DS}/query?filter_properties[]=title&filter_properties[]=st%253A`
+    )
+    expect(req.body).toEqual({
+      page_size: 100,
+      filter,
+      sorts: [{ property: 'uid', direction: 'ascending' }],
+      start_cursor: 'next'
+    })
+  })
+
+  it('has_more false ignora next_cursor; resposta sem results é inesperada', async () => {
+    const { client } = setup([
+      () => jsonResponse({ results: [], has_more: false, next_cursor: 'x' }),
+      () => jsonResponse({ object: 'error' })
+    ])
+    expect((await client.queryDataSource(TOKEN, DS)).nextCursor).toBeNull()
+    await expect(client.queryDataSource(TOKEN, DS)).rejects.toMatchObject({ code: 'unexpected' })
+  })
+
+  it('429 com Retry-After: pausa a fila e tenta de novo', async () => {
+    const { client, fetchMock } = setup([
+      () => new Response('{}', { status: 429, headers: { 'retry-after': '0' } }),
+      () => page([{ id: 'ok' }], null)
+    ])
+    expect((await client.getDataSource(TOKEN, DS)) as unknown).toMatchObject({
+      results: [{ id: 'ok' }]
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('429 sem Retry-After: backoff exponencial e desiste após 3 novas tentativas', async () => {
+    vi.useFakeTimers()
+    const limited = () => new Response('{}', { status: 429 })
+    const { client, fetchMock } = setup([limited, limited, limited, limited])
+    const result = client.queryDataSource(TOKEN, DS).catch((e: unknown) => e)
+    await vi.advanceTimersByTimeAsync(999)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1) // 1 s
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(2000) // 2 s
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    await vi.advanceTimersByTimeAsync(4000) // 4 s
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+    const error = await result
+    expect(error).toBeInstanceOf(NotionApiError)
+    expect(error).toMatchObject({ code: 'rate_limited' })
+    expectNoTokenLeak(error)
+  })
+
+  it('429 pedindo espera longa demais não tenta de novo', async () => {
+    const { client, fetchMock } = setup([
+      () => new Response('{}', { status: 429, headers: { 'retry-after': '120' } })
+    ])
+    await expect(client.getDataSource(TOKEN, DS)).rejects.toMatchObject({ code: 'rate_limited' })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('404/403/400 viram mensagens específicas, sem vazar token', async () => {
+    const { client } = setup([
+      () => new Response('{}', { status: 404 }),
+      () => new Response('{}', { status: 403 }),
+      () => new Response(JSON.stringify({ message: TOKEN }), { status: 400 })
+    ])
+    for (const code of ['not_found', 'forbidden', 'bad_request']) {
+      const error = await client.getDataSource(TOKEN, DS).catch((e: unknown) => e)
+      expect(error).toMatchObject({ code })
+      expectNoTokenLeak(error)
+    }
+  })
+
+  it('a fila limita a concorrência das leituras', async () => {
+    let active = 0
+    let peak = 0
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      active++
+      peak = Math.max(peak, active)
+      await new Promise((r) => setTimeout(r, 5))
+      active--
+      return page([], null)
+    })
+    const client = createNotionClient({
+      fetch: fetchMock,
+      queue: new RateQueue({ concurrency: 2, minIntervalMs: 0 })
+    })
+    await Promise.all(Array.from({ length: 6 }, () => client.queryDataSource(TOKEN, DS)))
+    expect(fetchMock).toHaveBeenCalledTimes(6)
+    expect(peak).toBe(2)
   })
 })

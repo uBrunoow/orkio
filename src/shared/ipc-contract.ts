@@ -93,6 +93,132 @@ export interface DeviceFlowInfo {
 export type DeviceFlowStartResult =
   { ok: true; flow: DeviceFlowInfo } | { ok: false; status: ConnectionStatus }
 
+// ---------- Notion: bancos (data sources), mapeamento e tarefas ----------
+
+export type NotionColor =
+  | 'default'
+  | 'gray'
+  | 'brown'
+  | 'orange'
+  | 'yellow'
+  | 'green'
+  | 'blue'
+  | 'purple'
+  | 'pink'
+  | 'red'
+
+export interface NotionDataSourceSummary {
+  id: string
+  title: string
+  url: string | null
+}
+
+export interface NotionPropertySummary {
+  id: string
+  name: string
+  /** Tipo do Notion: title, status, select, unique_id, relation, people, number, ... */
+  type: string
+  options?: { id: string; name: string; color: NotionColor }[]
+  /** Para `relation`: o data source apontado. */
+  relationDataSourceId?: string | null
+  /** Para `unique_id`: o prefixo (ex.: "ORK"). */
+  uniqueIdPrefix?: string | null
+}
+
+/** Referência a uma propriedade: o id é estável a renomeações; o nome serve para exibir. */
+export interface NotionPropertyRef {
+  id: string
+  name: string
+  type: string
+}
+
+export type NotionMappingField = 'title' | 'status' | 'uniqueId' | 'project' | 'priority' | 'assignee'
+
+export interface NotionMapping {
+  title: NotionPropertyRef
+  status: NotionPropertyRef
+  uniqueId: NotionPropertyRef
+  /** Relação das Tarefas com o banco de Projetos. */
+  project: NotionPropertyRef
+  priority?: NotionPropertyRef
+  assignee?: NotionPropertyRef
+}
+
+export interface NotionWorkspaceConfig {
+  projectsDataSource: { id: string; name: string }
+  tasksDataSource: { id: string; name: string }
+  mapping: NotionMapping
+  updatedAt: string
+}
+
+export interface NotionWorkspaceStatus {
+  /** null = ainda não configurado. */
+  config: NotionWorkspaceConfig | null
+  /** checking (revalidando), ok, warning (avisos), broken (tarefas bloqueadas), unverified (sem rede/Notion). */
+  health: 'checking' | 'ok' | 'warning' | 'broken' | 'unverified'
+  messages: string[]
+  /** Como o Notion está conectado (afeta quais bancos aparecem). */
+  connection: 'oauth' | 'token' | null
+}
+
+export interface NotionDataSourceList {
+  dataSources: NotionDataSourceSummary[]
+  /** Truncado no limite de leitura. */
+  truncated: boolean
+  connection: 'oauth' | 'token' | null
+}
+
+export interface NotionTasksSchemaInfo {
+  schema: { id: string; title: string; properties: NotionPropertySummary[] }
+  /** Sugestão automática (pode faltar campos). */
+  suggestion: Partial<NotionMapping>
+  /** Campos obrigatórios sem nenhuma propriedade possível (ex.: sem `unique_id`). */
+  missing: NotionMappingField[]
+}
+
+export interface NotionProjectPage {
+  id: string
+  title: string
+  url: string | null
+}
+
+export interface NotionProjectChoice extends NotionProjectPage {
+  /** Projeto local que já usa esta página (um projeto do Notion → um projeto local). */
+  linkedTo: { projectId: string; name: string } | null
+  /** Similaridade com o nome do projeto/repositório local (0..1). */
+  similarity: number
+}
+
+export interface NotionTask {
+  id: string
+  url: string | null
+  /** Ex.: "ORK-142". */
+  displayId: string | null
+  title: string
+  status: { name: string; color: NotionColor } | null
+  priority: { name: string; color: NotionColor } | null
+}
+
+export interface NotionTasksResult {
+  tasks: NotionTask[]
+  truncated: boolean
+  fetchedAt: string
+  fromCache: boolean
+}
+
+/** Resultado padrão das operações do Notion no renderer. */
+export type NotionResult<T> =
+  | { ok: true; value: T }
+  | {
+      ok: false
+      error: {
+        code: string
+        message: string
+        /** O usuário pode resolver reconectando o Notion (ex.: escolher mais páginas no OAuth). */
+        canReconnect?: boolean
+      }
+    }
+
 // ---------- Projetos ----------
 
 export interface ProjectRepo {

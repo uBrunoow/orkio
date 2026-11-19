@@ -50,7 +50,7 @@ function expectNoTokens(value: unknown): void {
 describe('NotionConnector — OAuth', () => {
   let dir: string
   let store: SecureStore
-  let client: { getSelf: ReturnType<typeof vi.fn<NotionClient['getSelf']>> }
+  let client: { [K in keyof NotionClient]: ReturnType<typeof vi.fn<NotionClient[K]>> }
   let broker: {
     exchangeCode: ReturnType<typeof vi.fn<NotionOAuthBroker['exchangeCode']>>
     refresh: ReturnType<typeof vi.fn<NotionOAuthBroker['refresh']>>
@@ -84,7 +84,12 @@ describe('NotionConnector — OAuth', () => {
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'orkio-notion-oauth-'))
     store = new SecureStore(dir, safeStorage())
-    client = { getSelf: vi.fn<NotionClient['getSelf']>() }
+    client = {
+      getSelf: vi.fn<NotionClient['getSelf']>(),
+      searchDataSources: vi.fn<NotionClient['searchDataSources']>(),
+      getDataSource: vi.fn<NotionClient['getDataSource']>(),
+      queryDataSource: vi.fn<NotionClient['queryDataSource']>()
+    }
     broker = {
       exchangeCode: vi.fn<NotionOAuthBroker['exchangeCode']>(),
       refresh: vi.fn<NotionOAuthBroker['refresh']>()
@@ -373,5 +378,51 @@ describe('NotionConnector — OAuth', () => {
     expect(await connector.testConnection()).toMatchObject({ state: 'connected' })
     expect(client.getSelf).toHaveBeenCalledWith('ntn_old')
     expect(await storedRecord()).toMatchObject({ v: 2, method: 'token', token: 'ntn_old' })
+  })
+
+  describe('leituras para os serviços', () => {
+    it('sem conexão → not_connected, sem chamar a API', async () => {
+      await expect(makeConnector().queryDataSource('ds')).rejects.toMatchObject({
+        code: 'not_connected',
+        message: NOTION_MESSAGES.notConnected
+      })
+      expect(client.queryDataSource).not.toHaveBeenCalled()
+      expect(await makeConnector().connectionMethod()).toBeNull()
+    })
+
+    it('usa o token salvo, renova em 401 e nunca devolve o token', async () => {
+      await connectViaOAuth()
+      expect(await makeConnector().connectionMethod()).toBe('oauth')
+      client.queryDataSource.mockImplementation(async (token) => {
+        if (token === tokens(1).accessToken) throw new NotionApiError('unauthorized', 'x', 401)
+        return { results: [{ id: 'task' }], nextCursor: null }
+      })
+      broker.refresh.mockResolvedValueOnce(tokens(2))
+
+      const page = await makeConnector().queryDataSource('ds', { pageSize: 10 })
+
+      expect(page).toEqual({ results: [{ id: 'task' }], nextCursor: null })
+      expect(client.queryDataSource).toHaveBeenLastCalledWith(tokens(2).accessToken, 'ds', {
+        pageSize: 10
+      })
+      expectNoTokens(page)
+    })
+
+    it('autorização revogada → mensagem de reconectar; erro desconhecido não vaza', async () => {
+      await connectViaOAuth()
+      client.getDataSource.mockRejectedValueOnce(new NotionApiError('unauthorized', 'x', 401))
+      broker.refresh.mockRejectedValueOnce(new NotionApiError('invalid_grant', 'y', 400))
+      await expect(makeConnector().getDataSource('ds')).rejects.toMatchObject({
+        code: 'invalid_grant',
+        message: NOTION_MESSAGES.oauthRevoked
+      })
+
+      client.searchDataSources.mockRejectedValueOnce(new Error(tokens(1).accessToken))
+      const error = await makeConnector()
+        .searchDataSources()
+        .catch((e: unknown) => e)
+      expect(error).toMatchObject({ code: 'unexpected', message: NOTION_MESSAGES.unknown })
+      expectNoTokens(String(error))
+    })
   })
 })

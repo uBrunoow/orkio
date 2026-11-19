@@ -2,7 +2,13 @@ import type { AuthOptions, ConnectedAccount } from '../../../shared/ipc-contract
 import { LoopbackAuthError } from '../../oauth/loopback'
 import { EncryptionUnavailableError, type SecretStore } from '../../storage/secure-store'
 import type { ConnectionStatus, OAuthConnector, OAuthCredentials, TokenCredentials } from '../types'
-import { NotionApiError, type NotionClient, type NotionSelf } from './notion.client'
+import {
+  NotionApiError,
+  type NotionClient,
+  type NotionListPage,
+  type NotionQueryOptions,
+  type NotionSelf
+} from './notion.client'
 import type { NotionOAuthBroker, NotionTokenSet } from './notion.oauth'
 
 const SECRET_KEY = 'notion'
@@ -41,8 +47,13 @@ export const NOTION_MESSAGES = {
   unknown: 'Algo deu errado ao falar com o Notion. Tente novamente.',
   oauthUnavailable: 'O login com Notion não está disponível nesta versão do Orkio. Use um token.',
   oauthInProgress: 'Já existe uma conexão com o Notion em andamento. Conclua ou cancele.',
-  oauthRevoked: 'A autorização do Notion expirou ou foi revogada. Conecte o Notion de novo.'
+  oauthRevoked: 'A autorização do Notion expirou ou foi revogada. Conecte o Notion de novo.',
+  notConnected: 'Conecte sua conta do Notion em Integrações para continuar.',
+  tokenRevoked: 'O token do Notion foi revogado ou expirou. Conecte o Notion de novo.'
 } as const
+
+/** Como a conta foi conectada (o OAuth só enxerga páginas escolhidas na autorização). */
+export type NotionConnectionMethod = 'oauth' | 'token'
 
 /** Peças do OAuth injetadas pelo main (navegador + loopback e intermediário). */
 export interface NotionOAuthDeps {
@@ -168,6 +179,54 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
       // Falha ao atualizar dados de exibição não invalida a conexão.
     }
     return connected(refreshed)
+  }
+
+  /** Método da conexão salva, ou `null` se não houver. Sem rede. */
+  async connectionMethod(): Promise<NotionConnectionMethod | null> {
+    const loaded = await this.load()
+    return loaded.kind === 'ok' ? loaded.record.method : null
+  }
+
+  // ---------- Leituras usadas pelos serviços (o token nunca sai do conector) ----------
+
+  searchDataSources(options: { query?: string; startCursor?: string | null } = {}) {
+    return this.callApi((token) => this.deps.client.searchDataSources(token, options))
+  }
+
+  getDataSource(id: string): Promise<unknown> {
+    return this.callApi((token) => this.deps.client.getDataSource(token, id))
+  }
+
+  queryDataSource(id: string, options: NotionQueryOptions = {}): Promise<NotionListPage> {
+    return this.callApi((token) => this.deps.client.queryDataSource(token, id, options))
+  }
+
+  /**
+   * Chamada com a conexão salva. Lança NotionApiError com mensagem segura; erros de
+   * autenticação ganham a mensagem de "conectar de novo" adequada ao método.
+   */
+  private async callApi<T>(call: (token: string) => Promise<T>): Promise<T> {
+    const loaded = await this.load()
+    if (loaded.kind !== 'ok') {
+      throw new NotionApiError('not_connected', NOTION_MESSAGES.notConnected)
+    }
+    try {
+      return (await this.withAccessToken(loaded.record, call)).value
+    } catch (e) {
+      if (!(e instanceof NotionApiError)) {
+        throw new NotionApiError('unexpected', NOTION_MESSAGES.unknown)
+      }
+      if (e.code === 'unauthorized' || e.code === 'invalid_grant') {
+        throw new NotionApiError(
+          e.code,
+          loaded.record.method === 'oauth'
+            ? NOTION_MESSAGES.oauthRevoked
+            : NOTION_MESSAGES.tokenRevoked,
+          e.status
+        )
+      }
+      throw e
+    }
   }
 
   /**
