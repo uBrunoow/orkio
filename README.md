@@ -21,19 +21,39 @@ pnpm dev         # abre o app com hot reload
 
 Outros comandos:
 
-| Comando          | O que faz                                      |
-| ---------------- | ---------------------------------------------- |
-| `pnpm test`      | Testes unitários (Vitest)                      |
-| `pnpm typecheck` | TypeScript strict para main/preload e renderer |
-| `pnpm lint`      | ESLint                                         |
-| `pnpm format`    | Prettier                                       |
-| `pnpm build`     | Gera o build em `out/`                         |
-| `pnpm start`     | Roda o build de produção (`out/`) localmente   |
-| `pnpm icons`     | Regenera os ícones a partir de `brand/`        |
-| `pnpm dist`      | Empacota para o SO atual (electron-builder)    |
-| `pnpm dist:dir`  | Empacota sem instalador (pasta em `dist/`)     |
+| Comando          | O que faz                                         |
+| ---------------- | ------------------------------------------------- |
+| `pnpm test`      | Testes unitários (Vitest)                         |
+| `pnpm typecheck` | TypeScript strict para main/preload e renderer    |
+| `pnpm lint`      | ESLint                                            |
+| `pnpm format`    | Prettier                                          |
+| `pnpm build`     | Gera o build em `out/`                            |
+| `pnpm start`     | Roda o build de produção (`out/`) localmente      |
+| `pnpm icons`     | Regenera os ícones a partir de `brand/`           |
+| `pnpm e2e`       | Testes ponta a ponta no app Electron (ver abaixo) |
+| `pnpm dist`      | Empacota para o SO atual (electron-builder)       |
+| `pnpm dist:dir`  | Empacota sem instalador (pasta em `dist/`)        |
 
-## Build
+## Testes ponta a ponta (E2E)
+
+```bash
+pnpm e2e
+```
+
+Faz o build de produção e roda o Playwright (`e2e/`) contra o app Electron real. Não é preciso
+instalar navegadores do Playwright: o teste usa o Electron do projeto.
+
+- A **API do Notion é simulada**: o teste substitui o `fetch` do processo main durante a
+  execução (o código do app não tem nenhum modo de teste). Nenhum token real é usado.
+- Cada execução usa um `userData` temporário (`--user-data-dir`) e não toca nos seus dados.
+- Cobre: tela inicial, isolamento do renderer, CSP de produção, fontes/logo/botão primário,
+  token inválido (nada salvo), conexão válida (arquivo criptografado, permissão 600, token fora
+  do renderer), reabrir mantendo a conexão, aviso em 503, token revogado, desconectar com
+  confirmação (arquivo apagado) e ausência do token nos logs.
+- **Linux sem interface gráfica** (CI/servidor): rode com `xvfb-run -a pnpm e2e`.
+- **Linux sem keyring**: o teste liga a criptografia básica do Electron só durante o teste.
+  No macOS/Windows usa o Keychain/DPAPI de verdade (o macOS pode pedir acesso ao Keychain na
+  primeira execução).
 
 ```bash
 pnpm build

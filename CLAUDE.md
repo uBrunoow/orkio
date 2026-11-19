@@ -8,7 +8,8 @@ Claude Code. Hoje só existe o conector do Notion.
 ```bash
 pnpm install      # postinstall baixa o binário do Electron
 pnpm dev          # app em modo dev
-pnpm test         # Vitest (src/**/*.test.ts)
+pnpm test         # Vitest (src/**/*.test.ts e test/**/*.test.ts, inclui build real p/ checar a CSP)
+pnpm e2e          # build + Playwright no app Electron (Notion simulado). Linux headless: xvfb-run -a pnpm e2e
 pnpm typecheck    # tsc nos dois projetos (node e web)
 pnpm lint         # ESLint
 pnpm build        # build em out/
@@ -17,6 +18,7 @@ pnpm dist         # empacota (electron-builder.yml)
 ```
 
 Antes de dar uma tarefa por concluída: `pnpm typecheck && pnpm lint && pnpm test`.
+Mudou UI, IPC, preload, segurança ou build? Rode também `pnpm e2e`.
 
 ## Estrutura
 
@@ -111,3 +113,29 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   `style-src` só é relaxado no dev server (`electron.vite.config.ts`). A prop `style` do React
   (aplicada via CSSOM) é permitida para variáveis CSS dinâmicas, como no `OrkioLogo`.
 - Textos de UI em pt-BR.
+
+## Testes
+
+- Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
+  (ex.: `test/csp-build.test.ts` faz um build real do renderer e falha se a CSP de produção
+  ganhar `'unsafe-inline'`/`'unsafe-eval'`, scripts/estilos inline ou fontes em `data:`).
+- E2E (Playwright + Electron): `e2e/`. `e2e/fixtures.ts` abre o build de `out/` com
+  `--user-data-dir` temporário e, **via `app.evaluate` no teste**, substitui `fetch`
+  (API simulada) e `shell.openExternal`. Nunca adicione hooks/variáveis de teste ao código
+  do app para isso. No Linux sem keyring, o fixture liga a criptografia básica do Electron
+  só no teste.
+- Para novos conectores: adicione o modo fake correspondente no fixture e um spec em `e2e/`.
+
+## Decisões registradas (Etapa 1)
+
+| Decisão                                                                                     | Por quê                                                                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No Linux, `safeStorage` com backend `basic_text` (ou `unknown`) conta como **indisponível** | `basic_text` usa uma senha fixa no binário: equivale a texto puro. Sem GNOME Keyring/KWallet o app não salva o token e mostra erro.                                                                                                                        |
+| `ConnectionStatus` tem `warning?` (em `connected`) e `hasStoredCredentials?` (em `error`)   | `warning`: falha transitória (rede, 5xx, 429) ao revalidar não "desconecta" o usuário (ex.: abrir offline). `hasStoredCredentials`: diferencia "token salvo inválido" (oferece Tentar novamente/Desconectar) de "falha ao conectar" (mostra o formulário). |
+| CSP estrita em produção; `style-src 'unsafe-inline'` **só no dev server**                   | O Vite injeta CSS via `<style>` em dev. O plugin `orkio:dev-only-relaxed-style-csp` tem `apply: 'serve'`; `test/csp-build.test.ts` e o E2E garantem que o build não muda.                                                                                  |
+| `fetch` nativo em vez de SDKs (`@notionhq/client`)                                          | Poucos endpoints; controle direto de timeout (`AbortController`), `Retry-After` e mensagens; fácil de mockar; sem dependência extra.                                                                                                                       |
+| Main e preload saem em **CommonJS** (sem `"type": "module"`)                                | Preload com `sandbox: true` não pode ser ESM. O preload só pode dar `require('electron')`: tudo o mais é empacotado nele.                                                                                                                                  |
+| `postinstall: install-electron`                                                             | O Electron 45 não baixa o binário na instalação, e o `electron-vite` precisa dele (`path.txt`). Sem isso `pnpm dev` falha num clone novo.                                                                                                                  |
+| React e `@fontsource/*` em `devDependencies`                                                | O Vite já os embute no bundle do renderer; assim o pacote do electron-builder não leva `node_modules` desnecessários.                                                                                                                                      |
+| Não definir `productName` no `package.json`                                                 | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.yml`.                                                                                                  |
+| Fontes nunca viram `data:` URI                                                              | A CSP só permite `font-src 'self'` (`assetsInlineLimit` no `electron.vite.config.ts`).                                                                                                                                                                     |
