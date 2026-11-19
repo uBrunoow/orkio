@@ -28,6 +28,8 @@ export interface FakeServices {
   githubDevice: 'approve' | 'pending' | 'deny' | 'expire'
   /** GET api.github.com/user. */
   githubUser: 'ok' | '401' | 'rate_limited'
+  /** GET api.github.com/repos/{owner}/{repo}, por "owner/repo" (minúsculas). Padrão: 'ok'. */
+  githubRepos: Record<string, 'ok' | 'not_found' | 'sso' | 'restricted' | 'archived'>
 }
 
 export const DEFAULT_FAKES: FakeServices = {
@@ -36,11 +38,14 @@ export const DEFAULT_FAKES: FakeServices = {
   browser: 'approve',
   broker: 'ok',
   githubDevice: 'approve',
-  githubUser: 'ok'
+  githubUser: 'ok',
+  githubRepos: {}
 }
 
 interface FakeGlobals {
   __fakes: FakeServices
+  /** Próximas pastas "escolhidas" no seletor do sistema (vazio = cancelar). */
+  __picks: string[]
   __calls: { url: string; auth: string | undefined; version: string | undefined; body?: string }[]
   __opened: string[]
   __tokenSeq: number
@@ -68,7 +73,8 @@ export function removeDir(dir: string): void {
  */
 export async function launchOrkio(
   userDataDir: string,
-  fakes: Partial<FakeServices> = {}
+  fakes: Partial<FakeServices> = {},
+  options: { startPage?: 'projects' | 'integrations' } = {}
 ): Promise<OrkioApp> {
   const env = { ...process.env } as Record<string, string>
   // Opções do Node que o Electron rejeita (ex.: --use-openssl-ca) poluem o log.
@@ -84,13 +90,19 @@ export async function launchOrkio(
   app.process().stderr?.on('data', (d: Buffer) => logs.push(String(d)))
 
   await app.evaluate(
-    ({ safeStorage, shell }, { initial, brokerUrl }) => {
+    ({ safeStorage, shell, dialog }, { initial, brokerUrl }) => {
       const g = globalThis as unknown as FakeGlobals
       if (process.platform === 'linux' && !safeStorage.isEncryptionAvailable()) {
         safeStorage.setUsePlainTextEncryption(true)
         safeStorage.getSelectedStorageBackend = () => 'gnome_libsecret'
       }
       g.__fakes = initial
+      g.__picks = []
+      // Seletor de pasta do sistema → fila controlada pelo teste.
+      dialog.showOpenDialog = (async () => {
+        const next = g.__picks.shift()
+        return next ? { canceled: false, filePaths: [next] } : { canceled: true, filePaths: [] }
+      }) as typeof dialog.showOpenDialog
       g.__calls = []
       g.__opened = []
       g.__tokenSeq = 0
@@ -159,6 +171,39 @@ export async function launchOrkio(
           if (mode === 'expire') return json({ error: 'expired_token' })
           return json({ access_token: 'gho_E2E_DEVICE_TOKEN', token_type: 'bearer', scope: 'repo' })
         }
+        const repoMatch = /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/?]+)$/.exec(url)
+        if (repoMatch) {
+          const owner = decodeURIComponent(repoMatch[1]!)
+          const name = decodeURIComponent(repoMatch[2]!)
+          const mode = g.__fakes.githubRepos[`${owner}/${name}`.toLowerCase()] ?? 'ok'
+          if (mode === 'not_found') return json({ message: 'Not Found' }, 404)
+          if (mode === 'sso') {
+            return new Response(JSON.stringify({ message: 'Resource protected by SAML.' }), {
+              status: 403,
+              headers: {
+                'X-GitHub-SSO': `required; url=https://github.com/orgs/${owner}/sso?authorization_request=E2E`
+              }
+            })
+          }
+          if (mode === 'restricted') {
+            return json(
+              {
+                message: `Although you appear to have the correct authorization credentials, the \`${owner}\` organization has enabled OAuth App access restrictions, meaning that data access to third-parties is limited.`
+              },
+              403
+            )
+          }
+          return json({
+            name,
+            owner: { login: owner },
+            default_branch: 'main',
+            visibility: 'private',
+            private: true,
+            archived: mode === 'archived',
+            permissions: { admin: false, maintain: false, push: true, triage: true, pull: true }
+          })
+        }
+
         if (url === 'https://api.github.com/user') {
           const mode = g.__fakes.githubUser
           if (mode === '401') return json({ message: 'Bad credentials' }, 401)
@@ -224,6 +269,13 @@ export async function launchOrkio(
   await page.setViewportSize({ width: 1100, height: 720 })
   // Recarrega para que o status inicial já passe pelos simuladores acima.
   await page.reload()
+  // O app abre em Projetos; os specs de integrações começam em Integrações.
+  if ((options.startPage ?? 'integrations') === 'integrations') {
+    await page
+      .getByRole('navigation', { name: 'Navegação principal' })
+      .getByRole('button', { name: 'Integrações' })
+      .click()
+  }
   return { app, page, logs }
 }
 
@@ -256,4 +308,11 @@ export function notionCard(page: Page): Locator {
 
 export function githubCard(page: Page): Locator {
   return page.getByRole('region', { name: 'GitHub' })
+}
+
+/** Enfileira pastas para as próximas aberturas do seletor de pasta (no main). */
+export async function queueFolderPicks(app: ElectronApplication, paths: string[]): Promise<void> {
+  await app.evaluate((_electron, next) => {
+    ;(globalThis as unknown as FakeGlobals).__picks.push(...next)
+  }, paths)
 }

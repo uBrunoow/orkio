@@ -58,12 +58,13 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
     process: typeof (window as unknown as { process?: unknown }).process,
     api: Object.keys(window.orkio),
     notion: Object.keys(window.orkio.notion),
-    github: Object.keys(window.orkio.github)
+    github: Object.keys(window.orkio.github),
+    projects: Object.keys(window.orkio.projects)
   }))
   expect(isolation).toEqual({
     require: 'undefined',
     process: 'undefined',
-    api: ['notion', 'github', 'openExternal'],
+    api: ['notion', 'github', 'projects', 'openExternal'],
     notion: [
       'getStatus',
       'connect',
@@ -82,6 +83,15 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'startDeviceFlow',
       'waitDeviceFlow',
       'cancelDeviceFlow'
+    ],
+    projects: [
+      'list',
+      'revalidate',
+      'pickFolder',
+      'create',
+      'relocate',
+      'remove',
+      'onBranchChanged'
     ]
   })
 

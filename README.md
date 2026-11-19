@@ -201,6 +201,29 @@ escolha os repositórios e dê, no mínimo, **Contents**, **Pull requests** e **
 (leitura; escrita em Contents/Pull requests para abrir PRs nas próximas etapas). O token é
 validado em `GET https://api.github.com/user` antes de ser salvo.
 
+## Projetos
+
+Um **projeto** é uma pasta local (clone) ligada a um repositório do GitHub. Em **Projetos →
+Adicionar projeto**:
+
+1. Escolha a pasta (pode ser uma subpasta: o Orkio usa a raiz do repositório e avisa).
+2. O Orkio lê os remotes com o `git` instalado (precisa estar no PATH). Em forks, escolha entre
+   `origin` e `upstream`. Remotes por alias do `~/.ssh/config` (ex.: `git@github-trabalho:org/repo`)
+   ou GitHub Enterprise pedem confirmação; Enterprise fica como "não verificado".
+3. O Orkio confirma no GitHub (com a conta conectada) a branch padrão, a visibilidade e a
+   permissão de push. Repositórios arquivados ou sem push são salvos com aviso.
+
+A lista mostra `owner/repo`, a **branch atual** (atualiza sozinha ao trocar de branch no
+terminal), alterações não commitadas e o status. Se a pasta for movida ou apagada, o projeto
+fica como "Pasta não encontrada" e pode ser **reapontado** para a nova pasta (do mesmo
+repositório). **Remover** só tira o projeto do Orkio; nenhum arquivo é apagado.
+
+Organizações com **SSO (SAML)** ou **restrição de OAuth Apps** respondem 403: o Orkio explica e
+oferece o link para autorizar (SSO) ou pedir a aprovação de um admin.
+
+Os projetos ficam em `<userData>/orkio-config.json` (sem segredos). Se o arquivo estiver
+corrompido, o Orkio guarda uma cópia (`orkio-config.corrupt-<data>.json`) e começa vazio, com aviso.
+
 ## Segurança
 
 - Todas as chamadas ao Notion e ao GitHub são feitas no **processo main**. O renderer não tem
@@ -216,6 +239,8 @@ validado em `GET https://api.github.com/user` antes de ser salvo.
 - CSP restritiva no `index.html`; navegação e novas janelas bloqueadas; links externos só
   abrem para a allowlist do main (domínios do Notion, `docs.github.com` e só
   `github.com/login/device`).
+- Projetos: o seletor de pasta roda no main e o renderer nunca envia caminhos; o git roda via
+  `execFile` (sem shell), com timeout.
 - Permissões do navegador negadas, exceto escrever na área de transferência (botão
   **Copiar** do código do GitHub).
 - GitHub Device Flow: sem client secret; o polling roda no main e a UI só recebe o código, a

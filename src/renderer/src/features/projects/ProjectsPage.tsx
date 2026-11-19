@@ -34,9 +34,11 @@ export function ProjectsPage({
   const [picking, setPicking] = useState(false)
   const [selection, setSelection] = useState<ProjectSelection | null>(null)
   const [pickError, setPickError] = useState<ProjectError | null>(null)
-  const githubConnected = useGitHubConnected()
+  const [githubCheck, setGithubCheck] = useState(0)
+  const githubConnected = useGitHubConnected(githubCheck)
 
   async function addProject(): Promise<void> {
+    setGithubCheck((n) => n + 1)
     setPicking(true)
     setPickError(null)
     const result = await projects.pickFolder()
@@ -92,6 +94,7 @@ export function ProjectsPage({
             selection={selection}
             onCreate={async (input) => {
               const result = await projects.create(input)
+              setGithubCheck((n) => n + 1)
               if (result.ok) setSelection(null)
               return result
             }}
@@ -262,22 +265,28 @@ function ProjectRow({
   )
 }
 
-/** `null` enquanto carrega. Só para a dica "conecte o GitHub". */
-function useGitHubConnected(): boolean | null {
+/**
+ * `null` enquanto carrega. Só para a dica "conecte o GitHub": relê ao voltar para a janela e
+ * quando `refreshKey` muda (ex.: depois de adicionar um projeto).
+ */
+function useGitHubConnected(refreshKey: number): boolean | null {
   const [connected, setConnected] = useState<boolean | null>(null)
   useEffect(() => {
     let active = true
-    void window.orkio.github
-      .getStatus()
-      .then((status) => {
-        if (active) setConnected(status.state === 'connected' || status.state === 'error')
-      })
-      .catch(() => {
-        if (active) setConnected(null)
-      })
+    const check = (): void => {
+      void window.orkio.github
+        .getStatus()
+        .then((status) => {
+          if (active) setConnected(status.state === 'connected' || status.state === 'error')
+        })
+        .catch(() => {})
+    }
+    check()
+    window.addEventListener('focus', check)
     return () => {
       active = false
+      window.removeEventListener('focus', check)
     }
-  }, [])
+  }, [refreshKey])
   return connected
 }
