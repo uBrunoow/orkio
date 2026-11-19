@@ -163,6 +163,7 @@ const api: OrkioApi = {
     openEditor: (projectId, taskId, editor) =>
       ipcRenderer.invoke(claude.openEditor, projectId, taskId, editor),
     diff: (projectId, taskId) => ipcRenderer.invoke(claude.diff, projectId, taskId),
+    catalog: (projectId, taskId) => ipcRenderer.invoke(claude.catalog, projectId, taskId),
     onRunEvent: (listener) => {
       const handler = (_event: unknown, payload: unknown): void => {
         if (isRunEventMessage(payload)) listener(payload)

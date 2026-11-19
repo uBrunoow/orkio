@@ -6,6 +6,7 @@
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
 import type {
+  CatalogGroup,
   ClaudeCodeStatus,
   ClaudeResult,
   EditorId,
@@ -23,6 +24,7 @@ import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
 import { errorName } from '../ipc/payload'
+import { buildCatalog } from './catalog'
 import { RUN_MESSAGES, type RunService } from './run.service'
 import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
 
@@ -228,6 +230,15 @@ export class ClaudeService {
         return fail('editor', CLAUDE_MESSAGES.editor)
       }
       return ok(null)
+    })
+  }
+
+  /** Catálogo de comandos; usa a pasta do worktree da tarefa (ou do projeto) para os do projeto. */
+  catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>> {
+    return this.wrap(async () => {
+      const project = this.project(projectId)
+      const dir = this.deps.worktrees.get(taskId)?.path ?? project.localPath
+      return ok(await buildCatalog({ projectDir: dir }))
     })
   }
 

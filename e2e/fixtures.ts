@@ -154,6 +154,7 @@ export function createUserDataDir(): string {
 export function removeDir(dir: string): void {
   rmSync(dir, { recursive: true, force: true })
   rmSync(`${dir}-bin`, { recursive: true, force: true })
+  rmSync(`${dir}-home`, { recursive: true, force: true })
 }
 
 /**
@@ -176,6 +177,15 @@ export async function launchOrkio(
   // Claude Code SIMULADO sempre primeiro no PATH: o E2E nunca chama o CLI real (4A).
   const fakeBin = fakeClaudeBin(userDataDir, options.claude ?? { loggedIn: true })
   env['PATH'] = `${fakeBin}${delimiter}${env['PATH'] ?? ''}`
+  // HOME isolado: o catálogo de comandos nunca lê o ~/.claude de verdade no E2E.
+  const home = `${userDataDir}-home`
+  mkdirSync(join(home, '.claude', 'commands'), { recursive: true })
+  writeFileSync(
+    join(home, '.claude', 'commands', 'revisar.md'),
+    '---\nname: revisar\ndescription: Revisa o diff da tarefa\n---\nCORPO'
+  )
+  env['HOME'] = home
+  env['USERPROFILE'] = home
   // Chave "vazada" no ambiente: o Orkio precisa filtrá-la antes de abrir o CLI.
   env['ANTHROPIC_API_KEY'] = 'sk-ant-api03-E2E-NAO-PODE-VAZAR'
 

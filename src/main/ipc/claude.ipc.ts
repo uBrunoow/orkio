@@ -125,6 +125,9 @@ export function registerClaudeIpc(
       ? service.openEditor(projectId, taskId, editor as EditorId)
       : INVALID
   )
+  guarded(ch.catalog, GENERIC, async (projectId, taskId) =>
+    isId(projectId) && isId(taskId) ? service.catalog(projectId, taskId) : INVALID
+  )
   guarded(ch.diff, GENERIC, async (projectId, taskId) =>
     isId(projectId) && isId(taskId) ? service.diff(projectId, taskId) : INVALID
   )

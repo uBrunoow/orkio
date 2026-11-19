@@ -195,6 +195,7 @@ async function main() {
       '-c',
       'user.email=fake@example.com',
       'commit',
+      '--allow-empty',
       '-q',
       '-m',
       'feat: exportar CSV (simulado)'

@@ -239,6 +239,20 @@ test('"sempre neste projeto" vale na próxima execução; cancelar encerra', asy
   await expect(section.getByRole('list', { name: 'Execuções do Claude Code' })).toBeVisible()
 })
 
+test('catálogo de comandos: agrupado, com busca, e rodar um comando instalado', async () => {
+  const { page } = orkio!
+  const section = page.getByRole('region', { name: 'Claude Code' }).last()
+  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
+  await section.getByRole('radio', { name: 'Comando instalado' }).click()
+  await section.getByRole('button', { name: /^Comando/ }).click()
+  await expect(page.getByText('Seus comandos')).toBeVisible()
+  await page.getByRole('option', { name: /\/revisar/ }).click()
+  await expect(section).not.toContainText('CORPO')
+  await section.getByRole('button', { name: 'Recarregar' }).click()
+  await section.getByRole('button', { name: 'Rodar', exact: true }).click()
+  await expect(section.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+})
+
 test('ver diff e limpar ambiente (a branch fica)', async () => {
   const { page } = orkio!
   const section = page.getByRole('region', { name: 'Claude Code' }).last()

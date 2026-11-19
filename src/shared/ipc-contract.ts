@@ -7,6 +7,7 @@ import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
 import type { FlowDraft } from './flow'
 import type { TaskSignals } from './task-signals'
 import type {
+  CatalogGroup,
   ClaudeCodeStatus,
   ClaudeResult,
   EditorId,
@@ -55,6 +56,7 @@ export const IPC_CHANNELS = {
     cleanup: 'claude:cleanup',
     openEditor: 'claude:open-editor',
     diff: 'claude:diff',
+    catalog: 'claude:catalog',
     /** Evento main → renderer: evento normalizado de uma execução. */
     runEvent: 'claude:run-event'
   },
@@ -658,6 +660,8 @@ export interface OrkioApi {
       projectId: string,
       taskId: string
     ): Promise<ClaudeResult<{ diff: string; truncated: boolean; untracked: string[] }>>
+    /** Comandos/skills instalados (usuário, projeto, plugins). Só metadados; recarrega a cada chamada. */
+    catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>>
     /** Assina os eventos das execuções. Devolve a função para cancelar a inscrição. */
     onRunEvent(listener: (message: RunEventMessage) => void): () => void
   }

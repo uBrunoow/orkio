@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { Code } from '@astryxdesign/core/Code'
@@ -8,7 +8,8 @@ import { Icon } from '@astryxdesign/core/Icon'
 import { Item } from '@astryxdesign/core/Item'
 import { List } from '@astryxdesign/core/List'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
-import { Selector } from '@astryxdesign/core/Selector'
+import { Selector, type SelectorOptionType } from '@astryxdesign/core/Selector'
+import { StackItem } from '@astryxdesign/core/Stack'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
@@ -17,6 +18,7 @@ import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import type {
   AgentRunView,
+  CatalogGroup,
   EditorId,
   RunLogEvent,
   RunMode,
@@ -29,6 +31,7 @@ import {
   DiffIcon,
   EditorIcon,
   PlayIcon,
+  RefreshIcon,
   StopIcon,
   TerminalIcon
 } from '../../components/icons'
@@ -219,24 +222,15 @@ function Composer({
           <SegmentedControlItem value="prompt" label="Prompt livre" />
           <SegmentedControlItem value="command" label="Comando instalado" />
         </SegmentedControl>
-        {mode === 'command' &&
-          (prep.commands.length > 0 ? (
-            <Selector
-              label="Comando"
-              hasSearch
-              searchPlaceholder="Buscar comando…"
-              options={prep.commands.map((c) => ({ value: c, label: `/${c}` }))}
-              {...(command ? { value: command } : {})}
-              onChange={setCommand}
-            />
-          ) : (
-            <TextInput
-              label="Comando"
-              description="Nome do comando instalado no Claude Code (ex.: review)."
-              value={command}
-              onChange={setCommand}
-            />
-          ))}
+        {mode === 'command' && (
+          <CommandPicker
+            projectId={projectId}
+            taskId={prep.taskId}
+            fallback={prep.commands}
+            value={command}
+            onChange={setCommand}
+          />
+        )}
         <TextArea
           label={mode === 'prompt' ? 'O que o Claude Code deve fazer' : 'Argumentos (opcional)'}
           value={text}
@@ -617,4 +611,85 @@ function describeEvent(e: RunLogEvent): string | null {
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+/** Catálogo agrupado por origem (usuário, projeto, plugin), com busca e recarregar. */
+function CommandPicker({
+  projectId,
+  taskId,
+  fallback,
+  value,
+  onChange
+}: {
+  projectId: string
+  taskId: string
+  fallback: string[]
+  value: string
+  onChange(value: string): void
+}): React.JSX.Element {
+  const [groups, setGroups] = useState<CatalogGroup[] | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  const load = async (): Promise<void> => {
+    setLoading(true)
+    const r = await window.orkio.claude.catalog(projectId, taskId)
+    setLoading(false)
+    setGroups(r.ok ? r.value : [])
+  }
+  // Carrega ao abrir (efeito assíncrono: o setState acontece depois do await).
+  useEffect(() => {
+    let active = true
+    void window.orkio.claude.catalog(projectId, taskId).then((r) => {
+      if (active) setGroups(r.ok ? r.value : [])
+    })
+    return () => {
+      active = false
+    }
+  }, [projectId, taskId])
+
+  const options: SelectorOptionType[] =
+    groups && groups.length > 0
+      ? groups.map((g) => ({
+          type: 'section' as const,
+          title: g.title,
+          options: g.commands.map((c) => ({
+            value: c.name,
+            label: `/${c.name}`,
+            ...(c.description ? { description: c.description } : {})
+          }))
+        }))
+      : fallback.map((c) => ({ value: c, label: `/${c}` }))
+
+  return (
+    <HStack gap={2} vAlign="end">
+      <StackItem size="fill">
+        {groups !== null && options.length === 0 ? (
+          <TextInput
+            label="Comando"
+            description="Nenhum comando encontrado. Digite o nome (ex.: review)."
+            value={value}
+            onChange={onChange}
+          />
+        ) : (
+          <Selector
+            label="Comando"
+            hasSearch
+            isLoading={groups === null}
+            searchPlaceholder="Buscar comando…"
+            options={options}
+            {...(value ? { value } : {})}
+            onChange={onChange}
+          />
+        )}
+      </StackItem>
+      <Button
+        size="sm"
+        variant="ghost"
+        label="Recarregar"
+        icon={<Icon icon={RefreshIcon} />}
+        isLoading={loading}
+        onClick={() => void load()}
+      />
+    </HStack>
+  )
 }

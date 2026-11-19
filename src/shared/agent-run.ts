@@ -127,3 +127,18 @@ export interface StartRunRequest {
 }
 
 export type EditorId = 'cursor' | 'code'
+
+/** Catálogo de comandos do Claude Code (4B): só nome e descrição. */
+export interface CatalogCommand {
+  /** Nome para `/nome` (plugins: `plugin:nome`). */
+  name: string
+  description: string
+  kind: 'command' | 'skill'
+}
+
+export interface CatalogGroup {
+  id: string
+  title: string
+  source: 'user' | 'project' | 'plugin'
+  commands: CatalogCommand[]
+}
