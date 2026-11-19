@@ -12,6 +12,7 @@ import {
   GitHubApiError,
   isTransientGitHubError,
   type GitHubClient,
+  type GitHubRepo,
   type GitHubUser
 } from './github.client'
 import type { GitHubDeviceApi, GitHubOAuthToken } from './github.oauth'
@@ -57,6 +58,8 @@ export interface GitHubConnectorDeps {
   now?: () => Date
   /** Injetável para testes do polling. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
+  /** Client ID da OAuth App (público): monta o link das configurações de acesso da conta. */
+  oauthClientId?: string | null
 }
 
 interface ActiveDeviceFlow {
@@ -154,6 +157,46 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
 
   cancelDeviceFlow(): void {
     this.flow?.controller.abort()
+  }
+
+  /** Há conta conectada (credencial salva e legível)? Sem rede. */
+  async isConnected(): Promise<boolean> {
+    return (await this.load()).kind === 'ok'
+  }
+
+  /**
+   * Dados do repositório com a conta conectada (branch padrão, visibilidade, push, arquivado).
+   * Lança GitHubApiError (`not_connected`, `not_found`, `sso_required`, `oauth_restricted`, ...).
+   */
+  async getRepository(owner: string, name: string): Promise<GitHubRepo> {
+    return this.withAccessToken((token) => this.deps.client.getRepository(token, owner, name))
+  }
+
+  /**
+   * Onde a pessoa revisa/pede acesso de organizações para o Orkio:
+   * OAuth App → página da autorização do app; token colado → página de fine-grained PATs.
+   */
+  async accessSettingsUrl(): Promise<string> {
+    const loaded = await this.load()
+    if (loaded.kind === 'ok' && loaded.record.method === 'device' && this.deps.oauthClientId) {
+      return `https://github.com/settings/connections/applications/${encodeURIComponent(this.deps.oauthClientId)}`
+    }
+    return 'https://github.com/settings/personal-access-tokens'
+  }
+
+  /**
+   * Executa uma chamada à API com o token salvo, sem expô-lo fora do conector.
+   * Tokens de OAuth App não expiram: não há renovação; 401 sobe como `unauthorized`.
+   */
+  private async withAccessToken<T>(call: (token: string) => Promise<T>): Promise<T> {
+    const loaded = await this.load()
+    if (loaded.kind !== 'ok') {
+      throw new GitHubApiError(
+        'not_connected',
+        'Conecte sua conta do GitHub em Integrações para continuar.'
+      )
+    }
+    return call(loaded.record.token)
   }
 
   async disconnect(): Promise<void> {

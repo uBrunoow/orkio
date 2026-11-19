@@ -368,4 +368,121 @@ describe('GitHubConnector', () => {
       })
     })
   })
+
+  describe('acesso a repositórios (getRepository)', () => {
+    const REPO_JSON = {
+      name: 'orkio',
+      owner: { login: 'uBrunoow' },
+      default_branch: 'main',
+      visibility: 'private',
+      private: true,
+      archived: false,
+      permissions: { admin: true, maintain: true, push: true, triage: true, pull: true }
+    }
+
+    it('sem conta conectada → not_connected, sem chamar a API', async () => {
+      const connector = makeConnector()
+      expect(await connector.isConnected()).toBe(false)
+      await expect(connector.getRepository('a', 'b')).rejects.toMatchObject({
+        code: 'not_connected'
+      })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('usa o token salvo e devolve só dados do repositório', async () => {
+      const connector = makeConnector()
+      await connector.connect({ kind: 'token', token: PAT })
+      fetchMock.mockReset()
+      fetchMock.mockResolvedValueOnce(json(REPO_JSON))
+
+      const repo = await connector.getRepository('uBrunoow', 'orkio')
+      expect(repo).toEqual({
+        owner: 'uBrunoow',
+        name: 'orkio',
+        defaultBranch: 'main',
+        visibility: 'private',
+        archived: false,
+        canPush: true
+      })
+      expectNoTokens(repo)
+      const [url, init] = fetchMock.mock.calls[0]!
+      expect(url).toBe('https://api.github.com/repos/uBrunoow/orkio')
+      expect(init?.headers).toMatchObject({ Authorization: `Bearer ${PAT}` })
+    })
+
+    it('404 → not_found; 403 SSO → sso_required com URL; 403 restrição → oauth_restricted', async () => {
+      const connector = makeConnector()
+      await connector.connect({ kind: 'token', token: PAT })
+      fetchMock.mockReset()
+
+      fetchMock.mockResolvedValueOnce(json({ message: 'Not Found' }, 404))
+      await expect(connector.getRepository('acme', 'secret')).rejects.toMatchObject({
+        code: 'not_found'
+      })
+
+      fetchMock.mockResolvedValueOnce(
+        json({ message: 'Resource protected by organization SAML enforcement.' }, 403, {
+          'X-GitHub-SSO':
+            'required; url=https://github.com/orgs/acme/sso?authorization_request=ABC123'
+        })
+      )
+      const sso = await connector.getRepository('acme', 'app').catch((e: unknown) => e)
+      expect(sso).toMatchObject({
+        code: 'sso_required',
+        details: {
+          org: 'acme',
+          ssoUrl: 'https://github.com/orgs/acme/sso?authorization_request=ABC123'
+        }
+      })
+
+      fetchMock.mockResolvedValueOnce(
+        json(
+          {
+            message:
+              'Although you appear to have the correct authorization credentials, the `acme` organization has enabled OAuth App access restrictions, meaning that data access to third-parties is limited.'
+          },
+          403
+        )
+      )
+      const restricted = await connector.getRepository('acme', 'app').catch((e: unknown) => e)
+      expect(restricted).toMatchObject({
+        code: 'oauth_restricted',
+        message: expect.stringContaining('Um admin da organização precisa aprovar o Orkio')
+      })
+      expectNoTokens([sso, restricted])
+    })
+
+    it('SSO com URL fora de github.com/orgs/<org>/sso é descartada', async () => {
+      const connector = makeConnector()
+      await connector.connect({ kind: 'token', token: PAT })
+      fetchMock.mockReset()
+      fetchMock.mockResolvedValueOnce(
+        json({}, 403, { 'X-GitHub-SSO': 'required; url=https://evil.example/orgs/acme/sso' })
+      )
+      const error = await connector.getRepository('acme', 'app').catch((e: unknown) => e)
+      expect(error).toMatchObject({ code: 'sso_required', details: { org: 'acme' } })
+      expect((error as GitHubApiError).details.ssoUrl).toBeUndefined()
+    })
+
+    it('accessSettingsUrl: OAuth App → página do app; PAT → página de tokens', async () => {
+      const withId = new GitHubConnector({
+        store,
+        client,
+        device,
+        oauthClientId: 'Iv1.abc',
+        now: () => NOW
+      })
+      await withId.connect({
+        kind: 'oauth',
+        tokens: { accessToken: DEVICE_TOKEN, scopes: ['repo'] }
+      })
+      expect(await withId.accessSettingsUrl()).toBe(
+        'https://github.com/settings/connections/applications/Iv1.abc'
+      )
+      await withId.connect({ kind: 'token', token: PAT })
+      expect(await withId.accessSettingsUrl()).toBe(
+        'https://github.com/settings/personal-access-tokens'
+      )
+    })
+  })
 })

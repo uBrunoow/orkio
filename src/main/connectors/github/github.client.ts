@@ -24,13 +24,23 @@ export type GitHubErrorCode =
   | 'unexpected'
   /** Device Flow: app sem Device Flow habilitado ou client ID inválido. */
   | 'oauth_config'
+  /** 404: o repositório não existe ou a conta não tem acesso (o GitHub não diferencia). */
+  | 'not_found'
+  /** 403 com X-GitHub-SSO: a org exige autorização SAML SSO para este token. */
+  | 'sso_required'
+  /** 403 por restrição de OAuth Apps da org: um owner precisa aprovar o Orkio. */
+  | 'oauth_restricted'
+  /** Nenhuma conta do GitHub conectada no Orkio. */
+  | 'not_connected'
 
 /** Erro com mensagem segura para o usuário (pt-BR). Nunca contém o token nem a exceção original. */
 export class GitHubApiError extends Error {
   constructor(
     readonly code: GitHubErrorCode,
     message: string,
-    readonly status?: number
+    readonly status?: number,
+    /** Dados extras seguros para a UI (ex.: URL de autorização SSO do próprio GitHub). */
+    readonly details: { ssoUrl?: string; org?: string } = {}
   ) {
     super(message)
     this.name = 'GitHubApiError'
@@ -54,6 +64,16 @@ export interface GitHubUser {
   scopes: string[] | null
 }
 
+export interface GitHubRepo {
+  owner: string
+  name: string
+  defaultBranch: string
+  visibility: 'public' | 'private' | 'internal'
+  archived: boolean
+  /** Permissão de push da conta conectada. */
+  canPush: boolean
+}
+
 export interface GitHubClientDeps {
   fetch?: typeof fetch
   sleep?: (ms: number) => Promise<void>
@@ -63,6 +83,7 @@ export interface GitHubClientDeps {
 
 export interface GitHubClient {
   getUser(token: string): Promise<GitHubUser>
+  getRepository(token: string, owner: string, name: string): Promise<GitHubRepo>
 }
 
 export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
@@ -90,22 +111,32 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
         }
         throw rateLimited(rateLimitWait)
       }
-      throw errorForStatus(response.status)
+      throw errorForResponse(response, body, path)
+    }
+  }
+
+  async function json(response: Response): Promise<unknown> {
+    try {
+      return await response.json()
+    } catch {
+      throw unexpected(response.status)
     }
   }
 
   return {
     async getUser(token: string): Promise<GitHubUser> {
       const response = await request('/user', token)
-      let body: unknown
-      try {
-        body = await response.json()
-      } catch {
-        throw unexpected(response.status)
-      }
-      const user = parseUser(body, response.headers.get('x-oauth-scopes'))
+      const user = parseUser(await json(response), response.headers.get('x-oauth-scopes'))
       if (!user) throw unexpected(response.status)
       return user
+    },
+
+    async getRepository(token: string, owner: string, name: string): Promise<GitHubRepo> {
+      const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
+      const response = await request(path, token)
+      const repo = parseRepository(await json(response))
+      if (!repo) throw unexpected(response.status)
+      return repo
     }
   }
 }
@@ -199,6 +230,62 @@ function formatWait(ms: number): string {
   return `em ${Math.ceil(seconds / 60)} min`
 }
 
+/**
+ * Erros específicos de repositório/organização antes do mapeamento genérico:
+ * - 403 + X-GitHub-SSO → SSO/SAML (com a URL de autorização, validada);
+ * - 403 + mensagem de "OAuth App access restrictions" → um owner da org precisa aprovar;
+ * - 404 em /repos → sem acesso ou inexistente.
+ */
+function errorForResponse(response: Response, body: string, path: string): GitHubApiError {
+  const { status } = response
+  const org = /^\/repos\/([^/]+)\//.exec(path)?.[1]
+  const orgName = org ? decodeURIComponent(org) : undefined
+  if (status === 403) {
+    const sso = response.headers.get('x-github-sso')
+    if (sso && /required/i.test(sso)) {
+      const ssoUrl = parseSsoUrl(sso)
+      return new GitHubApiError(
+        'sso_required',
+        `A organização${orgName ? ` ${orgName}` : ''} usa SSO (SAML). Autorize o acesso do Orkio pelo login da organização e tente de novo.`,
+        status,
+        { ...(ssoUrl ? { ssoUrl } : {}), ...(orgName ? { org: orgName } : {}) }
+      )
+    }
+    if (/OAuth App access restrictions/i.test(body)) {
+      return new GitHubApiError(
+        'oauth_restricted',
+        `A organização${orgName ? ` ${orgName}` : ''} restringe o acesso de OAuth Apps. Um admin da organização precisa aprovar o Orkio; você pode pedir a aprovação nas configurações de acesso da sua conta.`,
+        status,
+        orgName ? { org: orgName } : {}
+      )
+    }
+  }
+  if (status === 404 && path.startsWith('/repos/')) {
+    return new GitHubApiError(
+      'not_found',
+      'O GitHub não encontrou este repositório com a conta conectada: ele não existe ou a conta não tem acesso.',
+      status
+    )
+  }
+  return errorForStatus(status)
+}
+
+/** "required; url=https://github.com/orgs/acme/sso?authorization_request=..." → URL validada. */
+export function parseSsoUrl(header: string): string | null {
+  const match = /url=([^;\s]+)/i.exec(header)
+  if (!match) return null
+  try {
+    const url = new URL(match[1]!)
+    return url.protocol === 'https:' &&
+      url.hostname === 'github.com' &&
+      /^\/orgs\/[A-Za-z0-9-]+\/sso$/.test(url.pathname)
+      ? url.toString()
+      : null
+  } catch {
+    return null
+  }
+}
+
 function errorForStatus(status: number): GitHubApiError {
   if (status === 401) {
     return new GitHubApiError(
@@ -249,5 +336,30 @@ export function parseUser(body: unknown, scopesHeader: string | null): GitHubUse
             .split(',')
             .map((scope) => scope.trim())
             .filter(Boolean)
+  }
+}
+
+export function parseRepository(body: unknown): GitHubRepo | null {
+  if (!isRecord(body)) return null
+  const name = stringOrNull(body['name'])
+  const owner = isRecord(body['owner']) ? stringOrNull(body['owner']['login']) : null
+  const defaultBranch = stringOrNull(body['default_branch'])
+  if (!name || !owner || !defaultBranch) return null
+  const visibility =
+    body['visibility'] === 'public' ||
+    body['visibility'] === 'private' ||
+    body['visibility'] === 'internal'
+      ? body['visibility']
+      : body['private'] === true
+        ? 'private'
+        : 'public'
+  const permissions = isRecord(body['permissions']) ? body['permissions'] : {}
+  return {
+    owner,
+    name,
+    defaultBranch,
+    visibility,
+    archived: body['archived'] === true,
+    canPush: permissions['push'] === true || permissions['admin'] === true
   }
 }
