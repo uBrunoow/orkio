@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS, type ConnectionStatus } from '../../shared/ipc-contract'
 import type { DeviceFlowConnector, OAuthConnector } from '../connectors/types'
 import { registerGitHubIpc } from './github.ipc'
+import { registerProjectsIpc } from './projects.ipc'
 import { registerNotionIpc } from './notion.ipc'
 import { isAllowedExternalUrl, registerShellIpc } from './shell.ipc'
 import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
@@ -251,6 +252,85 @@ describe('registerGitHubIpc', () => {
   })
 })
 
+describe('registerProjectsIpc', () => {
+  function fakeProjects() {
+    return {
+      list: vi.fn(async () => ({ projects: [] })),
+      revalidate: vi.fn(async () => ({ projects: [] })),
+      pickFolder: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+      create: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+      relocate: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+      remove: vi.fn(async () => ({ ok: true }))
+    }
+  }
+
+  it('create só aceita selectionId/remoteName/hostConfirmed/name — nunca caminhos', async () => {
+    const ipc = fakeIpc()
+    const service = fakeProjects()
+    registerProjectsIpc(ipc, service, guard)
+
+    for (const payload of [
+      undefined,
+      { localPath: '/etc' },
+      { selectionId: '../../etc', remoteName: 'origin', hostConfirmed: false },
+      { selectionId: 'abc', remoteName: 'origin', hostConfirmed: 'sim' },
+      { selectionId: 'abc', remoteName: '', hostConfirmed: false }
+    ]) {
+      expect(await ipc.invoke(IPC_CHANNELS.projects.create, payload)).toMatchObject({ ok: false })
+    }
+    expect(service.create).not.toHaveBeenCalled()
+
+    await ipc.invoke(IPC_CHANNELS.projects.create, {
+      selectionId: 'id-1',
+      remoteName: 'origin',
+      hostConfirmed: false
+    })
+    expect(service.create).toHaveBeenCalledWith({
+      selectionId: 'id-1',
+      remoteName: 'origin',
+      hostConfirmed: false
+    })
+  })
+
+  it('relocate/remove exigem id válido', async () => {
+    const ipc = fakeIpc()
+    const service = fakeProjects()
+    registerProjectsIpc(ipc, service, guard)
+    expect(await ipc.invoke(IPC_CHANNELS.projects.relocate, '/home/user')).toMatchObject({
+      ok: false
+    })
+    expect(await ipc.invoke(IPC_CHANNELS.projects.remove, { id: 1 })).toEqual({ ok: false })
+    expect(service.relocate).not.toHaveBeenCalled()
+    expect(service.remove).not.toHaveBeenCalled()
+    await ipc.invoke(IPC_CHANNELS.projects.remove, 'id-1')
+    expect(service.remove).toHaveBeenCalledWith('id-1')
+  })
+
+  it('espera o serviço inicializar e recusa origem não confiável', async () => {
+    const ipc = fakeIpc()
+    const service = fakeProjects()
+    let release!: () => void
+    const ready = new Promise<void>((r) => (release = r))
+    registerProjectsIpc(ipc, service, guard, ready)
+
+    const pending = ipc.invoke(IPC_CHANNELS.projects.list)
+    await new Promise((r) => setTimeout(r, 5))
+    expect(service.list).not.toHaveBeenCalled()
+    release()
+    await pending
+    expect(service.list).toHaveBeenCalled()
+
+    ipc.trusted = false
+    for (const channel of [
+      IPC_CHANNELS.projects.list,
+      IPC_CHANNELS.projects.pickFolder,
+      IPC_CHANNELS.projects.remove
+    ]) {
+      await expect(ipc.invoke(channel)).rejects.toThrow('não autorizada')
+    }
+  })
+})
+
 describe('shell.openExternal', () => {
   it('allowlist: só https nos domínios do Notion', () => {
     expect(isAllowedExternalUrl('https://developers.notion.com/guides/x')).toBe(true)
@@ -271,6 +351,19 @@ describe('shell.openExternal', () => {
     expect(isAllowedExternalUrl('https://github.com/login/devicex')).toBe(false)
     expect(isAllowedExternalUrl('https://github.com/')).toBe(false)
     expect(isAllowedExternalUrl('https://gist.github.com/login/device')).toBe(false)
+  })
+
+  it('allowlist: acesso de organizações e SSO do GitHub', () => {
+    expect(
+      isAllowedExternalUrl('https://github.com/settings/connections/applications/Iv1.abc')
+    ).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/settings/personal-access-tokens')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/orgs/acme/sso?authorization_request=ABC')).toBe(
+      true
+    )
+    expect(isAllowedExternalUrl('https://github.com/orgs/acme/settings')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/orgs/acme/sso/extra')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/settings/keys')).toBe(false)
   })
 
   it('abre só URLs permitidas', async () => {

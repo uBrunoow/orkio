@@ -1,8 +1,10 @@
+import { realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   app,
   BrowserWindow,
+  dialog,
   ipcMain,
   safeStorage,
   session,
@@ -21,11 +23,16 @@ import {
   createNotionOAuthBroker,
   readNotionOAuthConfig
 } from './connectors/notion/notion.oauth'
+import { ORKIO_CONFIG_FILE, createOrkioConfigStore } from './config/orkio-config'
+import { createGit } from './git/git'
+import { registerProjectsIpc } from './ipc/projects.ipc'
 import { authorizeViaLoopback } from './oauth/loopback'
+import { ProjectsService } from './projects/projects.service'
 import { registerGitHubIpc } from './ipc/github.ipc'
 import { registerNotionIpc } from './ipc/notion.ipc'
 import { registerShellIpc } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
+import { IPC_CHANNELS } from '../shared/ipc-contract'
 import { SecureStore } from './storage/secure-store'
 import appIcon from '../../resources/icon.png?asset'
 
@@ -87,8 +94,41 @@ function registerIpc(): void {
     store,
     client: createGitHubClient(),
     // Device Flow não usa client secret nem o intermediário (broker/).
-    device: githubConfig ? createGitHubDeviceApi(githubConfig) : null
+    device: githubConfig ? createGitHubDeviceApi(githubConfig) : null,
+    oauthClientId: githubConfig?.clientId ?? null
   })
+
+  projects = new ProjectsService({
+    store: createOrkioConfigStore(join(app.getPath('userData'), ORKIO_CONFIG_FILE)),
+    git: createGit(),
+    // O token fica no conector; o serviço só pede dados do repositório.
+    github: {
+      isConnected: () => github.isConnected(),
+      getRepository: (owner, name) => github.getRepository(owner, name),
+      accessSettingsUrl: () => github.accessSettingsUrl()
+    },
+    pickFolder: async (purpose) => {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+      const options: Electron.OpenDialogOptions = {
+        title: purpose === 'add' ? 'Escolha a pasta do projeto' : 'Escolha a nova pasta do projeto',
+        buttonLabel: 'Usar esta pasta',
+        properties: ['openDirectory']
+      }
+      const result = win
+        ? await dialog.showOpenDialog(win, options)
+        : await dialog.showOpenDialog(options)
+      return result.canceled ? null : (result.filePaths[0] ?? null)
+    },
+    folderExists: async (path) => (await stat(path)).isDirectory(),
+    realpath: (path) => realpath(path),
+    // Evento main → renderer: só id do projeto e branch atual.
+    onBranchChanged: (event) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.projects.branchChanged, event)
+      }
+    }
+  })
+  const projectsReady = projects.init()
 
   // Depois de autorizar no navegador, traz o Orkio de volta para a frente.
   const focusSender = (event: IpcMainInvokeEvent): void => {
@@ -101,8 +141,11 @@ function registerIpc(): void {
 
   registerNotionIpc(ipcMain, notion, isTrustedSender, { onOAuthFinished: focusSender })
   registerGitHubIpc(ipcMain, github, isTrustedSender, { onDeviceFlowFinished: focusSender })
+  registerProjectsIpc(ipcMain, projects, isTrustedSender, projectsReady)
   registerShellIpc(ipcMain, (url) => shell.openExternal(url), isTrustedSender)
 }
+
+let projects: ProjectsService | null = null
 
 /** OAuth do Notion só existe se o build tiver client ID e URL do intermediário. */
 function createNotionOAuthDeps(): NotionOAuthDeps | null {
@@ -140,6 +183,8 @@ void app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
   })
 })
+
+app.on('before-quit', () => projects?.dispose())
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()

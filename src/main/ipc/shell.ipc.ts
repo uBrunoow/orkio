@@ -6,12 +6,20 @@ import type { SenderGuard } from './trusted-sender'
  * O que o renderer pode abrir no navegador externo: só https, sem porta/credenciais, e só
  * estes hosts. `pathPrefix` restringe o caminho (ex.: no github.com só a página do Device Flow).
  */
-export const EXTERNAL_URL_RULES: readonly { host: string; pathPrefix?: string }[] = [
+export const EXTERNAL_URL_RULES: readonly {
+  host: string
+  pathPrefix?: string
+  pathPattern?: RegExp
+}[] = [
   { host: 'notion.so' },
   { host: 'www.notion.so' },
   { host: 'developers.notion.com' },
   { host: 'docs.github.com' },
-  { host: 'github.com', pathPrefix: '/login/device' }
+  { host: 'github.com', pathPrefix: '/login/device' },
+  // Acesso de organizações (restrição de OAuth Apps / fine-grained PATs) e SSO (SAML).
+  { host: 'github.com', pathPrefix: '/settings/connections/applications' },
+  { host: 'github.com', pathPrefix: '/settings/personal-access-tokens' },
+  { host: 'github.com', pathPattern: /^\/orgs\/[A-Za-z0-9-]+\/sso$/ }
 ]
 
 export function isAllowedExternalUrl(value: unknown): value is string {
@@ -28,7 +36,8 @@ export function isAllowedExternalUrl(value: unknown): value is string {
       rule.host === url.hostname &&
       (!rule.pathPrefix ||
         url.pathname === rule.pathPrefix ||
-        url.pathname.startsWith(`${rule.pathPrefix}/`))
+        url.pathname.startsWith(`${rule.pathPrefix}/`)) &&
+      (!rule.pathPattern || rule.pathPattern.test(url.pathname))
   )
 }
 
