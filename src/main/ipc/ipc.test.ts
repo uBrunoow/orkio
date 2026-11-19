@@ -5,6 +5,7 @@ import type { DeviceFlowConnector, OAuthConnector } from '../connectors/types'
 import { registerGitHubIpc } from './github.ipc'
 import { registerProjectsIpc } from './projects.ipc'
 import { registerNotionIpc } from './notion.ipc'
+import { registerNotionWorkspaceIpc } from './notion-workspace.ipc'
 import { isAllowedExternalUrl, registerShellIpc } from './shell.ipc'
 import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
 
@@ -375,5 +376,89 @@ describe('shell.openExternal', () => {
     expect(open).not.toHaveBeenCalled()
     expect(await ipc.invoke(IPC_CHANNELS.shell.openExternal, 'https://notion.so/x')).toBe(true)
     expect(open).toHaveBeenCalledWith('https://notion.so/x')
+  })
+})
+
+describe('registerNotionWorkspaceIpc', () => {
+  const DS_A = '11111111-1111-1111-1111-111111111111'
+  const DS_B = '2222222222222222222222222222222a'
+  const ok = <T>(value: T) => ({ ok: true as const, value })
+
+  function setup() {
+    const ipc = fakeIpc()
+    const service = {
+      getStatus: vi.fn(async () => ({
+        config: null,
+        health: 'ok' as const,
+        messages: [],
+        connection: null
+      })),
+      revalidate: vi.fn(async () => ({
+        config: null,
+        health: 'ok' as const,
+        messages: [],
+        connection: null
+      })),
+      listDataSources: vi.fn(async () =>
+        ok({ dataSources: [], truncated: false, connection: null })
+      ),
+      getTasksSchema: vi.fn(async () => ok({} as never)),
+      saveConfig: vi.fn(async () => ok({} as never)),
+      clearConfig: vi.fn(async () => ok({} as never)),
+      listProjectChoices: vi.fn(async () => ok({ choices: [], truncated: false })),
+      link: vi.fn(async () => ok({ id: DS_A, name: 'X' })),
+      unlink: vi.fn(async () => ok(null)),
+      listTasks: vi.fn(async () => {
+        throw new Error('ntn_SECRET')
+      })
+    }
+    registerNotionWorkspaceIpc(ipc, service, guard)
+    return { ipc, service }
+  }
+  const ch = IPC_CHANNELS.notionWorkspace
+
+  it('valida ids e o formato do mapeamento antes de chamar o serviço', async () => {
+    const { ipc, service } = setup()
+    await ipc.invoke(ch.getTasksSchema, DS_B, DS_A)
+    expect(service.getTasksSchema).toHaveBeenCalledWith(DS_B, DS_A)
+
+    const invalid = { ok: false, error: { code: 'invalid' } }
+    expect(await ipc.invoke(ch.getTasksSchema, '../etc', DS_A)).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.link, 'proj-1', 'https://notion.so/x')).toMatchObject(invalid)
+    expect(
+      await ipc.invoke(ch.save, {
+        projectsDataSourceId: DS_A,
+        tasksDataSourceId: DS_B,
+        mapping: { title: 'title', hacked: 'x' }
+      })
+    ).toMatchObject(invalid)
+    expect(service.saveConfig).not.toHaveBeenCalled()
+
+    const input = {
+      projectsDataSourceId: DS_A,
+      tasksDataSourceId: DS_B,
+      mapping: { title: 'title', status: 'st', uniqueId: 'uid', project: 'rel', priority: null }
+    }
+    await ipc.invoke(ch.save, input)
+    expect(service.saveConfig).toHaveBeenCalledWith(input)
+
+    await ipc.invoke(ch.link, 'proj-1', DS_A)
+    expect(service.link).toHaveBeenCalledWith('proj-1', DS_A)
+    await ipc.invoke(ch.listTasks, 'proj-1', { force: 'yes' })
+    expect(service.listTasks).toHaveBeenCalledWith('proj-1', { force: false })
+  })
+
+  it('erro inesperado vira mensagem genérica; origem não confiável é recusada', async () => {
+    const { ipc, service } = setup()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const result = await ipc.invoke(ch.listTasks, 'proj-1')
+    expect(JSON.stringify(result)).not.toContain('SECRET')
+    expect(result).toMatchObject({ ok: false, error: { code: 'unexpected' } })
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('SECRET')
+    errors.mockRestore()
+
+    ipc.trusted = false
+    await expect(ipc.invoke(ch.getStatus)).rejects.toThrow('não autorizada')
+    expect(service.getStatus).not.toHaveBeenCalled()
   })
 })

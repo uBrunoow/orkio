@@ -86,8 +86,6 @@ export interface NotionQueryOptions {
   sorts?: unknown[]
   startCursor?: string | null
   pageSize?: number
-  /** Ids das propriedades a devolver (reduz o tamanho da resposta). */
-  filterProperties?: string[]
 }
 
 export interface NotionClient {
@@ -207,10 +205,7 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
       if (options.filter !== undefined) body['filter'] = options.filter
       if (options.sorts) body['sorts'] = options.sorts
       if (options.startCursor) body['start_cursor'] = options.startCursor
-      const query = (options.filterProperties ?? [])
-        .map((p) => `filter_properties[]=${encodeURIComponent(p)}`)
-        .join('&')
-      const path = `/data_sources/${encodeURIComponent(id)}/query${query ? `?${query}` : ''}`
+      const path = `/data_sources/${encodeURIComponent(id)}/query`
       return parseListPage(await dataRequest(path, token, { method: 'POST', body }))
     }
   }

@@ -189,10 +189,14 @@ export class ProjectsService {
       localPath: selection.root,
       repo: resolved.repo,
       createdAt: timestamp,
-      updatedAt: timestamp
+      updatedAt: timestamp,
+      notionProject: null
     }
     try {
-      await this.deps.store.update((config) => ({ projects: [...config.projects, project] }))
+      await this.deps.store.update((config) => ({
+        ...config,
+        projects: [...config.projects, project]
+      }))
     } catch (error) {
       return storageFailure(error)
     }
@@ -237,7 +241,18 @@ export class ProjectsService {
     }
     try {
       await this.deps.store.update((config) => ({
-        projects: config.projects.map((p) => (p.id === projectId ? updated : p))
+        ...config,
+        // Mantém campos alterados em paralelo (ex.: vínculo com o Notion).
+        projects: config.projects.map((p) =>
+          p.id === projectId
+            ? (updated = {
+                ...p,
+                localPath: updated.localPath,
+                repo: updated.repo,
+                updatedAt: updated.updatedAt
+              })
+            : p
+        )
       }))
     } catch (error) {
       return storageFailure(error)
@@ -259,6 +274,7 @@ export class ProjectsService {
     if (!this.findProject(projectId)) return { ok: false }
     try {
       await this.deps.store.update((config) => ({
+        ...config,
         projects: config.projects.filter((p) => p.id !== projectId)
       }))
     } catch {
@@ -442,10 +458,13 @@ export class ProjectsService {
 
   private async saveRepo(project: StoredProject, repo: ProjectRepo): Promise<StoredProject | null> {
     if (JSON.stringify(project.repo) === JSON.stringify(repo)) return project
-    const updated: StoredProject = { ...project, repo, updatedAt: this.now().toISOString() }
+    let updated: StoredProject = { ...project, repo, updatedAt: this.now().toISOString() }
     try {
       await this.deps.store.update((config) => ({
-        projects: config.projects.map((p) => (p.id === project.id ? updated : p))
+        ...config,
+        projects: config.projects.map((p) =>
+          p.id === project.id ? (updated = { ...p, repo, updatedAt: updated.updatedAt }) : p
+        )
       }))
       return updated
     } catch {
@@ -614,7 +633,8 @@ export class ProjectsService {
       updatedAt: project.updatedAt,
       local: local.local,
       health: local.health ?? remote ?? { state: 'checking' },
-      notices: noticesFor(project.repo)
+      notices: noticesFor(project.repo),
+      notionProject: project.notionProject
     }
   }
 }

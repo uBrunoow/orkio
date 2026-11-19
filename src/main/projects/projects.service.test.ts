@@ -181,7 +181,7 @@ describe('ProjectsService', () => {
 
       // Persistido no ConfigStore (JSON, sem segredos).
       const saved = JSON.parse(await readFile(configFile, 'utf8'))
-      expect(saved.schemaVersion).toBe(1)
+      expect(saved.schemaVersion).toBe(2)
       expect(saved.projects).toHaveLength(1)
       expect(JSON.stringify(saved)).not.toMatch(/token|gho_|github_pat/i)
     })

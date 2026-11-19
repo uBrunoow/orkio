@@ -23,6 +23,18 @@ export const IPC_CHANNELS = {
     waitDeviceFlow: 'github:device-flow-wait',
     cancelDeviceFlow: 'github:device-flow-cancel'
   },
+  notionWorkspace: {
+    getStatus: 'notion-workspace:get-status',
+    revalidate: 'notion-workspace:revalidate',
+    listDataSources: 'notion-workspace:list-data-sources',
+    getTasksSchema: 'notion-workspace:get-tasks-schema',
+    save: 'notion-workspace:save',
+    clear: 'notion-workspace:clear',
+    listProjectChoices: 'notion-workspace:list-project-choices',
+    link: 'notion-workspace:link',
+    unlink: 'notion-workspace:unlink',
+    listTasks: 'notion-workspace:list-tasks'
+  },
   projects: {
     list: 'projects:list',
     revalidate: 'projects:revalidate',
@@ -96,16 +108,7 @@ export type DeviceFlowStartResult =
 // ---------- Notion: bancos (data sources), mapeamento e tarefas ----------
 
 export type NotionColor =
-  | 'default'
-  | 'gray'
-  | 'brown'
-  | 'orange'
-  | 'yellow'
-  | 'green'
-  | 'blue'
-  | 'purple'
-  | 'pink'
-  | 'red'
+  'default' | 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
 
 export interface NotionDataSourceSummary {
   id: string
@@ -132,7 +135,8 @@ export interface NotionPropertyRef {
   type: string
 }
 
-export type NotionMappingField = 'title' | 'status' | 'uniqueId' | 'project' | 'priority' | 'assignee'
+export type NotionMappingField =
+  'title' | 'status' | 'uniqueId' | 'project' | 'priority' | 'assignee'
 
 export interface NotionMapping {
   title: NotionPropertyRef
@@ -149,6 +153,13 @@ export interface NotionWorkspaceConfig {
   tasksDataSource: { id: string; name: string }
   mapping: NotionMapping
   updatedAt: string
+}
+
+/** O que o assistente envia ao salvar: ids dos bancos e, por campo, o id da propriedade. */
+export interface NotionWorkspaceInput {
+  projectsDataSourceId: string
+  tasksDataSourceId: string
+  mapping: Partial<Record<NotionMappingField, string | null>>
 }
 
 export interface NotionWorkspaceStatus {
@@ -277,6 +288,8 @@ export interface ProjectView {
   local: { branch: string | null; dirty: boolean } | null
   health: ProjectHealth
   notices: ProjectNotice[]
+  /** Projeto do Notion vinculado (página do banco de Projetos). */
+  notionProject: { id: string; name: string } | null
 }
 
 export interface ProjectsListResult {
@@ -385,6 +398,30 @@ export interface OrkioApi {
     /** Resolve quando o fluxo termina: conectado, erro ou cancelado (status salvo). */
     waitDeviceFlow(): Promise<ConnectionStatus>
     cancelDeviceFlow(): Promise<void>
+  }
+  /** Bancos do Notion (Projetos/Tarefas), vínculo com projetos locais e tarefas (só leitura). */
+  notionWorkspace: {
+    /** Estado da configuração; na primeira chamada revalida o schema no Notion. */
+    getStatus(): Promise<NotionWorkspaceStatus>
+    revalidate(): Promise<NotionWorkspaceStatus>
+    listDataSources(query?: string): Promise<NotionResult<NotionDataSourceList>>
+    getTasksSchema(
+      tasksDataSourceId: string,
+      projectsDataSourceId: string
+    ): Promise<NotionResult<NotionTasksSchemaInfo>>
+    save(input: NotionWorkspaceInput): Promise<NotionResult<NotionWorkspaceStatus>>
+    /** Esquece os bancos e os vínculos (nada muda no Notion). */
+    clear(): Promise<NotionResult<NotionWorkspaceStatus>>
+    listProjectChoices(
+      projectId: string,
+      options?: { force?: boolean }
+    ): Promise<NotionResult<{ choices: NotionProjectChoice[]; truncated: boolean }>>
+    link(projectId: string, pageId: string): Promise<NotionResult<{ id: string; name: string }>>
+    unlink(projectId: string): Promise<NotionResult<null>>
+    listTasks(
+      projectId: string,
+      options?: { force?: boolean }
+    ): Promise<NotionResult<NotionTasksResult>>
   }
   projects: {
     /** Lista rápida (só checagens locais). */

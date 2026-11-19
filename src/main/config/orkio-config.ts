@@ -2,11 +2,20 @@
  * Formato do arquivo de configuração não secreta do Orkio (userData/orkio-config.json).
  * Nada de tokens aqui: segredos vão no SecureStore.
  */
-import type { ProjectRepo } from '../../shared/ipc-contract'
+import type {
+  NotionMapping,
+  NotionPropertyRef,
+  NotionWorkspaceConfig,
+  ProjectRepo
+} from '../../shared/ipc-contract'
 import { ConfigStore } from '../storage/config-store'
 
 export const ORKIO_CONFIG_FILE = 'orkio-config.json'
-export const ORKIO_CONFIG_VERSION = 1
+/**
+ * v1: projects. v2: `notion` (bancos de Projetos/Tarefas + mapeamento) e `notionProject` em cada
+ * projeto (vínculo com uma página do banco de Projetos). Só ids e nomes, nunca conteúdo.
+ */
+export const ORKIO_CONFIG_VERSION = 2
 
 export interface StoredProject {
   id: string
@@ -15,14 +24,17 @@ export interface StoredProject {
   repo: ProjectRepo | null
   createdAt: string
   updatedAt: string
+  /** Página do banco de Projetos do Notion vinculada (1 ↔ 1). */
+  notionProject: { id: string; name: string } | null
 }
 
 export interface OrkioConfig {
   projects: StoredProject[]
+  notion: NotionWorkspaceConfig | null
 }
 
 export function emptyConfig(): OrkioConfig {
-  return { projects: [] }
+  return { projects: [], notion: null }
 }
 
 export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
@@ -31,7 +43,15 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
     currentVersion: ORKIO_CONFIG_VERSION,
     migrations: {
       // v0: arquivo sem schemaVersion (rascunhos antigos) → v1.
-      0: (data) => ({ projects: Array.isArray(data['projects']) ? data['projects'] : [] })
+      0: (data) => ({ projects: Array.isArray(data['projects']) ? data['projects'] : [] }),
+      // v1 → v2: Notion ainda não configurado; nenhum projeto vinculado.
+      1: (data) => ({
+        ...data,
+        notion: null,
+        projects: Array.isArray(data['projects'])
+          ? data['projects'].map((p: unknown) => (isRecord(p) ? { ...p, notionProject: null } : p))
+          : []
+      })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -42,14 +62,62 @@ export function validateConfig(
   data: Record<string, unknown>
 ): { value: OrkioConfig; warning?: string } | null {
   if (!Array.isArray(data['projects'])) return null
+  const warnings: string[] = []
   const projects = data['projects'].map(parseProject).filter((p): p is StoredProject => !!p)
   const dropped = data['projects'].length - projects.length
-  return dropped > 0
-    ? {
-        value: { projects },
-        warning: `${dropped} projeto(s) com dados inválidos foram ignorados.`
-      }
-    : { value: { projects } }
+  if (dropped > 0) warnings.push(`${dropped} projeto(s) com dados inválidos foram ignorados.`)
+
+  // Configuração do Notion inválida não derruba os projetos: volta a "não configurado".
+  let notion: NotionWorkspaceConfig | null = null
+  if (data['notion'] !== null && data['notion'] !== undefined) {
+    notion = parseNotionConfig(data['notion'])
+    if (!notion) {
+      warnings.push('A configuração dos bancos do Notion estava inválida e precisa ser refeita.')
+    }
+  }
+
+  const value: OrkioConfig = { projects, notion }
+  return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
+}
+
+function nameRef(value: unknown): { id: string; name: string } | null {
+  if (!isRecord(value)) return null
+  const { id, name } = value
+  return typeof id === 'string' && id && typeof name === 'string' ? { id, name } : null
+}
+
+function propertyRef(value: unknown): NotionPropertyRef | null {
+  if (!isRecord(value)) return null
+  const { id, name, type } = value
+  return typeof id === 'string' &&
+    id &&
+    typeof name === 'string' &&
+    typeof type === 'string' &&
+    type
+    ? { id, name, type }
+    : null
+}
+
+export function parseNotionConfig(value: unknown): NotionWorkspaceConfig | null {
+  if (!isRecord(value)) return null
+  const projectsDataSource = nameRef(value['projectsDataSource'])
+  const tasksDataSource = nameRef(value['tasksDataSource'])
+  const mappingRaw = value['mapping']
+  if (!projectsDataSource || !tasksDataSource || !isRecord(mappingRaw)) return null
+  if (typeof value['updatedAt'] !== 'string') return null
+
+  const title = propertyRef(mappingRaw['title'])
+  const status = propertyRef(mappingRaw['status'])
+  const uniqueId = propertyRef(mappingRaw['uniqueId'])
+  const project = propertyRef(mappingRaw['project'])
+  if (!title || !status || !uniqueId || !project) return null
+  const mapping: NotionMapping = { title, status, uniqueId, project }
+  const priority = propertyRef(mappingRaw['priority'])
+  const assignee = propertyRef(mappingRaw['assignee'])
+  if (priority) mapping.priority = priority
+  if (assignee) mapping.assignee = assignee
+
+  return { projectsDataSource, tasksDataSource, mapping, updatedAt: value['updatedAt'] }
 }
 
 function parseProject(value: unknown): StoredProject | null {
@@ -66,7 +134,8 @@ function parseProject(value: unknown): StoredProject | null {
     localPath: localPath as string,
     repo,
     createdAt: createdAt as string,
-    updatedAt: updatedAt as string
+    updatedAt: updatedAt as string,
+    notionProject: nameRef(value['notionProject'])
   }
 }
 

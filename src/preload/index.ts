@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS, type BranchChangedEvent, type OrkioApi } from '../shared/ipc-contract'
 
-const { notion, github, projects, shell } = IPC_CHANNELS
+const { notion, github, notionWorkspace, projects, shell } = IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
 const api: OrkioApi = {
@@ -25,6 +25,28 @@ const api: OrkioApi = {
     startDeviceFlow: () => ipcRenderer.invoke(github.startDeviceFlow),
     waitDeviceFlow: () => ipcRenderer.invoke(github.waitDeviceFlow),
     cancelDeviceFlow: () => ipcRenderer.invoke(github.cancelDeviceFlow)
+  },
+  notionWorkspace: {
+    getStatus: () => ipcRenderer.invoke(notionWorkspace.getStatus),
+    revalidate: () => ipcRenderer.invoke(notionWorkspace.revalidate),
+    listDataSources: (query) => ipcRenderer.invoke(notionWorkspace.listDataSources, query),
+    getTasksSchema: (tasksId, projectsId) =>
+      ipcRenderer.invoke(notionWorkspace.getTasksSchema, tasksId, projectsId),
+    save: (input) =>
+      ipcRenderer.invoke(notionWorkspace.save, {
+        projectsDataSourceId: input.projectsDataSourceId,
+        tasksDataSourceId: input.tasksDataSourceId,
+        mapping: { ...input.mapping }
+      }),
+    clear: () => ipcRenderer.invoke(notionWorkspace.clear),
+    listProjectChoices: (projectId, options) =>
+      ipcRenderer.invoke(notionWorkspace.listProjectChoices, projectId, {
+        force: options?.force === true
+      }),
+    link: (projectId, pageId) => ipcRenderer.invoke(notionWorkspace.link, projectId, pageId),
+    unlink: (projectId) => ipcRenderer.invoke(notionWorkspace.unlink, projectId),
+    listTasks: (projectId, options) =>
+      ipcRenderer.invoke(notionWorkspace.listTasks, projectId, { force: options?.force === true })
   },
   projects: {
     list: () => ipcRenderer.invoke(projects.list),

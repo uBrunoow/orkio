@@ -301,20 +301,17 @@ describe('leituras de dados (data sources)', () => {
     })
   })
 
-  it('queryDataSource: filtro de relação, ordenação e filter_properties', async () => {
+  it('queryDataSource: filtro de relação, ordenação e cursor', async () => {
     const { client, call } = setup([() => page([], null)])
     const filter = { property: 'rel', relation: { contains: 'proj-1' } }
     const result = await client.queryDataSource(TOKEN, DS, {
       filter,
       sorts: [{ property: 'uid', direction: 'ascending' }],
-      startCursor: 'next',
-      filterProperties: ['title', 'st%3A']
+      startCursor: 'next'
     })
     expect(result).toEqual({ results: [], nextCursor: null })
     const req = call(0)
-    expect(req.url).toBe(
-      `https://api.notion.com/v1/data_sources/${DS}/query?filter_properties[]=title&filter_properties[]=st%253A`
-    )
+    expect(req.url).toBe(`https://api.notion.com/v1/data_sources/${DS}/query`)
     expect(req.body).toEqual({
       page_size: 100,
       filter,

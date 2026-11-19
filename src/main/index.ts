@@ -25,7 +25,9 @@ import {
 } from './connectors/notion/notion.oauth'
 import { ORKIO_CONFIG_FILE, createOrkioConfigStore } from './config/orkio-config'
 import { createGit } from './git/git'
+import { registerNotionWorkspaceIpc } from './ipc/notion-workspace.ipc'
 import { registerProjectsIpc } from './ipc/projects.ipc'
+import { NotionWorkspaceService } from './notion/notion-workspace.service'
 import { authorizeViaLoopback } from './oauth/loopback'
 import { ProjectsService } from './projects/projects.service'
 import { registerGitHubIpc } from './ipc/github.ipc'
@@ -98,8 +100,10 @@ function registerIpc(): void {
     oauthClientId: githubConfig?.clientId ?? null
   })
 
+  // Uma instância só: Projetos e bancos do Notion escrevem no mesmo arquivo.
+  const configStore = createOrkioConfigStore(join(app.getPath('userData'), ORKIO_CONFIG_FILE))
   projects = new ProjectsService({
-    store: createOrkioConfigStore(join(app.getPath('userData'), ORKIO_CONFIG_FILE)),
+    store: configStore,
     git: createGit(),
     // O token fica no conector; o serviço só pede dados do repositório.
     github: {
@@ -130,6 +134,17 @@ function registerIpc(): void {
   })
   const projectsReady = projects.init()
 
+  const notionWorkspace = new NotionWorkspaceService({
+    store: configStore,
+    // O token fica no conector; o serviço só pede leituras.
+    notion: {
+      connectionMethod: () => notion.connectionMethod(),
+      searchDataSources: (options) => notion.searchDataSources(options),
+      getDataSource: (id) => notion.getDataSource(id),
+      queryDataSource: (id, options) => notion.queryDataSource(id, options)
+    }
+  })
+
   // Depois de autorizar no navegador, traz o Orkio de volta para a frente.
   const focusSender = (event: IpcMainInvokeEvent): void => {
     const win = BrowserWindow.fromWebContents(event.sender)
@@ -142,6 +157,7 @@ function registerIpc(): void {
   registerNotionIpc(ipcMain, notion, isTrustedSender, { onOAuthFinished: focusSender })
   registerGitHubIpc(ipcMain, github, isTrustedSender, { onDeviceFlowFinished: focusSender })
   registerProjectsIpc(ipcMain, projects, isTrustedSender, projectsReady)
+  registerNotionWorkspaceIpc(ipcMain, notionWorkspace, isTrustedSender, projectsReady)
   registerShellIpc(ipcMain, (url) => shell.openExternal(url), isTrustedSender)
 }
 
