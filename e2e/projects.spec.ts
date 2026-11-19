@@ -169,7 +169,8 @@ test('subpasta de um fork → usa a raiz, escolhe o remote e cria o projeto', as
   // Config não secreta salva com schemaVersion e sem token.
   const config = readFileSync(join(userDataDir, 'orkio-config.json'), 'utf8')
   expect(JSON.parse(config)).toMatchObject({
-    schemaVersion: 1,
+    schemaVersion: 2,
+    notion: null,
     projects: [{ name: 'orkio', localPath: repoDir(), repo: { owner: 'uBrunoow', name: 'orkio' } }]
   })
   expect(config).not.toContain(PAT)

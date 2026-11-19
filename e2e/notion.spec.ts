@@ -60,12 +60,13 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
     api: Object.keys(window.orkio),
     notion: Object.keys(window.orkio.notion),
     github: Object.keys(window.orkio.github),
-    projects: Object.keys(window.orkio.projects)
+    projects: Object.keys(window.orkio.projects),
+    notionWorkspace: Object.keys(window.orkio.notionWorkspace)
   }))
   expect(isolation).toEqual({
     require: 'undefined',
     process: 'undefined',
-    api: ['notion', 'github', 'projects', 'openExternal'],
+    api: ['notion', 'github', 'notionWorkspace', 'projects', 'openExternal'],
     notion: [
       'getStatus',
       'connect',
@@ -93,6 +94,18 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'relocate',
       'remove',
       'onBranchChanged'
+    ],
+    notionWorkspace: [
+      'getStatus',
+      'revalidate',
+      'listDataSources',
+      'getTasksSchema',
+      'save',
+      'clear',
+      'listProjectChoices',
+      'link',
+      'unlink',
+      'listTasks'
     ]
   })
 
@@ -197,11 +210,15 @@ test('token válido → conectado, salvo criptografado, token fora do renderer',
   await expect(page.getByTestId('empty-hero')).toHaveCount(0)
   await expect(notionCard(page).getByLabel('Token do Notion')).toHaveCount(0)
 
+  // Depois de conectar, o assistente dos bancos também consulta o Notion (/search).
   const calls = await externalCalls(app)
-  expect(calls.at(-1)).toMatchObject({
-    url: 'https://api.notion.com/v1/users/me',
-    version: '2026-03-11'
+  expect(calls.filter((c) => c.url === 'https://api.notion.com/v1/users/me').at(-1)).toMatchObject({
+    version: '2026-03-11',
+    auth: `Bearer ${TOKEN}`
   })
+  expect(
+    calls.every((c) => !c.url.startsWith('https://api.notion.com') || c.version === '2026-03-11')
+  ).toBe(true)
 
   expect(secretFiles()).toEqual(['notion.bin'])
   const file = join(secretsDir(), 'notion.bin')

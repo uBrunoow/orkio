@@ -30,7 +30,21 @@ export interface FakeServices {
   githubUser: 'ok' | '401' | 'rate_limited'
   /** GET api.github.com/repos/{owner}/{repo}, por "owner/repo" (minúsculas). Padrão: 'ok'. */
   githubRepos: Record<string, 'ok' | 'not_found' | 'sso' | 'restricted' | 'archived'>
+  /**
+   * Bancos simulados do Notion (search, data_sources, query). Variações do banco de Tarefas:
+   * sem propriedade de ID, Status renomeado ou Status apagado.
+   */
+  notionTasks: 'ok' | 'no_unique_id' | 'renamed' | 'status_deleted'
 }
+
+/** Ids fixos dos bancos e páginas simulados (formato de id do Notion). */
+export const NOTION_FAKE = {
+  projectsDs: '11111111-1111-4111-8111-111111111111',
+  tasksDs: '22222222-2222-4222-8222-222222222222',
+  meetingsDs: '33333333-3333-4333-8333-333333333333',
+  orkioPage: 'aaaaaaaa-0000-4000-8000-000000000001',
+  sitePage: 'aaaaaaaa-0000-4000-8000-000000000002'
+} as const
 
 export const DEFAULT_FAKES: FakeServices = {
   notion: 'ok',
@@ -39,7 +53,8 @@ export const DEFAULT_FAKES: FakeServices = {
   broker: 'ok',
   githubDevice: 'approve',
   githubUser: 'ok',
-  githubRepos: {}
+  githubRepos: {},
+  notionTasks: 'ok'
 }
 
 interface FakeGlobals {
@@ -90,7 +105,7 @@ export async function launchOrkio(
   app.process().stderr?.on('data', (d: Buffer) => logs.push(String(d)))
 
   await app.evaluate(
-    ({ safeStorage, shell, dialog }, { initial, brokerUrl }) => {
+    ({ safeStorage, shell, dialog }, { initial, brokerUrl, ids }) => {
       const g = globalThis as unknown as FakeGlobals
       if (process.platform === 'linux' && !safeStorage.isEncryptionAvailable()) {
         safeStorage.setUsePlainTextEncryption(true)
@@ -251,10 +266,168 @@ export async function launchOrkio(
           return json({ object: 'user', id: 'u1', type: 'person', name: 'Ada Lovelace' })
         }
 
+        // Bancos do Notion (data sources). Exige um token aceito em /users/me.
+        if (url.startsWith('https://api.notion.com/v1/')) {
+          const token = (headers['Authorization'] ?? '').replace(/^Bearer /, '')
+          const { notion, validTokens, notionTasks } = g.__fakes
+          if (notion === '401' || !token || (validTokens && !validTokens.includes(token))) {
+            return json({ object: 'error', code: 'unauthorized' }, 401)
+          }
+          const rich = (text: string): unknown[] => [{ type: 'text', plain_text: text }]
+          const path = url.slice('https://api.notion.com/v1'.length)
+          const body = call.body ? (JSON.parse(call.body) as Record<string, unknown>) : {}
+
+          if (path === '/search') {
+            const all = [
+              { id: ids.projectsDs, title: 'Projetos' },
+              { id: ids.tasksDs, title: 'Tarefas' },
+              { id: ids.meetingsDs, title: 'Reuniões' }
+            ]
+            const query = typeof body['query'] === 'string' ? body['query'].toLowerCase() : ''
+            return json({
+              object: 'list',
+              results: all
+                .filter((d) => d.title.toLowerCase().includes(query))
+                .map((d) => ({
+                  object: 'data_source',
+                  id: d.id,
+                  title: rich(d.title),
+                  url: `https://www.notion.so/${d.id.replace(/-/g, '')}`
+                })),
+              has_more: false,
+              next_cursor: null
+            })
+          }
+
+          const statusProperty = {
+            id: 'st%3A',
+            name: notionTasks === 'renamed' ? 'Etapa' : 'Status',
+            type: 'status',
+            status: {
+              options: [
+                { id: 'o1', name: 'A fazer', color: 'gray' },
+                { id: 'o2', name: 'Em andamento', color: 'blue' },
+                { id: 'o3', name: 'Concluída', color: 'green' }
+              ]
+            }
+          }
+          const tasksProperties: Record<string, unknown> = {
+            Nome: { id: 'title', name: 'Nome', type: 'title', title: {} },
+            ...(notionTasks === 'status_deleted' ? {} : { [statusProperty.name]: statusProperty }),
+            ...(notionTasks === 'no_unique_id'
+              ? {}
+              : { ID: { id: 'uid', name: 'ID', type: 'unique_id', unique_id: { prefix: 'ORK' } } }),
+            Projeto: {
+              id: 'rel',
+              name: 'Projeto',
+              type: 'relation',
+              relation: { data_source_id: ids.projectsDs, type: 'dual_property' }
+            },
+            Prioridade: {
+              id: 'pri',
+              name: 'Prioridade',
+              type: 'select',
+              select: { options: [{ id: 'p1', name: 'Alta', color: 'red' }] }
+            },
+            Responsável: { id: 'ppl', name: 'Responsável', type: 'people', people: {} }
+          }
+
+          if (path === `/data_sources/${ids.projectsDs}`) {
+            return json({
+              object: 'data_source',
+              id: ids.projectsDs,
+              title: rich('Projetos'),
+              properties: { Nome: { id: 'title', name: 'Nome', type: 'title', title: {} } }
+            })
+          }
+          if (path === `/data_sources/${ids.tasksDs}`) {
+            return json({
+              object: 'data_source',
+              id: ids.tasksDs,
+              title: rich('Tarefas'),
+              properties: tasksProperties
+            })
+          }
+          if (path === `/data_sources/${ids.projectsDs}/query`) {
+            const page = (id: string, title: string): unknown => ({
+              object: 'page',
+              id,
+              url: `https://www.notion.so/${id.replace(/-/g, '')}`,
+              properties: { Nome: { id: 'title', type: 'title', title: rich(title) } }
+            })
+            return json({
+              object: 'list',
+              results: [
+                page(ids.sitePage, 'Site institucional'),
+                page(ids.orkioPage, 'Orkio Desktop')
+              ],
+              has_more: false,
+              next_cursor: null
+            })
+          }
+          if (path === `/data_sources/${ids.tasksDs}/query`) {
+            const filter = body['filter'] as
+              { property?: string; relation?: { contains?: string } } | undefined
+            const target = filter?.relation?.contains
+            const task = (
+              n: number,
+              title: string,
+              project: string,
+              status: { name: string; color: string },
+              priority: boolean
+            ): unknown => ({
+              object: 'page',
+              id: `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`,
+              url: `https://www.notion.so/ORK-${n}-bbbb${n}`,
+              properties: {
+                Nome: { id: 'title', type: 'title', title: rich(title) },
+                Status: { id: 'st%3A', type: 'status', status: status },
+                ID: { id: 'uid', type: 'unique_id', unique_id: { prefix: 'ORK', number: n } },
+                Projeto: { id: 'rel', type: 'relation', relation: [{ id: project }] },
+                Prioridade: {
+                  id: 'pri',
+                  type: 'select',
+                  select: priority ? { name: 'Alta', color: 'red' } : null
+                }
+              }
+            })
+            const all = [
+              task(
+                2,
+                'Listar tarefas do Notion',
+                ids.orkioPage,
+                { name: 'Em andamento', color: 'blue' },
+                true
+              ),
+              task(
+                1,
+                'Conectar o Notion via OAuth',
+                ids.orkioPage,
+                { name: 'Concluída', color: 'green' },
+                false
+              ),
+              task(3, 'Nova home do site', ids.sitePage, { name: 'A fazer', color: 'gray' }, false)
+            ]
+            return json({
+              object: 'list',
+              results:
+                filter?.property === 'rel' && target
+                  ? all.filter(
+                      (t) =>
+                        (t as { properties: { Projeto: { relation: { id: string }[] } } })
+                          .properties.Projeto.relation[0]?.id === target
+                    )
+                  : all,
+              has_more: false,
+              next_cursor: null
+            })
+          }
+        }
+
         return json({ object: 'error', code: 'not_found' }, 404)
       }
     },
-    { initial: { ...DEFAULT_FAKES, ...fakes }, brokerUrl: E2E_BROKER_URL }
+    { initial: { ...DEFAULT_FAKES, ...fakes }, brokerUrl: E2E_BROKER_URL, ids: NOTION_FAKE }
   )
 
   const page = await app.firstWindow()
@@ -305,7 +478,7 @@ export async function cspViolations(page: Page): Promise<string[]> {
 
 /** Cards da tela de Integrações (cada <section> nomeada vira uma região acessível). */
 export function notionCard(page: Page): Locator {
-  return page.getByRole('region', { name: 'Notion' })
+  return page.getByRole('region', { name: 'Notion', exact: true })
 }
 
 export function githubCard(page: Page): Locator {

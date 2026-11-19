@@ -20,6 +20,8 @@ import type {
 } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
+import { ProjectNotionSection } from '../notion-workspace/ProjectNotionSection'
+import { useNotionWorkspace } from '../notion-workspace/useNotionWorkspace'
 import { ActionLink } from './ActionLink'
 import { AddProjectPanel } from './AddProjectPanel'
 import { useProjects } from './useProjects'
@@ -49,6 +51,7 @@ export function ProjectsPage({
   const [pickError, setPickError] = useState<ProjectError | null>(null)
   const [githubCheck, setGithubCheck] = useState(0)
   const githubConnected = useGitHubConnected(githubCheck)
+  const notionWorkspace = useNotionWorkspace().status
 
   async function addProject(): Promise<void> {
     setGithubCheck((n) => n + 1)
@@ -146,6 +149,16 @@ export function ProjectsPage({
               project={project}
               onRelocate={() => projects.relocate(project.id)}
               onRemove={() => projects.remove(project.id)}
+              notion={
+                notionWorkspace?.config ? (
+                  <ProjectNotionSection
+                    project={project}
+                    workspace={notionWorkspace}
+                    onChanged={projects.refresh}
+                    onOpenIntegrations={onOpenIntegrations}
+                  />
+                ) : null
+              }
             />
           ))}
         </List>
@@ -157,11 +170,14 @@ export function ProjectsPage({
 function ProjectRow({
   project,
   onRelocate,
-  onRemove
+  onRemove,
+  notion
 }: {
   project: ProjectView
   onRelocate(): Promise<ProjectMutationResult>
   onRemove(): Promise<boolean>
+  /** Vínculo com o Notion e tarefas (quando os bancos estão configurados). */
+  notion: React.ReactNode
 }): React.JSX.Element {
   const [busy, setBusy] = useState<'relocate' | 'remove' | null>(null)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
@@ -231,6 +247,7 @@ function ProjectRow({
               {notice.message}
             </Text>
           ))}
+          {notion}
           {relocateError && (
             <Alert
               tone="danger"

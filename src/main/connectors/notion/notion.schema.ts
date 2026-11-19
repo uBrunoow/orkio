@@ -13,7 +13,17 @@ import type {
   NotionProjectPage,
   NotionTask
 } from '../../../shared/ipc-contract'
+import {
+  FIELD_TYPES,
+  MAPPING_FIELDS,
+  REQUIRED_FIELDS,
+  candidatesFor,
+  fieldLabel,
+  sameId
+} from '../../../shared/notion-mapping'
 import { httpsUrlOrNull, isRecord, stringOrNull } from '../../net/parse'
+
+export { FIELD_TYPES, REQUIRED_FIELDS, candidatesFor, fieldLabel, sameId }
 
 export interface NotionDataSourceSchema {
   id: string
@@ -32,23 +42,6 @@ const COLORS: readonly NotionColor[] = [
   'purple',
   'pink',
   'red'
-]
-
-/** Tipos aceitos em cada campo do mapeamento das Tarefas. */
-export const FIELD_TYPES: Record<NotionMappingField, readonly string[]> = {
-  title: ['title'],
-  status: ['status', 'select'],
-  uniqueId: ['unique_id'],
-  project: ['relation'],
-  priority: ['select', 'status', 'number'],
-  assignee: ['people']
-}
-
-export const REQUIRED_FIELDS: readonly NotionMappingField[] = [
-  'title',
-  'status',
-  'uniqueId',
-  'project'
 ]
 
 /** Nomes usuais (pt/en), já normalizados, por campo: aumentam a pontuação da sugestão. */
@@ -143,19 +136,6 @@ function nameScore(field: NotionMappingField, name: string): number {
   return 0
 }
 
-/** Propriedades válidas para um campo (tipo certo; relação precisa apontar para Projetos). */
-export function candidatesFor(
-  field: NotionMappingField,
-  schema: NotionDataSourceSchema,
-  projectsDataSourceId: string
-): NotionPropertySummary[] {
-  return schema.properties.filter(
-    (p) =>
-      FIELD_TYPES[field].includes(p.type) &&
-      (field !== 'project' || sameId(p.relationDataSourceId ?? '', projectsDataSourceId))
-  )
-}
-
 export interface MappingSuggestion {
   mapping: Partial<NotionMapping>
   /** Campos obrigatórios sem nenhuma propriedade possível. */
@@ -179,7 +159,7 @@ export function suggestMapping(
     'assignee'
   ]
   for (const field of fields) {
-    const ranked = candidatesFor(field, schema, projectsDataSourceId)
+    const ranked = candidatesFor(field, schema.properties, projectsDataSourceId)
       .filter((p) => !used.has(p.id))
       .map((p) => ({
         p,
@@ -218,19 +198,6 @@ export interface MappingCheck {
   mapping: NotionMapping
 }
 
-const FIELD_LABELS: Record<NotionMappingField, string> = {
-  title: 'Título',
-  status: 'Status',
-  uniqueId: 'ID',
-  project: 'Projeto',
-  priority: 'Prioridade',
-  assignee: 'Responsável'
-}
-
-export function fieldLabel(field: NotionMappingField): string {
-  return FIELD_LABELS[field]
-}
-
 export function checkMapping(
   mapping: NotionMapping,
   schema: NotionDataSourceSchema,
@@ -239,15 +206,15 @@ export function checkMapping(
   const errors: string[] = []
   const warnings: string[] = []
   const updated: NotionMapping = { ...mapping }
-  for (const field of Object.keys(FIELD_LABELS) as NotionMappingField[]) {
+  for (const field of MAPPING_FIELDS) {
     const ref = mapping[field]
     if (!ref) {
       if (REQUIRED_FIELDS.includes(field))
-        errors.push(`Falta mapear a propriedade de ${FIELD_LABELS[field]}.`)
+        errors.push(`Falta mapear a propriedade de ${fieldLabel(field)}.`)
       continue
     }
     const current = schema.properties.find((p) => p.id === ref.id)
-    const label = `${FIELD_LABELS[field]} (“${ref.name}”)`
+    const label = `${fieldLabel(field)} (“${ref.name}”)`
     if (!current) {
       const msg = `A propriedade ${label} não existe mais nas Tarefas do Notion.`
       if (REQUIRED_FIELDS.includes(field)) errors.push(msg)
@@ -375,11 +342,6 @@ export function nameSimilarity(a: string, b: string): number {
     }
   }
   return (2 * overlap) / (bx.length + by.length)
-}
-
-/** Ids do Notion aparecem com e sem hífens. */
-export function sameId(a: string, b: string): boolean {
-  return a.replace(/-/g, '').toLowerCase() === b.replace(/-/g, '').toLowerCase()
 }
 
 export const NOTION_ID_PATTERN =

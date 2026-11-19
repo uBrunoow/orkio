@@ -6,8 +6,11 @@ Claude Code. Hoje existem:
 - **Conectores:** Notion (OAuth via `broker/` + token) e GitHub (OAuth Device Flow + fine-grained PAT).
 - **Projetos:** pasta local → repositório GitHub detectado (git local + API), saúde do projeto e
   branch atual ao vivo. Config não secreta em `userData/orkio-config.json` (`ConfigStore`).
-- **UI:** design system Astryx com o tema Orkio, CSP estrita.
-- Ainda não existem: tarefas do Notion, vínculo Notion ↔ projeto, PRs, automações, Claude Code.
+- **Bancos do Notion:** assistente (Integrações) escolhe os data sources de Projetos e Tarefas e
+  mapeia propriedades; cada projeto local se vincula a uma página de Projetos e lista as tarefas
+  ligadas a ela (**só leitura**).
+- **UI:** design system Astryx com o tema Orkio, CSP estrita, textos da Astryx em pt-BR.
+- Ainda não existem: escrita no Notion, kanban, PRs, automações, Claude Code.
 
 ## Comandos
 
@@ -32,23 +35,27 @@ Mudou UI, IPC, preload, segurança ou build? Rode também `pnpm e2e`.
 ```
 src/
   shared/ipc-contract.ts   # canais IPC, ConnectionStatus, credenciais, OrkioApi. Sem Node/DOM.
+  shared/notion-mapping.ts # regras do mapeamento (tipos por campo, obrigatórios) p/ main e renderer
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
     connectors/types.ts    # interface Connector
     connectors/<id>/       # <id>.client.ts (HTTP) + <id>.oauth.ts + <id>.connector.ts
     oauth/                 # fluxos genéricos: loopback.ts (redirect, RFC 8252), device-flow.ts (RFC 8628)
     net/parse.ts           # helpers puros de parsing (isRecord, Retry-After, ...)
+    net/rate-queue.ts      # fila de rate limit (concorrência, intervalo mínimo, pausa) + backoff
     ipc/                   # handlers finos: validam origem e payload, delegam ao conector/serviço
     storage/secure-store.ts  # SEGREDOS (safeStorage)
     storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações)
-    config/orkio-config.ts   # formato do orkio-config.json (schema v1: projects)
+    config/orkio-config.ts   # formato do orkio-config.json (schema v2: projects + notion)
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
+    notion/                # notion-workspace.service.ts (bancos, mapeamento, vínculo, tarefas)
   preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
     features/<feature>/    # componentes + hooks por funcionalidade
       integrations/connection-ui.tsx  # peças comuns dos cards (conectado, erro, token, desconectar)
       projects/            # tela Projetos (useProjects, AddProjectPanel, ActionLink)
+      notion-workspace/    # card "Bancos do Notion" (assistente) e seção Notion de cada projeto
     components/Alert.tsx   # mensagens (Banner da Astryx)
     components/PageHeader.tsx  # título da página + ação
     components/OrkioLogo/  # logo (símbolo full/simple + wordmark)
@@ -126,7 +133,36 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   Token colado continua como alternativa ("Usar token").
 - Registro salvo (`secrets/notion.bin`, cifrado) é versionado: `v: 2` com
   `method: 'token' | 'oauth'`. Registros `v: 1` (Etapa 1) são lidos como `token`.
-- Futuras chamadas à API devem usar `withAccessToken` do conector (renova em 401).
+- Chamadas à API passam pelo conector (`withAccessToken`, renova em 401). Serviços recebem só
+  métodos de leitura (`searchDataSources`, `getDataSource`, `queryDataSource`,
+  `connectionMethod`), nunca o token.
+- Leituras de dados usam a API de **data sources** (2025-09-03+): `POST /search` (filtro
+  `object: data_source`), `GET /data_sources/{id}`, `POST /data_sources/{id}/query`. Passam pela
+  `RateQueue` (2 simultâneas, 350 ms entre inícios ≈ 3 req/s); 429 pausa a fila pelo
+  `Retry-After` (ou backoff exponencial) e tenta de novo até 3 vezes (espera máx. 30 s).
+  404 → `not_found`, 403 → `forbidden`, 400 → `bad_request`, com mensagens pt-BR.
+
+## Bancos do Notion (Etapa 2C)
+
+- `NotionWorkspaceService` (`main/notion/`). Config em `orkio-config.json` → `notion`:
+  `projectsDataSource`/`tasksDataSource` (`{ id, name }`) e `mapping` por **id de propriedade**
+  (`{ id, name, type }`); em cada projeto, `notionProject: { id, name } | null`. **Só ids e
+  nomes**; nunca conteúdo de páginas.
+- Campos: `title`, `status` (status/select), `uniqueId` (unique_id), `project` (relation que
+  aponta para o banco de Projetos) obrigatórios; `priority`, `assignee` opcionais
+  (`shared/notion-mapping.ts`). Sem `unique_id` o salvar é bloqueado com explicação.
+- Sugestão automática (`suggestMapping`): tipo + nomes usuais pt/en; opcionais só com nome
+  reconhecido. `checkMapping` revalida: renomeada → aviso e nome atualizado; apagada/tipo
+  mudou → erro (`broken`, tarefas bloqueadas) nos obrigatórios, aviso e campo ignorado nos opcionais.
+- Revalidação: uma vez por sessão (`getStatus`) e ao mudar a conexão do Notion. Sem rede →
+  `unverified` (nada é apagado). Trocar o banco de Projetos desfaz os vínculos.
+- Vínculo 1 ↔ 1 (página de Projetos ↔ projeto local); a lista vem ordenada por semelhança de
+  nome (Dice em bigramas) com o projeto/repositório.
+- Tarefas: `relation.contains` com a página vinculada, `created_time` desc, até 500 (5 páginas),
+  cache em memória de 60 s (`force` ignora). Não usamos `filter_properties` (ids de
+  propriedade vêm codificados; sem como validar sem a API real).
+- OAuth só enxerga o que foi escolhido na autorização: 404/403 em conexão OAuth vira
+  `canReconnect` ("Reconectar com Notion").
 - Config de build: `MAIN_VITE_NOTION_OAUTH_CLIENT_ID` e `MAIN_VITE_NOTION_OAUTH_BROKER_URL`
   (`.env.example`; `.env.e2e` só para o E2E). Sem elas, OAuth fica indisponível.
 
@@ -221,6 +257,9 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   do app para isso. No Linux sem keyring, o fixture liga a criptografia básica do Electron
   só no teste.
 - Para novos conectores: adicione o modo fake correspondente no fixture e um spec em `e2e/`.
+- Notion simulado: `notionTasks` (`ok`, `no_unique_id`, `renamed`, `status_deleted`) e ids fixos
+  em `NOTION_FAKE` (`e2e/fixtures.ts`). Selector da Astryx no E2E: gatilho com papel `button`
+  (sem valor) ou `combobox` (com valor), nome começando pelo rótulo; opções têm papel `option`.
 
 ## Decisões registradas
 
@@ -250,6 +289,10 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 | CSS das camadas da Astryx como arquivo estático                                                             | `ensureSlideRules` só injeta `<style>` se não achar o id; o arquivo estático (gerado e testado contra a versão instalada) evita relaxar a CSP.                                                                                                              |
 | Confirmações inline em vez de `AlertDialog`                                                                 | Diálogos usam camadas sobrepostas; inline é suficiente e mantém o risco de CSP baixo.                                                                                                                                                                       |
 | Peças de UI dos cards em `connection-ui.tsx`                                                                | Notion e GitHub compartilham conectado/erro/token/desconectar; cada card só implementa o próprio fluxo de login.                                                                                                                                            |
+| Mapeamento das Tarefas salvo por **id de propriedade**                                                      | O id é estável a renomeações: renomear vira só aviso (e atualizamos o nome); apagar/mudar tipo é detectado na revalidação.                                                                                                                                  |
+| Tarefas do Notion só em memória (cache 60 s, até 500)                                                       | Nada de conteúdo do Notion no disco; o Notion continua a fonte da verdade. 60 s equilibra rate limit (~3 req/s) e frescor; "Atualizar" força.                                                                                                               |
+| Config v2 com bloco `notion` inválido → "não configurado" com aviso                                         | Um mapeamento corrompido não pode derrubar a lista de projetos.                                                                                                                                                                                             |
+| `InternationalizationProvider` pt-BR da Astryx                                                              | Textos internos dos componentes (Obrigatório, Limpar, busca) seguem a regra de UI em pt-BR.                                                                                                                                                                 |
 
 ## Astryx e CSP (regra inegociável)
 

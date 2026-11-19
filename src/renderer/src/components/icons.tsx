@@ -6,11 +6,16 @@ import type { FunctionComponent, SVGProps } from 'react'
 import {
   IconBrandGithub,
   IconBrandNotion,
+  IconDatabase,
   IconExternalLink,
   IconFolderPlus,
   IconFolderSearch,
   IconFolders,
+  IconLink,
+  IconLinkOff,
+  IconListCheck,
   IconPlugConnected,
+  IconRefresh,
   IconTrash,
   type Icon as TablerIcon,
   type IconProps as TablerIconProps
@@ -34,3 +39,8 @@ export const FolderSearchIcon = adapt(IconFolderSearch)
 export const ProjectsIcon = adapt(IconFolders)
 export const IntegrationsIcon = adapt(IconPlugConnected)
 export const TrashIcon = adapt(IconTrash)
+export const DatabaseIcon = adapt(IconDatabase)
+export const LinkIcon = adapt(IconLink)
+export const UnlinkIcon = adapt(IconLinkOff)
+export const TasksIcon = adapt(IconListCheck)
+export const RefreshIcon = adapt(IconRefresh)

@@ -6,6 +6,8 @@ import { VStack } from '@astryxdesign/core/VStack'
 import type { ConnectionStatus } from '../../../../shared/ipc-contract'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
 import { PageHeader } from '../../components/PageHeader'
+import { NotionWorkspaceCard } from '../notion-workspace/NotionWorkspaceCard'
+import { useNotionWorkspace } from '../notion-workspace/useNotionWorkspace'
 import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
 import { useGitHubConnection } from './useGitHubConnection'
@@ -14,6 +16,8 @@ import { useNotionConnection } from './useNotionConnection'
 export function IntegrationsPage(): React.JSX.Element {
   const notion = useNotionConnection()
   const github = useGitHubConnection()
+  // Revalida os bancos quando a conexão do Notion muda (conectou, desconectou, reconectou).
+  const workspace = useNotionWorkspace(connectionKey(notion.status))
   const nothingConnected = [notion.status, github.status].every(isEmpty)
 
   return (
@@ -51,6 +55,12 @@ export function IntegrationsPage(): React.JSX.Element {
         <NotionConnectionCard notion={notion} />
         <GitHubConnectionCard github={github} />
       </Grid>
+
+      <NotionWorkspaceCard
+        workspace={workspace}
+        notionStatus={notion.status}
+        {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
+      />
     </VStack>
   )
 }
@@ -62,4 +72,9 @@ export function IntegrationsPage(): React.JSX.Element {
 function isEmpty(status: ConnectionStatus | null): boolean {
   if (status === null || status.state === 'connected') return false
   return !(status.state === 'error' && status.hasStoredCredentials)
+}
+
+function connectionKey(status: ConnectionStatus | null): string | null {
+  if (status === null || status.state === 'connecting') return null
+  return status.state === 'connected' ? `connected:${status.connectedAt}` : status.state
 }

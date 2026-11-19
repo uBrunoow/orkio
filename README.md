@@ -226,6 +226,30 @@ oferece o link para autorizar (SSO) ou pedir a aprovação de um admin.
 Os projetos ficam em `<userData>/orkio-config.json` (sem segredos). Se o arquivo estiver
 corrompido, o Orkio guarda uma cópia (`orkio-config.corrupt-<data>.json`) e começa vazio, com aviso.
 
+## Bancos do Notion e tarefas
+
+Em **Integrações → Bancos do Notion** (com o Notion conectado), um assistente em 3 passos:
+
+1. **Projetos:** escolha o banco (data source) com uma página por projeto.
+2. **Tarefas:** escolha o banco de tarefas. Ele precisa de uma **relação** com o banco de Projetos.
+3. **Mapeamento:** o Orkio sugere quais propriedades usar (pelo nome e pelo tipo). Obrigatórias:
+   Título, Status (status ou seleção), **ID** (tipo “ID”/`unique_id`, ex.: `ORK-142`) e Projeto
+   (a relação). Opcionais: Prioridade e Responsável.
+
+Sem uma propriedade do tipo ID, o Orkio não salva e explica como criá-la no Notion (+ nova
+propriedade → **ID**). Com login via Notion (OAuth), só aparecem os bancos escolhidos na
+autorização; se faltar algum, use **Reconectar com Notion** e marque as páginas desses bancos.
+
+Ao abrir o app, o Orkio confere o mapeamento: propriedade **renomeada** gera um aviso (e o nome é
+atualizado); propriedade **apagada** ou com outro tipo bloqueia as tarefas até você revisar o
+mapeamento.
+
+Em **Projetos**, cada projeto pode ser **vinculado** a um projeto do Notion (um para um; o Orkio
+sugere pelo nome). Com o vínculo, **Ver tarefas** lista as tarefas ligadas a ele: ID, título,
+status (com a cor do Notion) e prioridade, com **Atualizar** e um botão para abrir no Notion.
+É só leitura: o Orkio não altera nada no Notion. As tarefas ficam só em memória (cache de 60 s);
+o arquivo de configuração guarda apenas ids e nomes dos bancos, das propriedades e do vínculo.
+
 ## Segurança
 
 - Todas as chamadas ao Notion e ao GitHub são feitas no **processo main**. O renderer não tem
