@@ -1,0 +1,42 @@
+/* Tokens da marca Orkio. Dark mode é o padrão. */
+:root {
+  color-scheme: dark;
+
+  /* Cores */
+  --bg: #0a0a0b;
+  --surface: #141416;
+  --raised: #1e1e21;
+  --border: #2c2c30;
+  --text: #f2f2f0;
+  --muted: #8f8f94;
+  --accent: #ff5b1f;
+  --on-accent: #0a0a0b;
+  --success: #3dd68c;
+  --warning: #f5c518;
+  --danger: #f0445c;
+
+  /* Tipografia */
+  --font-sans:
+    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    sans-serif;
+  --font-mono:
+    ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 22px;
+
+  /* Espaçamento, raio, movimento */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-full: 999px;
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --transition: 120ms ease;
+}
