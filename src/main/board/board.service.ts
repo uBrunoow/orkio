@@ -8,6 +8,7 @@
  *   (NotionWriteQueue), que confirma, tenta de novo ou desfaz.
  */
 import { defaultRules } from '../../shared/automation'
+import { diffFlow, toBoardStages, validateFlow, type FlowDraft } from '../../shared/flow'
 import {
   findOption,
   reconcile,
@@ -25,6 +26,7 @@ import type {
   BoardSaveInput,
   BoardSyncEvent,
   BoardView,
+  ConfigEvent,
   NotionMapping,
   NotionPropertySummary,
   NotionResult
@@ -70,6 +72,8 @@ export interface BoardServiceDeps {
   newId?: () => string
   /** Depois de confirmar uma escrita, quanto tempo o Notion pode demorar a refletir (ms). */
   graceMs?: number
+  /** "Quem" nos eventos de configuração (usuário do sistema operacional). */
+  actor?: () => string
 }
 
 export const BOARD_MESSAGES = {
@@ -600,6 +604,106 @@ export class BoardService {
     })
   }
 
+  // ---------- Fluxo (3C) ----------
+
+  /**
+   * Salva etapas + automações do editor de fluxo. Valida de novo aqui (mesma função pura da tela),
+   * move as tarefas das etapas removidas para o destino escolhido (mesmo caminho do movimento
+   * manual, com escrita no Notion se o status mudar) e registra o evento de configuração.
+   */
+  async saveFlow(projectId: string, draft: FlowDraft): Promise<NotionResult<BoardView>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      const previous = this.deps.config.get().boards[projectId]
+      if (!previous) {
+        throw new BoardError({ code: 'not_configured', message: BOARD_MESSAGES.noBoard })
+      }
+      const optionsResult = await this.deps.notion.statusOptions()
+      if (!optionsResult.ok) throw new BoardError(optionsResult.error)
+      const { options } = optionsResult.value
+
+      const issues = validateFlow(draft, {
+        statusOptions: options,
+        savedStageIds: previous.stages.map((s) => s.id),
+        taskCounts: this.deps.store.taskCounts(projectId)
+      }).filter((i) => i.level === 'error')
+      if (issues.length > 0) {
+        throw new BoardError({ code: 'invalid', message: issues.map((i) => i.message).join(' ') })
+      }
+
+      // Garante as tarefas em memória para mover as das etapas removidas.
+      if (!this.snapshots.has(projectId)) await this.load(projectId, false)
+
+      const stages = toBoardStages(draft.stages, options)
+      const board: BoardConfig = {
+        ...previous,
+        stages,
+        rules: draft.rules,
+        updatedAt: this.now().toISOString()
+      }
+      try {
+        await this.deps.config.update((c) => ({
+          ...c,
+          boards: { ...c.boards, [projectId]: board }
+        }))
+      } catch (e) {
+        throw new BoardError({
+          code: 'storage',
+          message:
+            e instanceof ConfigReadOnlyError ? BOARD_MESSAGES.readOnly : BOARD_MESSAGES.storage
+        })
+      }
+
+      const changes = diffFlow(previous, board)
+      let moved = 0
+      this.deps.store.transaction(() => {
+        for (const removed of previous.stages) {
+          if (stages.some((s) => s.id === removed.id)) continue
+          const destination = draft.removals[removed.id]
+          const tasks = this.deps.store.tasksInStage(projectId, removed.id)
+          for (const taskId of tasks) {
+            if (
+              !destination ||
+              !this.snapshots.get(projectId)?.data.tasks.some((t) => t.id === taskId)
+            ) {
+              continue
+            }
+            if (
+              this.applyMove(projectId, taskId, destination, {
+                source: 'manual',
+                detail: { flow: 'stage_removed', removedStage: removed.name }
+              })
+            ) {
+              moved++
+            }
+          }
+          if (tasks.length > 0 && destination) {
+            const name = stages.find((s) => s.id === destination)?.name ?? ''
+            changes.push(`Tarefas de “${removed.name}” movidas para “${name}”`)
+          }
+        }
+        if (changes.length > 0) {
+          this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
+        }
+      })
+      if (moved > 0) this.queue?.kick()
+      return this.load(projectId, false)
+    })
+  }
+
+  async configEvents(projectId: string): Promise<ConfigEvent[]> {
+    this.project(projectId)
+    return this.deps.store.configEvents(projectId)
+  }
+
+  private actor(): string {
+    try {
+      return this.deps.actor?.() || 'você'
+    } catch {
+      return 'você'
+    }
+  }
+
   // ---------- Configuração ----------
 
   async save(projectId: string, input: BoardSaveInput): Promise<NotionResult<BoardView>> {
@@ -713,6 +817,12 @@ export class BoardService {
           message:
             e instanceof ConfigReadOnlyError ? BOARD_MESSAGES.readOnly : BOARD_MESSAGES.storage
         })
+      }
+      const changes = previous
+        ? diffFlow(previous, board)
+        : [`Quadro criado com ${stages.length} etapas e ${board.rules.length} automações`]
+      if (changes.length > 0) {
+        this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
       }
       if (orkioStageProperty) this.deps.notion.invalidateTasks(projectId)
       return this.load(projectId, orkioStageProperty !== null)

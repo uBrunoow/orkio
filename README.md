@@ -301,7 +301,18 @@ Cada evento age uma vez só, mesmo reiniciando o app. Tarefas bloqueadas ou com 
 pausadas (no menu do card ou "Pausar todas" no topo do quadro) não se movem: o histórico mostra o
 evento e por que foi ignorado. Se você mover a tarefa à mão depois do evento, vale a sua escolha.
 O GitHub é consultado a cada minuto sem gastar o limite de requisições quando nada mudou;
-**Atualizar** verifica na hora. O editor de regras chega numa próxima etapa.
+**Atualizar** verifica na hora. Para mudar etapas e automações, use **Fluxo do projeto** no quadro (abaixo).
+
+## Fluxo do projeto
+
+No quadro, **Fluxo do projeto** mostra uma coluna por etapa: nome, cor, status do Notion e as
+automações que levam para ela, escritas em frase ("Quando a PR é aprovada e a tarefa está em
+Revisando, mover para QA"). Dá para criar, reordenar e remover etapas (as tarefas de uma etapa
+removida vão para onde você escolher) e criar, editar, desativar, reordenar e remover automações
+num formulário. Antes de salvar, o Orkio aponta erros (ex.: etapa sem status do Notion) e avisa
+sobre conflitos (qual regra vence pela ordem) e ciclos. **Testar automação** mostra o que
+aconteceria com uma tarefa num evento, sem executar nada. Também há **Restaurar padrão**,
+**Exportar/Importar JSON** (para reaproveitar em outro projeto) e o histórico de alterações.
 
 ## Segurança
 

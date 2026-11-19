@@ -6,6 +6,7 @@ import { registerGitHubIpc } from './github.ipc'
 import { registerProjectsIpc } from './projects.ipc'
 import { registerSignalsIpc } from './signals.ipc'
 import { registerBoardIpc } from './board.ipc'
+import { isFlowDraft, registerFlowIpc } from './flow.ipc'
 import { registerAutomationIpc } from './automation.ipc'
 import { registerNotionIpc } from './notion.ipc'
 import { registerNotionWorkspaceIpc } from './notion-workspace.ipc'
@@ -573,5 +574,51 @@ describe('registerAutomationIpc', () => {
     const result = await ipc.invoke(ch.setPaused, true)
     expect(JSON.stringify(result)).not.toContain('SECRET')
     errors.mockRestore()
+  })
+})
+
+describe('registerFlowIpc / isFlowDraft', () => {
+  it('aceita só a forma do rascunho; descarta campos estranhos nas regras', async () => {
+    const draft = {
+      stages: [{ id: 'stage-1', name: 'A', notionStatusId: 'o1' }],
+      rules: [
+        {
+          id: 'r1',
+          name: 'r',
+          enabled: true,
+          trigger: 'pr.merged',
+          action: { type: 'move_to_stage', stageId: 'stage-1' },
+          exec: 'rm -rf /'
+        }
+      ],
+      removals: { 'stage-2': 'stage-1' }
+    }
+    expect(isFlowDraft(draft)).toBe(true)
+    expect(JSON.stringify(draft.rules)).not.toContain('exec')
+    expect(
+      isFlowDraft({ ...draft, stages: [{ id: '../x', name: 'A', notionStatusId: null }] })
+    ).toBe(false)
+    expect(isFlowDraft({ ...draft, rules: [{ id: 'x', trigger: 'pr.hack' }] })).toBe(false)
+    expect(isFlowDraft({ ...draft, removals: { 'stage-2': '../y' } })).toBe(false)
+
+    const ipc = fakeIpc()
+    const service = {
+      saveFlow: vi.fn(async () => ({ ok: true as const, value: null as never })),
+      configEvents: vi.fn(async () => [])
+    }
+    const files = { save: vi.fn(async () => null), open: vi.fn(async () => '{oops') }
+    registerFlowIpc(ipc, service, files, guard)
+    expect(await ipc.invoke(IPC_CHANNELS.flow.save, 'p1', { stages: 'x' })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid' }
+    })
+    expect(await ipc.invoke(IPC_CHANNELS.flow.exportFile, { a: 1 })).toEqual({
+      ok: false,
+      cancelled: true
+    })
+    expect(await ipc.invoke(IPC_CHANNELS.flow.importFile)).toMatchObject({
+      ok: false,
+      cancelled: false
+    })
   })
 })

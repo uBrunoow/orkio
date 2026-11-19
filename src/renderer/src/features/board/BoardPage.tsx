@@ -17,6 +17,7 @@ import { AutomationIcon, PauseIcon, RefreshIcon, SettingsIcon } from '../../comp
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardSettings } from './BoardSettings'
+import { FlowPage } from './FlowPage'
 import { TaskPanel } from './TaskPanel'
 import { useBoard, type BoardError } from './useBoard'
 
@@ -105,7 +106,8 @@ function Board({
   const automation = useAutomationStatus(projectId)
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
-  const [editing, setEditing] = useState(false)
+  /** Tela atual: quadro, fluxo (3C) ou ajustes do Notion (Etapa Orkio/Bloqueada). */
+  const [mode, setMode] = useState<'board' | 'flow' | 'settings'>('board')
   const [selected, setPicked] = useState<string | null>(openTaskId)
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
@@ -145,16 +147,30 @@ function Board({
     )
   }
 
-  if (!view.config || editing) {
+  if (!view.config || mode === 'settings') {
     return (
       <BoardSettings
         view={view}
         onSave={async (input) => {
           const result = await board.save(input)
-          if (result.ok) setEditing(false)
+          if (result.ok) setMode('board')
           return result
         }}
-        onCancel={view.config ? () => setEditing(false) : undefined}
+        onCancel={view.config ? () => setMode('flow') : undefined}
+      />
+    )
+  }
+
+  if (mode === 'flow') {
+    return (
+      <FlowPage
+        view={view}
+        onSaved={(next) => {
+          board.replace(next)
+          setMode('board')
+        }}
+        onClose={() => setMode('board')}
+        onOpenNotionSettings={() => setMode('settings')}
       />
     )
   }
@@ -211,9 +227,9 @@ function Board({
         />
         <Button
           variant="ghost"
-          label="Ajustar quadro"
+          label="Fluxo do projeto"
           icon={<Icon icon={SettingsIcon} />}
-          onClick={() => setEditing(true)}
+          onClick={() => setMode('flow')}
         />
       </HStack>
 

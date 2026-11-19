@@ -538,4 +538,96 @@ describe('BoardService', () => {
       error: { code: 'unexpected', message: 'Algo deu errado no quadro. Tente novamente.' }
     })
   })
+
+  describe('saveFlow (3C)', () => {
+    async function flowFrom(view: Awaited<ReturnType<typeof createBoard>>) {
+      return {
+        stages: view.config!.stages.map((s) => ({
+          id: s.id,
+          name: s.name,
+          notionStatusId: s.notionStatus.id
+        })),
+        rules: view.config!.rules.map((r) => ({ ...r })),
+        removals: {} as Record<string, string | null>
+      }
+    }
+
+    it('cria a etapa QA com uma regra, salva e registra o evento de configuração', async () => {
+      const view = await createBoard()
+      const draft = await flowFrom(view)
+      draft.stages.splice(4, 0, { id: 'stage-qa', name: 'QA', notionStatusId: 'o-and' })
+      draft.rules.unshift({
+        id: 'rule-qa',
+        name: 'Aprovada vai para QA',
+        enabled: true,
+        trigger: 'pr.approved',
+        conditions: { fromStages: [stageId(view, 'Revisando')] },
+        action: { type: 'move_to_stage', stageId: 'stage-qa' }
+      })
+      const saved = await service.saveFlow('p1', draft)
+      expect(saved.ok).toBe(true)
+      if (!saved.ok) return
+      expect(saved.value.config!.stages.map((s) => s.name)).toEqual([
+        'Prioridades',
+        'Em andamento',
+        'Revisando',
+        'Revisado',
+        'QA',
+        'Finalizada'
+      ])
+      expect(config.get().boards['p1']!.rules[0]!.id).toBe('rule-qa')
+      const events = await service.configEvents('p1')
+      expect(events[0]!.actor).toBe('você')
+      expect(events[0]!.changes).toEqual([
+        'Etapa “QA” criada entre Revisado e Finalizada (Notion: Em andamento)',
+        'Automação criada: Quando a PR é aprovada e a tarefa está em Revisando, mover para QA.'
+      ])
+      expect(events[1]!.changes[0]).toMatch(/Quadro criado com 5 etapas/)
+    })
+
+    it('valida de novo no main: etapa sem status e regra para etapa removida', async () => {
+      const view = await createBoard()
+      const draft = await flowFrom(view)
+      draft.stages[0] = { ...draft.stages[0]!, notionStatusId: 'nao-existe' }
+      expect(await service.saveFlow('p1', draft)).toMatchObject({
+        ok: false,
+        error: { code: 'invalid' }
+      })
+      const removed = await flowFrom(view)
+      removed.stages = removed.stages.filter((s) => s.name !== 'Revisado')
+      expect(await service.saveFlow('p1', removed)).toMatchObject({
+        ok: false,
+        error: { message: expect.stringContaining('não existe mais') }
+      })
+    })
+
+    it('remover etapa com tarefas exige destino e move as tarefas (Notion se o status mudar)', async () => {
+      const view = await createBoard()
+      // T2 está em Prioridades.
+      const prio = stageId(view, 'Prioridades')
+      const draft = await flowFrom(view)
+      draft.stages = draft.stages.filter((s) => s.id !== prio)
+      draft.rules = draft.rules.map((r) => ({
+        ...r,
+        conditions: {
+          ...r.conditions,
+          fromStages: (r.conditions?.fromStages ?? []).filter((id) => id !== prio)
+        }
+      }))
+      const without = await service.saveFlow('p1', draft)
+      expect(without).toMatchObject({
+        ok: false,
+        error: { message: expect.stringContaining('para onde vão') }
+      })
+      draft.removals = { [prio]: stageId(view, 'Em andamento') }
+      const saved = await service.saveFlow('p1', draft)
+      expect(saved.ok && saved.value.cards.find((c) => c.taskId === T2)?.stageId).toBe(
+        stageId(view, 'Em andamento')
+      )
+      await queue.idle()
+      expect(notion.status[T2]).toBe('Em andamento')
+      const events = await service.configEvents('p1')
+      expect(events[0]!.changes).toContain('Tarefas de “Prioridades” movidas para “Em andamento”')
+    })
+  })
 })

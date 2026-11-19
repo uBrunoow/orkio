@@ -71,6 +71,17 @@ export const MIGRATIONS: readonly string[] = [
     updated_at TEXT NOT NULL
   );
   CREATE INDEX signal_snapshots_project ON signal_snapshots (project_id);
+  `,
+  // v3 (Etapa 3C): histórico de alterações do fluxo (quem, quando, o quê).
+  `
+  CREATE TABLE config_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    changes_json TEXT NOT NULL
+  );
+  CREATE INDEX config_events_project ON config_events (project_id, id);
   `
 ]
 

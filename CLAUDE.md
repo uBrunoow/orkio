@@ -15,7 +15,9 @@ Claude Code. Hoje existem:
 - **UI:** design system Astryx com o tema Orkio, CSP estrita, textos da Astryx em pt-BR.
 - **Automações (3B):** eventos do git/GitHub (por diff de sinais) movem tarefas por regras
   declarativas, em segundo plano, com idempotência no SQLite.
-- Ainda não existem: editor de regras (3C), Claude Code, webhooks.
+- **Fluxo do projeto (3C):** tela para editar etapas e automações (frases, formulário),
+  validação, simulação, restaurar padrão, exportar/importar e histórico de alterações.
+- Ainda não existem: Claude Code (4A/4B), webhooks.
 
 ## Comandos
 
@@ -45,6 +47,7 @@ src/
   shared/task-signals.ts   # TaskSignals, buildTaskSignals, diffSignals (base da Etapa 3)
   shared/board.ts          # etapas, template, validação e reconciliação do quadro (puras)
   shared/automation.ts     # snapshot, deriveEvents, regras padrão, evaluate (motor puro)
+  shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
     connectors/types.ts    # interface Connector
@@ -339,6 +342,24 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   merge). Clique → `board:open-task` abre a tarefa no quadro. Movimento automático →
   `board:changed` recarrega a tela.
 
+## Fluxo do projeto (Etapa 3C)
+
+- Tela `FlowPage` (botão "Fluxo do projeto" no quadro): rascunho local; nada vale até "Salvar
+  fluxo". O main valida de novo (`validateFlow`, a mesma função) e grava `boards[id].stages/rules`
+  (formato da config inalterado, v4).
+- `validateFlow`: **erros** (bloqueiam) = etapa sem status válido, nome vazio/repetido, regra para
+  etapa removida (destino ou origem), notificação sem mensagem, etapa removida com tarefas sem
+  destino. **Avisos** (exigem "Entendi os avisos") = conflito (mesmo gatilho, origens que se
+  sobrepõem, destinos diferentes: diz qual vence pela ordem), ciclo instantâneo (A→B e B→A pelo
+  mesmo gatilho), regra inalcançável.
+- Simular = `simulate` (motor `evaluate` da 3B sobre o rascunho, sem gravar nada).
+- Remover etapa com tarefas: as tarefas vão para o destino escolhido pelo caminho do movimento
+  manual (escrita no Notion só se o status mudar).
+- Exportar/importar: `{ format: 'orkio-flow', version: 1 }`, etapas por chave e status por NOME
+  (portável entre projetos); versão futura é recusada. Diálogos abertos pelo main.
+- Histórico de configuração: `config_events` (SQLite v3) com quem (`os.userInfo().username`),
+  quando e o quê (`diffFlow`). Também registra a criação do quadro.
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -350,6 +371,7 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   do app para isso. No Linux sem keyring, o fixture liga a criptografia básica do Electron
   só no teste.
 - Para novos conectores: adicione o modo fake correspondente no fixture e um spec em `e2e/`.
+- Diálogos simulados: `queueFolderPicks` (abrir) e `queueSavePaths` ("Salvar como…").
 - GitHub simulado (3B): `githubPrDetails[n].reviews`/`reviewRequests` e `FakePull.updatedAt` (o
   Orkio só relê detalhes quando `updated_at` muda). `notionInitialStatus` mantém o Notion
   simulado igual entre aberturas do app.

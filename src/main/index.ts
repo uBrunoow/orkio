@@ -1,4 +1,5 @@
-import { realpath, stat } from 'node:fs/promises'
+import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { userInfo } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -30,6 +31,7 @@ import { registerNotionWorkspaceIpc } from './ipc/notion-workspace.ipc'
 import { registerProjectsIpc } from './ipc/projects.ipc'
 import { registerSignalsIpc } from './ipc/signals.ipc'
 import { registerBoardIpc } from './ipc/board.ipc'
+import { registerFlowIpc } from './ipc/flow.ipc'
 import { registerAutomationIpc } from './ipc/automation.ipc'
 import { AutomationService, type AutomationNotification } from './automation/automation.service'
 import { AutomationScheduler } from './automation/scheduler'
@@ -205,7 +207,8 @@ function registerIpc(): void {
         updateDataSource: (id, properties) => notion.updateDataSource(id, properties),
         connectionMethod: () => notion.connectionMethod()
       },
-      onSync: broadcast
+      onSync: broadcast,
+      actor: () => userInfo().username
     })
     writeQueue = new NotionWriteQueue({
       store: boardStore,
@@ -217,6 +220,43 @@ function registerIpc(): void {
     })
     board.attachQueue(writeQueue)
     registerBoardIpc(ipcMain, board, isTrustedSender, projectsReady)
+    registerFlowIpc(
+      ipcMain,
+      board,
+      {
+        save: async (json) => {
+          const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+          const options: Electron.SaveDialogOptions = {
+            title: 'Exportar fluxo do projeto',
+            defaultPath: 'fluxo-orkio.json',
+            filters: [{ name: 'Fluxo do Orkio', extensions: ['json'] }]
+          }
+          const result = win
+            ? await dialog.showSaveDialog(win, options)
+            : await dialog.showSaveDialog(options)
+          if (result.canceled || !result.filePath) return null
+          await writeFile(result.filePath, json, 'utf8')
+          return true
+        },
+        open: async (maxBytes) => {
+          const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+          const options: Electron.OpenDialogOptions = {
+            title: 'Importar fluxo do projeto',
+            properties: ['openFile'],
+            filters: [{ name: 'Fluxo do Orkio', extensions: ['json'] }]
+          }
+          const result = win
+            ? await dialog.showOpenDialog(win, options)
+            : await dialog.showOpenDialog(options)
+          const file = result.canceled ? undefined : result.filePaths[0]
+          if (!file) return null
+          if ((await stat(file)).size > maxBytes) throw new Error('arquivo grande demais')
+          return readFile(file, 'utf8')
+        }
+      },
+      isTrustedSender,
+      projectsReady
+    )
 
     // Automações (3B): motor + agendador em segundo plano.
     const send = (channel: string, payload: unknown): void => {

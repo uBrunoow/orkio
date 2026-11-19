@@ -99,6 +99,8 @@ interface FakeGlobals {
   __fakes: FakeServices
   /** Próximas pastas "escolhidas" no seletor do sistema (vazio = cancelar). */
   __picks: string[]
+  /** Próximos caminhos escolhidos em "Salvar como…" (vazio = cancelar). */
+  __savePaths: string[]
   __calls: {
     url: string
     auth: string | undefined
@@ -185,6 +187,11 @@ export async function launchOrkio(
       }
       g.__fakes = initial
       g.__picks = []
+      g.__savePaths = []
+      dialog.showSaveDialog = (async () => {
+        const next = g.__savePaths.shift()
+        return next ? { canceled: false, filePath: next } : { canceled: true, filePath: '' }
+      }) as typeof dialog.showSaveDialog
       // Seletor de pasta do sistema → fila controlada pelo teste.
       dialog.showOpenDialog = (async () => {
         const next = g.__picks.shift()
@@ -729,4 +736,11 @@ export async function queueFolderPicks(app: ElectronApplication, paths: string[]
  */
 export function alerts(scope: Page | Locator): Locator {
   return scope.locator('[role="alert"]:not([data-astryx-live-region])')
+}
+
+/** Enfileira caminhos para as próximas aberturas de "Salvar como…" (no main). */
+export async function queueSavePaths(app: ElectronApplication, paths: string[]): Promise<void> {
+  await app.evaluate((_electron, next) => {
+    ;(globalThis as unknown as FakeGlobals).__savePaths.push(...next)
+  }, paths)
 }

@@ -101,7 +101,7 @@ describe('migração v2 (3B)', () => {
       "INSERT INTO task_state (task_page_id, project_id, stage_id, blocked, updated_at, source) VALUES ('t', 'p', 's', 0, 'x', 'manual')"
     )
     v1.close()
-    const db = openDatabase(file)
+    const db = openDatabase(file, MIGRATIONS.slice(0, 2))
     expect(db.version).toBe(2)
     expect(db.get('SELECT event_key, kind FROM task_events')).toEqual({
       event_key: null,
@@ -122,6 +122,27 @@ describe('migração v2 (3B)', () => {
     // Eventos sem chave (manuais) continuam livres.
     insert(null)
     insert(null)
+    db.close()
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+describe('migração v3 (3C)', () => {
+  it('v2 → v3 cria config_events sem perder dados', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v3-'))
+    const file = join(dir, 'orkio.db')
+    const v2 = openDatabase(file, MIGRATIONS.slice(0, 2))
+    v2.run(
+      "INSERT INTO task_events (task_page_id, project_id, at, kind, source, event_key) VALUES ('t', 'p', 'x', 'automation', 'automation', 'pr#1:merged')"
+    )
+    v2.close()
+    const db = openDatabase(file)
+    expect(db.version).toBe(3)
+    expect(db.get('SELECT event_key FROM task_events')).toEqual({ event_key: 'pr#1:merged' })
+    db.run(
+      "INSERT INTO config_events (project_id, at, actor, changes_json) VALUES ('p', 'x', 'ana', '[]')"
+    )
+    expect(db.all('SELECT actor FROM config_events')).toEqual([{ actor: 'ana' }])
     db.close()
     await rm(dir, { recursive: true, force: true })
   })

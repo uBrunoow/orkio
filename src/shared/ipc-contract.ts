@@ -4,6 +4,7 @@
  */
 
 import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
+import type { FlowDraft } from './flow'
 import type { TaskSignals } from './task-signals'
 
 export type { BoardConfig, BoardStage, StageIssue, StatusOption, TaskSignals }
@@ -30,6 +31,12 @@ export const IPC_CHANNELS = {
   },
   signals: {
     get: 'signals:get'
+  },
+  flow: {
+    save: 'flow:save',
+    events: 'flow:events',
+    exportFile: 'flow:export-file',
+    importFile: 'flow:import-file'
   },
   automation: {
     status: 'automation:status',
@@ -363,6 +370,19 @@ export interface BoardHistoryEntry {
   detail: Record<string, unknown> | null
 }
 
+// ---------- Fluxo do projeto (Etapa 3C) ----------
+
+export interface ConfigEvent {
+  id: number
+  at: string
+  /** Usuário do sistema operacional. */
+  actor: string
+  changes: string[]
+}
+
+export type FlowFileResult =
+  { ok: true; content: unknown } | { ok: false; cancelled: boolean; message?: string }
+
 // ---------- Automações (Etapa 3B) ----------
 
 export interface AutomationStatus {
@@ -572,6 +592,16 @@ export interface OrkioApi {
     onChanged(listener: (event: { projectId: string }) => void): () => void
     /** Pedido para abrir uma tarefa (clique na notificação). */
     onOpenTask(listener: (event: BoardTaskRef) => void): () => void
+  }
+  /** Editor do fluxo (3C): etapas + automações. */
+  flow: {
+    /** Valida de novo no main e salva; tarefas de etapas removidas vão para o destino escolhido. */
+    save(projectId: string, draft: FlowDraft): Promise<NotionResult<BoardView>>
+    events(projectId: string): Promise<ConfigEvent[]>
+    /** Abre "Salvar como…" no main e grava o JSON (o renderer nunca escolhe caminhos). */
+    exportFile(content: unknown): Promise<FlowFileResult>
+    /** Abre o seletor no main e devolve o JSON lido (validação no renderer, função pura). */
+    importFile(): Promise<FlowFileResult>
   }
   /** Motor de automações (3B). */
   automation: {

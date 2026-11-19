@@ -6,7 +6,7 @@ import {
   type OrkioApi
 } from '../shared/ipc-contract'
 
-const { notion, github, notionWorkspace, signals, board, automation, projects, shell } =
+const { notion, github, notionWorkspace, signals, board, flow, automation, projects, shell } =
   IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
@@ -111,6 +111,17 @@ const api: OrkioApi = {
         ipcRenderer.removeListener(board.syncChanged, handler)
       }
     }
+  },
+  flow: {
+    save: (projectId, draft) =>
+      ipcRenderer.invoke(flow.save, projectId, {
+        stages: draft.stages.map((st) => ({ ...st })),
+        rules: draft.rules.map((r) => JSON.parse(JSON.stringify(r)) as unknown),
+        removals: { ...draft.removals }
+      }),
+    events: (projectId) => ipcRenderer.invoke(flow.events, projectId),
+    exportFile: (content) => ipcRenderer.invoke(flow.exportFile, content),
+    importFile: () => ipcRenderer.invoke(flow.importFile)
   },
   automation: {
     status: (projectId) => ipcRenderer.invoke(automation.status, projectId),

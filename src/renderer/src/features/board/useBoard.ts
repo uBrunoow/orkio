@@ -30,6 +30,8 @@ export interface UseBoard {
   notice: (BoardError & { taskId?: string }) | null
   dismissNotice(): void
   load(force: boolean): Promise<void>
+  /** Troca o quadro exibido (ex.: depois de salvar o fluxo). */
+  replace(view: BoardView): void
   move(taskId: string, stageId: string): Promise<void>
   setBlocked(taskId: string, blocked: boolean): Promise<void>
   setAutomationPaused(taskId: string, paused: boolean): Promise<void>
@@ -194,6 +196,10 @@ export function useBoard(projectId: string): UseBoard {
     notice,
     dismissNotice: () => setNotice(null),
     load,
+    replace: (next: BoardView) => {
+      setView(next)
+      setError(null)
+    },
     move,
     setBlocked,
     setAutomationPaused,

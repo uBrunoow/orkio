@@ -194,6 +194,55 @@ export class BoardStore {
     )
   }
 
+  // ---------- Fluxo (3C) ----------
+
+  /** Tarefas por etapa (estado local). */
+  taskCounts(projectId: string): Record<string, number> {
+    const rows = this.db.all<{ stage_id: string | null; n: number }>(
+      'SELECT stage_id, COUNT(*) AS n FROM task_state WHERE project_id = ? GROUP BY stage_id',
+      projectId
+    )
+    return Object.fromEntries(rows.filter((r) => r.stage_id).map((r) => [r.stage_id!, r.n]))
+  }
+
+  tasksInStage(projectId: string, stageId: string): string[] {
+    return this.db
+      .all<{ task_page_id: string }>(
+        'SELECT task_page_id FROM task_state WHERE project_id = ? AND stage_id = ?',
+        projectId,
+        stageId
+      )
+      .map((r) => r.task_page_id)
+  }
+
+  addConfigEvent(projectId: string, at: string, actor: string, changes: string[]): void {
+    this.db.run(
+      'INSERT INTO config_events (project_id, at, actor, changes_json) VALUES (?, ?, ?, ?)',
+      projectId,
+      at,
+      actor,
+      JSON.stringify(changes)
+    )
+  }
+
+  configEvents(
+    projectId: string,
+    limit = 30
+  ): { id: number; at: string; actor: string; changes: string[] }[] {
+    return this.db
+      .all<{ id: number; at: string; actor: string; changes_json: string }>(
+        'SELECT id, at, actor, changes_json FROM config_events WHERE project_id = ? ORDER BY id DESC LIMIT ?',
+        projectId,
+        limit
+      )
+      .map((r) => ({
+        id: r.id,
+        at: r.at,
+        actor: r.actor,
+        changes: JSON.parse(r.changes_json) as string[]
+      }))
+  }
+
   // ---------- Snapshots dos sinais (3B) ----------
 
   snapshots(projectId: string): Map<string, unknown> {
