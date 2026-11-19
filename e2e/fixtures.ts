@@ -35,6 +35,23 @@ export interface FakeServices {
    * sem propriedade de ID, Status renomeado ou Status apagado.
    */
   notionTasks: 'ok' | 'no_unique_id' | 'renamed' | 'status_deleted'
+  /** Branches remotas (GET /repos/{o}/{r}/branches), iguais para todo repositório. */
+  githubBranches: string[]
+  /** PRs (GET /repos/{o}/{r}/pulls). `updatedDaysAgo` padrão: 1. */
+  githubPulls: FakePull[]
+  /** Detalhes via GraphQL por número da PR. */
+  githubPrDetails: Record<
+    string,
+    { reviewDecision: string | null; unresolved: number; checks: string | null }
+  >
+}
+
+export interface FakePull {
+  number: number
+  title: string
+  head: string
+  state: 'open' | 'draft' | 'merged' | 'closed'
+  updatedDaysAgo?: number
 }
 
 /** Ids fixos dos bancos e páginas simulados (formato de id do Notion). */
@@ -54,14 +71,24 @@ export const DEFAULT_FAKES: FakeServices = {
   githubDevice: 'approve',
   githubUser: 'ok',
   githubRepos: {},
-  notionTasks: 'ok'
+  notionTasks: 'ok',
+  githubBranches: [],
+  githubPulls: [],
+  githubPrDetails: {}
 }
 
 interface FakeGlobals {
   __fakes: FakeServices
   /** Próximas pastas "escolhidas" no seletor do sistema (vazio = cancelar). */
   __picks: string[]
-  __calls: { url: string; auth: string | undefined; version: string | undefined; body?: string }[]
+  __calls: {
+    url: string
+    auth: string | undefined
+    version: string | undefined
+    body?: string
+    ifNoneMatch?: string
+    status?: number
+  }[]
   __opened: string[]
   __tokenSeq: number
 }
@@ -146,8 +173,9 @@ export async function launchOrkio(
           url,
           auth: headers['Authorization'],
           version: headers['Notion-Version'] ?? headers['X-GitHub-Api-Version'],
-          ...(typeof init?.body === 'string' ? { body: init.body } : {})
-        }
+          ...(typeof init?.body === 'string' ? { body: init.body } : {}),
+          ...(headers['If-None-Match'] ? { ifNoneMatch: headers['If-None-Match'] } : {})
+        } as FakeGlobals['__calls'][number]
         g.__calls.push(call)
 
         // Intermediário OAuth.
@@ -186,6 +214,74 @@ export async function launchOrkio(
           if (mode === 'expire') return json({ error: 'expired_token' })
           return json({ access_token: 'gho_E2E_DEVICE_TOKEN', token_type: 'bearer', scope: 'repo' })
         }
+        // Sinais (2D): branches e PRs com ETag; detalhes via GraphQL.
+        const listMatch =
+          /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/(branches|pulls)\?(.*)$/.exec(url)
+        if (listMatch) {
+          const owner = decodeURIComponent(listMatch[1]!)
+          const name = decodeURIComponent(listMatch[2]!)
+          const mode = g.__fakes.githubRepos[`${owner}/${name}`.toLowerCase()] ?? 'ok'
+          if (mode === 'not_found') return json({ message: 'Not Found' }, 404)
+          const params = new URLSearchParams(listMatch[4])
+          let body: unknown[]
+          if (listMatch[3] === 'branches') {
+            body = g.__fakes.githubBranches.map((b) => ({ name: b, commit: { sha: 'abc' } }))
+          } else {
+            const wantOpen = params.get('state') === 'open'
+            body = g.__fakes.githubPulls
+              .filter((p) => (p.state === 'open' || p.state === 'draft') === wantOpen)
+              .map((p) => ({
+                number: p.number,
+                title: p.title,
+                html_url: `https://github.com/${owner}/${name}/pull/${p.number}`,
+                state: p.state === 'open' || p.state === 'draft' ? 'open' : 'closed',
+                draft: p.state === 'draft',
+                merged_at: p.state === 'merged' ? '2026-01-01T00:00:00Z' : null,
+                updated_at: new Date(Date.now() - (p.updatedDaysAgo ?? 1) * 86_400_000)
+                  .toISOString()
+                  .slice(0, 10),
+                head: { ref: p.head }
+              }))
+          }
+          const etag = `W/"${JSON.stringify(body).length}-${JSON.stringify(body)
+            .split('')
+            .reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7)}"`
+          if (headers['If-None-Match'] === etag) {
+            call.status = 304
+            return new Response(null, { status: 304, headers: { etag } })
+          }
+          call.status = 200
+          return new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'content-type': 'application/json', etag }
+          })
+        }
+        if (url === 'https://api.github.com/graphql') {
+          const query = String((JSON.parse(call.body ?? '{}') as { query?: string }).query)
+          const repository: Record<string, unknown> = {}
+          for (const match of query.matchAll(/pr(\d+): pullRequest/g)) {
+            const d = g.__fakes.githubPrDetails[match[1]!]
+            repository[`pr${match[1]}`] = d
+              ? {
+                  number: Number(match[1]),
+                  reviewDecision: d.reviewDecision,
+                  reviewThreads: {
+                    nodes: [
+                      ...Array.from({ length: d.unresolved }, () => ({ isResolved: false })),
+                      { isResolved: true }
+                    ]
+                  },
+                  commits: {
+                    nodes: [
+                      { commit: { statusCheckRollup: d.checks ? { state: d.checks } : null } }
+                    ]
+                  }
+                }
+              : null
+          }
+          return json({ data: { repository } })
+        }
+
         const repoMatch = /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/?]+)$/.exec(url)
         if (repoMatch) {
           const owner = decodeURIComponent(repoMatch[1]!)

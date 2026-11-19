@@ -27,7 +27,10 @@ import {
   TasksIcon,
   UnlinkIcon
 } from '../../components/icons'
+import { ActionLink } from '../projects/ActionLink'
 import { call } from './NotionWorkspaceCard'
+import { TaskSignalsLine } from './TaskSignalsLine'
+import { useTaskSignals } from './useTaskSignals'
 import { tokenColor } from './notion-colors'
 
 type NotionError = Extract<NotionResult<never>, { ok: false }>['error']
@@ -274,6 +277,8 @@ function TasksPanel({
   const [error, setError] = useState<NotionError | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
+  const signals = useTaskSignals(project.id)
+  const refreshSignals = signals.refresh
 
   useEffect(() => {
     let active = true
@@ -282,13 +287,16 @@ function TasksPanel({
     ).then((r) => {
       if (!active) return
       setLoading(false)
-      if (r.ok) setResult(r.value)
-      else setError(r.error)
+      if (r.ok) {
+        setResult(r.value)
+        // Branches/PRs depois das tarefas; "Atualizar" também força o GitHub.
+        void refreshSignals(refreshKey > 0)
+      } else setError(r.error)
     })
     return () => {
       active = false
     }
-  }, [project.id, refreshKey])
+  }, [project.id, refreshKey, refreshSignals])
 
   const hasPriority = Boolean(workspace.config?.mapping.priority)
 
@@ -313,6 +321,28 @@ function TasksPanel({
           </Text>
         )}
       </HStack>
+
+      {signals.result && signals.result.messages.length > 0 && !error && (
+        <Alert
+          tone="warning"
+          {...(signals.result.action
+            ? { action: <ActionLink action={signals.result.action} /> }
+            : {})}
+        >
+          <VStack gap={1}>
+            {signals.result.messages.map((m) => (
+              <Text key={m}>{m}</Text>
+            ))}
+          </VStack>
+        </Alert>
+      )}
+      {signals.error && !error && <Alert tone="warning">{signals.error.message}</Alert>}
+      {signals.result && signals.result.tasksWithoutPrefix > 0 && (
+        <Text type="supporting">
+          {signals.result.tasksWithoutPrefix} tarefa(s) sem prefixo no ID não podem ser ligadas a
+          branches e PRs. Defina um prefixo na propriedade ID do Notion (ex.: ORK).
+        </Text>
+      )}
 
       {error && (
         <Alert
@@ -351,6 +381,7 @@ function TasksPanel({
               aria-label={task.title}
               startContent={<Code data-testid="task-id">{task.displayId ?? '—'}</Code>}
               label={task.title}
+              description={<TaskSignalsLine signals={signals.result?.signals[task.id]} />}
               endContent={
                 <HStack gap={2} vAlign="center">
                   {hasPriority && task.priority && (

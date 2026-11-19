@@ -250,6 +250,19 @@ status (com a cor do Notion) e prioridade, com **Atualizar** e um botão para ab
 É só leitura: o Orkio não altera nada no Notion. As tarefas ficam só em memória (cache de 60 s);
 o arquivo de configuração guarda apenas ids e nomes dos bancos, das propriedades e do vínculo.
 
+## Branches e PRs das tarefas
+
+Na lista de tarefas de um projeto, cada tarefa mostra a **branch** (local, remota ou as duas) e a
+**PR** ligada a ela pelo ID, por exemplo `ORK-142/sync-notion`, `feat/ORK-142-sync` ou uma PR com
+"ORK-142" no título. O casamento respeita a palavra inteira: `ORK-14` não se confunde com
+`ORK-142`. O chip da PR mostra número (clique para abrir no GitHub), estado (rascunho, aberta,
+mergeada, fechada), revisão (aprovada, alterações pedidas), comentários de revisão não
+resolvidos e CI. É só leitura.
+
+A lista se atualiza sozinha a cada minuto enquanto o Orkio está em primeiro plano (o GitHub
+responde "nada mudou" na maioria das vezes, sem gastar o limite de requisições) e ao clicar em
+**Atualizar**. Sem GitHub conectado, aparecem só as branches locais, com um aviso.
+
 ## Segurança
 
 - Todas as chamadas ao Notion e ao GitHub são feitas no **processo main**. O renderer não tem

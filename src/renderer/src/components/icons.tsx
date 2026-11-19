@@ -11,6 +11,8 @@ import {
   IconFolderPlus,
   IconFolderSearch,
   IconFolders,
+  IconGitBranch,
+  IconGitPullRequest,
   IconLink,
   IconLinkOff,
   IconListCheck,
@@ -44,3 +46,5 @@ export const LinkIcon = adapt(IconLink)
 export const UnlinkIcon = adapt(IconLinkOff)
 export const TasksIcon = adapt(IconListCheck)
 export const RefreshIcon = adapt(IconRefresh)
+export const GitBranchIcon = adapt(IconGitBranch)
+export const PullRequestIcon = adapt(IconGitPullRequest)

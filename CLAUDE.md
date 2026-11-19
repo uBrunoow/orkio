@@ -9,6 +9,7 @@ Claude Code. Hoje existem:
 - **Bancos do Notion:** assistente (Integrações) escolhe os data sources de Projetos e Tarefas e
   mapeia propriedades; cada projeto local se vincula a uma página de Projetos e lista as tarefas
   ligadas a ela (**só leitura**).
+- **Sinais (2D):** branch local/remota e PR de cada tarefa, casadas pelo ID (ex.: ORK-142).
 - **UI:** design system Astryx com o tema Orkio, CSP estrita, textos da Astryx em pt-BR.
 - Ainda não existem: escrita no Notion, kanban, PRs, automações, Claude Code.
 
@@ -36,6 +37,8 @@ Mudou UI, IPC, preload, segurança ou build? Rode também `pnpm e2e`.
 src/
   shared/ipc-contract.ts   # canais IPC, ConnectionStatus, credenciais, OrkioApi. Sem Node/DOM.
   shared/notion-mapping.ts # regras do mapeamento (tipos por campo, obrigatórios) p/ main e renderer
+  shared/task-id-match.ts  # casamento puro de IDs (ORK-142) em branches/títulos
+  shared/task-signals.ts   # TaskSignals, buildTaskSignals, diffSignals (base da Etapa 3)
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
     connectors/types.ts    # interface Connector
@@ -50,6 +53,7 @@ src/
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
     notion/                # notion-workspace.service.ts (bancos, mapeamento, vínculo, tarefas)
+    signals/               # github-signals.source.ts (ETag, GraphQL) + task-signals.service.ts
   preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
     features/<feature>/    # componentes + hooks por funcionalidade
@@ -246,6 +250,28 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   A prop `style` do React (CSSOM) é permitida. Ver "Astryx e CSP" abaixo.
 - Textos de UI em pt-BR.
 
+## Sinais das tarefas (Etapa 2D)
+
+- Convenção: o ID aparece no nome da branch ou no título/branch da PR. `extractTaskNumbers`
+  (`shared/task-id-match.ts`): `<PREFIXO>-<n>`, sem diferenciar maiúsculas, sem letra/dígito
+  colado dos dois lados (ORK-14 ≠ ORK-142; ORK-0142 não casa). Tarefas sem prefixo no ID não
+  recebem sinais.
+- Fontes: `git for-each-ref refs/heads` (`Git.localBranches`); GitHub REST
+  `/branches` (até 10 páginas), `/pulls?state=open` (até 5) e `/pulls?state=closed&sort=updated`
+  (para ao passar de 30 dias), com **ETag/If-None-Match por página** (cache em memória por
+  repositório; 304 não gasta rate limit primário). Paginação pelo header `Link` (só api.github.com).
+- **GraphQL é necessário** para `reviewDecision` e `reviewThreads.isResolved` (a REST não tem
+  nenhum dos dois). Query em lote (aliases `pr<n>`), só para PRs ligadas a tarefas e só quando
+  `updated_at` muda (abertas: no máximo a cada 5 min). Falha/permissão faltando → PR só com estado.
+- O conector do GitHub expõe `getConditional` (só caminhos `/repos/` e `/repositories/`) e
+  `graphql`; o token nunca sai dele.
+- Falhas não quebram: sem GitHub/Enterprise/sem repo → só local com aviso; 404/SSO/restrição/
+  rate limit/rede → mantém o último resultado remoto conhecido e explica (com link quando houver).
+- UI: na lista de tarefas, branch (mono, local/remota) e chip da PR (#n abre no GitHub; estado,
+  revisão, comentários, CI). Atualiza com "Atualizar" (força), a cada 60 s com a janela visível e
+  em foco, e quando a branch atual muda. Allowlist: `github.com/<owner>/<repo>/pull/<n>`.
+- `diffSignals` gera eventos (branch criada, PR aberta/mergeada, revisão mudou...) para a Etapa 3.
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -257,6 +283,8 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   do app para isso. No Linux sem keyring, o fixture liga a criptografia básica do Electron
   só no teste.
 - Para novos conectores: adicione o modo fake correspondente no fixture e um spec em `e2e/`.
+- GitHub simulado (2D): `githubBranches`, `githubPulls`, `githubPrDetails`; listas com ETag
+  (304 quando `If-None-Match` bate) e GraphQL por alias. `__calls` registra `ifNoneMatch`/`status`.
 - Notion simulado: `notionTasks` (`ok`, `no_unique_id`, `renamed`, `status_deleted`) e ids fixos
   em `NOTION_FAKE` (`e2e/fixtures.ts`). Selector da Astryx no E2E: gatilho com papel `button`
   (sem valor) ou `combobox` (com valor), nome começando pelo rótulo; opções têm papel `option`.
