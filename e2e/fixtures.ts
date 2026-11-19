@@ -1,7 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
+import {
+  _electron as electron,
+  type ElectronApplication,
+  type Locator,
+  type Page
+} from '@playwright/test'
 
 export const ROOT = resolve(__dirname, '..')
 /** Mesmo valor de .env.e2e (o build de E2E usa --mode e2e). */
@@ -19,13 +24,19 @@ export interface FakeServices {
   validTokens: string[] | null
   browser: 'approve' | 'deny' | 'ignore'
   broker: 'ok' | 'invalid_grant' | 'down'
+  /** GitHub Device Flow: o que o "usuário" faz em github.com/login/device. */
+  githubDevice: 'approve' | 'pending' | 'deny' | 'expire'
+  /** GET api.github.com/user. */
+  githubUser: 'ok' | '401' | 'rate_limited'
 }
 
 export const DEFAULT_FAKES: FakeServices = {
   notion: 'ok',
   validTokens: null,
   browser: 'approve',
-  broker: 'ok'
+  broker: 'ok',
+  githubDevice: 'approve',
+  githubUser: 'ok'
 }
 
 interface FakeGlobals {
@@ -107,7 +118,7 @@ export async function launchOrkio(
         const call = {
           url,
           auth: headers['Authorization'],
-          version: headers['Notion-Version'],
+          version: headers['Notion-Version'] ?? headers['X-GitHub-Api-Version'],
           ...(typeof init?.body === 'string' ? { body: init.body } : {})
         }
         g.__calls.push(call)
@@ -129,6 +140,46 @@ export async function launchOrkio(
             workspace_icon: null,
             owner: { type: 'user', user: { id: 'u1', name: 'Grace Hopper', avatar_url: null } }
           })
+        }
+
+        // GitHub: Device Flow (github.com) e API REST (api.github.com).
+        if (url === 'https://github.com/login/device/code') {
+          return json({
+            device_code: 'e2e-device-code',
+            user_code: 'WDJB-MJHT',
+            verification_uri: 'https://github.com/login/device',
+            expires_in: 900,
+            interval: 1
+          })
+        }
+        if (url === 'https://github.com/login/oauth/access_token') {
+          const mode = g.__fakes.githubDevice
+          if (mode === 'pending') return json({ error: 'authorization_pending' })
+          if (mode === 'deny') return json({ error: 'access_denied' })
+          if (mode === 'expire') return json({ error: 'expired_token' })
+          return json({ access_token: 'gho_E2E_DEVICE_TOKEN', token_type: 'bearer', scope: 'repo' })
+        }
+        if (url === 'https://api.github.com/user') {
+          const mode = g.__fakes.githubUser
+          if (mode === '401') return json({ message: 'Bad credentials' }, 401)
+          if (mode === 'rate_limited') {
+            return new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+              status: 403,
+              headers: {
+                'x-ratelimit-remaining': '0',
+                'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 1800)
+              }
+            })
+          }
+          return new Response(
+            JSON.stringify({
+              login: 'octocat',
+              id: 1,
+              name: 'The Octocat',
+              avatar_url: null
+            }),
+            { status: 200, headers: { 'X-OAuth-Scopes': 'repo' } }
+          )
         }
 
         // API do Notion.
@@ -196,4 +247,13 @@ export async function openedUrls(app: ElectronApplication): Promise<string[]> {
 
 export async function cspViolations(page: Page): Promise<string[]> {
   return page.evaluate(() => (window as unknown as { __csp: string[] }).__csp)
+}
+
+/** Cards da tela de Integrações (cada <section> nomeada vira uma região acessível). */
+export function notionCard(page: Page): Locator {
+  return page.getByRole('region', { name: 'Notion' })
+}
+
+export function githubCard(page: Page): Locator {
+  return page.getByRole('region', { name: 'GitHub' })
 }

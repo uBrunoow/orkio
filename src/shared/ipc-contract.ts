@@ -81,8 +81,7 @@ export interface DeviceFlowInfo {
 }
 
 export type DeviceFlowStartResult =
-  | { ok: true; flow: DeviceFlowInfo }
-  | { ok: false; status: ConnectionStatus }
+  { ok: true; flow: DeviceFlowInfo } | { ok: false; status: ConnectionStatus }
 
 /** API exposta pelo preload em `window.orkio`. */
 export interface OrkioApi {

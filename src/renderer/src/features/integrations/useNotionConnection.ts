@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AuthOptions, ConnectionStatus } from '../../../../shared/ipc-contract'
+import type { ConnectionActivity } from './connection-ui'
 
-/** O que está acontecendo agora, além do status persistido. */
-export type NotionActivity =
-  'loading' | 'idle' | 'connecting' | 'authorizing' | 'testing' | 'disconnecting'
+export type NotionActivity = ConnectionActivity
 
 const IPC_FAILURE: ConnectionStatus = {
   state: 'error',

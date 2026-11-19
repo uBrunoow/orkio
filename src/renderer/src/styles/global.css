@@ -495,3 +495,53 @@ button {
   line-height: 1.15;
   letter-spacing: -0.005em;
 }
+
+/* ---------- Integrações lado a lado ---------- */
+.page--wide {
+  max-width: 1080px;
+}
+
+.integrations-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+/* ---------- Device Flow ---------- */
+.device-code {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.device-code__value {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  letter-spacing: 0.12em;
+  color: var(--text);
+  user-select: all;
+}
+
+.device-code__timer {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.device-code__timer .spinner {
+  width: 12px;
+  height: 12px;
+  color: var(--accent);
+}

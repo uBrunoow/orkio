@@ -6,6 +6,7 @@ import {
   cspViolations,
   externalCalls,
   launchOrkio,
+  notionCard,
   openedUrls,
   removeDir,
   setFakes,
@@ -50,18 +51,19 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
   const { page } = await open('401')
 
   await expect(page.getByRole('heading', { name: 'Integrações' })).toBeVisible()
-  await expect(page.getByText('Desconectado')).toBeVisible()
+  await expect(notionCard(page).getByText('Desconectado')).toBeVisible()
 
   const isolation = await page.evaluate(() => ({
     require: typeof (window as unknown as { require?: unknown }).require,
     process: typeof (window as unknown as { process?: unknown }).process,
     api: Object.keys(window.orkio),
-    notion: Object.keys(window.orkio.notion)
+    notion: Object.keys(window.orkio.notion),
+    github: Object.keys(window.orkio.github)
   }))
   expect(isolation).toEqual({
     require: 'undefined',
     process: 'undefined',
-    api: ['notion', 'openExternal'],
+    api: ['notion', 'github', 'openExternal'],
     notion: [
       'getStatus',
       'connect',
@@ -70,15 +72,25 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'getAuthOptions',
       'startOAuth',
       'cancelOAuth'
+    ],
+    github: [
+      'getStatus',
+      'connect',
+      'disconnect',
+      'testConnection',
+      'getAuthOptions',
+      'startDeviceFlow',
+      'waitDeviceFlow',
+      'cancelDeviceFlow'
     ]
   })
 
   // O login com Notion (OAuth) é a ação principal; o token fica atrás de "Usar token".
-  await expect(page.getByRole('button', { name: 'Conectar com Notion' })).toBeVisible()
-  await page.getByRole('button', { name: 'Usar token' }).click()
+  await expect(notionCard(page).getByRole('button', { name: 'Conectar com Notion' })).toBeVisible()
+  await notionCard(page).getByRole('button', { name: 'Usar token' }).click()
 
   // Fontes locais, logo e botão primário.
-  await page.getByLabel('Token do Notion').fill('x')
+  await notionCard(page).getByLabel('Token do Notion').fill('x')
   await page.waitForTimeout(300) // fim da transição de cor do botão
   const visual = await page.evaluate(async () => {
     await Promise.all([
@@ -109,7 +121,7 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       heroVariant: heroLogo?.dataset['variant']
     }
   })
-  await page.getByLabel('Token do Notion').fill('')
+  await notionCard(page).getByLabel('Token do Notion').fill('')
 
   for (const font of ['Inter 400', 'Jost 300', 'Jost 400', 'JetBrains Mono 400']) {
     expect(visual.fonts).toContain(font)
@@ -138,7 +150,9 @@ test('build de produção carrega a CSP estrita, sem violações', async () => {
 
 test('link "Como criar um token" usa openExternal com allowlist', async () => {
   const { app, page } = orkio!
-  await page.getByRole('button', { name: /Como criar um token/ }).click()
+  await notionCard(page)
+    .getByRole('button', { name: /Como criar um token/ })
+    .click()
   await expect
     .poll(() => openedUrls(app))
     .toEqual(['https://developers.notion.com/guides/get-started/personal-access-tokens'])
@@ -149,22 +163,22 @@ test('link "Como criar um token" usa openExternal com allowlist', async () => {
 
 test('token inválido → erro claro e nada é salvo', async () => {
   const { page } = orkio!
-  await page.getByLabel('Token do Notion').fill(TOKEN)
-  await expect(page.getByLabel('Token do Notion')).toHaveAttribute('type', 'password')
-  await page.getByRole('button', { name: 'Conectar', exact: true }).click()
+  await notionCard(page).getByLabel('Token do Notion').fill(TOKEN)
+  await expect(notionCard(page).getByLabel('Token do Notion')).toHaveAttribute('type', 'password')
+  await notionCard(page).getByRole('button', { name: 'Conectar', exact: true }).click()
 
-  await expect(page.getByRole('alert')).toContainText('Token inválido ou revogado')
+  await expect(notionCard(page).getByRole('alert')).toContainText('Token inválido ou revogado')
   expect(secretFiles()).toEqual([])
 })
 
 test('token válido → conectado, salvo criptografado, token fora do renderer', async () => {
   const { app, page } = orkio!
   await setFakes(app, { notion: 'ok' })
-  await page.getByRole('button', { name: 'Tentar novamente' }).click()
+  await notionCard(page).getByRole('button', { name: 'Tentar novamente' }).click()
 
-  await expect(page.getByText('Ada Lovelace')).toBeVisible()
+  await expect(notionCard(page).getByText('Ada Lovelace')).toBeVisible()
   await expect(page.locator('.empty-hero')).toHaveCount(0)
-  await expect(page.getByLabel('Token do Notion')).toHaveCount(0)
+  await expect(notionCard(page).getByLabel('Token do Notion')).toHaveCount(0)
 
   const calls = await externalCalls(app)
   expect(calls.at(-1)).toMatchObject({
@@ -186,31 +200,31 @@ test('token válido → conectado, salvo criptografado, token fora do renderer',
 
 test('reabrir o app mantém a conexão e revalida em segundo plano', async () => {
   const { page } = await open('ok')
-  await expect(page.getByText('Ada Lovelace')).toBeVisible()
-  await expect(page.getByText(/Verificado às/)).toBeVisible()
+  await expect(notionCard(page).getByText('Ada Lovelace')).toBeVisible()
+  await expect(notionCard(page).getByText(/Verificado às/)).toBeVisible()
 })
 
 test('falha transitória (503) mantém conectado com aviso', async () => {
   const { app, page } = orkio!
   await setFakes(app, { notion: '503' })
-  await page.getByRole('button', { name: 'Testar conexão' }).click()
-  await expect(page.getByRole('status').filter({ hasText: '503' })).toBeVisible()
-  await expect(page.getByText('Ada Lovelace')).toBeVisible()
+  await notionCard(page).getByRole('button', { name: 'Testar conexão' }).click()
+  await expect(notionCard(page).getByRole('status').filter({ hasText: '503' })).toBeVisible()
+  await expect(notionCard(page).getByText('Ada Lovelace')).toBeVisible()
 })
 
 test('token revogado (401) na revalidação → erro com opções', async () => {
   const { app, page } = orkio!
   await setFakes(app, { notion: '401' })
-  await page.getByRole('button', { name: 'Testar conexão' }).click()
-  await expect(page.getByRole('alert')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Tentar novamente' })).toBeVisible()
+  await notionCard(page).getByRole('button', { name: 'Testar conexão' }).click()
+  await expect(notionCard(page).getByRole('alert')).toBeVisible()
+  await expect(notionCard(page).getByRole('button', { name: 'Tentar novamente' })).toBeVisible()
   expect(secretFiles()).toEqual(['notion.bin'])
 })
 
 test('desconectar pede confirmação e apaga o token do disco', async () => {
   const { page } = orkio!
-  await page.getByRole('button', { name: 'Desconectar' }).click()
-  await expect(page.getByText('Remover a conexão deste computador?')).toBeVisible()
+  await notionCard(page).getByRole('button', { name: 'Desconectar' }).click()
+  await expect(notionCard(page).getByText('Remover a conexão deste computador?')).toBeVisible()
   expect(secretFiles()).toEqual(['notion.bin'])
 
   await page
@@ -218,8 +232,8 @@ test('desconectar pede confirmação e apaga o token do disco', async () => {
     .getByRole('button', { name: 'Desconectar' })
     .click()
 
-  await expect(page.getByRole('button', { name: 'Conectar com Notion' })).toBeVisible()
-  await expect(page.getByText('Desconectado')).toBeVisible()
+  await expect(notionCard(page).getByRole('button', { name: 'Conectar com Notion' })).toBeVisible()
+  await expect(notionCard(page).getByText('Desconectado')).toBeVisible()
   expect(secretFiles()).toEqual([])
   expect(await cspViolations(page)).toEqual([])
   await close()

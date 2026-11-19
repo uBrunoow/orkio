@@ -1,7 +1,7 @@
 # CLAUDE.md — convenções do Orkio
 
 App Electron (electron-vite + React + TypeScript strict). Orquestra Notion, GitHub e
-Claude Code. Hoje só existe o conector do Notion.
+Claude Code. Hoje existem os conectores do Notion (OAuth + token) e do GitHub (Device Flow + PAT).
 
 ## Comandos
 
@@ -28,12 +28,15 @@ src/
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
     connectors/types.ts    # interface Connector
-    connectors/<id>/       # <id>.client.ts (HTTP) + <id>.connector.ts (estado/persistência)
+    connectors/<id>/       # <id>.client.ts (HTTP) + <id>.oauth.ts + <id>.connector.ts
+    oauth/                 # fluxos genéricos: loopback.ts (redirect, RFC 8252), device-flow.ts (RFC 8628)
+    net/parse.ts           # helpers puros de parsing (isRecord, Retry-After, ...)
     ipc/                   # handlers finos: validam origem e payload, delegam ao conector
     storage/secure-store.ts
   preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
     features/<feature>/    # componentes + hooks por funcionalidade
+      integrations/connection-ui.tsx  # peças comuns dos cards (conectado, erro, token, desconectar)
     components/OrkioLogo/  # logo (símbolo full/simple + wordmark)
     styles/tokens.css      # ÚNICO arquivo de tokens (cores, fontes, raios, espaçamento)
     styles/fonts.css       # fontes locais via @fontsource
@@ -89,7 +92,11 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - Canais definidos em `IPC_CHANNELS` (`shared/ipc-contract.ts`). Use `ipcMain.handle`/`invoke`.
 - Todo handler checa a origem com `createSenderGuard` e valida o payload (`unknown`).
 - O preload expõe funções específicas, nunca `ipcRenderer` cru.
-- Links externos: `window.orkio.openExternal`, com allowlist em `ipc/shell.ipc.ts`.
+- Links externos: `window.orkio.openExternal`, com allowlist em `ipc/shell.ipc.ts`
+  (`EXTERNAL_URL_RULES`: host + prefixo de caminho opcional). Adicione só o necessário.
+- Validação de payload e log de erro: `ipc/payload.ts` (`isTokenCredentials`, `errorName`).
+- Fluxos longos (OAuth/Device Flow): uma chamada `invoke` que só resolve no fim
+  (`startOAuth`, `waitDeviceFlow`). Não exponha `ipcRenderer.on` sem necessidade.
 
 ## Notion
 
@@ -104,6 +111,20 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - Futuras chamadas à API devem usar `withAccessToken` do conector (renova em 401).
 - Config de build: `MAIN_VITE_NOTION_OAUTH_CLIENT_ID` e `MAIN_VITE_NOTION_OAUTH_BROKER_URL`
   (`.env.example`; `.env.e2e` só para o E2E). Sem elas, OAuth fica indisponível.
+
+## GitHub
+
+- Versão da API em `GITHUB_API_VERSION` (`github.client.ts`), hoje `2026-03-10`; headers em
+  `githubHeaders()` (Bearer, `application/vnd.github+json`, `X-GitHub-Api-Version`, User-Agent).
+- Rate limits: primário (403/429 + `x-ratelimit-remaining: 0` → `x-ratelimit-reset`) e
+  secundário (403/429 + `Retry-After`, ou 1 min). Uma nova tentativa se a espera for ≤ 5 s.
+- Conexão principal: OAuth App com **Device Flow** (`github.oauth.ts`), escopo `repo`, sem
+  client secret e **sem** `broker/`. Config: `MAIN_VITE_GITHUB_CLIENT_ID`.
+- O conector implementa `DeviceFlowConnector` (`startDeviceFlow` → código; `waitDeviceFlow`
+  → resultado; `cancelDeviceFlow`). Um fluxo por vez; `startDeviceFlow` repetido devolve o mesmo
+  código. Tokens de OAuth App não expiram: 401 → "Reconectar com GitHub".
+- Registro salvo: `secrets/github.bin`, `{ v: 1, method: 'device' | 'token', token, scopes, ... }`.
+- Fallback: fine-grained PAT ("Usar token").
 
 ## Identidade visual
 
@@ -147,17 +168,21 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 
 ## Decisões registradas
 
-| Decisão                                                                                     | Por quê                                                                                                                                                                                                                                                    |
-| ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No Linux, `safeStorage` com backend `basic_text` (ou `unknown`) conta como **indisponível** | `basic_text` usa uma senha fixa no binário: equivale a texto puro. Sem GNOME Keyring/KWallet o app não salva o token e mostra erro.                                                                                                                        |
-| `ConnectionStatus` tem `warning?` (em `connected`) e `hasStoredCredentials?` (em `error`)   | `warning`: falha transitória (rede, 5xx, 429) ao revalidar não "desconecta" o usuário (ex.: abrir offline). `hasStoredCredentials`: diferencia "token salvo inválido" (oferece Tentar novamente/Desconectar) de "falha ao conectar" (mostra o formulário). |
-| CSP estrita em produção; `style-src 'unsafe-inline'` **só no dev server**                   | O Vite injeta CSS via `<style>` em dev. O plugin `orkio:dev-only-relaxed-style-csp` tem `apply: 'serve'`; `test/csp-build.test.ts` e o E2E garantem que o build não muda.                                                                                  |
-| `fetch` nativo em vez de SDKs (`@notionhq/client`)                                          | Poucos endpoints; controle direto de timeout (`AbortController`), `Retry-After` e mensagens; fácil de mockar; sem dependência extra.                                                                                                                       |
-| Main e preload saem em **CommonJS** (sem `"type": "module"`)                                | Preload com `sandbox: true` não pode ser ESM. O preload só pode dar `require('electron')`: tudo o mais é empacotado nele.                                                                                                                                  |
-| `postinstall: install-electron`                                                             | O Electron 45 não baixa o binário na instalação, e o `electron-vite` precisa dele (`path.txt`). Sem isso `pnpm dev` falha num clone novo.                                                                                                                  |
-| React e `@fontsource/*` em `devDependencies`                                                | O Vite já os embute no bundle do renderer; assim o pacote do electron-builder não leva `node_modules` desnecessários.                                                                                                                                      |
-| Não definir `productName` no `package.json`                                                 | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.yml`.                                                                                                  |
-| Fontes nunca viram `data:` URI                                                              | A CSP só permite `font-src 'self'` (`assetsInlineLimit` no `electron.vite.config.ts`).                                                                                                                                                                     |
-| Notion via OAuth com intermediário (`broker/`, Cloudflare Worker)                           | O Notion exige client secret na troca do código/renovação e a API REST não aceita PKCE. O secret fica só no Worker, que é stateless e não loga. O MCP do Notion aceita PKCE, mas trocaria a API REST pelas ferramentas MCP (decisão da Etapa 1.5).         |
-| Redirect em loopback com porta fixa `47821`                                                 | O Notion exige redirect URI exato e registrado. `127.0.0.1` (não `localhost`) evita ambiguidade IPv4/IPv6 (RFC 8252). Porta ocupada → mensagem clara.                                                                                                      |
-| `startOAuth()` é uma chamada IPC que só resolve no fim                                      | O OAuth do Notion não tem estado intermediário para mostrar (diferente do Device Flow do GitHub, que exibe um código). Evita um canal de eventos.                                                                                                          |
+| Decisão                                                                                         | Por quê                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No Linux, `safeStorage` com backend `basic_text` (ou `unknown`) conta como **indisponível**     | `basic_text` usa uma senha fixa no binário: equivale a texto puro. Sem GNOME Keyring/KWallet o app não salva o token e mostra erro.                                                                                                                         |
+| `ConnectionStatus` tem `warning?` (em `connected`) e `hasStoredCredentials?` (em `error`)       | `warning`: falha transitória (rede, 5xx, 429) ao revalidar não "desconecta" o usuário (ex.: abrir offline). `hasStoredCredentials`: diferencia "token salvo inválido" (oferece Tentar novamente/Desconectar) de "falha ao conectar" (mostra o formulário).  |
+| CSP estrita em produção; `style-src 'unsafe-inline'` **só no dev server**                       | O Vite injeta CSS via `<style>` em dev. O plugin `orkio:dev-only-relaxed-style-csp` tem `apply: 'serve'`; `test/csp-build.test.ts` e o E2E garantem que o build não muda.                                                                                   |
+| `fetch` nativo em vez de SDKs (`@notionhq/client`)                                              | Poucos endpoints; controle direto de timeout (`AbortController`), `Retry-After` e mensagens; fácil de mockar; sem dependência extra.                                                                                                                        |
+| Main e preload saem em **CommonJS** (sem `"type": "module"`)                                    | Preload com `sandbox: true` não pode ser ESM. O preload só pode dar `require('electron')`: tudo o mais é empacotado nele.                                                                                                                                   |
+| `postinstall: install-electron`                                                                 | O Electron 45 não baixa o binário na instalação, e o `electron-vite` precisa dele (`path.txt`). Sem isso `pnpm dev` falha num clone novo.                                                                                                                   |
+| React e `@fontsource/*` em `devDependencies`                                                    | O Vite já os embute no bundle do renderer; assim o pacote do electron-builder não leva `node_modules` desnecessários.                                                                                                                                       |
+| Não definir `productName` no `package.json`                                                     | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.yml`.                                                                                                   |
+| Fontes nunca viram `data:` URI                                                                  | A CSP só permite `font-src 'self'` (`assetsInlineLimit` no `electron.vite.config.ts`).                                                                                                                                                                      |
+| Notion via OAuth com intermediário (`broker/`, Cloudflare Worker)                               | O Notion exige client secret na troca do código/renovação e a API REST não aceita PKCE. O secret fica só no Worker, que é stateless e não loga. O MCP do Notion aceita PKCE, mas trocaria a API REST pelas ferramentas MCP (decisão da Etapa 1.5).          |
+| Redirect em loopback com porta fixa `47821`                                                     | O Notion exige redirect URI exato e registrado. `127.0.0.1` (não `localhost`) evita ambiguidade IPv4/IPv6 (RFC 8252). Porta ocupada → mensagem clara.                                                                                                       |
+| `startOAuth()` é uma chamada IPC que só resolve no fim                                          | O OAuth do Notion não tem estado intermediário para mostrar (diferente do Device Flow do GitHub, que exibe um código). Evita um canal de eventos.                                                                                                           |
+| GitHub via OAuth App + Device Flow, escopo `repo`, sem `broker/`                                | Device Flow não exige client secret. `repo` é o único escopo de OAuth App que cobre privados, PRs e comentários (não há só-leitura). GitHub App teria permissões finas, mas tokens de 8 h cuja renovação exige secret (→ broker) e instalação por org/repo. |
+| Device Flow com duas chamadas (`startDeviceFlow` + `waitDeviceFlow`) em vez de canal de eventos | O único dado intermediário (código, URL, expiração) chega no início. Evita expor `ipcRenderer.on`/gerenciar inscrições no preload e não exige polling do renderer.                                                                                          |
+| Permissão `clipboard-sanitized-write` liberada                                                  | Botão "Copiar" do código do GitHub. Leitura da área de transferência e demais permissões continuam negadas.                                                                                                                                                 |
+| Peças de UI dos cards em `connection-ui.tsx`                                                    | Notion e GitHub compartilham conectado/erro/token/desconectar; cada card só implementa o próprio fluxo de login.                                                                                                                                            |

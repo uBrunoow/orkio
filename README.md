@@ -3,8 +3,10 @@
 App desktop (Electron) de orquestração de desenvolvimento com IA. Conecta planejamento
 (Notion), código (GitHub) e agentes (Claude Code).
 
-> Estado atual: apenas a **conexão da conta do Notion** está implementada — via login com
-> Notion (OAuth) ou, como alternativa discreta, um token colado.
+> Estado atual: só as **conexões de conta** estão implementadas:
+>
+> - **Notion** — login com Notion (OAuth) ou, como alternativa, um token colado;
+> - **GitHub** — login com GitHub (OAuth Device Flow) ou, como alternativa, um fine-grained PAT.
 
 ## Requisitos
 
@@ -44,13 +46,15 @@ pnpm e2e
 Faz o build de produção e roda o Playwright (`e2e/`) contra o app Electron real. Não é preciso
 instalar navegadores do Playwright: o teste usa o Electron do projeto.
 
-- A **API do Notion é simulada**: o teste substitui o `fetch` do processo main durante a
-  execução (o código do app não tem nenhum modo de teste). Nenhum token real é usado.
+- **Notion, intermediário OAuth e GitHub são simulados**: o teste substitui o `fetch` e o
+  `shell.openExternal` do processo main durante a execução (o código do app não tem nenhum modo
+  de teste). Nenhum token real é usado. O build usa `--mode e2e` (`.env.e2e`, valores falsos).
 - Cada execução usa um `userData` temporário (`--user-data-dir`) e não toca nos seus dados.
 - Cobre: tela inicial, isolamento do renderer, CSP de produção, fontes/logo/botão primário,
   token inválido (nada salvo), conexão válida (arquivo criptografado, permissão 600, token fora
   do renderer), reabrir mantendo a conexão, aviso em 503, token revogado, desconectar com
-  confirmação (arquivo apagado) e ausência do token nos logs.
+  confirmação (arquivo apagado) e ausência do token nos logs — para o Notion (token e OAuth) e
+  para o GitHub (Device Flow com código/copiar/abrir/cancelar/expirar/recusar, PAT, rate limit).
 - **Linux sem interface gráfica** (CI/servidor): rode com `xvfb-run -a pnpm e2e`.
 - **Linux sem keyring**: o teste liga a criptografia básica do Electron só durante o teste.
   No macOS/Windows usa o Keychain/DPAPI de verdade (o macOS pode pedir acesso ao Keychain na
@@ -157,22 +161,68 @@ O token é validado em `GET https://api.notion.com/v1/users/me` antes de ser sal
 
 Documentação oficial: <https://developers.notion.com/guides/get-started/personal-access-tokens>
 
+## Conectar o GitHub (Device Flow)
+
+Para quem usa: **Integrações → Conectar com GitHub** mostra um código (ex.: `WDJB-MJHT`).
+A pessoa clica em **Copiar** e **Abrir GitHub**, cola o código em github.com/login/device e
+clica em **Authorize**. O Orkio conecta sozinho, sem precisar voltar e clicar em nada.
+
+O Device Flow **não usa client secret** nem redirect, então o GitHub **não** passa pelo
+intermediário (`broker/`): o app fala direto com o GitHub e guarda o token cifrado.
+
+**Escopo pedido: `repo`.** Para OAuth Apps é o único escopo que dá acesso a repositórios
+privados, PRs e comentários e, depois, permite abrir PRs. O GitHub não oferece uma versão
+só-leitura dele (`public_repo` não cobre privados).
+
+### Criar a OAuth App (uma vez, por quem mantém o Orkio)
+
+1. GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App** (para a org:
+   _Organization settings → Developer settings → OAuth Apps_).
+2. Preencha:
+   - **Application name:** `Orkio`
+   - **Homepage URL:** a página do projeto (ex.: o repositório)
+   - **Authorization callback URL:** obrigatório no formulário, mas **não é usado** pelo Device
+     Flow. Pode usar `http://127.0.0.1/`.
+   - Marque **Enable Device Flow**.
+3. Copie o **Client ID** (público). **Não gere client secret** — o Orkio não usa.
+4. No `.env` do app: `MAIN_VITE_GITHUB_CLIENT_ID=<Client ID>`. Sem ele, o card mostra só a
+   opção de token.
+
+**Organizações com restrições:** se a org usa _OAuth App access restrictions_ ou SAML SSO, um
+admin precisa aprovar a OAuth App do Orkio (e, com SSO, cada pessoa autoriza o token para a
+org). Sem isso a conexão funciona, mas os repositórios da org não aparecem nas próximas etapas.
+
+### Alternativa: fine-grained personal access token
+
+**Usar token** no card do GitHub aceita um
+[fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)
+(GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens):
+escolha os repositórios e dê, no mínimo, **Contents**, **Pull requests** e **Metadata**
+(leitura; escrita em Contents/Pull requests para abrir PRs nas próximas etapas). O token é
+validado em `GET https://api.github.com/user` antes de ser salvo.
+
 ## Segurança
 
-- Todas as chamadas à API do Notion são feitas no **processo main**. O renderer não tem
+- Todas as chamadas ao Notion e ao GitHub são feitas no **processo main**. O renderer não tem
   acesso a Node (`contextIsolation`, `sandbox`, sem `nodeIntegration`) e fala com o main só
   pela API mínima `window.orkio`.
 - Tokens (OAuth ou colados) são criptografados com `safeStorage` do Electron (Keychain no macOS, DPAPI no
-  Windows, libsecret/KWallet no Linux) e salvo em `<userData>/secrets/notion.bin` com
-  permissão `0600`.
+  Windows, libsecret/KWallet no Linux) e salvos em `<userData>/secrets/notion.bin` e
+  `github.bin` com permissão `0600`.
 - Se não houver criptografia disponível, o token **não é salvo** e o app mostra um erro.
   No Linux, o backend `basic_text` (chave fixa) é tratado como indisponível.
 - O token nunca volta para o renderer, não aparece em logs e o `.gitignore` bloqueia `*.bin`
   e `secrets/`.
 - CSP restritiva no `index.html`; navegação e novas janelas bloqueadas; links externos só
-  abrem para domínios do Notion (allowlist no main).
+  abrem para a allowlist do main (domínios do Notion, `docs.github.com` e só
+  `github.com/login/device`).
+- Permissões do navegador negadas, exceto escrever na área de transferência (botão
+  **Copiar** do código do GitHub).
+- GitHub Device Flow: sem client secret; o polling roda no main e a UI só recebe o código, a
+  URL e a expiração.
 - OAuth: o client secret existe só no intermediário; o app valida o `state`, aceita o redirect
   só em `127.0.0.1` (e confere o header `Host`) e fecha o servidor local ao terminar.
 
 Para desconectar, use **Desconectar** no card. Isso apaga o arquivo do disco. O token
-continua válido no Notion; revogue-o por lá se quiser invalidá-lo.
+continua válido no serviço; para revogar, remova o Orkio em **Notion → Configurações →
+Conexões** ou em **GitHub → Settings → Applications → Authorized OAuth Apps** (ou apague o PAT).

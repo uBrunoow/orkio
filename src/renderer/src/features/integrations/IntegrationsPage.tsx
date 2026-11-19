@@ -1,12 +1,17 @@
+import type { ConnectionStatus } from '../../../../shared/ipc-contract'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
+import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
-import { useNotionConnection, type UseNotionConnection } from './useNotionConnection'
+import { useGitHubConnection } from './useGitHubConnection'
+import { useNotionConnection } from './useNotionConnection'
 
 export function IntegrationsPage(): React.JSX.Element {
   const notion = useNotionConnection()
+  const github = useGitHubConnection()
+  const nothingConnected = [notion.status, github.status].every(isEmpty)
 
   return (
-    <div className="page">
+    <div className="page page--wide">
       <header className="page__header">
         <h1 className="page__title">Integrações</h1>
         <p className="page__subtitle">
@@ -14,26 +19,34 @@ export function IntegrationsPage(): React.JSX.Element {
         </p>
       </header>
 
-      {isNothingConnected(notion) && (
+      {nothingConnected && (
         <section className="empty-hero" aria-labelledby="empty-hero-title">
           <OrkioLogo variant="full" size={88} />
           <div>
             <p className="slogan">Do contexto ao commit</p>
             <h2 className="display-title" id="empty-hero-title">
-              Conecte sua primeira ferramenta
+              Conecte suas ferramentas
             </h2>
-            <p className="muted">Comece pelo Notion: é de lá que o Orkio vai ler o planejamento.</p>
+            <p className="muted">
+              Notion para o planejamento, GitHub para o código. O Orkio liga os dois.
+            </p>
           </div>
         </section>
       )}
 
-      <NotionConnectionCard notion={notion} />
+      <div className="integrations-grid">
+        <NotionConnectionCard notion={notion} />
+        <GitHubConnectionCard github={github} />
+      </div>
     </div>
   )
 }
 
-/** Nenhuma integração conectada (nem com credencial salva). Enquanto carrega, não mostramos nada. */
-function isNothingConnected({ status }: UseNotionConnection): boolean {
+/**
+ * Sem conexão nem credencial salva. Enquanto carrega (`null`), não conta como vazio,
+ * para o destaque não "piscar".
+ */
+function isEmpty(status: ConnectionStatus | null): boolean {
   if (status === null || status.state === 'connected') return false
   return !(status.state === 'error' && status.hasStoredCredentials)
 }
