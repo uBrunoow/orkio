@@ -1,42 +1,62 @@
-/* Tokens da marca Orkio. Dark mode é o padrão. */
+/*
+ * Orkio — design tokens (dark-first).
+ * Fonte da verdade da marca: brand/tokens.css + brand/BRAND.md.
+ * Único arquivo de tokens do renderer: nenhuma cor deve existir fora daqui.
+ */
 :root {
   color-scheme: dark;
 
-  /* Cores */
-  --bg: #0a0a0b;
+  /* Superfícies */
+  --bg: #0a0a0b; /* piano black */
   --surface: #141416;
   --raised: #1e1e21;
   --border: #2c2c30;
+
+  /* Texto */
   --text: #f2f2f0;
   --muted: #8f8f94;
-  --accent: #ff5b1f;
-  --on-accent: #0a0a0b;
+
+  /* Marca */
+  --accent: #ff5b1f; /* Orkio orange */
+  --accent-hover: #ff7440;
+  --accent-tint: #3a1a0e; /* fundo de badges laranja */
+  --accent-tint-text: #ffb08f;
+  --on-accent: #0a0a0b; /* texto SEMPRE preto sobre laranja */
+
+  /* Estados */
   --success: #3dd68c;
   --warning: #f5c518;
-  --danger: #f0445c;
+  --danger: #f0445c; /* rosado, para não confundir com o laranja */
 
-  /* Tipografia */
-  --font-sans:
-    'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    sans-serif;
-  --font-mono:
-    ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  /* Tons derivados (sempre a partir dos tokens acima) */
+  --danger-border: color-mix(in srgb, var(--danger) 45%, transparent);
+  --danger-tint: color-mix(in srgb, var(--danger) 10%, transparent);
+  --warning-border: color-mix(in srgb, var(--warning) 45%, transparent);
+  --warning-tint: color-mix(in srgb, var(--warning) 8%, transparent);
+
+  /* Tipografia (fontes empacotadas via @fontsource, ver styles/fonts.css) */
+  --font-brand: 'Jost', system-ui, sans-serif; /* só logo e títulos grandes */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   --text-xs: 12px;
   --text-sm: 13px;
   --text-md: 14px;
   --text-lg: 16px;
   --text-xl: 22px;
+  --text-display: 30px;
 
-  /* Espaçamento, raio, movimento */
+  /* Forma */
+  --radius: 8px;
+  --radius-card: 12px;
+  --radius-full: 999px;
+
+  /* Espaçamento e movimento */
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 24px;
   --space-6: 32px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-full: 999px;
   --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
   --transition: 120ms ease;
 }

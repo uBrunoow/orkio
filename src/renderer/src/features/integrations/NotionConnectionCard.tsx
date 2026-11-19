@@ -4,13 +4,16 @@ import {
   type ConnectedAccount,
   type ConnectionStatus
 } from '../../../../shared/ipc-contract'
-import { useNotionConnection, type NotionActivity } from './useNotionConnection'
+import type { NotionActivity, UseNotionConnection } from './useNotionConnection'
 
 const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' })
 const timeFormatter = new Intl.DateTimeFormat('pt-BR', { timeStyle: 'short' })
 
-export function NotionConnectionCard(): React.JSX.Element {
-  const notion = useNotionConnection()
+export function NotionConnectionCard({
+  notion
+}: {
+  notion: UseNotionConnection
+}): React.JSX.Element {
   const { status, activity } = notion
 
   return (

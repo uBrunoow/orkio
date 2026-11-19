@@ -1,0 +1,11 @@
+/*
+ * Fontes empacotadas localmente (CSP: font-src 'self', sem CDN).
+ * Inter = UI · Jost = logo e títulos grandes · JetBrains Mono = IDs e tokens.
+ */
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+@import '@fontsource/jost/300.css';
+@import '@fontsource/jost/400.css';
+@import '@fontsource/jetbrains-mono/400.css';

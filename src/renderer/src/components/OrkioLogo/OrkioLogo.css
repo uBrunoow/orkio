@@ -1,0 +1,30 @@
+.orkio-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--orkio-logo-gap);
+  color: var(--accent);
+  line-height: 1;
+}
+
+.orkio-logo__symbol {
+  display: block;
+  flex-shrink: 0;
+}
+
+.orkio-logo__wordmark {
+  font-family: var(--font-brand);
+  font-size: var(--orkio-wordmark-size);
+  letter-spacing: 0.25em;
+  /* Compensa o espaçamento extra depois da última letra. */
+  margin-right: -0.25em;
+  color: var(--orkio-wordmark-color, var(--text));
+  white-space: nowrap;
+}
+
+.orkio-logo__wordmark--w300 {
+  font-weight: 300;
+}
+
+.orkio-logo__wordmark--w400 {
+  font-weight: 400;
+}

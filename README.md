@@ -29,6 +29,9 @@ Outros comandos:
 | `pnpm format`    | Prettier                                       |
 | `pnpm build`     | Gera o build em `out/`                         |
 | `pnpm start`     | Roda o build de produção (`out/`) localmente   |
+| `pnpm icons`     | Regenera os ícones a partir de `brand/`        |
+| `pnpm dist`      | Empacota para o SO atual (electron-builder)    |
+| `pnpm dist:dir`  | Empacota sem instalador (pasta em `dist/`)     |
 
 ## Build
 
@@ -37,8 +40,31 @@ pnpm build
 pnpm start
 ```
 
-`pnpm build` gera `out/main`, `out/preload` e `out/renderer`. Empacotamento em
-instaladores (dmg/exe/AppImage) ainda não está configurado.
+`pnpm build` gera `out/main`, `out/preload` e `out/renderer`.
+
+Para empacotar (config em `electron-builder.yml`):
+
+```bash
+pnpm dist        # dmg no macOS, instalador NSIS no Windows, AppImage no Linux
+pnpm dist:dir    # só a pasta do app, sem instalador
+```
+
+Sem assinatura de código nem auto-update por enquanto.
+
+## Identidade visual
+
+A fonte da verdade da marca é a pasta [`brand/`](brand/BRAND.md) (símbolos, ícone e tokens).
+
+- **Tokens:** `src/renderer/src/styles/tokens.css` é o único arquivo de tokens do app
+  (une `brand/tokens.css` com espaçamentos e tamanhos da UI).
+- **Fontes:** empacotadas via `@fontsource` (Inter na UI, Jost na logo e em títulos grandes,
+  JetBrains Mono em IDs e tokens). Nada vem de CDN.
+- **Logo:** `<OrkioLogo variant="full|simple" withWordmark size />` em
+  `src/renderer/src/components/OrkioLogo/`.
+- **Ícones:** `pnpm icons` gera `build/icon.icns`, `build/icon.ico`, `build/icon.png` e
+  `resources/icon.png` a partir de `brand/orkio-app-icon-1024.png`, usando
+  [png2icons](https://github.com/idesis-gmbh/png2icons) (JavaScript puro, sem dependências
+  nativas).
 
 ## Como criar o token do Notion
 

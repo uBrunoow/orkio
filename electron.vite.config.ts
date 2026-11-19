@@ -28,6 +28,10 @@ export default defineConfig({
   },
   renderer: {
     root: resolve('src/renderer'),
-    plugins: [react(), devOnlyRelaxedStyleCsp()]
+    plugins: [react(), devOnlyRelaxedStyleCsp()],
+    build: {
+      // Fontes nunca viram data: URI — a CSP só permite font-src 'self'.
+      assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined)
+    }
   }
 })

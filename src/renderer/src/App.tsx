@@ -1,3 +1,4 @@
+import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 
 export function App(): React.JSX.Element {
@@ -5,10 +6,7 @@ export function App(): React.JSX.Element {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <span className="brand__mark" aria-hidden="true">
-            O
-          </span>
-          Orkio
+          <OrkioLogo variant="simple" withWordmark size={26} />
         </div>
         <nav className="nav" aria-label="Navegação principal">
           <span className="nav__label">Configurações</span>
