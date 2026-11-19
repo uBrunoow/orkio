@@ -82,6 +82,37 @@ export const MIGRATIONS: readonly string[] = [
     changes_json TEXT NOT NULL
   );
   CREATE INDEX config_events_project ON config_events (project_id, id);
+  `,
+  // v4 (Etapa 4A): worktrees por tarefa, execuções do Claude Code e aprovações "sempre neste projeto".
+  `
+  CREATE TABLE worktrees (
+    task_page_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    base_ref TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE agent_runs (
+    id TEXT PRIMARY KEY,
+    task_page_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK (mode IN ('prompt', 'command')),
+    command TEXT,
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    cost REAL,
+    summary TEXT
+  );
+  CREATE INDEX agent_runs_task ON agent_runs (task_page_id, started_at);
+  CREATE TABLE permission_rules (
+    project_id TEXT NOT NULL,
+    tool TEXT NOT NULL,
+    pattern TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, tool, pattern)
+  );
   `
 ]
 

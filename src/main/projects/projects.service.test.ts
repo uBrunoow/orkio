@@ -10,7 +10,12 @@ import type {
 import { createOrkioConfigStore } from '../config/orkio-config'
 import { GitHubApiError, type GitHubRepo } from '../connectors/github/github.client'
 import { GitError, type Git, type GitRemote } from '../git/git'
-import { ProjectsService, type HeadWatcherLike, type ProjectsGitHub } from './projects.service'
+import {
+  ProjectsService,
+  type HeadWatcherLike,
+  type ProjectsGitHub,
+  type ProjectsServiceDeps
+} from './projects.service'
 
 interface FakeRepo {
   remotes: GitRemote[]
@@ -19,7 +24,10 @@ interface FakeRepo {
 }
 
 /** Git simulado: repositórios por raiz; subpastas resolvem para a raiz. */
-function fakeGit(repos: Record<string, FakeRepo>, opts: { gitMissing?: boolean } = {}): Git {
+function fakeGit(
+  repos: Record<string, FakeRepo>,
+  opts: { gitMissing?: boolean } = {}
+): ProjectsServiceDeps['git'] & Pick<Git, 'localBranches'> {
   const rootOf = (dir: string): string => {
     if (opts.gitMissing) {
       throw new GitError(
@@ -69,7 +77,7 @@ describe('ProjectsService', () => {
   }[]
   let ids: number
 
-  function makeService(overrides: { git?: Git } = {}): ProjectsService {
+  function makeService(overrides: { git?: ProjectsServiceDeps['git'] } = {}): ProjectsService {
     return new ProjectsService({
       store: createOrkioConfigStore(configFile),
       git: overrides.git ?? fakeGit(repos),

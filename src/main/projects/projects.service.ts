@@ -37,7 +37,16 @@ export interface HeadWatcherLike {
 
 export interface ProjectsServiceDeps {
   store: ConfigStore<OrkioConfig>
-  git: Git
+  /** Só o que Projetos usa do git (as operações de worktree ficam com a 4A). */
+  git: Pick<
+    Git,
+    | 'showToplevel'
+    | 'absoluteGitDir'
+    | 'remotes'
+    | 'currentBranch'
+    | 'isDirty'
+    | 'remoteDefaultBranch'
+  >
   github: ProjectsGitHub
   /** Abre o seletor de pasta do sistema (no main). `null` = cancelado. */
   pickFolder(purpose: 'add' | 'relocate'): Promise<string | null>

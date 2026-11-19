@@ -52,6 +52,32 @@ export interface Git {
   remoteDefaultBranch(root: string, remote: string): Promise<string | null>
   /** Nomes das branches locais (refs/heads). */
   localBranches(root: string): Promise<string[]>
+  // ---------- Worktrees (4A) ----------
+  /** `git fetch <remote> <branch>` (sem credenciais interativas: GIT_TERMINAL_PROMPT=0). */
+  fetch(root: string, remote: string, branch: string): Promise<void>
+  /** Branches remotas conhecidas localmente (refs/remotes/<remote>/…), sem o prefixo do remote. */
+  remoteBranches(root: string, remote: string): Promise<string[]>
+  /** O ref existe? (ex.: `origin/main`, `refs/heads/x`) */
+  refExists(root: string, ref: string): Promise<boolean>
+  /** `git worktree add`: nova branch a partir de `base`, ou branch existente (`newBranch: false`). */
+  worktreeAdd(
+    root: string,
+    path: string,
+    branch: string,
+    options: { newBranch: true; base: string } | { newBranch: false; track?: string }
+  ): Promise<void>
+  /** `git worktree remove` (com `force` remove mesmo com mudanças). */
+  worktreeRemove(root: string, path: string, force: boolean): Promise<void>
+  /** Worktrees registrados (inclui a pasta principal) e a branch em uso em cada um. */
+  worktreeList(root: string): Promise<{ path: string; branch: string | null }[]>
+  /** `git status --porcelain` (linhas). */
+  statusPorcelain(dir: string): Promise<string[]>
+  /** `git diff --stat <base>` (texto) e arquivos alterados desde `base`, incluindo não commitados. */
+  diffStat(dir: string, base: string): Promise<{ stat: string; files: string[] }>
+  /** Commits em `HEAD` que não estão em `base` (hash curto + assunto). */
+  commitsSince(dir: string, base: string): Promise<{ hash: string; subject: string }[]>
+  /** Commit atual (hash completo). */
+  headCommit(dir: string): Promise<string>
 }
 
 export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = {}): Git {
@@ -104,6 +130,85 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean)
+    },
+    async fetch(root, remote, branch) {
+      await git(root, ['fetch', '--quiet', remote, branch])
+    },
+    async remoteBranches(root, remote) {
+      const out = await git(root, [
+        'for-each-ref',
+        '--format=%(refname:short)',
+        `refs/remotes/${remote}`
+      ])
+      return out
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l && l !== `${remote}/HEAD` && l !== remote)
+        .map((l) => l.slice(remote.length + 1))
+    },
+    async refExists(root, ref) {
+      try {
+        await git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])
+        return true
+      } catch {
+        return false
+      }
+    },
+    async worktreeAdd(root, path, branch, options) {
+      const args = options.newBranch
+        ? ['worktree', 'add', '-b', branch, path, options.base]
+        : options.track
+          ? ['worktree', 'add', '--track', '-b', branch, path, options.track]
+          : ['worktree', 'add', path, branch]
+      await git(root, args)
+    },
+    async worktreeRemove(root, path, force) {
+      await git(root, ['worktree', 'remove', ...(force ? ['--force'] : []), path])
+    },
+    async worktreeList(root) {
+      const out = await git(root, ['worktree', 'list', '--porcelain'])
+      const list: { path: string; branch: string | null }[] = []
+      for (const line of out.split('\n')) {
+        if (line.startsWith('worktree ')) {
+          list.push({ path: line.slice('worktree '.length).trim(), branch: null })
+        } else if (line.startsWith('branch ') && list.length > 0) {
+          list[list.length - 1]!.branch = line
+            .slice('branch '.length)
+            .trim()
+            .replace(/^refs\/heads\//, '')
+        }
+      }
+      return list
+    },
+    async statusPorcelain(dir) {
+      return (await git(dir, ['status', '--porcelain']))
+        .split('\n')
+        .map((l) => l.trimEnd())
+        .filter(Boolean)
+    },
+    async diffStat(dir, base) {
+      const stat = (await git(dir, ['diff', '--stat', base])).trim()
+      const names = await git(dir, ['diff', '--name-only', base])
+      const untracked = await git(dir, ['ls-files', '--others', '--exclude-standard'])
+      const files = [
+        ...new Set(
+          [...names.split('\n'), ...untracked.split('\n')].map((l) => l.trim()).filter(Boolean)
+        )
+      ]
+      return { stat, files }
+    },
+    async commitsSince(dir, base) {
+      const out = await git(dir, ['log', '--format=%h%x09%s', `${base}..HEAD`])
+      return out
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => {
+          const [hash, ...rest] = l.split('\t')
+          return { hash: hash ?? '', subject: rest.join('\t') }
+        })
+    },
+    async headCommit(dir) {
+      return (await git(dir, ['rev-parse', 'HEAD'])).trim()
     },
     async remoteDefaultBranch(root, remote) {
       try {
