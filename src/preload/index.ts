@@ -6,7 +6,8 @@ import {
   type OrkioApi
 } from '../shared/ipc-contract'
 
-const { notion, github, notionWorkspace, signals, board, projects, shell } = IPC_CHANNELS
+const { notion, github, notionWorkspace, signals, board, automation, projects, shell } =
+  IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
 const api: OrkioApi = {
@@ -73,6 +74,34 @@ const api: OrkioApi = {
       ipcRenderer.invoke(board.setBlocked, projectId, taskId, blocked === true),
     history: (projectId, taskId) => ipcRenderer.invoke(board.history, projectId, taskId),
     retryNow: () => ipcRenderer.invoke(board.retryNow),
+    setAutomationPaused: (projectId, taskId, paused) =>
+      ipcRenderer.invoke(board.setAutomationPaused, projectId, taskId, paused === true),
+    onChanged: (listener) => {
+      const handler = (_event: unknown, payload: unknown): void => {
+        if (isRecord(payload) && typeof payload['projectId'] === 'string') {
+          listener({ projectId: payload['projectId'] })
+        }
+      }
+      ipcRenderer.on(board.changed, handler)
+      return () => {
+        ipcRenderer.removeListener(board.changed, handler)
+      }
+    },
+    onOpenTask: (listener) => {
+      const handler = (_event: unknown, payload: unknown): void => {
+        if (
+          isRecord(payload) &&
+          typeof payload['projectId'] === 'string' &&
+          typeof payload['taskId'] === 'string'
+        ) {
+          listener({ projectId: payload['projectId'], taskId: payload['taskId'] })
+        }
+      }
+      ipcRenderer.on(board.openTask, handler)
+      return () => {
+        ipcRenderer.removeListener(board.openTask, handler)
+      }
+    },
     onSyncChanged: (listener) => {
       const handler = (_event: unknown, payload: unknown): void => {
         if (isBoardSyncEvent(payload)) listener(payload)
@@ -82,6 +111,11 @@ const api: OrkioApi = {
         ipcRenderer.removeListener(board.syncChanged, handler)
       }
     }
+  },
+  automation: {
+    status: (projectId) => ipcRenderer.invoke(automation.status, projectId),
+    runNow: (projectId) => ipcRenderer.invoke(automation.runNow, projectId),
+    setPaused: (paused) => ipcRenderer.invoke(automation.setPaused, paused === true)
   },
   signals: {
     get: (projectId, options) =>
@@ -137,4 +171,8 @@ function isBoardSyncEvent(value: unknown): value is BoardSyncEvent {
     typeof v['blocked'] === 'boolean' &&
     (v['message'] === undefined || typeof v['message'] === 'string')
   )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }

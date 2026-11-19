@@ -13,7 +13,9 @@ Claude Code. Hoje existem:
 - **Quadro (3A):** kanban por projeto com etapas próprias ligadas ao status do Notion; mover
   card escreve no Notion (fila persistente); estado local e histórico em SQLite.
 - **UI:** design system Astryx com o tema Orkio, CSP estrita, textos da Astryx em pt-BR.
-- Ainda não existem: automações (3B/3C), editor de regras, Claude Code.
+- **Automações (3B):** eventos do git/GitHub (por diff de sinais) movem tarefas por regras
+  declarativas, em segundo plano, com idempotência no SQLite.
+- Ainda não existem: editor de regras (3C), Claude Code, webhooks.
 
 ## Comandos
 
@@ -42,6 +44,7 @@ src/
   shared/task-id-match.ts  # casamento puro de IDs (ORK-142) em branches/títulos
   shared/task-signals.ts   # TaskSignals, buildTaskSignals, diffSignals (base da Etapa 3)
   shared/board.ts          # etapas, template, validação e reconciliação do quadro (puras)
+  shared/automation.ts     # snapshot, deriveEvents, regras padrão, evaluate (motor puro)
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
     connectors/types.ts    # interface Connector
@@ -52,13 +55,14 @@ src/
     ipc/                   # handlers finos: validam origem e payload, delegam ao conector/serviço
     storage/secure-store.ts  # SEGREDOS (safeStorage)
     storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações)
-    config/orkio-config.ts   # formato do orkio-config.json (schema v3: projects, notion, boards)
+    config/orkio-config.ts   # orkio-config.json (schema v4: projects, notion, boards+rules, automation)
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
     notion/                # notion-workspace.service.ts (bancos, mapeamento, vínculo, tarefas)
     signals/               # github-signals.source.ts (ETag, GraphQL) + task-signals.service.ts
     db/database.ts         # SQLite (node:sqlite) + migrações por PRAGMA user_version
     board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
+    automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
   preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
     features/<feature>/    # componentes + hooks por funcionalidade
@@ -308,6 +312,33 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   `kanban-board` (sem StyleX; `style` só no card arrastável/flutuante e no `flexShrink` da coluna)
   e "Mover para…" no menu do card e no painel (teclado). Painel lateral dentro da página (sem gaveta).
 
+## Automações (Etapa 3B)
+
+- **Motor puro** (`shared/automation.ts`): `toSnapshot` (só ids, estados, datas; nada de títulos,
+  textos ou autores) → `deriveEvents(anterior, novo)` → `evaluate(eventos, regras, estado)`.
+  Primeira observação = linha de base (não dispara). Parte desconhecida (GitHub indisponível,
+  GraphQL falhou) não gera evento; `mergeSnapshot` mantém o último valor conhecido.
+- Eventos e chaves (únicas em `task_events.event_key`): `branch:<local|remote>:<nome>`,
+  `pr#N:opened|ready|merged`, `pr#N:closed:<closed_at>`, `pr#N:review_request:<id>`,
+  `pr#N:review:<id>` (changes_requested/approved), `pr#N:threads:<ids novos>`. Os ids vêm do
+  GraphQL da 2D estendido (`timelineItems` REVIEW_REQUESTED_EVENT, `reviews`, `reviewThreads.id`).
+- Ordem: ciclo de vida sem horário (branch, aberta, pronta) → demais por horário do GitHub →
+  merge/fechamento. Para cada evento, a **primeira regra habilitada que casar** age; condições
+  usam a etapa já atualizada pelo evento anterior. Bloqueada (`notBlocked`), pausada (tarefa ou
+  global) ou movida à mão depois do horário do evento → `automation` com `outcome: skipped` e
+  motivo; o evento é consumido (não reaplica ao despausar).
+- Regras em `boards[projectId].rules` (`defaultRules` ao criar o quadro e na migração v3→v4,
+  etapas pelo nome; etapa ausente → regra desligada). Pausa global em `automation.paused`.
+- Execução: `BoardService.applyAutomationMove` é o mesmo caminho do manual (`source:'automation'`,
+  detalhe com `ruleId`, evento e `pr {number, owner, repo}`). Chave + estado + escrita pendente +
+  snapshot numa transação: nunca repete, nunca perde (Notion fora → pendente).
+- Agendador (`AutomationScheduler`): projetos com quadro e vínculo; ciclo ao abrir e a cada ~60 s
+  (±10%); erro/rate limit → backoff 2^n × 60 s até 15 min; `for-each-ref` local a cada 5 s e
+  `HeadWatcher` (via `onBranchChanged`) → ciclo imediato. "Atualizar" no quadro = `runNow` (force).
+- Notificação de desktop (`Notification`) só em regras com `notify` (padrão: PR fechada sem
+  merge). Clique → `board:open-task` abre a tarefa no quadro. Movimento automático →
+  `board:changed` recarrega a tela.
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -319,6 +350,9 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   do app para isso. No Linux sem keyring, o fixture liga a criptografia básica do Electron
   só no teste.
 - Para novos conectores: adicione o modo fake correspondente no fixture e um spec em `e2e/`.
+- GitHub simulado (3B): `githubPrDetails[n].reviews`/`reviewRequests` e `FakePull.updatedAt` (o
+  Orkio só relê detalhes quando `updated_at` muda). `notionInitialStatus` mantém o Notion
+  simulado igual entre aberturas do app.
 - Notion simulado com escrita (3A): `notionNetwork: 'down'` (sem internet), `notionWrites:
 'reject'` (400); `setNotionStatus` muda o status "por fora"; `notionState` lê o estado.
 - GitHub simulado (2D): `githubBranches`, `githubPulls`, `githubPrDetails`; listas com ETag
@@ -363,6 +397,10 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 | Escritas pendentes no SQLite, calculadas contra o último valor conhecido do Notion                          | Sobrevivem a fechar o app; mover e voltar antes de sincronizar não gera escrita; rollback restaura o estado anterior à primeira mudança.                                                                                                                    |
 | "Bloqueada" local, com checkbox do Notion opcional                                                          | Nem todo banco tem a propriedade; não criamos checkbox sem pedir. Com mapeamento, o Notion é a fonte da verdade.                                                                                                                                            |
 | Coluna "Sem etapa"                                                                                          | Status do Notion que nenhuma etapa usa não pode sumir do quadro nem ser forçado numa etapa errada.                                                                                                                                                          |
+| Automações: primeira observação é linha de base                                                             | Ligar o quadro (ou um projeto novo) não pode mover tudo pelo histórico antigo de PRs. Depois disso, eventos ocorridos com o app fechado disparam ao abrir (diff com o snapshot salvo).                                                                      |
+| Evento ignorado (bloqueada/pausada/conflito) é consumido                                                    | Despausar não deve aplicar de uma vez movimentos antigos; o histórico mostra o que foi ignorado e por quê.                                                                                                                                                  |
+| Movimento manual depois do horário do evento vence                                                          | O usuário decidiu depois do GitHub; a automação não desfaz uma escolha mais recente.                                                                                                                                                                        |
+| Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 
 ## Astryx e CSP (regra inegociável)
 

@@ -283,6 +283,26 @@ opção, ex.: Revisando e Revisado → "Em andamento").
 Para escrever no Notion, a integração precisa da capacidade **Update content** (Inserir/atualizar
 conteúdo). O estado local fica em `<userData>/orkio.db` (só ids, etapas e histórico).
 
+## Automações
+
+Com o quadro criado, o Orkio acompanha o git e o GitHub em segundo plano (enquanto estiver
+aberto, mesmo em outra tela) e move as tarefas sozinho:
+
+| Quando                                                       | Vai para                                 | Se estiver em             |
+| ------------------------------------------------------------ | ---------------------------------------- | ------------------------- |
+| Uma branch com o ID (ex.: `ORK-142/sync`) é criada           | Em andamento                             | Prioridades               |
+| A PR é aberta ou fica pronta para review                     | Revisando                                | Prioridades, Em andamento |
+| A review pede alterações ou deixa comentários não resolvidos | Revisado                                 | Revisando                 |
+| Você pede review de novo (ex.: depois das correções)         | Revisando                                | Revisado                  |
+| A PR é mergeada                                              | Finalizada (o Notion fica "Finalizadas") | qualquer etapa            |
+| A PR é fechada sem merge                                     | Em andamento (com notificação)           | qualquer etapa            |
+
+Cada evento age uma vez só, mesmo reiniciando o app. Tarefas bloqueadas ou com automações
+pausadas (no menu do card ou "Pausar todas" no topo do quadro) não se movem: o histórico mostra o
+evento e por que foi ignorado. Se você mover a tarefa à mão depois do evento, vale a sua escolha.
+O GitHub é consultado a cada minuto sem gastar o limite de requisições quando nada mudou;
+**Atualizar** verifica na hora. O editor de regras chega numa próxima etapa.
+
 ## Segurança
 
 - Todas as chamadas ao Notion e ao GitHub são feitas no **processo main**. O renderer não tem

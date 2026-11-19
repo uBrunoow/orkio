@@ -97,9 +97,9 @@ test.afterAll(async () => {
 test('sem Notion conectado, o card dos bancos só orienta', async () => {
   const { page } = await open({ notionTasks: 'no_unique_id' })
   await expect(workspaceCard(page)).toContainText('Conecte o Notion acima')
-  // Migração v1 → v2 → v3 gravada no disco.
+  // Migração v1 → … → v4 gravada no disco.
   const saved = JSON.parse(readFileSync(configFile(), 'utf8')) as Record<string, unknown>
-  expect(saved['schemaVersion']).toBe(3)
+  expect(saved['schemaVersion']).toBe(4)
   expect(saved['notion']).toBeNull()
 })
 

@@ -8,7 +8,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
-import { LockIcon } from '../../components/icons'
+import { LockIcon, PauseIcon } from '../../components/icons'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { tokenColor } from '../notion-workspace/notion-colors'
 
@@ -16,6 +16,7 @@ export interface CardActions {
   onOpen(taskId: string): void
   onMove(taskId: string, stageId: string): void
   onToggleBlocked(taskId: string, blocked: boolean): void
+  onToggleAutomation(taskId: string, paused: boolean): void
 }
 
 /** Conteúdo do card (no quadro e no "fantasma" do arrasto). */
@@ -40,6 +41,16 @@ export function BoardCardBody({
             <Icon icon={LockIcon} size="sm" color="secondary" />
           </HStack>
         )}
+        {card.automationPaused && (
+          <HStack
+            vAlign="center"
+            role="img"
+            aria-label="Automações pausadas"
+            data-testid="card-automation-paused"
+          >
+            <Icon icon={PauseIcon} size="sm" color="secondary" />
+          </HStack>
+        )}
         {card.sync.state === 'pending' && (
           <Token size="sm" color="yellow" label="Sincronizando" data-testid="card-sync" />
         )}
@@ -54,6 +65,10 @@ export function BoardCardBody({
                   {
                     label: card.blocked ? 'Desmarcar bloqueada' : 'Marcar como bloqueada',
                     onClick: () => actions.onToggleBlocked(card.taskId, !card.blocked)
+                  },
+                  {
+                    label: card.automationPaused ? 'Retomar automações' : 'Pausar automações',
+                    onClick: () => actions.onToggleAutomation(card.taskId, !card.automationPaused)
                   },
                   { type: 'divider' },
                   ...stages

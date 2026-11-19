@@ -32,6 +32,7 @@ export interface UseBoard {
   load(force: boolean): Promise<void>
   move(taskId: string, stageId: string): Promise<void>
   setBlocked(taskId: string, blocked: boolean): Promise<void>
+  setAutomationPaused(taskId: string, paused: boolean): Promise<void>
   save(input: BoardSaveInput): Promise<NotionResult<BoardView>>
   retryNow(): Promise<void>
 }
@@ -102,9 +103,15 @@ export function useBoard(projectId: string): UseBoard {
         })
       }
     })
+    // Movimento por automação (3B): recarrega o quadro (sem forçar o Notion).
+    const unsubscribeChanged = window.orkio.board.onChanged((event) => {
+      if (event.projectId !== projectId) return
+      void call(() => window.orkio.board.get(projectId, { force: false })).then(apply)
+    })
     return () => {
       mounted.current = false
       unsubscribe()
+      unsubscribeChanged()
     }
   }, [projectId, apply, patchCard])
 
@@ -154,6 +161,16 @@ export function useBoard(projectId: string): UseBoard {
     [mutate, projectId]
   )
 
+  const setAutomationPaused = useCallback(
+    (taskId: string, paused: boolean) =>
+      mutate(
+        taskId,
+        (card) => ({ ...card, automationPaused: paused }),
+        () => window.orkio.board.setAutomationPaused(projectId, taskId, paused)
+      ),
+    [mutate, projectId]
+  )
+
   const save = useCallback(
     async (input: BoardSaveInput) => {
       const result = await call(() => window.orkio.board.save(projectId, input))
@@ -179,6 +196,7 @@ export function useBoard(projectId: string): UseBoard {
     load,
     move,
     setBlocked,
+    setAutomationPaused,
     save,
     retryNow
   }

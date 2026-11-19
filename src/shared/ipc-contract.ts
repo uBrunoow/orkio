@@ -31,6 +31,11 @@ export const IPC_CHANNELS = {
   signals: {
     get: 'signals:get'
   },
+  automation: {
+    status: 'automation:status',
+    runNow: 'automation:run-now',
+    setPaused: 'automation:set-paused'
+  },
   board: {
     get: 'board:get',
     save: 'board:save',
@@ -38,6 +43,11 @@ export const IPC_CHANNELS = {
     setBlocked: 'board:set-blocked',
     history: 'board:history',
     retryNow: 'board:retry-now',
+    setAutomationPaused: 'board:set-automation-paused',
+    /** Evento main → renderer: o quadro do projeto mudou (automação). */
+    changed: 'board:changed',
+    /** Evento main → renderer: abrir uma tarefa (clique na notificação). */
+    openTask: 'board:open-task',
     /** Evento main → renderer: resultado/estado de uma escrita no Notion. */
     syncChanged: 'board:sync-changed'
   },
@@ -353,6 +363,23 @@ export interface BoardHistoryEntry {
   detail: Record<string, unknown> | null
 }
 
+// ---------- Automações (Etapa 3B) ----------
+
+export interface AutomationStatus {
+  /** "Pausar todas" ligado. */
+  paused: boolean
+  /** Situação do GitHub no último ciclo do projeto. */
+  github: SignalsGitHubState | 'unknown'
+  lastRunAt: string | null
+  nextRunAt: string | null
+  error: string | null
+}
+
+export interface BoardTaskRef {
+  projectId: string
+  taskId: string
+}
+
 // ---------- Projetos ----------
 
 export interface ProjectRepo {
@@ -536,6 +563,23 @@ export interface OrkioApi {
     /** Tenta agora as escritas pendentes. */
     retryNow(): Promise<void>
     onSyncChanged(listener: (event: BoardSyncEvent) => void): () => void
+    setAutomationPaused(
+      projectId: string,
+      taskId: string,
+      paused: boolean
+    ): Promise<NotionResult<BoardCard>>
+    /** O quadro mudou por automação (recarregar). */
+    onChanged(listener: (event: { projectId: string }) => void): () => void
+    /** Pedido para abrir uma tarefa (clique na notificação). */
+    onOpenTask(listener: (event: BoardTaskRef) => void): () => void
+  }
+  /** Motor de automações (3B). */
+  automation: {
+    status(projectId: string): Promise<AutomationStatus>
+    /** Verifica agora (git + GitHub) e devolve o novo estado. */
+    runNow(projectId: string): Promise<AutomationStatus>
+    /** "Pausar todas" / "Retomar". */
+    setPaused(paused: boolean): Promise<AutomationStatus>
   }
   /** Branches e PRs ligadas às tarefas de um projeto pelo ID (só leitura). */
   signals: {

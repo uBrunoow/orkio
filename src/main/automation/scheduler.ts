@@ -163,6 +163,8 @@ export class AutomationScheduler {
   private scheduleLocal(): void {
     if (this.stopped) return
     this.localTimer = this.schedule(() => {
+      // Quadros criados/removidos desde a última volta entram/saem do agendamento.
+      this.sync()
       void this.checkLocal().finally(() => this.scheduleLocal())
     }, this.localInterval)
   }

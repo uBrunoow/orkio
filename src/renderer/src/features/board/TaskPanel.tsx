@@ -20,6 +20,7 @@ import type {
   BoardStage,
   TaskSignals
 } from '../../../../shared/ipc-contract'
+import { EVENT_LABELS, type EventKind } from '../../../../shared/automation'
 import { CloseIcon, ExternalLinkIcon } from '../../components/icons'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { tokenColor } from '../notion-workspace/notion-colors'
@@ -32,6 +33,7 @@ export function TaskPanel({
   signals,
   onMove,
   onToggleBlocked,
+  onToggleAutomation,
   onClose
 }: {
   projectId: string
@@ -40,6 +42,7 @@ export function TaskPanel({
   signals: TaskSignals | undefined
   onMove(stageId: string): void
   onToggleBlocked(blocked: boolean): void
+  onToggleAutomation(paused: boolean): void
   onClose(): void
 }): React.JSX.Element {
   const [history, setHistory] = useState<BoardHistoryEntry[] | null>(null)
@@ -60,7 +63,7 @@ export function TaskPanel({
     return () => {
       active = false
     }
-  }, [projectId, card.taskId, card.stageId, card.blocked, card.sync.state])
+  }, [projectId, card.taskId, card.stageId, card.blocked, card.automationPaused, card.sync.state])
 
   return (
     <Card role="complementary" aria-label={`Detalhes de ${card.displayId ?? card.title}`}>
@@ -117,6 +120,11 @@ export function TaskPanel({
           value={card.blocked}
           onChange={(checked) => onToggleBlocked(checked)}
         />
+        <CheckboxInput
+          label="Pausar automações desta tarefa"
+          value={card.automationPaused}
+          onChange={(checked) => onToggleAutomation(checked)}
+        />
         {card.url && (
           <HStack gap={2} vAlign="center">
             <IconButton
@@ -147,6 +155,19 @@ export function TaskPanel({
                     dateStyle: 'short',
                     timeStyle: 'short'
                   })}
+                  {...(prUrl(e)
+                    ? {
+                        endContent: (
+                          <IconButton
+                            size="sm"
+                            variant="ghost"
+                            label={`Abrir a PR #${prNumber(e)} no GitHub`}
+                            icon={<Icon icon={ExternalLinkIcon} />}
+                            onClick={() => void window.orkio.openExternal(prUrl(e)!)}
+                          />
+                        )
+                      }
+                    : {})}
                 />
               ))}
             </List>
@@ -157,8 +178,54 @@ export function TaskPanel({
   )
 }
 
+function prNumber(e: BoardHistoryEntry): number | null {
+  const pr = e.detail?.['pr'] as { number?: unknown } | undefined
+  return typeof pr?.number === 'number' ? pr.number : null
+}
+
+/** Link da PR montado a partir de owner/repo/número (o banco não guarda URLs nem títulos). */
+function prUrl(e: BoardHistoryEntry): string | null {
+  const pr = e.detail?.['pr'] as { number?: unknown; owner?: unknown; repo?: unknown } | undefined
+  return typeof pr?.number === 'number' &&
+    typeof pr.owner === 'string' &&
+    typeof pr.repo === 'string'
+    ? `https://github.com/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/pull/${pr.number}`
+    : null
+}
+
+/** "PR #45 mergeada" / "Branch criada (ORK-1/x)". */
+function automationEvent(e: BoardHistoryEntry): string {
+  const kind = e.detail?.['event']
+  const label =
+    typeof kind === 'string' && kind in EVENT_LABELS ? EVENT_LABELS[kind as EventKind] : 'Evento'
+  const n = prNumber(e)
+  const branch = e.detail?.['branch'] as { name?: unknown } | undefined
+  return n !== null
+    ? `${label} (PR #${n})`
+    : typeof branch?.name === 'string'
+      ? `${label} (${branch.name})`
+      : label
+}
+
 function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string): string {
+  const rule = typeof e.detail?.['ruleName'] === 'string' ? `“${e.detail['ruleName']}”` : null
+  if (e.kind === 'moved' && e.source === 'automation') {
+    return `${automationEvent(e)} → regra ${rule ?? ''}: ${stageName(e.fromStage)} → ${stageName(e.toStage)}`
+  }
+  if (e.kind === 'automation') {
+    const outcome = e.detail?.['outcome']
+    if (outcome === 'skipped') {
+      return `${automationEvent(e)}: regra ${rule ?? ''} ignorada (${String(e.detail?.['reason'] ?? '')})`
+    }
+    if (outcome === 'noop') return `${automationEvent(e)}: já estava em ${stageName(e.fromStage)}`
+    if (outcome === 'notify') return `${automationEvent(e)}: notificação (regra ${rule ?? ''})`
+    return automationEvent(e)
+  }
   switch (e.kind) {
+    case 'automation_paused':
+      return 'Automações pausadas nesta tarefa'
+    case 'automation_resumed':
+      return 'Automações retomadas nesta tarefa'
     case 'added':
       return `Entrou no quadro em ${stageName(e.toStage)}`
     case 'moved':

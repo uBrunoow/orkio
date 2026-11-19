@@ -23,7 +23,10 @@ const INVALID: NotionResult<never> = {
 /** O renderer manda só ids (projeto, página do Notion, etapa) e a configuração das etapas. */
 export function registerBoardIpc(
   ipc: Pick<IpcMain, 'handle'>,
-  service: Pick<BoardService, 'get' | 'save' | 'move' | 'setBlocked' | 'history' | 'retryNow'>,
+  service: Pick<
+    BoardService,
+    'get' | 'save' | 'move' | 'setBlocked' | 'history' | 'retryNow' | 'setAutomationPaused'
+  >,
   isTrustedSender: SenderGuard,
   ready: Promise<void> = Promise.resolve()
 ): void {
@@ -56,6 +59,11 @@ export function registerBoardIpc(
   guarded(ch.setBlocked, async (projectId, taskId, blocked) =>
     isId(projectId) && isNotionId(taskId) && typeof blocked === 'boolean'
       ? service.setBlocked(projectId, taskId, blocked)
+      : INVALID
+  )
+  guarded(ch.setAutomationPaused, async (projectId, taskId, paused) =>
+    isId(projectId) && isNotionId(taskId) && typeof paused === 'boolean'
+      ? service.setAutomationPaused(projectId, taskId, paused)
       : INVALID
   )
   guarded(ch.history, async (projectId, taskId) =>

@@ -23,6 +23,8 @@ import {
   IconArrowUp,
   IconArrowDown,
   IconPlus,
+  IconPlayerPause,
+  IconBolt,
   IconX,
   IconPlugConnected,
   IconRefresh,
@@ -64,3 +66,5 @@ export const ArrowUpIcon = adapt(IconArrowUp)
 export const ArrowDownIcon = adapt(IconArrowDown)
 export const PlusIcon = adapt(IconPlus)
 export const CloseIcon = adapt(IconX)
+export const PauseIcon = adapt(IconPlayerPause)
+export const AutomationIcon = adapt(IconBolt)

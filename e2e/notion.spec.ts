@@ -63,12 +63,22 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
     projects: Object.keys(window.orkio.projects),
     notionWorkspace: Object.keys(window.orkio.notionWorkspace),
     signals: Object.keys(window.orkio.signals),
-    board: Object.keys(window.orkio.board)
+    board: Object.keys(window.orkio.board),
+    automation: Object.keys(window.orkio.automation)
   }))
   expect(isolation).toEqual({
     require: 'undefined',
     process: 'undefined',
-    api: ['notion', 'github', 'notionWorkspace', 'board', 'signals', 'projects', 'openExternal'],
+    api: [
+      'notion',
+      'github',
+      'notionWorkspace',
+      'board',
+      'automation',
+      'signals',
+      'projects',
+      'openExternal'
+    ],
     notion: [
       'getStatus',
       'connect',
@@ -110,7 +120,19 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'listTasks'
     ],
     signals: ['get'],
-    board: ['get', 'save', 'move', 'setBlocked', 'history', 'retryNow', 'onSyncChanged']
+    board: [
+      'get',
+      'save',
+      'move',
+      'setBlocked',
+      'history',
+      'retryNow',
+      'setAutomationPaused',
+      'onChanged',
+      'onOpenTask',
+      'onSyncChanged'
+    ],
+    automation: ['status', 'runNow', 'setPaused']
   })
 
   // O login com Notion (OAuth) é a ação principal; o token fica atrás de "Usar token".

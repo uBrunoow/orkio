@@ -6,6 +6,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Notification,
   safeStorage,
   session,
   shell,
@@ -29,6 +30,9 @@ import { registerNotionWorkspaceIpc } from './ipc/notion-workspace.ipc'
 import { registerProjectsIpc } from './ipc/projects.ipc'
 import { registerSignalsIpc } from './ipc/signals.ipc'
 import { registerBoardIpc } from './ipc/board.ipc'
+import { registerAutomationIpc } from './ipc/automation.ipc'
+import { AutomationService, type AutomationNotification } from './automation/automation.service'
+import { AutomationScheduler } from './automation/scheduler'
 import { errorName } from './ipc/payload'
 import { BoardService } from './board/board.service'
 import { BoardStore } from './board/board.store'
@@ -42,7 +46,7 @@ import { registerGitHubIpc } from './ipc/github.ipc'
 import { registerNotionIpc } from './ipc/notion.ipc'
 import { registerShellIpc } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
-import { IPC_CHANNELS, type BoardSyncEvent } from '../shared/ipc-contract'
+import { IPC_CHANNELS, type AutomationStatus, type BoardSyncEvent } from '../shared/ipc-contract'
 import { SecureStore } from './storage/secure-store'
 import appIcon from '../../resources/icon.png?asset'
 
@@ -138,6 +142,8 @@ function registerIpc(): void {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.projects.branchChanged, event)
       }
+      // Troca/criação de branch com checkout entra na hora nas automações (3B).
+      scheduler?.onLocalChange(event.projectId)
     }
   })
   const projectsReady = projects.init()
@@ -211,8 +217,68 @@ function registerIpc(): void {
     })
     board.attachQueue(writeQueue)
     registerBoardIpc(ipcMain, board, isTrustedSender, projectsReady)
-    // Retoma o que ficou pendente quando o app fechou.
-    void projectsReady.then(() => writeQueue?.start())
+
+    // Automações (3B): motor + agendador em segundo plano.
+    const send = (channel: string, payload: unknown): void => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(channel, payload)
+      }
+    }
+    const automation = new AutomationService({
+      config: configStore,
+      store: boardStore,
+      board,
+      signals,
+      notify: (n) => showNotification(n, send),
+      onChanged: (projectId) => send(IPC_CHANNELS.board.changed, { projectId })
+    })
+    const git = createGit()
+    const automationProjects = (): string[] => {
+      const c = configStore.get()
+      return c.projects.filter((p) => p.notionProject && c.boards[p.id]).map((p) => p.id)
+    }
+    scheduler = new AutomationScheduler({
+      run: (projectId, options) => automation.run(projectId, options),
+      projects: automationProjects,
+      localBranches: async (projectId) => {
+        const project = configStore.get().projects.find((p) => p.id === projectId)
+        return project ? git.localBranches(project.localPath) : null
+      }
+    })
+    const automationStatus = (projectId: string): AutomationStatus => {
+      const s = scheduler!.getStatus(projectId)
+      return {
+        paused: configStore.get().automation.paused,
+        github: s.github,
+        lastRunAt: s.lastRunAt ? new Date(s.lastRunAt).toISOString() : null,
+        nextRunAt: s.nextRunAt ? new Date(s.nextRunAt).toISOString() : null,
+        error: s.error || null
+      }
+    }
+    registerAutomationIpc(
+      ipcMain,
+      {
+        status: automationStatus,
+        runNow: async (projectId) => {
+          await scheduler!.runNow(projectId)
+          return automationStatus(projectId)
+        },
+        setPaused: async (paused) => {
+          await configStore.update((c) => ({ ...c, automation: { paused } }))
+          return automationStatus('')
+        }
+      },
+      isTrustedSender,
+      projectsReady
+    )
+
+    void projectsReady.then(async () => {
+      // Retoma o que ficou pendente quando o app fechou.
+      writeQueue?.start()
+      // Liga os HeadWatchers (eventos locais na hora) e começa os ciclos.
+      await projects?.list().catch(() => undefined)
+      scheduler?.start()
+    })
   } else {
     registerBoardIpc(ipcMain, unavailableBoard(), isTrustedSender, projectsReady)
   }
@@ -221,6 +287,25 @@ function registerIpc(): void {
 
 let projects: ProjectsService | null = null
 let writeQueue: NotionWriteQueue | null = null
+let scheduler: AutomationScheduler | null = null
+
+/** Notificação de desktop (opcional por regra). Clique: foca o Orkio e abre a tarefa. */
+function showNotification(
+  n: AutomationNotification,
+  send: (channel: string, payload: unknown) => void
+): void {
+  if (!Notification.isSupported()) return
+  const notification = new Notification({ title: n.title, body: n.body, silent: false })
+  notification.on('click', () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+    send(IPC_CHANNELS.board.openTask, { projectId: n.projectId, taskId: n.taskId })
+  })
+  notification.show()
+}
 
 /** Abre o banco local; versão futura ou arquivo ilegível → quadro indisponível (sem apagar nada). */
 function openBoardStore(): BoardStore | null {
@@ -248,7 +333,8 @@ function unavailableBoard(): Parameters<typeof registerBoardIpc>[1] {
     move: fail,
     setBlocked: fail,
     history: fail,
-    retryNow: () => {}
+    retryNow: () => {},
+    setAutomationPaused: fail
   }
 }
 
@@ -292,6 +378,7 @@ void app.whenReady().then(() => {
 app.on('before-quit', () => {
   projects?.dispose()
   writeQueue?.stop()
+  scheduler?.stop()
 })
 
 app.on('window-all-closed', () => {

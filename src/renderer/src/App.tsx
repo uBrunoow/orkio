@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { BoardIcon, IntegrationsIcon, ProjectsIcon, type SvgIcon } from './components/icons'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
+import type { BoardTaskRef } from '../../shared/ipc-contract'
 import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
 import { BoardPage } from './features/board/BoardPage'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
@@ -17,6 +18,17 @@ const PAGES: { id: Page; label: string; icon: SvgIcon }[] = [
 
 export function App(): React.JSX.Element {
   const [page, setPage] = useState<Page>('projects')
+  const [openTask, setOpenTask] = useState<BoardTaskRef | null>(null)
+
+  // Clique numa notificação de automação: abre a tarefa no quadro.
+  useEffect(
+    () =>
+      window.orkio.board.onOpenTask((ref) => {
+        setOpenTask(ref)
+        setPage('board')
+      }),
+    []
+  )
 
   return (
     <AppShell
@@ -36,7 +48,10 @@ export function App(): React.JSX.Element {
                 label={item.label}
                 icon={item.icon}
                 isSelected={page === item.id}
-                onClick={() => setPage(item.id)}
+                onClick={() => {
+                  setOpenTask(null)
+                  setPage(item.id)
+                }}
               />
             ))}
           </SideNavSection>
@@ -49,6 +64,7 @@ export function App(): React.JSX.Element {
         <BoardPage
           onOpenIntegrations={() => setPage('integrations')}
           onOpenProjects={() => setPage('projects')}
+          openTask={openTask}
         />
       ) : (
         <IntegrationsPage />

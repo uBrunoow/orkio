@@ -10,10 +10,10 @@ import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { VStack } from '@astryxdesign/core/VStack'
-import type { ProjectView } from '../../../../shared/ipc-contract'
+import type { AutomationStatus, BoardTaskRef, ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
-import { RefreshIcon, SettingsIcon } from '../../components/icons'
+import { AutomationIcon, PauseIcon, RefreshIcon, SettingsIcon } from '../../components/icons'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardSettings } from './BoardSettings'
@@ -23,13 +23,17 @@ import { useBoard, type BoardError } from './useBoard'
 /** Tela "Quadro": kanban por projeto vinculado ao Notion. */
 export function BoardPage({
   onOpenIntegrations,
-  onOpenProjects
+  onOpenProjects,
+  openTask
 }: {
   onOpenIntegrations(): void
   onOpenProjects(): void
+  /** Tarefa a abrir (clique numa notificação de automação). */
+  openTask: BoardTaskRef | null
 }): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[] | null>(null)
-  const [projectId, setProjectId] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<string | null>(null)
+  const projectId = openTask?.projectId ?? chosen ?? projects?.[0]?.id ?? null
 
   useEffect(() => {
     let active = true
@@ -39,7 +43,6 @@ export function BoardPage({
         if (!active) return
         const linked = result.projects.filter((p) => p.notionProject)
         setProjects(linked)
-        setProjectId((current) => current ?? linked[0]?.id ?? null)
       })
       .catch(() => {
         if (active) setProjects([])
@@ -62,7 +65,7 @@ export function BoardPage({
               width={260}
               options={projects.map((p) => ({ value: p.id, label: p.name }))}
               {...(projectId ? { value: projectId } : {})}
-              onChange={(value: string) => setProjectId(value)}
+              onChange={(value: string) => setChosen(value)}
             />
           ) : undefined
         }
@@ -77,7 +80,13 @@ export function BoardPage({
           actions={<Button label="Ir para Projetos" onClick={onOpenProjects} />}
         />
       ) : (
-        <Board key={projectId} projectId={projectId} onOpenIntegrations={onOpenIntegrations} />
+        <Board
+          // Nova tarefa vinda de notificação: remonta com ela selecionada (fechar continua funcionando).
+          key={`${projectId}:${openTask?.taskId ?? ''}`}
+          projectId={projectId}
+          openTaskId={openTask?.projectId === projectId ? openTask.taskId : null}
+          onOpenIntegrations={onOpenIntegrations}
+        />
       )}
     </VStack>
   )
@@ -85,16 +94,19 @@ export function BoardPage({
 
 function Board({
   projectId,
+  openTaskId,
   onOpenIntegrations
 }: {
   projectId: string
+  openTaskId: string | null
   onOpenIntegrations(): void
 }): React.JSX.Element {
   const board = useBoard(projectId)
+  const automation = useAutomationStatus(projectId)
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
   const [editing, setEditing] = useState(false)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [selected, setPicked] = useState<string | null>(openTaskId)
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
   const [onlyBlocked, setOnlyBlocked] = useState(false)
@@ -149,9 +161,11 @@ function Board({
 
   const selectedCard = view.cards.find((c) => c.taskId === selected) ?? null
   const actions = {
-    onOpen: (taskId: string) => setSelected(taskId),
+    onOpen: (taskId: string) => setPicked(taskId),
     onMove: (taskId: string, stageId: string) => void board.move(taskId, stageId),
-    onToggleBlocked: (taskId: string, blocked: boolean) => void board.setBlocked(taskId, blocked)
+    onToggleBlocked: (taskId: string, blocked: boolean) => void board.setBlocked(taskId, blocked),
+    onToggleAutomation: (taskId: string, paused: boolean) =>
+      void board.setAutomationPaused(taskId, paused)
   }
 
   return (
@@ -183,10 +197,17 @@ function Board({
           variant="ghost"
           label="Atualizar"
           icon={<Icon icon={RefreshIcon} />}
-          isLoading={board.loading}
+          isLoading={board.loading || automation.running}
           onClick={() => {
-            void board.load(true)
+            // Verifica git/GitHub agora (automações) e relê o Notion.
+            void automation.runNow().then(() => board.load(true))
           }}
+        />
+        <Button
+          variant="ghost"
+          label={automation.status?.paused ? 'Retomar automações' : 'Pausar todas'}
+          icon={<Icon icon={automation.status?.paused ? AutomationIcon : PauseIcon} />}
+          onClick={() => void automation.setPaused(!automation.status?.paused)}
         />
         <Button
           variant="ghost"
@@ -196,6 +217,7 @@ function Board({
         />
       </HStack>
 
+      <AutomationLine status={automation.status} />
       {view.pendingCount > 0 && (
         <Alert
           tone="warning"
@@ -275,7 +297,10 @@ function Board({
               signals={signals.result?.signals[selectedCard.taskId]}
               onMove={(stageId) => actions.onMove(selectedCard.taskId, stageId)}
               onToggleBlocked={(blocked) => actions.onToggleBlocked(selectedCard.taskId, blocked)}
-              onClose={() => setSelected(null)}
+              onToggleAutomation={(paused) =>
+                actions.onToggleAutomation(selectedCard.taskId, paused)
+              }
+              onClose={() => setPicked(null)}
             />
           </VStack>
         )}
@@ -311,5 +336,76 @@ function BoardErrorAlert({
     >
       {error.message}
     </Alert>
+  )
+}
+
+/** Estado das automações do projeto (atualiza a cada 15 s enquanto a tela está aberta). */
+function useAutomationStatus(projectId: string): {
+  status: AutomationStatus | null
+  running: boolean
+  runNow(): Promise<void>
+  setPaused(paused: boolean): Promise<void>
+} {
+  const [status, setStatus] = useState<AutomationStatus | null>(null)
+  const [running, setRunning] = useState(false)
+  useEffect(() => {
+    let active = true
+    const load = (): void => {
+      void window.orkio.automation
+        .status(projectId)
+        .then((s) => {
+          if (active) setStatus(s)
+        })
+        .catch(() => {})
+    }
+    load()
+    const timer = window.setInterval(load, 15_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [projectId])
+  return {
+    status,
+    running,
+    runNow: async () => {
+      setRunning(true)
+      const next = await window.orkio.automation.runNow(projectId).catch(() => null)
+      setRunning(false)
+      if (next) setStatus(next)
+    },
+    setPaused: async (paused) => {
+      const next = await window.orkio.automation.setPaused(paused).catch(() => null)
+      if (next)
+        setStatus({
+          ...next,
+          ...(status
+            ? { github: status.github, lastRunAt: status.lastRunAt, nextRunAt: status.nextRunAt }
+            : {})
+        })
+    }
+  }
+}
+
+function AutomationLine({ status }: { status: AutomationStatus | null }): React.JSX.Element | null {
+  if (!status) return null
+  const time = (iso: string | null): string =>
+    iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
+  const text = status.paused
+    ? 'Automações pausadas para todos os projetos. Os eventos são registrados no histórico, sem mover tarefas.'
+    : status.github === 'disconnected'
+      ? 'Automações: só eventos locais (conecte o GitHub em Integrações para PRs e reviews).'
+      : status.github === 'rate_limited'
+        ? `Automações: limite do GitHub atingido; próxima verificação às ${time(status.nextRunAt)}.`
+        : status.github === 'ok'
+          ? `Automações ativas: GitHub verificado às ${time(status.lastRunAt)}.`
+          : status.lastRunAt
+            ? `Automações: última verificação às ${time(status.lastRunAt)}${status.error ? ` (${status.error})` : ''}.`
+            : 'Automações: aguardando a primeira verificação.'
+  return (
+    <HStack gap={2} vAlign="center" data-testid="automation-status">
+      <Icon icon={status.paused ? PauseIcon : AutomationIcon} size="sm" color="secondary" />
+      <Text type="supporting">{text}</Text>
+    </HStack>
   )
 }

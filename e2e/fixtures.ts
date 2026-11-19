@@ -39,6 +39,8 @@ export interface FakeServices {
   notionNetwork: 'up' | 'down'
   /** PATCH de páginas: 'ok' aplica no estado simulado; 'reject' devolve 400. */
   notionWrites: 'ok' | 'reject'
+  /** Status inicial por página (para "o Notion continua igual" entre aberturas do app). */
+  notionInitialStatus: Record<string, string>
   /** Branches remotas (GET /repos/{o}/{r}/branches), iguais para todo repositório. */
   githubBranches: string[]
   /** PRs (GET /repos/{o}/{r}/pulls). `updatedDaysAgo` padrão: 1. */
@@ -46,7 +48,14 @@ export interface FakeServices {
   /** Detalhes via GraphQL por número da PR. */
   githubPrDetails: Record<
     string,
-    { reviewDecision: string | null; unresolved: number; checks: string | null }
+    {
+      reviewDecision: string | null
+      unresolved: number
+      checks: string | null
+      /** 3B: reviews com decisão e pedidos de review (ids estáveis). */
+      reviews?: { id: string; state: 'APPROVED' | 'CHANGES_REQUESTED'; submittedAt: string }[]
+      reviewRequests?: { id: string; createdAt: string }[]
+    }
   >
 }
 
@@ -56,6 +65,8 @@ export interface FakePull {
   head: string
   state: 'open' | 'draft' | 'merged' | 'closed'
   updatedDaysAgo?: number
+  /** `updated_at` exato (o GitHub muda a cada review/pedido; o Orkio relê os detalhes). */
+  updatedAt?: string
 }
 
 /** Ids fixos dos bancos e páginas simulados (formato de id do Notion). */
@@ -78,6 +89,7 @@ export const DEFAULT_FAKES: FakeServices = {
   notionTasks: 'ok',
   notionNetwork: 'up',
   notionWrites: 'ok',
+  notionInitialStatus: {},
   githubBranches: [],
   githubPulls: [],
   githubPrDetails: {}
@@ -185,7 +197,8 @@ export async function launchOrkio(
         status: {
           [`bbbbbbbb-0000-4000-8000-${'1'.padStart(12, '0')}`]: 'Concluída',
           [`bbbbbbbb-0000-4000-8000-${'2'.padStart(12, '0')}`]: 'Em andamento',
-          [`bbbbbbbb-0000-4000-8000-${'3'.padStart(12, '0')}`]: 'A fazer'
+          [`bbbbbbbb-0000-4000-8000-${'3'.padStart(12, '0')}`]: 'A fazer',
+          ...initial.notionInitialStatus
         },
         extra: {},
         addedProperties: {}
@@ -279,9 +292,13 @@ export async function launchOrkio(
                 state: p.state === 'open' || p.state === 'draft' ? 'open' : 'closed',
                 draft: p.state === 'draft',
                 merged_at: p.state === 'merged' ? '2026-01-01T00:00:00Z' : null,
-                updated_at: new Date(Date.now() - (p.updatedDaysAgo ?? 1) * 86_400_000)
-                  .toISOString()
-                  .slice(0, 10),
+                updated_at:
+                  p.updatedAt ??
+                  new Date(Date.now() - (p.updatedDaysAgo ?? 1) * 86_400_000)
+                    .toISOString()
+                    .slice(0, 10),
+                closed_at:
+                  p.state === 'merged' || p.state === 'closed' ? '2026-01-01T00:00:00Z' : null,
                 head: { ref: p.head }
               }))
           }
@@ -309,10 +326,15 @@ export async function launchOrkio(
                   reviewDecision: d.reviewDecision,
                   reviewThreads: {
                     nodes: [
-                      ...Array.from({ length: d.unresolved }, () => ({ isResolved: false })),
-                      { isResolved: true }
+                      ...Array.from({ length: d.unresolved }, (_, i) => ({
+                        id: `thread-${match[1]}-${i}`,
+                        isResolved: false
+                      })),
+                      { id: `thread-${match[1]}-resolved`, isResolved: true }
                     ]
                   },
+                  timelineItems: { nodes: d.reviewRequests ?? [] },
+                  reviews: { nodes: d.reviews ?? [] },
                   commits: {
                     nodes: [
                       { commit: { statusCheckRollup: d.checks ? { state: d.checks } : null } }

@@ -6,6 +6,7 @@ import { registerGitHubIpc } from './github.ipc'
 import { registerProjectsIpc } from './projects.ipc'
 import { registerSignalsIpc } from './signals.ipc'
 import { registerBoardIpc } from './board.ipc'
+import { registerAutomationIpc } from './automation.ipc'
 import { registerNotionIpc } from './notion.ipc'
 import { registerNotionWorkspaceIpc } from './notion-workspace.ipc'
 import { isAllowedExternalUrl, registerShellIpc } from './shell.ipc'
@@ -507,7 +508,8 @@ describe('registerBoardIpc', () => {
       move: vi.fn(ok),
       setBlocked: vi.fn(ok),
       history: vi.fn(ok),
-      retryNow: vi.fn()
+      retryNow: vi.fn(),
+      setAutomationPaused: vi.fn(ok)
     }
     registerBoardIpc(ipc, service, guard)
     const ch = IPC_CHANNELS.board
@@ -533,7 +535,43 @@ describe('registerBoardIpc', () => {
     expect(await ipc.invoke(ch.save, 'p1', { ...input, stages: [] })).toMatchObject(invalid)
     expect(service.save).toHaveBeenCalledTimes(1)
 
+    await ipc.invoke(ch.setAutomationPaused, 'p1', TASK, true)
+    expect(service.setAutomationPaused).toHaveBeenCalledWith('p1', TASK, true)
+    expect(await ipc.invoke(ch.setAutomationPaused, 'p1', TASK, 'sim')).toMatchObject(invalid)
+
     ipc.trusted = false
     await expect(ipc.invoke(ch.get, 'p1')).rejects.toThrow('não autorizada')
+  })
+})
+
+describe('registerAutomationIpc', () => {
+  it('valida id e booleano; erro vira estado genérico', async () => {
+    const ipc = fakeIpc()
+    const status = {
+      paused: false,
+      github: 'ok' as const,
+      lastRunAt: null,
+      nextRunAt: null,
+      error: null
+    }
+    const service = {
+      status: vi.fn(() => status),
+      runNow: vi.fn(async () => status),
+      setPaused: vi.fn(async () => {
+        throw new Error('gho_SECRET')
+      })
+    }
+    registerAutomationIpc(ipc, service, guard)
+    const ch = IPC_CHANNELS.automation
+    await ipc.invoke(ch.runNow, 'p1')
+    expect(service.runNow).toHaveBeenCalledWith('p1')
+    await ipc.invoke(ch.runNow, '../x')
+    expect(service.runNow).toHaveBeenCalledTimes(1)
+    await ipc.invoke(ch.setPaused, 'sim')
+    expect(service.setPaused).not.toHaveBeenCalled()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const result = await ipc.invoke(ch.setPaused, true)
+    expect(JSON.stringify(result)).not.toContain('SECRET')
+    errors.mockRestore()
   })
 })
