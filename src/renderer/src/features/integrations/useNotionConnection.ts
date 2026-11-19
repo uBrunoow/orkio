@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ConnectionStatus } from '../../../../shared/ipc-contract'
+import type { AuthOptions, ConnectionStatus } from '../../../../shared/ipc-contract'
 
 /** O que está acontecendo agora, além do status persistido. */
-export type NotionActivity = 'loading' | 'idle' | 'connecting' | 'testing' | 'disconnecting'
+export type NotionActivity =
+  'loading' | 'idle' | 'connecting' | 'authorizing' | 'testing' | 'disconnecting'
 
 const IPC_FAILURE: ConnectionStatus = {
   state: 'error',
@@ -13,9 +14,14 @@ export interface UseNotionConnection {
   /** `null` enquanto o status salvo ainda está sendo carregado. */
   status: ConnectionStatus | null
   activity: NotionActivity
+  /** Métodos de conexão deste build (`null` enquanto carrega). */
+  authOptions: AuthOptions | null
   /** Momento da última verificação bem-sucedida nesta sessão. */
   lastVerifiedAt: Date | null
   connect(token: string): Promise<ConnectionStatus>
+  /** Abre o Notion no navegador; resolve quando o usuário autoriza, recusa ou cancela. */
+  startOAuth(): Promise<ConnectionStatus>
+  cancelOAuth(): Promise<void>
   testConnection(): Promise<void>
   disconnect(): Promise<void>
 }
@@ -23,6 +29,7 @@ export interface UseNotionConnection {
 export function useNotionConnection(): UseNotionConnection {
   const [status, setStatus] = useState<ConnectionStatus | null>(null)
   const [activity, setActivity] = useState<NotionActivity>('loading')
+  const [authOptions, setAuthOptions] = useState<AuthOptions | null>(null)
   const [lastVerifiedAt, setLastVerifiedAt] = useState<Date | null>(null)
   const mounted = useRef(true)
 
@@ -35,6 +42,12 @@ export function useNotionConnection(): UseNotionConnection {
   // Ao abrir: mostra o status salvo na hora e revalida em segundo plano.
   useEffect(() => {
     mounted.current = true
+    void window.orkio.notion
+      .getAuthOptions()
+      .catch(() => ({ oauth: false }))
+      .then((options) => {
+        if (mounted.current) setAuthOptions(options)
+      })
     void (async () => {
       const saved = await safeCall(() => window.orkio.notion.getStatus())
       if (!mounted.current) return
@@ -62,6 +75,19 @@ export function useNotionConnection(): UseNotionConnection {
     [apply]
   )
 
+  const startOAuth = useCallback(async () => {
+    setActivity('authorizing')
+    const next = await safeCall(() => window.orkio.notion.startOAuth())
+    apply(next)
+    if (mounted.current) setActivity('idle')
+    return next
+  }, [apply])
+
+  const cancelOAuth = useCallback(async () => {
+    // O startOAuth pendente resolve com o status salvo assim que o main cancelar.
+    await window.orkio.notion.cancelOAuth().catch(() => {})
+  }, [])
+
   const testConnection = useCallback(async () => {
     setActivity('testing')
     apply(await safeCall(() => window.orkio.notion.testConnection()))
@@ -78,7 +104,17 @@ export function useNotionConnection(): UseNotionConnection {
     }
   }, [])
 
-  return { status, activity, lastVerifiedAt, connect, testConnection, disconnect }
+  return {
+    status,
+    activity,
+    authOptions,
+    lastVerifiedAt,
+    connect,
+    startOAuth,
+    cancelOAuth,
+    testConnection,
+    disconnect
+  }
 }
 
 async function safeCall(fn: () => Promise<ConnectionStatus>): Promise<ConnectionStatus> {

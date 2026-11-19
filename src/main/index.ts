@@ -2,7 +2,15 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, ipcMain, safeStorage, session, shell } from 'electron'
 import { createNotionClient } from './connectors/notion/notion.client'
-import { NotionConnector } from './connectors/notion/notion.connector'
+import { NotionConnector, type NotionOAuthDeps } from './connectors/notion/notion.connector'
+import {
+  NOTION_OAUTH_REDIRECT_URI,
+  NOTION_OAUTH_TIMEOUT_MS,
+  buildNotionAuthorizeUrl,
+  createNotionOAuthBroker,
+  readNotionOAuthConfig
+} from './connectors/notion/notion.oauth'
+import { authorizeViaLoopback } from './oauth/loopback'
 import { registerNotionIpc } from './ipc/notion.ipc'
 import { registerShellIpc } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
@@ -56,10 +64,43 @@ function registerIpc(): void {
   })
 
   const store = new SecureStore(join(app.getPath('userData'), 'secrets'), safeStorage)
-  const notion = new NotionConnector({ store, client: createNotionClient() })
+  const notion = new NotionConnector({
+    store,
+    client: createNotionClient(),
+    oauth: createNotionOAuthDeps()
+  })
 
-  registerNotionIpc(ipcMain, notion, isTrustedSender)
+  registerNotionIpc(ipcMain, notion, isTrustedSender, {
+    // Depois de autorizar no navegador, traz o Orkio de volta para a frente.
+    onOAuthFinished: (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      if (win && !win.isDestroyed()) {
+        if (win.isMinimized()) win.restore()
+        win.focus()
+      }
+    }
+  })
   registerShellIpc(ipcMain, (url) => shell.openExternal(url), isTrustedSender)
+}
+
+/** OAuth do Notion só existe se o build tiver client ID e URL do intermediário. */
+function createNotionOAuthDeps(): NotionOAuthDeps | null {
+  const config = readNotionOAuthConfig(import.meta.env)
+  if (!config) return null
+  return {
+    redirectUri: NOTION_OAUTH_REDIRECT_URI,
+    broker: createNotionOAuthBroker(config),
+    authorize: (signal) =>
+      authorizeViaLoopback({
+        redirectUri: NOTION_OAUTH_REDIRECT_URI,
+        providerName: 'Notion',
+        timeoutMs: NOTION_OAUTH_TIMEOUT_MS,
+        signal,
+        buildAuthorizeUrl: (state) => buildNotionAuthorizeUrl(config.clientId, state),
+        // URL montada aqui no main (não vem do renderer), sempre em api.notion.com.
+        openExternal: (url) => shell.openExternal(url)
+      })
+  }
 }
 
 void app.whenReady().then(() => {

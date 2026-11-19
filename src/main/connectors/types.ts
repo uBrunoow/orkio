@@ -1,6 +1,18 @@
-import type { ConnectionStatus, ConnectorCredentials, ConnectorId } from '../../shared/ipc-contract'
+import type {
+  AuthOptions,
+  ConnectionStatus,
+  ConnectorCredentials,
+  ConnectorId,
+  TokenCredentials
+} from '../../shared/ipc-contract'
 
-export type { ConnectionStatus, ConnectorCredentials, ConnectorId }
+export type { AuthOptions, ConnectionStatus, ConnectorCredentials, ConnectorId, TokenCredentials }
+
+/**
+ * Credenciais obtidas via OAuth. Só existem no processo main: nunca vêm do renderer
+ * nem voltam para ele. `TTokens` é o conjunto de tokens específico de cada serviço.
+ */
+export type OAuthCredentials<TTokens> = { kind: 'oauth'; tokens: TTokens }
 
 /**
  * Contrato de toda integração externa (Notion hoje; GitHub e Claude Code depois).
@@ -11,7 +23,7 @@ export type { ConnectionStatus, ConnectorCredentials, ConnectorId }
  * - Não lança para erros esperados (token inválido, rede, rate limit):
  *   converte em `{ state: 'error' }` ou `warning` com mensagem em pt-BR.
  */
-export interface Connector<C extends ConnectorCredentials = ConnectorCredentials> {
+export interface Connector<C = ConnectorCredentials> {
   readonly id: ConnectorId
   connect(credentials: C): Promise<ConnectionStatus>
   disconnect(): Promise<void>
@@ -19,4 +31,12 @@ export interface Connector<C extends ConnectorCredentials = ConnectorCredentials
   getStatus(): Promise<ConnectionStatus>
   /** Revalida a credencial salva contra a API do serviço. */
   testConnection(): Promise<ConnectionStatus>
+}
+
+/** Conector que também conecta via OAuth (fluxo inteiro no main). */
+export interface OAuthConnector<C = ConnectorCredentials> extends Connector<C> {
+  getAuthOptions(): AuthOptions
+  /** Roda o fluxo OAuth. Resolve com o status final (ou com o status salvo, se cancelado). */
+  startOAuth(): Promise<ConnectionStatus>
+  cancelOAuth(): void
 }

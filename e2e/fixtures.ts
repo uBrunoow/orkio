@@ -4,14 +4,35 @@ import { join, resolve } from 'node:path'
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
 
 export const ROOT = resolve(__dirname, '..')
+/** Mesmo valor de .env.e2e (o build de E2E usa --mode e2e). */
+export const E2E_BROKER_URL = 'https://orkio-oauth-broker.e2e.invalid'
 
-/** Comportamento da API do Notion simulada dentro do processo main. */
-export type FakeNotionMode = 'ok' | '401' | '503'
+/**
+ * Simulação dos serviços externos, dentro do processo main:
+ * - `notion`: resposta de GET /v1/users/me ('ok' | '401' | '503'). Em 'ok', só aceita os
+ *   tokens listados em `validTokens` (se houver) — o resto recebe 401.
+ * - `browser`: o que o "usuário" faz na página de autorização do Notion.
+ * - `broker`: resposta do intermediário OAuth.
+ */
+export interface FakeServices {
+  notion: 'ok' | '401' | '503'
+  validTokens: string[] | null
+  browser: 'approve' | 'deny' | 'ignore'
+  broker: 'ok' | 'invalid_grant' | 'down'
+}
+
+export const DEFAULT_FAKES: FakeServices = {
+  notion: 'ok',
+  validTokens: null,
+  browser: 'approve',
+  broker: 'ok'
+}
 
 interface FakeGlobals {
-  __notionMode: FakeNotionMode
-  __notionCalls: { url: string; version: string | undefined }[]
+  __fakes: FakeServices
+  __calls: { url: string; auth: string | undefined; version: string | undefined; body?: string }[]
   __opened: string[]
+  __tokenSeq: number
 }
 
 export interface OrkioApp {
@@ -30,13 +51,14 @@ export function removeDir(dir: string): void {
 }
 
 /**
- * Abre o app (out/) com um userData isolado e substitui, no processo main:
- * - fetch → API do Notion simulada (sem rede, sem backdoor no código do app);
- * - shell.openExternal → só registra a URL;
- * - no Linux sem keyring, liga a criptografia básica do Electron só para o teste
- *   (o app de verdade recusa esse backend).
+ * Abre o app (out/) com um userData isolado e substitui, no processo main, `fetch` e
+ * `shell.openExternal` pelos simuladores acima. O código do app não tem modo de teste.
+ * No Linux sem keyring, liga a criptografia básica do Electron só para o teste.
  */
-export async function launchOrkio(userDataDir: string, mode: FakeNotionMode): Promise<OrkioApp> {
+export async function launchOrkio(
+  userDataDir: string,
+  fakes: Partial<FakeServices> = {}
+): Promise<OrkioApp> {
   const env = { ...process.env } as Record<string, string>
   // Opções do Node que o Electron rejeita (ex.: --use-openssl-ca) poluem o log.
   delete env['NODE_OPTIONS']
@@ -50,39 +72,94 @@ export async function launchOrkio(userDataDir: string, mode: FakeNotionMode): Pr
   app.process().stdout?.on('data', (d: Buffer) => logs.push(String(d)))
   app.process().stderr?.on('data', (d: Buffer) => logs.push(String(d)))
 
-  await app.evaluate(({ safeStorage, shell }, initialMode) => {
-    const g = globalThis as unknown as FakeGlobals
-    if (process.platform === 'linux' && !safeStorage.isEncryptionAvailable()) {
-      safeStorage.setUsePlainTextEncryption(true)
-      safeStorage.getSelectedStorageBackend = () => 'gnome_libsecret'
-    }
-    g.__notionMode = initialMode
-    g.__notionCalls = []
-    g.__opened = []
-    shell.openExternal = async (url: string) => {
-      g.__opened.push(url)
-    }
-    globalThis.fetch = async (input, init) => {
-      const headers = (init?.headers ?? {}) as Record<string, string>
-      g.__notionCalls.push({ url: String(input), version: headers['Notion-Version'] })
-      if (g.__notionMode === '401') {
-        return new Response(JSON.stringify({ object: 'error', code: 'unauthorized' }), {
-          status: 401
-        })
+  await app.evaluate(
+    ({ safeStorage, shell }, { initial, brokerUrl }) => {
+      const g = globalThis as unknown as FakeGlobals
+      if (process.platform === 'linux' && !safeStorage.isEncryptionAvailable()) {
+        safeStorage.setUsePlainTextEncryption(true)
+        safeStorage.getSelectedStorageBackend = () => 'gnome_libsecret'
       }
-      if (g.__notionMode === '503') return new Response('indisponível', { status: 503 })
-      return new Response(
-        JSON.stringify({
-          object: 'user',
-          id: 'u1',
-          type: 'person',
-          name: 'Ada Lovelace',
-          avatar_url: null
-        }),
-        { status: 200 }
-      )
-    }
-  }, mode)
+      g.__fakes = initial
+      g.__calls = []
+      g.__opened = []
+      g.__tokenSeq = 0
+      const realFetch = globalThis.fetch
+      const json = (body: unknown, status = 200): Response =>
+        new Response(JSON.stringify(body), { status })
+
+      // "Navegador": registra a URL e, para a página de autorização do Notion, simula o usuário.
+      shell.openExternal = async (url: string) => {
+        g.__opened.push(url)
+        const parsed = new URL(url)
+        if (parsed.origin + parsed.pathname !== 'https://api.notion.com/v1/oauth/authorize') return
+        const redirect = new URL(parsed.searchParams.get('redirect_uri') ?? '')
+        redirect.searchParams.set('state', parsed.searchParams.get('state') ?? '')
+        if (g.__fakes.browser === 'ignore') return
+        if (g.__fakes.browser === 'deny') redirect.searchParams.set('error', 'access_denied')
+        else redirect.searchParams.set('code', 'e2e-auth-code')
+        // Redirect de verdade para o servidor local do app.
+        setTimeout(() => void realFetch(redirect.toString()).catch(() => {}), 50)
+      }
+
+      globalThis.fetch = async (input, init) => {
+        const url = String(input)
+        const headers = (init?.headers ?? {}) as Record<string, string>
+        const call = {
+          url,
+          auth: headers['Authorization'],
+          version: headers['Notion-Version'],
+          ...(typeof init?.body === 'string' ? { body: init.body } : {})
+        }
+        g.__calls.push(call)
+
+        // Intermediário OAuth.
+        if (url.startsWith(brokerUrl)) {
+          if (g.__fakes.broker === 'down') throw new TypeError('fetch failed')
+          if (g.__fakes.broker === 'invalid_grant') return json({ error: 'invalid_grant' }, 400)
+          // Geração do token: na renovação, a seguinte à do refresh token recebido.
+          const previous = /nrt_E2E_OAUTH_REFRESH_(\d+)/.exec(call.body ?? '')
+          g.__tokenSeq = previous ? Number(previous[1]) + 1 : g.__tokenSeq + 1
+          return json({
+            access_token: `ntn_E2E_OAUTH_ACCESS_${g.__tokenSeq}`,
+            token_type: 'bearer',
+            refresh_token: `nrt_E2E_OAUTH_REFRESH_${g.__tokenSeq}`,
+            bot_id: 'bot-e2e',
+            workspace_id: 'ws-e2e',
+            workspace_name: 'Acme Labs',
+            workspace_icon: null,
+            owner: { type: 'user', user: { id: 'u1', name: 'Grace Hopper', avatar_url: null } }
+          })
+        }
+
+        // API do Notion.
+        if (url === 'https://api.notion.com/v1/users/me') {
+          const token = (headers['Authorization'] ?? '').replace(/^Bearer /, '')
+          const { notion, validTokens } = g.__fakes
+          if (notion === '503') return new Response('indisponível', { status: 503 })
+          if (notion === '401' || (validTokens && !validTokens.includes(token))) {
+            return json({ object: 'error', code: 'unauthorized' }, 401)
+          }
+          if (token.startsWith('ntn_E2E_OAUTH_')) {
+            return json({
+              object: 'user',
+              id: 'bot-e2e',
+              type: 'bot',
+              name: 'Orkio',
+              avatar_url: null,
+              bot: {
+                owner: { type: 'user', user: { name: 'Grace Hopper', avatar_url: null } },
+                workspace_name: 'Acme Labs'
+              }
+            })
+          }
+          return json({ object: 'user', id: 'u1', type: 'person', name: 'Ada Lovelace' })
+        }
+
+        return json({ object: 'error', code: 'not_found' }, 404)
+      }
+    },
+    { initial: { ...DEFAULT_FAKES, ...fakes }, brokerUrl: E2E_BROKER_URL }
+  )
 
   const page = await app.firstWindow()
   page.on('console', (m) => logs.push(m.text()))
@@ -94,19 +171,23 @@ export async function launchOrkio(userDataDir: string, mode: FakeNotionMode): Pr
     )
   })
   await page.setViewportSize({ width: 1100, height: 720 })
-  // Recarrega para que o status inicial já passe pelos fakes acima.
+  // Recarrega para que o status inicial já passe pelos simuladores acima.
   await page.reload()
   return { app, page, logs }
 }
 
-export async function setNotionMode(app: ElectronApplication, mode: FakeNotionMode): Promise<void> {
+export async function setFakes(
+  app: ElectronApplication,
+  fakes: Partial<FakeServices>
+): Promise<void> {
   await app.evaluate((_electron, next) => {
-    ;(globalThis as unknown as FakeGlobals).__notionMode = next
-  }, mode)
+    const g = globalThis as unknown as FakeGlobals
+    g.__fakes = { ...g.__fakes, ...next }
+  }, fakes)
 }
 
-export async function notionCalls(app: ElectronApplication): Promise<FakeGlobals['__notionCalls']> {
-  return app.evaluate(() => (globalThis as unknown as FakeGlobals).__notionCalls)
+export async function externalCalls(app: ElectronApplication): Promise<FakeGlobals['__calls']> {
+  return app.evaluate(() => (globalThis as unknown as FakeGlobals).__calls)
 }
 
 export async function openedUrls(app: ElectronApplication): Promise<string[]> {

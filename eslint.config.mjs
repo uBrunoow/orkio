@@ -18,6 +18,11 @@ export default tseslint.config(
     languageOptions: { globals: globals.node }
   },
   {
+    // Cloudflare Worker: APIs web padrão (fetch, Request, btoa).
+    files: ['broker/**/*.ts'],
+    languageOptions: { globals: { ...globals.browser, ...globals.serviceworker } }
+  },
+  {
     files: ['src/renderer/**/*.{ts,tsx}'],
     languageOptions: { globals: globals.browser },
     plugins: { 'react-hooks': reactHooks },

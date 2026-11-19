@@ -10,7 +10,10 @@ const api: OrkioApi = {
     connect: (credentials) =>
       ipcRenderer.invoke(notion.connect, { kind: credentials.kind, token: credentials.token }),
     disconnect: () => ipcRenderer.invoke(notion.disconnect),
-    testConnection: () => ipcRenderer.invoke(notion.testConnection)
+    testConnection: () => ipcRenderer.invoke(notion.testConnection),
+    getAuthOptions: () => ipcRenderer.invoke(notion.getAuthOptions),
+    startOAuth: () => ipcRenderer.invoke(notion.startOAuth),
+    cancelOAuth: () => ipcRenderer.invoke(notion.cancelOAuth)
   },
   openExternal: (url) => ipcRenderer.invoke(shell.openExternal, url)
 }

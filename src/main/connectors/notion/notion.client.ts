@@ -13,7 +13,17 @@ export const NOTION_REQUEST_TIMEOUT_MS = 10_000
 export const NOTION_MAX_RETRY_WAIT_MS = 5_000
 
 export type NotionErrorCode =
-  'unauthorized' | 'forbidden' | 'rate_limited' | 'timeout' | 'network' | 'server' | 'unexpected'
+  | 'unauthorized'
+  | 'forbidden'
+  | 'rate_limited'
+  | 'timeout'
+  | 'network'
+  | 'server'
+  | 'unexpected'
+  /** OAuth: código ou refresh token inválido, expirado ou revogado (reconectar). */
+  | 'invalid_grant'
+  /** OAuth: client ID/secret do app recusados pelo Notion (problema de configuração). */
+  | 'oauth_config'
 
 /** Erro com mensagem segura para o usuário (pt-BR). Nunca contém o token nem a exceção original. */
 export class NotionApiError extends Error {
@@ -219,15 +229,15 @@ export function parseSelf(body: unknown): NotionSelf | null {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function stringOrNull(value: unknown): string | null {
+export function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
 
-function httpsUrlOrNull(value: unknown): string | null {
+export function httpsUrlOrNull(value: unknown): string | null {
   if (typeof value !== 'string') return null
   try {
     return new URL(value).protocol === 'https:' ? value : null

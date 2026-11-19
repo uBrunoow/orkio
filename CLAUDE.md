@@ -9,7 +9,7 @@ Claude Code. Hoje só existe o conector do Notion.
 pnpm install      # postinstall baixa o binário do Electron
 pnpm dev          # app em modo dev
 pnpm test         # Vitest (src/**/*.test.ts e test/**/*.test.ts, inclui build real p/ checar a CSP)
-pnpm e2e          # build + Playwright no app Electron (Notion simulado). Linux headless: xvfb-run -a pnpm e2e
+pnpm e2e          # build (--mode e2e) + Playwright no app Electron (Notion simulado). Linux headless: xvfb-run -a pnpm e2e
 pnpm typecheck    # tsc nos dois projetos (node e web)
 pnpm lint         # ESLint
 pnpm build        # build em out/
@@ -63,8 +63,19 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 `connect(credentials)`, `disconnect()`, `getStatus()` (local, sem rede) e
 `testConnection()` (revalida na API).
 
-- `ConnectorCredentials` é uma união discriminada por `kind` (hoje só `'token'`).
-  OAuth entra como nova variante, sem mudar a interface.
+- Credenciais são uniões discriminadas por `kind`. `ConnectorCredentials`
+  (`shared/ipc-contract.ts`) só tem o que o renderer pode mandar (`'token'`).
+  `OAuthCredentials<TTokens>` (`kind: 'oauth'`) existe só no main.
+- Conectores com OAuth implementam `OAuthConnector`: `getAuthOptions()`, `startOAuth()`
+  (resolve quando o fluxo termina) e `cancelOAuth()`. O fluxo roda inteiro no main; o renderer
+  só vê `ConnectionStatus`.
+- OAuth com redirect: use `authorizeViaLoopback` (`src/main/oauth/loopback.ts`, RFC 8252):
+  servidor em `127.0.0.1` só durante o login, `state` aleatório, checagem de `Host`, porta fixa
+  registrada no provedor.
+- Provedor que exige client secret (Notion): a troca/renovação passa pelo intermediário em
+  `broker/`. Nunca coloque client secret no app nem em `.env` do app.
+- Tokens rotativos: renovações serializadas por conexão (uma promise em andamento);
+  `invalid_grant` é terminal (erro com `hasStoredCredentials` + "Reconectar").
 - Separe **client** (HTTP puro, timeout, retry, mapeamento de erros para mensagens) de
   **connector** (validação de entrada, persistência, regras de status).
 - Erros esperados viram `{ state: 'error', message }`, sem lançar exceção. Falhas
@@ -85,6 +96,14 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - Versão da API centralizada em `NOTION_VERSION` (`notion.client.ts`), hoje `2026-03-11`.
 - Usamos `fetch` nativo (não o SDK). Timeout de 10 s; 429 respeita `Retry-After` (uma
   nova tentativa se a espera for de até 5 s).
+- Conexão principal: OAuth (`notion.oauth.ts`): `owner=user`, redirect
+  `http://127.0.0.1:47821/oauth/notion/callback`, troca/renovação via `broker/`.
+  Token colado continua como alternativa ("Usar token").
+- Registro salvo (`secrets/notion.bin`, cifrado) é versionado: `v: 2` com
+  `method: 'token' | 'oauth'`. Registros `v: 1` (Etapa 1) são lidos como `token`.
+- Futuras chamadas à API devem usar `withAccessToken` do conector (renova em 401).
+- Config de build: `MAIN_VITE_NOTION_OAUTH_CLIENT_ID` e `MAIN_VITE_NOTION_OAUTH_BROKER_URL`
+  (`.env.example`; `.env.e2e` só para o E2E). Sem elas, OAuth fica indisponível.
 
 ## Identidade visual
 
@@ -126,7 +145,7 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   só no teste.
 - Para novos conectores: adicione o modo fake correspondente no fixture e um spec em `e2e/`.
 
-## Decisões registradas (Etapa 1)
+## Decisões registradas
 
 | Decisão                                                                                     | Por quê                                                                                                                                                                                                                                                    |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -139,3 +158,6 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 | React e `@fontsource/*` em `devDependencies`                                                | O Vite já os embute no bundle do renderer; assim o pacote do electron-builder não leva `node_modules` desnecessários.                                                                                                                                      |
 | Não definir `productName` no `package.json`                                                 | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.yml`.                                                                                                  |
 | Fontes nunca viram `data:` URI                                                              | A CSP só permite `font-src 'self'` (`assetsInlineLimit` no `electron.vite.config.ts`).                                                                                                                                                                     |
+| Notion via OAuth com intermediário (`broker/`, Cloudflare Worker)                           | O Notion exige client secret na troca do código/renovação e a API REST não aceita PKCE. O secret fica só no Worker, que é stateless e não loga. O MCP do Notion aceita PKCE, mas trocaria a API REST pelas ferramentas MCP (decisão da Etapa 1.5).         |
+| Redirect em loopback com porta fixa `47821`                                                 | O Notion exige redirect URI exato e registrado. `127.0.0.1` (não `localhost`) evita ambiguidade IPv4/IPv6 (RFC 8252). Porta ocupada → mensagem clara.                                                                                                      |
+| `startOAuth()` é uma chamada IPC que só resolve no fim                                      | O OAuth do Notion não tem estado intermediário para mostrar (diferente do Device Flow do GitHub, que exibe um código). Evita um canal de eventos.                                                                                                          |

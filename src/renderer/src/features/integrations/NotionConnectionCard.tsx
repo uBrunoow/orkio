@@ -34,6 +34,8 @@ export function NotionConnectionCard({
       <div className="card__body" aria-live="polite">
         {status === null ? (
           <div className="skeleton" aria-label="Carregando status da conexão" />
+        ) : activity === 'authorizing' ? (
+          <AuthorizingView onCancel={notion.cancelOAuth} />
         ) : status.state === 'connected' ? (
           <ConnectedView
             account={status.account}
@@ -50,12 +52,15 @@ export function NotionConnectionCard({
             activity={activity}
             onRetry={notion.testConnection}
             onDisconnect={notion.disconnect}
+            onReconnect={notion.authOptions?.oauth ? notion.startOAuth : undefined}
           />
         ) : (
-          <ConnectForm
+          <DisconnectedView
             error={status.state === 'error' ? status.message : null}
             connecting={activity === 'connecting'}
-            onConnect={notion.connect}
+            oauthAvailable={notion.authOptions ? notion.authOptions.oauth : null}
+            onConnectToken={notion.connect}
+            onStartOAuth={notion.startOAuth}
           />
         )}
       </div>
@@ -72,6 +77,7 @@ function StatusBadge({
 }): React.JSX.Element | null {
   if (status === null) return null
   if (activity === 'testing') return <span className="badge">Verificando…</span>
+  if (activity === 'authorizing') return <span className="badge">Aguardando o Notion…</span>
   switch (status.state) {
     case 'connected':
       return status.warning ? (
@@ -86,6 +92,97 @@ function StatusBadge({
     case 'disconnected':
       return <span className="badge">Desconectado</span>
   }
+}
+
+function DisconnectedView({
+  error,
+  connecting,
+  oauthAvailable,
+  onConnectToken,
+  onStartOAuth
+}: {
+  error: string | null
+  connecting: boolean
+  /** `null` enquanto as opções do build carregam. */
+  oauthAvailable: boolean | null
+  onConnectToken: (token: string) => Promise<ConnectionStatus>
+  onStartOAuth: () => Promise<ConnectionStatus>
+}): React.JSX.Element {
+  const [useToken, setUseToken] = useState(false)
+
+  if (oauthAvailable === null) {
+    return <div className="skeleton" aria-label="Carregando opções de conexão" />
+  }
+
+  if (useToken || !oauthAvailable) {
+    return (
+      <>
+        <ConnectForm error={error} connecting={connecting} onConnect={onConnectToken} />
+        {oauthAvailable ? (
+          <button
+            type="button"
+            className="link-button link-button--muted"
+            onClick={() => setUseToken(false)}
+            disabled={connecting}
+          >
+            ← Voltar para “Conectar com Notion”
+          </button>
+        ) : (
+          <p className="field__hint">
+            O login com Notion não está disponível nesta versão do Orkio.
+          </p>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <>
+      <p className="muted">
+        Entre com a sua conta do Notion e escolha as páginas que o Orkio pode ler. Você autoriza no
+        navegador; nenhuma senha passa pelo Orkio.
+      </p>
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div className="card__actions">
+        <button
+          type="button"
+          className="button button--primary"
+          onClick={() => void onStartOAuth()}
+        >
+          {error ? 'Tentar novamente' : 'Conectar com Notion'}
+        </button>
+        <button
+          type="button"
+          className="link-button link-button--muted"
+          onClick={() => setUseToken(true)}
+        >
+          Usar token
+        </button>
+      </div>
+    </>
+  )
+}
+
+function AuthorizingView({ onCancel }: { onCancel: () => Promise<void> }): React.JSX.Element {
+  return (
+    <>
+      <div className="authorizing" role="status">
+        <span className="spinner" aria-hidden="true" />
+        <div>
+          <div className="account__name">Aguardando autorização no Notion…</div>
+          <p className="muted">
+            Conclua no navegador que abriu: escolha o workspace e as páginas e clique em Permitir.
+            Depois é só voltar para cá.
+          </p>
+        </div>
+      </div>
+      <div className="card__actions">
+        <button type="button" className="button" onClick={() => void onCancel()}>
+          Cancelar
+        </button>
+      </div>
+    </>
+  )
 }
 
 function ConnectForm({
@@ -218,21 +315,36 @@ function StoredCredentialErrorView({
   message,
   activity,
   onRetry,
-  onDisconnect
+  onDisconnect,
+  onReconnect
 }: {
   message: string
   activity: NotionActivity
   onRetry: () => Promise<void>
   onDisconnect: () => Promise<void>
+  /** Presente quando o build tem login com Notion (OAuth). */
+  onReconnect: (() => Promise<ConnectionStatus>) | undefined
 }): React.JSX.Element {
   const busy = activity !== 'idle'
   return (
     <>
       <Alert tone="danger">{message}</Alert>
       <p className="muted">
-        Se o token foi revogado, desconecte e conecte de novo com um token novo.
+        {onReconnect
+          ? 'Reconecte para autorizar o Orkio de novo, ou desconecte para remover a conexão.'
+          : 'Se o token foi revogado, desconecte e conecte de novo com um token novo.'}
       </p>
       <div className="card__actions">
+        {onReconnect && (
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={() => void onReconnect()}
+            disabled={busy}
+          >
+            Reconectar com Notion
+          </button>
+        )}
         <button type="button" className="button" onClick={() => void onRetry()} disabled={busy}>
           {activity === 'testing' && <span className="spinner" aria-hidden="true" />}
           {activity === 'testing' ? 'Testando…' : 'Tentar novamente'}
@@ -273,7 +385,7 @@ function DisconnectButton({
 
   return (
     <span className="confirm" role="group" aria-label="Confirmar desconexão">
-      <span>Remover o token deste computador?</span>
+      <span>Remover a conexão deste computador?</span>
       <button
         type="button"
         className="button"

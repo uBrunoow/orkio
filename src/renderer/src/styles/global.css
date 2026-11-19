@@ -308,6 +308,44 @@ button {
   text-decoration: underline;
 }
 
+.card__body > .link-button--muted {
+  align-self: flex-start;
+}
+
+.link-button--muted {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.link-button--muted:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.link-button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* ---------- Autorização em andamento ---------- */
+.authorizing {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.authorizing .spinner {
+  margin-top: 4px;
+  color: var(--accent);
+}
+
+.authorizing .muted {
+  margin: var(--space-1) 0 0;
+}
+
 .spinner {
   width: 14px;
   height: 14px;

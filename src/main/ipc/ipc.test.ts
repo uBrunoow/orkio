@@ -1,7 +1,7 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS, type ConnectionStatus } from '../../shared/ipc-contract'
-import type { Connector } from '../connectors/types'
+import type { OAuthConnector } from '../connectors/types'
 import { registerNotionIpc } from './notion.ipc'
 import { isAllowedExternalUrl, registerShellIpc } from './shell.ipc'
 import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
@@ -21,7 +21,7 @@ function fakeIpc(): FakeIpc {
     handle: (channel, handler) => {
       handlers.set(channel, handler)
     },
-    invoke: (channel, ...args) => {
+    invoke: async (channel, ...args) => {
       const handler = handlers.get(channel)
       if (!handler) throw new Error(`sem handler para ${channel}`)
       const url = state.trusted ? 'file:///app/out/renderer/index.html' : 'https://evil.example/'
@@ -33,9 +33,12 @@ function fakeIpc(): FakeIpc {
 
 const guard = createSenderGuard({ rendererFileUrl: 'file:///app/out/renderer/index.html' })
 
-function fakeConnector(overrides: Partial<Connector> = {}): Connector {
+function fakeConnector(overrides: Partial<OAuthConnector> = {}): OAuthConnector {
   return {
     id: 'notion',
+    getAuthOptions: vi.fn(() => ({ oauth: true })),
+    startOAuth: vi.fn(async (): Promise<ConnectionStatus> => ({ state: 'disconnected' })),
+    cancelOAuth: vi.fn(),
     connect: vi.fn(async (): Promise<ConnectionStatus> => ({ state: 'disconnected' })),
     disconnect: vi.fn(async () => {}),
     getStatus: vi.fn(async (): Promise<ConnectionStatus> => ({ state: 'disconnected' })),
@@ -122,6 +125,44 @@ describe('registerNotionIpc', () => {
     expect(result).toMatchObject({ state: 'error' })
     expect(JSON.stringify(result)).not.toContain('ntn_LEAK')
     expect(JSON.stringify(spy.mock.calls)).not.toContain('ntn_LEAK')
+  })
+})
+
+describe('registerNotionIpc — OAuth', () => {
+  it('expõe opções de autenticação, inicia e cancela o fluxo', async () => {
+    const ipc = fakeIpc()
+    const connector = fakeConnector({
+      startOAuth: vi.fn(async (): Promise<ConnectionStatus> => ({
+        state: 'connected',
+        account: { userName: 'Ada' },
+        connectedAt: '2026-11-19T12:00:00.000Z'
+      }))
+    })
+    const onOAuthFinished = vi.fn()
+    registerNotionIpc(ipc, connector, guard, { onOAuthFinished })
+
+    expect(await ipc.invoke(IPC_CHANNELS.notion.getAuthOptions)).toEqual({ oauth: true })
+    expect(await ipc.invoke(IPC_CHANNELS.notion.startOAuth)).toMatchObject({ state: 'connected' })
+    expect(onOAuthFinished).toHaveBeenCalledTimes(1)
+    await ipc.invoke(IPC_CHANNELS.notion.cancelOAuth)
+    expect(connector.cancelOAuth).toHaveBeenCalled()
+  })
+
+  it('canais OAuth recusam origem não confiável', async () => {
+    const ipc = fakeIpc()
+    const connector = fakeConnector()
+    registerNotionIpc(ipc, connector, guard)
+    ipc.trusted = false
+
+    for (const channel of [
+      IPC_CHANNELS.notion.getAuthOptions,
+      IPC_CHANNELS.notion.startOAuth,
+      IPC_CHANNELS.notion.cancelOAuth
+    ]) {
+      await expect(ipc.invoke(channel)).rejects.toThrow('não autorizada')
+    }
+    expect(connector.startOAuth).not.toHaveBeenCalled()
+    expect(connector.cancelOAuth).not.toHaveBeenCalled()
   })
 })
 

@@ -3,7 +3,8 @@
 App desktop (Electron) de orquestração de desenvolvimento com IA. Conecta planejamento
 (Notion), código (GitHub) e agentes (Claude Code).
 
-> Estado atual: apenas a **conexão da conta do Notion** está implementada.
+> Estado atual: apenas a **conexão da conta do Notion** está implementada — via login com
+> Notion (OAuth) ou, como alternativa discreta, um token colado.
 
 ## Requisitos
 
@@ -86,9 +87,57 @@ A fonte da verdade da marca é a pasta [`brand/`](brand/BRAND.md) (símbolos, í
   [png2icons](https://github.com/idesis-gmbh/png2icons) (JavaScript puro, sem dependências
   nativas).
 
-## Como criar o token do Notion
+## Conectar o Notion (OAuth)
 
-O Orkio aceita dois tipos de token. Os dois usam o mesmo header `Authorization: Bearer`.
+Para quem usa o Orkio é um clique: **Integrações → Conectar com Notion** abre o navegador, a
+pessoa escolhe o workspace e as páginas, clica em **Permitir** e volta para o app já conectado.
+
+### Como funciona
+
+```
+Orkio (main) ──abre navegador──▶ api.notion.com/v1/oauth/authorize?…&state=…
+     ▲                                        │ usuário autoriza
+     │  http://127.0.0.1:47821/oauth/notion/callback?code=…&state=…
+     │  (servidor local, só durante o login; confere o state)
+     ├──POST /notion/token { code } ──▶ intermediário (broker/, Cloudflare Worker)
+     │                                        │ + client_secret (só ele conhece)
+     │                                        ▼
+     │                               api.notion.com/v1/oauth/token
+     ◀──────── access_token + refresh_token ──┘   (o intermediário não guarda nada)
+```
+
+O Notion exige o **client secret** para trocar o código e renovar tokens, e a API REST não
+aceita PKCE. Um app desktop não consegue esconder um segredo, então essa etapa passa pelo
+intermediário em [`broker/`](broker/README.md). Os tokens ficam só no computador da pessoa,
+criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo intermediário.
+
+### Configuração (uma vez, por quem mantém o Orkio)
+
+1. **Crie a conexão OAuth no Notion** (developers.notion.com → _New connection_):
+   - Authentication method: **OAuth**
+   - Installable in: **Any workspace** (ou só os workspaces da sua org)
+   - Redirect URI: `http://127.0.0.1:47821/oauth/notion/callback`
+   - Guarde o **OAuth client ID** (público) e o **client secret** (segredo — não cole em chat,
+     issue ou commit).
+2. **Publique o intermediário** seguindo [`broker/README.md`](broker/README.md). O client
+   secret vai só para o cofre da Cloudflare (`wrangler secret put`).
+3. **Configure o build do app**: copie `.env.example` para `.env` (dev) ou
+   `.env.production` (build de release) e preencha:
+   ```
+   MAIN_VITE_NOTION_OAUTH_CLIENT_ID=<client ID>
+   MAIN_VITE_NOTION_OAUTH_BROKER_URL=https://orkio-oauth-broker.<sua-conta>.workers.dev
+   ```
+   Nenhum desses valores é segredo. Sem eles, o app esconde o login com Notion e mostra só
+   a opção de token.
+
+A porta `47821` precisa estar livre no computador durante o login; se estiver ocupada, o
+Orkio avisa. Para desconectar de vez, além de **Desconectar** no Orkio, a pessoa pode
+remover o Orkio em **Notion → Configurações → Conexões**.
+
+## Alternativa: usar um token do Notion
+
+Para workspaces que permitem tokens, o card tem o link discreto **Usar token**. O Orkio
+aceita dois tipos de token. Os dois usam o mesmo header `Authorization: Bearer`.
 
 **Personal Access Token (recomendado para uso pessoal)**
 
@@ -102,7 +151,8 @@ O Orkio aceita dois tipos de token. Os dois usam o mesmo header `Authorization: 
 2. Copie o _Internal Integration Secret_.
 3. Compartilhe com a integração as páginas que o Orkio poderá ler.
 
-Depois, no Orkio, vá em **Integrações → Notion**, cole o token e clique em **Conectar**.
+Depois, no Orkio, vá em **Integrações → Notion → Usar token**, cole o token e clique em
+**Conectar**.
 O token é validado em `GET https://api.notion.com/v1/users/me` antes de ser salvo.
 
 Documentação oficial: <https://developers.notion.com/guides/get-started/personal-access-tokens>
@@ -112,7 +162,7 @@ Documentação oficial: <https://developers.notion.com/guides/get-started/person
 - Todas as chamadas à API do Notion são feitas no **processo main**. O renderer não tem
   acesso a Node (`contextIsolation`, `sandbox`, sem `nodeIntegration`) e fala com o main só
   pela API mínima `window.orkio`.
-- O token é criptografado com `safeStorage` do Electron (Keychain no macOS, DPAPI no
+- Tokens (OAuth ou colados) são criptografados com `safeStorage` do Electron (Keychain no macOS, DPAPI no
   Windows, libsecret/KWallet no Linux) e salvo em `<userData>/secrets/notion.bin` com
   permissão `0600`.
 - Se não houver criptografia disponível, o token **não é salvo** e o app mostra um erro.
@@ -121,6 +171,8 @@ Documentação oficial: <https://developers.notion.com/guides/get-started/person
   e `secrets/`.
 - CSP restritiva no `index.html`; navegação e novas janelas bloqueadas; links externos só
   abrem para domínios do Notion (allowlist no main).
+- OAuth: o client secret existe só no intermediário; o app valida o `state`, aceita o redirect
+  só em `127.0.0.1` (e confere o header `Host`) e fecha o servidor local ao terminar.
 
 Para desconectar, use **Desconectar** no card. Isso apaga o arquivo do disco. O token
 continua válido no Notion; revogue-o por lá se quiser invalidá-lo.

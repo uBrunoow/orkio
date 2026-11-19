@@ -2,7 +2,7 @@
   "name": "orkio",
   "version": "0.1.0",
   "private": true,
-  "description": "Orkio \u2014 orquestra\u00e7\u00e3o de desenvolvimento com IA (Notion, GitHub, Claude Code).",
+  "description": "Orkio — orquestração de desenvolvimento com IA (Notion, GitHub, Claude Code).",
   "main": "./out/main/index.js",
   "scripts": {
     "postinstall": "install-electron",
@@ -12,7 +12,7 @@
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "pnpm typecheck:node && pnpm typecheck:web && pnpm typecheck:e2e",
+    "typecheck": "pnpm typecheck:node && pnpm typecheck:web && pnpm typecheck:e2e && pnpm typecheck:broker",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -20,8 +20,9 @@
     "icons": "node scripts/generate-icons.mjs",
     "dist": "electron-vite build && electron-builder",
     "dist:dir": "electron-vite build && electron-builder --dir",
-    "e2e": "electron-vite build && playwright test",
-    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json"
+    "e2e": "electron-vite build --mode e2e && playwright test",
+    "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
+    "typecheck:broker": "tsc --noEmit -p tsconfig.broker.json"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

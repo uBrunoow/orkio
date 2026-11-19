@@ -11,3 +11,5 @@ secrets/
 *.tsbuildinfo
 test-results/
 playwright-report/
+!.env.example
+!.env.e2e
