@@ -136,13 +136,37 @@ describe('migração v3 (3C)', () => {
       "INSERT INTO task_events (task_page_id, project_id, at, kind, source, event_key) VALUES ('t', 'p', 'x', 'automation', 'automation', 'pr#1:merged')"
     )
     v2.close()
-    const db = openDatabase(file)
+    const db = openDatabase(file, MIGRATIONS.slice(0, 3))
     expect(db.version).toBe(3)
     expect(db.get('SELECT event_key FROM task_events')).toEqual({ event_key: 'pr#1:merged' })
     db.run(
       "INSERT INTO config_events (project_id, at, actor, changes_json) VALUES ('p', 'x', 'ana', '[]')"
     )
     expect(db.all('SELECT actor FROM config_events')).toEqual([{ actor: 'ana' }])
+    db.close()
+    await rm(dir, { recursive: true, force: true })
+  })
+})
+
+describe('migração v4 (4A)', () => {
+  it('v3 → v4 cria worktrees, agent_runs e permission_rules', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v4-'))
+    const file = join(dir, 'orkio.db')
+    openDatabase(file, MIGRATIONS.slice(0, 3)).close()
+    const db = openDatabase(file)
+    expect(db.version).toBe(4)
+    db.run(
+      "INSERT INTO agent_runs (id, task_page_id, project_id, mode, status, started_at) VALUES ('r', 't', 'p', 'prompt', 'running', 'x')"
+    )
+    expect(() =>
+      db.run(
+        "INSERT INTO agent_runs (id, task_page_id, project_id, mode, status, started_at) VALUES ('r2', 't', 'p', 'shell', 'running', 'x')"
+      )
+    ).toThrow()
+    db.run("INSERT INTO permission_rules VALUES ('p', 'Bash', 'npm test', 'x')")
+    expect(() =>
+      db.run("INSERT INTO permission_rules VALUES ('p', 'Bash', 'npm test', 'y')")
+    ).toThrow()
     db.close()
     await rm(dir, { recursive: true, force: true })
   })
