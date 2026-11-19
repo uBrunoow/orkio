@@ -1,0 +1,33 @@
+/* Orkio — design tokens (dark-first) */
+:root {
+  /* Superfícies */
+  --bg: #0A0A0B;          /* piano black */
+  --surface: #141416;
+  --raised: #1E1E21;
+  --border: #2C2C30;
+
+  /* Texto */
+  --text: #F2F2F0;
+  --muted: #8F8F94;
+
+  /* Marca */
+  --accent: #FF5B1F;      /* Orkio orange */
+  --accent-hover: #FF7440;
+  --accent-tint: #3A1A0E; /* fundo de badges laranja */
+  --accent-tint-text: #FFB08F;
+  --on-accent: #0A0A0B;   /* texto SEMPRE preto sobre laranja */
+
+  /* Estados */
+  --success: #3DD68C;
+  --warning: #F5C518;
+  --danger: #F0445C;      /* rosado, para não confundir com o laranja */
+
+  /* Tipografia */
+  --font-brand: 'Jost', system-ui, sans-serif;      /* só logo e títulos grandes */
+  --font-ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Forma */
+  --radius: 8px;
+  --radius-card: 12px;
+}

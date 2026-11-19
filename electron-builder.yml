@@ -1,0 +1,32 @@
+# Configuração do empacotador (electron-builder). Ícones gerados por `pnpm icons`.
+appId: com.orkio.app
+productName: Orkio
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - resources/**
+  - package.json
+asarUnpack:
+  - resources/**
+mac:
+  icon: build/icon.icns
+  category: public.app-category.developer-tools
+  target: dmg
+win:
+  icon: build/icon.ico
+  target: nsis
+linux:
+  icon: build/icon.png
+  category: Development
+  target: AppImage
+  executableName: orkio
+nsis:
+  artifactName: ${productName}-${version}-setup.${ext}
+dmg:
+  artifactName: ${productName}-${version}.${ext}
+appImage:
+  artifactName: ${productName}-${version}.${ext}
+npmRebuild: false
+publish: null

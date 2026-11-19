@@ -23,5 +23,11 @@ export default tseslint.config(
       'no-console': ['error', { allow: ['warn', 'error'] }],
       '@typescript-eslint/consistent-type-imports': 'error'
     }
+  },
+  {
+    // Scripts de build rodam fora do app: podem usar console.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: globals.node },
+    rules: { 'no-console': 'off' }
   }
 )

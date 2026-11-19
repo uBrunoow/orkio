@@ -7,6 +7,7 @@ import { registerNotionIpc } from './ipc/notion.ipc'
 import { registerShellIpc } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
 import { SecureStore } from './storage/secure-store'
+import appIcon from '../../resources/icon.png?asset'
 
 const RENDERER_HTML = join(__dirname, '../renderer/index.html')
 const DEV_SERVER_URL = app.isPackaged ? undefined : process.env['ELECTRON_RENDERER_URL']
@@ -18,8 +19,11 @@ function createMainWindow(): BrowserWindow {
     minWidth: 720,
     minHeight: 520,
     show: false,
+    // Mesmo valor de --bg (tokens.css); evita flash branco antes do CSS carregar.
     backgroundColor: '#0A0A0B',
     title: 'Orkio',
+    // Linux/Windows usam este ícone na janela/barra de tarefas. No macOS o ícone vem do bundle (.icns).
+    icon: appIcon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -63,6 +67,9 @@ void app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) =>
     callback(false)
   )
+
+  // Em dev no macOS não há bundle .app: aplicamos o ícone no Dock manualmente.
+  if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(appIcon)
 
   registerIpc()
   createMainWindow()
