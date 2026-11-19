@@ -5,6 +5,11 @@
  * controlamos timeout, Retry-After e mensagens de erro sem dependência extra.
  */
 
+import { httpsUrlOrNull, isRecord, parseRetryAfterMs, stringOrNull } from '../../net/parse'
+
+// Reexportado para quem já importava daqui.
+export { parseRetryAfterMs }
+
 export const NOTION_API_BASE_URL = 'https://api.notion.com/v1'
 /** Versão da API do Notion (header Notion-Version). Atualize só aqui. */
 export const NOTION_VERSION = '2026-03-11'
@@ -183,16 +188,6 @@ function rateLimited(waitMs: number | null): NotionApiError {
   )
 }
 
-/** Retry-After pode ser segundos ("3") ou uma data HTTP. */
-export function parseRetryAfterMs(value: string | null, now: number = Date.now()): number | null {
-  if (value === null) return null
-  const trimmed = value.trim()
-  if (/^\d+(\.\d+)?$/.test(trimmed)) return Math.round(Number(trimmed) * 1000)
-  const date = Date.parse(trimmed)
-  if (Number.isNaN(date)) return null
-  return Math.max(0, date - now)
-}
-
 /**
  * Normaliza a resposta de GET /v1/users/me:
  * - PAT: usuário `person` dono do token.
@@ -226,22 +221,5 @@ export function parseSelf(body: unknown): NotionSelf | null {
     ownerName,
     ownerAvatarUrl,
     workspaceName
-  }
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-export function stringOrNull(value: unknown): string | null {
-  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
-}
-
-export function httpsUrlOrNull(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  try {
-    return new URL(value).protocol === 'https:' ? value : null
-  } catch {
-    return null
   }
 }

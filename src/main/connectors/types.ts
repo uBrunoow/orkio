@@ -3,10 +3,18 @@ import type {
   ConnectionStatus,
   ConnectorCredentials,
   ConnectorId,
+  DeviceFlowStartResult,
   TokenCredentials
 } from '../../shared/ipc-contract'
 
-export type { AuthOptions, ConnectionStatus, ConnectorCredentials, ConnectorId, TokenCredentials }
+export type {
+  AuthOptions,
+  ConnectionStatus,
+  ConnectorCredentials,
+  ConnectorId,
+  DeviceFlowStartResult,
+  TokenCredentials
+}
 
 /**
  * Credenciais obtidas via OAuth. Só existem no processo main: nunca vêm do renderer
@@ -39,4 +47,15 @@ export interface OAuthConnector<C = ConnectorCredentials> extends Connector<C> {
   /** Roda o fluxo OAuth. Resolve com o status final (ou com o status salvo, se cancelado). */
   startOAuth(): Promise<ConnectionStatus>
   cancelOAuth(): void
+}
+
+/**
+ * Conector que conecta via OAuth Device Flow (RFC 8628): o polling roda no main e a UI só
+ * recebe o código a digitar (`startDeviceFlow`) e o resultado final (`waitDeviceFlow`).
+ */
+export interface DeviceFlowConnector<C = ConnectorCredentials> extends Connector<C> {
+  getAuthOptions(): AuthOptions
+  startDeviceFlow(): Promise<DeviceFlowStartResult>
+  waitDeviceFlow(): Promise<ConnectionStatus>
+  cancelDeviceFlow(): void
 }

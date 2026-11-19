@@ -1,7 +1,8 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
 import { IPC_CHANNELS, type ConnectionStatus } from '../../shared/ipc-contract'
-import type { OAuthConnector } from '../connectors/types'
+import type { DeviceFlowConnector, OAuthConnector } from '../connectors/types'
+import { registerGitHubIpc } from './github.ipc'
 import { registerNotionIpc } from './notion.ipc'
 import { isAllowedExternalUrl, registerShellIpc } from './shell.ipc'
 import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
@@ -166,6 +167,90 @@ describe('registerNotionIpc — OAuth', () => {
   })
 })
 
+function fakeGitHub(overrides: Partial<DeviceFlowConnector> = {}): DeviceFlowConnector {
+  return {
+    id: 'github',
+    getAuthOptions: vi.fn(() => ({ oauth: true })),
+    startDeviceFlow: vi.fn(async () => ({
+      ok: true as const,
+      flow: {
+        userCode: 'WDJB-MJHT',
+        verificationUri: 'https://github.com/login/device',
+        expiresAt: '2026-11-19T12:15:00.000Z'
+      }
+    })),
+    waitDeviceFlow: vi.fn(async (): Promise<ConnectionStatus> => ({ state: 'disconnected' })),
+    cancelDeviceFlow: vi.fn(),
+    connect: vi.fn(async (): Promise<ConnectionStatus> => ({ state: 'disconnected' })),
+    disconnect: vi.fn(async () => {}),
+    getStatus: vi.fn(async (): Promise<ConnectionStatus> => ({ state: 'disconnected' })),
+    testConnection: vi.fn(async (): Promise<ConnectionStatus> => ({ state: 'disconnected' })),
+    ...overrides
+  }
+}
+
+describe('registerGitHubIpc', () => {
+  it('Device Flow: start devolve só código/URL/expiração; wait resolve e foca a janela', async () => {
+    const ipc = fakeIpc()
+    const connector = fakeGitHub()
+    const onDeviceFlowFinished = vi.fn()
+    registerGitHubIpc(ipc, connector, guard, { onDeviceFlowFinished })
+
+    expect(await ipc.invoke(IPC_CHANNELS.github.getAuthOptions)).toEqual({ oauth: true })
+    expect(await ipc.invoke(IPC_CHANNELS.github.startDeviceFlow)).toEqual({
+      ok: true,
+      flow: {
+        userCode: 'WDJB-MJHT',
+        verificationUri: 'https://github.com/login/device',
+        expiresAt: '2026-11-19T12:15:00.000Z'
+      }
+    })
+    await ipc.invoke(IPC_CHANNELS.github.waitDeviceFlow)
+    expect(onDeviceFlowFinished).toHaveBeenCalledTimes(1)
+    await ipc.invoke(IPC_CHANNELS.github.cancelDeviceFlow)
+    expect(connector.cancelDeviceFlow).toHaveBeenCalled()
+  })
+
+  it('connect valida o payload', async () => {
+    const ipc = fakeIpc()
+    const connector = fakeGitHub()
+    registerGitHubIpc(ipc, connector, guard)
+    expect(await ipc.invoke(IPC_CHANNELS.github.connect, { token: 1 })).toMatchObject({
+      state: 'error'
+    })
+    await ipc.invoke(IPC_CHANNELS.github.connect, { kind: 'token', token: 'ghp_x', extra: 1 })
+    expect(connector.connect).toHaveBeenCalledWith({ kind: 'token', token: 'ghp_x' })
+  })
+
+  it('todos os canais recusam origem não confiável', async () => {
+    const ipc = fakeIpc()
+    const connector = fakeGitHub()
+    registerGitHubIpc(ipc, connector, guard)
+    ipc.trusted = false
+    for (const channel of Object.values(IPC_CHANNELS.github)) {
+      await expect(ipc.invoke(channel)).rejects.toThrow('não autorizada')
+    }
+    expect(connector.startDeviceFlow).not.toHaveBeenCalled()
+  })
+
+  it('exceção inesperada vira erro genérico, sem a mensagem original no log', async () => {
+    const ipc = fakeIpc()
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    registerGitHubIpc(
+      ipc,
+      fakeGitHub({
+        startDeviceFlow: async () => {
+          throw new Error('gho_LEAK')
+        }
+      }),
+      guard
+    )
+    const result = await ipc.invoke(IPC_CHANNELS.github.startDeviceFlow)
+    expect(result).toMatchObject({ ok: false, status: { state: 'error' } })
+    expect(JSON.stringify([result, spy.mock.calls])).not.toContain('gho_LEAK')
+  })
+})
+
 describe('shell.openExternal', () => {
   it('allowlist: só https nos domínios do Notion', () => {
     expect(isAllowedExternalUrl('https://developers.notion.com/guides/x')).toBe(true)
@@ -176,6 +261,16 @@ describe('shell.openExternal', () => {
     expect(isAllowedExternalUrl('https://user@notion.so/')).toBe(false)
     expect(isAllowedExternalUrl('file:///etc/passwd')).toBe(false)
     expect(isAllowedExternalUrl(42)).toBe(false)
+  })
+
+  it('allowlist do GitHub: só a página do Device Flow e docs.github.com', () => {
+    expect(isAllowedExternalUrl('https://github.com/login/device')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/login/device/select_account')).toBe(true)
+    expect(isAllowedExternalUrl('https://docs.github.com/en/authentication')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/settings/tokens')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/login/devicex')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/')).toBe(false)
+    expect(isAllowedExternalUrl('https://gist.github.com/login/device')).toBe(false)
   })
 
   it('abre só URLs permitidas', async () => {

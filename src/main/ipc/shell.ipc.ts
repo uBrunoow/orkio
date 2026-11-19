@@ -2,27 +2,34 @@ import type { IpcMain } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { SenderGuard } from './trusted-sender'
 
-/** Domínios que o renderer pode abrir no navegador externo. */
-export const EXTERNAL_URL_ALLOWLIST: ReadonlySet<string> = new Set([
-  'notion.so',
-  'www.notion.so',
-  'developers.notion.com'
-])
+/**
+ * O que o renderer pode abrir no navegador externo: só https, sem porta/credenciais, e só
+ * estes hosts. `pathPrefix` restringe o caminho (ex.: no github.com só a página do Device Flow).
+ */
+export const EXTERNAL_URL_RULES: readonly { host: string; pathPrefix?: string }[] = [
+  { host: 'notion.so' },
+  { host: 'www.notion.so' },
+  { host: 'developers.notion.com' },
+  { host: 'docs.github.com' },
+  { host: 'github.com', pathPrefix: '/login/device' }
+]
 
 export function isAllowedExternalUrl(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 2048) return false
+  let url: URL
   try {
-    const url = new URL(value)
-    return (
-      url.protocol === 'https:' &&
-      url.username === '' &&
-      url.password === '' &&
-      url.port === '' &&
-      EXTERNAL_URL_ALLOWLIST.has(url.hostname)
-    )
+    url = new URL(value)
   } catch {
     return false
   }
+  if (url.protocol !== 'https:' || url.username || url.password || url.port) return false
+  return EXTERNAL_URL_RULES.some(
+    (rule) =>
+      rule.host === url.hostname &&
+      (!rule.pathPrefix ||
+        url.pathname === rule.pathPrefix ||
+        url.pathname.startsWith(`${rule.pathPrefix}/`))
+  )
 }
 
 export function registerShellIpc(

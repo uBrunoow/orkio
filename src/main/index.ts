@@ -1,6 +1,17 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, ipcMain, safeStorage, session, shell } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  safeStorage,
+  session,
+  shell,
+  type IpcMainInvokeEvent
+} from 'electron'
+import { createGitHubClient } from './connectors/github/github.client'
+import { GitHubConnector } from './connectors/github/github.connector'
+import { createGitHubDeviceApi, readGitHubOAuthConfig } from './connectors/github/github.oauth'
 import { createNotionClient } from './connectors/notion/notion.client'
 import { NotionConnector, type NotionOAuthDeps } from './connectors/notion/notion.connector'
 import {
@@ -11,6 +22,7 @@ import {
   readNotionOAuthConfig
 } from './connectors/notion/notion.oauth'
 import { authorizeViaLoopback } from './oauth/loopback'
+import { registerGitHubIpc } from './ipc/github.ipc'
 import { registerNotionIpc } from './ipc/notion.ipc'
 import { registerShellIpc } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
@@ -70,16 +82,25 @@ function registerIpc(): void {
     oauth: createNotionOAuthDeps()
   })
 
-  registerNotionIpc(ipcMain, notion, isTrustedSender, {
-    // Depois de autorizar no navegador, traz o Orkio de volta para a frente.
-    onOAuthFinished: (event) => {
-      const win = BrowserWindow.fromWebContents(event.sender)
-      if (win && !win.isDestroyed()) {
-        if (win.isMinimized()) win.restore()
-        win.focus()
-      }
-    }
+  const githubConfig = readGitHubOAuthConfig(import.meta.env)
+  const github = new GitHubConnector({
+    store,
+    client: createGitHubClient(),
+    // Device Flow não usa client secret nem o intermediário (broker/).
+    device: githubConfig ? createGitHubDeviceApi(githubConfig) : null
   })
+
+  // Depois de autorizar no navegador, traz o Orkio de volta para a frente.
+  const focusSender = (event: IpcMainInvokeEvent): void => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore()
+      win.focus()
+    }
+  }
+
+  registerNotionIpc(ipcMain, notion, isTrustedSender, { onOAuthFinished: focusSender })
+  registerGitHubIpc(ipcMain, github, isTrustedSender, { onDeviceFlowFinished: focusSender })
   registerShellIpc(ipcMain, (url) => shell.openExternal(url), isTrustedSender)
 }
 
@@ -104,9 +125,10 @@ function createNotionOAuthDeps(): NotionOAuthDeps | null {
 }
 
 void app.whenReady().then(() => {
-  // O app não precisa de nenhuma permissão do navegador (câmera, notificações etc.).
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) =>
-    callback(false)
+  // Nenhuma permissão do navegador (câmera, notificações etc.), exceto ESCREVER na área de
+  // transferência (botão "Copiar" do código do GitHub). Ler a área de transferência continua negado.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) =>
+    callback(permission === 'clipboard-sanitized-write')
   )
 
   // Em dev no macOS não há bundle .app: aplicamos o ícone no Dock manualmente.

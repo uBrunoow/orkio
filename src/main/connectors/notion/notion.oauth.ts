@@ -7,13 +7,8 @@
  * não armazena tokens. Aqui ficam: config, URL de autorização, client do intermediário e
  * a leitura da resposta de token.
  */
-import {
-  NOTION_API_BASE_URL,
-  NotionApiError,
-  httpsUrlOrNull,
-  isRecord,
-  stringOrNull
-} from './notion.client'
+import { httpsUrlOrNull, isRecord, stringOrNull } from '../../net/parse'
+import { NOTION_API_BASE_URL, NotionApiError } from './notion.client'
 
 export const NOTION_OAUTH_AUTHORIZE_URL = `${NOTION_API_BASE_URL}/oauth/authorize`
 /** Precisa estar cadastrada em "Redirect URIs" da conexão OAuth no Notion e no intermediário. */

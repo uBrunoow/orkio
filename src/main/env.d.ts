@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly MAIN_VITE_NOTION_OAUTH_CLIENT_ID?: string
   /** URL https do intermediário OAuth (broker/), que guarda o client secret. */
   readonly MAIN_VITE_NOTION_OAUTH_BROKER_URL?: string
+  /** Client ID da OAuth App do GitHub com Device Flow habilitado (público). */
+  readonly MAIN_VITE_GITHUB_CLIENT_ID?: string
 }
 
 interface ImportMeta {

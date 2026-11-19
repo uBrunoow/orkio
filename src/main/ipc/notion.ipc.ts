@@ -1,11 +1,10 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
-import {
-  IPC_CHANNELS,
-  type ConnectionStatus,
-  type ConnectorCredentials
-} from '../../shared/ipc-contract'
+import { IPC_CHANNELS, type ConnectionStatus } from '../../shared/ipc-contract'
 import type { OAuthConnector } from '../connectors/types'
+import { errorName, isTokenCredentials } from './payload'
 import type { SenderGuard } from './trusted-sender'
+
+export { isTokenCredentials }
 
 const GENERIC_ERROR: ConnectionStatus = {
   state: 'error',
@@ -72,17 +71,4 @@ export function registerNotionIpc(
     if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
     connector.cancelOAuth()
   })
-}
-
-export function isTokenCredentials(value: unknown): value is ConnectorCredentials {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === 'token' &&
-    typeof (value as { token?: unknown }).token === 'string'
-  )
-}
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error
 }
