@@ -116,6 +116,13 @@ interface FakeGlobals {
     status: Record<string, string>
     extra: Record<string, Record<string, unknown>>
     addedProperties: Record<string, unknown>
+    /** Publicações de artefatos (4B): subpáginas criadas e markdown acrescentado. */
+    published: {
+      kind: 'child_page' | 'section'
+      parent: string
+      title?: string
+      markdown: string
+    }[]
   }
 }
 
@@ -228,7 +235,8 @@ export async function launchOrkio(
           ...initial.notionInitialStatus
         },
         extra: {},
-        addedProperties: {}
+        addedProperties: {},
+        published: []
       }
       const realFetch = globalThis.fetch
       const json = (body: unknown, status = 200): Response =>
@@ -471,6 +479,38 @@ export async function launchOrkio(
             { id: 'o5', name: 'Finalizadas', color: 'green' },
             { id: 'o3', name: 'Concluída', color: 'green' }
           ]
+
+          // Publicação de artefatos (4B): subpágina com markdown e markdown no fim da página.
+          if (path === '/pages' && init?.method === 'POST') {
+            if (g.__fakes.notionWrites === 'reject') {
+              return json({ object: 'error', code: 'restricted_resource' }, 403)
+            }
+            const parent = (body['parent'] as { page_id?: string } | undefined)?.page_id ?? ''
+            const props = body['properties'] as
+              { title?: { title?: { text?: { content?: string } }[] } } | undefined
+            const n = g.__notion.published.length + 1
+            g.__notion.published.push({
+              kind: 'child_page',
+              parent,
+              title: props?.title?.title?.[0]?.text?.content ?? '',
+              markdown: String(body['markdown'] ?? '')
+            })
+            const id = `dddddddd-0000-4000-8000-${String(n).padStart(12, '0')}`
+            return json({ object: 'page', id, url: `https://www.notion.so/artefato-${n}` })
+          }
+          const mdPatch = /^\/pages\/([0-9a-f-]+)\/markdown$/.exec(path)
+          if (mdPatch && init?.method === 'PATCH') {
+            if (g.__fakes.notionWrites === 'reject') {
+              return json({ object: 'error', code: 'restricted_resource' }, 403)
+            }
+            const insert = body['insert_content'] as { content?: string } | undefined
+            g.__notion.published.push({
+              kind: 'section',
+              parent: mdPatch[1]!,
+              markdown: String(insert?.content ?? '')
+            })
+            return json({ object: 'page_markdown', id: mdPatch[1] })
+          }
 
           // Escrita numa página (3A).
           const pagePatch = /^\/pages\/([0-9a-f-]+)$/.exec(path)

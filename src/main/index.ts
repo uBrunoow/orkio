@@ -53,6 +53,7 @@ import { IPC_CHANNELS, type AutomationStatus, type BoardSyncEvent } from '../sha
 import { SecureStore } from './storage/secure-store'
 import { ClaudeService, type ClaudeServiceDeps } from './claude/claude.service'
 import { detectClaude } from './claude/detect'
+import { ArtifactsService, type ArtifactsDeps } from './claude/artifacts.service'
 import { ClaudeRun } from './claude/runner'
 import { RunService } from './claude/run.service'
 import { WorktreeService } from './claude/worktree.service'
@@ -327,6 +328,11 @@ function registerIpc(): void {
       listTasks: (projectId) => notionWorkspace.listTasks(projectId),
       signals: (projectId) => signals.get(projectId),
       getBlockChildren: (id, cursor) => notion.getBlockChildren(id, cursor),
+      notionInsert: {
+        createChildPage: (parent, title, markdown) =>
+          notion.createChildPage(parent, title, markdown),
+        appendMarkdown: (pageId, markdown) => notion.appendMarkdown(pageId, markdown)
+      },
       send,
       isTrustedSender,
       ready: projectsReady
@@ -375,6 +381,8 @@ function createClaude(deps: {
   listTasks: ClaudeServiceDeps['listTasks']
   signals: ClaudeServiceDeps['signals']
   getBlockChildren: ClaudeServiceDeps['getBlockChildren']
+  /** Escritas no Notion para publicar artefatos (o token fica no conector). */
+  notionInsert: ArtifactsDeps['notion']
   send: (channel: string, payload: unknown) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
@@ -420,6 +428,13 @@ function createClaude(deps: {
     signals: deps.signals,
     getBlockChildren: deps.getBlockChildren,
     detect: () => detectClaude({ env }),
+    artifacts: new ArtifactsService({
+      db: deps.boardStore.db,
+      store: deps.boardStore,
+      worktrees,
+      git: deps.git,
+      notion: deps.notionInsert
+    }),
     openEditor: (editor, path) =>
       new Promise<void>((resolve, reject) => {
         const child = spawn(editor, [path], {

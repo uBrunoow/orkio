@@ -6,7 +6,9 @@ import {
   NOTION_FAKE,
   createUserDataDir,
   cspViolations,
+  NOTION_TASK_IDS,
   launchOrkio,
+  notionState,
   removeDir,
   type OrkioApp
 } from './fixtures'
@@ -251,6 +253,53 @@ test('catálogo de comandos: agrupado, com busca, e rodar um comando instalado',
   await section.getByRole('button', { name: 'Recarregar' }).click()
   await section.getByRole('button', { name: 'Rodar', exact: true }).click()
   await expect(section.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+})
+
+test('"Rodar de novo" reabre com o mesmo comando; artefato anexado e publicado no Notion', async () => {
+  const { app, page } = orkio!
+  const section = page.getByRole('region', { name: 'Claude Code' }).last()
+  // A execução exibida é a do /revisar (teste anterior).
+  await section.getByRole('button', { name: 'Rodar de novo', exact: true }).click()
+  await expect(section.getByRole('radio', { name: 'Comando instalado' })).toBeChecked()
+  await expect(section.getByRole('button', { name: 'Comando /revisar' })).toBeVisible()
+  await section.getByRole('button', { name: 'Cancelar', exact: true }).click()
+
+  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
+  await section
+    .getByRole('textbox', { name: /^O que o Claude Code deve fazer/ })
+    .fill('escrever-doc')
+  await section.getByRole('button', { name: 'Rodar', exact: true }).click()
+  await expect(section.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+
+  const artifacts = page.getByRole('region', { name: 'Artefatos da tarefa' })
+  await artifacts.getByRole('button', { name: 'Anexar docs/exportar.md' }).click()
+  const attached = artifacts.getByRole('list', { name: 'Artefatos anexados' })
+  await expect(attached).toContainText('docs/exportar.md')
+
+  // Subpágina: confirmação antes de publicar.
+  await attached.getByRole('button', { name: 'Publicar docs/exportar.md como subpágina' }).click()
+  const confirm = artifacts.getByRole('alertdialog', { name: 'Confirmar publicação' })
+  await expect(confirm).toContainText('subpágina da tarefa')
+  await confirm.getByRole('button', { name: 'Publicar', exact: true }).click()
+  await expect(artifacts.getByText('publicado no Notion')).toBeVisible()
+  await expect(attached).toContainText('No Notion (subpágina)')
+
+  await attached.getByRole('button', { name: 'Publicar docs/exportar.md como seção' }).click()
+  await artifacts
+    .getByRole('alertdialog', { name: 'Confirmar publicação' })
+    .getByRole('button', { name: 'Publicar', exact: true })
+    .click()
+  await expect(attached).toContainText('No Notion (seção)')
+
+  const published = (await notionState(app)).published
+  expect(published.map((p) => [p.kind, p.parent])).toEqual([
+    ['child_page', NOTION_TASK_IDS.ork2],
+    ['section', NOTION_TASK_IDS.ork2]
+  ])
+  expect(published[0]!.title).toBe('Exportar CSV')
+  expect(published[0]!.markdown).toContain('Separador ponto e vírgula')
+  expect(published[1]!.markdown).toContain('## exportar.md')
+  for (const p of published) expect(p.markdown).not.toContain('ghp_abcdef')
 })
 
 test('ver diff e limpar ambiente (a branch fica)', async () => {

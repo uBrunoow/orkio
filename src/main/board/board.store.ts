@@ -36,6 +36,9 @@ export type TaskEventKind =
   | 'run_cancelled'
   | 'run_failed'
   | 'run_blocked'
+  /** Artefatos (4B): documento anexado (caminho + commit) e publicado no Notion. */
+  | 'artifact_attached'
+  | 'artifact_published'
 
 export interface TaskEventRow {
   id: number

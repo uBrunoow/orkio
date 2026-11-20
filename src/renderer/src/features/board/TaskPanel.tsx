@@ -279,6 +279,10 @@ function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string
       return 'Execução do Claude Code cancelada'
     case 'run_failed':
       return 'Execução do Claude Code falhou'
+    case 'artifact_attached':
+      return `Artefato anexado: ${String(e.detail?.['path'] ?? '')}`
+    case 'artifact_published':
+      return `Artefato publicado no Notion: ${String(e.detail?.['path'] ?? '')}`
     case 'run_blocked':
       return `Claude Code bloqueado: ${String(e.detail?.['reason'] ?? 'ação não permitida')}`
     case 'rolled_back':

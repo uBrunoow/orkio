@@ -108,13 +108,30 @@ export interface NotionClient {
   updateDataSource(token: string, id: string, properties: Record<string, unknown>): Promise<unknown>
   /** GET /v1/blocks/{id}/children (conteúdo de uma página; paginado). */
   getBlockChildren(token: string, id: string, startCursor?: string | null): Promise<NotionListPage>
+  /** Busca páginas (não data sources) por título. */
+  searchPages(token: string, query: string): Promise<NotionListPage>
+  /**
+   * Cria uma subpágina com conteúdo em markdown (POST /v1/pages, `markdown_version: v2`).
+   * Precisa da capacidade "Insert content".
+   */
+  createChildPage(
+    token: string,
+    parentPageId: string,
+    title: string,
+    markdown: string
+  ): Promise<{ id: string; url: string | null }>
+  /**
+   * Acrescenta markdown no fim de uma página (PATCH /v1/pages/{id}/markdown, `insert_content`
+   * com `position: end`). Precisa da capacidade "Insert content".
+   */
+  appendMarkdown(token: string, pageId: string, markdown: string): Promise<void>
 }
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PATCH'
   body?: unknown
   /** Contexto da mensagem de 403/404. */
-  kind?: 'self' | 'data' | 'write'
+  kind?: 'self' | 'data' | 'write' | 'insert'
 }
 
 export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
@@ -167,7 +184,7 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
     options: RequestOptions
   ): Promise<unknown> {
     for (let attempt = 0; ; attempt++) {
-      const kind = options.kind === 'write' ? 'write' : 'data'
+      const kind = options.kind === 'write' || options.kind === 'insert' ? options.kind : 'data'
       const response = await queue.run(() => send(path, token, { ...options, kind }))
       if (response.ok) return readJson(response)
 
@@ -237,6 +254,43 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
       )
     },
 
+    async searchPages(token, query) {
+      const body: Record<string, unknown> = {
+        filter: { property: 'object', value: 'page' },
+        sort: { timestamp: 'last_edited_time', direction: 'descending' },
+        page_size: 50
+      }
+      if (query) body['query'] = query
+      return parseListPage(await dataRequest('/search', token, { method: 'POST', body }))
+    },
+
+    async createChildPage(token, parentPageId, title, markdown) {
+      const body = await dataRequest('/pages', token, {
+        method: 'POST',
+        body: {
+          parent: { page_id: parentPageId },
+          properties: { title: { title: [{ text: { content: title.slice(0, 2000) } }] } },
+          markdown,
+          markdown_version: 'v2'
+        },
+        kind: 'insert'
+      })
+      if (!isRecord(body) || typeof body['id'] !== 'string') throw unexpected(200)
+      return { id: body['id'], url: stringOrNull(body['url']) }
+    },
+
+    async appendMarkdown(token, pageId, markdown) {
+      await dataRequest(`/pages/${encodeURIComponent(pageId)}/markdown`, token, {
+        method: 'PATCH',
+        body: {
+          markdown_version: 'v2',
+          type: 'insert_content',
+          insert_content: { content: markdown, position: { type: 'end' } }
+        },
+        kind: 'insert'
+      })
+    },
+
     async updateDataSource(token, id, properties) {
       return dataRequest(`/data_sources/${encodeURIComponent(id)}`, token, {
         method: 'PATCH',
@@ -292,7 +346,34 @@ async function fetchWithTimeout(
   }
 }
 
-function errorForStatus(status: number, kind: 'self' | 'data' | 'write'): NotionApiError {
+function errorForStatus(
+  status: number,
+  kind: 'self' | 'data' | 'write' | 'insert'
+): NotionApiError {
+  if (kind === 'insert') {
+    if (status === 403) {
+      return new NotionApiError(
+        'forbidden',
+        'O Notion não deixou o Orkio publicar: a conexão precisa da capacidade “Insert content” ' +
+          '(Inserir conteúdo) e acesso a esta página.',
+        status
+      )
+    }
+    if (status === 404) {
+      return new NotionApiError(
+        'not_found',
+        'O Notion não encontrou a página da tarefa: ela foi apagada ou não está compartilhada com o Orkio.',
+        status
+      )
+    }
+    if (status === 400) {
+      return new NotionApiError(
+        'bad_request',
+        'O Notion recusou o conteúdo (grande ou complexo demais). Tente como subpágina ou divida o documento.',
+        status
+      )
+    }
+  }
   if (kind === 'write') {
     if (status === 403) {
       return new NotionApiError(

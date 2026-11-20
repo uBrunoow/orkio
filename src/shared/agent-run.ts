@@ -56,6 +56,8 @@ export interface AgentRunView {
   startedAt: string
   endedAt: string | null
   costUsd: number | null
+  /** Prompt ou argumentos usados ("Rodar de novo"). O briefing não é guardado. */
+  text: string | null
   /** Branch e pasta do worktree (exibição; o renderer nunca as envia de volta). */
   branch: string | null
   worktreePath: string | null
@@ -141,4 +143,29 @@ export interface CatalogGroup {
   title: string
   source: 'user' | 'project' | 'plugin'
   commands: CatalogCommand[]
+}
+
+/** Documento gerado/alterado que pode virar artefato da tarefa (4B). */
+export function isDocFile(path: string): boolean {
+  if (path.startsWith('.orkio/')) return false
+  return /\.(md|mdx|markdown|txt|adoc|rst)$/i.test(path)
+}
+
+export type ArtifactPublishMode = 'section' | 'child_page'
+
+/** Documento candidato a artefato (alterado desde a base). */
+export interface ArtifactCandidate {
+  path: string
+  /** Sem mudanças pendentes: dá para anexar (o anexo aponta para um commit). */
+  committed: boolean
+}
+
+/** Artefato anexado: só caminho + commit (o conteúdo fica no git). */
+export interface ArtifactView {
+  id: string
+  path: string
+  commit: string
+  runId: string | null
+  attachedAt: string
+  notion: { mode: ArtifactPublishMode; pageId: string | null; publishedAt: string } | null
 }

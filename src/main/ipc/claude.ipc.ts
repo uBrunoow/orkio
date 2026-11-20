@@ -38,6 +38,22 @@ export function isRequestId(value: unknown): value is string {
   return typeof value === 'string' && /^[\w-]{1,200}$/.test(value)
 }
 
+/**
+ * Caminho relativo ao repositório vindo da lista de candidatos (o serviço confere de novo que é
+ * um documento alterado nesta tarefa). Nada de absoluto, `..` ou controle.
+ */
+export function isRepoPath(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 500 &&
+    !value.startsWith('/') &&
+    !/^[A-Za-z]:/.test(value) &&
+    !value.split(/[\\/]/).includes('..') &&
+    ![...value].some((c) => c.charCodeAt(0) < 0x20)
+  )
+}
+
 export function isStartRunRequest(value: unknown): value is StartRunRequest {
   if (typeof value !== 'object' || value === null) return false
   const v = value as Record<string, unknown>
@@ -123,6 +139,19 @@ export function registerClaudeIpc(
   guarded(ch.openEditor, GENERIC, async (projectId, taskId, editor) =>
     isId(projectId) && isId(taskId) && EDITORS.includes(editor as EditorId)
       ? service.openEditor(projectId, taskId, editor as EditorId)
+      : INVALID
+  )
+  guarded(ch.artifacts, GENERIC, async (projectId, taskId) =>
+    isId(projectId) && isId(taskId) ? service.artifacts(projectId, taskId) : INVALID
+  )
+  guarded(ch.attachArtifact, GENERIC, async (projectId, taskId, path, runId) =>
+    isId(projectId) && isId(taskId) && isRepoPath(path) && (runId === null || isId(runId))
+      ? service.attachArtifact(projectId, taskId, path, runId)
+      : INVALID
+  )
+  guarded(ch.publishArtifact, GENERIC, async (projectId, artifactId, mode) =>
+    isId(projectId) && isId(artifactId) && (mode === 'section' || mode === 'child_page')
+      ? service.publishArtifact(projectId, artifactId, mode)
       : INVALID
   )
   guarded(ch.catalog, GENERIC, async (projectId, taskId) =>

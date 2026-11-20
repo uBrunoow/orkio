@@ -6,6 +6,9 @@
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
 import type {
+  ArtifactCandidate,
+  ArtifactPublishMode,
+  ArtifactView,
   CatalogGroup,
   ClaudeCodeStatus,
   ClaudeResult,
@@ -24,6 +27,8 @@ import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
 import { errorName } from '../ipc/payload'
+import { NotionApiError } from '../connectors/notion/notion.client'
+import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
 import { RUN_MESSAGES, type RunService } from './run.service'
 import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
@@ -63,6 +68,7 @@ export interface ClaudeServiceDeps {
     cursor: string | null
   ): Promise<{ results: unknown[]; nextCursor: string | null }>
   detect(): Promise<ClaudeCodeStatus>
+  artifacts: ArtifactsService
   /** Abre a pasta no editor (execFile, sem shell). */
   openEditor(editor: EditorId, path: string): Promise<void>
 }
@@ -233,6 +239,45 @@ export class ClaudeService {
     })
   }
 
+  /** Documentos candidatos (alterados no worktree) e artefatos já anexados. */
+  artifacts(
+    projectId: string,
+    taskId: string
+  ): Promise<ClaudeResult<{ candidates: ArtifactCandidate[]; attached: ArtifactView[] }>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      const attached = this.deps.artifacts.list(taskId)
+      const candidates = this.deps.worktrees.get(taskId)
+        ? await this.deps.artifacts.candidates(taskId)
+        : []
+      return ok({ candidates, attached })
+    })
+  }
+
+  attachArtifact(
+    projectId: string,
+    taskId: string,
+    path: string,
+    runId: string | null
+  ): Promise<ClaudeResult<ArtifactView>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      return ok(await this.deps.artifacts.attach(projectId, taskId, path, runId))
+    })
+  }
+
+  /** Publica no Notion (seção na página da tarefa ou subpágina). Precisa de "Insert content". */
+  publishArtifact(
+    projectId: string,
+    artifactId: string,
+    mode: ArtifactPublishMode
+  ): Promise<ClaudeResult<{ artifact: ArtifactView; url: string | null }>> {
+    return this.wrap(async () => {
+      const project = this.project(projectId)
+      return ok(await this.deps.artifacts.publish(artifactId, mode, project.localPath))
+    })
+  }
+
   /** Catálogo de comandos; usa a pasta do worktree da tarefa (ou do projeto) para os do projeto. */
   catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>> {
     return this.wrap(async () => {
@@ -353,6 +398,10 @@ export class ClaudeService {
       return await run()
     } catch (error) {
       if (error instanceof ClaudeFailure) return fail(error.code, error.message)
+      if (error instanceof ArtifactError) return fail(error.code, error.message)
+      if (error instanceof NotionApiError) {
+        return fail(error.code, error.message)
+      }
       if (error instanceof WorktreeError) {
         return fail(error.code, error.message, error.files.length ? error.files : undefined)
       }

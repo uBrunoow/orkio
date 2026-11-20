@@ -7,6 +7,9 @@ import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
 import type { FlowDraft } from './flow'
 import type { TaskSignals } from './task-signals'
 import type {
+  ArtifactCandidate,
+  ArtifactPublishMode,
+  ArtifactView,
   CatalogGroup,
   ClaudeCodeStatus,
   ClaudeResult,
@@ -57,6 +60,9 @@ export const IPC_CHANNELS = {
     openEditor: 'claude:open-editor',
     diff: 'claude:diff',
     catalog: 'claude:catalog',
+    artifacts: 'claude:artifacts',
+    attachArtifact: 'claude:attach-artifact',
+    publishArtifact: 'claude:publish-artifact',
     /** Evento main → renderer: evento normalizado de uma execução. */
     runEvent: 'claude:run-event'
   },
@@ -662,6 +668,24 @@ export interface OrkioApi {
     ): Promise<ClaudeResult<{ diff: string; truncated: boolean; untracked: string[] }>>
     /** Comandos/skills instalados (usuário, projeto, plugins). Só metadados; recarrega a cada chamada. */
     catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>>
+    /** Documentos alterados no ambiente (candidatos) e artefatos anexados à tarefa. */
+    artifacts(
+      projectId: string,
+      taskId: string
+    ): Promise<ClaudeResult<{ candidates: ArtifactCandidate[]; attached: ArtifactView[] }>>
+    /** Anexa um documento commitado (caminho relativo da lista de candidatos). */
+    attachArtifact(
+      projectId: string,
+      taskId: string,
+      path: string,
+      runId: string | null
+    ): Promise<ClaudeResult<ArtifactView>>
+    /** Publica no Notion (seção no fim da página da tarefa ou subpágina). */
+    publishArtifact(
+      projectId: string,
+      artifactId: string,
+      mode: ArtifactPublishMode
+    ): Promise<ClaudeResult<{ artifact: ArtifactView; url: string | null }>>
     /** Assina os eventos das execuções. Devolve a função para cancelar a inscrição. */
     onRunEvent(listener: (message: RunEventMessage) => void): () => void
   }

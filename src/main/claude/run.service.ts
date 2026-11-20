@@ -160,14 +160,15 @@ export class RunService {
     const id = this.deps.newId?.() ?? randomUUID()
     const startedAt = this.now().toISOString()
     this.deps.db.run(
-      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at)
-       VALUES (?, ?, ?, ?, ?, 'queued', ?)`,
+      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`,
       id,
       input.task.id,
       input.project.id,
       input.mode,
       input.command,
-      startedAt
+      startedAt,
+      redactSecrets(input.text).slice(0, 20_000)
     )
     await mkdir(this.deps.runsDir, { recursive: true })
 
@@ -321,6 +322,7 @@ export class RunService {
       ended_at: string | null
       cost: number | null
       summary: string | null
+      input_text: string | null
     }>('SELECT * FROM agent_runs WHERE id = ?', runId)
     if (!r) return null
     const wt = this.deps.worktrees.get(r.task_page_id)
@@ -334,6 +336,7 @@ export class RunService {
       startedAt: r.started_at,
       endedAt: r.ended_at,
       costUsd: r.cost,
+      text: r.input_text,
       branch: wt?.branch ?? null,
       worktreePath: wt?.path ?? null,
       summary: r.summary ? (JSON.parse(r.summary) as RunSummary) : null

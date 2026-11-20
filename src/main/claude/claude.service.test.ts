@@ -86,6 +86,7 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
     }),
     detect: vi.fn(async () => READY),
     openEditor: vi.fn(async () => undefined),
+    artifacts: {} as never,
     ...over
   }
   return { service: new ClaudeService(deps), deps, runs, worktrees }

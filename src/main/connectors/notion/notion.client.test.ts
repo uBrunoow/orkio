@@ -449,4 +449,44 @@ describe('escritas (Etapa 3A)', () => {
       expectNoTokenLeak(error)
     }
   })
+
+  it('createChildPage: POST /pages com parent.page_id, título e markdown v2', async () => {
+    const { client, fetchMock } = setup([
+      () => jsonResponse({ object: 'page', id: 'novo', url: 'https://www.notion.so/novo' })
+    ])
+    const r = await client.createChildPage(TOKEN, 'task-1', 'Spec', '# Spec\n\nTexto')
+    expect(r).toEqual({ id: 'novo', url: 'https://www.notion.so/novo' })
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('https://api.notion.com/v1/pages')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      parent: { page_id: 'task-1' },
+      properties: { title: { title: [{ text: { content: 'Spec' } }] } },
+      markdown: '# Spec\n\nTexto',
+      markdown_version: 'v2'
+    })
+  })
+
+  it('appendMarkdown: PATCH /pages/{id}/markdown com insert_content no fim', async () => {
+    const { client, fetchMock } = setup([() => jsonResponse({ object: 'page_markdown' })])
+    await client.appendMarkdown(TOKEN, 'task-1', '## Doc')
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('https://api.notion.com/v1/pages/task-1/markdown')
+    expect(init?.method).toBe('PATCH')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      markdown_version: 'v2',
+      type: 'insert_content',
+      insert_content: { content: '## Doc', position: { type: 'end' } }
+    })
+  })
+
+  it('publicar sem "Insert content" (403) explica a capacidade, sem vazar token', async () => {
+    const { client } = setup([
+      () => new Response(JSON.stringify({ message: TOKEN }), { status: 403 })
+    ])
+    const error = await client.appendMarkdown(TOKEN, 'p', 'x').catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'forbidden' })
+    expect((error as Error).message).toMatch(/Insert content/)
+    expectNoTokenLeak(error)
+  })
 })

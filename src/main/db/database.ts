@@ -113,6 +113,25 @@ export const MIGRATIONS: readonly string[] = [
     created_at TEXT NOT NULL,
     PRIMARY KEY (project_id, tool, pattern)
   );
+  `,
+  // v5 (Etapa 4B): texto do prompt/argumentos ("Rodar de novo"; o briefing NÃO é guardado) e
+  // artefatos anexados às tarefas (só caminho + commit; o conteúdo fica no git).
+  `
+  ALTER TABLE agent_runs ADD COLUMN input_text TEXT;
+  CREATE TABLE task_artifacts (
+    id TEXT PRIMARY KEY,
+    task_page_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    run_id TEXT,
+    path TEXT NOT NULL,
+    commit_hash TEXT NOT NULL,
+    attached_at TEXT NOT NULL,
+    notion_page_id TEXT,
+    notion_mode TEXT CHECK (notion_mode IN ('section', 'child_page')),
+    published_at TEXT,
+    UNIQUE (task_page_id, path, commit_hash)
+  );
+  CREATE INDEX task_artifacts_task ON task_artifacts (task_page_id, attached_at);
   `
 ]
 

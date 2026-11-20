@@ -35,6 +35,7 @@ import {
   StopIcon,
   TerminalIcon
 } from '../../components/icons'
+import { TaskArtifacts } from './TaskArtifacts'
 import {
   pendingRequests,
   useTaskRuns,
@@ -70,16 +71,24 @@ export function TaskClaudeSection({
 }): React.JSX.Element {
   const runs = useTaskRuns(projectId, taskId)
   const [prep, setPrep] = useState<RunPreparation | null>(null)
+  const [initial, setInitial] = useState<RunInitial>(EMPTY_INITIAL)
   const [preparing, setPreparing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
-  const prepare = async (): Promise<void> => {
+  /** Abre o formulário; "Rodar de novo" vem com modo/comando/texto da execução anterior. */
+  const prepare = async (from: AgentRunView | null = null): Promise<void> => {
     setPreparing(true)
     setMessage(null)
     const r = await window.orkio.claude.prepare(projectId, taskId)
     setPreparing(false)
-    if (r.ok) setPrep(r.value)
-    else setMessage(r.error.message)
+    if (!r.ok) {
+      setMessage(r.error.message)
+      return
+    }
+    setInitial(
+      from ? { mode: from.mode, command: from.command ?? '', text: from.text ?? '' } : EMPTY_INITIAL
+    )
+    setPrep(r.value)
   }
 
   const state = runs.state
@@ -100,6 +109,7 @@ export function TaskClaudeSection({
       ) : prep && !active ? (
         <Composer
           prep={prep}
+          initial={initial}
           onCancel={() => setPrep(null)}
           onStarted={(s) => {
             setPrep(null)
@@ -125,6 +135,16 @@ export function TaskClaudeSection({
           run={selected}
           log={runs.log}
           onCancel={() => void window.orkio.claude.cancel(selected.id)}
+          {...(!active && !prep ? { onRerun: () => void prepare(selected) } : {})}
+        />
+      )}
+
+      {state && (
+        <TaskArtifacts
+          projectId={projectId}
+          taskId={taskId}
+          runId={selected?.id ?? null}
+          refreshKey={`${state.runs.length}:${state.activeRunId ?? ''}:${state.workspace?.changes ?? ''}`}
         />
       )}
 
@@ -150,16 +170,27 @@ export function TaskClaudeSection({
                 label={`${STATUS_LABEL[r.status]} · ${r.command ? `/${r.command}` : 'prompt'}`}
                 description={formatDate(r.startedAt)}
                 endContent={
-                  r.id === runs.selectedRunId ? (
-                    <Token size="sm" label="Exibindo" />
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      label="Ver log"
-                      onClick={() => void runs.select(r.id)}
-                    />
-                  )
+                  <HStack gap={1} vAlign="center">
+                    {r.id === runs.selectedRunId ? (
+                      <Token size="sm" label="Exibindo" />
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        label="Ver log"
+                        onClick={() => void runs.select(r.id)}
+                      />
+                    )}
+                    {!active && !prep && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        label="Rodar de novo"
+                        aria-label={`Rodar de novo (${formatDate(r.startedAt)})`}
+                        onClick={() => void prepare(r)}
+                      />
+                    )}
+                  </HStack>
                 }
               />
             ))}
@@ -170,20 +201,29 @@ export function TaskClaudeSection({
   )
 }
 
+interface RunInitial {
+  mode: RunMode
+  command: string
+  text: string
+}
+const EMPTY_INITIAL: RunInitial = { mode: 'prompt', command: '', text: '' }
+
 function Composer({
   prep,
+  initial,
   projectId,
   onCancel,
   onStarted
 }: {
   prep: RunPreparation
+  initial: RunInitial
   projectId: string
   onCancel(): void
   onStarted(state: NonNullable<ReturnType<typeof useTaskRuns>['state']>): void
 }): React.JSX.Element {
-  const [mode, setMode] = useState<RunMode>('prompt')
-  const [command, setCommand] = useState('')
-  const [text, setText] = useState('')
+  const [mode, setMode] = useState<RunMode>(initial.mode)
+  const [command, setCommand] = useState(initial.command)
+  const [text, setText] = useState(initial.text)
   const [briefing, setBriefing] = useState(prep.briefing)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -272,11 +312,13 @@ function Composer({
 function RunView({
   run,
   log,
-  onCancel
+  onCancel,
+  onRerun
 }: {
   run: AgentRunView
   log: readonly RunLogEvent[]
   onCancel(): void
+  onRerun?: () => void
 }): React.JSX.Element {
   const [showAll, setShowAll] = useState(false)
   const live = run.status === 'running' || run.status === 'queued'
@@ -303,6 +345,15 @@ function RunView({
             label="Cancelar execução"
             icon={<Icon icon={StopIcon} />}
             onClick={onCancel}
+          />
+        )}
+        {!live && onRerun && (
+          <Button
+            size="sm"
+            variant="secondary"
+            label="Rodar de novo"
+            icon={<Icon icon={PlayIcon} />}
+            onClick={onRerun}
           />
         )}
       </HStack>

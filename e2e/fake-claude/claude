@@ -127,6 +127,23 @@ async function main() {
   ])
   toolResult('toolu_edit', false)
 
+  if (prompt.includes('escrever-doc')) {
+    mkdirSync(join(process.cwd(), 'docs'), { recursive: true })
+    writeFileSync(
+      join(process.cwd(), 'docs', 'exportar.md'),
+      '# Exportar CSV\n\n## Decisões\n\nSeparador ponto e vírgula. TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123\n'
+    )
+    assistant([
+      {
+        type: 'tool_use',
+        id: 'toolu_doc',
+        name: 'Write',
+        input: { file_path: join(process.cwd(), 'docs', 'exportar.md'), content: 'x' }
+      }
+    ])
+    toolResult('toolu_doc', false)
+  }
+
   if (prompt.includes('ler-env')) {
     writeFileSync(join(process.cwd(), '.env'), 'SEGREDO_E2E=valor-super-secreto-123\n')
     assistant([

@@ -153,7 +153,7 @@ describe('migração v4 (4A)', () => {
     const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v4-'))
     const file = join(dir, 'orkio.db')
     openDatabase(file, MIGRATIONS.slice(0, 3)).close()
-    const db = openDatabase(file)
+    const db = openDatabase(file, MIGRATIONS.slice(0, 4))
     expect(db.version).toBe(4)
     db.run(
       "INSERT INTO agent_runs (id, task_page_id, project_id, mode, status, started_at) VALUES ('r', 't', 'p', 'prompt', 'running', 'x')"
@@ -167,6 +167,30 @@ describe('migração v4 (4A)', () => {
     expect(() =>
       db.run("INSERT INTO permission_rules VALUES ('p', 'Bash', 'npm test', 'y')")
     ).toThrow()
+    db.close()
+    await rm(dir, { recursive: true, force: true })
+  })
+
+  it('v4 → v5 guarda o texto da execução e cria task_artifacts (caminho + commit únicos)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v5-'))
+    const file = join(dir, 'orkio.db')
+    const old = openDatabase(file, MIGRATIONS.slice(0, 4))
+    old.run(
+      "INSERT INTO agent_runs (id, task_page_id, project_id, mode, status, started_at) VALUES ('r', 't', 'p', 'prompt', 'succeeded', 'x')"
+    )
+    old.close()
+    const db = openDatabase(file, MIGRATIONS.slice(0, 5))
+    expect(db.version).toBe(5)
+    expect(
+      db.get<{ input_text: string | null }>("SELECT input_text FROM agent_runs WHERE id = 'r'")
+    ).toEqual({ input_text: null })
+    const add = (id: string): unknown =>
+      db.run(
+        `INSERT INTO task_artifacts (id, task_page_id, project_id, path, commit_hash, attached_at) VALUES (?, 't', 'p', 'docs/a.md', 'abc', 'x')`,
+        id
+      )
+    add('a1')
+    expect(() => add('a2')).toThrow()
     db.close()
     await rm(dir, { recursive: true, force: true })
   })

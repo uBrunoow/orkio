@@ -164,6 +164,11 @@ const api: OrkioApi = {
       ipcRenderer.invoke(claude.openEditor, projectId, taskId, editor),
     diff: (projectId, taskId) => ipcRenderer.invoke(claude.diff, projectId, taskId),
     catalog: (projectId, taskId) => ipcRenderer.invoke(claude.catalog, projectId, taskId),
+    artifacts: (projectId, taskId) => ipcRenderer.invoke(claude.artifacts, projectId, taskId),
+    attachArtifact: (projectId, taskId, path, runId) =>
+      ipcRenderer.invoke(claude.attachArtifact, projectId, taskId, path, runId),
+    publishArtifact: (projectId, artifactId, mode) =>
+      ipcRenderer.invoke(claude.publishArtifact, projectId, artifactId, mode),
     onRunEvent: (listener) => {
       const handler = (_event: unknown, payload: unknown): void => {
         if (isRunEventMessage(payload)) listener(payload)
