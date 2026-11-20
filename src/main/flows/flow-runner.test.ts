@@ -9,6 +9,7 @@ import {
   FlowRunner,
   NOOP_ACTION,
   ORKIO_LINES_EXTRACTOR,
+  type FlowExtractor,
   type FlowRunnerDeps
 } from './flow-runner'
 
@@ -50,7 +51,13 @@ const flush = (): Promise<void> => new Promise((r) => setImmediate(() => setImme
 
 let db: Db
 let store: BoardStore
-let started: { runId: string; command: string; args: string; briefing: string }[]
+let started: {
+  runId: string
+  command: string
+  args: string
+  briefing: string
+  includeBriefing?: boolean
+}[]
 let cancelled: string[]
 let notifications: string[]
 let stage: string | null
@@ -67,7 +74,13 @@ function makeRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
     prepare: prepare as unknown as FlowRunnerDeps['prepare'],
     startClaude: async (input) => {
       const runId = `run-${started.length + 1}`
-      started.push({ runId, command: input.command, args: input.args, briefing: input.briefing })
+      started.push({
+        runId,
+        command: input.command,
+        args: input.args,
+        briefing: input.briefing,
+        includeBriefing: input.includeBriefing
+      })
       return runId
     },
     cancelClaude: (id) => cancelled.push(id),
@@ -315,5 +328,141 @@ describe('FlowRunner', () => {
     const r2 = makeRunner()
     r2.init()
     expect(r2.view(id)).toMatchObject({ status: 'paused', pauseReason: 'interrupted' })
+  })
+
+  describe('5B: capacidades genéricas', () => {
+    const CHOOSER: FlowExtractor = {
+      id: 'escolhe',
+      label: 'Escolhe',
+      snapshot: async () => ['antes'],
+      extract: ({ resultText, snapshot }) =>
+        resultText === 'nada'
+          ? { fail: 'Nada foi criado.' }
+          : resultText === 'varias'
+            ? {
+                vars: { 'x.antes': String((snapshot as string[])[0]) },
+                choose: {
+                  prompt: 'Qual?',
+                  options: [
+                    { value: 'A', label: 'A' },
+                    { value: 'B', label: 'B' }
+                  ]
+                }
+              }
+            : { vars: { 'x.id': resultText } },
+      resolveChoice: async ({ value }) => ({ vars: { 'x.id': value } })
+    }
+    const ALVA: Flow = {
+      id: 'alva',
+      name: 'Alva',
+      tags: ['alva'],
+      steps: [
+        {
+          id: 'spec',
+          name: 'Spec',
+          type: 'claude_command',
+          command: 'alva-flow:spec',
+          args: '{{alva.spec_arg}}',
+          timeoutMin: 60,
+          includeBriefing: false,
+          extract: { extractor: 'escolhe' }
+        },
+        {
+          id: 'plan',
+          name: 'Plan',
+          type: 'claude_command',
+          command: 'alva-flow:plan',
+          args: '{{x.id}} {{task_title}}',
+          timeoutMin: 60
+        },
+        { id: 'push', name: 'Push', type: 'orkio_action', action: 'push' }
+      ]
+    }
+    const PUSH = { id: 'push', label: 'Push', pending: 'Push chega na 5C.', run: NOOP_ACTION.run }
+
+    function alvaRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
+      config = {
+        flows: [ALVA],
+        bindings: [{ stageId: 's-rev', flowId: 'alva', enabled: true, mode: 'manual' }]
+      }
+      prepare.mockResolvedValue({
+        briefing: '# ORK-1',
+        displayId: 'ORK-1',
+        title: 'Exportar CSV',
+        notionUrl: null
+      })
+      return makeRunner({
+        extractors: [CHOOSER],
+        actions: [PUSH],
+        initialVars: async () => ({ 'alva.spec_arg': 'ORK-1 — Exportar CSV' }),
+        ...over
+      })
+    }
+
+    it('variáveis iniciais, sem briefing nos argumentos, escolha pedida pelo extrator e ação pendente', async () => {
+      const runner = alvaRunner()
+      const { id } = await runner.startManual('p1', 't1')
+      expect(started[0]).toMatchObject({ args: 'ORK-1 — Exportar CSV', includeBriefing: false })
+      finish(runner, 'run-1', 'succeeded', 'varias')
+      await flush()
+      let v = runner.view(id)
+      expect(v).toMatchObject({ status: 'paused', pauseReason: 'needs_choice' })
+      expect(v.choice).toEqual({
+        prompt: 'Qual?',
+        options: [
+          { value: 'A', label: 'A' },
+          { value: 'B', label: 'B' }
+        ]
+      })
+      await expect(runner.choose(id, 'Z')).rejects.toThrow('Opção inválida')
+      await runner.choose(id, 'B')
+      expect(started[1]).toMatchObject({ args: 'B Exportar CSV', includeBriefing: true })
+      expect(runner.view(id).vars).toMatchObject({ 'x.id': 'B', 'x.antes': 'antes' })
+      finish(runner, 'run-2', 'succeeded')
+      await flush()
+      v = runner.view(id)
+      expect(v).toMatchObject({ status: 'waiting_gate', currentStep: 'push' })
+      expect(notifications).toContain('Um fluxo espera você')
+      await runner.approveGate(id) // fez o push à mão
+      expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'done' })
+    })
+
+    it('extrator que falha pausa o fluxo com a mensagem', async () => {
+      const runner = alvaRunner()
+      const { id } = await runner.startManual('p1', 't1')
+      finish(runner, 'run-1', 'succeeded', 'nada')
+      await flush()
+      expect(runner.view(id)).toMatchObject({ status: 'paused', pauseReason: 'step_failed' })
+      expect(runner.view(id).history[0]).toMatchObject({
+        status: 'failed',
+        message: 'Nada foi criado.'
+      })
+    })
+
+    it('recusar a ação pendente cancela o fluxo', async () => {
+      const runner = alvaRunner()
+      const { id } = await runner.startManual('p1', 't1')
+      finish(runner, 'run-1', 'succeeded', 'A')
+      await flush()
+      finish(runner, 'run-2', 'succeeded')
+      await flush()
+      await runner.rejectGate(id)
+      expect(runner.view(id)).toMatchObject({ status: 'cancelled' })
+    })
+
+    it('limite por projeto: o segundo fluxo Alva espera vaga e começa sozinho', async () => {
+      const runner = alvaRunner({ concurrencyLimit: () => 1 })
+      const first = await runner.startManual('p1', 't1')
+      const second = await runner.startManual('p1', 't2')
+      expect(runner.view(second.id)).toMatchObject({
+        status: 'paused',
+        pauseReason: 'waiting_slot'
+      })
+      expect(started).toHaveLength(1)
+      await runner.cancel(first.id)
+      await flush()
+      expect(runner.view(second.id).status).toBe('running')
+      expect(started).toHaveLength(2)
+    })
   })
 })

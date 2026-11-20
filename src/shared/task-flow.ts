@@ -33,6 +33,11 @@ export type ClaudeCommandStep = StepBase & {
   timeoutMin: number
   /** Extrator registrado em código que grava variáveis do fluxo a partir do resultado. */
   extract?: { extractor: string }
+  /**
+   * Junta o briefing ao texto enviado (padrão: sim). Em comandos que tratam `$ARGUMENTS` como
+   * ID (ex.: alva-flow), use `false`: o briefing fica só em `.orkio/briefing.md`.
+   */
+  includeBriefing?: boolean
 }
 
 export type GateStep = StepBase & {
@@ -62,6 +67,8 @@ export interface Flow {
   id: string
   name: string
   steps: Step[]
+  /** Marcadores (ex.: `alva`, para o limite de fluxos em paralelo por projeto). */
+  tags?: string[]
 }
 
 export interface StageFlow {
@@ -75,6 +82,8 @@ export interface StageFlow {
 export interface ProjectFlows {
   flows: Flow[]
   bindings: StageFlow[]
+  /** 5B: quantos fluxos Alva podem rodar ao mesmo tempo no projeto (Docker/portas). */
+  alva?: { maxParallel: number }
 }
 
 /** Trava de segurança: passos executados (inclui saltos avaliados) num mesmo fluxo. */
@@ -227,12 +236,18 @@ export function retryStep(flow: Flow, state: FlowState, stepId: StepId): FlowDec
 export interface TemplateContext {
   briefingPath: string
   taskId: string
+  taskTitle?: string
   notionUrl: string | null
   vars: Record<string, string>
 }
 
 const TEMPLATE_VAR = /\{\{\s*([\w.-]+)\s*\}\}/g
-const KNOWN_VARS = new Set(['briefing_path', 'task_id', 'notion_url'])
+const KNOWN_VARS = new Set(['briefing_path', 'task_id', 'task_title', 'notion_url'])
+/** Variáveis de integrações (ex.: `alva.task_id`), gravadas por extratores ou no início do fluxo. */
+const NAMESPACED_VAR = /^[a-z][a-z0-9_]*\.[a-z0-9_.]+$/
+
+/** Chave de variável do fluxo (aceita namespace com ponto, ex.: `alva.task_id`). */
+export const VAR_KEY = /^[a-z][a-z0-9_.]{0,39}$/
 
 export function renderArgs(
   template: string,
@@ -242,6 +257,7 @@ export function renderArgs(
   const text = template.replace(TEMPLATE_VAR, (_m, name: string) => {
     if (name === 'briefing_path') return ctx.briefingPath
     if (name === 'task_id') return ctx.taskId
+    if (name === 'task_title') return ctx.taskTitle ?? ''
     if (name === 'notion_url') {
       if (ctx.notionUrl) return ctx.notionUrl
       missing.push(name)
@@ -249,6 +265,9 @@ export function renderArgs(
     }
     if (name.startsWith('flow.')) {
       const v = ctx.vars[name.slice(5)]
+      if (v !== undefined) return v
+    } else if (NAMESPACED_VAR.test(name)) {
+      const v = ctx.vars[name]
       if (v !== undefined) return v
     }
     missing.push(name)
@@ -331,7 +350,7 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
           err(step.id, `${label}: o tempo limite deve ficar entre 1 e 720 minutos.`)
         }
         for (const v of templateVars(step.args)) {
-          if (!KNOWN_VARS.has(v) && !v.startsWith('flow.')) {
+          if (!KNOWN_VARS.has(v) && !v.startsWith('flow.') && !NAMESPACED_VAR.test(v)) {
             warn(step.id, `${label}: variável desconhecida {{${v}}} (fica vazia).`)
           }
         }
@@ -419,7 +438,15 @@ export type FlowStepStatus =
 
 /** Por que o fluxo parou e espera você. */
 export type FlowPauseReason =
-  'step_failed' | 'interrupted' | 'loop_guard' | 'gate_timeout' | 'left_stage'
+  | 'step_failed'
+  | 'interrupted'
+  | 'loop_guard'
+  | 'gate_timeout'
+  | 'left_stage'
+  /** Um extrator precisa que você escolha (ex.: qual task do Backlog é desta tarefa). */
+  | 'needs_choice'
+  /** Limite de fluxos em paralelo no projeto: começa sozinho quando outro terminar. */
+  | 'waiting_slot'
 
 export interface FlowStepView {
   seq: number
@@ -449,6 +476,8 @@ export interface FlowRunView {
   endedAt: string | null
   vars: Record<string, string>
   history: FlowStepView[]
+  /** Escolha pedida por um extrator (`needs_choice`). */
+  choice: { prompt: string; options: { value: string; label: string }[] } | null
 }
 
 export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {
@@ -456,7 +485,9 @@ export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {
   interrupted: 'O Orkio foi fechado no meio do passo',
   loop_guard: 'Limite de passos atingido (possível loop)',
   gate_timeout: 'A aprovação expirou',
-  left_stage: 'A tarefa saiu da etapa do fluxo'
+  left_stage: 'A tarefa saiu da etapa do fluxo',
+  needs_choice: 'O fluxo precisa de uma escolha sua',
+  waiting_slot: 'Aguardando outro fluxo do projeto terminar'
 }
 
 /** Fluxo ativo (não terminado) espera uma ação sua? */

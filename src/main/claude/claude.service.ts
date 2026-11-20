@@ -199,6 +199,7 @@ export class ClaudeService {
     args: string
     briefing: string
     timeoutMin: number
+    includeBriefing?: boolean
   }): Promise<ClaudeResult<string>> {
     return this.wrap(() =>
       this.startRun(
@@ -210,7 +211,8 @@ export class ClaudeService {
           text: input.args,
           briefing: input.briefing
         },
-        input.timeoutMin
+        input.timeoutMin,
+        input.includeBriefing !== false
       )
     )
   }
@@ -219,7 +221,9 @@ export class ClaudeService {
   flowContext(
     projectId: string,
     taskId: string
-  ): Promise<ClaudeResult<{ briefing: string; displayId: string; notionUrl: string | null }>> {
+  ): Promise<
+    ClaudeResult<{ briefing: string; displayId: string; title: string; notionUrl: string | null }>
+  > {
     return this.wrap(async () => {
       const prep = await this.prepare(projectId, taskId)
       if (!prep.ok) return prep
@@ -227,12 +231,17 @@ export class ClaudeService {
       return ok({
         briefing: prep.value.briefing,
         displayId: prep.value.displayId,
+        title: task.title,
         notionUrl: task.url
       })
     })
   }
 
-  private async startRun(req: StartRunRequest, timeoutMin?: number): Promise<ClaudeResult<string>> {
+  private async startRun(
+    req: StartRunRequest,
+    timeoutMin?: number,
+    includeBriefing = true
+  ): Promise<ClaudeResult<string>> {
     const project = this.project(req.projectId)
     const status = await this.getStatus(true)
     if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
@@ -256,7 +265,8 @@ export class ClaudeService {
       command: req.mode === 'command' ? req.command : null,
       text: req.text,
       briefing: req.briefing,
-      ...(timeoutMin ? { timeoutMin } : {})
+      ...(timeoutMin ? { timeoutMin } : {}),
+      includeBriefing
     })
     return ok(view.id)
   }

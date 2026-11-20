@@ -28,7 +28,7 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
 import type { Condition, Flow, ProjectFlows, StageFlow, Step } from '../../shared/task-flow'
 
-export const ORKIO_CONFIG_VERSION = 6
+export const ORKIO_CONFIG_VERSION = 7
 
 export interface StoredProject {
   id: string
@@ -98,7 +98,10 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
       // v4 → v5: nenhum contexto do Claude Code ainda.
       4: (data) => ({ ...data, claudeContexts: {} }),
       // v5 → v6: nenhum fluxo de tarefa ainda.
-      5: (data) => ({ ...data, flows: {} })
+      5: (data) => ({ ...data, flows: {} }),
+      // v6 → v7 (5B): só campos opcionais novos nos fluxos (includeBriefing, tags, limite Alva);
+      // os fluxos existentes continuam iguais.
+      6: (data) => ({ ...data })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -389,6 +392,9 @@ export function parseStep(v: unknown): Step | null {
         timeoutMin: v['timeoutMin'],
         ...(isRecord(v['extract']) && str(v['extract']['extractor'])
           ? { extract: { extractor: v['extract']['extractor'] } }
+          : {}),
+        ...(typeof v['includeBriefing'] === 'boolean'
+          ? { includeBriefing: v['includeBriefing'] }
           : {})
       }
     case 'gate': {
@@ -429,7 +435,10 @@ export function parseFlowDef(v: unknown): Flow | null {
   }
   const steps = v['steps'].map(parseStep)
   if (!steps.every((s): s is Step => s !== null)) return null
-  return { id: v['id'], name: v['name'], steps }
+  const tags = Array.isArray(v['tags'])
+    ? v['tags'].filter((t): t is string => str(t) && /^[a-z0-9_-]{1,20}$/.test(t)).slice(0, 5)
+    : []
+  return { id: v['id'], name: v['name'], steps, ...(tags.length > 0 ? { tags } : {}) }
 }
 
 function parseBinding(v: unknown): StageFlow | null {
@@ -449,5 +458,13 @@ export function parseProjectFlows(v: unknown): { value: ProjectFlows; dropped: n
   for (const b of rawBindings.map(parseBinding)) {
     if (b && ids.has(b.flowId) && !bindings.some((x) => x.stageId === b.stageId)) bindings.push(b)
   }
-  return { value: { flows, bindings }, dropped: rawFlows.length - flows.length }
+  const alvaRaw = isRecord(v) && isRecord(v['alva']) ? v['alva'] : null
+  const maxParallel =
+    alvaRaw && typeof alvaRaw['maxParallel'] === 'number'
+      ? Math.min(4, Math.max(1, Math.floor(alvaRaw['maxParallel'])))
+      : null
+  return {
+    value: { flows, bindings, ...(maxParallel !== null ? { alva: { maxParallel } } : {}) },
+    dropped: rawFlows.length - flows.length
+  }
 }

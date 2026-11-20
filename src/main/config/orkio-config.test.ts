@@ -263,7 +263,7 @@ describe('orkio-config v2/v3', () => {
     const { data } = await createOrkioConfigStore(file).load()
     expect(data.flows).toEqual({})
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(6)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
 
     const parsed = validateConfig({
       projects: [],
@@ -306,5 +306,42 @@ describe('orkio-config v2/v3', () => {
       { stageId: 's1', flowId: 'f1', enabled: true, mode: 'on_enter' }
     ])
     expect(parsed?.warning).toContain('1 fluxo(s) de tarefa inválido(s)')
+  })
+
+  it('migra v6 → v7: fluxos iguais; campos novos opcionais lidos (includeBriefing, tags, alva)', async () => {
+    const flow = {
+      id: 'f1',
+      name: 'Alva',
+      tags: ['alva', 'NÃO VALE'],
+      steps: [
+        {
+          id: 'spec',
+          name: 'Spec',
+          type: 'claude_command',
+          command: 'alva-flow:spec',
+          args: '{{alva.spec_arg}}',
+          timeoutMin: 60,
+          includeBriefing: false
+        }
+      ]
+    }
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 6,
+        projects: [{ ...PROJECT, notionProject: null }],
+        notion: NOTION,
+        boards: {},
+        automation: { paused: false },
+        claudeContexts: {},
+        flows: { p1: { flows: [flow], bindings: [], alva: { maxParallel: 9 } } }
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    const pf = data.flows['p1']!
+    expect(pf.flows[0]).toEqual({ ...flow, tags: ['alva'] })
+    expect(pf.alva).toEqual({ maxParallel: 4 })
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(7)
   })
 })

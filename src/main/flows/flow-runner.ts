@@ -19,6 +19,7 @@ import {
   retryStep,
   skipStep,
   startFlow,
+  VAR_KEY,
   type Flow,
   type FlowDecision,
   type FlowPauseReason,
@@ -57,16 +58,47 @@ export class FlowError extends Error {
 }
 
 /** Extrator: grava variáveis do fluxo a partir do resultado de um comando. */
+/** Contexto de um passo para extratores (sem segredos; o worktree é local). */
+export interface ExtractContext {
+  projectId: string
+  taskId: string
+  stepId: string
+  command: string
+  worktreePath: string | null
+}
+
+/** O que um extrator devolve: variáveis, falha do passo ou uma escolha para o usuário. */
+export interface ExtractResult {
+  vars?: Record<string, string>
+  /** O passo conta como falho, com esta mensagem (o fluxo pausa). */
+  fail?: string
+  /** O fluxo pausa até você escolher; `resolveChoice` transforma a escolha em variáveis. */
+  choose?: { prompt: string; options: { value: string; label: string }[] }
+}
+
+/** Extrator: grava variáveis do fluxo a partir do resultado (e do repositório) de um comando. */
 export interface FlowExtractor {
   id: string
   label: string
-  extract(input: { resultText: string }): Record<string, string>
+  /** Antes do passo (ex.: lista de arquivos), para comparar depois. Fica só em memória. */
+  snapshot?(ctx: ExtractContext): Promise<unknown>
+  extract(input: {
+    resultText: string
+    ctx: ExtractContext
+    snapshot: unknown
+  }): ExtractResult | Promise<ExtractResult>
+  resolveChoice?(input: { ctx: ExtractContext; value: string }): Promise<ExtractResult>
 }
 
 /** Ação do próprio Orkio (5C implementa push / pedir review). */
 export interface OrkioAction {
   id: string
   label: string
+  /**
+   * Ação ainda não implementada (ex.: push antes da 5C): o passo vira uma espera que você
+   * aprova depois de fazer à mão (recusar cancela o fluxo).
+   */
+  pending?: string
   run(ctx: {
     projectId: string
     taskId: string
@@ -77,6 +109,7 @@ export interface OrkioAction {
 export interface FlowContext {
   briefing: string
   displayId: string
+  title?: string
   notionUrl: string | null
 }
 
@@ -97,10 +130,20 @@ export interface FlowRunnerDeps {
     args: string
     briefing: string
     timeoutMin: number
+    includeBriefing: boolean
   }): Promise<string>
   cancelClaude(runId: string): void
   extractors: readonly FlowExtractor[]
   actions: readonly OrkioAction[]
+  /** Pasta do worktree da tarefa (para extratores). */
+  worktreePath?: (taskId: string) => string | null
+  /** Variáveis no início do fluxo (ex.: `alva.task_id` do vínculo salvo). */
+  initialVars?: (projectId: string, taskId: string) => Promise<Record<string, string>>
+  /**
+   * Limite de fluxos com o mesmo marcador em paralelo no projeto (ex.: Alva com Docker);
+   * `null` = sem limite. Excedente espera e começa sozinho quando liberar.
+   */
+  concurrencyLimit?: (projectId: string, flow: Flow) => number | null
   notify(title: string, body: string, ref: { projectId: string; taskId: string }): void
   /** Algo mudou no fluxo da tarefa (a tela recarrega). */
   emit(ref: { projectId: string; taskId: string }): void
@@ -142,15 +185,26 @@ interface Persisted {
   notionUrl: string | null
   /** Passo que terminou enquanto o fluxo esperava sua decisão (tarefa saiu da etapa). */
   pendingEnd?: { stepId: string; end: StepEnd } | null
+  /** Escolha pedida por um extrator; `vars` já extraídas antes da escolha. */
+  pendingChoice?: {
+    stepId: string
+    extractor: string
+    prompt: string
+    options: { value: string; label: string }[]
+    vars: Record<string, string>
+  } | null
 }
 
 const ACTIVE: readonly FlowRunStatus[] = ['running', 'waiting_gate', 'paused', 'awaiting_decision']
 
 export class FlowRunner {
-  private readonly briefings = new Map<string, string>()
+  /** Briefing e título da tarefa por fluxo (só em memória; refeitos ao retomar). */
+  private readonly briefings = new Map<string, { briefing: string; title?: string }>()
   /** Execução da 4A → passo do fluxo. */
   private readonly runIndex = new Map<string, { flowRunId: string; rowId: number }>()
   private readonly gateTimers = new Map<string, NodeJS.Timeout>()
+  /** "Antes do passo" dos extratores, por execução da 4A (só em memória). */
+  private readonly snapshots = new Map<string, unknown>()
   private readonly locks = new Map<string, Promise<void>>()
   /** Fechando o app: fins de execução (cancelAll) não contam; ao reabrir viram "interrompido". */
   private disposed = false
@@ -193,6 +247,12 @@ export class FlowRunner {
       } else if (row.status === 'waiting_gate') {
         this.armGateTimer(row)
       }
+    }
+    // Quem esperava vaga e já pode começar (ex.: o outro fluxo terminou com o app fechado).
+    for (const r of this.deps.db.all<{ project_id: string }>(
+      `SELECT DISTINCT project_id FROM flow_runs WHERE status = 'paused' AND pause_reason = 'waiting_slot'`
+    )) {
+      this.promoteWaiting(r.project_id)
     }
   }
 
@@ -254,27 +314,123 @@ export class FlowRunner {
       displayId: '',
       notionUrl: null
     }
+    const waits = !this.hasSlot(projectId, flow)
     this.deps.store.transaction(() => {
       this.deps.db.run(
-        `INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, stage_id, status, state_json, started_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?)`,
+        `INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, stage_id, status, pause_reason, state_json, started_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         taskId,
         projectId,
         flow.id,
         JSON.stringify(flow),
         stageId,
+        waits ? 'paused' : 'running',
+        waits ? 'waiting_slot' : null,
         JSON.stringify(persisted),
         this.now()
       )
-      this.event(this.row(id), 'flow_started', { flow: flow.name })
+      this.event(this.row(id), 'flow_started', {
+        flow: flow.name,
+        ...(waits ? { waiting: true } : {})
+      })
     })
     this.deps.emit({ projectId, taskId })
-    await this.withLock(id, async () => {
-      const decision = startFlow(flow)
-      await this.apply(id, decision)
-    })
+    if (!waits) await this.withLock(id, () => this.begin(id))
     return this.view(id)
+  }
+
+  /** Primeiro passo (com as variáveis iniciais da integração). */
+  private async begin(id: string): Promise<void> {
+    const row = this.row(id)
+    const vars = await this.safeInitialVars(row)
+    this.deps.db.run(
+      `UPDATE flow_runs SET status = 'running', pause_reason = NULL WHERE id = ?`,
+      id
+    )
+    await this.apply(id, startFlow(this.flow(row), vars))
+  }
+
+  private async safeInitialVars(row: RunRow): Promise<Record<string, string>> {
+    try {
+      return cleanVars((await this.deps.initialVars?.(row.project_id, row.task_page_id)) ?? {})
+    } catch (error) {
+      console.error(`[orkio] fluxo (variáveis iniciais): ${errorName(error)}`)
+      return {}
+    }
+  }
+
+  /** Cabe mais um fluxo com este marcador no projeto? */
+  private hasSlot(projectId: string, flow: Flow): boolean {
+    const tag = flow.tags?.[0]
+    const limit = tag ? (this.deps.concurrencyLimit?.(projectId, flow) ?? null) : null
+    if (!tag || limit === null) return true
+    const busy = this.deps.db
+      .all<RunRow>(
+        `SELECT * FROM flow_runs WHERE project_id = ? AND status IN ('running', 'waiting_gate', 'paused', 'awaiting_decision') AND COALESCE(pause_reason, '') != 'waiting_slot'`,
+        projectId
+      )
+      .filter((r) => this.flow(r).tags?.includes(tag)).length
+    return busy < limit
+  }
+
+  /** Um fluxo terminou: começa o próximo que esperava vaga no projeto (o mais antigo). */
+  private promoteWaiting(projectId: string): void {
+    const waiting = this.deps.db.all<RunRow>(
+      `SELECT * FROM flow_runs WHERE project_id = ? AND status = 'paused' AND pause_reason = 'waiting_slot' ORDER BY started_at`,
+      projectId
+    )
+    for (const row of waiting) {
+      if (!this.hasSlot(projectId, this.flow(row))) continue
+      void this.withLock(row.id, async () => {
+        const r = this.row(row.id)
+        if (r.status !== 'paused' || r.pause_reason !== 'waiting_slot') return
+        await this.begin(row.id)
+      }).catch((error: unknown) => {
+        console.error(`[orkio] fluxo (vaga liberada): ${errorName(error)}`)
+      })
+      return
+    }
+  }
+
+  /** Você escolheu uma opção pedida por um extrator. */
+  async choose(flowRunId: string, value: string): Promise<FlowRunView> {
+    await this.withLock(flowRunId, async () => {
+      const row = this.row(flowRunId)
+      const p = this.persisted(row)
+      const pc = p.pendingChoice
+      if (row.status !== 'paused' || row.pause_reason !== 'needs_choice' || !pc) {
+        throw new FlowError('wrong_state', FLOW_MESSAGES.wrongState)
+      }
+      if (!pc.options.some((o) => o.value === value)) {
+        throw new FlowError('invalid', 'Opção inválida. Atualize a tela.')
+      }
+      const ex = this.deps.extractors.find((e) => e.id === pc.extractor)
+      const step = this.flow(row).steps.find((st) => st.id === pc.stepId)
+      const ctx = this.extractContext(
+        row,
+        pc.stepId,
+        step?.type === 'claude_command' ? step.command : ''
+      )
+      const r = ex?.resolveChoice ? await ex.resolveChoice({ ctx, value }) : {}
+      this.savePersisted(flowRunId, { ...p, pendingChoice: null })
+      this.event(row, 'step_finished', { step: pc.stepId, choice: value })
+      if (r.fail) {
+        await this.apply(
+          flowRunId,
+          afterStep(this.flow(row), p.engine, pc.stepId, { outcome: 'failed' })
+        )
+        return
+      }
+      await this.apply(
+        flowRunId,
+        afterStep(this.flow(row), p.engine, pc.stepId, {
+          outcome: 'ok',
+          vars: { ...pc.vars, ...cleanVars(r.vars ?? {}) }
+        })
+      )
+    })
+    return this.view(flowRunId)
   }
 
   // ---------- Ações do usuário ----------
@@ -302,6 +458,19 @@ export class FlowRunner {
         step: row.current_step
       })
       const p = this.persisted(row)
+      const step = this.flow(row).steps.find((st) => st.id === row.current_step)
+      if (step?.type === 'orkio_action') {
+        // Ação pendente (feita à mão): aprovar segue; recusar cancela o fluxo.
+        if (outcome === 'rejected') {
+          this.finishRun(row, 'cancelled', 'cancelled')
+          return
+        }
+        await this.apply(
+          flowRunId,
+          afterStep(this.flow(row), p.engine, row.current_step, { outcome: 'ok' })
+        )
+        return
+      }
       await this.apply(
         flowRunId,
         afterStep(this.flow(row), p.engine, row.current_step, { outcome })
@@ -403,7 +572,8 @@ export class FlowRunner {
 
   // ---------- Fim das execuções da 4A ----------
 
-  onRunFinished(info: RunFinished): void {
+  onRunFinished(finished: RunFinished): void {
+    let info = finished
     if (this.disposed) return
     const ref = this.runIndex.get(info.runId)
     if (!ref) return
@@ -414,12 +584,22 @@ export class FlowRunner {
       if (!current || current.status !== 'running') return
       const step = this.flow(row).steps.find((s) => s.id === current.step_id)
       let end: StepEnd
-      if (info.status === 'succeeded') {
-        const vars =
-          step?.type === 'claude_command' && step.extract
-            ? this.extract(step.extract.extractor, info.resultText)
-            : {}
-        end = { outcome: 'ok', vars }
+      let extracted: ExtractResult = {}
+      if (info.status === 'succeeded' && step?.type === 'claude_command' && step.extract) {
+        extracted = await this.extract(
+          row,
+          step.extract.extractor,
+          step.id,
+          step.command,
+          info.resultText,
+          info.runId
+        )
+      }
+      if (info.status === 'succeeded' && extracted.fail) {
+        end = { outcome: 'failed' }
+        info = { ...info, message: extracted.fail }
+      } else if (info.status === 'succeeded') {
+        end = { outcome: 'ok', vars: cleanVars(extracted.vars ?? {}) }
       } else {
         end = { outcome: info.status === 'cancelled' ? 'cancelled' : 'failed' }
       }
@@ -434,6 +614,27 @@ export class FlowRunner {
         runId: info.runId,
         ...(info.message ? { message: info.message } : {})
       })
+      if (extracted.choose && end.outcome === 'ok' && row.status === 'running') {
+        const p = this.persisted(row)
+        this.savePersisted(ref.flowRunId, {
+          ...p,
+          pendingChoice: {
+            stepId: current.step_id,
+            extractor: step?.type === 'claude_command' ? (step.extract?.extractor ?? '') : '',
+            prompt: extracted.choose.prompt,
+            options: extracted.choose.options.slice(0, 20),
+            vars: end.vars ?? {}
+          }
+        })
+        this.deps.db.run(
+          `UPDATE flow_runs SET status = 'paused', pause_reason = 'needs_choice' WHERE id = ?`,
+          ref.flowRunId
+        )
+        this.event(row, 'flow_paused', { reason: 'needs_choice', step: current.step_id })
+        this.notifyRow(row, 'Um fluxo precisa de você', extracted.choose.prompt)
+        this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
+        return
+      }
       if (row.status === 'awaiting_decision') {
         // Você ainda não decidiu: guarda o fim e espera.
         this.savePersisted(ref.flowRunId, {
@@ -516,7 +717,13 @@ export class FlowRunner {
       startedAt: row.started_at,
       endedAt: row.ended_at,
       vars: this.persisted(row).engine.vars,
-      history
+      history,
+      choice: this.persisted(row).pendingChoice
+        ? {
+            prompt: this.persisted(row).pendingChoice!.prompt,
+            options: this.persisted(row).pendingChoice!.options
+          }
+        : null
     }
   }
 
@@ -588,9 +795,17 @@ export class FlowRunner {
   ): Promise<void> {
     try {
       const ctx = await this.context(row)
+      // Extrator com "antes": tira a foto antes do comando rodar.
+      const ex = step.extract
+        ? this.deps.extractors.find((e) => e.id === step.extract!.extractor)
+        : undefined
+      const snap = ex?.snapshot
+        ? await ex.snapshot(this.extractContext(row, step.id, step.command)).catch(() => undefined)
+        : undefined
       const { text } = renderArgs(step.args, {
         briefingPath: '.orkio/briefing.md',
         taskId: ctx.displayId,
+        ...(ctx.title ? { taskTitle: ctx.title } : {}),
         notionUrl: ctx.notionUrl,
         vars: this.persisted(this.row(row.id)).engine.vars
       })
@@ -600,10 +815,12 @@ export class FlowRunner {
         command: step.command,
         args: text,
         briefing: ctx.briefing,
-        timeoutMin: step.timeoutMin
+        timeoutMin: step.timeoutMin,
+        includeBriefing: step.includeBriefing !== false
       })
       this.deps.db.run('UPDATE flow_steps SET run_id = ? WHERE id = ?', runId, rowId)
       this.runIndex.set(runId, { flowRunId: row.id, rowId })
+      if (snap !== undefined) this.snapshots.set(runId, snap)
       this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
     } catch (error) {
       // Não iniciou (Claude Code ausente, worktree...): falha, o fluxo pausa.
@@ -628,6 +845,16 @@ export class FlowRunner {
     step: Extract<Step, { type: 'orkio_action' }>
   ): Promise<void> {
     const action = this.deps.actions.find((a) => a.id === step.action)
+    if (action?.pending) {
+      // Ainda não existe (ex.: push antes da 5C): espera você fazer à mão e aprovar.
+      this.deps.db.run(
+        `UPDATE flow_steps SET status = 'waiting' WHERE id = (SELECT MAX(id) FROM flow_steps WHERE flow_run_id = ?)`,
+        row.id
+      )
+      this.setStatus(row.id, 'waiting_gate', null)
+      this.notifyRow(row, 'Um fluxo espera você', action.pending)
+      return
+    }
     const engine = this.persisted(this.row(row.id)).engine
     let end: StepEnd
     let message: string | null = null
@@ -686,6 +913,7 @@ export class FlowRunner {
     this.event(row, 'flow_finished', { result })
     this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
     this.briefings.delete(row.id)
+    this.promoteWaiting(row.project_id)
   }
 
   private closeStep(
@@ -758,25 +986,53 @@ export class FlowRunner {
     const cached = this.briefings.get(row.id)
     const p = this.persisted(row)
     if (cached !== undefined && p.displayId) {
-      return { briefing: cached, displayId: p.displayId, notionUrl: p.notionUrl }
+      return {
+        briefing: cached.briefing,
+        displayId: p.displayId,
+        notionUrl: p.notionUrl,
+        ...(cached.title ? { title: cached.title } : {})
+      }
     }
     const ctx = await this.deps.prepare(row.project_id, row.task_page_id)
-    this.briefings.set(row.id, ctx.briefing)
+    this.briefings.set(row.id, {
+      briefing: ctx.briefing,
+      ...(ctx.title ? { title: ctx.title } : {})
+    })
     this.savePersisted(row.id, { ...p, displayId: ctx.displayId, notionUrl: ctx.notionUrl })
     return ctx
   }
 
-  private extract(extractorId: string, resultText: string): Record<string, string> {
+  private async extract(
+    row: RunRow,
+    extractorId: string,
+    stepId: string,
+    command: string,
+    resultText: string,
+    runId: string
+  ): Promise<ExtractResult> {
     const ex = this.deps.extractors.find((e) => e.id === extractorId)
+    const snapshot = this.snapshots.get(runId)
+    this.snapshots.delete(runId)
     if (!ex) return {}
     try {
-      const out: Record<string, string> = {}
-      for (const [k, v] of Object.entries(ex.extract({ resultText })).slice(0, 20)) {
-        if (/^[a-z][a-z0-9_]{0,39}$/.test(k)) out[k] = redactSecrets(String(v)).slice(0, 500)
-      }
-      return out
-    } catch {
+      return await ex.extract({
+        resultText,
+        ctx: this.extractContext(row, stepId, command),
+        snapshot
+      })
+    } catch (error) {
+      console.error(`[orkio] extrator ${extractorId}: ${errorName(error)}`)
       return {}
+    }
+  }
+
+  private extractContext(row: RunRow, stepId: string, command: string): ExtractContext {
+    return {
+      projectId: row.project_id,
+      taskId: row.task_page_id,
+      stepId,
+      command,
+      worktreePath: this.deps.worktreePath?.(row.task_page_id) ?? null
     }
   }
 
@@ -847,7 +1103,9 @@ const FLOW_PAUSE_TEXT: Record<FlowPauseReason, string> = {
   interrupted: 'O Orkio foi fechado no meio do passo. Retome, pule ou cancele.',
   loop_guard: 'O fluxo atingiu o limite de passos. Confira se não está em loop.',
   gate_timeout: 'A aprovação expirou. Retome para pedir de novo, pule ou cancele.',
-  left_stage: 'A tarefa saiu da etapa do fluxo.'
+  left_stage: 'A tarefa saiu da etapa do fluxo.',
+  needs_choice: 'Escolha uma opção no Orkio para o fluxo seguir.',
+  waiting_slot: 'Aguardando outro fluxo do projeto terminar.'
 }
 
 /** Extrator de exemplo: linhas `@orkio chave=valor` no texto final do Claude Code. */
@@ -855,11 +1113,11 @@ export const ORKIO_LINES_EXTRACTOR: FlowExtractor = {
   id: 'linhas_orkio',
   label: 'Linhas “@orkio chave=valor” no resultado',
   extract({ resultText }) {
-    const out: Record<string, string> = {}
+    const vars: Record<string, string> = {}
     for (const m of resultText.matchAll(/^\s*@orkio\s+([a-z][a-z0-9_]{0,39})\s*=\s*(.*)$/gm)) {
-      out[m[1]!] = m[2]!.trim()
+      vars[m[1]!] = m[2]!.trim()
     }
-    return out
+    return { vars }
   }
 }
 
@@ -868,4 +1126,13 @@ export const NOOP_ACTION: OrkioAction = {
   id: 'noop',
   label: 'Nada (teste)',
   run: async () => ({ ok: true })
+}
+
+/** Variáveis do fluxo: chaves válidas, valores curtos e sem segredos. */
+export function cleanVars(vars: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(vars).slice(0, 30)) {
+    if (VAR_KEY.test(k)) out[k] = redactSecrets(String(v)).slice(0, 500)
+  }
+  return out
 }

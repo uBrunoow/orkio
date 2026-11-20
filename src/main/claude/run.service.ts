@@ -74,6 +74,8 @@ export interface StartRunInput {
   briefing: string
   /** Tempo limite (min): ao estourar, cancela e a execução termina como falha. */
   timeoutMin?: number
+  /** Comando: junta o briefing ao texto (padrão). Falso = só os argumentos; o arquivo continua. */
+  includeBriefing?: boolean
 }
 
 /** Fim de uma execução, para quem a pediu (5A: fluxos). */
@@ -159,11 +161,14 @@ export class RunService {
     mode: RunMode,
     command: string | null,
     text: string,
-    briefing: string
+    briefing: string,
+    includeBriefing = true
   ): string {
     const brief = `Briefing da tarefa (também em .orkio/briefing.md no worktree):\n\n${briefing}`
     if (mode === 'command' && command) {
-      return `/${command}${text.trim() ? ` ${text.trim()}` : ''}\n\n${brief}`
+      const line = `/${command}${text.trim() ? ` ${text.trim()}` : ''}`
+      // Sem o briefing: o comando recebe só os argumentos ($ARGUMENTS), ex.: um task-ID.
+      return includeBriefing ? `${line}\n\n${brief}` : line
     }
     return `${text.trim()}\n\n---\n\n${brief}`
   }
@@ -219,7 +224,13 @@ export class RunService {
         await broker.open()
         run.handle = this.deps.createRun({
           cwd: worktree.path,
-          prompt: RunService.composePrompt(input.mode, input.command, input.text, input.briefing),
+          prompt: RunService.composePrompt(
+            input.mode,
+            input.command,
+            input.text,
+            input.briefing,
+            input.includeBriefing !== false
+          ),
           sessionId: randomUUID(),
           broker,
           onEvent: (event) => this.onEvent(run, event),
