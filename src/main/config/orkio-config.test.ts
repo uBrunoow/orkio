@@ -48,7 +48,8 @@ describe('orkio-config v2/v3', () => {
       boards: {},
       automation: { paused: false },
       claudeContexts: {},
-      flows: {}
+      flows: {},
+      delivery: {}
     })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
     expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
@@ -342,6 +343,38 @@ describe('orkio-config v2/v3', () => {
     expect(pf.flows[0]).toEqual({ ...flow, tags: ['alva'] })
     expect(pf.alva).toEqual({ maxParallel: 4 })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(7)
+    expect(saved['schemaVersion']).toBe(8)
+  })
+
+  it('v7 → v8: ajustes de entrega vazios (padrão: aprovação para push); inválidos ignorados', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-v8-'))
+    const file = join(dir, 'orkio-config.json')
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 7,
+        projects: [{ ...PROJECT, notionProject: null }],
+        notion: null,
+        boards: {},
+        automation: { paused: false },
+        claudeContexts: {},
+        flows: {}
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.delivery).toEqual({})
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(8)
+    expect(saved['delivery']).toEqual({})
+
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...saved,
+        delivery: { p1: { requirePushApproval: false }, p2: { requirePushApproval: 'nao' } }
+      })
+    )
+    const again = await createOrkioConfigStore(file).load()
+    expect(again.data.delivery).toEqual({ p1: { requirePushApproval: false } })
   })
 })

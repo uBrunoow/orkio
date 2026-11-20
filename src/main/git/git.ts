@@ -20,7 +20,17 @@ export type ExecFileFn = (
 ) => Promise<{ stdout: string; stderr: string }>
 
 export type GitErrorCode =
-  'git_not_found' | 'not_a_repo' | 'dubious_ownership' | 'folder_not_found' | 'timeout' | 'failed'
+  | 'git_not_found'
+  | 'not_a_repo'
+  | 'dubious_ownership'
+  | 'folder_not_found'
+  | 'timeout'
+  | 'credentials'
+  | 'rejected'
+  | 'failed'
+
+/** Tempo limite do `git push` (rede). */
+export const GIT_PUSH_TIMEOUT_MS = 120_000
 
 export class GitError extends Error {
   constructor(
@@ -82,6 +92,16 @@ export interface Git {
   fileAtCommit(root: string, commit: string, path: string): Promise<string>
   /** `git diff <base>` (commits + mudanças no worktree), texto puro, sem cor. */
   diffText(dir: string, base: string): Promise<string>
+  // ---------- Entrega (5C) ----------
+  /**
+   * `git push --porcelain -u <remote> refs/heads/<b>:refs/heads/<b>`. Nunca força. Sem prompts
+   * (GIT_TERMINAL_PROMPT=0, ssh BatchMode): credencial pedida → GitError('credentials').
+   */
+  push(dir: string, remote: string, branch: string): Promise<void>
+  /** Aliases do git vistos em `dir` (`git config --get-regexp ^alias\.`): nome → expansão. */
+  aliases(dir: string): Promise<Record<string, string>>
+  /** `git config --get <key>` (`null` se não existir). */
+  configValue(dir: string, key: string): Promise<string | null>
 }
 
 export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = {}): Git {
@@ -89,11 +109,15 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
     deps.execFile ?? (promisify(nodeExecFile) as unknown as ExecFileFn)
   const timeout = deps.timeoutMs ?? GIT_TIMEOUT_MS
 
-  async function git(cwd: string, args: string[]): Promise<string> {
+  async function git(
+    cwd: string,
+    args: string[],
+    extra: { timeout?: number; env?: NodeJS.ProcessEnv } = {}
+  ): Promise<string> {
     try {
       const { stdout } = await execFileImpl('git', args, {
         cwd,
-        timeout,
+        timeout: extra.timeout ?? timeout,
         maxBuffer: 4 * 1024 * 1024,
         windowsHide: true,
         env: {
@@ -102,7 +126,8 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
           GIT_TERMINAL_PROMPT: '0',
           GIT_OPTIONAL_LOCKS: '0',
           LC_ALL: 'C',
-          LANG: 'C'
+          LANG: 'C',
+          ...extra.env
         }
       })
       return stdout
@@ -220,6 +245,41 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
     async headCommit(dir) {
       return (await git(dir, ['rev-parse', 'HEAD'])).trim()
     },
+    async push(dir, remote, branch) {
+      if (!isSafeRefName(branch) || !/^[A-Za-z0-9._-]+$/.test(remote)) {
+        throw new GitError('failed', 'Branch ou remote inválido para o push.')
+      }
+      const ref = `refs/heads/${branch}`
+      await git(dir, ['push', '--porcelain', '-u', remote, `${ref}:${ref}`], {
+        timeout: GIT_PUSH_TIMEOUT_MS,
+        env: {
+          // Nunca perguntar: senha, passphrase do SSH, nem a janela do Git Credential Manager.
+          GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+          GIT_ASKPASS: '',
+          SSH_ASKPASS: '',
+          GCM_INTERACTIVE: 'never'
+        }
+      })
+    },
+    async aliases(dir) {
+      const out = await git(dir, ['config', '--get-regexp', '^alias\\.']).catch(
+        () => '' // sem aliases: o git sai com código 1
+      )
+      const map: Record<string, string> = {}
+      for (const line of out.split('\n')) {
+        const m = /^alias\.(\S+)\s+(.*)$/.exec(line.trim())
+        if (m) map[m[1]!] = m[2]!
+      }
+      return map
+    },
+    async configValue(dir, key) {
+      try {
+        const v = (await git(dir, ['config', '--get', key])).trim()
+        return v === '' ? null : v
+      } catch {
+        return null
+      }
+    },
     async remoteDefaultBranch(root, remote) {
       try {
         const ref = (
@@ -247,7 +307,12 @@ export function parseRemotes(output: string): GitRemote[] {
 
 export function toGitError(error: unknown): GitError {
   if (error instanceof GitError) return error
-  const e = error as NodeJS.ErrnoException & { stderr?: string; killed?: boolean; signal?: string }
+  const e = error as NodeJS.ErrnoException & {
+    stderr?: string
+    stdout?: string
+    killed?: boolean
+    signal?: string
+  }
   if (e?.code === 'ENOENT' && e.syscall?.startsWith('spawn')) {
     return new GitError(
       'git_not_found',
@@ -261,6 +326,27 @@ export function toGitError(error: unknown): GitError {
     return new GitError('timeout', 'O git demorou demais para responder nesta pasta.')
   }
   const stderr = typeof e?.stderr === 'string' ? e.stderr : ''
+  if (
+    /terminal prompts disabled|could not read (username|password)|authentication failed|permission denied \(publickey|host key verification failed|invalid username or password|askpass/i.test(
+      stderr
+    )
+  ) {
+    return new GitError(
+      'credentials',
+      'O git pediu credenciais. Configure o acesso a este repositório (gh auth setup-git, chave SSH ou gerenciador de credenciais) e tente de novo.'
+    )
+  }
+  const stdout = typeof e?.stdout === 'string' ? e.stdout : ''
+  if (
+    /\[rejected\]|non-fast-forward|fetch first|\[remote rejected\]|failed to push/i.test(
+      `${stderr}\n${stdout}`
+    )
+  ) {
+    return new GitError(
+      'rejected',
+      'O GitHub recusou o push: a branch remota tem commits que não estão aqui (ou há uma regra de proteção). Atualize a branch e tente de novo.'
+    )
+  }
   if (/not a git repository/i.test(stderr)) {
     return new GitError('not_a_repo', 'Esta pasta não é um repositório git.')
   }
@@ -271,4 +357,15 @@ export function toGitError(error: unknown): GitError {
     )
   }
   return new GitError('failed', 'O git retornou um erro ao ler esta pasta.')
+}
+
+/** Nome de branch seguro para usar como argumento (sem opções, refspec, `..` nem espaços). */
+export function isSafeRefName(name: string): boolean {
+  return (
+    /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(name) &&
+    !name.includes('..') &&
+    !name.endsWith('/') &&
+    !name.endsWith('.lock') &&
+    !name.includes('//')
+  )
 }

@@ -1,0 +1,190 @@
+/**
+ * Entrega (Etapa 5C): push da branch da tarefa pelo Orkio e o alvo do "modo entrega".
+ *
+ * - O alvo vem do worktree da tarefa (branch) e do projeto (owner/repo/remote/branch padrão).
+ * - Push só da branch da tarefa (`checkPushBranch`), sem força, sem mudanças pendentes e com
+ *   commits novos. Credenciais do próprio usuário (sem prompts: falha com mensagem clara).
+ */
+import { basename } from 'node:path'
+import {
+  DEFAULT_DELIVERY_SETTINGS,
+  DELIVERY_MESSAGES,
+  checkPushBranch,
+  type DeliverySettings,
+  type DeliveryTarget
+} from '../../shared/delivery'
+import type { StoredProject } from '../config/orkio-config'
+import type { Git } from '../git/git'
+import { GitError } from '../git/git'
+import type { WorktreeRecord } from '../claude/worktree.service'
+
+export class DeliveryError extends Error {
+  constructor(
+    readonly code:
+      | 'no_project'
+      | 'no_repo'
+      | 'no_worktree'
+      | 'branch'
+      | 'dirty'
+      | 'nothing'
+      | 'credentials'
+      | 'rejected'
+      | 'git',
+    message: string
+  ) {
+    super(message)
+    this.name = 'DeliveryError'
+  }
+}
+
+export const DELIVERY_SERVICE_MESSAGES = {
+  noProject: 'Projeto não encontrado.',
+  noWorktree:
+    'Esta tarefa ainda não tem ambiente (worktree). Rode o Claude Code nela antes da entrega.',
+  git: 'O git retornou um erro no push. Veja o terminal do projeto e tente de novo.'
+} as const
+
+export interface PushPreview {
+  target: DeliveryTarget
+  /** Commits que vão para o GitHub (hash curto + assunto). */
+  commits: { hash: string; subject: string }[]
+  /** `git diff --stat` do que vai (contra a branch remota, ou a base se ainda não existe). */
+  stat: string
+  /** A branch remota já existe? */
+  remoteExists: boolean
+  /** Mudanças não commitadas (linhas do `status --porcelain`). */
+  pending: string[]
+  /** Motivo para não fazer o push (`null` = pode). */
+  problem: string | null
+  /** Link da branch no GitHub. */
+  branchUrl: string
+}
+
+export interface DeliveryDeps {
+  git: Git
+  project(projectId: string): StoredProject | null
+  worktree(taskId: string): WorktreeRecord | null
+  settings(projectId: string): DeliverySettings | undefined
+}
+
+export class DeliveryService {
+  constructor(private readonly deps: DeliveryDeps) {}
+
+  settings(projectId: string): DeliverySettings {
+    return this.deps.settings(projectId) ?? DEFAULT_DELIVERY_SETTINGS
+  }
+
+  /** Alvo da entrega da tarefa (lança `DeliveryError` sem repositório/ambiente). */
+  target(projectId: string, taskId: string): DeliveryTarget & { worktree: WorktreeRecord } {
+    const project = this.deps.project(projectId)
+    if (!project) throw new DeliveryError('no_project', DELIVERY_SERVICE_MESSAGES.noProject)
+    const repo = project.repo
+    if (!repo || repo.host !== 'github.com' || !repo.verified) {
+      throw new DeliveryError('no_repo', DELIVERY_MESSAGES.noRepo)
+    }
+    const wt = this.deps.worktree(taskId)
+    if (!wt || wt.projectId !== projectId) {
+      throw new DeliveryError('no_worktree', DELIVERY_SERVICE_MESSAGES.noWorktree)
+    }
+    return {
+      owner: repo.owner,
+      repo: repo.name,
+      remote: repo.remoteName,
+      branch: wt.branch,
+      defaultBranch: repo.defaultBranch,
+      displayId: basename(wt.path),
+      worktree: wt
+    }
+  }
+
+  branchUrl(t: DeliveryTarget): string {
+    return `https://github.com/${t.owner}/${t.repo}/tree/${t.branch
+      .split('/')
+      .map(encodeURIComponent)
+      .join('/')}`
+  }
+
+  /** O que o push enviaria (para o gate) e se pode. */
+  async preview(projectId: string, taskId: string): Promise<PushPreview> {
+    const t = this.target(projectId, taskId)
+    const { git } = this.deps
+    const dir = t.worktree.path
+    // Atualiza a visão da branch remota (sem credencial → segue com o que há localmente).
+    await git.fetch(dir, t.remote, t.branch).catch(() => undefined)
+    const remoteRef = `${t.remote}/${t.branch}`
+    const remoteExists = await git.refExists(dir, remoteRef)
+    const base = remoteExists ? remoteRef : t.worktree.baseRef
+    const [commits, pending, diff] = await Promise.all([
+      git.commitsSince(dir, base).catch(() => []),
+      git.statusPorcelain(dir).catch(() => []),
+      git.diffStat(dir, `${base}...HEAD`).catch(() => ({ stat: '', files: [] }))
+    ])
+    const current = await git.currentBranch(dir).catch(() => null)
+    const problem =
+      checkPushBranch(t.branch, t) ??
+      checkPushBranch(current ?? '', t) ??
+      (pending.length > 0 ? DELIVERY_MESSAGES.dirty : null) ??
+      (commits.length === 0 ? DELIVERY_MESSAGES.nothing : null)
+    const target: DeliveryTarget = {
+      owner: t.owner,
+      repo: t.repo,
+      remote: t.remote,
+      branch: t.branch,
+      defaultBranch: t.defaultBranch,
+      displayId: t.displayId
+    }
+    return {
+      target,
+      commits,
+      stat: diff.stat,
+      remoteExists,
+      pending,
+      problem,
+      branchUrl: this.branchUrl(t)
+    }
+  }
+
+  /** Faz o push (revalida tudo na hora: o gate pode ter ficado aberto por um tempo). */
+  async push(
+    projectId: string,
+    taskId: string
+  ): Promise<{ commits: number; branchUrl: string; target: DeliveryTarget }> {
+    const p = await this.preview(projectId, taskId)
+    if (p.problem) {
+      const code =
+        p.problem === DELIVERY_MESSAGES.dirty
+          ? 'dirty'
+          : p.problem === DELIVERY_MESSAGES.nothing
+            ? 'nothing'
+            : 'branch'
+      throw new DeliveryError(code, p.problem)
+    }
+    const wt = this.deps.worktree(taskId)!
+    try {
+      await this.deps.git.push(wt.path, p.target.remote, p.target.branch)
+    } catch (error) {
+      if (error instanceof GitError) {
+        if (error.code === 'credentials') throw new DeliveryError('credentials', error.message)
+        if (error.code === 'rejected') throw new DeliveryError('rejected', error.message)
+        if (error.code === 'timeout') throw new DeliveryError('git', error.message)
+      }
+      throw new DeliveryError('git', DELIVERY_SERVICE_MESSAGES.git)
+    }
+    return { commits: p.commits.length, branchUrl: p.branchUrl, target: p.target }
+  }
+
+  /** Commit atual do worktree (para conferir com o `headRefOid` da PR). */
+  async head(taskId: string): Promise<string | null> {
+    const wt = this.deps.worktree(taskId)
+    if (!wt) return null
+    return this.deps.git.headCommit(wt.path).catch(() => null)
+  }
+
+  /** Contexto do modo entrega lido no começo do passo: aliases e `push.default`. */
+  async policyInputs(
+    dir: string
+  ): Promise<{ gitAliases: Record<string, string>; pushDefault: string | null }> {
+    const gitAliases = await this.deps.git.aliases(dir).catch(() => ({}))
+    return { gitAliases, pushDefault: await this.deps.git.configValue(dir, 'push.default') }
+  }
+}

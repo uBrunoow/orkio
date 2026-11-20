@@ -2,6 +2,7 @@
  * Formato do arquivo de configuração não secreta do Orkio (userData/orkio-config.json).
  * Nada de tokens aqui: segredos vão no SecureStore.
  */
+import type { DeliverySettings } from '../../shared/delivery'
 import {
   EVENT_KINDS,
   defaultRules,
@@ -28,7 +29,7 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
 import type { Condition, Flow, ProjectFlows, StageFlow, Step } from '../../shared/task-flow'
 
-export const ORKIO_CONFIG_VERSION = 7
+export const ORKIO_CONFIG_VERSION = 8
 
 export interface StoredProject {
   id: string
@@ -52,6 +53,8 @@ export interface OrkioConfig {
   claudeContexts: Record<string, ProjectClaudeContext>
   /** Fluxos de tarefa por projeto (5A) e a ligação de cada um com as etapas. */
   flows: Record<string, ProjectFlows>
+  /** Ajustes de entrega por projeto (5C). Ausente = padrão (aprovação para push). */
+  delivery: Record<string, DeliverySettings>
 }
 
 export function emptyConfig(): OrkioConfig {
@@ -61,7 +64,8 @@ export function emptyConfig(): OrkioConfig {
     boards: {},
     automation: { paused: false },
     claudeContexts: {},
-    flows: {}
+    flows: {},
+    delivery: {}
   }
 }
 
@@ -101,7 +105,9 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
       5: (data) => ({ ...data, flows: {} }),
       // v6 → v7 (5B): só campos opcionais novos nos fluxos (includeBriefing, tags, limite Alva);
       // os fluxos existentes continuam iguais.
-      6: (data) => ({ ...data })
+      6: (data) => ({ ...data }),
+      // v7 → v8 (5C): ajustes de entrega por projeto (padrão: exigir aprovação para push).
+      7: (data) => ({ ...data, delivery: {} })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -160,7 +166,23 @@ export function validateConfig(
       }
     }
   }
-  const value: OrkioConfig = { projects, notion, boards, automation, claudeContexts, flows }
+  const delivery: Record<string, DeliverySettings> = {}
+  if (isRecord(data['delivery'])) {
+    for (const [projectId, raw] of Object.entries(data['delivery'])) {
+      if (isRecord(raw) && typeof raw['requirePushApproval'] === 'boolean') {
+        delivery[projectId] = { requirePushApproval: raw['requirePushApproval'] }
+      }
+    }
+  }
+  const value: OrkioConfig = {
+    projects,
+    notion,
+    boards,
+    automation,
+    claudeContexts,
+    flows,
+    delivery
+  }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
 }
 
