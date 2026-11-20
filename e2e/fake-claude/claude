@@ -22,6 +22,15 @@ if (args[0] === '--version') {
   process.stdout.write('2.1.9 (Claude Code)\n')
   process.exit(0)
 }
+if (args[0] === 'mcp' && args[1] === 'list') {
+  // Só o MCP do Backlog importa para a pré-checagem do alva-flow (escopo do usuário).
+  const cfgFile = join(__dirname, 'mcp.json')
+  const cfg = existsSync(cfgFile) ? JSON.parse(readFileSync(cfgFile, 'utf8')) : {}
+  process.stdout.write('Checking MCP server health...\n\n')
+  if (cfg.backlog) process.stdout.write('backlog: backlog mcp start - ✔ Connected\n')
+  else process.stdout.write('No MCP servers configured.\n')
+  process.exit(0)
+}
 if (args[0] === 'auth' && args[1] === 'status') {
   const auth = existsSync(authFile)
     ? JSON.parse(readFileSync(authFile, 'utf8'))
@@ -118,6 +127,13 @@ async function main() {
 
   const mcp = bridge(config)
   await mcp.init()
+
+  // alva-flow simulado: imita o efeito dos comandos no Backlog.md (backlog/tasks/).
+  const alvaMatch = /^\/alva-flow:(\w+)\s*([^\n]*)/.exec(prompt)
+  if (alvaMatch) {
+    await alvaCommand(alvaMatch[1], alvaMatch[2].trim(), mcp, prompt)
+    return
+  }
 
   // Edição dentro do worktree (acceptEdits: não passa pela ponte).
   mkdirSync(join(process.cwd(), 'src'), { recursive: true })
@@ -244,6 +260,136 @@ async function main() {
     result: 'Pronto: exportação implementada.'
   })
   // O Orkio fecha a entrada após o result; o CLI termina.
+  process.stdin.on('end', () => process.exit(0))
+  setTimeout(() => process.exit(0), 2000)
+}
+
+/** Imitação mínima do plugin alva-flow para o E2E (nunca o plugin real). */
+async function alvaCommand(cmd, argsText, mcp, prompt) {
+  const cwd = process.cwd()
+  const tasksDir = join(cwd, 'backlog', 'tasks')
+  const orkioDir = join(cwd, '.orkio')
+  mkdirSync(orkioDir, { recursive: true })
+  // Registro do que cada comando recebeu (fica fora do git: .orkio/.gitignore = *).
+  require('node:fs').appendFileSync(join(orkioDir, 'alva-args.log'), `${cmd} ${argsText}\n`)
+  const taskFile = () => {
+    const f = require('node:fs')
+      .readdirSync(tasksDir)
+      .find((n) => /^task-1 - /.test(n))
+    return f ? join(tasksDir, f) : null
+  }
+  const setStatus = (status) => {
+    const f = taskFile()
+    writeFileSync(f, readFileSync(f, 'utf8').replace(/^status: .*$/m, `status: ${status}`))
+  }
+  let result = 'Pronto.'
+  if (cmd === 'spec') {
+    if (!/^TASK-\d+/.test(argsText)) {
+      // Perguntas em lote (como o /spec faz com o PO).
+      const r = await mcp.approve(
+        'AskUserQuestion',
+        {
+          questions: [
+            {
+              question: 'Qual o formato da exportação?',
+              header: 'Formato',
+              options: [{ label: 'CSV' }, { label: 'XLSX' }],
+              multiSelect: false
+            },
+            {
+              question: 'Quem pode exportar?',
+              header: 'Acesso',
+              options: [{ label: 'Todos' }, { label: 'Só admins' }],
+              multiSelect: false
+            }
+          ]
+        },
+        'toolu_spec_q'
+      )
+      const answers = (r.updatedInput && r.updatedInput.answers) || {}
+      mkdirSync(tasksDir, { recursive: true })
+      writeFileSync(
+        join(tasksDir, 'task-1 - Exportar-tarefas.md'),
+        [
+          '---',
+          'id: TASK-1',
+          "title: 'Exportar tarefas'",
+          'status: Requirements Defined',
+          'assignee: []',
+          '---',
+          '',
+          '## Description',
+          '',
+          '<!-- SECTION:DESCRIPTION:BEGIN -->',
+          '## Problema',
+          argsText,
+          '',
+          '## Decisões',
+          ...Object.entries(answers).map(([q, a]) => `- ${q} → ${a}`),
+          '',
+          '## Perguntas em aberto',
+          '- [x] Formato → decidido',
+          '<!-- SECTION:DESCRIPTION:END -->',
+          '',
+          '## Acceptance Criteria',
+          '<!-- AC:BEGIN -->',
+          '- [ ] #1 CA-F01: QUANDO exportar ENTÃO o sistema DEVE gerar o arquivo',
+          '- [ ] #2 CA-F02: QUANDO não for admin ENTÃO o sistema DEVE negar',
+          '<!-- AC:END -->',
+          ''
+        ].join('\n')
+      )
+      result =
+        '## Spec pronta ✓\n**Task:** TASK-1 — Exportar tarefas  |  **CA-F:** 2  |  **Tamanho:** Médio'
+    }
+  } else if (cmd === 'plan') {
+    setStatus('Architected')
+    result = '## Plano pronto ✓'
+  } else if (cmd === 'implement') {
+    mkdirSync(join(cwd, 'src'), { recursive: true })
+    writeFileSync(join(cwd, 'src', 'exportar.ts'), 'export const exportar = true\n')
+    setStatus('Executed')
+    // Como o /implement real: código em stage, sem commit.
+    execFileSync('git', ['add', 'src', 'backlog'], { cwd })
+  } else if (cmd === 'review') {
+    const counter = join(orkioDir, 'reviews')
+    const n = (existsSync(counter) ? Number(readFileSync(counter, 'utf8')) : 0) + 1
+    writeFileSync(counter, String(n))
+    const blockers = Number(process.env.FAKE_ALVA_BLOCKERS || '1')
+    setStatus(n <= blockers ? 'Executed' : 'Reviewed')
+    result = n <= blockers ? 'Blocker: falta validação.' : 'Review limpo.'
+  } else if (cmd === 'fix') {
+    writeFileSync(join(cwd, 'src', 'exportar.ts'), 'export const exportar = true // corrigido\n')
+    execFileSync('git', ['add', 'src'], { cwd })
+  } else if (cmd === 'commit') {
+    execFileSync('git', ['add', '-A'], { cwd })
+    execFileSync(
+      'git',
+      [
+        '-c',
+        'user.name=Fake',
+        '-c',
+        'user.email=fake@example.com',
+        'commit',
+        '--allow-empty',
+        '-q',
+        '-m',
+        'feat: exportar tarefas'
+      ],
+      { cwd }
+    )
+  }
+  mcp.close()
+  out({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    duration_ms: 500,
+    total_cost_usd: 0.01,
+    num_turns: 1,
+    result
+  })
+  void prompt
   process.stdin.on('end', () => process.exit(0))
   setTimeout(() => process.exit(0), 2000)
 }

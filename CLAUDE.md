@@ -23,8 +23,9 @@ Claude Code. Hoje existem:
   (anexar caminho + commit, publicar no Notion) e contexto do projeto (instruções + páginas).
 - **Fluxos de tarefa (5A):** sequências de passos (comandos do Claude Code, gates, ações do
   Orkio, saltos condicionais) ligadas às colunas, disparadas ao entrar ou à mão.
-- Ainda não existem: push/PR/pedir review nos fluxos (5C), integração alva-flow (5B), login no
-  app (tela inicial), webhooks.
+- **alva-flow (5B):** pré-checagem do projeto, vínculo tarefa do Notion ↔ task do Backlog.md,
+  extratores e templates "Fluxo Alva" sobre os fluxos da 5A.
+- Ainda não existem: push/PR/pedir review pelo Orkio (5C), login no app (tela inicial), webhooks.
 
 ## Comandos
 
@@ -58,6 +59,8 @@ src/
   shared/briefing.ts       # blocos do Notion → markdown e montagem do briefing (puro)
   shared/slug.ts           # slug e nome da branch da tarefa (<ID>/<slug>)
   shared/task-flow.ts      # 5A: fluxos de tarefa (tipos, motor puro, condições, template, validação)
+  shared/alva.ts           # 5B: tipos da pré-checagem, parse da task do Backlog.md (puro)
+  shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -77,6 +80,7 @@ src/
     db/database.ts         # SQLite (node:sqlite) + migrações por PRAGMA user_version
     board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
+    alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts
     flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
                            # policy, redact, run.service, claude.service; bridge/permission-mcp.ts
@@ -471,6 +475,45 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   gate, pausas, decisão; o log ao vivo é o da seção Claude Code, que segue a execução nova) e token
   "Fluxo"/"Esperando você" no card (`active-flows.tsx`, contexto React).
 
+## alva-flow (Etapa 5B)
+
+- **Plugin:** alva-flow v1.0.25; comandos `/alva-flow:spec|plan|implement|review|fix|commit|pr`
+  (não existem `/tests` nem `/security`). Estado no Backlog.md: `backlog/tasks/task-<N> - <título>.md`,
+  frontmatter `id: TASK-<N>`/`title`/`status`, critérios entre `<!-- AC:BEGIN/END -->`, "Perguntas
+  em aberto" na descrição. Usamos o `id` do frontmatter como está (`TASK-12`).
+- **Pré-checagem** (`alva/precheck.ts`, tela "alva-flow" no quadro): plugin + versão (catálogo e
+  `.claude-plugin/plugin.json`), `backlog/config.yml` + `backlog/tasks/`, MCP do Backlog
+  (`claude mcp list` numa pasta neutra = escopo do usuário; só no projeto = aviso, porque o worktree
+  é outra pasta e não é "confiável"), `gh auth status` (só o código de saída), `python3`, Makefile
+  com `test`/`lint`, Docker Compose ≥ 2.24.4 rodando (se houver compose). Lê só nome/status e
+  códigos de saída. Itens faltando bloqueiam só os fluxos com marcador `alva` (`canStart`).
+- **Vínculo** (SQLite v7 `alva_links`, só ids): o 1º `/spec` recebe `alva.spec_arg` = "ORK-142 —
+  título. Tarefa no Notion: <url>. Briefing completo em .orkio/briefing.md." (o `/pr` acha o link do
+  Notion na task e não pergunta). Depois do passo, o extrator `alva` compara `backlog/tasks/` antes e
+  depois no worktree: uma task nova → vínculo; várias → o fluxo pausa pedindo a escolha
+  (`needs_choice`); nenhuma → passo falha com explicação. Com vínculo, `alva.task_id`/`alva.spec_arg`
+  = ID.
+- **Variáveis:** `alva.task_id`, `alva.status`, `alva.open_questions`, `alva.linked`,
+  `alva.review_blocker` (`sim` se o `/review` deixou `Executed`), `alva.size` (Médio/Grande pela
+  linha "**Tamanho:**" do resultado do `/spec`, heurística; Pequeno = status `Reviewed` depois do
+  `/spec`, sinal confiável).
+- **Generalizações na 5A** usadas pela integração: extratores assíncronos com "antes do passo",
+  falha e escolha; variáveis iniciais por fluxo; chaves com namespace (`{{alva.task_id}}`);
+  `{{task_title}}`; `includeBriefing: false` (o comando recebe só os argumentos, porque o texto vira
+  `$ARGUMENTS`; o briefing fica em `.orkio/briefing.md`); salto para `$fim`; ação pendente
+  (`pending`: vira espera aprovada à mão, recusar cancela); limite por marcador e projeto (o
+  excedente espera `waiting_slot` e começa sozinho). `orkio-config` v7 só com campos opcionais.
+- **Templates** (`shared/alva-templates.ts`, criados na tela alva-flow e editáveis): "Alva:
+  planejar" (/spec → Pequeno termina → perguntas em aberto voltam ao /spec, até 3 → /plan → gate),
+  "Alva: implementar e entregar" (sem vínculo: /spec e /plan → /implement (pula se Reviewed) →
+  /review → blocker → /fix --apply, no máximo 2 → gate do diff → /commit → push pendente da 5C →
+  /pr com 60 min), "Alva: comentários da PR" e "Alva: CI vermelho" (manual). Coluna opcional
+  "Planejando" criada pelo mesmo caminho do "Salvar fluxo" com o status escolhido.
+- **Execução:** cartão de perguntas com várias por vez, múltipla escolha e "Outro" (texto livre);
+  com Docker no projeto, 1 fluxo Alva por vez (configurável até 4); hooks do projeto viram uma linha
+  "Hook do projeto rodou" no log (formato do evento não confirmado, leitura tolerante); painel mostra
+  "Backlog: TASK-12 · status · critérios" (lido do arquivo) e "Aguardando CI" durante o `/pr`.
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -487,6 +530,10 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   `launchOrkio(..., { claude: { loggedIn, installed } })`. Cenário por palavras no prompt
   (`pedir-shell`, `perguntar`, `tentar-push`, `ler-env`, `demorar`); usa a ponte MCP real.
   O fixture põe uma `ANTHROPIC_API_KEY` falsa no ambiente para provar o filtro.
+- 5B: `launchOrkio(..., { alva: { plugin, mcpBacklog, gh, blockers } })` instala o plugin
+  simulado no HOME de teste, controla `claude mcp list` e um `gh` simulado no PATH. O Claude simulado
+  imita `/alva-flow:*` (cria/muda `backlog/tasks/task-1 - …md`, perguntas em lote no `/spec`,
+  blocker nos primeiros `blockers` reviews) e registra os argumentos em `.orkio/alva-args.log`.
 - 5A: o simulado tem `demorar-uma-vez` (espera só na primeira vez, marcador em `.orkio/demorou`)
   e `falhar` (sai com erro). `e2e/task-flows.spec.ts` monta o fluxo pela tela e edita o
   `orkio-config.json` entre aberturas para trocar os argumentos do passo.
@@ -549,6 +596,8 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 | Log da execução normalizado e redigido                                                                      | Nunca gravamos o stream cru (traria conteúdo de arquivos lidos, inclusive `.env`).                                                                                                                                                                          |
 | Fluxo de tarefa: falha sempre pausa; reabrir o app nunca segue sozinho                                      | Um agente não deve continuar depois de algo inesperado sem alguém ver; "Pular" é a forma explícita de seguir (e só então a condição enxerga a falha).                                                                                                       |
 | Execução do fluxo guarda uma cópia do fluxo (`flow_json`)                                                   | Editar ou remover o fluxo no meio de uma execução não quebra a execução em curso.                                                                                                                                                                           |
+| alva-flow: briefing fora dos argumentos dos comandos                                                        | O texto depois do comando vira `$ARGUMENTS`; o `/plan` receberia "TASK-12 + briefing" e trataria como demanda nova.                                                                                                                                         |
+| MCP do Backlog no escopo do usuário                                                                         | Servidores do `.mcp.json` só conectam em pasta confiável; o worktree do Orkio é outra pasta.                                                                                                                                                                |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 
 ## Astryx e CSP (regra inegociável)

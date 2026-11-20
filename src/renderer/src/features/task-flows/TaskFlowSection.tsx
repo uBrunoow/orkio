@@ -370,8 +370,15 @@ function GateCard({
     let active = true
     if (show === 'diff') {
       void window.orkio.claude.diff(projectId, taskId).then((r) => {
-        if (active)
-          setDetail(r.ok ? r.value.diff || 'Sem diferenças em relação à base.' : r.error.message)
+        if (!active) return
+        if (!r.ok) {
+          setDetail(r.error.message)
+          return
+        }
+        const extra = r.value.untracked.length
+          ? `\n\nArquivos novos fora do git: ${r.value.untracked.join(', ')}`
+          : ''
+        setDetail((r.value.diff || 'Sem diferenças em relação à base.') + extra)
       })
     } else if (show === 'summary') {
       void window.orkio.claude.state(projectId, taskId).then((r) => {

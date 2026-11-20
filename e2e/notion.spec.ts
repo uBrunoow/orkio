@@ -77,6 +77,7 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'board',
       'flow',
       'automation',
+      'alva',
       'taskFlows',
       'claude',
       'signals',

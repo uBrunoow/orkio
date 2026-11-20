@@ -175,8 +175,7 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
 
   // Pergunta do Claude: resposta volta para o CLI.
   const question = section.getByRole('group', { name: 'Pergunta do Claude Code' })
-  await question.getByRole('combobox', { name: /^Qual separador usar\?/ }).click()
-  await page.getByRole('option', { name: 'Ponto e vírgula' }).click()
+  await question.getByRole('radio', { name: 'Ponto e vírgula' }).check()
   await question.getByRole('button', { name: 'Responder' }).click()
 
   await expect(section.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })

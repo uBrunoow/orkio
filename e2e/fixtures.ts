@@ -176,13 +176,24 @@ export async function launchOrkio(
     startPage?: 'projects' | 'integrations'
     /** Claude Code simulado: `installed: false` tira o CLI do PATH. */
     claude?: { loggedIn?: boolean; installed?: boolean }
+    /**
+     * 5B: alva-flow simulado. `plugin` instala o plugin no HOME de teste; `mcpBacklog` faz o
+     * `claude mcp list` mostrar o MCP do Backlog; `gh` simula o GitHub CLI; `blockers` = quantos
+     * /review deixam blocker antes de passar.
+     */
+    alva?: {
+      plugin?: boolean
+      mcpBacklog?: boolean
+      gh?: 'ok' | 'logged_out' | 'missing'
+      blockers?: number
+    }
   } = {}
 ): Promise<OrkioApp> {
   const env = { ...process.env } as Record<string, string>
   // Opções do Node que o Electron rejeita (ex.: --use-openssl-ca) poluem o log.
   delete env['NODE_OPTIONS']
   // Claude Code SIMULADO sempre primeiro no PATH: o E2E nunca chama o CLI real (4A).
-  const fakeBin = fakeClaudeBin(userDataDir, options.claude ?? { loggedIn: true })
+  const fakeBin = fakeClaudeBin(userDataDir, options.claude ?? { loggedIn: true }, options.alva)
   env['PATH'] = `${fakeBin}${delimiter}${env['PATH'] ?? ''}`
   // HOME isolado: o catálogo de comandos nunca lê o ~/.claude de verdade no E2E.
   const home = `${userDataDir}-home`
@@ -191,8 +202,11 @@ export async function launchOrkio(
     join(home, '.claude', 'commands', 'revisar.md'),
     '---\nname: revisar\ndescription: Revisa o diff da tarefa\n---\nCORPO'
   )
+  if (options.alva?.plugin) installFakeAlvaPlugin(home)
   env['HOME'] = home
   env['USERPROFILE'] = home
+  // Simulado do alva-flow: quantos /review deixam blocker (não começa com ORKIO_: passa o filtro).
+  env['FAKE_ALVA_BLOCKERS'] = String(options.alva?.blockers ?? 1)
   // Chave "vazada" no ambiente: o Orkio precisa filtrá-la antes de abrir o CLI.
   env['ANTHROPIC_API_KEY'] = 'sk-ant-api03-E2E-NAO-PODE-VAZAR'
 
@@ -860,7 +874,8 @@ export async function queueSavePaths(app: ElectronApplication, paths: string[]):
 /** Pasta com o `claude` simulado (e2e/fake-claude) e o estado de login dele. */
 function fakeClaudeBin(
   userDataDir: string,
-  claude: { loggedIn?: boolean; installed?: boolean }
+  claude: { loggedIn?: boolean; installed?: boolean },
+  alva?: { mcpBacklog?: boolean; gh?: 'ok' | 'logged_out' | 'missing' }
 ): string {
   const dir = `${userDataDir}-bin`
   rmSync(dir, { recursive: true, force: true })
@@ -876,6 +891,37 @@ function fakeClaudeBin(
           : { loggedIn: true, authMethod: 'claude.ai' }
       )
     )
+    writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ backlog: alva?.mcpBacklog === true }))
+  }
+  // GitHub CLI simulado (só para a pré-checagem do alva-flow).
+  const gh = alva?.gh ?? 'missing'
+  if (gh !== 'missing') {
+    writeFileSync(
+      join(dir, 'gh'),
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "gh version 2.60.0"; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit ${gh === 'ok' ? 0 : 1}; fi\nexit 1\n`
+    )
+    chmodSync(join(dir, 'gh'), 0o755)
   }
   return dir
+}
+
+/** Plugin alva-flow simulado no HOME de teste (installed_plugins.json + comandos + versão). */
+function installFakeAlvaPlugin(home: string): void {
+  const plugin = join(home, '.claude', 'plugins', 'cache', 'alva-flow')
+  mkdirSync(join(plugin, 'commands'), { recursive: true })
+  mkdirSync(join(plugin, '.claude-plugin'), { recursive: true })
+  writeFileSync(
+    join(plugin, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'alva-flow', version: '1.0.25' })
+  )
+  for (const c of ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr']) {
+    writeFileSync(
+      join(plugin, 'commands', `${c}.md`),
+      `---\ndescription: ${c} do fluxo Alva\n---\nCORPO`
+    )
+  }
+  writeFileSync(
+    join(home, '.claude', 'plugins', 'installed_plugins.json'),
+    JSON.stringify({ plugins: { 'alva-flow@alva-flow-marketplace': [{ installPath: plugin }] } })
+  )
 }
