@@ -55,14 +55,21 @@ import { ClaudeService, type ClaudeServiceDeps } from './claude/claude.service'
 import { detectClaude } from './claude/detect'
 import { ArtifactsService, type ArtifactsDeps } from './claude/artifacts.service'
 import { ClaudeRun } from './claude/runner'
-import { FlowError, FlowRunner, NOOP_ACTION, ORKIO_LINES_EXTRACTOR } from './flows/flow-runner'
+import {
+  FlowError,
+  FlowRunner,
+  NOOP_ACTION,
+  ORKIO_LINES_EXTRACTOR,
+  type OrkioAction
+} from './flows/flow-runner'
 import { FlowsService } from './flows/flows.service'
 import { AlvaService } from './alva/alva.service'
-import { ALVA_PENDING_5C, AlvaFlowsService } from './alva/alva-flows.service'
+import { AlvaFlowsService } from './alva/alva-flows.service'
 import { runPrecheck } from './alva/precheck'
 import { buildCatalog } from './claude/catalog'
 import { sanitizeEnv } from './claude/redact'
-import { parseGhAliases } from './delivery/delivery.service'
+import { DeliveryService, parseGhAliases } from './delivery/delivery.service'
+import { createDeliveryActions } from './delivery/delivery-actions'
 import { registerAlvaIpc } from './ipc/alva.ipc'
 import { registerTaskFlowsIpc } from './ipc/task-flows.ipc'
 import { RunService } from './claude/run.service'
@@ -362,6 +369,18 @@ function registerIpc(): void {
       runs: claude.runs,
       worktrees: claude.worktrees,
       listTasks: (projectId) => notionWorkspace.listTasks(projectId),
+      // Entrega (5C): push/pedir review. O token do GitHub fica no conector.
+      deliveryActions: createDeliveryActions({
+        delivery: claude.delivery,
+        signals: (projectId, force) => signals.get(projectId, { force }),
+        github: {
+          requestReviewers: (owner, repo, pull, reviewers) =>
+            github.requestReviewers(owner, repo, pull, reviewers),
+          listCollaborators: (owner, repo) => github.listCollaborators(owner, repo)
+        },
+        store: boardStore,
+        runAutomation: (projectId) => void scheduler?.runNow(projectId).catch(() => undefined)
+      }),
       send,
       isTrustedSender,
       ready: projectsReady
@@ -394,6 +413,7 @@ function createFlowRunner(deps: {
   runs: RunService
   worktrees: WorktreeService
   listTasks: ClaudeServiceDeps['listTasks']
+  deliveryActions: OrkioAction[]
   send: (channel: string, payload: unknown) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
@@ -457,21 +477,7 @@ function createFlowRunner(deps: {
   registerAlvaIpc(ipcMain, alvaFlows, deps.isTrustedSender, deps.ready)
 
   const extractors = [ORKIO_LINES_EXTRACTOR, alva.extractor]
-  const actions = [
-    NOOP_ACTION,
-    {
-      id: 'push',
-      label: 'Push da branch (5C)',
-      pending: ALVA_PENDING_5C.push,
-      run: NOOP_ACTION.run
-    },
-    {
-      id: 'request_review',
-      label: 'Pedir review (5C)',
-      pending: ALVA_PENDING_5C.request_review,
-      run: NOOP_ACTION.run
-    }
-  ]
+  const actions = [NOOP_ACTION, ...deps.deliveryActions]
   const runner = new FlowRunner({
     db: deps.boardStore.db,
     store: deps.boardStore,
@@ -549,7 +555,12 @@ function createClaude(deps: {
   send: (channel: string, payload: unknown) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
-}): { runs: RunService; service: ClaudeService; worktrees: WorktreeService } {
+}): {
+  runs: RunService
+  service: ClaudeService
+  worktrees: WorktreeService
+  delivery: DeliveryService
+} {
   const userData = app.getPath('userData')
   const tmpDir = join(userData, 'run-tmp')
   const env = toolEnv()
@@ -557,6 +568,12 @@ function createClaude(deps: {
     git: deps.git,
     db: deps.boardStore.db,
     root: join(userData, 'worktrees')
+  })
+  const delivery = new DeliveryService({
+    git: deps.git,
+    project: (id) => deps.configStore.get().projects.find((p) => p.id === id) ?? null,
+    worktree: (taskId) => worktrees.get(taskId),
+    settings: (projectId) => deps.configStore.get().delivery[projectId]
   })
   let service: ClaudeService | null = null
   const runs = new RunService({
@@ -601,6 +618,20 @@ function createClaude(deps: {
       showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, deps.send)
   })
   service = new ClaudeService({
+    deliveryTarget: (projectId, taskId) => {
+      const t = delivery.target(projectId, taskId)
+      return {
+        target: {
+          owner: t.owner,
+          repo: t.repo,
+          remote: t.remote,
+          branch: t.branch,
+          defaultBranch: t.defaultBranch,
+          displayId: t.displayId
+        },
+        requirePushApproval: delivery.settings(projectId).requirePushApproval
+      }
+    },
     config: deps.configStore,
     worktrees,
     runs,
@@ -636,7 +667,7 @@ function createClaude(deps: {
   })
   void mkdir(tmpDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
   registerClaudeIpc(ipcMain, service, deps.isTrustedSender, deps.ready)
-  return { runs, service, worktrees }
+  return { runs, service, worktrees, delivery }
 }
 
 /** Notificação de desktop (opcional por regra). Clique: foca o Orkio e abre a tarefa. */

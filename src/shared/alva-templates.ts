@@ -7,7 +7,14 @@ import { FLOW_END, type Flow, type Step } from './task-flow'
 
 const P = 'alva-flow'
 
-function alva(id: string, name: string, cmd: string, args: string, timeoutMin: number): Step {
+function alva(
+  id: string,
+  name: string,
+  cmd: string,
+  args: string,
+  timeoutMin: number,
+  options: { delivery?: boolean } = {}
+): Step {
   return {
     id,
     name,
@@ -16,9 +23,18 @@ function alva(id: string, name: string, cmd: string, args: string, timeoutMin: n
     args,
     timeoutMin,
     includeBriefing: false,
-    extract: { extractor: 'alva' }
+    extract: { extractor: 'alva' },
+    ...(options.delivery ? { delivery: true } : {})
   }
 }
+
+/** Push pelo Orkio (gate com commits/diff/destino quando "Exigir minha aprovação" está ligado). */
+const PUSH = (id = 'push'): Step => ({
+  id,
+  name: 'Push da branch (Orkio)',
+  type: 'orkio_action',
+  action: 'push'
+})
 
 const SPEC = (): Step => alva('spec', 'Especificar (/spec)', 'spec', '{{alva.spec_arg}}', 120)
 const PLAN = (): Step => alva('plan', 'Planejar (/plan)', 'plan', '{{alva.task_id}}', 60)
@@ -87,7 +103,8 @@ export function alvaPlanFlow(): Flow {
 
 /**
  * Coluna "Em andamento": (sem vínculo: /spec e /plan) → /implement (pula se já Reviewed) →
- * /review → blocker volta para /fix --apply (máx. 2) → ver diff → /commit → push (5C) → /pr.
+ * /review → blocker volta para /fix --apply (máx. 2) → ver diff → /commit → push (Orkio, com
+ * aprovação) → /pr em modo entrega (o próprio comando pode fazer push da branch e abrir a PR).
  */
 export function alvaDeliverFlow(): Flow {
   return {
@@ -144,8 +161,10 @@ export function alvaDeliverFlow(): Flow {
         timeoutMin: null
       },
       alva('commit', 'Commit (/commit)', 'commit', '{{alva.task_id}}', 15),
-      { id: 'push', name: 'Push da branch', type: 'orkio_action', action: 'push' },
-      alva('pr', 'Pull Request (/pr)', 'pr', '{{alva.task_id}}', 60),
+      PUSH(),
+      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', '{{alva.task_id}}', 60, {
+        delivery: true
+      }),
       { id: 'fim', name: 'Fim', type: 'branch', when: always, then: FLOW_END },
       alva('fix', 'Corrigir blocker (/fix --apply)', 'fix', '{{alva.task_id}} --apply', 60),
       {
@@ -159,7 +178,10 @@ export function alvaDeliverFlow(): Flow {
   }
 }
 
-/** Coluna "Revisado": tratar comentários da PR → pedir review (5C). */
+/**
+ * Coluna "Revisado": /pr --comments (modo entrega) → confere se a PR tem o commit atual → se não
+ * (o comando não fez push, ou você recusou), push pelo Orkio → pedir review de novo.
+ */
 export function alvaReviewedFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.reviewed,
@@ -168,17 +190,32 @@ export function alvaReviewedFlow(): Flow {
     steps: [
       alva(
         'comentarios',
-        'Tratar comentários (/pr --comments)',
+        'Tratar comentários (/pr --comments, modo entrega)',
         'pr',
         '{{alva.task_id}} --comments',
-        60
+        60,
+        { delivery: true }
       ),
+      {
+        id: 'conferir-push',
+        name: 'A PR já tem o commit atual?',
+        type: 'orkio_action',
+        action: 'verify_pushed'
+      },
+      {
+        id: 'ja-enviado',
+        name: 'Já enviado?',
+        type: 'branch',
+        when: { type: 'var', key: 'pr.pushed', op: 'eq', value: 'sim' },
+        then: 'pedir-review'
+      },
+      PUSH(),
       { id: 'pedir-review', name: 'Pedir review', type: 'orkio_action', action: 'request_review' }
     ]
   }
 }
 
-/** Avulso (manual): CI vermelho → /fix --ci --apply → /commit → push (5C). */
+/** Avulso (manual, botão "Rodar fluxo CI vermelho"): /fix --ci --apply → /commit → push. */
 export function alvaCiFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.ci,
@@ -187,7 +224,7 @@ export function alvaCiFlow(): Flow {
     steps: [
       alva('fix-ci', 'Corrigir CI (/fix --ci --apply)', 'fix', '{{alva.task_id}} --ci --apply', 60),
       alva('commit', 'Commit (/commit)', 'commit', '{{alva.task_id}}', 15),
-      { id: 'push', name: 'Push da branch', type: 'orkio_action', action: 'push' }
+      PUSH()
     ]
   }
 }

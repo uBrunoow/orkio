@@ -15,12 +15,6 @@ import { errorName } from '../ipc/payload'
 import type { ConfigStore } from '../storage/config-store'
 import type { AlvaService } from './alva.service'
 
-export const ALVA_PENDING_5C = {
-  push: 'O push da branch pelo Orkio chega na Etapa 5C. Faça o push à mão (git push) e aprove para seguir, ou recuse para encerrar o fluxo.',
-  request_review:
-    'Pedir review pelo Orkio chega na Etapa 5C. Peça o review à mão no GitHub e aprove para concluir, ou recuse para encerrar.'
-} as const
-
 export interface AlvaStatus {
   precheck: AlvaPrecheck | null
   /** Templates já criados neste projeto (ids presentes na config). */

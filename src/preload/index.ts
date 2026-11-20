@@ -168,7 +168,10 @@ const api: OrkioApi = {
     runs: (taskId) => ipcRenderer.invoke(taskFlows.runs, taskId),
     active: (projectId) => ipcRenderer.invoke(taskFlows.active, projectId),
     start: (projectId, taskId) => ipcRenderer.invoke(taskFlows.start, projectId, taskId),
-    approve: (id) => ipcRenderer.invoke(taskFlows.approve, id),
+    approve: (id, values) =>
+      ipcRenderer.invoke(taskFlows.approve, id, values ? values.map(String) : undefined),
+    startById: (projectId, taskId, flowId) =>
+      ipcRenderer.invoke(taskFlows.startById, projectId, taskId, flowId),
     reject: (id) => ipcRenderer.invoke(taskFlows.reject, id),
     resume: (id) => ipcRenderer.invoke(taskFlows.resume, id),
     skip: (id) => ipcRenderer.invoke(taskFlows.skip, id),

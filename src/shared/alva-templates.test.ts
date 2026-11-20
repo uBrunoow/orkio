@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { alvaDeliverFlow, alvaPlanFlow, alvaTemplates } from './alva-templates'
+import { alvaDeliverFlow, alvaPlanFlow, alvaReviewedFlow, alvaTemplates } from './alva-templates'
 import { afterStep, startFlow, validateTaskFlow, type Flow, type FlowDecision } from './task-flow'
 
 const CTX = {
@@ -7,7 +7,7 @@ const CTX = {
     ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr'].map((c) => `alva-flow:${c}`)
   ),
   extractors: ['alva'],
-  actions: ['noop', 'push', 'request_review']
+  actions: ['noop', 'push', 'verify_pushed', 'request_review']
 }
 
 /** Roda o motor: `outcomes[stepId]` dá as variáveis que o extrator gravaria a cada execução. */
@@ -29,7 +29,7 @@ function simulate(
     const r = onStep(id, count[id]!)
     const step = flow.steps.find((s) => s.id === id)!
     d =
-      step.type === 'gate' || (step.type === 'orkio_action' && step.action !== 'noop')
+      step.type === 'gate'
         ? afterStep(flow, d.state, id, { outcome: r.gate === 'rejected' ? 'rejected' : 'approved' })
         : afterStep(flow, d.state, id, { outcome: 'ok', ...(r.vars ? { vars: r.vars } : {}) })
   }
@@ -102,6 +102,25 @@ describe('templates do alva-flow', () => {
       id === 'spec' ? { vars: { 'alva.linked': 'sim', 'alva.status': 'Reviewed' } } : {}
     )
     expect(small.trail.slice(0, 2)).toEqual(['spec', 'ver-diff']) // Pequeno pula o plano
+  })
+
+  it('/pr e /pr --comments em modo entrega; nenhum outro passo tem o modo', () => {
+    const delivery = alvaTemplates()
+      .flatMap((f) => f.steps.map((s) => ({ f: f.id, s })))
+      .filter(({ s }) => s.type === 'claude_command' && s.delivery)
+      .map(({ f, s }) => `${f}:${s.id}`)
+    expect(delivery).toEqual(['alva-entregar:pr', 'alva-revisado:comentarios'])
+  })
+
+  it('Revisado: já enviado → pede review; não enviado → push do Orkio antes', () => {
+    const pushed = simulate(alvaReviewedFlow(), {}, (id) =>
+      id === 'conferir-push' ? { vars: { 'pr.pushed': 'sim' } } : {}
+    )
+    expect(pushed.trail).toEqual(['comentarios', 'conferir-push', 'pedir-review'])
+    const notPushed = simulate(alvaReviewedFlow(), {}, (id) =>
+      id === 'conferir-push' ? { vars: { 'pr.pushed': 'nao' } } : {}
+    )
+    expect(notPushed.trail).toEqual(['comentarios', 'conferir-push', 'push', 'pedir-review'])
   })
 
   it('recusar o diff encerra antes do commit', () => {

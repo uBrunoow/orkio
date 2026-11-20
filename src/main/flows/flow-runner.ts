@@ -21,6 +21,7 @@ import {
   startFlow,
   VAR_KEY,
   type Flow,
+  type ActionConfirm,
   type FlowDecision,
   type FlowPauseReason,
   type FlowRunStatus,
@@ -90,20 +91,28 @@ export interface FlowExtractor {
   resolveChoice?(input: { ctx: ExtractContext; value: string }): Promise<ExtractResult>
 }
 
-/** Ação do próprio Orkio (5C implementa push / pedir review). */
+export interface ActionContext {
+  projectId: string
+  taskId: string
+  vars: Record<string, string>
+}
+
+/** Ação do próprio Orkio (5C: push, conferir push, pedir review). */
 export interface OrkioAction {
   id: string
   label: string
   /**
-   * Ação ainda não implementada (ex.: push antes da 5C): o passo vira uma espera que você
-   * aprova depois de fazer à mão (recusar cancela o fluxo).
+   * Ação feita à mão: o passo vira uma espera que você aprova depois (recusar cancela o fluxo).
    */
   pending?: string
-  run(ctx: {
-    projectId: string
-    taskId: string
-    vars: Record<string, string>
-  }): Promise<{ ok: true; vars?: Record<string, string> } | { ok: false; message: string }>
+  /**
+   * Antes de agir: o que mostrar para você aprovar (gate da ação), `{ problem }` para falhar já
+   * (o fluxo pausa) ou `null` para agir sem perguntar. Recusar encerra o fluxo como recusado.
+   */
+  confirm?(ctx: ActionContext): Promise<ActionConfirm | { problem: string } | null>
+  run(
+    ctx: ActionContext & { input?: string[] }
+  ): Promise<{ ok: true; vars?: Record<string, string> } | { ok: false; message: string }>
 }
 
 export interface FlowContext {
@@ -131,6 +140,8 @@ export interface FlowRunnerDeps {
     briefing: string
     timeoutMin: number
     includeBriefing: boolean
+    /** Modo entrega (5C): só nesta execução. */
+    delivery: boolean
   }): Promise<string>
   cancelClaude(runId: string): void
   extractors: readonly FlowExtractor[]
@@ -195,6 +206,8 @@ interface Persisted {
     options: { value: string; label: string }[]
     vars: Record<string, string>
   } | null
+  /** Ação do Orkio esperando sua confirmação (só metadados do git/GitHub). */
+  pendingConfirm?: ActionConfirm | null
 }
 
 const ACTIVE: readonly FlowRunStatus[] = ['running', 'waiting_gate', 'paused', 'awaiting_decision']
@@ -309,10 +322,18 @@ export class FlowRunner {
     return this.start(projectId, taskId, stageId, binding.flowId)
   }
 
+  /**
+   * Um fluxo específico, à mão (ex.: "Rodar fluxo CI vermelho" no painel). Não acompanha a etapa:
+   * a tarefa pode mudar de coluna sem interromper.
+   */
+  async startById(projectId: string, taskId: string, flowId: string): Promise<FlowRunView> {
+    return this.start(projectId, taskId, null, flowId)
+  }
+
   private async start(
     projectId: string,
     taskId: string,
-    stageId: string,
+    stageId: string | null,
     flowId: string
   ): Promise<FlowRunView> {
     if (this.activeRow(taskId)) throw new FlowError('busy', FLOW_MESSAGES.busy)
@@ -449,8 +470,8 @@ export class FlowRunner {
 
   // ---------- Ações do usuário ----------
 
-  approveGate(flowRunId: string): Promise<FlowRunView> {
-    return this.gateAnswer(flowRunId, 'approved')
+  approveGate(flowRunId: string, input?: string[]): Promise<FlowRunView> {
+    return this.gateAnswer(flowRunId, 'approved', input)
   }
 
   rejectGate(flowRunId: string): Promise<FlowRunView> {
@@ -459,7 +480,8 @@ export class FlowRunner {
 
   private async gateAnswer(
     flowRunId: string,
-    outcome: 'approved' | 'rejected'
+    outcome: 'approved' | 'rejected',
+    input?: string[]
   ): Promise<FlowRunView> {
     await this.withLock(flowRunId, async () => {
       const row = this.row(flowRunId)
@@ -467,12 +489,35 @@ export class FlowRunner {
         throw new FlowError('wrong_state', FLOW_MESSAGES.wrongState)
       }
       this.clearGateTimer(flowRunId)
+      const p = this.persisted(row)
+      const step = this.flow(row).steps.find((st) => st.id === row.current_step)
+      const action =
+        step?.type === 'orkio_action'
+          ? this.deps.actions.find((a) => a.id === step.action)
+          : undefined
+      if (step?.type === 'orkio_action' && action && !action.pending) {
+        // Ação com confirmação: aprovar executa agora; recusar encerra o fluxo (recusado).
+        this.savePersisted(flowRunId, { ...p, pendingConfirm: null })
+        this.event(row, outcome === 'approved' ? 'gate_approved' : 'gate_rejected', {
+          step: row.current_step
+        })
+        if (outcome === 'rejected') {
+          this.closeStep(flowRunId, 'rejected', null)
+          this.finishRun(row, 'finished', 'rejected')
+          return
+        }
+        this.deps.db.run(
+          `UPDATE flow_steps SET status = 'running' WHERE id = (SELECT MAX(id) FROM flow_steps WHERE flow_run_id = ?)`,
+          flowRunId
+        )
+        this.setStatus(flowRunId, 'running', null)
+        await this.execAction(this.row(flowRunId), step, action, input)
+        return
+      }
       this.closeStep(flowRunId, outcome, null)
       this.event(row, outcome === 'approved' ? 'gate_approved' : 'gate_rejected', {
         step: row.current_step
       })
-      const p = this.persisted(row)
-      const step = this.flow(row).steps.find((st) => st.id === row.current_step)
       if (step?.type === 'orkio_action') {
         // Ação pendente (feita à mão): aprovar segue; recusar cancela o fluxo.
         if (outcome === 'rejected') {
@@ -737,7 +782,8 @@ export class FlowRunner {
             prompt: this.persisted(row).pendingChoice!.prompt,
             options: this.persisted(row).pendingChoice!.options
           }
-        : null
+        : null,
+      confirm: row.status === 'waiting_gate' ? (this.persisted(row).pendingConfirm ?? null) : null
     }
   }
 
@@ -830,7 +876,8 @@ export class FlowRunner {
         args: text,
         briefing: ctx.briefing,
         timeoutMin: step.timeoutMin,
-        includeBriefing: step.includeBriefing !== false
+        includeBriefing: step.includeBriefing !== false,
+        delivery: step.delivery === true
       })
       this.deps.db.run('UPDATE flow_steps SET run_id = ? WHERE id = ?', runId, rowId)
       this.runIndex.set(runId, { flowRunId: row.id, rowId })
@@ -869,30 +916,78 @@ export class FlowRunner {
       this.notifyRow(row, 'Um fluxo espera você', action.pending)
       return
     }
+    if (!action) {
+      await this.endAction(row, step, { outcome: 'failed' }, `Ação desconhecida: ${step.action}`)
+      return
+    }
+    if (action.confirm) {
+      let info: ActionConfirm | { problem: string } | null
+      try {
+        info = await action.confirm({
+          projectId: row.project_id,
+          taskId: row.task_page_id,
+          vars: this.persisted(this.row(row.id)).engine.vars
+        })
+      } catch (error) {
+        console.error(`[orkio] ação do fluxo (confirmar): ${errorName(error)}`)
+        info = { problem: 'Não foi possível preparar a ação do Orkio.' }
+      }
+      if (info && 'problem' in info) {
+        await this.endAction(row, step, { outcome: 'failed' }, info.problem)
+        return
+      }
+      if (info) {
+        // Gate da ação: espera você aprovar (com o que vai acontecer na tela).
+        this.savePersisted(row.id, { ...this.persisted(this.row(row.id)), pendingConfirm: info })
+        this.deps.db.run(
+          `UPDATE flow_steps SET status = 'waiting' WHERE id = (SELECT MAX(id) FROM flow_steps WHERE flow_run_id = ?)`,
+          row.id
+        )
+        this.event(row, 'gate_waiting', { step: step.id })
+        this.setStatus(row.id, 'waiting_gate', null)
+        this.notifyRow(row, 'Um fluxo espera sua aprovação', info.title)
+        return
+      }
+    }
+    await this.execAction(row, step, action)
+  }
+
+  private async execAction(
+    row: RunRow,
+    step: Extract<Step, { type: 'orkio_action' }>,
+    action: OrkioAction,
+    input?: string[]
+  ): Promise<void> {
     const engine = this.persisted(this.row(row.id)).engine
     let end: StepEnd
     let message: string | null = null
-    if (!action) {
-      end = { outcome: 'failed' }
-      message = `Ação desconhecida: ${step.action}`
-    } else {
-      try {
-        const r = await action.run({
-          projectId: row.project_id,
-          taskId: row.task_page_id,
-          vars: engine.vars
-        })
-        if (r.ok) end = { outcome: 'ok', ...(r.vars ? { vars: r.vars } : {}) }
-        else {
-          end = { outcome: 'failed' }
-          message = r.message
-        }
-      } catch (error) {
-        console.error(`[orkio] ação do fluxo: ${errorName(error)}`)
+    try {
+      const r = await action.run({
+        projectId: row.project_id,
+        taskId: row.task_page_id,
+        vars: engine.vars,
+        ...(input ? { input } : {})
+      })
+      if (r.ok) end = { outcome: 'ok', ...(r.vars ? { vars: cleanVars(r.vars) } : {}) }
+      else {
         end = { outcome: 'failed' }
-        message = 'A ação do Orkio falhou.'
+        message = r.message
       }
+    } catch (error) {
+      console.error(`[orkio] ação do fluxo: ${errorName(error)}`)
+      end = { outcome: 'failed' }
+      message = 'A ação do Orkio falhou.'
     }
+    await this.endAction(row, step, end, message)
+  }
+
+  private async endAction(
+    row: RunRow,
+    step: Extract<Step, { type: 'orkio_action' }>,
+    end: StepEnd,
+    message: string | null
+  ): Promise<void> {
+    const engine = this.persisted(this.row(row.id)).engine
     this.closeStep(row.id, end.outcome === 'ok' ? 'ok' : 'failed', message)
     this.event(row, end.outcome === 'ok' ? 'step_finished' : 'step_failed', {
       step: step.id,

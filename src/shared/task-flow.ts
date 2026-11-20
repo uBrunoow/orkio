@@ -38,6 +38,11 @@ export type ClaudeCommandStep = StepBase & {
    * ID (ex.: alva-flow), use `false`: o briefing fica só em `.orkio/briefing.md`.
    */
   includeBriefing?: boolean
+  /**
+   * Modo entrega (5C): só neste passo, o Claude Code pode criar/atualizar a PR (gh) e fazer push
+   * da branch da tarefa, com aprovação na primeira vez. Merge, força e outras branches, nunca.
+   */
+  delivery?: boolean
 }
 
 export type GateStep = StepBase & {
@@ -483,6 +488,25 @@ export interface FlowRunView {
   history: FlowStepView[]
   /** Escolha pedida por um extrator (`needs_choice`). */
   choice: { prompt: string; options: { value: string; label: string }[] } | null
+  /** Confirmação de uma ação do Orkio (5C: push, pedir review) esperando você. */
+  confirm: ActionConfirm | null
+}
+
+/** O que uma ação do Orkio mostra antes de agir (gate da ação). */
+export interface ActionConfirm {
+  title: string
+  message: string
+  /** Pares rótulo → valor (ex.: Destino → origin/ORK-7/x). */
+  details: { label: string; value: string }[]
+  /** Commits que vão (push). */
+  commits?: { hash: string; subject: string }[]
+  /** `git diff --stat`. */
+  stat?: string
+  /** Escolha de valores antes de aprovar (ex.: revisores). */
+  input?: { label: string; options: string[]; selected: string[]; allowOther: boolean }
+  approveLabel: string
+  /** Link do GitHub (branch ou PR). */
+  link?: { label: string; url: string } | null
 }
 
 export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {

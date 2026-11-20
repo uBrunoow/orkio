@@ -415,6 +415,7 @@ export function parseStep(v: unknown): Step | null {
         ...(isRecord(v['extract']) && str(v['extract']['extractor'])
           ? { extract: { extractor: v['extract']['extractor'] } }
           : {}),
+        ...(v['delivery'] === true ? { delivery: true } : {}),
         ...(typeof v['includeBriefing'] === 'boolean'
           ? { includeBriefing: v['includeBriefing'] }
           : {})

@@ -83,6 +83,7 @@ export const IPC_CHANNELS = {
     active: 'task-flows:active',
     start: 'task-flows:start',
     approve: 'task-flows:approve',
+    startById: 'task-flows:start-by-id',
     reject: 'task-flows:reject',
     resume: 'task-flows:resume',
     skip: 'task-flows:skip',
@@ -723,7 +724,10 @@ export interface OrkioApi {
     active(projectId: string): Promise<Record<string, 'running' | 'needs_you'>>
     /** "Rodar fluxo": o fluxo ligado à etapa atual da tarefa. */
     start(projectId: string, taskId: string): Promise<ClaudeResult<FlowRunView>>
-    approve(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
+    /** Aprovar um gate; numa ação com escolha (ex.: revisores), os valores escolhidos. */
+    approve(flowRunId: string, values?: string[]): Promise<ClaudeResult<FlowRunView>>
+    /** Rodar um fluxo específico à mão (ex.: "Alva: CI vermelho"). */
+    startById(projectId: string, taskId: string, flowId: string): Promise<ClaudeResult<FlowRunView>>
     reject(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     resume(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     skip(flowRunId: string): Promise<ClaudeResult<FlowRunView>>

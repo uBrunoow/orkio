@@ -68,7 +68,28 @@ export function registerTaskFlowsIpc(
       ? service.act(() => runner.startManual(projectId, taskId))
       : INVALID
   )
-  act(ch.approve, (id) => runner.approveGate(id))
+  guarded(ch.approve, GENERIC, async (id, values) => {
+    if (!isId(id)) return INVALID
+    if (values === undefined || values === null) {
+      return service.act(() => runner.approveGate(id))
+    }
+    // Valores de uma escolha (ex.: revisores): logins ou `team:<slug>`, poucos e curtos.
+    if (
+      !Array.isArray(values) ||
+      values.length > 20 ||
+      !values.every(
+        (v) => typeof v === 'string' && /^(team:)?[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(v)
+      )
+    ) {
+      return INVALID
+    }
+    return service.act(() => runner.approveGate(id, values as string[]))
+  })
+  guarded(ch.startById, GENERIC, async (projectId, taskId, flowId) =>
+    isId(projectId) && isId(taskId) && isId(flowId)
+      ? service.act(() => runner.startById(projectId, taskId, flowId))
+      : INVALID
+  )
   act(ch.reject, (id) => runner.rejectGate(id))
   act(ch.resume, (id) => runner.resume(id))
   act(ch.skip, (id) => runner.skip(id))

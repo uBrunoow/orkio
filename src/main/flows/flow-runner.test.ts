@@ -57,6 +57,7 @@ let started: {
   args: string
   briefing: string
   includeBriefing?: boolean
+  delivery?: boolean
 }[]
 let cancelled: string[]
 let notifications: string[]
@@ -79,7 +80,8 @@ function makeRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
         command: input.command,
         args: input.args,
         briefing: input.briefing,
-        includeBriefing: input.includeBriefing
+        includeBriefing: input.includeBriefing,
+        delivery: input.delivery
       })
       return runId
     },
@@ -463,6 +465,155 @@ describe('FlowRunner', () => {
       await flush()
       expect(runner.view(second.id).status).toBe('running')
       expect(started).toHaveLength(2)
+    })
+  })
+
+  describe('5C: ações com confirmação e modo entrega', () => {
+    const DELIVER: Flow = {
+      id: 'd',
+      name: 'Entregar',
+      steps: [
+        {
+          id: 'pr',
+          name: 'PR',
+          type: 'claude_command',
+          command: 'alva-flow:pr',
+          args: 'x',
+          timeoutMin: 10,
+          delivery: true
+        },
+        {
+          id: 'depois',
+          name: 'Depois',
+          type: 'claude_command',
+          command: 'revisar',
+          args: 'x',
+          timeoutMin: 10
+        },
+        { id: 'push', name: 'Push', type: 'orkio_action', action: 'push' },
+        { id: 'review', name: 'Review', type: 'orkio_action', action: 'request_review' }
+      ]
+    }
+    let pushes: number
+    let reviewInput: string[] | undefined
+    let pushProblem: string | null
+    const PUSH = {
+      id: 'push',
+      label: 'Push',
+      confirm: async () =>
+        pushProblem
+          ? { problem: pushProblem }
+          : {
+              title: 'Enviar?',
+              message: 'm',
+              details: [{ label: 'Destino', value: 'origin → ORK-1/x' }],
+              commits: [{ hash: 'abc', subject: 'feat' }],
+              stat: '1 file',
+              approveLabel: 'Fazer push',
+              link: null
+            },
+      run: async () => {
+        pushes++
+        return { ok: true as const, vars: { 'delivery.pushed': 'sim' } }
+      }
+    }
+    const REVIEW = {
+      id: 'request_review',
+      label: 'Review',
+      confirm: async () => ({
+        title: 'Pedir review?',
+        message: 'm',
+        details: [],
+        input: { label: 'Revisores', options: ['ana', 'bia'], selected: ['ana'], allowOther: true },
+        approveLabel: 'Pedir review',
+        link: null
+      }),
+      run: async ({ input }: { input?: string[] }) => {
+        reviewInput = input
+        return { ok: true as const }
+      }
+    }
+
+    function deliveryRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
+      pushes = 0
+      reviewInput = undefined
+      pushProblem = null
+      config = {
+        flows: [DELIVER],
+        bindings: [{ stageId: 's-rev', flowId: 'd', enabled: true, mode: 'manual' }]
+      }
+      return makeRunner({ actions: [PUSH, REVIEW], ...over })
+    }
+
+    it('modo entrega só no passo marcado; push espera a confirmação e só então age', async () => {
+      const runner = deliveryRunner()
+      const { id } = await runner.startManual('p1', 't1')
+      expect(started[0]).toMatchObject({ command: 'alva-flow:pr', delivery: true })
+      finish(runner, 'run-1', 'succeeded')
+      await flush()
+      expect(started[1]).toMatchObject({ command: 'revisar', delivery: false })
+      finish(runner, 'run-2', 'succeeded')
+      await flush()
+      let v = runner.view(id)
+      expect(v).toMatchObject({ status: 'waiting_gate', currentStep: 'push' })
+      expect(v.confirm).toMatchObject({ title: 'Enviar?', commits: [{ hash: 'abc' }] })
+      expect(pushes).toBe(0)
+      expect(notifications).toContain('Um fluxo espera sua aprovação')
+      await runner.approveGate(id)
+      expect(pushes).toBe(1)
+      v = runner.view(id)
+      expect(v).toMatchObject({ status: 'waiting_gate', currentStep: 'review' })
+      expect(v.vars).toMatchObject({ 'delivery.pushed': 'sim' })
+      await runner.approveGate(id, ['bia', 'team:core'])
+      expect(reviewInput).toEqual(['bia', 'team:core'])
+      expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'done', confirm: null })
+      const kinds = store.events('t1').map((e) => e.kind)
+      expect(kinds.filter((k) => k === 'gate_approved')).toHaveLength(2)
+    })
+
+    it('recusar a confirmação encerra como recusado sem agir; problema na prévia pausa', async () => {
+      const runner = deliveryRunner()
+      const { id } = await runner.startManual('p1', 't1')
+      finish(runner, 'run-1', 'succeeded')
+      await flush()
+      finish(runner, 'run-2', 'succeeded')
+      await flush()
+      await runner.rejectGate(id)
+      expect(pushes).toBe(0)
+      expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'rejected' })
+
+      const r2 = deliveryRunner({ newId: () => 'fr-b' })
+      pushProblem = 'Não há commits novos para enviar.'
+      await r2.startManual('p1', 't1')
+      finish(r2, 'run-3', 'succeeded')
+      await flush()
+      finish(r2, 'run-4', 'succeeded')
+      await flush()
+      expect(r2.view('fr-b')).toMatchObject({ status: 'paused', pauseReason: 'step_failed' })
+      expect(r2.view('fr-b').history.at(-1)).toMatchObject({
+        stepId: 'push',
+        status: 'failed',
+        message: 'Não há commits novos para enviar.'
+      })
+      // Resolvido o problema, "Retomar" prepara de novo e pede a confirmação.
+      pushProblem = null
+      await r2.resume('fr-b')
+      expect(r2.view('fr-b')).toMatchObject({ status: 'waiting_gate', currentStep: 'push' })
+    })
+
+    it('reabrir o app com a confirmação aberta: continua esperando, com o que mostrar', async () => {
+      const runner = deliveryRunner()
+      const { id } = await runner.startManual('p1', 't1')
+      finish(runner, 'run-1', 'succeeded')
+      await flush()
+      finish(runner, 'run-2', 'succeeded')
+      await flush()
+      runner.dispose()
+      const r2 = makeRunner({ actions: [PUSH, REVIEW] })
+      r2.init()
+      expect(r2.view(id)).toMatchObject({ status: 'waiting_gate', confirm: { title: 'Enviar?' } })
+      await r2.approveGate(id)
+      expect(pushes).toBe(1)
     })
   })
 })
