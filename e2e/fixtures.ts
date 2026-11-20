@@ -33,6 +33,11 @@ export interface FakeServices {
   validTokens: string[] | null
   browser: 'approve' | 'deny' | 'ignore'
   broker: 'ok' | 'invalid_grant' | 'down'
+  /**
+   * 6A: base de um intermediário DE VERDADE (o site local, `next start`). Com ela, as chamadas do
+   * app ao intermediário do build E2E vão por HTTP real para lá, em vez da simulação.
+   */
+  brokerTarget: string | null
   /** GitHub Device Flow: o que o "usuário" faz em github.com/login/device. */
   githubDevice: 'approve' | 'pending' | 'deny' | 'expire'
   /** GET api.github.com/user. */
@@ -99,6 +104,7 @@ export const DEFAULT_FAKES: FakeServices = {
   validTokens: null,
   browser: 'approve',
   broker: 'ok',
+  brokerTarget: null,
   githubDevice: 'approve',
   githubUser: 'ok',
   githubRepos: {},
@@ -301,6 +307,12 @@ export async function launchOrkio(
         g.__calls.push(call)
 
         // Intermediário OAuth.
+        if (url.startsWith(brokerUrl) && g.__fakes.brokerTarget) {
+          const target = `${g.__fakes.brokerTarget}${url.slice(brokerUrl.length)}`
+          const response = await realFetch(target, init)
+          call.status = response.status
+          return response
+        }
         if (url.startsWith(brokerUrl)) {
           if (g.__fakes.broker === 'down') throw new TypeError('fetch failed')
           if (g.__fakes.broker === 'invalid_grant') return json({ error: 'invalid_grant' }, 400)

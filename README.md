@@ -105,7 +105,7 @@ Orkio (main) ──abre navegador──▶ api.notion.com/v1/oauth/authorize?…
      ▲                                        │ usuário autoriza
      │  http://127.0.0.1:47821/oauth/notion/callback?code=…&state=…
      │  (servidor local, só durante o login; confere o state)
-     ├──POST /notion/token { code } ──▶ intermediário (broker/, Cloudflare Worker)
+     ├──POST /notion/token { code } ──▶ intermediário (site/, rotas do site na Vercel)
      │                                        │ + client_secret (só ele conhece)
      │                                        ▼
      │                               api.notion.com/v1/oauth/token
@@ -114,7 +114,9 @@ Orkio (main) ──abre navegador──▶ api.notion.com/v1/oauth/authorize?…
 
 O Notion exige o **client secret** para trocar o código e renovar tokens, e a API REST não
 aceita PKCE. Um app desktop não consegue esconder um segredo, então essa etapa passa pelo
-intermediário em [`broker/`](broker/README.md). Os tokens ficam só no computador da pessoa,
+intermediário: as rotas `/notion/token` e `/notion/refresh` do site do Orkio
+([`site/`](site/README.md), na Vercel). O antigo Worker em [`broker/`](broker/README.md) fica
+até o login real ser confirmado pelo site. Os tokens ficam só no computador da pessoa,
 criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo intermediário.
 
 ### Configuração (uma vez, por quem mantém o Orkio)
@@ -125,14 +127,15 @@ criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo int
    - Redirect URI: `http://127.0.0.1:47821/oauth/notion/callback`
    - Guarde o **OAuth client ID** (público) e o **client secret** (segredo — não cole em chat,
      issue ou commit).
-2. **Publique o intermediário** seguindo [`broker/README.md`](broker/README.md). O client
-   secret vai só para o cofre da Cloudflare (`wrangler secret put`).
+2. **Publique o site** (intermediário incluso) seguindo [`site/README.md`](site/README.md). O
+   client secret vai só para as variáveis de ambiente da Vercel (`NOTION_CLIENT_SECRET`).
 3. **Configure o build do app**: copie `.env.example` para `.env` (dev) ou
    `.env.production` (build de release) e preencha:
    ```
    MAIN_VITE_NOTION_OAUTH_CLIENT_ID=<client ID>
-   MAIN_VITE_NOTION_OAUTH_BROKER_URL=https://orkio-oauth-broker.<sua-conta>.workers.dev
+   MAIN_VITE_NOTION_OAUTH_BROKER_URL=https://<domínio do site>
    ```
+   Em dev, com o site rodando local (`pnpm --dir site dev`), use `http://127.0.0.1:3000`.
    Nenhum desses valores é segredo. Sem eles, o app esconde o login com Notion e mostra só
    a opção de token.
 
