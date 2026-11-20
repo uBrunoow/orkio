@@ -11,7 +11,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import { CLAUDE_CODE_DOCS_URL } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
-import { ExternalLinkIcon, RefreshIcon, TerminalIcon } from '../../components/icons'
+import { ClaudeLogo, ExternalLinkIcon, RefreshIcon } from '../../components/icons'
 import { CardHeader } from '../integrations/connection-ui'
 
 /**
@@ -50,7 +50,7 @@ export function ClaudeCodeCard(): React.JSX.Element {
           titleId="claude-card-title"
           title="Claude Code"
           description="Executa as tarefas no seu computador, com a sua conta."
-          icon={<Icon icon={TerminalIcon} color="primary" size="lg" />}
+          icon={<Icon icon={ClaudeLogo} color="primary" size="lg" />}
           badge={
             status === null ? null : (
               <Token

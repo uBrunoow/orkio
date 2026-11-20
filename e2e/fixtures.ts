@@ -730,6 +730,8 @@ export async function launchOrkio(
   // Recarrega para que o status inicial já passe pelos simuladores acima.
   await page.reload()
   // O app abre em Projetos; os specs de integrações começam em Integrações.
+  // Tela inicial: "Começar" leva a Projetos (como era a tela de abertura antes dela).
+  await page.getByRole('button', { name: 'Começar', exact: true }).click()
   if ((options.startPage ?? 'integrations') === 'integrations') {
     await page
       .getByRole('navigation', { name: 'Navegação principal' })

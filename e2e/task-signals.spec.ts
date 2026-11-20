@@ -132,6 +132,8 @@ test('branch local e PR aparecem na tarefa certa', async () => {
     expect(status.state).toBe('connected')
   }
   await page.reload()
+  // O reload volta à tela inicial.
+  await page.getByRole('button', { name: 'Começar', exact: true }).click()
 
   const row = page.getByRole('listitem', { name: 'orkio-app' })
   await row.getByRole('button', { name: 'Ver tarefas' }).click()

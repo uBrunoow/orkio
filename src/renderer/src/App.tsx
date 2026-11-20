@@ -6,18 +6,19 @@ import type { BoardTaskRef } from '../../shared/ipc-contract'
 import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
 import { BoardPage } from './features/board/BoardPage'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
+import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
 
-type Page = 'projects' | 'board' | 'integrations'
+type Page = 'welcome' | 'projects' | 'board' | 'integrations'
 
-const PAGES: { id: Page; label: string; icon: SvgIcon }[] = [
+const PAGES: { id: Exclude<Page, 'welcome'>; label: string; icon: SvgIcon }[] = [
   { id: 'projects', label: 'Projetos', icon: ProjectsIcon },
   { id: 'board', label: 'Quadro', icon: BoardIcon },
   { id: 'integrations', label: 'Integrações', icon: IntegrationsIcon }
 ]
 
 export function App(): React.JSX.Element {
-  const [page, setPage] = useState<Page>('projects')
+  const [page, setPage] = useState<Page>('welcome')
   const [openTask, setOpenTask] = useState<BoardTaskRef | null>(null)
 
   // Clique numa notificação de automação: abre a tarefa no quadro.
@@ -58,7 +59,12 @@ export function App(): React.JSX.Element {
         </SideNav>
       }
     >
-      {page === 'projects' ? (
+      {page === 'welcome' ? (
+        <WelcomePage
+          onStart={() => setPage('projects')}
+          onOpenIntegrations={() => setPage('integrations')}
+        />
+      ) : page === 'projects' ? (
         <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
       ) : page === 'board' ? (
         <BoardPage

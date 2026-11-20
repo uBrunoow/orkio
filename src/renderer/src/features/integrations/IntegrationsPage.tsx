@@ -1,5 +1,4 @@
 import { Card } from '@astryxdesign/core/Card'
-import { Grid } from '@astryxdesign/core/Grid'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Text } from '@astryxdesign/core/Text'
 import { VStack } from '@astryxdesign/core/VStack'
@@ -45,18 +44,19 @@ export function IntegrationsPage(): React.JSX.Element {
                 Conecte suas ferramentas
               </Text>
               <Text color="secondary">
-                Notion para o planejamento, GitHub para o código. O Orkio liga os dois.
+                Notion para o planejamento, GitHub para o código e Claude Code para executar. O
+                Orkio liga tudo.
               </Text>
             </VStack>
           </HStack>
         </Card>
       )}
 
-      <Grid columns={{ minWidth: 380, repeat: 'fit' }} gap={4} align="start">
+      <VStack gap={4}>
         <NotionConnectionCard notion={notion} />
         <GitHubConnectionCard github={github} />
         <ClaudeCodeCard />
-      </Grid>
+      </VStack>
 
       <NotionWorkspaceCard
         workspace={workspace}
