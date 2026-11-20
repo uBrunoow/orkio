@@ -152,6 +152,8 @@ export class FlowRunner {
   private readonly runIndex = new Map<string, { flowRunId: string; rowId: number }>()
   private readonly gateTimers = new Map<string, NodeJS.Timeout>()
   private readonly locks = new Map<string, Promise<void>>()
+  /** Fechando o app: fins de execução (cancelAll) não contam; ao reabrir viram "interrompido". */
+  private disposed = false
 
   constructor(private readonly deps: FlowRunnerDeps) {}
 
@@ -195,6 +197,7 @@ export class FlowRunner {
   }
 
   dispose(): void {
+    this.disposed = true
     for (const t of this.gateTimers.values()) clearTimeout(t)
     this.gateTimers.clear()
   }
@@ -401,6 +404,7 @@ export class FlowRunner {
   // ---------- Fim das execuções da 4A ----------
 
   onRunFinished(info: RunFinished): void {
+    if (this.disposed) return
     const ref = this.runIndex.get(info.runId)
     if (!ref) return
     this.runIndex.delete(info.runId)

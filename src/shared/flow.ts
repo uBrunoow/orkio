@@ -20,6 +20,7 @@ import {
   type BoardStage,
   type StatusOption
 } from './board'
+import type { StageFlow } from './task-flow'
 import type { NotionColor } from './ipc-contract'
 
 export const EVENT_DESCRIPTIONS: Record<EventKind, string> = {
@@ -75,6 +76,8 @@ export interface FlowDraft {
   rules: AutomationRule[]
   /** Etapas removidas → destino das tarefas que estão nelas. */
   removals: Record<string, string | null>
+  /** 5A: fluxo de tarefa de cada coluna. Ausente = mantém as ligações salvas. */
+  bindings?: StageFlow[]
 }
 
 // ---------- Frases ----------

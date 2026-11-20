@@ -17,7 +17,8 @@ const {
   automation,
   projects,
   shell,
-  claude
+  claude,
+  taskFlows
 } = IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
@@ -138,6 +139,40 @@ const api: OrkioApi = {
     status: (projectId) => ipcRenderer.invoke(automation.status, projectId),
     runNow: (projectId) => ipcRenderer.invoke(automation.runNow, projectId),
     setPaused: (paused) => ipcRenderer.invoke(automation.setPaused, paused === true)
+  },
+  taskFlows: {
+    getProject: (projectId) => ipcRenderer.invoke(taskFlows.getProject, projectId),
+    saveFlows: (projectId, flows) =>
+      ipcRenderer.invoke(
+        taskFlows.saveFlows,
+        projectId,
+        flows.map((f) => JSON.parse(JSON.stringify(f)) as unknown)
+      ),
+    runs: (taskId) => ipcRenderer.invoke(taskFlows.runs, taskId),
+    active: (projectId) => ipcRenderer.invoke(taskFlows.active, projectId),
+    start: (projectId, taskId) => ipcRenderer.invoke(taskFlows.start, projectId, taskId),
+    approve: (id) => ipcRenderer.invoke(taskFlows.approve, id),
+    reject: (id) => ipcRenderer.invoke(taskFlows.reject, id),
+    resume: (id) => ipcRenderer.invoke(taskFlows.resume, id),
+    skip: (id) => ipcRenderer.invoke(taskFlows.skip, id),
+    cancel: (id) => ipcRenderer.invoke(taskFlows.cancel, id),
+    decideLeft: (id, choice) =>
+      ipcRenderer.invoke(taskFlows.decideLeft, id, choice === 'cancel' ? 'cancel' : 'continue'),
+    onChanged: (listener) => {
+      const handler = (_event: unknown, payload: unknown): void => {
+        if (
+          isRecord(payload) &&
+          typeof payload['projectId'] === 'string' &&
+          typeof payload['taskId'] === 'string'
+        ) {
+          listener({ projectId: payload['projectId'], taskId: payload['taskId'] })
+        }
+      }
+      ipcRenderer.on(taskFlows.changed, handler)
+      return () => {
+        ipcRenderer.removeListener(taskFlows.changed, handler)
+      }
+    }
   },
   claude: {
     status: (options) => ipcRenderer.invoke(claude.status, { force: options?.force === true }),

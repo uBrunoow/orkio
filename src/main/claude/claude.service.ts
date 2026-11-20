@@ -52,6 +52,8 @@ export const CLAUDE_MESSAGES = {
   editor: 'Não foi possível abrir o editor. Confira se o comando está instalado no PATH.',
   invalidCommand: 'Nome de comando inválido.',
   emptyPrompt: 'Escreva o que o Claude Code deve fazer.',
+  flowActive:
+    'Esta tarefa tem um fluxo em andamento. Use o fluxo (ou cancele-o) para rodar o Claude Code.',
   pageUnavailable: 'Não deu para ler a página da tarefa no Notion; o briefing usa só os campos.',
   generic: 'Algo deu errado. Tente novamente.'
 } as const
@@ -81,6 +83,8 @@ export interface ClaudeServiceDeps {
   ): Promise<{ results: unknown[]; nextCursor: string | null }>
   detect(): Promise<ClaudeCodeStatus>
   artifacts: ArtifactsService
+  /** 5A: a tarefa tem fluxo ativo? (bloqueia a execução manual). */
+  flowActive?: (taskId: string) => boolean
   /** Abre a pasta no editor (execFile, sem shell). */
   openEditor(editor: EditorId, path: string): Promise<void>
 }
@@ -179,32 +183,82 @@ export class ClaudeService {
 
   start(req: StartRunRequest): Promise<ClaudeResult<TaskRunsState>> {
     return this.wrap(async () => {
-      const project = this.project(req.projectId)
-      const status = await this.getStatus(true)
-      if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
-      if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
-      if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
-      if (req.mode === 'command' && !(req.command && COMMAND_NAME.test(req.command))) {
-        return fail('invalid', CLAUDE_MESSAGES.invalidCommand)
-      }
-      if (req.mode === 'prompt' && !req.text.trim()) {
-        return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
-      }
-      const task = await this.task(req.projectId, req.taskId)
-      if (!task.displayId) return fail('no_task_id', CLAUDE_MESSAGES.noTaskId)
-      const wtProject = this.worktreeProject(project)
-      const taskRef = { id: task.id, displayId: task.displayId, title: task.title }
-      await this.deps.worktrees.ensure(wtProject, taskRef)
-      await this.deps.runs.start({
-        project: { ...wtProject, name: project.name },
-        task: taskRef,
-        mode: req.mode,
-        command: req.mode === 'command' ? req.command : null,
-        text: req.text,
-        briefing: req.briefing
-      })
+      // 5A: com fluxo ativo, quem roda o Claude Code na tarefa é o fluxo.
+      if (this.deps.flowActive?.(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.flowActive)
+      const started = await this.startRun(req)
+      if (!started.ok) return started
       return ok(await this.taskState(req.taskId))
     })
+  }
+
+  /** Passo `claude_command` de um fluxo (5A): mesma execução da 4A; devolve o id ou o erro. */
+  startForFlow(input: {
+    projectId: string
+    taskId: string
+    command: string
+    args: string
+    briefing: string
+    timeoutMin: number
+  }): Promise<ClaudeResult<string>> {
+    return this.wrap(() =>
+      this.startRun(
+        {
+          projectId: input.projectId,
+          taskId: input.taskId,
+          mode: 'command',
+          command: input.command,
+          text: input.args,
+          briefing: input.briefing
+        },
+        input.timeoutMin
+      )
+    )
+  }
+
+  /** Contexto de um fluxo (5A): briefing do Notion, ID e URL da tarefa. */
+  flowContext(
+    projectId: string,
+    taskId: string
+  ): Promise<ClaudeResult<{ briefing: string; displayId: string; notionUrl: string | null }>> {
+    return this.wrap(async () => {
+      const prep = await this.prepare(projectId, taskId)
+      if (!prep.ok) return prep
+      const task = await this.task(projectId, taskId)
+      return ok({
+        briefing: prep.value.briefing,
+        displayId: prep.value.displayId,
+        notionUrl: task.url
+      })
+    })
+  }
+
+  private async startRun(req: StartRunRequest, timeoutMin?: number): Promise<ClaudeResult<string>> {
+    const project = this.project(req.projectId)
+    const status = await this.getStatus(true)
+    if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
+    if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
+    if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
+    if (req.mode === 'command' && !(req.command && COMMAND_NAME.test(req.command))) {
+      return fail('invalid', CLAUDE_MESSAGES.invalidCommand)
+    }
+    if (req.mode === 'prompt' && !req.text.trim()) {
+      return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
+    }
+    const task = await this.task(req.projectId, req.taskId)
+    if (!task.displayId) return fail('no_task_id', CLAUDE_MESSAGES.noTaskId)
+    const wtProject = this.worktreeProject(project)
+    const taskRef = { id: task.id, displayId: task.displayId, title: task.title }
+    await this.deps.worktrees.ensure(wtProject, taskRef)
+    const view = await this.deps.runs.start({
+      project: { ...wtProject, name: project.name },
+      task: taskRef,
+      mode: req.mode,
+      command: req.mode === 'command' ? req.command : null,
+      text: req.text,
+      briefing: req.briefing,
+      ...(timeoutMin ? { timeoutMin } : {})
+    })
+    return ok(view.id)
   }
 
   cancel(runId: string): void {

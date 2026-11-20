@@ -113,6 +113,21 @@ export function isFlowDraft(value: unknown): value is FlowDraft {
   // A forma normalizada substitui a recebida (campos extras são descartados).
   v['rules'] = parsed as AutomationRule[]
   if (typeof removals !== 'object' || removals === null || Array.isArray(removals)) return false
+  const bindings = v['bindings']
+  if (bindings !== undefined) {
+    if (!Array.isArray(bindings) || bindings.length > 30) return false
+    const ok = bindings.every(
+      (b) =>
+        typeof b === 'object' &&
+        b !== null &&
+        isStageId((b as Record<string, unknown>)['stageId']) &&
+        typeof (b as Record<string, unknown>)['flowId'] === 'string' &&
+        ((b as Record<string, unknown>)['flowId'] as string).length <= 100 &&
+        typeof (b as Record<string, unknown>)['enabled'] === 'boolean' &&
+        ['on_enter', 'manual'].includes((b as Record<string, unknown>)['mode'] as string)
+    )
+    if (!ok) return false
+  }
   return Object.entries(removals).every(
     ([k, dest]) => isStageId(k) && (dest === null || isStageId(dest))
   )

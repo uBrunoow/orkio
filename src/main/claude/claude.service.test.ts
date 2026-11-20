@@ -29,7 +29,7 @@ function para(text: string, extra: Record<string, unknown> = {}): Record<string,
 
 function setup(over: Partial<ClaudeServiceDeps> = {}) {
   const runs = {
-    start: vi.fn(async () => undefined),
+    start: vi.fn(async () => ({ id: 'run-1' })),
     list: vi.fn(() => []),
     isRunning: vi.fn(() => false),
     cancel: vi.fn(() => {
@@ -221,5 +221,32 @@ describe('ClaudeService', () => {
     expect(
       await service.saveContext('p1', { instructions: 'x'.repeat(9000), notionPages: [] })
     ).toMatchObject({ ok: false, error: { code: 'invalid' } })
+  })
+
+  it('com fluxo ativo na tarefa, a execução manual é bloqueada (o fluxo roda os comandos)', async () => {
+    const { service, runs } = setup({ flowActive: (taskId) => taskId === 'task-1' })
+    const r = await service.start({
+      projectId: 'p1',
+      taskId: 'task-1',
+      mode: 'prompt',
+      command: null,
+      text: 'Faça',
+      briefing: 'b'
+    })
+    expect(r).toMatchObject({ ok: false, error: { code: 'flow_active' } })
+    expect(runs.start).not.toHaveBeenCalled()
+    // O passo do fluxo usa o mesmo caminho e devolve o id da execução.
+    const fromFlow = await service.startForFlow({
+      projectId: 'p1',
+      taskId: 'task-1',
+      command: 'revisar',
+      args: 'ORK-7',
+      briefing: 'b',
+      timeoutMin: 5
+    })
+    expect(fromFlow).toEqual({ ok: true, value: 'run-1' })
+    expect(runs.start).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: 'command', command: 'revisar', text: 'ORK-7', timeoutMin: 5 })
+    )
   })
 })

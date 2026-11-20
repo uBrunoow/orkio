@@ -7,6 +7,7 @@
  * - Mover/bloquear: grava localmente na hora (otimista) e enfileira a escrita no Notion
  *   (NotionWriteQueue), que confirma, tenta de novo ou desfaz.
  */
+import type { StageFlow } from '../../shared/task-flow'
 import { defaultRules } from '../../shared/automation'
 import { diffFlow, toBoardStages, validateFlow, type FlowDraft } from '../../shared/flow'
 import {
@@ -679,10 +680,20 @@ export class BoardService {
         rules: draft.rules,
         updatedAt: this.now().toISOString()
       }
+      // 5A: ligações etapa → fluxo de tarefa (só para etapas e fluxos que existem).
+      const current = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
+      const flowIds = new Set(current.flows.map((f) => f.id))
+      const bindings = (draft.bindings ?? current.bindings).filter(
+        (b, i, all) =>
+          stages.some((st) => st.id === b.stageId) &&
+          flowIds.has(b.flowId) &&
+          all.findIndex((x) => x.stageId === b.stageId) === i
+      )
       try {
         await this.deps.config.update((c) => ({
           ...c,
-          boards: { ...c.boards, [projectId]: board }
+          boards: { ...c.boards, [projectId]: board },
+          flows: { ...c.flows, [projectId]: { ...current, bindings } }
         }))
       } catch (e) {
         throw new BoardError({
@@ -693,6 +704,7 @@ export class BoardService {
       }
 
       const changes = diffFlow(previous, board)
+      changes.push(...diffBindings(current.bindings, bindings, stages, current.flows))
       let moved = 0
       this.deps.store.transaction(() => {
         for (const removed of previous.stages) {
@@ -1005,4 +1017,31 @@ export function optionForStage(
   stage: BoardStage
 ): StatusOption | null {
   return findOption(options, stage.notionStatus)
+}
+
+/** Frases do histórico de configuração para as ligações etapa → fluxo (5A). */
+function diffBindings(
+  before: readonly StageFlow[],
+  after: readonly StageFlow[],
+  stages: readonly BoardStage[],
+  flows: readonly { id: string; name: string }[]
+): string[] {
+  const stageName = (id: string): string => stages.find((s) => s.id === id)?.name ?? id
+  const flowName = (id: string): string => flows.find((f) => f.id === id)?.name ?? id
+  const describe = (b: StageFlow): string =>
+    `“${flowName(b.flowId)}” (${b.mode === 'on_enter' ? 'ao entrar' : 'manual'}${b.enabled ? '' : ', desligado'})`
+  const out: string[] = []
+  for (const b of after) {
+    const old = before.find((x) => x.stageId === b.stageId)
+    if (!old) out.push(`Coluna “${stageName(b.stageId)}” ganhou o fluxo ${describe(b)}`)
+    else if (JSON.stringify(old) !== JSON.stringify(b)) {
+      out.push(`Fluxo da coluna “${stageName(b.stageId)}”: ${describe(b)}`)
+    }
+  }
+  for (const b of before) {
+    if (!after.some((x) => x.stageId === b.stageId) && stages.some((s) => s.id === b.stageId)) {
+      out.push(`Coluna “${stageName(b.stageId)}” ficou sem fluxo`)
+    }
+  }
+  return out
 }

@@ -55,6 +55,9 @@ import { ClaudeService, type ClaudeServiceDeps } from './claude/claude.service'
 import { detectClaude } from './claude/detect'
 import { ArtifactsService, type ArtifactsDeps } from './claude/artifacts.service'
 import { ClaudeRun } from './claude/runner'
+import { FlowError, FlowRunner, NOOP_ACTION, ORKIO_LINES_EXTRACTOR } from './flows/flow-runner'
+import { FlowsService } from './flows/flows.service'
+import { registerTaskFlowsIpc } from './ipc/task-flows.ipc'
 import { RunService } from './claude/run.service'
 import { WorktreeService } from './claude/worktree.service'
 import { registerClaudeIpc } from './ipc/claude.ipc'
@@ -216,7 +219,9 @@ function registerIpc(): void {
         connectionMethod: () => notion.connectionMethod()
       },
       onSync: broadcast,
-      actor: () => userInfo().username
+      actor: () => userInfo().username,
+      // 5A: entrada/saída de etapa vai para os fluxos (o runner adia o trabalho).
+      onStageChanged: (change) => flowRunner?.onStageChanged(change)
     })
     writeQueue = new NotionWriteQueue({
       store: boardStore,
@@ -321,7 +326,7 @@ function registerIpc(): void {
     )
 
     // Claude Code (4A): CLI do usuário (assinatura dele), worktree por tarefa, permissões pelo Orkio.
-    claudeRuns = createClaude({
+    const claude = createClaude({
       boardStore,
       git,
       configStore,
@@ -334,6 +339,18 @@ function registerIpc(): void {
           notion.createChildPage(parent, title, markdown),
         appendMarkdown: (pageId, markdown) => notion.appendMarkdown(pageId, markdown)
       },
+      send,
+      isTrustedSender,
+      ready: projectsReady
+    })
+    claudeRuns = claude.runs
+
+    // Fluxos de tarefa (5A): passos ligados às colunas, sobre as execuções da 4A.
+    flowRunner = createFlowRunner({
+      boardStore,
+      configStore,
+      claude: claude.service,
+      runs: claude.runs,
       send,
       isTrustedSender,
       ready: projectsReady
@@ -356,6 +373,58 @@ let projects: ProjectsService | null = null
 let writeQueue: NotionWriteQueue | null = null
 let scheduler: AutomationScheduler | null = null
 let claudeRuns: RunService | null = null
+let flowRunner: FlowRunner | null = null
+
+function createFlowRunner(deps: {
+  boardStore: BoardStore
+  configStore: ReturnType<typeof createOrkioConfigStore>
+  claude: ClaudeService
+  runs: RunService
+  send: (channel: string, payload: unknown) => void
+  isTrustedSender: ReturnType<typeof createSenderGuard>
+  ready: Promise<void>
+}): FlowRunner {
+  const extractors = [ORKIO_LINES_EXTRACTOR]
+  const actions = [NOOP_ACTION]
+  const runner = new FlowRunner({
+    db: deps.boardStore.db,
+    store: deps.boardStore,
+    flows: (projectId) => deps.configStore.get().flows[projectId] ?? { flows: [], bindings: [] },
+    currentStage: (_projectId, taskId) =>
+      deps.boardStore.db.get<{ stage_id: string | null }>(
+        'SELECT stage_id FROM task_state WHERE task_page_id = ?',
+        taskId
+      )?.stage_id ?? null,
+    prepare: async (projectId, taskId) => {
+      const r = await deps.claude.flowContext(projectId, taskId)
+      if (!r.ok) throw new FlowError(r.error.code, r.error.message)
+      return r.value
+    },
+    startClaude: async (input) => {
+      const r = await deps.claude.startForFlow(input)
+      if (!r.ok) throw new FlowError(r.error.code, r.error.message)
+      return r.value
+    },
+    cancelClaude: (runId) => deps.claude.cancel(runId),
+    extractors,
+    actions,
+    notify: (title, body, ref) =>
+      showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, deps.send),
+    emit: (ref) => deps.send(IPC_CHANNELS.taskFlows.changed, ref)
+  })
+  deps.runs.onFinished((info) => runner.onRunFinished(info))
+  runner.init()
+  const service = new FlowsService({
+    config: deps.configStore,
+    store: deps.boardStore,
+    runner,
+    extractors,
+    actions,
+    actor: () => userInfo().username
+  })
+  registerTaskFlowsIpc(ipcMain, service, runner, deps.isTrustedSender, deps.ready)
+  return runner
+}
 
 /**
  * Apps abertos pelo Finder/menu não herdam o PATH do terminal: acrescenta as pastas usuais do
@@ -388,7 +457,7 @@ function createClaude(deps: {
   send: (channel: string, payload: unknown) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
-}): RunService {
+}): { runs: RunService; service: ClaudeService } {
   const userData = app.getPath('userData')
   const tmpDir = join(userData, 'run-tmp')
   const env = toolEnv()
@@ -431,6 +500,7 @@ function createClaude(deps: {
     getBlockChildren: deps.getBlockChildren,
     searchPages: deps.searchPages,
     detect: () => detectClaude({ env }),
+    flowActive: (taskId) => flowRunner?.hasActive(taskId) ?? false,
     artifacts: new ArtifactsService({
       db: deps.boardStore.db,
       store: deps.boardStore,
@@ -456,7 +526,7 @@ function createClaude(deps: {
   })
   void mkdir(tmpDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
   registerClaudeIpc(ipcMain, service, deps.isTrustedSender, deps.ready)
-  return runs
+  return { runs, service }
 }
 
 /** Notificação de desktop (opcional por regra). Clique: foca o Orkio e abre a tarefa. */
@@ -546,6 +616,7 @@ void app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  flowRunner?.dispose()
   claudeRuns?.cancelAll()
   projects?.dispose()
   writeQueue?.stop()

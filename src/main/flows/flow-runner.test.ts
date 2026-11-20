@@ -304,4 +304,16 @@ describe('FlowRunner', () => {
     expect(runner.view(id)).toMatchObject({ status: 'paused', pauseReason: 'step_failed' })
     expect(runner.view(id).history[0]!.message).toBe('Claude Code não encontrado.')
   })
+
+  it('fechar o app: o cancelamento das execuções não vira falha (reabre como interrompido)', async () => {
+    const r1 = makeRunner()
+    const { id } = await r1.startManual('p1', 't1')
+    r1.dispose()
+    finish(r1, 'run-1', 'cancelled') // cancelAll da 4A ao sair
+    await flush()
+    expect(r1.view(id).status).toBe('running')
+    const r2 = makeRunner()
+    r2.init()
+    expect(r2.view(id)).toMatchObject({ status: 'paused', pauseReason: 'interrupted' })
+  })
 })

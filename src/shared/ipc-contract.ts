@@ -6,6 +6,13 @@
 import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
 import type { FlowDraft } from './flow'
 import type { TaskSignals } from './task-signals'
+import type { Flow, FlowRunView, ProjectFlows } from './task-flow'
+
+/** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
+export interface TaskFlowsProject extends ProjectFlows {
+  extractors: { id: string; label: string }[]
+  actions: { id: string; label: string }[]
+}
 import type {
   ProjectClaudeContext,
   ArtifactCandidate,
@@ -47,6 +54,21 @@ export const IPC_CHANNELS = {
   },
   signals: {
     get: 'signals:get'
+  },
+  taskFlows: {
+    getProject: 'task-flows:get-project',
+    saveFlows: 'task-flows:save-flows',
+    runs: 'task-flows:runs',
+    active: 'task-flows:active',
+    start: 'task-flows:start',
+    approve: 'task-flows:approve',
+    reject: 'task-flows:reject',
+    resume: 'task-flows:resume',
+    skip: 'task-flows:skip',
+    cancel: 'task-flows:cancel',
+    decideLeft: 'task-flows:decide-left',
+    /** Evento main → renderer: o fluxo de uma tarefa mudou. */
+    changed: 'task-flows:changed'
   },
   claude: {
     status: 'claude:status',
@@ -648,6 +670,25 @@ export interface OrkioApi {
     runNow(projectId: string): Promise<AutomationStatus>
     /** "Pausar todas" / "Retomar". */
     setPaused(paused: boolean): Promise<AutomationStatus>
+  }
+  /** Fluxos de tarefa (5A): sequências de passos ligadas às colunas do quadro. */
+  taskFlows: {
+    getProject(projectId: string): Promise<ClaudeResult<TaskFlowsProject>>
+    /** Valida de novo no main; erros bloqueiam. */
+    saveFlows(projectId: string, flows: Flow[]): Promise<ClaudeResult<TaskFlowsProject>>
+    /** Execuções da tarefa (a ativa ou a mais recente primeiro). */
+    runs(taskId: string): Promise<FlowRunView[]>
+    /** Para os cards: tarefas com fluxo ativo e se ele espera você. */
+    active(projectId: string): Promise<Record<string, 'running' | 'needs_you'>>
+    /** "Rodar fluxo": o fluxo ligado à etapa atual da tarefa. */
+    start(projectId: string, taskId: string): Promise<ClaudeResult<FlowRunView>>
+    approve(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
+    reject(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
+    resume(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
+    skip(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
+    cancel(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
+    decideLeft(flowRunId: string, choice: 'cancel' | 'continue'): Promise<ClaudeResult<FlowRunView>>
+    onChanged(listener: (event: { projectId: string; taskId: string }) => void): () => void
   }
   /** Claude Code (4A): CLI do usuário rodando a tarefa num worktree isolado. */
   claude: {
