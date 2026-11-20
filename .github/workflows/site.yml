@@ -1,0 +1,61 @@
+# Site (Next.js na Vercel). Separado do app: falhas aqui não afetam o workflow do app.
+# O deploy é feito pela integração Vercel ↔ GitHub (Root Directory = site).
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/site.yml']
+  pull_request:
+    paths: ['site/**', '.github/workflows/site.yml']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: site
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: site/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  # Integração real: o app (build E2E) faz o login OAuth do Notion passando pelo site local.
+  app-integration:
+    runs-on: ubuntu-latest
+    needs: checks
+    defaults:
+      run:
+        working-directory: .
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir site install --frozen-lockfile
+      - run: pnpm --dir site build
+      - run: pnpm exec playwright install-deps
+      - run: xvfb-run -a pnpm e2e --trace off --grep @site

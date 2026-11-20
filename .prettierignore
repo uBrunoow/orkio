@@ -11,3 +11,6 @@ themes
 src/themes
 src/astryx-themes.ts
 src/renderer/public/astryx-layer-slide-rules.css
+site/.next
+site/node_modules
+site/next-env.d.ts

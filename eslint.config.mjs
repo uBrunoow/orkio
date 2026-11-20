@@ -9,6 +9,8 @@ export default tseslint.config(
     ignores: [
       'out/**',
       'dist/**',
+      // Site (Vercel): package próprio, com ESLint/TS/Vitest próprios (site/).
+      'site/**',
       'node_modules/**',
       'themes/**',
       'src/themes/**',
