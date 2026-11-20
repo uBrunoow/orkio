@@ -23,7 +23,12 @@ export const EXTERNAL_URL_RULES: readonly {
   { host: 'github.com', pathPrefix: '/settings/personal-access-tokens' },
   { host: 'github.com', pathPattern: /^\/orgs\/[A-Za-z0-9-]+\/sso$/ },
   // PRs ligadas às tarefas (Etapa 2D).
-  { host: 'github.com', pathPattern: /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/\d+$/ }
+  { host: 'github.com', pathPattern: /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/\d+$/ },
+  // Branch da tarefa enviada por um fluxo (Etapa 5C).
+  {
+    host: 'github.com',
+    pathPattern: /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/tree\/[A-Za-z0-9._%-]+(\/[A-Za-z0-9._%-]+)*$/
+  }
 ]
 
 export function isAllowedExternalUrl(value: unknown): value is string {

@@ -496,6 +496,13 @@ describe('allowlist: PRs do GitHub', () => {
     expect(isAllowedExternalUrl('https://github.com/acme/app/issues/12')).toBe(false)
     expect(isAllowedExternalUrl('https://gist.github.com/acme/app/pull/12')).toBe(false)
   })
+
+  it('5C: aceita a branch da tarefa em /<owner>/<repo>/tree/<branch>', () => {
+    expect(isAllowedExternalUrl('https://github.com/acme/app/tree/ORK-7/exportar-csv')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/tree/')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/tree/x/../../settings')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/blob/main/x')).toBe(false)
+  })
 })
 
 describe('registerBoardIpc', () => {

@@ -6,8 +6,12 @@ import {
   NOTION_FAKE,
   createUserDataDir,
   cspViolations,
+  ghCalls,
   launchOrkio,
+  notionState,
   removeDir,
+  setFakes,
+  type FakePull,
   type OrkioApp
 } from './fixtures'
 
@@ -16,6 +20,7 @@ import {
  * backlog/tasks/task-1 - …md), Notion simulado e git real. Nada do plugin real roda aqui.
  */
 const NOTION_TOKEN = 'ntn_E2E_ALVA_TOKEN_abcdef123456'
+const GITHUB_PAT = 'github_pat_E2E_ALVA_DELIVERY_TOKEN_0123456789'
 const ORK2 = 'ORK-2 Listar tarefas do Notion'
 const PROJECT = 'proj-alva'
 
@@ -68,6 +73,23 @@ async function goToBoard(page: Page): Promise<void> {
     .click()
 }
 const card = (page: Page): Locator => page.getByRole('listitem', { name: ORK2, exact: true })
+const column = (page: Page, name: string): Locator =>
+  page.getByRole('list', { name: 'Etapas do quadro' }).getByRole('listitem', { name, exact: true })
+async function expectIn(page: Page, stage: string): Promise<void> {
+  await expect(column(page, stage).getByRole('listitem', { name: ORK2, exact: true })).toBeVisible({
+    timeout: 30_000
+  })
+}
+const origin = (): string => join(work, 'origin.git')
+const taskBranch = (): string => git(worktree(), 'branch', '--show-current').trim()
+const pull = (over: Partial<FakePull> = {}): FakePull => ({
+  number: 7,
+  title: 'ORK-2 Listar tarefas do Notion',
+  head: taskBranch(),
+  state: 'open',
+  updatedAt: new Date().toISOString(),
+  ...over
+})
 async function moveTo(page: Page, stage: string): Promise<void> {
   await card(page).getByRole('button', { name: 'Ações de ORK-2' }).click()
   await page.getByRole('menuitem', { name: `Mover para ${stage}` }).click()
@@ -153,6 +175,12 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
     NOTION_TOKEN
   )
   expect(s.state).toBe('connected')
+  // GitHub conectado (sinais/automações e o pedido de review da 5C).
+  const gh = await page.evaluate(
+    (t) => window.orkio.github.connect({ kind: 'token', token: t }),
+    GITHUB_PAT
+  )
+  expect(gh.state).toBe('connected')
   await goToBoard(page)
   await page
     .getByRole('region', { name: 'Criar o quadro' })
@@ -237,12 +265,13 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
   expect(await cspViolations(page)).toEqual([])
 })
 
-test('critérios 3–5: entrega com blocker → fix (1 volta), diff, commit e para antes do push (5C)', async () => {
-  const { page } = orkio!
+test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado → /pr abre a PR → Revisando', async () => {
+  const { page, app, logs } = orkio!
   await page
     .getByRole('complementary', { name: 'Detalhes de ORK-2' })
     .getByRole('button', { name: 'Fechar' })
     .click()
+  const mainBefore = git(origin(), 'rev-parse', 'main').trim()
   await moveTo(page, 'Em andamento')
   const panel = await flowPanel(page)
   const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
@@ -251,8 +280,7 @@ test('critérios 3–5: entrega com blocker → fix (1 volta), diff, commit e pa
   const gate = flow.getByRole('group', { name: 'Aprovação do fluxo' })
   await expect(gate).toContainText('Confira o diff antes do commit', { timeout: 60_000 })
   await expect(gate.getByRole('textbox', { name: 'Diff para aprovar' })).toHaveValue(/corrigido/)
-  const log = argsLog()
-  expect(log.slice(2)).toEqual([
+  expect(argsLog().slice(2)).toEqual([
     'implement TASK-1',
     'review TASK-1',
     'fix TASK-1 --apply',
@@ -260,14 +288,149 @@ test('critérios 3–5: entrega com blocker → fix (1 volta), diff, commit e pa
   ])
   await gate.getByRole('button', { name: 'Aprovar' }).click()
 
-  // Commit e para no push pendente da 5C, explicando.
-  const pending = flow.getByRole('group', { name: 'Ação pendente do fluxo' })
-  await expect(pending).toContainText('Push da branch', { timeout: 30_000 })
-  await expect(pending).toContainText('chega na Etapa 5C')
+  // Commit → gate do push com commits, diff e destino. Nada foi enviado ainda.
+  const push = flow.getByRole('group', { name: 'Enviar a branch para o GitHub?' })
+  await expect(push).toBeVisible({ timeout: 30_000 })
   expect(argsLog().at(-1)).toBe('commit TASK-1')
-  expect(git(worktree(), 'log', '--oneline', '-1')).toContain('feat: exportar tarefas')
-  // Nada foi enviado ao origin.
-  expect(git(join(work, 'origin.git'), 'branch', '--list').trim()).toBe('* main')
+  await expect(push.getByRole('list', { name: 'Commits que vão para o GitHub' })).toContainText(
+    'feat: exportar tarefas'
+  )
+  await expect(push.getByRole('list', { name: 'Detalhes da ação' })).toContainText(
+    `origin → ${taskBranch()}`
+  )
+  await expect(push.getByTestId('confirm-stat')).toContainText('exportar.ts')
+  expect(git(origin(), 'branch', '--list').trim()).toBe('* main')
   await expect(card(page).getByTestId('card-flow')).toHaveText('Esperando você')
-  await expect(flow.getByTestId('alva-task')).toContainText('Backlog: TASK-1 · Reviewed')
+  await push.getByRole('button', { name: 'Fazer push' }).click()
+
+  // /pr em modo entrega: o primeiro comando do gh pede aprovação (só nesta execução).
+  const ask = panel.getByRole('group', { name: 'Pedido de aprovação da entrega' })
+  await expect(ask).toContainText('gh pr create --fill --base main', { timeout: 30_000 })
+  await expect(ask.getByRole('button', { name: /^Sempre neste projeto/ })).toHaveCount(0)
+  // O push foi feito pelo Orkio (sem força), só da branch da tarefa.
+  expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(
+    git(worktree(), 'rev-parse', 'HEAD').trim()
+  )
+  await ask.getByRole('button', { name: 'Permitir nesta execução' }).click()
+
+  // O /pr espera o CI e pergunta no cartão normal; enquanto isso a PR aparece no GitHub.
+  const q = panel.getByRole('group', { name: 'Pergunta do Claude Code' })
+  await expect(q).toContainText('O CI ainda está rodando', { timeout: 30_000 })
+  expect(ghCalls(userDataDir)).toEqual(['pr create --fill --base main', 'pr checks 7'])
+  await setFakes(app, {
+    githubPulls: [pull({ sha: git(worktree(), 'rev-parse', 'HEAD').trim() })],
+    githubPrDetails: {
+      '7': { reviewDecision: 'REVIEW_REQUIRED', unresolved: 0, checks: 'PENDING' }
+    }
+  })
+  await page.getByRole('button', { name: 'Atualizar' }).click()
+  // Critério 2: a PR aberta move a tarefa para Revisando sozinha (3B), sem parar o fluxo.
+  await expectIn(page, 'Revisando')
+  await expect(flow.getByTestId('flow-status')).toHaveText('Rodando')
+  await expect(flow.getByTestId('pr-ci')).toHaveText('CI rodando (PR #7)')
+  await q.getByRole('radio', { name: 'Sim, esperar' }).check()
+  await q.getByRole('button', { name: 'Responder' }).click()
+  await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+
+  // Critério 4: merge, força e main continuam impossíveis, mesmo no modo entrega.
+  const log = argsLog()
+  expect(log).toContain('deny:gh pr merge 7 --squash')
+  expect(log).toContain('deny:git push --force origin HEAD:main')
+  expect(log).toContain('allow:gh pr create --fill --base main')
+  expect(log).toContain('allow:gh pr checks 7') // já aprovado nesta execução
+  expect(log.some((l) => l.startsWith('allow:git push'))).toBe(false) // nada novo para o /pr
+  expect(ghCalls(userDataDir).some((c) => c.includes('merge'))).toBe(false)
+  expect(git(origin(), 'rev-parse', 'main').trim()).toBe(mainBefore)
+  // Nenhum token do Orkio no ambiente do Claude Code.
+  const env = readFileSync(join(worktree(), '.orkio', 'env.txt'), 'utf8')
+  expect(env).not.toContain(GITHUB_PAT)
+  expect(env).not.toContain(NOTION_TOKEN)
+
+  // Histórico com cada entrega e o link.
+  const history = panel.getByRole('list', { name: 'Histórico da tarefa' })
+  await expect(history).toContainText(`Push de ${taskBranch()} pelo Orkio`)
+  await expect(history).toContainText('PR aberta pelo Claude Code (modo entrega)')
+  await expect(history).toContainText('Claude Code bloqueado')
+  expect(await cspViolations(page)).toEqual([])
+  expect(logs.join('\n')).not.toContain(GITHUB_PAT)
+})
+
+test('5C critério 3: alterações pedidas → Revisado → --comments → push confirmado → novo review → Revisando', async () => {
+  const { page, app, logs } = orkio!
+  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
+  const pushedSha = git(origin(), 'rev-parse', taskBranch()).trim()
+
+  // Ana pede alterações: a 3B move para Revisado e o fluxo da coluna começa sozinho.
+  await setFakes(app, {
+    githubPulls: [pull({ sha: pushedSha })],
+    githubPrDetails: {
+      '7': {
+        reviewDecision: 'CHANGES_REQUESTED',
+        unresolved: 1,
+        checks: 'FAILURE',
+        reviews: [
+          {
+            id: 'REV-1',
+            state: 'CHANGES_REQUESTED',
+            submittedAt: new Date().toISOString(),
+            author: { login: 'ana' }
+          }
+        ]
+      }
+    }
+  })
+  await page.getByRole('button', { name: 'Atualizar' }).click()
+  await expectIn(page, 'Revisado')
+  await expect(flow).toContainText('Fluxo: Alva: comentários da PR', { timeout: 30_000 })
+  // CI vermelho na PR: estado no painel (o botão aparece quando nenhum fluxo está rodando).
+  await expect(flow.getByTestId('pr-ci')).toHaveText('CI falhou (PR #7)')
+
+  // O /pr --comments tenta o push: você recusa (o Orkio oferece o próprio push depois).
+  const ask = panel.getByRole('group', { name: 'Pedido de aprovação da entrega' })
+  await expect(ask).toContainText(`git push origin ${taskBranch()}`, { timeout: 30_000 })
+  await ask.getByRole('button', { name: 'Negar' }).click()
+  // Resolver a conversa: primeiro comando do gh nesta execução → aprovação.
+  await expect(ask).toContainText('resolveReviewThread', { timeout: 30_000 })
+  await ask.getByRole('button', { name: 'Permitir nesta execução' }).click()
+
+  // A PR não tem o commit novo → push do Orkio, com a confirmação.
+  const push = flow.getByRole('group', { name: 'Enviar a branch para o GitHub?' })
+  await expect(push).toBeVisible({ timeout: 30_000 })
+  await expect(push).toContainText('fix: comentários da revisão')
+  await expect(push).toContainText('já existe (só commits novos)')
+  expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(pushedSha) // nada enviado ainda
+  await push.getByRole('button', { name: 'Fazer push' }).click()
+
+  // Pedir review de novo a quem revisou (Ana), depois de confirmar.
+  const review = flow.getByRole('group', { name: 'Pedir review da PR #7?' })
+  await expect(review).toBeVisible({ timeout: 30_000 })
+  expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(
+    git(worktree(), 'rev-parse', 'HEAD').trim()
+  )
+  await expect(review.getByRole('checkbox', { name: 'ana' })).toBeChecked()
+  await expect(review.getByRole('checkbox', { name: 'bia' })).not.toBeChecked()
+  await review.getByRole('button', { name: 'Pedir review' }).click()
+  await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+  expect((await notionState(app)).reviewRequests).toEqual([
+    { pull: 7, reviewers: ['ana'], teams: [] }
+  ])
+  // O novo pedido de review leva a tarefa de volta para Revisando (3B), sozinho.
+  await expectIn(page, 'Revisando')
+
+  const log = argsLog()
+  expect(log.at(-2)).toBe(`deny:git push origin ${taskBranch()}`)
+  expect(log.at(-1)).toMatch(/^allow:gh api graphql -f query='mutation \{ resolveReviewThread/)
+  expect(ghCalls(userDataDir).at(-1)).toMatch(/^api graphql -f query=mutation/)
+  const history = panel.getByRole('list', { name: 'Histórico da tarefa' })
+  await expect(history).toContainText('Conversa de review resolvida')
+  await expect(history).toContainText('Review pedido na PR #7 pelo Orkio')
+  await expect(
+    history.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).first()
+  ).toBeVisible()
+
+  // Com o fluxo parado e o CI vermelho, o painel oferece o fluxo de CI.
+  await expect(flow.getByRole('button', { name: 'Rodar fluxo CI vermelho' })).toBeVisible()
+  expect(await cspViolations(page)).toEqual([])
+  expect(logs.join('\n')).not.toContain(GITHUB_PAT)
 })

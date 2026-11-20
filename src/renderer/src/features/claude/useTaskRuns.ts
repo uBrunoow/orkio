@@ -7,6 +7,8 @@ export interface PendingPermission {
   tool: string
   summary: string
   suggestion: string | null
+  /** Comando de entrega (5C): a aprovação vale só nesta execução. */
+  delivery: boolean
 }
 
 export interface PendingQuestion {
@@ -31,7 +33,8 @@ export function pendingRequests(
         requestId: e.requestId,
         tool: e.tool,
         summary: e.summary,
-        suggestion: e.suggestion ?? null
+        suggestion: e.suggestion ?? null,
+        delivery: e.delivery === true
       })
     } else if (e.kind === 'question' && e.state === 'pending') {
       out.push({ kind: 'question', requestId: e.requestId, questions: e.questions })

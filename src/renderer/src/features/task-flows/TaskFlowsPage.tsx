@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
+import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Heading } from '@astryxdesign/core/Heading'
@@ -167,6 +168,25 @@ export function TaskFlowsPage({
         ) : (
           <Text role="status">{message.text}</Text>
         ))}
+
+      <Card role="region" aria-label="Entrega">
+        <VStack gap={2}>
+          <Heading level={3}>Entrega</Heading>
+          <CheckboxInput
+            label="Exigir minha aprovação para push"
+            description="Antes de cada push da branch da tarefa (pelo Orkio ou pelo Claude Code em modo entrega), o fluxo mostra commits, diff e destino e espera você. A branch padrão (main/master, develop, production, release) nunca recebe push, com ou sem este ajuste."
+            value={project.delivery.requirePushApproval}
+            onChange={(on) =>
+              void window.orkio.taskFlows
+                .setDelivery(projectId, { requirePushApproval: on })
+                .then((r) => {
+                  if (r.ok) setProject(r.value)
+                  else setMessage({ tone: 'error', text: r.error.message })
+                })
+            }
+          />
+        </VStack>
+      </Card>
 
       <HStack gap={5} vAlign="start">
         <VStack gap={2} width="calc(var(--spacing-12) * 5)" style={{ flexShrink: 0 }}>
@@ -419,6 +439,16 @@ function StepForm({
             description="Variáveis: {{briefing_path}}, {{task_id}}, {{notion_url}}, {{flow.<chave>}}"
             value={step.args}
             onChange={(args) => onChange({ ...step, args })}
+          />
+          <CheckboxInput
+            label={`Modo entrega (passo ${n})`}
+            description="Só neste passo: o Claude Code pode criar/atualizar a PR (gh) e fazer push da branch da tarefa, com sua aprovação na primeira vez. Merge, força e outras branches continuam bloqueados."
+            value={step.delivery === true}
+            onChange={(on) => {
+              const rest = { ...step }
+              delete rest.delivery
+              onChange(on ? { ...rest, delivery: true } : rest)
+            }}
           />
           <HStack gap={2} wrap="wrap">
             <TextInput

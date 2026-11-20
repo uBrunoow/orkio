@@ -9,6 +9,7 @@ import {
   type FlowRunView,
   type ProjectFlows
 } from '../../shared/task-flow'
+import { DEFAULT_DELIVERY_SETTINGS, type DeliverySettings } from '../../shared/delivery'
 import type { BoardStore } from '../board/board.store'
 import type { ConfigStore } from '../storage/config-store'
 import type { OrkioConfig } from '../config/orkio-config'
@@ -18,6 +19,8 @@ import { FlowError, type FlowExtractor, type FlowRunner, type OrkioAction } from
 export interface FlowsProjectView extends ProjectFlows {
   extractors: { id: string; label: string }[]
   actions: { id: string; label: string; pending?: string }[]
+  /** Ajustes de entrega do projeto (5C). */
+  delivery: DeliverySettings
 }
 
 export class FlowsService {
@@ -44,9 +47,49 @@ export class FlowsService {
           id: a.id,
           label: a.label,
           ...(a.pending ? { pending: a.pending } : {})
-        }))
+        })),
+        delivery: this.deps.config.get().delivery[projectId] ?? DEFAULT_DELIVERY_SETTINGS
       }
     }
+  }
+
+  /**
+   * "Exigir minha aprovação para push" (5C). A branch padrão continua bloqueada sempre: o ajuste
+   * só decide se há um gate antes de cada push da branch da tarefa.
+   */
+  async setDelivery(
+    projectId: string,
+    settings: DeliverySettings
+  ): Promise<ClaudeResult<FlowsProjectView>> {
+    if (!this.deps.config.get().projects.some((p) => p.id === projectId)) {
+      return fail('not_found', 'Projeto não encontrado. Atualize a lista.')
+    }
+    const before = this.deps.config.get().delivery[projectId] ?? DEFAULT_DELIVERY_SETTINGS
+    try {
+      await this.deps.config.update((c) => ({
+        ...c,
+        delivery: {
+          ...c.delivery,
+          [projectId]: { requirePushApproval: settings.requirePushApproval }
+        }
+      }))
+    } catch (error) {
+      console.error(`[orkio] salvar entrega: ${errorName(error)}`)
+      return fail('storage', 'Não foi possível salvar o ajuste. Tente novamente.')
+    }
+    if (before.requirePushApproval !== settings.requirePushApproval) {
+      this.deps.store.addConfigEvent(
+        projectId,
+        (this.deps.now?.() ?? new Date()).toISOString(),
+        this.deps.actor(),
+        [
+          settings.requirePushApproval
+            ? 'Entrega: aprovação antes de cada push ligada'
+            : 'Entrega: aprovação antes de cada push desligada (a branch padrão continua bloqueada)'
+        ]
+      )
+    }
+    return this.getProject(projectId)
   }
 
   async saveFlows(projectId: string, flows: Flow[]): Promise<ClaudeResult<FlowsProjectView>> {

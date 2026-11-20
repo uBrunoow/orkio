@@ -1,4 +1,13 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import {
@@ -52,9 +61,14 @@ export interface FakeServices {
       reviewDecision: string | null
       unresolved: number
       checks: string | null
-      /** 3B: reviews com decisão e pedidos de review (ids estáveis). */
-      reviews?: { id: string; state: 'APPROVED' | 'CHANGES_REQUESTED'; submittedAt: string }[]
-      reviewRequests?: { id: string; createdAt: string }[]
+      /** 3B: reviews com decisão e pedidos de review (ids estáveis). 5C: autores/revisores. */
+      reviews?: {
+        id: string
+        state: 'APPROVED' | 'CHANGES_REQUESTED'
+        submittedAt: string
+        author?: { login: string }
+      }[]
+      reviewRequests?: { id: string; createdAt: string; requestedReviewer?: { login: string } }[]
     }
   >
 }
@@ -67,6 +81,8 @@ export interface FakePull {
   updatedDaysAgo?: number
   /** `updated_at` exato (o GitHub muda a cada review/pedido; o Orkio relê os detalhes). */
   updatedAt?: string
+  /** 5C: commit no topo da branch da PR (`head.sha`). */
+  sha?: string
 }
 
 /** Ids fixos dos bancos e páginas simulados (formato de id do Notion). */
@@ -116,6 +132,8 @@ interface FakeGlobals {
     status: Record<string, string>
     extra: Record<string, Record<string, unknown>>
     addedProperties: Record<string, unknown>
+    /** 5C: pedidos de review recebidos (POST requested_reviewers). */
+    reviewRequests?: { pull: number; reviewers: string[]; teams: string[] }[]
     /** Publicações de artefatos (4B): subpáginas criadas e markdown acrescentado. */
     published: {
       kind: 'child_page' | 'section'
@@ -348,7 +366,7 @@ export async function launchOrkio(
                     .slice(0, 10),
                 closed_at:
                   p.state === 'merged' || p.state === 'closed' ? '2026-01-01T00:00:00Z' : null,
-                head: { ref: p.head }
+                head: { ref: p.head, ...(p.sha ? { sha: p.sha } : {}) }
               }))
           }
           const etag = `W/"${JSON.stringify(body).length}-${JSON.stringify(body)
@@ -363,6 +381,44 @@ export async function launchOrkio(
             status: 200,
             headers: { 'content-type': 'application/json', etag }
           })
+        }
+        // 5C: pedir review (POST) e colaboradores do repositório.
+        const reviewersMatch =
+          /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/requested_reviewers$/.exec(
+            url
+          )
+        if (reviewersMatch && init?.method === 'POST') {
+          const n = Number(reviewersMatch[3])
+          const body = JSON.parse(call.body ?? '{}') as {
+            reviewers?: string[]
+            team_reviewers?: string[]
+          }
+          ;(g.__notion.reviewRequests ??= []).push({
+            pull: n,
+            reviewers: body.reviewers ?? [],
+            teams: body.team_reviewers ?? []
+          })
+          // Como o GitHub: novo evento na linha do tempo e `updated_at` da PR muda.
+          const now = new Date().toISOString()
+          const d = g.__fakes.githubPrDetails[String(n)]
+          if (d) {
+            d.reviewRequests = [
+              ...(d.reviewRequests ?? []),
+              ...(body.reviewers ?? []).map((login, i) => ({
+                id: `RR-${n}-${(d.reviewRequests ?? []).length + i + 1}`,
+                createdAt: now,
+                requestedReviewer: { login }
+              }))
+            ]
+            d.reviewDecision = 'REVIEW_REQUIRED'
+          }
+          g.__fakes.githubPulls = g.__fakes.githubPulls.map((p) =>
+            p.number === n ? { ...p, updatedAt: now } : p
+          )
+          return json({ number: n }, 201)
+        }
+        if (/^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/collaborators\?/.test(url)) {
+          return json([{ login: 'ana' }, { login: 'bia' }])
         }
         if (url === 'https://api.github.com/graphql') {
           const query = String((JSON.parse(call.body ?? '{}') as { query?: string }).query)
@@ -893,12 +949,22 @@ function fakeClaudeBin(
     )
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ backlog: alva?.mcpBacklog === true }))
   }
-  // GitHub CLI simulado (só para a pré-checagem do alva-flow).
+  // GitHub CLI simulado: pré-checagem (5B) e, na 5C, registra cada chamada em gh-calls.log.
   const gh = alva?.gh ?? 'missing'
   if (gh !== 'missing') {
     writeFileSync(
       join(dir, 'gh'),
-      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo "gh version 2.60.0"; exit 0; fi\nif [ "$1 $2" = "auth status" ]; then exit ${gh === 'ok' ? 0 : 1}; fi\nexit 1\n`
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "--version" ]; then echo "gh version 2.60.0"; exit 0; fi',
+        `if [ "$1 $2" = "auth status" ]; then exit ${gh === 'ok' ? 0 : 1}; fi`,
+        'if [ "$1 $2" = "alias list" ]; then exit 0; fi',
+        'echo "$*" >> "$(dirname "$0")/gh-calls.log"',
+        'if [ "$1 $2" = "pr create" ]; then echo "https://github.com/acme/orkio-app/pull/7"; exit 0; fi',
+        'if [ "$1" = "pr" ] || [ "$1" = "api" ] || [ "$1" = "run" ]; then echo "{}"; exit 0; fi',
+        'exit 1',
+        ''
+      ].join('\n')
     )
     chmodSync(join(dir, 'gh'), 0o755)
   }
@@ -924,4 +990,10 @@ function installFakeAlvaPlugin(home: string): void {
     join(home, '.claude', 'plugins', 'installed_plugins.json'),
     JSON.stringify({ plugins: { 'alva-flow@alva-flow-marketplace': [{ installPath: plugin }] } })
   )
+}
+
+/** 5C: chamadas ao GitHub CLI simulado (uma linha por chamada, os argumentos). */
+export function ghCalls(userDataDir: string): string[] {
+  const file = join(`${userDataDir}-bin`, 'gh-calls.log')
+  return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean) : []
 }

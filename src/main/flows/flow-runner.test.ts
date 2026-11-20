@@ -601,6 +601,31 @@ describe('FlowRunner', () => {
       expect(r2.view('fr-b')).toMatchObject({ status: 'waiting_gate', currentStep: 'push' })
     })
 
+    it('PR aberta pelo passo move a tarefa (automação): o fluxo segue sem acompanhar a etapa', async () => {
+      config = {
+        flows: [DELIVER],
+        bindings: [{ stageId: 's-rev', flowId: 'd', enabled: true, mode: 'on_enter' }]
+      }
+      const runner = makeRunner({ actions: [PUSH, REVIEW] })
+      enter(runner, 'manual')
+      await flush()
+      await flush()
+      const id = 'fr-1'
+      expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'pr' })
+      runner.onStageChanged({
+        projectId: 'p1',
+        taskId: 't1',
+        from: 's-rev',
+        to: 's-revisando',
+        source: 'automation'
+      })
+      await flush()
+      expect(runner.view(id).status).toBe('running')
+      finish(runner, 'run-1', 'succeeded')
+      await flush()
+      expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'depois' })
+    })
+
     it('reabrir o app com a confirmação aberta: continua esperando, com o que mostrar', async () => {
       const runner = deliveryRunner()
       const { id } = await runner.startManual('p1', 't1')

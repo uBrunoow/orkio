@@ -361,6 +361,103 @@ async function alvaCommand(cmd, argsText, mcp, prompt) {
   } else if (cmd === 'fix') {
     writeFileSync(join(cwd, 'src', 'exportar.ts'), 'export const exportar = true // corrigido\n')
     execFileSync('git', ['add', 'src'], { cwd })
+  } else if (cmd === 'pr') {
+    // 5C: o /pr real usa git e gh; aqui pede cada comando pela ponte de permissões do Orkio,
+    // roda os liberados (gh simulado no PATH; git push para o origin local) e registra tudo.
+    const fs = require('node:fs')
+    const log = (line) => fs.appendFileSync(join(orkioDir, 'alva-args.log'), `${line}\n`)
+    // Ambiente que o Orkio passou ao CLI (para provar que nenhum token do Orkio vai junto).
+    writeFileSync(join(orkioDir, 'env.txt'), Object.values(process.env).join('\n'))
+    const branch = execFileSync('git', ['branch', '--show-current'], { cwd }).toString().trim()
+    let n = 0
+    const tryCmd = async (command, argv) => {
+      const r = await mcp.approve('Bash', { command }, `toolu_pr_${++n}`)
+      log(`${r.behavior}:${command}`)
+      if (r.behavior === 'allow') {
+        execFileSync(argv[0], argv.slice(1), { cwd, stdio: 'ignore', env: process.env })
+      }
+      return r.behavior
+    }
+    if (argsText.includes('--comments')) {
+      writeFileSync(
+        join(cwd, 'src', 'exportar.ts'),
+        'export const exportar = true // corrigido, comentário tratado\n'
+      )
+      execFileSync('git', ['add', '-A'], { cwd })
+      execFileSync(
+        'git',
+        [
+          '-c',
+          'user.name=Fake',
+          '-c',
+          'user.email=fake@example.com',
+          'commit',
+          '-q',
+          '-m',
+          'fix: comentários da revisão'
+        ],
+        { cwd }
+      )
+      await tryCmd(`git push origin ${branch}`, ['git', 'push', '-q', 'origin', branch])
+      const query =
+        'mutation { resolveReviewThread(input: {threadId: "thread-7-0"}) { thread { isResolved } } }'
+      await tryCmd(`gh api graphql -f query='${query}'`, [
+        'gh',
+        'api',
+        'graphql',
+        '-f',
+        `query=${query}`
+      ])
+      result = 'Comentários tratados.'
+    } else {
+      let ahead = 1
+      try {
+        ahead = Number(
+          execFileSync('git', ['rev-list', '--count', `origin/${branch}..HEAD`], { cwd })
+            .toString()
+            .trim()
+        )
+      } catch {
+        ahead = 1
+      }
+      if (ahead > 0)
+        await tryCmd(`git push -u origin ${branch}`, ['git', 'push', '-q', '-u', 'origin', branch])
+      // Tentativas que o Orkio precisa bloquear mesmo no modo entrega.
+      await tryCmd('gh pr merge 7 --squash', ['gh', 'pr', 'merge', '7', '--squash'])
+      await tryCmd('git push --force origin HEAD:main', [
+        'git',
+        'push',
+        '--force',
+        'origin',
+        'HEAD:main'
+      ])
+      await tryCmd('gh pr create --fill --base main', [
+        'gh',
+        'pr',
+        'create',
+        '--fill',
+        '--base',
+        'main'
+      ])
+      await tryCmd('gh pr checks 7', ['gh', 'pr', 'checks', '7'])
+      // O /pr acompanha o CI e pergunta se continua esperando.
+      const q = await mcp.approve(
+        'AskUserQuestion',
+        {
+          questions: [
+            {
+              question: 'O CI ainda está rodando. Continuar esperando?',
+              header: 'CI',
+              options: [{ label: 'Sim, esperar' }, { label: 'Não, parar aqui' }],
+              multiSelect: false
+            }
+          ]
+        },
+        'toolu_pr_ci'
+      )
+      log(`ci:${JSON.stringify((q.updatedInput && q.updatedInput.answers) || {})}`)
+      result = 'PR aberta: https://github.com/acme/orkio-app/pull/7'
+    }
   } else if (cmd === 'commit') {
     execFileSync('git', ['add', '-A'], { cwd })
     execFileSync(

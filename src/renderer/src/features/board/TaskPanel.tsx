@@ -171,7 +171,12 @@ export function TaskPanel({
           </HStack>
         )}
 
-        <TaskFlowSection projectId={projectId} taskId={card.taskId} stageId={card.stageId} />
+        <TaskFlowSection
+          projectId={projectId}
+          taskId={card.taskId}
+          stageId={card.stageId}
+          pr={signals?.pr ?? null}
+        />
 
         <TaskClaudeSection
           projectId={projectId}
@@ -208,7 +213,19 @@ export function TaskPanel({
                           />
                         )
                       }
-                    : {})}
+                    : branchUrl(e)
+                      ? {
+                          endContent: (
+                            <IconButton
+                              size="sm"
+                              variant="ghost"
+                              label="Abrir a branch no GitHub"
+                              icon={<Icon icon={ExternalLinkIcon} />}
+                              onClick={() => void window.orkio.openExternal(branchUrl(e)!)}
+                            />
+                          )
+                        }
+                      : {})}
                 />
               ))}
             </List>
@@ -217,6 +234,18 @@ export function TaskPanel({
       </VStack>
     </Card>
   )
+}
+
+/** Link da branch (entrega sem PR conhecida): github.com/<owner>/<repo>/tree/<branch>. */
+function branchUrl(e: BoardHistoryEntry): string | null {
+  if (e.kind !== 'delivery') return null
+  const { owner, repo, branch } = (e.detail ?? {}) as Record<string, unknown>
+  return typeof owner === 'string' && typeof repo === 'string' && typeof branch === 'string'
+    ? `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tree/${branch
+        .split('/')
+        .map(encodeURIComponent)
+        .join('/')}`
+    : null
 }
 
 function prNumber(e: BoardHistoryEntry): number | null {
@@ -318,6 +347,32 @@ function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string
       return `Artefato anexado: ${String(e.detail?.['path'] ?? '')}`
     case 'artifact_published':
       return `Artefato publicado no Notion: ${String(e.detail?.['path'] ?? '')}`
+    case 'delivery': {
+      const by = e.detail?.['by'] === 'claude' ? 'Claude Code (modo entrega)' : 'Orkio'
+      const branch = typeof e.detail?.['branch'] === 'string' ? e.detail['branch'] : ''
+      const n = prNumber(e)
+      const pr = n !== null ? ` na PR #${n}` : ''
+      switch (e.detail?.['action']) {
+        case 'push':
+          return `Push de ${branch} pelo ${by}`
+        case 'pr_create':
+          return `PR aberta pelo ${by} (${branch})`
+        case 'pr_edit':
+          return `PR atualizada pelo ${by}${pr}`
+        case 'pr_ready':
+          return `PR marcada como pronta pelo ${by}${pr}`
+        case 'pr_comment':
+          return `Comentário${pr} pelo ${by}`
+        case 'thread_reply':
+          return `Resposta a comentário de review${pr} pelo ${by}`
+        case 'thread_resolve':
+          return `Conversa de review resolvida${pr} pelo ${by}`
+        case 'review_request':
+          return `Review pedido${pr} pelo ${by}`
+        default:
+          return `Entrega pelo ${by}`
+      }
+    }
     case 'run_blocked':
       return `Claude Code bloqueado: ${String(e.detail?.['reason'] ?? 'ação não permitida')}`
     case 'rolled_back':

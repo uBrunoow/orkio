@@ -85,6 +85,16 @@ export function registerTaskFlowsIpc(
     }
     return service.act(() => runner.approveGate(id, values as string[]))
   })
+  guarded(ch.setDelivery, GENERIC, async (projectId, settings) =>
+    isId(projectId) &&
+    typeof settings === 'object' &&
+    settings !== null &&
+    typeof (settings as Record<string, unknown>)['requirePushApproval'] === 'boolean'
+      ? service.setDelivery(projectId, {
+          requirePushApproval: (settings as { requirePushApproval: boolean }).requirePushApproval
+        })
+      : INVALID
+  )
   guarded(ch.startById, GENERIC, async (projectId, taskId, flowId) =>
     isId(projectId) && isId(taskId) && isId(flowId)
       ? service.act(() => runner.startById(projectId, taskId, flowId))

@@ -13,15 +13,21 @@ import { VStack } from '@astryxdesign/core/VStack'
 import type { RunSummary } from '../../../../shared/agent-run'
 import type { BacklogTaskInfo } from '../../../../shared/alva'
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
+import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
+import { Code } from '@astryxdesign/core/Code'
+import { TextInput } from '@astryxdesign/core/TextInput'
+import { ALVA_TEMPLATE_IDS } from '../../../../shared/alva-templates'
+import type { TaskPullRequest } from '../../../../shared/task-signals'
 import {
   FLOW_PAUSE_LABEL,
+  type ActionConfirm,
   type FlowRunStatus,
   type FlowRunView,
   type FlowStepStatus,
   type StageFlow
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
-import { AutomationIcon, PlayIcon } from '../../components/icons'
+import { AutomationIcon, ExternalLinkIcon, PlayIcon } from '../../components/icons'
 
 type TokenColor = 'gray' | 'green' | 'red' | 'yellow' | 'orange' | 'blue'
 
@@ -51,18 +57,28 @@ const STEP_STATUS: Record<FlowStepStatus, string> = {
  * resumo), pausas (retomar/pular/cancelar) e a decisão quando a tarefa sai da etapa. O log ao vivo
  * do passo atual é o da seção Claude Code, logo abaixo.
  */
+const CI_LABEL = {
+  success: { label: 'CI passou', color: 'green' },
+  failure: { label: 'CI falhou', color: 'red' },
+  pending: { label: 'CI rodando', color: 'yellow' }
+} as const
+
 export function TaskFlowSection({
   projectId,
   taskId,
-  stageId
+  stageId,
+  pr = null
 }: {
   projectId: string
   taskId: string
   stageId: string | null
+  /** PR da tarefa (sinais da 2D): estado do CI e botão do fluxo de CI vermelho. */
+  pr?: TaskPullRequest | null
 }): React.JSX.Element | null {
   const [runs, setRuns] = useState<FlowRunView[] | null>(null)
   const [binding, setBinding] = useState<(StageFlow & { flowName: string }) | null>(null)
   const [pending, setPending] = useState<Record<string, string>>({})
+  const [ciFlow, setCiFlow] = useState<{ id: string; name: string } | null>(null)
   const [backlog, setBacklog] = useState<{ linked: string | null; task: BacklogTaskInfo | null }>({
     linked: null,
     task: null
@@ -84,6 +100,8 @@ export function TaskFlowSection({
       setPending(
         Object.fromEntries(r.value.actions.filter((a) => a.pending).map((a) => [a.id, a.pending!]))
       )
+      const ci = r.value.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.ci)
+      setCiFlow(ci ? { id: ci.id, name: ci.name } : null)
     })
     // alva-flow (5B): task do Backlog.md vinculada (lida do arquivo, nada guardado).
     void window.orkio.alva.taskSummary(projectId, taskId).then((r) => {
@@ -114,7 +132,8 @@ export function TaskFlowSection({
   )
 
   const run = runs?.[0] ?? null
-  if (!run && !binding && !backlog.linked) return null
+  const openPr = pr && (pr.state === 'open' || pr.state === 'draft') ? pr : null
+  if (!run && !binding && !backlog.linked && !openPr?.checks) return null
   const live = run && run.status !== 'finished' && run.status !== 'cancelled'
   const stepName = (id: string | null): string =>
     run?.steps.find((s) => s.id === id)?.name ?? id ?? ''
@@ -147,6 +166,29 @@ export function TaskFlowSection({
           isLoading={busy}
           onClick={() => void act(() => window.orkio.taskFlows.start(projectId, taskId))}
         />
+      )}
+
+      {openPr?.checks && (
+        <HStack gap={2} vAlign="center" wrap="wrap">
+          <Token
+            size="sm"
+            color={CI_LABEL[openPr.checks].color}
+            label={`${CI_LABEL[openPr.checks].label} (PR #${openPr.number})`}
+            data-testid="pr-ci"
+          />
+          {openPr.checks === 'failure' && ciFlow && !live && (
+            <Button
+              size="sm"
+              variant="secondary"
+              label="Rodar fluxo CI vermelho"
+              icon={<Icon icon={PlayIcon} />}
+              isLoading={busy}
+              onClick={() =>
+                void act(() => window.orkio.taskFlows.startById(projectId, taskId, ciFlow.id))
+              }
+            />
+          )}
+        </HStack>
       )}
 
       {run && run.history.length > 0 && (
@@ -185,7 +227,18 @@ export function TaskFlowSection({
         </Text>
       )}
 
-      {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && (
+      {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && run.confirm && (
+        <ConfirmCard
+          info={run.confirm}
+          busy={busy}
+          onApprove={(values) =>
+            void act(() => window.orkio.taskFlows.approve(run.id, values ?? undefined))
+          }
+          onReject={() => void act(() => window.orkio.taskFlows.reject(run.id))}
+        />
+      )}
+
+      {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && !run.confirm && (
         <Card role="group" aria-label="Ação pendente do fluxo">
           <VStack gap={2}>
             <Text weight="semibold">{current.name}</Text>
@@ -309,6 +362,101 @@ export function TaskFlowSection({
       )}
       {error && <Alert tone="danger">{error}</Alert>}
     </VStack>
+  )
+}
+
+/** Gate de uma ação do Orkio (5C): o que vai acontecer (destino, commits, diff, revisores). */
+function ConfirmCard({
+  info,
+  busy,
+  onApprove,
+  onReject
+}: {
+  info: ActionConfirm
+  busy: boolean
+  onApprove(values: string[] | null): void
+  onReject(): void
+}): React.JSX.Element {
+  const [chosen, setChosen] = useState<string[]>(info.input?.selected ?? [])
+  const [other, setOther] = useState('')
+  const extra = other
+    .split(/[\s,]+/)
+    .map((v) => v.trim().replace(/^@/, ''))
+    .filter(Boolean)
+  const values = info.input ? [...new Set([...chosen, ...extra])] : null
+  const invalid = values?.some((v) => !/^(team:)?[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(v)) ?? false
+  return (
+    <Card role="group" aria-label={info.title}>
+      <VStack gap={2}>
+        <Text weight="semibold">{info.title}</Text>
+        <Text>{info.message}</Text>
+        {info.details.length > 0 && (
+          <List density="compact" aria-label="Detalhes da ação">
+            {info.details.map((d) => (
+              <Item as="li" key={d.label} label={d.label} description={d.value} />
+            ))}
+          </List>
+        )}
+        {info.commits && info.commits.length > 0 && (
+          <List density="compact" aria-label="Commits que vão para o GitHub">
+            {info.commits.map((c) => (
+              <Item as="li" key={c.hash} label={c.subject} startContent={<Code>{c.hash}</Code>} />
+            ))}
+          </List>
+        )}
+        {info.stat && (
+          <Text type="supporting" data-testid="confirm-stat">
+            <Code>{info.stat}</Code>
+          </Text>
+        )}
+        {info.input && (
+          <VStack gap={1} role="group" aria-label={info.input.label}>
+            <Text weight="semibold">{info.input.label}</Text>
+            {info.input.options.map((o) => (
+              <CheckboxInput
+                key={o}
+                label={o}
+                value={chosen.includes(o)}
+                onChange={(on) =>
+                  setChosen((all) => (on ? [...all, o] : all.filter((x) => x !== o)))
+                }
+              />
+            ))}
+            {info.input.allowOther && (
+              <TextInput
+                label="Outros (logins separados por vírgula)"
+                value={other}
+                onChange={setOther}
+                {...(invalid ? { error: 'Use logins do GitHub (ou team:slug).' } : {})}
+              />
+            )}
+          </VStack>
+        )}
+        {info.link && (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={info.link.label}
+            icon={<Icon icon={ExternalLinkIcon} />}
+            onClick={() => void window.orkio.openExternal(info.link!.url)}
+          />
+        )}
+        <HStack gap={2}>
+          <Button
+            size="sm"
+            variant="primary"
+            label={info.approveLabel}
+            isLoading={busy}
+            isDisabled={invalid || (values !== null && values.length === 0)}
+            {...(values !== null && values.length === 0
+              ? { disabledMessage: 'Escolha pelo menos um revisor.' }
+              : {})}
+            onClick={() => onApprove(values)}
+          />
+          <Button size="sm" variant="ghost" label="Recusar e encerrar" onClick={onReject} />
+        </HStack>
+      </VStack>
+    </Card>
   )
 }
 

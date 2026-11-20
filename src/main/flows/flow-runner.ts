@@ -210,6 +210,9 @@ interface Persisted {
   pendingConfirm?: ActionConfirm | null
 }
 
+/** Ações que publicam no GitHub (a etapa pode mudar por causa delas). */
+const DELIVERY_ACTION_IDS: readonly string[] = ['push', 'verify_pushed', 'request_review']
+
 const ACTIVE: readonly FlowRunStatus[] = ['running', 'waiting_gate', 'paused', 'awaiting_decision']
 
 export class FlowRunner {
@@ -288,7 +291,15 @@ export class FlowRunner {
     try {
       const active = this.activeRow(change.taskId)
       if (active && active.stage_id !== null && change.from === active.stage_id) {
-        if (change.to !== active.stage_id) await this.leftStage(active.id)
+        if (change.to === active.stage_id) return
+        // Entrega (5C): a própria PR aberta/revisão pedida move a tarefa (automação da 3B).
+        // Isso é consequência do passo, não uma decisão sua: o fluxo segue sem acompanhar a etapa.
+        if (change.source === 'automation' && this.inDeliveryStep(active)) {
+          this.deps.db.run(`UPDATE flow_runs SET stage_id = NULL WHERE id = ?`, active.id)
+          this.deps.emit({ projectId: active.project_id, taskId: active.task_page_id })
+          return
+        }
+        await this.leftStage(active.id)
         return
       }
       // Só entrada real dispara (nunca reconciliação, desfazer ou remoção de etapa).
@@ -310,6 +321,15 @@ export class FlowRunner {
         console.error(`[orkio] fluxo (entrada na etapa): ${errorName(error)}`)
       }
     }
+  }
+
+  /** O passo atual entrega no GitHub (comando em modo entrega ou ação push/pedir review)? */
+  private inDeliveryStep(row: RunRow): boolean {
+    const step = this.flow(row).steps.find((s) => s.id === row.current_step)
+    return (
+      (step?.type === 'claude_command' && step.delivery === true) ||
+      (step?.type === 'orkio_action' && DELIVERY_ACTION_IDS.includes(step.action))
+    )
   }
 
   /** Botão "Rodar fluxo": o fluxo ligado à etapa atual (ao entrar ou manual). */

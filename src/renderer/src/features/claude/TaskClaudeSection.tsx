@@ -427,18 +427,32 @@ function PermissionCard({
   const answer = (a: 'allow_once' | 'allow_always' | 'deny'): void =>
     void window.orkio.claude.answerPermission(runId, request.requestId, a)
   return (
-    <Card role="group" aria-label="Pedido de aprovação">
+    <Card
+      role="group"
+      aria-label={request.delivery ? 'Pedido de aprovação da entrega' : 'Pedido de aprovação'}
+    >
       <VStack gap={2}>
-        <Text weight="semibold">O Claude Code quer rodar ({request.tool}):</Text>
+        <Text weight="semibold">
+          {request.delivery
+            ? 'Modo entrega: o Claude Code quer publicar no GitHub'
+            : `O Claude Code quer rodar (${request.tool}):`}
+        </Text>
         <Code>{request.summary}</Code>
+        {request.delivery && (
+          <Text type="supporting">
+            Só a branch da tarefa e o repositório do projeto. Aprovar libera comandos deste tipo até
+            o fim deste passo (push com “Exigir minha aprovação” ligado pergunta sempre). Merge,
+            força e outras branches continuam bloqueados.
+          </Text>
+        )}
         <HStack gap={2} wrap="wrap">
           <Button
             size="sm"
             variant="primary"
-            label="Permitir uma vez"
+            label={request.delivery ? 'Permitir nesta execução' : 'Permitir uma vez'}
             onClick={() => answer('allow_once')}
           />
-          {request.suggestion && (
+          {request.suggestion && !request.delivery && (
             <Button
               size="sm"
               variant="secondary"

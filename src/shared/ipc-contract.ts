@@ -8,12 +8,15 @@ import type { FlowDraft } from './flow'
 import type { TaskSignals } from './task-signals'
 import type { Flow, FlowRunView, ProjectFlows } from './task-flow'
 import type { AlvaPrecheck, BacklogTaskInfo } from './alva'
+import type { DeliverySettings } from './delivery'
 
 /** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
 export interface TaskFlowsProject extends ProjectFlows {
   extractors: { id: string; label: string }[]
-  /** `pending`: ação ainda não implementada (vira espera que você aprova). */
+  /** `pending`: ação feita à mão (vira espera que você aprova). */
   actions: { id: string; label: string; pending?: string }[]
+  /** Ajustes de entrega do projeto (5C). */
+  delivery: DeliverySettings
 }
 
 export interface AlvaStatusView {
@@ -83,6 +86,7 @@ export const IPC_CHANNELS = {
     active: 'task-flows:active',
     start: 'task-flows:start',
     approve: 'task-flows:approve',
+    setDelivery: 'task-flows:set-delivery',
     startById: 'task-flows:start-by-id',
     reject: 'task-flows:reject',
     resume: 'task-flows:resume',
@@ -726,6 +730,11 @@ export interface OrkioApi {
     start(projectId: string, taskId: string): Promise<ClaudeResult<FlowRunView>>
     /** Aprovar um gate; numa ação com escolha (ex.: revisores), os valores escolhidos. */
     approve(flowRunId: string, values?: string[]): Promise<ClaudeResult<FlowRunView>>
+    /** "Exigir minha aprovação para push" (5C). */
+    setDelivery(
+      projectId: string,
+      settings: DeliverySettings
+    ): Promise<ClaudeResult<TaskFlowsProject>>
     /** Rodar um fluxo específico à mão (ex.: "Alva: CI vermelho"). */
     startById(projectId: string, taskId: string, flowId: string): Promise<ClaudeResult<FlowRunView>>
     reject(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
