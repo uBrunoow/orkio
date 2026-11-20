@@ -25,7 +25,9 @@ Claude Code. Hoje existem:
   Orkio, saltos condicionais) ligadas às colunas, disparadas ao entrar ou à mão.
 - **alva-flow (5B):** pré-checagem do projeto, vínculo tarefa do Notion ↔ task do Backlog.md,
   extratores e templates "Fluxo Alva" sobre os fluxos da 5A.
-- Ainda não existem: push/PR/pedir review pelo Orkio (5C), login no app (tela inicial), webhooks.
+- **Entrega (5C):** push da branch da tarefa pelo Orkio (com gate), "modo entrega" por passo para
+  `/alva-flow:pr` (gh/push só da branch da tarefa), pedir review pelo conector, CI no painel.
+- Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
 
@@ -61,6 +63,7 @@ src/
   shared/task-flow.ts      # 5A: fluxos de tarefa (tipos, motor puro, condições, template, validação)
   shared/alva.ts           # 5B: tipos da pré-checagem, parse da task do Backlog.md (puro)
   shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
+  shared/delivery.ts       # 5C: branches protegidas, checkPushBranch, DeliveryTarget/Settings (puro)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -81,9 +84,11 @@ src/
     board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
     alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts
+    delivery/              # 5C: delivery.service.ts (alvo, prévia, push), delivery-actions.ts (ações)
     flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
-                           # policy, redact, run.service, claude.service; bridge/permission-mcp.ts
+                           # policy (+ delivery-policy, 5C), redact, run.service, claude.service;
+                           # bridge/permission-mcp.ts
                            # (servidor MCP stdio → out/main/permission-mcp.js)
   preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
@@ -514,6 +519,56 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   "Hook do projeto rodou" no log (formato do evento não confirmado, leitura tolerante); painel mostra
   "Backlog: TASK-12 · status · critérios" (lido do arquivo) e "Aguardando CI" durante o `/pr`.
 
+## Entrega (Etapa 5C)
+
+- **Regra de ouro:** só a branch da tarefa (a do worktree, com o ID) vai para o GitHub.
+  `shared/delivery.ts` (`checkPushBranch`): branch padrão, `main/master/develop/production/staging/
+trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
+- **Push pelo Orkio** (`orkio_action "push"`, `DeliveryService`): `Git.push` =
+  `git push --porcelain -u <remote> refs/heads/<b>:refs/heads/<b>` via `execFile`, com
+  `GIT_TERMINAL_PROMPT=0`, `ssh -o BatchMode=yes`, `GCM_INTERACTIVE=never` (credenciais do próprio
+  usuário; pedido de senha → `GitError('credentials')` com mensagem pt-BR; recusa → `'rejected'`;
+  nunca força). Recusa sem enviar: mudanças não commitadas, nada novo, branch errada/protegida.
+- **Ações com confirmação** (`OrkioAction.confirm`): o passo vira gate com o que vai acontecer
+  (`ActionConfirm`: destino, commits, `diff --stat`, revisores); aprovar executa; recusar encerra o
+  fluxo como recusado; `{ problem }` falha o passo (o fluxo pausa). Persistido em `pendingConfirm`
+  (só metadados do git/GitHub). Ações: `push` (gate só com "Exigir minha aprovação para push"),
+  `verify_pushed` (`head.sha` da PR == HEAD → `pr.pushed`/`pr.exists`/`pr.number`) e
+  `request_review` (quem revisou/foi pedido, ou você escolhe; POST pelo conector; `runNow` da 3B).
+- **Modo entrega** (`claude_command.delivery`, só no passo marcado; nunca no "Rodar" manual):
+  `RunService` recebe o alvo; o CLI ganha `DELIVERY_RUN_SETTINGS` (deny de força/delete/mirror/
+  `gh pr merge|close`/`gh release`/`gh repo`); `delivery-policy.ts` decide:
+  - `git push`: só remote do projeto e branch da tarefa (refspec, `HEAD`, `HEAD:x`, sem refspec com
+    a branch atual lida antes de avaliar); bloqueia `-f`/`--force*`/`+x`/`:x`/`--delete`/`--all`/
+    `--tags`/`--mirror`, opções globais além de `-C`, `push.default=matching` e troca de branch na
+    mesma linha.
+  - `gh pr create|view|edit|checks|comment|diff|list|status|ready`, `gh run view|list|watch`,
+    `gh label list` (com `-R`/URL só do próprio repo; `--head` só a branch da tarefa).
+  - `gh api`: REST só `repos/<owner>/<repo>/…` do projeto; escrita só em PR/comentários/revisores
+    (nada de merge, refs, contents, `state=closed`, APPROVE); nunca DELETE; GraphQL com o mesmo repo
+    e mutations só da allowlist (`resolveReviewThread`, `addPullRequestReviewThreadReply`,
+    `addComment`…); consulta em arquivo é recusada.
+  - Primeira vez de cada categoria (`push`, `github`) por execução: pergunta ("Permitir nesta
+    execução"; "sempre neste projeto" não vale). Com "Exigir minha aprovação para push", todo push
+    pergunta. O log marca "Liberado pelo modo entrega".
+- **Aliases:** no começo de toda execução, `git config --get-regexp ^alias\.` e `gh alias list`
+  (no worktree) são expandidos pela política (também fora do modo entrega); `git -c alias.*` é
+  recusado. `shellSegments`/`shellWords` seguem as aspas do shell.
+- **Sinais:** `PullRequestSummary.headSha` (REST) e logins de `reviews.author`/
+  `requestedReviewer` (GraphQL, só em memória; o snapshot da 3B continua só com ids).
+  `TaskSignalsService.prForBranch` (sem rede) dá o número da PR para o histórico.
+- **Etapa:** automação que move a tarefa durante um passo de entrega (a PR aberta pelo `/pr`) não
+  interrompe o fluxo: ele deixa de acompanhar a etapa e segue.
+- **Histórico:** evento `delivery` (`action`: push, pr_create, pr_edit, pr_comment, pr_ready,
+  thread_reply, thread_resolve, review_request; `by`: orkio/claude) com owner/repo/branch e PR;
+  link para a PR ou `github.com/<o>/<r>/tree/<branch>` (allowlist).
+- **Ajuste por projeto:** `orkio-config` v8 → `delivery[projectId].requirePushApproval` (padrão
+  sim), na tela "Fluxos de tarefa", com histórico de configuração.
+- **CI:** token do CI da PR no painel (sinais 2D) e "Rodar fluxo CI vermelho" (`startById`) quando
+  os checks falham e o template existe.
+- **Segurança:** nenhum token do Orkio no ambiente do Claude (o `gh` usa o `gh auth` do usuário);
+  o único POST do conector do GitHub é `requested_reviewers` (caminho validado).
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -534,6 +589,13 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   simulado no HOME de teste, controla `claude mcp list` e um `gh` simulado no PATH. O Claude simulado
   imita `/alva-flow:*` (cria/muda `backlog/tasks/task-1 - …md`, perguntas em lote no `/spec`,
   blocker nos primeiros `blockers` reviews) e registra os argumentos em `.orkio/alva-args.log`.
+- 5C: o `gh` simulado registra cada chamada em `<userData>-bin/gh-calls.log` (`ghCalls`); o
+  Claude simulado imita o `/alva-flow:pr` (tenta merge e força, que devem ser bloqueados; cria a PR
+  pelo gh; pergunta do CI) e o `--comments` (commit, push pedido, resolveReviewThread pelo gh api),
+  registrando `allow:`/`deny:` em `.orkio/alva-args.log` e o ambiente em `.orkio/env.txt`. O GitHub
+  simulado tem `FakePull.sha`, autores/revisores, POST `requested_reviewers` (registra em
+  `notionState(app).reviewRequests` e muda `updated_at`) e colaboradores. O push vai para um
+  `origin.git` local (git real).
 - 5A: o simulado tem `demorar-uma-vez` (espera só na primeira vez, marcador em `.orkio/demorou`)
   e `falhar` (sai com erro). `e2e/task-flows.spec.ts` monta o fluxo pela tela e edita o
   `orkio-config.json` entre aberturas para trocar os argumentos do passo.
@@ -598,6 +660,9 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 | Execução do fluxo guarda uma cópia do fluxo (`flow_json`)                                                   | Editar ou remover o fluxo no meio de uma execução não quebra a execução em curso.                                                                                                                                                                           |
 | alva-flow: briefing fora dos argumentos dos comandos                                                        | O texto depois do comando vira `$ARGUMENTS`; o `/plan` receberia "TASK-12 + briefing" e trataria como demanda nova.                                                                                                                                         |
 | MCP do Backlog no escopo do usuário                                                                         | Servidores do `.mcp.json` só conectam em pasta confiável; o worktree do Orkio é outra pasta.                                                                                                                                                                |
+| Entrega: push só da branch da tarefa, nunca força; branch padrão sempre bloqueada                           | A automação nunca pode reescrever histórico nem publicar fora da tarefa; "Exigir aprovação" só decide se há gate, não o que é permitido.                                                                                                                    |
+| Modo entrega por passo (não global), aprovação por execução                                                 | O `/pr` precisa de gh e push; liberar só no passo marcado limita o alcance e o log mostra cada comando liberado.                                                                                                                                            |
+| Pedir review pelo conector (não pelo gh do Claude)                                                          | É uma ação do Orkio depois de um gate, com histórico e link; dispara a automação na hora.                                                                                                                                                                   |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 
 ## Astryx e CSP (regra inegociável)
