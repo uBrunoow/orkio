@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { blocksToMarkdown, buildBriefing, extractAcceptanceCriteria } from '../../shared/briefing'
+import {
+  blocksToMarkdown,
+  buildBriefing,
+  buildProjectContext,
+  extractAcceptanceCriteria
+} from '../../shared/briefing'
 import {
   POLICY_MESSAGES,
   evaluatePermission,
@@ -329,5 +334,25 @@ describe('briefing', () => {
     })
     expect(b).toContain('_A página da tarefa está vazia._')
     expect(b).toContain('PR: ainda não existe')
+  })
+
+  it('contexto do projeto: instruções primeiro, corta no limite com aviso', () => {
+    const r = buildProjectContext(
+      {
+        instructions: 'abc',
+        pages: [
+          { name: 'A', markdown: '1234567' },
+          { name: 'B', markdown: 'zzz' }
+        ]
+      },
+      8
+    )
+    expect(r.markdown).toContain('### Instruções\n\nabc')
+    expect(r.markdown).toContain('### A (Notion)\n\n12345\n\n_(cortado pelo limite de contexto)_')
+    expect(r.markdown).not.toContain('### B')
+    expect(r.warnings).toEqual([
+      'A página “A” foi cortada: o contexto passou de 8 caracteres.',
+      'A página “B” ficou de fora: o contexto passou de 8 caracteres.'
+    ])
   })
 })

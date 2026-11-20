@@ -558,6 +558,27 @@ export async function launchOrkio(
             return json({ object: 'data_source', id: ids.tasksDs, properties: result })
           }
 
+          // Busca de páginas (4B: referências do contexto do projeto).
+          const searchFilter = body['filter'] as { value?: string } | undefined
+          if (path === '/search' && searchFilter?.value === 'page') {
+            const pages = [
+              { id: 'eeeeeeee-0000-4000-8000-000000000001', title: 'Arquitetura do Orkio' },
+              { id: 'eeeeeeee-0000-4000-8000-000000000002', title: 'Guia de estilo' }
+            ]
+            const q = typeof body['query'] === 'string' ? body['query'].toLowerCase() : ''
+            return json({
+              object: 'list',
+              has_more: false,
+              next_cursor: null,
+              results: pages
+                .filter((p) => p.title.toLowerCase().includes(q))
+                .map((p) => ({
+                  object: 'page',
+                  id: p.id,
+                  properties: { title: { id: 'title', type: 'title', title: rich(p.title) } }
+                }))
+            })
+          }
           if (path === '/search') {
             const all = [
               { id: ids.projectsDs, title: 'Projetos' },
@@ -652,20 +673,22 @@ export async function launchOrkio(
             const blocks =
               children[1] === 'cccccccc-0000-4000-8000-000000000001'
                 ? [para('Detalhe aninhado')]
-                : [
-                    para('Exportar as tarefas em CSV.'),
-                    {
-                      type: 'heading_2',
-                      heading_2: { rich_text: rich('Critérios de aceite') }
-                    },
-                    {
-                      id: 'cccccccc-0000-4000-8000-000000000001',
-                      type: 'bulleted_list_item',
-                      has_children: true,
-                      bulleted_list_item: { rich_text: rich('Gera um arquivo .csv') }
-                    },
-                    { type: 'audio', audio: {} }
-                  ]
+                : children[1] === 'eeeeeeee-0000-4000-8000-000000000001'
+                  ? [para('Camadas: main, preload, renderer.')]
+                  : [
+                      para('Exportar as tarefas em CSV.'),
+                      {
+                        type: 'heading_2',
+                        heading_2: { rich_text: rich('Critérios de aceite') }
+                      },
+                      {
+                        id: 'cccccccc-0000-4000-8000-000000000001',
+                        type: 'bulleted_list_item',
+                        has_children: true,
+                        bulleted_list_item: { rich_text: rich('Gera um arquivo .csv') }
+                      },
+                      { type: 'audio', audio: {} }
+                    ]
             return json({ object: 'list', results: blocks, next_cursor: null, has_more: false })
           }
 

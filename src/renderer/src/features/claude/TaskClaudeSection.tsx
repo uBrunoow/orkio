@@ -284,6 +284,11 @@ function Composer({
           onChange={setBriefing}
           rows={10}
         />
+        {prep.contextWarnings.map((w) => (
+          <Alert key={w} tone="warning">
+            {w}
+          </Alert>
+        ))}
         {prep.unsupported.length > 0 && (
           <Alert tone="warning">
             Alguns blocos do Notion não foram convertidos: {prep.unsupported.join(', ')}.

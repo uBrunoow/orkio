@@ -42,7 +42,9 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
     remove: vi.fn(async () => undefined)
   }
   const deps: ClaudeServiceDeps = {
+    searchPages: vi.fn(async () => ({ results: [], nextCursor: null })),
     config: {
+      update: vi.fn(async () => undefined),
       get: () =>
         ({
           projects: [
@@ -53,7 +55,8 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
               repo: { owner: 'o', name: 'app', remoteName: 'origin', defaultBranch: 'main' },
               notionProject: null
             }
-          ]
+          ],
+          claudeContexts: {}
         }) as never
     },
     worktrees: worktrees as never,
@@ -172,5 +175,51 @@ describe('ClaudeService', () => {
     expect(isStartRunRequest({ ...base, projectId: '../x' })).toBe(false)
     expect(isStartRunRequest({ ...base, mode: 'shell' })).toBe(false)
     expect(isStartRunRequest({ ...base, briefing: 'x'.repeat(300_000) })).toBe(false)
+  })
+
+  it('contexto do projeto entra no briefing; página ilegível vira aviso; limites ao salvar', async () => {
+    const ctx = {
+      instructions: 'Rode pnpm test antes de commitar.',
+      notionPages: [
+        { id: 'ref-ok', name: 'Arquitetura' },
+        { id: 'ref-404', name: 'Apagada' }
+      ]
+    }
+    const { service } = setup({
+      config: {
+        update: vi.fn(async () => undefined),
+        get: () =>
+          ({
+            projects: [
+              {
+                id: 'p1',
+                name: 'app',
+                localPath: '/repo',
+                repo: { owner: 'o', name: 'app', remoteName: 'origin', defaultBranch: 'main' },
+                notionProject: null
+              }
+            ],
+            claudeContexts: { p1: ctx }
+          }) as never
+      },
+      getBlockChildren: vi.fn(async (id: string) => {
+        if (id === 'ref-404') throw new Error('404')
+        if (id === 'ref-ok') return { results: [para('Use hexagonal.')], nextCursor: null }
+        return { results: [], nextCursor: null }
+      })
+    })
+    const r = await service.prepare('p1', 'task-1')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.briefing).toContain('## Contexto do projeto')
+    expect(r.value.briefing).toContain('Rode pnpm test antes de commitar.')
+    expect(r.value.briefing).toContain('### Arquitetura (Notion)\n\nUse hexagonal.')
+    expect(r.value.contextWarnings).toEqual([
+      'Não deu para ler a página “Apagada” no Notion; ela ficou de fora.'
+    ])
+
+    expect(
+      await service.saveContext('p1', { instructions: 'x'.repeat(9000), notionPages: [] })
+    ).toMatchObject({ ok: false, error: { code: 'invalid' } })
   })
 })

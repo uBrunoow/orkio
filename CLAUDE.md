@@ -19,7 +19,9 @@ Claude Code. Hoje existem:
   validação, simulação, restaurar padrão, exportar/importar e histórico de alterações.
 - **Claude Code (4A):** roda a tarefa com o CLI `claude` do usuário (login/assinatura dele) num
   worktree isolado por tarefa, com briefing do Notion, permissões pelo Orkio e log ao vivo.
-- Ainda não existem: catálogo de comandos/artefatos/contexto (4B), webhooks.
+- **Claude Code (4B):** catálogo de comandos (usuário/projeto/plugins), "Rodar de novo", artefatos
+  (anexar caminho + commit, publicar no Notion) e contexto do projeto (instruções + páginas).
+- Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
 
@@ -405,6 +407,29 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 - Eventos ao renderer: `claude:run-event` (`onRunEvent` → unsubscribe). Histórico da tarefa ganha
   `run_started|finished|cancelled|failed|blocked`.
 
+## Claude Code (Etapa 4B)
+
+- **Catálogo** (`claude/catalog.ts`): `~/.claude/commands|skills`, `.claude/` do worktree (ou da
+  pasta do projeto) e plugins de `~/.claude/plugins/installed_plugins.json` (`installPath` →
+  `commands/*.md`, `skills/*/SKILL.md`). Lê **só** `name`/`description` do frontmatter (8 KB do
+  começo); nunca o corpo, settings ou credenciais. Agrupado por origem, com busca e "Recarregar".
+- **Rodar de novo**: `agent_runs.input_text` (SQLite v5) guarda o prompt/argumentos (redigidos);
+  o briefing é montado de novo do Notion, nunca guardado.
+- **Artefatos** (`claude/artifacts.service.ts`, tabela `task_artifacts`): documentos alterados
+  desde a base (`isDocFile`: md/mdx/txt/adoc/rst, fora de `.orkio/`). Anexar exige o arquivo
+  commitado e guarda caminho + commit. Publicar lê o arquivo **no commit** (`git show`), redige
+  segredos, limite de 150 mil caracteres, sempre com confirmação na UI:
+  - subpágina: `POST /v1/pages` `{ parent: { page_id }, properties.title, markdown,
+markdown_version: 'v2' }`;
+  - seção: `PATCH /v1/pages/{id}/markdown` `{ type: 'insert_content', insert_content: { content,
+position: { type: 'end' } } }` (documentado como legado, ainda suportado).
+    Ambos exigem a capacidade **Insert content** (403 → mensagem própria). Eventos
+    `artifact_attached`/`artifact_published` no histórico.
+- **Contexto do projeto** (`orkio-config` v5 → `claudeContexts[projectId]`): instruções (até
+  8.000) + até 5 páginas do Notion (só id/nome; conteúdo lido na hora). No briefing, seção
+  "Contexto do projeto" limitada a 30.000 caracteres (`buildProjectContext`): o que passar é cortado
+  e vira aviso no formulário; página ilegível também. Tela "Contexto do Claude" no quadro.
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -421,6 +446,9 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   `launchOrkio(..., { claude: { loggedIn, installed } })`. Cenário por palavras no prompt
   (`pedir-shell`, `perguntar`, `tentar-push`, `ler-env`, `demorar`); usa a ponte MCP real.
   O fixture põe uma `ANTHROPIC_API_KEY` falsa no ambiente para provar o filtro.
+- 4B: o fixture usa um `HOME` temporário (com `~/.claude/commands/revisar.md`); o cenário
+  `escrever-doc` gera `docs/exportar.md`; o Notion simulado registra publicações em
+  `notionState(app).published` e responde à busca de páginas (`filter.value: 'page'`).
 - Diálogos simulados: `queueFolderPicks` (abrir) e `queueSavePaths` ("Salvar como…").
 - GitHub simulado (3B): `githubPrDetails[n].reviews`/`reviewRequests` e `FakePull.updatedAt` (o
   Orkio só relê detalhes quando `updated_at` muda). `notionInitialStatus` mantém o Notion

@@ -302,6 +302,36 @@ test('"Rodar de novo" reabre com o mesmo comando; artefato anexado e publicado n
   for (const p of published) expect(p.markdown).not.toContain('ghp_abcdef')
 })
 
+test('contexto do projeto: instruções + página do Notion entram no briefing', async () => {
+  const { page } = orkio!
+  await page
+    .getByRole('complementary', { name: 'Detalhes de ORK-2' })
+    .getByRole('button', { name: 'Fechar' })
+    .click()
+  await page.getByRole('button', { name: 'Contexto do Claude' }).click()
+  const ctx = page.getByRole('region', { name: 'Contexto do Claude Code' })
+  await ctx.getByRole('textbox', { name: /^Instruções/ }).fill('Rode pnpm test antes de commitar.')
+  await ctx.getByRole('searchbox', { name: 'Buscar página no Notion' }).fill('arquitetura')
+  await ctx.getByRole('button', { name: 'Buscar', exact: true }).click()
+  await ctx.getByRole('button', { name: 'Adicionar Arquitetura do Orkio' }).click()
+  await expect(ctx.getByRole('list', { name: 'Páginas de referência' })).toContainText(
+    'Arquitetura do Orkio'
+  )
+  await ctx.getByRole('button', { name: 'Salvar contexto' }).click()
+  await expect(ctx.getByText('Contexto salvo.')).toBeVisible()
+  await ctx.getByRole('button', { name: 'Voltar ao quadro' }).click()
+
+  const section = await openPanel(page)
+  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
+  const briefing = section.getByRole('textbox', { name: /^Briefing da tarefa/ })
+  await expect(briefing).toHaveValue(/## Contexto do projeto/)
+  await expect(briefing).toHaveValue(/Rode pnpm test antes de commitar\./)
+  await expect(briefing).toHaveValue(
+    /### Arquitetura do Orkio \(Notion\)\n\nCamadas: main, preload, renderer\./
+  )
+  await section.getByRole('button', { name: 'Cancelar', exact: true }).click()
+})
+
 test('ver diff e limpar ambiente (a branch fica)', async () => {
   const { page } = orkio!
   const section = page.getByRole('region', { name: 'Claude Code' }).last()

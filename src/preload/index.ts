@@ -165,6 +165,13 @@ const api: OrkioApi = {
     diff: (projectId, taskId) => ipcRenderer.invoke(claude.diff, projectId, taskId),
     catalog: (projectId, taskId) => ipcRenderer.invoke(claude.catalog, projectId, taskId),
     artifacts: (projectId, taskId) => ipcRenderer.invoke(claude.artifacts, projectId, taskId),
+    getContext: (projectId) => ipcRenderer.invoke(claude.getContext, projectId),
+    saveContext: (projectId, context) =>
+      ipcRenderer.invoke(claude.saveContext, projectId, {
+        instructions: context.instructions,
+        notionPages: context.notionPages.map((p) => ({ id: p.id, name: p.name }))
+      }),
+    searchPages: (query) => ipcRenderer.invoke(claude.searchPages, query),
     attachArtifact: (projectId, taskId, path, runId) =>
       ipcRenderer.invoke(claude.attachArtifact, projectId, taskId, path, runId),
     publishArtifact: (projectId, artifactId, mode) =>

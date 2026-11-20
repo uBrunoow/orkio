@@ -328,6 +328,7 @@ function registerIpc(): void {
       listTasks: (projectId) => notionWorkspace.listTasks(projectId),
       signals: (projectId) => signals.get(projectId),
       getBlockChildren: (id, cursor) => notion.getBlockChildren(id, cursor),
+      searchPages: (query) => notion.searchPages(query),
       notionInsert: {
         createChildPage: (parent, title, markdown) =>
           notion.createChildPage(parent, title, markdown),
@@ -381,6 +382,7 @@ function createClaude(deps: {
   listTasks: ClaudeServiceDeps['listTasks']
   signals: ClaudeServiceDeps['signals']
   getBlockChildren: ClaudeServiceDeps['getBlockChildren']
+  searchPages: ClaudeServiceDeps['searchPages']
   /** Escritas no Notion para publicar artefatos (o token fica no conector). */
   notionInsert: ArtifactsDeps['notion']
   send: (channel: string, payload: unknown) => void
@@ -427,6 +429,7 @@ function createClaude(deps: {
     listTasks: deps.listTasks,
     signals: deps.signals,
     getBlockChildren: deps.getBlockChildren,
+    searchPages: deps.searchPages,
     detect: () => detectClaude({ env }),
     artifacts: new ArtifactsService({
       db: deps.boardStore.db,

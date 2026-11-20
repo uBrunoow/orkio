@@ -232,6 +232,46 @@ export interface BriefingInput {
   unsupported: string[]
   project: { name: string; repo: string | null; branch: string; worktree: string }
   pr: { number: number; state: string; url: string } | null
+  /** Contexto do projeto (4B), já montado e limitado por `buildProjectContext`. */
+  projectContext?: string
+}
+
+/**
+ * Monta a seção "Contexto do projeto" dentro de `limit` caracteres: instruções primeiro, depois as
+ * páginas na ordem escolhida. O que não couber é cortado e vira aviso.
+ */
+export function buildProjectContext(
+  ctx: { instructions: string; pages: { name: string; markdown: string }[] },
+  limit: number
+): { markdown: string; warnings: string[] } {
+  const warnings: string[] = []
+  const parts: string[] = []
+  let left = limit
+  const take = (text: string, label: string): string | null => {
+    if (left <= 0) {
+      warnings.push(`${label} ficou de fora: o contexto passou de ${limit} caracteres.`)
+      return null
+    }
+    if (text.length <= left) {
+      left -= text.length
+      return text
+    }
+    const cut = text.slice(0, left)
+    left = 0
+    warnings.push(`${label} foi cortada: o contexto passou de ${limit} caracteres.`)
+    return `${cut}\n\n_(cortado pelo limite de contexto)_`
+  }
+  const instructions = ctx.instructions.trim()
+  if (instructions) {
+    const t = take(instructions, 'Parte das instruções')
+    if (t) parts.push(`### Instruções\n\n${t}`)
+  }
+  for (const page of ctx.pages) {
+    const body = page.markdown.trim() || '_Página vazia._'
+    const t = take(body, `A página “${page.name}”`)
+    if (t) parts.push(`### ${page.name} (Notion)\n\n${t}`)
+  }
+  return { markdown: parts.join('\n\n'), warnings }
 }
 
 /** Briefing em markdown (mostrado ao usuário antes de rodar; editável na hora). */
@@ -250,6 +290,7 @@ export function buildBriefing(input: BriefingInput): string {
         ? `- PR: #${input.pr.number} (${input.pr.state}) ${input.pr.url}`
         : '- PR: ainda não existe'
     ].join('\n'),
+    input.projectContext ? `## Contexto do projeto\n\n${input.projectContext}` : '',
     criteria ? `## Critérios de aceite\n\n${criteria}` : '',
     '## Descrição da tarefa (Notion)',
     input.pageMarkdown || '_A página da tarefa está vazia._',

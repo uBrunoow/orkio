@@ -1,3 +1,4 @@
+import { ORKIO_CONFIG_VERSION } from '../config/orkio-config'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -190,7 +191,7 @@ describe('ProjectsService', () => {
 
       // Persistido no ConfigStore (JSON, sem segredos).
       const saved = JSON.parse(await readFile(configFile, 'utf8'))
-      expect(saved.schemaVersion).toBe(4)
+      expect(saved.schemaVersion).toBe(ORKIO_CONFIG_VERSION)
       expect(saved.projects).toHaveLength(1)
       expect(JSON.stringify(saved)).not.toMatch(/token|gho_|github_pat/i)
     })

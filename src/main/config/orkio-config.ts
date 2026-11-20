@@ -25,7 +25,9 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  * v3: `boards` (quadro kanban por projeto: etapas ↔ opções do status do Notion).
  * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
  */
-export const ORKIO_CONFIG_VERSION = 4
+import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
+
+export const ORKIO_CONFIG_VERSION = 5
 
 export interface StoredProject {
   id: string
@@ -45,10 +47,18 @@ export interface OrkioConfig {
   boards: Record<string, BoardConfig>
   /** Automações (3B): pausa global ("Pausar todas"). */
   automation: { paused: boolean }
+  /** Contexto do Claude Code por projeto (4B): instruções + páginas de referência (só ids/nomes). */
+  claudeContexts: Record<string, ProjectClaudeContext>
 }
 
 export function emptyConfig(): OrkioConfig {
-  return { projects: [], notion: null, boards: {}, automation: { paused: false } }
+  return {
+    projects: [],
+    notion: null,
+    boards: {},
+    automation: { paused: false },
+    claudeContexts: {}
+  }
 }
 
 export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
@@ -80,7 +90,9 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
               : board
         }
         return { ...data, boards, automation: { paused: false } }
-      }
+      },
+      // v4 → v5: nenhum contexto do Claude Code ainda.
+      4: (data) => ({ ...data, claudeContexts: {} })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -120,7 +132,15 @@ export function validateConfig(
   const automation = {
     paused: isRecord(automationRaw) && automationRaw['paused'] === true
   }
-  const value: OrkioConfig = { projects, notion, boards, automation }
+  // Contextos do Claude Code: um inválido é descartado sozinho.
+  const claudeContexts: Record<string, ProjectClaudeContext> = {}
+  if (isRecord(data['claudeContexts'])) {
+    for (const [projectId, raw] of Object.entries(data['claudeContexts'])) {
+      const ctx = parseClaudeContext(raw)
+      if (ctx) claudeContexts[projectId] = ctx
+    }
+  }
+  const value: OrkioConfig = { projects, notion, boards, automation, claudeContexts }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
 }
 
@@ -294,4 +314,15 @@ export function parseRule(value: unknown): AutomationRule | null {
   }
   if (value['notify'] === true) rule.notify = true
   return rule
+}
+
+export function parseClaudeContext(value: unknown): ProjectClaudeContext | null {
+  if (!isRecord(value) || typeof value['instructions'] !== 'string') return null
+  const pages = Array.isArray(value['notionPages'])
+    ? value['notionPages'].map(nameRef).filter((p): p is { id: string; name: string } => !!p)
+    : []
+  return {
+    instructions: value['instructions'].slice(0, CONTEXT_LIMITS.instructions),
+    notionPages: pages.slice(0, CONTEXT_LIMITS.pages)
+  }
 }

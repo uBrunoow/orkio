@@ -13,7 +13,14 @@ import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationStatus, BoardTaskRef, ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
-import { AutomationIcon, PauseIcon, RefreshIcon, SettingsIcon } from '../../components/icons'
+import {
+  AutomationIcon,
+  ClaudeLogo,
+  PauseIcon,
+  RefreshIcon,
+  SettingsIcon
+} from '../../components/icons'
+import { ProjectContextPage } from '../claude/ProjectContextPage'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardSettings } from './BoardSettings'
@@ -107,7 +114,7 @@ function Board({
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
   /** Tela atual: quadro, fluxo (3C) ou ajustes do Notion (Etapa Orkio/Bloqueada). */
-  const [mode, setMode] = useState<'board' | 'flow' | 'settings'>('board')
+  const [mode, setMode] = useState<'board' | 'flow' | 'settings' | 'context'>('board')
   const [selected, setPicked] = useState<string | null>(openTaskId)
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
@@ -175,6 +182,10 @@ function Board({
     )
   }
 
+  if (mode === 'context') {
+    return <ProjectContextPage projectId={projectId} onClose={() => setMode('board')} />
+  }
+
   const selectedCard = view.cards.find((c) => c.taskId === selected) ?? null
   const actions = {
     onOpen: (taskId: string) => setPicked(taskId),
@@ -224,6 +235,12 @@ function Board({
           label={automation.status?.paused ? 'Retomar automações' : 'Pausar todas'}
           icon={<Icon icon={automation.status?.paused ? AutomationIcon : PauseIcon} />}
           onClick={() => void automation.setPaused(!automation.status?.paused)}
+        />
+        <Button
+          variant="ghost"
+          label="Contexto do Claude"
+          icon={<Icon icon={ClaudeLogo} />}
+          onClick={() => setMode('context')}
         />
         <Button
           variant="ghost"

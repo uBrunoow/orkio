@@ -46,7 +46,8 @@ describe('orkio-config v2/v3', () => {
       projects: [{ ...PROJECT, notionProject: null }],
       notion: null,
       boards: {},
-      automation: { paused: false }
+      automation: { paused: false },
+      claudeContexts: {}
     })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
     expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
@@ -67,7 +68,7 @@ describe('orkio-config v2/v3', () => {
     expect(data.boards).toEqual({})
     expect(data.notion).toEqual(NOTION)
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(4)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
   })
 
   it('migra v3 → v4: quadros ganham as regras padrão e a pausa global começa desligada', async () => {
@@ -108,7 +109,7 @@ describe('orkio-config v2/v3', () => {
     ])
     expect(rules.find((r) => r.id === 'default-rerequest')?.conditions?.fromStages).toEqual(['s4'])
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(4)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
   })
 
   it('regra inválida é descartada sem perder o quadro', () => {
@@ -212,5 +213,37 @@ describe('orkio-config v2/v3', () => {
     expect(result?.value.notion?.mapping.priority).toBeUndefined()
     expect(result?.value.projects[0]?.notionProject).toBeNull()
     expect(result?.warning).toBeUndefined()
+  })
+
+  it('migra v4 → v5: contextos do Claude Code começam vazios; inválido é descartado', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 4,
+        projects: [{ ...PROJECT, notionProject: null }],
+        notion: NOTION,
+        boards: {},
+        automation: { paused: true }
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.claudeContexts).toEqual({})
+    expect(data.automation.paused).toBe(true)
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(5)
+
+    const parsed = validateConfig({
+      projects: [],
+      claudeContexts: {
+        ok: {
+          instructions: 'Use pnpm',
+          notionPages: [{ id: 'p1', name: 'Arquitetura' }, { id: 7 }]
+        },
+        ruim: { notionPages: [] }
+      }
+    })
+    expect(parsed?.value.claudeContexts).toEqual({
+      ok: { instructions: 'Use pnpm', notionPages: [{ id: 'p1', name: 'Arquitetura' }] }
+    })
   })
 })

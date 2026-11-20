@@ -117,6 +117,8 @@ export interface RunPreparation extends TaskRunsState {
   branch: string
   /** Comandos vistos na última sessão do Claude Code (system/init). */
   commands: string[]
+  /** Avisos do contexto do projeto (página ilegível, contexto cortado pelo limite). */
+  contextWarnings: string[]
 }
 
 export interface StartRunRequest {
@@ -169,3 +171,18 @@ export interface ArtifactView {
   attachedAt: string
   notion: { mode: ArtifactPublishMode; pageId: string | null; publishedAt: string } | null
 }
+
+/** Contexto do projeto para o Claude Code (4B): vai no briefing de toda execução. */
+export interface ProjectClaudeContext {
+  /** Instruções fixas (convenções, comandos de teste, o que evitar...). */
+  instructions: string
+  /** Páginas de referência do Notion (só id e nome; o conteúdo é lido na hora). */
+  notionPages: { id: string; name: string }[]
+}
+
+export const CONTEXT_LIMITS = {
+  instructions: 8_000,
+  pages: 5,
+  /** Total de contexto (instruções + páginas) no briefing; acima disso corta com aviso. */
+  total: 30_000
+} as const

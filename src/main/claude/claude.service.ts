@@ -5,7 +5,9 @@
  * O renderer só manda ids (projeto, tarefa, execução); caminhos e nomes de branch são resolvidos
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
+import { CONTEXT_LIMITS } from '../../shared/agent-run'
 import type {
+  ProjectClaudeContext,
   ArtifactCandidate,
   ArtifactPublishMode,
   ArtifactView,
@@ -20,7 +22,12 @@ import type {
   TaskRunsState,
   TaskWorkspace
 } from '../../shared/agent-run'
-import { blocksToMarkdown, buildBriefing, type NotionBlock } from '../../shared/briefing'
+import {
+  blocksToMarkdown,
+  buildBriefing,
+  buildProjectContext,
+  type NotionBlock
+} from '../../shared/briefing'
 import type { NotionResult, NotionTask, TaskSignalsResult } from '../../shared/ipc-contract'
 import { taskBranchName } from '../../shared/slug'
 import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
@@ -56,7 +63,12 @@ const MAX_DIFF_CHARS = 400_000
 const COMMAND_NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
 
 export interface ClaudeServiceDeps {
-  config: { get(): OrkioConfig }
+  config: {
+    get(): OrkioConfig
+    update(fn: (c: OrkioConfig) => OrkioConfig): Promise<unknown>
+  }
+  /** Busca páginas no Notion (contexto do projeto). */
+  searchPages(query: string): Promise<{ results: unknown[]; nextCursor: string | null }>
   worktrees: WorktreeService
   runs: RunService
   git: Pick<Git, 'statusPorcelain' | 'diffText' | 'localBranches' | 'remoteBranches'>
@@ -134,6 +146,7 @@ export class ClaudeService {
         { name: 'Prioridade', value: task.priority?.name ?? '' },
         { name: 'Responsáveis', value: task.assignees.join(', ') }
       ]
+      const context = await this.projectContext(projectId)
       const briefing = buildBriefing({
         displayId: task.displayId,
         title: task.title,
@@ -147,7 +160,8 @@ export class ClaudeService {
           branch,
           worktree: state.workspace?.path ?? '(será criado ao rodar)'
         },
-        pr
+        pr,
+        ...(context.markdown ? { projectContext: context.markdown } : {})
       })
       return ok({
         ...state,
@@ -157,7 +171,8 @@ export class ClaudeService {
         briefing,
         unsupported: [...new Set(unsupported)],
         branch,
-        commands: this.commands
+        commands: this.commands,
+        contextWarnings: context.warnings
       })
     })
   }
@@ -236,6 +251,51 @@ export class ClaudeService {
         return fail('editor', CLAUDE_MESSAGES.editor)
       }
       return ok(null)
+    })
+  }
+
+  /** Contexto do projeto (instruções + páginas de referência; só ids e nomes). */
+  getContext(projectId: string): Promise<ClaudeResult<ProjectClaudeContext>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      return ok(
+        this.deps.config.get().claudeContexts[projectId] ?? { instructions: '', notionPages: [] }
+      )
+    })
+  }
+
+  saveContext(
+    projectId: string,
+    context: ProjectClaudeContext
+  ): Promise<ClaudeResult<ProjectClaudeContext>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      if (context.instructions.length > CONTEXT_LIMITS.instructions) {
+        return fail(
+          'invalid',
+          `As instruções passam de ${CONTEXT_LIMITS.instructions.toLocaleString('pt-BR')} caracteres.`
+        )
+      }
+      if (context.notionPages.length > CONTEXT_LIMITS.pages) {
+        return fail('invalid', `Escolha no máximo ${CONTEXT_LIMITS.pages} páginas de referência.`)
+      }
+      const clean: ProjectClaudeContext = {
+        instructions: context.instructions,
+        notionPages: context.notionPages.map((p) => ({ id: p.id, name: p.name.slice(0, 200) }))
+      }
+      await this.deps.config.update((c) => ({
+        ...c,
+        claudeContexts: { ...c.claudeContexts, [projectId]: clean }
+      }))
+      return ok(clean)
+    })
+  }
+
+  /** Páginas do Notion por título (para escolher referências). */
+  searchPages(query: string): Promise<ClaudeResult<{ id: string; name: string }[]>> {
+    return this.wrap(async () => {
+      const page = await this.deps.searchPages(query.slice(0, 200))
+      return ok(page.results.flatMap((r) => pageRef(r)))
     })
   }
 
@@ -368,6 +428,34 @@ export class ClaudeService {
     }
   }
 
+  /** Contexto do projeto em markdown, dentro do limite; páginas ilegíveis viram aviso. */
+  private async projectContext(
+    projectId: string
+  ): Promise<{ markdown: string; warnings: string[] }> {
+    const ctx = this.deps.config.get().claudeContexts[projectId]
+    if (!ctx || (!ctx.instructions.trim() && ctx.notionPages.length === 0)) {
+      return { markdown: '', warnings: [] }
+    }
+    const warnings: string[] = []
+    const pages: { name: string; markdown: string }[] = []
+    for (const ref of ctx.notionPages) {
+      try {
+        pages.push({
+          name: ref.name,
+          markdown: blocksToMarkdown(await this.pageBlocks(ref.id)).markdown
+        })
+      } catch (error) {
+        console.error(`[orkio] contexto: página indisponível: ${errorName(error)}`)
+        warnings.push(`Não deu para ler a página “${ref.name}” no Notion; ela ficou de fora.`)
+      }
+    }
+    const built = buildProjectContext(
+      { instructions: ctx.instructions, pages },
+      CONTEXT_LIMITS.total
+    )
+    return { markdown: built.markdown, warnings: [...warnings, ...built.warnings] }
+  }
+
   /** Blocos da página (filhos até MAX_DEPTH, no máximo MAX_BLOCKS no total). */
   private async pageBlocks(pageId: string): Promise<NotionBlock[]> {
     let budget = MAX_BLOCKS
@@ -434,4 +522,28 @@ function fail<T>(code: string, message: string, files?: string[]): ClaudeResult<
 
 function isBlock(v: unknown): v is NotionBlock {
   return typeof v === 'object' && v !== null && typeof (v as { type?: unknown }).type === 'string'
+}
+
+/** Página do resultado de busca → id + título (propriedade do tipo title). */
+function pageRef(value: unknown): { id: string; name: string }[] {
+  if (typeof value !== 'object' || value === null) return []
+  const v = value as { id?: unknown; object?: unknown; properties?: unknown }
+  if (typeof v.id !== 'string' || v.object !== 'page') return []
+  let name = ''
+  if (typeof v.properties === 'object' && v.properties !== null) {
+    for (const prop of Object.values(v.properties as Record<string, unknown>)) {
+      const p = prop as { type?: unknown; title?: unknown }
+      if (p.type === 'title' && Array.isArray(p.title)) {
+        name = p.title
+          .map((t) =>
+            typeof (t as { plain_text?: unknown }).plain_text === 'string'
+              ? (t as { plain_text: string }).plain_text
+              : ''
+          )
+          .join('')
+        break
+      }
+    }
+  }
+  return [{ id: v.id, name: name.trim() || 'Sem título' }]
 }
