@@ -22,6 +22,7 @@ import {
 } from '../../components/icons'
 import { ProjectContextPage } from '../claude/ProjectContextPage'
 import { TaskFlowsPage } from '../task-flows/TaskFlowsPage'
+import { AlvaPage } from '../alva/AlvaPage'
 import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
@@ -116,7 +117,9 @@ function Board({
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
   /** Tela atual: quadro, fluxo (3C) ou ajustes do Notion (Etapa Orkio/Bloqueada). */
-  const [mode, setMode] = useState<'board' | 'flow' | 'settings' | 'context' | 'taskflows'>('board')
+  const [mode, setMode] = useState<
+    'board' | 'flow' | 'settings' | 'context' | 'taskflows' | 'alva'
+  >('board')
   const activeFlows = useActiveFlows(projectId)
   const [selected, setPicked] = useState<string | null>(openTaskId)
   const [query, setQuery] = useState('')
@@ -186,6 +189,17 @@ function Board({
     )
   }
 
+  if (mode === 'alva') {
+    return (
+      <AlvaPage
+        projectId={projectId}
+        view={view}
+        onBoardChanged={() => void board.load(true)}
+        onClose={() => setMode('board')}
+      />
+    )
+  }
+
   if (mode === 'taskflows') {
     return <TaskFlowsPage projectId={projectId} onClose={() => setMode('flow')} />
   }
@@ -244,6 +258,7 @@ function Board({
           icon={<Icon icon={automation.status?.paused ? AutomationIcon : PauseIcon} />}
           onClick={() => void automation.setPaused(!automation.status?.paused)}
         />
+        <Button variant="ghost" label="alva-flow" onClick={() => setMode('alva')} />
         <Button
           variant="ghost"
           label="Contexto do Claude"

@@ -125,6 +125,7 @@ describe('alva-flow: vínculo e extratores', () => {
     expect(r).toEqual({
       vars: {
         'alva.task_id': 'TASK-2',
+        'alva.spec_arg': 'TASK-2',
         'alva.linked': 'sim',
         'alva.status': 'Requirements Defined',
         'alva.open_questions': '1',

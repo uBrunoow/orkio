@@ -86,6 +86,9 @@ export interface ProjectFlows {
   alva?: { maxParallel: number }
 }
 
+/** Alvo especial de um salto: encerra o fluxo (concluído). */
+export const FLOW_END = '$fim'
+
 /** Trava de segurança: passos executados (inclui saltos avaliados) num mesmo fluxo. */
 export const MAX_EXECUTED_STEPS = 50
 
@@ -162,6 +165,7 @@ function resolveFrom(flow: Flow, from: number, state: FlowState): FlowDecision {
     if (step.type !== 'branch') return { kind: 'run', stepId: step.id, state: s }
     s = { ...s, outcomes: { ...s.outcomes, [step.id]: 'ok' } }
     const target = evaluateCondition(step.when, s) ? step.then : step.else
+    if (target === FLOW_END) return { kind: 'finished', result: 'done', state: s }
     i = target === undefined ? i + 1 : indexOf(flow, target)
     if (i < 0) return { kind: 'paused', reason: 'step_failed', stepId: step.id, state: s }
   }
@@ -332,6 +336,7 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
     if (!step.name.trim()) err(step.id, `Passo ${i + 1}: dê um nome ao passo.`)
 
     const target = (to: StepId, what: string): number | null => {
+      if (to === FLOW_END) return null
       const t = index.get(to)
       if (t === undefined) {
         err(step.id, `${label}: ${what} aponta para um passo que não existe (${to}).`)

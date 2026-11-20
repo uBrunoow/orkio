@@ -7,11 +7,24 @@ import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
 import type { FlowDraft } from './flow'
 import type { TaskSignals } from './task-signals'
 import type { Flow, FlowRunView, ProjectFlows } from './task-flow'
+import type { AlvaPrecheck, BacklogTaskInfo } from './alva'
 
 /** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
 export interface TaskFlowsProject extends ProjectFlows {
   extractors: { id: string; label: string }[]
-  actions: { id: string; label: string }[]
+  /** `pending`: ação ainda não implementada (vira espera que você aprova). */
+  actions: { id: string; label: string; pending?: string }[]
+}
+
+export interface AlvaStatusView {
+  precheck: AlvaPrecheck | null
+  templates: {
+    id: string
+    name: string
+    stageId: string | null
+    mode: 'on_enter' | 'manual' | null
+  }[]
+  maxParallel: number
 }
 import type {
   ProjectClaudeContext,
@@ -55,6 +68,14 @@ export const IPC_CHANNELS = {
   signals: {
     get: 'signals:get'
   },
+  alva: {
+    precheck: 'alva:precheck',
+    status: 'alva:status',
+    createTemplates: 'alva:create-templates',
+    addPlanningStage: 'alva:add-planning-stage',
+    setMaxParallel: 'alva:set-max-parallel',
+    taskSummary: 'alva:task-summary'
+  },
   taskFlows: {
     getProject: 'task-flows:get-project',
     saveFlows: 'task-flows:save-flows',
@@ -67,6 +88,7 @@ export const IPC_CHANNELS = {
     skip: 'task-flows:skip',
     cancel: 'task-flows:cancel',
     decideLeft: 'task-flows:decide-left',
+    choose: 'task-flows:choose',
     /** Evento main → renderer: o fluxo de uma tarefa mudou. */
     changed: 'task-flows:changed'
   },
@@ -671,6 +693,25 @@ export interface OrkioApi {
     /** "Pausar todas" / "Retomar". */
     setPaused(paused: boolean): Promise<AutomationStatus>
   }
+  /** Integração com o plugin alva-flow (5B). */
+  alva: {
+    /** "Pronto para o alva-flow?" (`force` verifica de novo). */
+    precheck(projectId: string, options?: { force?: boolean }): Promise<ClaudeResult<AlvaPrecheck>>
+    status(projectId: string): Promise<ClaudeResult<AlvaStatusView>>
+    /** Cria os templates "Fluxo Alva" e liga nas colunas escolhidas (ao entrar). */
+    createTemplates(
+      projectId: string,
+      bindings: { plan: string | null; deliver: string | null; reviewed: string | null }
+    ): Promise<ClaudeResult<AlvaStatusView>>
+    /** Coluna "Planejando" (entre Prioridades e Em andamento) com o status do Notion escolhido. */
+    addPlanningStage(projectId: string, notionStatusId: string): Promise<ClaudeResult<string>>
+    setMaxParallel(projectId: string, value: number): Promise<ClaudeResult<AlvaStatusView>>
+    /** Task do Backlog.md vinculada (id, título, status, critérios). */
+    taskSummary(
+      projectId: string,
+      taskId: string
+    ): Promise<ClaudeResult<{ linked: string | null; task: BacklogTaskInfo | null }>>
+  }
   /** Fluxos de tarefa (5A): sequências de passos ligadas às colunas do quadro. */
   taskFlows: {
     getProject(projectId: string): Promise<ClaudeResult<TaskFlowsProject>>
@@ -688,6 +729,8 @@ export interface OrkioApi {
     skip(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     cancel(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     decideLeft(flowRunId: string, choice: 'cancel' | 'continue'): Promise<ClaudeResult<FlowRunView>>
+    /** Escolha pedida por um extrator (ex.: qual task do Backlog é desta tarefa). */
+    choose(flowRunId: string, value: string): Promise<ClaudeResult<FlowRunView>>
     onChanged(listener: (event: { projectId: string; taskId: string }) => void): () => void
   }
   /** Claude Code (4A): CLI do usuário rodando a tarefa num worktree isolado. */

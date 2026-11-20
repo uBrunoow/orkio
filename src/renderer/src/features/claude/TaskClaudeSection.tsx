@@ -35,13 +35,9 @@ import {
   StopIcon,
   TerminalIcon
 } from '../../components/icons'
+import { QuestionCard } from './QuestionCard'
 import { TaskArtifacts } from './TaskArtifacts'
-import {
-  pendingRequests,
-  useTaskRuns,
-  type PendingPermission,
-  type PendingQuestion
-} from './useTaskRuns'
+import { pendingRequests, useTaskRuns, type PendingPermission } from './useTaskRuns'
 
 const STATUS_LABEL: Record<RunStatus, string> = {
   queued: 'Na fila',
@@ -367,7 +363,13 @@ function RunView({
         p.kind === 'permission' ? (
           <PermissionCard key={p.requestId} runId={run.id} request={p} />
         ) : (
-          <QuestionCard key={p.requestId} runId={run.id} request={p} />
+          <QuestionCard
+            key={p.requestId}
+            questions={p.questions}
+            onAnswer={(answers) =>
+              void window.orkio.claude.answerQuestion(run.id, p.requestId, answers)
+            }
+          />
         )
       )}
 
@@ -445,43 +447,6 @@ function PermissionCard({
             />
           )}
           <Button size="sm" variant="destructive" label="Negar" onClick={() => answer('deny')} />
-        </HStack>
-      </VStack>
-    </Card>
-  )
-}
-
-function QuestionCard({
-  runId,
-  request
-}: {
-  runId: string
-  request: PendingQuestion
-}): React.JSX.Element {
-  const [answers, setAnswers] = useState<Record<string, string>>({})
-  const complete = request.questions.every((q) => answers[q.question])
-  return (
-    <Card role="group" aria-label="Pergunta do Claude Code">
-      <VStack gap={2}>
-        {request.questions.map((q) => (
-          <Selector
-            key={q.question}
-            label={q.question}
-            options={q.options.map((o) => ({ value: o, label: o }))}
-            {...(answers[q.question] ? { value: answers[q.question] } : {})}
-            onChange={(v) => setAnswers((prev) => ({ ...prev, [q.question]: v }))}
-          />
-        ))}
-        <HStack gap={2}>
-          <Button
-            size="sm"
-            variant="primary"
-            label="Responder"
-            isDisabled={!complete}
-            onClick={() =>
-              void window.orkio.claude.answerQuestion(runId, request.requestId, answers)
-            }
-          />
         </HStack>
       </VStack>
     </Card>

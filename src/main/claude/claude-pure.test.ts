@@ -355,4 +355,18 @@ describe('briefing', () => {
       'A página “B” ficou de fora: o contexto passou de 8 caracteres.'
     ])
   })
+
+  it('hook do projeto vira só uma linha no log (sem a saída)', () => {
+    expect(
+      parseStreamLine(
+        JSON.stringify({
+          type: 'system',
+          subtype: 'hook_response',
+          hook_event_name: 'PostToolUse',
+          stdout: 'SEGREDO=abc'
+        }),
+        '/wt'
+      )
+    ).toEqual([{ kind: 'info', text: 'Hook do projeto rodou: PostToolUse' }])
+  })
 })

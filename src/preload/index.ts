@@ -18,7 +18,8 @@ const {
   projects,
   shell,
   claude,
-  taskFlows
+  taskFlows,
+  alva
 } = IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
@@ -141,6 +142,21 @@ const api: OrkioApi = {
     runNow: (projectId) => ipcRenderer.invoke(automation.runNow, projectId),
     setPaused: (paused) => ipcRenderer.invoke(automation.setPaused, paused === true)
   },
+  alva: {
+    precheck: (projectId, options) =>
+      ipcRenderer.invoke(alva.precheck, projectId, options?.force === true),
+    status: (projectId) => ipcRenderer.invoke(alva.status, projectId),
+    createTemplates: (projectId, b) =>
+      ipcRenderer.invoke(alva.createTemplates, projectId, {
+        plan: b.plan,
+        deliver: b.deliver,
+        reviewed: b.reviewed
+      }),
+    addPlanningStage: (projectId, statusId) =>
+      ipcRenderer.invoke(alva.addPlanningStage, projectId, statusId),
+    setMaxParallel: (projectId, value) => ipcRenderer.invoke(alva.setMaxParallel, projectId, value),
+    taskSummary: (projectId, taskId) => ipcRenderer.invoke(alva.taskSummary, projectId, taskId)
+  },
   taskFlows: {
     getProject: (projectId) => ipcRenderer.invoke(taskFlows.getProject, projectId),
     saveFlows: (projectId, flows) =>
@@ -157,6 +173,7 @@ const api: OrkioApi = {
     resume: (id) => ipcRenderer.invoke(taskFlows.resume, id),
     skip: (id) => ipcRenderer.invoke(taskFlows.skip, id),
     cancel: (id) => ipcRenderer.invoke(taskFlows.cancel, id),
+    choose: (id, value) => ipcRenderer.invoke(taskFlows.choose, id, value),
     decideLeft: (id, choice) =>
       ipcRenderer.invoke(taskFlows.decideLeft, id, choice === 'cancel' ? 'cancel' : 'continue'),
     onChanged: (listener) => {

@@ -17,7 +17,7 @@ import { FlowError, type FlowExtractor, type FlowRunner, type OrkioAction } from
 
 export interface FlowsProjectView extends ProjectFlows {
   extractors: { id: string; label: string }[]
-  actions: { id: string; label: string }[]
+  actions: { id: string; label: string; pending?: string }[]
 }
 
 export class FlowsService {
@@ -40,7 +40,11 @@ export class FlowsService {
       value: {
         ...pf,
         extractors: this.deps.extractors.map((e) => ({ id: e.id, label: e.label })),
-        actions: this.deps.actions.map((a) => ({ id: a.id, label: a.label }))
+        actions: this.deps.actions.map((a) => ({
+          id: a.id,
+          label: a.label,
+          ...(a.pending ? { pending: a.pending } : {})
+        }))
       }
     }
   }

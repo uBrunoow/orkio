@@ -274,7 +274,10 @@ describe('RunService', () => {
       await tick()
     }
     expect(service.list('task-1').map((r) => r.status)).toEqual(['failed', 'failed', 'failed'])
-    expect((await readdir(join(dir, 'runs'))).length).toBe(2)
+    // A limpeza dos logs é assíncrona: espera com prazo (não um intervalo fixo).
+    await vi.waitFor(async () => expect((await readdir(join(dir, 'runs'))).length).toBe(2), {
+      timeout: 3000
+    })
   })
 
   it('valores de .env do worktree nunca vão para o log (nem repetidos pelo agente)', async () => {

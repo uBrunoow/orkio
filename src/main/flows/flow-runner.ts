@@ -138,7 +138,9 @@ export interface FlowRunnerDeps {
   /** Pasta do worktree da tarefa (para extratores). */
   worktreePath?: (taskId: string) => string | null
   /** Variáveis no início do fluxo (ex.: `alva.task_id` do vínculo salvo). */
-  initialVars?: (projectId: string, taskId: string) => Promise<Record<string, string>>
+  initialVars?: (projectId: string, taskId: string, flow: Flow) => Promise<Record<string, string>>
+  /** Antes de começar: devolve a mensagem que impede (ex.: projeto não pronto para o alva-flow). */
+  canStart?: (projectId: string, flow: Flow) => Promise<string | null>
   /**
    * Limite de fluxos com o mesmo marcador em paralelo no projeto (ex.: Alva com Docker);
    * `null` = sem limite. Excedente espera e começa sozinho quando liberar.
@@ -285,7 +287,15 @@ export class FlowRunner {
       if (!binding) return
       await this.start(change.projectId, change.taskId, change.to, binding.flowId)
     } catch (error) {
-      console.error(`[orkio] fluxo (entrada na etapa): ${errorName(error)}`)
+      // Não começou ao entrar na coluna (ex.: projeto não pronto): avisa, sem quebrar o quadro.
+      if (error instanceof FlowError && error.code !== 'busy') {
+        this.deps.notify('O fluxo da coluna não começou', error.message, {
+          projectId: change.projectId,
+          taskId: change.taskId
+        })
+      } else {
+        console.error(`[orkio] fluxo (entrada na etapa): ${errorName(error)}`)
+      }
     }
   }
 
@@ -308,6 +318,8 @@ export class FlowRunner {
     if (this.activeRow(taskId)) throw new FlowError('busy', FLOW_MESSAGES.busy)
     const flow = this.deps.flows(projectId).flows.find((f) => f.id === flowId)
     if (!flow) throw new FlowError('flow_missing', FLOW_MESSAGES.flowMissing)
+    const blocked = await this.deps.canStart?.(projectId, flow)
+    if (blocked) throw new FlowError('not_ready', blocked)
     const id = this.deps.newId?.() ?? randomUUID()
     const persisted: Persisted = {
       engine: { vars: {}, visits: {}, outcomes: {}, executed: 0 },
@@ -353,7 +365,9 @@ export class FlowRunner {
 
   private async safeInitialVars(row: RunRow): Promise<Record<string, string>> {
     try {
-      return cleanVars((await this.deps.initialVars?.(row.project_id, row.task_page_id)) ?? {})
+      return cleanVars(
+        (await this.deps.initialVars?.(row.project_id, row.task_page_id, this.flow(row))) ?? {}
+      )
     } catch (error) {
       console.error(`[orkio] fluxo (variáveis iniciais): ${errorName(error)}`)
       return {}

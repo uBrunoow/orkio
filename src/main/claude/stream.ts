@@ -139,6 +139,12 @@ export function parseStreamLine(line: string, worktree: string): RunLogEvent[] {
     ]
   }
 
+  // Hooks do projeto (ex.: `make format` do alva-flow instalado por cópia) rodam no worktree:
+  // só registramos que rodaram, nunca a saída. Formato do evento não confirmado: leitura tolerante.
+  if (type === 'system' && typeof msg['subtype'] === 'string' && /hook/i.test(msg['subtype'])) {
+    const name = str(msg['hook_event_name']) ?? str(msg['hook_name']) ?? str(msg['event']) ?? 'hook'
+    return [{ kind: 'info', text: `Hook do projeto rodou: ${name.slice(0, 60)}` }]
+  }
   if (type === 'system' && msg['subtype'] === 'api_retry') {
     return [{ kind: 'info', text: 'A API do Claude falhou; tentando de novo…' }]
   }

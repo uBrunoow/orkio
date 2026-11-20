@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  FLOW_END,
   MAX_EXECUTED_STEPS,
   afterStep,
   evaluateCondition,
@@ -221,5 +222,20 @@ describe('motor de fluxos', () => {
     const flow: Flow = { id: 'f', name: 'F', steps: [cmd('revisao')] }
     expect(newStepId(flow, 'Revisão')).toBe('revisao-2')
     expect(newStepId(flow, 'Aprovação final!')).toBe('aprovacao-final')
+  })
+
+  it('salto para $fim encerra o fluxo (válido na validação)', () => {
+    const flow: Flow = {
+      id: 'f',
+      name: 'F',
+      steps: [
+        cmd('a'),
+        { id: 'sai', name: 'sai', type: 'branch', when: { type: 'all', of: [] }, then: FLOW_END },
+        cmd('nunca')
+      ]
+    }
+    const d = afterStep(flow, startFlow(flow).state, 'a', { outcome: 'ok' })
+    expect(d).toMatchObject({ kind: 'finished', result: 'done' })
+    expect(validateTaskFlow(flow, { commands: null, extractors: [], actions: [] })).toEqual([])
   })
 })

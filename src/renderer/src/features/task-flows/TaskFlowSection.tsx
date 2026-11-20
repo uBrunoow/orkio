@@ -11,6 +11,8 @@ import { TextArea } from '@astryxdesign/core/TextArea'
 import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { RunSummary } from '../../../../shared/agent-run'
+import type { BacklogTaskInfo } from '../../../../shared/alva'
+import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
 import {
   FLOW_PAUSE_LABEL,
   type FlowRunStatus,
@@ -60,6 +62,11 @@ export function TaskFlowSection({
 }): React.JSX.Element | null {
   const [runs, setRuns] = useState<FlowRunView[] | null>(null)
   const [binding, setBinding] = useState<(StageFlow & { flowName: string }) | null>(null)
+  const [pending, setPending] = useState<Record<string, string>>({})
+  const [backlog, setBacklog] = useState<{ linked: string | null; task: BacklogTaskInfo | null }>({
+    linked: null,
+    task: null
+  })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
@@ -74,6 +81,13 @@ export function TaskFlowSection({
       const b = r.value.bindings.find((x) => x.stageId === stageId && x.enabled)
       const flow = b ? r.value.flows.find((f) => f.id === b.flowId) : null
       setBinding(b && flow ? { ...b, flowName: flow.name } : null)
+      setPending(
+        Object.fromEntries(r.value.actions.filter((a) => a.pending).map((a) => [a.id, a.pending!]))
+      )
+    })
+    // alva-flow (5B): task do Backlog.md vinculada (lida do arquivo, nada guardado).
+    void window.orkio.alva.taskSummary(projectId, taskId).then((r) => {
+      if (active && r.ok) setBacklog(r.value)
     })
     return () => {
       active = false
@@ -100,7 +114,7 @@ export function TaskFlowSection({
   )
 
   const run = runs?.[0] ?? null
-  if (!run && !binding) return null
+  if (!run && !binding && !backlog.linked) return null
   const live = run && run.status !== 'finished' && run.status !== 'cancelled'
   const stepName = (id: string | null): string =>
     run?.steps.find((s) => s.id === id)?.name ?? id ?? ''
@@ -155,10 +169,53 @@ export function TaskFlowSection({
         </List>
       )}
 
-      {run?.status === 'running' && current?.type === 'claude_command' && (
-        <Text type="supporting">
-          Rodando /{current.command}. O log ao vivo está em Claude Code, logo abaixo.
+      {backlog.linked && (
+        <Text type="supporting" data-testid="alva-task">
+          {backlog.task
+            ? `Backlog: ${backlog.task.id} · ${backlog.task.status} · critérios ${backlog.task.criteria.done}/${backlog.task.criteria.total}${backlog.task.openQuestions > 0 ? ` · ${backlog.task.openQuestions} pergunta(s) em aberto` : ''}`
+            : `Backlog: ${backlog.linked} (arquivo não encontrado no ambiente)`}
         </Text>
+      )}
+
+      {run?.status === 'running' && current?.type === 'claude_command' && (
+        <Text type="supporting" data-testid="flow-running-step">
+          {/:pr$/.test(current.command) && !/--comments/.test(current.args)
+            ? 'Aguardando CI do GitHub: o /pr acompanha os checks até terminar (pode levar vários minutos).'
+            : `Rodando /${current.command}. O log ao vivo está em Claude Code, logo abaixo.`}
+        </Text>
+      )}
+
+      {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && (
+        <Card role="group" aria-label="Ação pendente do fluxo">
+          <VStack gap={2}>
+            <Text weight="semibold">{current.name}</Text>
+            <Text>{pending[current.action] ?? 'Esta ação ainda não existe no Orkio.'}</Text>
+            <HStack gap={2}>
+              <Button
+                size="sm"
+                variant="primary"
+                label="Já fiz, seguir"
+                isLoading={busy}
+                onClick={() => void act(() => window.orkio.taskFlows.approve(run.id))}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                label="Encerrar o fluxo"
+                onClick={() => void act(() => window.orkio.taskFlows.reject(run.id))}
+              />
+            </HStack>
+          </VStack>
+        </Card>
+      )}
+
+      {run?.status === 'paused' && run.pauseReason === 'needs_choice' && run.choice && (
+        <ChoiceCard
+          prompt={run.choice.prompt}
+          options={run.choice.options}
+          busy={busy}
+          onChoose={(v) => void act(() => window.orkio.taskFlows.choose(run.id, v))}
+        />
       )}
 
       {run?.status === 'waiting_gate' && current?.type === 'gate' && (
@@ -173,35 +230,51 @@ export function TaskFlowSection({
         />
       )}
 
-      {run?.status === 'paused' && (
+      {run?.status === 'paused' && run.pauseReason === 'waiting_slot' && (
         <VStack gap={2}>
           <Alert tone="warning">
-            {run.pauseReason ? FLOW_PAUSE_LABEL[run.pauseReason] : 'Fluxo pausado'}
-            {current ? ` — ${current.name}` : ''}.
+            Aguardando outro fluxo Alva deste projeto terminar (Docker e portas). Começa sozinho.
           </Alert>
-          <HStack gap={2} wrap="wrap">
-            <Button
-              size="sm"
-              variant="primary"
-              label="Retomar deste passo"
-              isLoading={busy}
-              onClick={() => void act(() => window.orkio.taskFlows.resume(run.id))}
-            />
-            <Button
-              size="sm"
-              variant="secondary"
-              label="Pular"
-              onClick={() => void act(() => window.orkio.taskFlows.skip(run.id))}
-            />
-            <Button
-              size="sm"
-              variant="ghost"
-              label="Cancelar fluxo"
-              onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
-            />
-          </HStack>
+          <Button
+            size="sm"
+            variant="ghost"
+            label="Cancelar fluxo"
+            onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
+          />
         </VStack>
       )}
+
+      {run?.status === 'paused' &&
+        run.pauseReason !== 'waiting_slot' &&
+        run.pauseReason !== 'needs_choice' && (
+          <VStack gap={2}>
+            <Alert tone="warning">
+              {run.pauseReason ? FLOW_PAUSE_LABEL[run.pauseReason] : 'Fluxo pausado'}
+              {current ? ` — ${current.name}` : ''}.
+            </Alert>
+            <HStack gap={2} wrap="wrap">
+              <Button
+                size="sm"
+                variant="primary"
+                label="Retomar deste passo"
+                isLoading={busy}
+                onClick={() => void act(() => window.orkio.taskFlows.resume(run.id))}
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                label="Pular"
+                onClick={() => void act(() => window.orkio.taskFlows.skip(run.id))}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                label="Cancelar fluxo"
+                onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
+              />
+            </HStack>
+          </VStack>
+        )}
 
       {run?.status === 'awaiting_decision' && (
         <VStack gap={2}>
@@ -236,6 +309,41 @@ export function TaskFlowSection({
       )}
       {error && <Alert tone="danger">{error}</Alert>}
     </VStack>
+  )
+}
+
+function ChoiceCard({
+  prompt,
+  options,
+  busy,
+  onChoose
+}: {
+  prompt: string
+  options: { value: string; label: string }[]
+  busy: boolean
+  onChoose(value: string): void
+}): React.JSX.Element {
+  const [value, setValue] = useState('')
+  return (
+    <Card role="group" aria-label="Escolha do fluxo">
+      <VStack gap={2}>
+        <RadioList label={prompt} value={value} onChange={setValue}>
+          {options.map((o) => (
+            <RadioListItem key={o.value} value={o.value} label={o.label} />
+          ))}
+        </RadioList>
+        <HStack gap={2}>
+          <Button
+            size="sm"
+            variant="primary"
+            label="Confirmar"
+            isDisabled={!value}
+            isLoading={busy}
+            onClick={() => onChoose(value)}
+          />
+        </HStack>
+      </VStack>
+    </Card>
   )
 }
 

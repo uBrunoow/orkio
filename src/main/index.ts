@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { execFile as execFileCb, spawn } from 'node:child_process'
 import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { homedir, userInfo } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -57,6 +57,12 @@ import { ArtifactsService, type ArtifactsDeps } from './claude/artifacts.service
 import { ClaudeRun } from './claude/runner'
 import { FlowError, FlowRunner, NOOP_ACTION, ORKIO_LINES_EXTRACTOR } from './flows/flow-runner'
 import { FlowsService } from './flows/flows.service'
+import { AlvaService } from './alva/alva.service'
+import { ALVA_PENDING_5C, AlvaFlowsService } from './alva/alva-flows.service'
+import { runPrecheck } from './alva/precheck'
+import { buildCatalog } from './claude/catalog'
+import { sanitizeEnv } from './claude/redact'
+import { registerAlvaIpc } from './ipc/alva.ipc'
 import { registerTaskFlowsIpc } from './ipc/task-flows.ipc'
 import { RunService } from './claude/run.service'
 import { WorktreeService } from './claude/worktree.service'
@@ -349,8 +355,11 @@ function registerIpc(): void {
     flowRunner = createFlowRunner({
       boardStore,
       configStore,
+      board,
       claude: claude.service,
       runs: claude.runs,
+      worktrees: claude.worktrees,
+      listTasks: (projectId) => notionWorkspace.listTasks(projectId),
       send,
       isTrustedSender,
       ready: projectsReady
@@ -378,14 +387,89 @@ let flowRunner: FlowRunner | null = null
 function createFlowRunner(deps: {
   boardStore: BoardStore
   configStore: ReturnType<typeof createOrkioConfigStore>
+  board: BoardService
   claude: ClaudeService
   runs: RunService
+  worktrees: WorktreeService
+  listTasks: ClaudeServiceDeps['listTasks']
   send: (channel: string, payload: unknown) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
 }): FlowRunner {
-  const extractors = [ORKIO_LINES_EXTRACTOR]
-  const actions = [NOOP_ACTION]
+  // alva-flow (5B): vínculo com o Backlog.md, extrator, pré-checagem e ações pendentes da 5C.
+  const env = toolEnv()
+  const neutralDir = join(app.getPath('userData'), 'alva-check')
+  void mkdir(neutralDir, { recursive: true }).catch(() => undefined)
+  const projectDir = (projectId: string): string | null =>
+    deps.configStore.get().projects.find((p) => p.id === projectId)?.localPath ?? null
+  const alva = new AlvaService({
+    db: deps.boardStore.db,
+    worktreePath: (taskId) => deps.worktrees.get(taskId)?.path ?? null,
+    projectDir,
+    taskInfo: async (projectId, taskId) => {
+      const r = await deps.listTasks(projectId)
+      const t = r.ok ? r.value.tasks.find((x) => x.id === taskId) : undefined
+      return t?.displayId ? { displayId: t.displayId, title: t.title, url: t.url } : null
+    }
+  })
+  const alvaFlows = new AlvaFlowsService({
+    config: deps.configStore,
+    store: deps.boardStore,
+    board: deps.board,
+    alva,
+    actor: () => userInfo().username,
+    precheck: async (dir) => {
+      const catalog = await buildCatalog({ projectDir: dir, home: homedir() })
+      return runPrecheck(
+        dir,
+        catalog.flatMap((g) => g.commands.map((c) => c.name)),
+        {
+          neutralDir,
+          exec: (command, args, options) =>
+            new Promise((resolve, reject) => {
+              execFileCb(
+                command,
+                args,
+                {
+                  cwd: options.cwd,
+                  timeout: options.timeoutMs,
+                  env: sanitizeEnv(env),
+                  windowsHide: true,
+                  maxBuffer: 1024 * 1024
+                },
+                (error, stdout) => {
+                  // Comando ausente → rejeita; código ≠ 0 → resolve com o código (só ele importa).
+                  if (error && (error as NodeJS.ErrnoException).code === 'ENOENT') reject(error)
+                  else
+                    resolve({
+                      code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+                      stdout: String(stdout)
+                    })
+                }
+              )
+            })
+        }
+      )
+    }
+  })
+  registerAlvaIpc(ipcMain, alvaFlows, deps.isTrustedSender, deps.ready)
+
+  const extractors = [ORKIO_LINES_EXTRACTOR, alva.extractor]
+  const actions = [
+    NOOP_ACTION,
+    {
+      id: 'push',
+      label: 'Push da branch (5C)',
+      pending: ALVA_PENDING_5C.push,
+      run: NOOP_ACTION.run
+    },
+    {
+      id: 'request_review',
+      label: 'Pedir review (5C)',
+      pending: ALVA_PENDING_5C.request_review,
+      run: NOOP_ACTION.run
+    }
+  ]
   const runner = new FlowRunner({
     db: deps.boardStore.db,
     store: deps.boardStore,
@@ -408,6 +492,11 @@ function createFlowRunner(deps: {
     cancelClaude: (runId) => deps.claude.cancel(runId),
     extractors,
     actions,
+    worktreePath: (taskId) => deps.worktrees.get(taskId)?.path ?? null,
+    initialVars: (projectId, taskId, flow) =>
+      flow.tags?.includes('alva') ? alva.initialVars(projectId, taskId) : Promise.resolve({}),
+    canStart: (projectId, flow) => alvaFlows.blockReason(projectId, flow),
+    concurrencyLimit: (projectId, flow) => alvaFlows.concurrencyLimit(projectId, flow),
     notify: (title, body, ref) =>
       showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, deps.send),
     emit: (ref) => deps.send(IPC_CHANNELS.taskFlows.changed, ref)
@@ -457,7 +546,7 @@ function createClaude(deps: {
   send: (channel: string, payload: unknown) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
-}): { runs: RunService; service: ClaudeService } {
+}): { runs: RunService; service: ClaudeService; worktrees: WorktreeService } {
   const userData = app.getPath('userData')
   const tmpDir = join(userData, 'run-tmp')
   const env = toolEnv()
@@ -526,7 +615,7 @@ function createClaude(deps: {
   })
   void mkdir(tmpDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
   registerClaudeIpc(ipcMain, service, deps.isTrustedSender, deps.ready)
-  return { runs, service }
+  return { runs, service, worktrees }
 }
 
 /** Notificação de desktop (opcional por regra). Clique: foca o Orkio e abre a tarefa. */

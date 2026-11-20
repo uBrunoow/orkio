@@ -168,7 +168,12 @@ export class AlvaService {
     resultText: string
   ): Promise<Record<string, string>> {
     const info = ctx.worktreePath ? await this.findTask(ctx.worktreePath, id) : null
-    const vars: Record<string, string> = { 'alva.task_id': id, 'alva.linked': 'sim' }
+    // Com vínculo, um novo /spec recebe o ID (retoma a task em vez de criar outra).
+    const vars: Record<string, string> = {
+      'alva.task_id': id,
+      'alva.spec_arg': id,
+      'alva.linked': 'sim'
+    }
     if (!info) return vars
     vars['alva.status'] = info.status
     vars['alva.open_questions'] = String(info.openQuestions)
