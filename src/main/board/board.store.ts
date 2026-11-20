@@ -39,6 +39,17 @@ export type TaskEventKind =
   /** Artefatos (4B): documento anexado (caminho + commit) e publicado no Notion. */
   | 'artifact_attached'
   | 'artifact_published'
+  /** Fluxos de tarefa (5A). */
+  | 'flow_started'
+  | 'step_started'
+  | 'step_finished'
+  | 'step_failed'
+  | 'step_skipped'
+  | 'gate_waiting'
+  | 'gate_approved'
+  | 'gate_rejected'
+  | 'flow_paused'
+  | 'flow_finished'
 
 export interface TaskEventRow {
   id: number

@@ -72,6 +72,21 @@ export interface StartRunInput {
   /** Texto livre (prompt) ou argumentos do comando. */
   text: string
   briefing: string
+  /** Tempo limite (min): ao estourar, cancela e a execução termina como falha. */
+  timeoutMin?: number
+}
+
+/** Fim de uma execução, para quem a pediu (5A: fluxos). */
+export interface RunFinished {
+  runId: string
+  taskId: string
+  status: RunStatus
+  /** Texto final do Claude (já redigido), se houve `result`. */
+  resultText: string
+  summary: RunSummary | null
+  costUsd: number | null
+  /** Motivo curto quando não foi sucesso (ex.: tempo esgotado). */
+  message: string | null
 }
 
 interface Pending {
@@ -95,6 +110,9 @@ interface ActiveRun {
   tests: Set<string>
   costUsd: number | null
   ok: boolean | null
+  resultText: string
+  timer: NodeJS.Timeout | null
+  timedOut: boolean
   /** Valores lidos de arquivos .env do worktree: escondidos em tudo que vai para o log. */
   secrets: Set<string>
   start: () => Promise<void>
@@ -105,7 +123,8 @@ export const RUN_MESSAGES = {
   timeout: 'Sem resposta em 10 minutos: o Orkio negou o pedido.',
   denied: 'Negado por você no Orkio.',
   cancelled: 'Execução cancelada.',
-  notFound: 'Execução não encontrada.'
+  notFound: 'Execução não encontrada.',
+  timedOut: 'Tempo limite esgotado: o Orkio cancelou a execução.'
 } as const
 
 const TEST_COMMAND =
@@ -117,6 +136,7 @@ export class RunService {
   private readonly maxParallel: number
   private readonly keepPerTask: number
   private readonly logWrites = new Map<string, Promise<void>>()
+  private readonly finishListeners = new Set<(info: RunFinished) => void>()
   private readonly approvalTimeoutMs: number
 
   constructor(private readonly deps: RunServiceDeps) {
@@ -184,6 +204,9 @@ export class RunService {
       tests: new Set(),
       costUsd: null,
       ok: null,
+      resultText: '',
+      timer: null,
+      timedOut: false,
       secrets: new Set(),
       start: async () => {
         run.status = 'running'
@@ -203,6 +226,19 @@ export class RunService {
           onExit: (result) => void this.onExit(run, result)
         })
         await run.handle.start()
+        if (input.timeoutMin && input.timeoutMin > 0) {
+          run.timer = setTimeout(() => {
+            run.timedOut = true
+            run.cancelled = true
+            for (const [requestId, p] of run.pending) {
+              this.resolvePending(run, requestId, p, {
+                behavior: 'deny',
+                message: RUN_MESSAGES.timedOut
+              })
+            }
+            run.handle?.cancel()
+          }, input.timeoutMin * 60_000)
+        }
       }
     }
     this.queue.push(run)
@@ -467,6 +503,7 @@ export class RunService {
     if (event.kind === 'result') {
       run.costUsd = event.costUsd
       run.ok = event.ok
+      run.resultText = event.text.slice(0, 20_000)
     }
     this.log(run, event)
   }
@@ -496,6 +533,12 @@ export class RunService {
 
   private async finish(run: ActiveRun, status: RunStatus, message?: string): Promise<void> {
     if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled') return
+    if (run.timer) clearTimeout(run.timer)
+    // Tempo esgotado: cancelado por nós, mas para quem pediu é falha.
+    if (run.timedOut) {
+      status = 'failed'
+      message = RUN_MESSAGES.timedOut
+    }
     run.status = status
     this.active.delete(run.id)
     let summary: RunSummary | null = null
@@ -530,7 +573,29 @@ export class RunService {
       { files: summary?.files.length ?? 0, costUsd: run.costUsd }
     )
     await this.prune(run.taskId)
+    const finished: RunFinished = {
+      runId: run.id,
+      taskId: run.taskId,
+      status,
+      resultText: scrubText(run.resultText, run.secrets),
+      summary,
+      costUsd: run.costUsd,
+      message: message ?? null
+    }
+    for (const listener of this.finishListeners) {
+      try {
+        listener(finished)
+      } catch {
+        // quem ouve não derruba a execução
+      }
+    }
     this.pump()
+  }
+
+  /** Avisa quando uma execução termina (sucesso, falha ou cancelamento). */
+  onFinished(listener: (info: RunFinished) => void): () => void {
+    this.finishListeners.add(listener)
+    return () => this.finishListeners.delete(listener)
   }
 
   private setStatus(run: ActiveRun, status: RunStatus): void {
@@ -625,4 +690,8 @@ function scrubEvent(event: RunLogEvent, secrets: ReadonlySet<string>): RunLogEve
             )
           : v
   return clean(event) as RunLogEvent
+}
+
+function scrubText(text: string, secrets: ReadonlySet<string>): string {
+  return redactValues(redactSecrets(text), secrets)
 }

@@ -298,4 +298,30 @@ describe('RunService', () => {
     expect(raw).toContain('DEBUG=true')
     expect(JSON.stringify(messages)).not.toContain('abc-123-xyz')
   })
+
+  it('avisa quem pediu quando termina (texto redigido) e cancela no tempo limite como falha', async () => {
+    const finished: { status: string; resultText: string; message: string | null }[] = []
+    service.onFinished((f) => finished.push(f))
+    await start(1)
+    await tick()
+    runs[0]!.emit({
+      kind: 'result',
+      ok: true,
+      durationMs: 1,
+      costUsd: 0,
+      turns: 1,
+      text: 'pronto @orkio pr=7 token ghp_abcdefghijklmnopqrstuvwxyz0123'
+    })
+    runs[0]!.exit(0)
+    await tick()
+    expect(finished[0]).toMatchObject({ status: 'succeeded', message: null })
+    expect(finished[0]!.resultText).toContain('@orkio pr=7')
+    expect(finished[0]!.resultText).not.toContain('ghp_abc')
+
+    await start(2, { timeoutMin: 0.001 }) // ~60 ms
+    await new Promise((r) => setTimeout(r, 150))
+    expect(runs[1]!.cancel).toHaveBeenCalled()
+    await tick()
+    expect(finished[1]).toMatchObject({ status: 'failed', message: RUN_MESSAGES.timedOut })
+  })
 })

@@ -400,3 +400,66 @@ export function newStepId(flow: Flow, base: string): StepId {
   if (!used.has(clean)) return clean
   for (let n = 2; ; n++) if (!used.has(`${clean}-${n}`)) return `${clean}-${n}`
 }
+
+// ---------- Execução (visão para a UI) ----------
+
+export type FlowRunStatus =
+  'running' | 'waiting_gate' | 'paused' | 'awaiting_decision' | 'finished' | 'cancelled'
+
+export type FlowStepStatus =
+  | 'running'
+  | 'waiting'
+  | 'ok'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped'
+  | 'interrupted'
+  | 'approved'
+  | 'rejected'
+
+/** Por que o fluxo parou e espera você. */
+export type FlowPauseReason =
+  'step_failed' | 'interrupted' | 'loop_guard' | 'gate_timeout' | 'left_stage'
+
+export interface FlowStepView {
+  seq: number
+  stepId: StepId
+  /** Execução do Claude Code (4A), quando o passo é um comando. */
+  runId: string | null
+  status: FlowStepStatus
+  startedAt: string
+  endedAt: string | null
+  message: string | null
+  costUsd: number | null
+}
+
+export interface FlowRunView {
+  id: string
+  projectId: string
+  taskId: string
+  flowId: string
+  flowName: string
+  /** Cópia dos passos do fluxo no início da execução. */
+  steps: Step[]
+  status: FlowRunStatus
+  currentStep: StepId | null
+  pauseReason: FlowPauseReason | null
+  result: 'done' | 'rejected' | 'cancelled' | null
+  startedAt: string
+  endedAt: string | null
+  vars: Record<string, string>
+  history: FlowStepView[]
+}
+
+export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {
+  step_failed: 'Um passo falhou',
+  interrupted: 'O Orkio foi fechado no meio do passo',
+  loop_guard: 'Limite de passos atingido (possível loop)',
+  gate_timeout: 'A aprovação expirou',
+  left_stage: 'A tarefa saiu da etapa do fluxo'
+}
+
+/** Fluxo ativo (não terminado) espera uma ação sua? */
+export function needsYou(status: FlowRunStatus): boolean {
+  return status === 'waiting_gate' || status === 'paused' || status === 'awaiting_decision'
+}

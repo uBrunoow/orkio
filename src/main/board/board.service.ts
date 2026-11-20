@@ -74,6 +74,19 @@ export interface BoardServiceDeps {
   graceMs?: number
   /** "Quem" nos eventos de configuração (usuário do sistema operacional). */
   actor?: () => string
+  /**
+   * A etapa local de uma tarefa mudou (5A: fluxos). Chamado dentro da transação; quem ouve deve
+   * adiar o trabalho. `source` diz se foi entrada real (manual/automação) ou não.
+   */
+  onStageChanged?: (change: StageChange) => void
+}
+
+export interface StageChange {
+  projectId: string
+  taskId: string
+  from: string | null
+  to: string | null
+  source: 'manual' | 'automation' | 'notion' | 'rollback' | 'stage_removed'
 }
 
 export const BOARD_MESSAGES = {
@@ -237,6 +250,13 @@ export class BoardService {
             detail: null
           })
         } else if (d.from !== d.stageId) {
+          this.deps.onStageChanged?.({
+            projectId,
+            taskId: d.taskId,
+            from: d.from,
+            to: d.stageId,
+            source: 'notion'
+          })
           this.deps.store.addEvent({
             taskPageId: d.taskId,
             projectId,
@@ -344,6 +364,8 @@ export class BoardService {
       source: 'manual' | 'automation'
       eventKey?: string
       detail?: Record<string, unknown>
+      /** Remoção de etapa na 3C: move sem contar como entrada (não dispara fluxos). */
+      stageRemoved?: boolean
     }
   ): boolean {
     const { board, snapshot, task } = this.context(projectId, taskId)
@@ -379,6 +401,13 @@ export class BoardService {
       eventKey: options.eventKey ?? null
     })
     this.syncDesired(projectId, taskId, board, snapshot, before)
+    this.deps.onStageChanged?.({
+      projectId,
+      taskId,
+      from: before.stageId,
+      to: stageId,
+      source: options.stageRemoved ? 'stage_removed' : options.source
+    })
     return true
   }
 
@@ -569,6 +598,15 @@ export class BoardService {
         detail: { code: error.code }
       })
     })
+    if (before.stageId !== write.rollback.stageId) {
+      this.deps.onStageChanged?.({
+        projectId: write.projectId,
+        taskId: write.taskPageId,
+        from: before.stageId,
+        to: write.rollback.stageId,
+        source: 'rollback'
+      })
+    }
     const canReconnect =
       error.code === 'not_found' &&
       (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth'
@@ -671,7 +709,8 @@ export class BoardService {
             if (
               this.applyMove(projectId, taskId, destination, {
                 source: 'manual',
-                detail: { flow: 'stage_removed', removedStage: removed.name }
+                detail: { flow: 'stage_removed', removedStage: removed.name },
+                stageRemoved: true
               })
             ) {
               moved++

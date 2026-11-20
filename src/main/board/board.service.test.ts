@@ -15,7 +15,7 @@ import { NotionApiError } from '../connectors/notion/notion.client'
 import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
-import { BoardService, type BoardNotion } from './board.service'
+import { BoardService, type StageChange, type BoardNotion } from './board.service'
 import { BoardStore } from './board.store'
 import { NotionWriteQueue } from './write-queue'
 
@@ -154,6 +154,7 @@ describe('BoardService', () => {
   let queue: NotionWriteQueue
   let clock: number
   let seq: number
+  let changes: StageChange[] = []
 
   function build(): void {
     const store = new BoardStore(db)
@@ -164,7 +165,8 @@ describe('BoardService', () => {
       onSync: (e) => events.push(e),
       now: () => new Date(clock),
       newId: () => `stage-${++seq}`,
-      graceMs: 30_000
+      graceMs: 30_000,
+      onStageChanged: (c) => changes.push(c)
     })
     queue = new NotionWriteQueue({
       store,
@@ -278,7 +280,18 @@ describe('BoardService', () => {
   it('critério 2: mover para Revisando grava a etapa fina e NÃO escreve status no Notion', async () => {
     const view = await createBoard()
     const rev = stageId(view, 'Revisando')
+    changes = []
     const moved = await service.move('p1', T1, rev)
+    // 5A: o movimento manual avisa a entrada na etapa (gatilho dos fluxos).
+    expect(changes).toEqual([
+      {
+        projectId: 'p1',
+        taskId: T1,
+        from: stageId(view, 'Em andamento'),
+        to: rev,
+        source: 'manual'
+      }
+    ])
     expect(moved).toMatchObject({ ok: true, value: { stageId: rev, sync: { state: 'synced' } } })
     await queue.idle()
     expect(notion.writes).toEqual([])
