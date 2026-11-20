@@ -16,6 +16,8 @@ export interface PullRequestSummary {
   state: PullRequestState
   merged: boolean
   headRef: string
+  /** Commit no topo da branch da PR (REST `head.sha`); para conferir o push (5C). */
+  headSha?: string | null
   updatedAt: string
   /** Quando foi fechada/mergeada (REST `closed_at`); `null` se aberta. */
   closedAt?: string | null
@@ -28,9 +30,15 @@ export interface PullRequestDetails {
   unresolvedComments: number | null
   checks: ChecksState | null
   /** Pedidos de review (ids do GitHub, inclusive re-pedidos). Só para automações (3B). */
-  reviewRequests?: { id: string; at: string }[]
+  reviewRequests?: { id: string; at: string; reviewer?: string | null }[]
   /** Reviews com decisão (APPROVED / CHANGES_REQUESTED). */
-  reviews?: { id: string; state: 'approved' | 'changes_requested'; at: string }[]
+  reviews?: {
+    id: string
+    state: 'approved' | 'changes_requested'
+    at: string
+    /** Login de quem revisou (5C: pedir review de novo). Fica só em memória. */
+    author?: string | null
+  }[]
   /** Ids das threads de review não resolvidas. */
   unresolvedThreadIds?: string[]
 }

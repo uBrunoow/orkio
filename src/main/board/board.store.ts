@@ -50,6 +50,8 @@ export type TaskEventKind =
   | 'gate_rejected'
   | 'flow_paused'
   | 'flow_finished'
+  /** Entrega (5C): push/PR/comentário/resolução/pedido de review feitos por fluxo. */
+  | 'delivery'
 
 export interface TaskEventRow {
   id: number

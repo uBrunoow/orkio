@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { StoredProject } from '../config/orkio-config'
 import { createGit } from '../git/git'
 import type { WorktreeRecord } from '../claude/worktree.service'
-import { DeliveryError, DeliveryService } from './delivery.service'
+import { DeliveryError, DeliveryService, parseGhAliases } from './delivery.service'
 
 function sh(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, {
@@ -200,5 +200,15 @@ describe('DeliveryService com git real', () => {
       expect(String((err as Error).message)).not.toContain('127.0.0.1')
       expect(Date.now() - started).toBeLessThan(20_000)
     })
+  })
+})
+
+describe('parseGhAliases', () => {
+  it('lê a saída do gh alias list (com aspas)', () => {
+    expect(
+      parseGhAliases(
+        'co: pr checkout\nm: \'pr merge --squash\'\nbugs: "!gh issue list --label=bug"\n\n'
+      )
+    ).toEqual({ co: 'pr checkout', m: 'pr merge --squash', bugs: '!gh issue list --label=bug' })
   })
 })

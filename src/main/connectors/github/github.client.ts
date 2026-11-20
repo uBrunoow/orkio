@@ -30,6 +30,8 @@ export type GitHubErrorCode =
   | 'sso_required'
   /** 403 por restrição de OAuth Apps da org: um owner precisa aprovar o Orkio. */
   | 'oauth_restricted'
+  /** 422: pedido recusado pelo GitHub (ex.: revisor sem acesso ao repositório ou autor da PR). */
+  | 'invalid'
   /** Nenhuma conta do GitHub conectada no Orkio. */
   | 'not_connected'
 
@@ -100,6 +102,16 @@ export interface GitHubClient {
     query: string,
     variables: Record<string, unknown>
   ): Promise<{ data: unknown; errors: { type: string | null; path: string[] }[] }>
+  /** POST /repos/{o}/{r}/pulls/{n}/requested_reviewers (5C). */
+  requestReviewers(
+    token: string,
+    owner: string,
+    repo: string,
+    pull: number,
+    reviewers: { users: string[]; teams: string[] }
+  ): Promise<void>
+  /** Logins de colaboradores (para sugerir revisores). Até 100. */
+  listCollaborators(token: string, owner: string, repo: string): Promise<string[]>
 }
 
 export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
@@ -205,6 +217,37 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
             : unexpected(response.status)
       }
       return { data: body['data'], errors }
+    },
+
+    async requestReviewers(token, owner, repo, pull, reviewers) {
+      const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${pull}/requested_reviewers`
+      try {
+        await request(path, token, {
+          method: 'POST',
+          body: JSON.stringify({ reviewers: reviewers.users, team_reviewers: reviewers.teams })
+        })
+      } catch (error) {
+        if (error instanceof GitHubApiError && error.status === 422) {
+          throw new GitHubApiError(
+            'invalid',
+            'O GitHub recusou o pedido de review: confira se os revisores têm acesso ao repositório (o autor da PR não pode revisar a própria PR).',
+            422
+          )
+        }
+        throw error
+      }
+    },
+
+    async listCollaborators(token, owner, repo) {
+      const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators?per_page=100`
+      const body = await json(await request(path, token))
+      return Array.isArray(body)
+        ? body.flatMap((u) =>
+            isRecord(u) && typeof u['login'] === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(u['login'])
+              ? [u['login']]
+              : []
+          )
+        : []
     }
   }
 }
@@ -468,6 +511,8 @@ export interface GitHubPullItem {
   state: 'draft' | 'open' | 'merged' | 'closed'
   merged: boolean
   headRef: string
+  /** Commit no topo da branch da PR (para conferir se o push chegou). */
+  headSha: string | null
   updatedAt: string
   closedAt: string | null
 }
@@ -480,6 +525,7 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
   const htmlUrl = httpsUrlOrNull(value['html_url'])
   const updatedAt = stringOrNull(value['updated_at'])
   const head = isRecord(value['head']) ? stringOrNull(value['head']['ref']) : null
+  const sha = isRecord(value['head']) ? stringOrNull(value['head']['sha']) : null
   if (typeof number !== 'number' || !htmlUrl || !updatedAt) return null
   let url: string
   try {
@@ -507,6 +553,7 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
     state,
     merged,
     headRef: head ?? '',
+    headSha: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : null,
     updatedAt,
     closedAt: stringOrNull(value['closed_at'])
   }

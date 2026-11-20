@@ -188,3 +188,17 @@ export class DeliveryService {
     return { gitAliases, pushDefault: await this.deps.git.configValue(dir, 'push.default') }
   }
 }
+
+/** Saída de `gh alias list` (`nome: expansão`, uma por linha) → mapa. */
+export function parseGhAliases(output: string): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const line of output.split(/\r?\n/)) {
+    const m = /^\s*([A-Za-z0-9_.-]+):\s*(.+?)\s*$/.exec(line)
+    if (!m) continue
+    let value = m[2]!
+    if (/^'.*'$/.test(value)) value = value.slice(1, -1).replace(/''/g, "'")
+    else if (/^".*"$/.test(value)) value = value.slice(1, -1).replace(/\\"/g, '"')
+    map[m[1]!] = value
+  }
+  return map
+}

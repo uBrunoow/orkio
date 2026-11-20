@@ -1,6 +1,7 @@
 /**
  * Execuções do Claude Code por tarefa (Etapa 4A): worktree → briefing → `claude -p` → log ao vivo
- * → resumo (diff/commits/testes) → histórico. Sem push/PR nesta etapa.
+ * → resumo (diff/commits/testes) → histórico. Push/PR só no "modo entrega" de um passo de fluxo
+ * (5C), com as regras de `delivery-policy.ts` e aprovação na primeira vez em cada execução.
  *
  * - Uma execução por tarefa; até `maxParallel` em paralelo (fila FIFO além disso).
  * - Permissões: política pura (`policy.ts`) + pergunta ao usuário (10 min sem resposta → negar).
@@ -23,7 +24,16 @@ import type {
 import type { BoardStore } from '../board/board.store'
 import type { Db } from '../db/database'
 import type { Git } from '../git/git'
-import { evaluatePermission, isInside, type AllowRule } from './policy'
+import type { DeliveryTarget } from '../../shared/delivery'
+import type { DeliveryEvent, DeliveryKind } from './delivery-policy'
+import {
+  DELIVERY_ALLOWED,
+  evaluatePermission,
+  isInside,
+  type AllowRule,
+  type DeliveryAction,
+  type PolicyAliases
+} from './policy'
 import { envFileValues, isEnvFile, redactSecrets, redactValues } from './redact'
 import { PermissionBroker, type BridgeDecision, type BridgeRequest } from './runner'
 import type {
@@ -49,9 +59,17 @@ export interface RunServiceDeps {
     prompt: string
     sessionId: string
     broker: PermissionBroker
+    /** Modo entrega (5C): troca as regras `deny` do CLI pelas do modo entrega. */
+    delivery: boolean
     onEvent(event: RunLogEvent): void
     onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   }): RunHandle
+  /** Aliases do git/gh e `push.default`, lidos no começo da execução (política). */
+  policyInputs?(dir: string): Promise<{ aliases: PolicyAliases; pushDefault: string | null }>
+  /** Branch atual do worktree, lida antes de avaliar um push. */
+  currentBranch?(dir: string): Promise<string | null>
+  /** Número da PR aberta da branch (sinais da 2D), para o link no histórico. */
+  prFor?(projectId: string, branch: string): number | null
   runsDir: string
   emit(message: { runId: string; projectId: string; taskId: string; event: RunLogEvent }): void
   /** Notificação de desktop (pedido de aprovação/pergunta). */
@@ -76,6 +94,8 @@ export interface StartRunInput {
   timeoutMin?: number
   /** Comando: junta o briefing ao texto (padrão). Falso = só os argumentos; o arquivo continua. */
   includeBriefing?: boolean
+  /** Modo entrega (5C): só em passo de fluxo marcado; vale só nesta execução. */
+  delivery?: { target: DeliveryTarget; requirePushApproval: boolean } | null
 }
 
 /** Fim de uma execução, para quem a pediu (5A: fluxos). */
@@ -98,6 +118,8 @@ interface Pending {
   summary: string
   input: Record<string, unknown>
   suggestion: string | null
+  /** Comandos de entrega neste pedido (aprovar libera a categoria nesta execução). */
+  delivery: DeliveryAction[] | null
 }
 
 interface ActiveRun {
@@ -117,6 +139,11 @@ interface ActiveRun {
   timedOut: boolean
   /** Valores lidos de arquivos .env do worktree: escondidos em tudo que vai para o log. */
   secrets: Set<string>
+  /** Modo entrega (5C) e categorias já aprovadas nesta execução. */
+  delivery: StartRunInput['delivery'] | null
+  granted: Set<DeliveryKind>
+  aliases: PolicyAliases
+  pushDefault: string | null
   start: () => Promise<void>
 }
 
@@ -213,6 +240,10 @@ export class RunService {
       timer: null,
       timedOut: false,
       secrets: new Set(),
+      delivery: input.delivery ?? null,
+      granted: new Set(),
+      aliases: {},
+      pushDefault: null,
       start: async () => {
         run.status = 'running'
         this.setStatus(run, 'running')
@@ -220,6 +251,18 @@ export class RunService {
         // Briefing também em arquivo (fora do git: .git/info/exclude do worktree).
         await this.writeBriefing(worktree.path, input.briefing).catch(() => undefined)
         this.collectEnvSecrets(run, worktree.path)
+        const inputs = await this.deps.policyInputs?.(worktree.path).catch(() => null)
+        if (inputs) {
+          run.aliases = inputs.aliases
+          run.pushDefault = inputs.pushDefault
+        }
+        if (run.delivery) {
+          const t = run.delivery.target
+          this.log(run, {
+            kind: 'text',
+            text: `Modo entrega ligado neste passo: push só de ${t.branch} (${t.remote}) e GitHub CLI só em ${t.owner}/${t.repo}.`
+          })
+        }
         const broker = new PermissionBroker((req) => this.onPermission(run, req))
         await broker.open()
         run.handle = this.deps.createRun({
@@ -233,6 +276,7 @@ export class RunService {
           ),
           sessionId: randomUUID(),
           broker,
+          delivery: !!run.delivery,
           onEvent: (event) => this.onEvent(run, event),
           onExit: (result) => void this.onExit(run, result)
         })
@@ -290,7 +334,7 @@ export class RunService {
     const run = this.active.get(runId)
     const p = run?.pending.get(requestId)
     if (!run || !p) throw new Error(RUN_MESSAGES.notFound)
-    if (answer === 'allow_always' && p.suggestion) {
+    if (answer === 'allow_always' && p.suggestion && !p.delivery) {
       this.deps.db.run(
         `INSERT OR IGNORE INTO permission_rules (project_id, tool, pattern, created_at) VALUES (?, ?, ?, ?)`,
         run.projectId,
@@ -301,15 +345,21 @@ export class RunService {
     }
     const decision: BridgeDecision =
       answer === 'deny' ? { behavior: 'deny', message: RUN_MESSAGES.denied } : { behavior: 'allow' }
+    if (answer !== 'deny' && p.delivery) {
+      for (const a of p.delivery) run.granted.add(a.kind)
+      this.deliveryEvents(run, p.delivery, p.summary)
+    }
     this.log(run, {
       kind: 'permission',
       requestId,
       tool: p.tool,
       summary: p.summary,
       state: answer === 'deny' ? 'denied' : 'allowed',
-      ...(answer === 'allow_always' && p.suggestion
-        ? { reason: `sempre neste projeto: ${p.suggestion}` }
-        : {})
+      ...(answer !== 'deny' && p.delivery
+        ? { reason: `${DELIVERY_ALLOWED} (aprovado por você)` }
+        : answer === 'allow_always' && p.suggestion
+          ? { reason: `sempre neste projeto: ${p.suggestion}` }
+          : {})
     })
     this.resolvePending(run, requestId, p, decision)
   }
@@ -404,9 +454,27 @@ export class RunService {
 
   private async onPermission(run: ActiveRun, req: BridgeRequest): Promise<BridgeDecision> {
     if (run.cancelled) return { behavior: 'deny', message: RUN_MESSAGES.cancelled }
+    const command = typeof req.input['command'] === 'string' ? req.input['command'] : ''
+    const currentBranch =
+      run.delivery && req.toolName === 'Bash' && /\bpush\b/.test(command)
+        ? await this.deps.currentBranch?.(run.worktree.path).catch(() => null)
+        : null
     const decision = evaluatePermission(
       { tool: req.toolName, input: req.input },
-      { worktree: run.worktree.path, allowRules: this.allowRules(run.projectId) }
+      {
+        worktree: run.worktree.path,
+        allowRules: this.allowRules(run.projectId),
+        aliases: run.aliases,
+        delivery: run.delivery
+          ? {
+              target: run.delivery.target,
+              requirePushApproval: run.delivery.requirePushApproval,
+              granted: run.granted,
+              pushDefault: run.pushDefault,
+              currentBranch: currentBranch ?? null
+            }
+          : null
+      }
     )
     const requestId = req.toolUseId ?? randomUUID()
     const summary =
@@ -426,6 +494,7 @@ export class RunService {
           reason: decision.reason
         })
       }
+      if (decision.delivery) this.deliveryEvents(run, decision.delivery, summary)
       return { behavior: 'allow' }
     }
     if (decision.decision === 'deny') {
@@ -460,7 +529,8 @@ export class RunService {
         tool: req.toolName,
         summary,
         input: req.input,
-        suggestion: decision.decision === 'ask' ? decision.suggestion : null
+        suggestion: decision.decision === 'ask' ? decision.suggestion : null,
+        delivery: decision.decision === 'ask' ? (decision.delivery ?? null) : null
       })
       if (decision.decision === 'question') {
         const questions = Array.isArray(req.input['questions'])
@@ -485,9 +555,15 @@ export class RunService {
           tool: req.toolName,
           summary,
           state: 'pending',
-          suggestion: decision.suggestion
+          ...(decision.delivery ? { delivery: true } : { suggestion: decision.suggestion })
         })
-        this.deps.notify('O Claude Code pede aprovação', summary, run)
+        this.deps.notify(
+          decision.delivery
+            ? 'Entrega: o Claude Code pede aprovação'
+            : 'O Claude Code pede aprovação',
+          summary,
+          run
+        )
       }
     })
   }
@@ -653,9 +729,31 @@ export class RunService {
     return join(this.deps.runsDir, `${runId.replace(/[^A-Za-z0-9-]/g, '')}.jsonl`)
   }
 
+  /** Histórico: cada push/PR/comentário/resolução liberado no modo entrega (com link). */
+  private deliveryEvents(run: ActiveRun, actions: DeliveryAction[], command: string): void {
+    const t = run.delivery?.target
+    if (!t) return
+    const seen = new Set<DeliveryEvent>()
+    for (const a of actions) {
+      if (!a.event || seen.has(a.event)) continue
+      seen.add(a.event)
+      const pr = a.event === 'push' ? null : (this.deps.prFor?.(run.projectId, t.branch) ?? null)
+      this.taskEvent(run, 'delivery', {
+        action: a.event,
+        by: 'claude',
+        command: scrubText(command, run.secrets).slice(0, 200),
+        owner: t.owner,
+        repo: t.repo,
+        branch: t.branch,
+        ...(pr !== null ? { pr: { number: pr, owner: t.owner, repo: t.repo } } : {})
+      })
+    }
+  }
+
   private taskEvent(
     run: ActiveRun,
-    kind: 'run_started' | 'run_finished' | 'run_cancelled' | 'run_failed' | 'run_blocked',
+    kind:
+      'run_started' | 'run_finished' | 'run_cancelled' | 'run_failed' | 'run_blocked' | 'delivery',
     detail: Record<string, unknown>
   ): void {
     this.deps.store.addEvent({

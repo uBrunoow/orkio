@@ -5,6 +5,7 @@
  * O renderer só manda ids (projeto, tarefa, execução); caminhos e nomes de branch são resolvidos
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
+import type { DeliveryTarget } from '../../shared/delivery'
 import { CONTEXT_LIMITS } from '../../shared/agent-run'
 import type {
   ProjectClaudeContext,
@@ -65,6 +66,14 @@ const MAX_DIFF_CHARS = 400_000
 const COMMAND_NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
 
 export interface ClaudeServiceDeps {
+  /**
+   * Modo entrega (5C): alvo da entrega (repositório + branch da tarefa) e o ajuste do projeto.
+   * Lança erro com mensagem pt-BR se não houver repositório verificado/ambiente.
+   */
+  deliveryTarget?(
+    projectId: string,
+    taskId: string
+  ): { target: DeliveryTarget; requirePushApproval: boolean }
   config: {
     get(): OrkioConfig
     update(fn: (c: OrkioConfig) => OrkioConfig): Promise<unknown>
@@ -200,6 +209,8 @@ export class ClaudeService {
     briefing: string
     timeoutMin: number
     includeBriefing?: boolean
+    /** Modo entrega (5C): só nesta execução. */
+    delivery?: boolean
   }): Promise<ClaudeResult<string>> {
     return this.wrap(() =>
       this.startRun(
@@ -212,7 +223,8 @@ export class ClaudeService {
           briefing: input.briefing
         },
         input.timeoutMin,
-        input.includeBriefing !== false
+        input.includeBriefing !== false,
+        input.delivery === true
       )
     )
   }
@@ -240,7 +252,8 @@ export class ClaudeService {
   private async startRun(
     req: StartRunRequest,
     timeoutMin?: number,
-    includeBriefing = true
+    includeBriefing = true,
+    delivery = false
   ): Promise<ClaudeResult<string>> {
     const project = this.project(req.projectId)
     const status = await this.getStatus(true)
@@ -258,6 +271,15 @@ export class ClaudeService {
     const wtProject = this.worktreeProject(project)
     const taskRef = { id: task.id, displayId: task.displayId, title: task.title }
     await this.deps.worktrees.ensure(wtProject, taskRef)
+    let deliveryInput: { target: DeliveryTarget; requirePushApproval: boolean } | null = null
+    if (delivery) {
+      if (!this.deps.deliveryTarget) return fail('no_repo', CLAUDE_MESSAGES.noRepo)
+      try {
+        deliveryInput = this.deps.deliveryTarget(req.projectId, req.taskId)
+      } catch (error) {
+        return fail('no_repo', error instanceof Error ? error.message : CLAUDE_MESSAGES.noRepo)
+      }
+    }
     const view = await this.deps.runs.start({
       project: { ...wtProject, name: project.name },
       task: taskRef,
@@ -266,7 +288,8 @@ export class ClaudeService {
       text: req.text,
       briefing: req.briefing,
       ...(timeoutMin ? { timeoutMin } : {}),
-      includeBriefing
+      includeBriefing,
+      delivery: deliveryInput
     })
     return ok(view.id)
   }

@@ -21,6 +21,8 @@ export type RunLogEvent =
       reason?: string
       /** Padrão sugerido para "sempre neste projeto" (ex.: "npm test"). */
       suggestion?: string
+      /** Comando de entrega (5C): a aprovação vale só nesta execução (sem "sempre"). */
+      delivery?: boolean
     }
   | {
       kind: 'question'

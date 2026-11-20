@@ -22,6 +22,9 @@ const SECRET_KEY = 'github'
 const DISCONNECTED: ConnectionStatus = { state: 'disconnected' }
 const MAX_TOKEN_LENGTH = 512
 
+/** owner, repo, login ou slug de time: sem barras, sem espaços. */
+const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
+
 export type GitHubCredentials = TokenCredentials | OAuthCredentials<GitHubOAuthToken>
 
 /** O que fica salvo (criptografado) no disco. */
@@ -190,6 +193,37 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     variables: Record<string, unknown>
   ): Promise<{ data: unknown; errors: { type: string | null; path: string[] }[] }> {
     return this.withAccessToken((token) => this.deps.client.graphql(token, query, variables))
+  }
+
+  /**
+   * Pede review numa PR (5C, ação "Pedir review" de um fluxo, sempre depois de um gate). Única
+   * escrita do conector: caminho montado aqui (owner/repo/número validados), o token não sai.
+   */
+  async requestReviewers(
+    owner: string,
+    repo: string,
+    pull: number,
+    reviewers: { users: string[]; teams: string[] }
+  ): Promise<void> {
+    if (
+      !SLUG.test(owner) ||
+      !SLUG.test(repo) ||
+      !Number.isSafeInteger(pull) ||
+      pull <= 0 ||
+      reviewers.users.length + reviewers.teams.length === 0 ||
+      ![...reviewers.users, ...reviewers.teams].every((r) => SLUG.test(r))
+    ) {
+      throw new GitHubApiError('unexpected', 'Pedido de review inválido.')
+    }
+    return this.withAccessToken((token) =>
+      this.deps.client.requestReviewers(token, owner, repo, pull, reviewers)
+    )
+  }
+
+  /** Colaboradores do repositório (sugestão de revisores). */
+  async listCollaborators(owner: string, repo: string): Promise<string[]> {
+    if (!SLUG.test(owner) || !SLUG.test(repo)) return []
+    return this.withAccessToken((token) => this.deps.client.listCollaborators(token, owner, repo))
   }
 
   /**

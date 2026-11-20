@@ -82,8 +82,9 @@ export function toSnapshot(
                 state: pr.state,
                 updatedAt: pr.updatedAt,
                 closedAt: pr.closedAt ?? null,
-                reviewRequests: pr.reviewRequests ?? null,
-                reviews: pr.reviews ?? null,
+                // Só ids, estados e datas (sem logins).
+                reviewRequests: pr.reviewRequests?.map((r) => ({ id: r.id, at: r.at })) ?? null,
+                reviews: pr.reviews?.map((r) => ({ id: r.id, state: r.state, at: r.at })) ?? null,
                 unresolvedThreadIds: pr.unresolvedThreadIds
                   ? [...pr.unresolvedThreadIds].sort()
                   : null

@@ -157,6 +157,18 @@ export class TaskSignalsService {
     return { ok: true, value: result }
   }
 
+  /** PR aberta (ou rascunho) mais recente da branch, pelo último resultado conhecido (sem rede). */
+  prForBranch(projectId: string, branch: string): PullRequestSummary | null {
+    const repo = this.deps.store.get().projects.find((p) => p.id === projectId)?.repo
+    if (!repo) return null
+    const last = this.remotes.get(`${projectId}:${repo.owner}/${repo.name}`.toLowerCase())?.last
+    return (
+      last?.pulls
+        .filter((p) => p.headRef === branch && (p.state === 'open' || p.state === 'draft'))
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null
+    )
+  }
+
   private remoteFor(projectId: string, owner: string, name: string): RemoteState {
     const key = `${projectId}:${owner}/${name}`.toLowerCase()
     let state = this.remotes.get(key)

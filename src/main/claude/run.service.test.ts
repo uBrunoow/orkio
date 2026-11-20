@@ -185,6 +185,68 @@ describe('RunService', () => {
     expect(notifications).toEqual([])
   })
 
+  it('modo entrega: só na execução marcada; 1ª vez pergunta, depois libera; histórico com link', async () => {
+    const target = {
+      owner: 'acme',
+      repo: 'app',
+      remote: 'origin',
+      branch: 'ORK-1/tarefa',
+      defaultBranch: 'main',
+      displayId: 'ORK-1'
+    }
+    await start(1, { delivery: { target, requirePushApproval: false } })
+    await tick()
+    const run = runs[0]!
+    expect(run.opts.delivery).toBe(true)
+    // Primeira vez: pergunta, sem "sempre neste projeto".
+    const first = run.ask('Bash', { command: 'gh pr create --fill' }, 'd-1')
+    await tick()
+    expect(messages.at(-1)?.event).toMatchObject({
+      kind: 'permission',
+      state: 'pending',
+      delivery: true
+    })
+    expect(notifications).toContain('Entrega: o Claude Code pede aprovação')
+    service.answerPermission('run-1', 'd-1', 'allow_always')
+    expect(await first).toEqual({ behavior: 'allow' })
+    expect(service.allowRules('p1')).toEqual([]) // nada salvo como "sempre"
+    // Depois: liberado e marcado no log.
+    expect(await run.ask('Bash', { command: 'gh pr comment 3 --body ok' })).toEqual({
+      behavior: 'allow'
+    })
+    expect(messages.at(-1)?.event).toMatchObject({
+      state: 'allowed',
+      reason: 'Liberado pelo modo entrega'
+    })
+    // Bloqueios continuam, mesmo no modo entrega.
+    expect(await run.ask('Bash', { command: 'gh pr merge 3 --squash' })).toMatchObject({
+      behavior: 'deny'
+    })
+    expect(
+      await run.ask('Bash', { command: 'git push --force origin ORK-1/tarefa' })
+    ).toMatchObject({ behavior: 'deny' })
+    const history = store.events('task-1').filter((e) => e.kind === 'delivery')
+    expect(history.map((e) => e.detail?.['action']).sort()).toEqual(['pr_comment', 'pr_create'])
+    expect(history[0]!.detail).toMatchObject({ by: 'claude', owner: 'acme', repo: 'app' })
+    run.emit({ kind: 'result', ok: true, durationMs: 1, costUsd: 0, turns: 1, text: '' })
+    run.exit(0)
+    await tick()
+
+    // Próximo passo (sem a marca): push e gh voltam a ser bloqueados.
+    await start(1)
+    await tick()
+    const next = runs[1]!
+    expect(next.opts.delivery).toBe(false)
+    expect(await next.ask('Bash', { command: 'gh pr comment 3 --body ok' })).toEqual({
+      behavior: 'deny',
+      message: POLICY_MESSAGES.gh
+    })
+    expect(await next.ask('Bash', { command: 'git push origin ORK-1/tarefa' })).toEqual({
+      behavior: 'deny',
+      message: POLICY_MESSAGES.push
+    })
+  })
+
   it('token errado no socket é recusado', async () => {
     await start(1)
     await tick()

@@ -62,6 +62,7 @@ import { ALVA_PENDING_5C, AlvaFlowsService } from './alva/alva-flows.service'
 import { runPrecheck } from './alva/precheck'
 import { buildCatalog } from './claude/catalog'
 import { sanitizeEnv } from './claude/redact'
+import { parseGhAliases } from './delivery/delivery.service'
 import { registerAlvaIpc } from './ipc/alva.ipc'
 import { registerTaskFlowsIpc } from './ipc/task-flows.ipc'
 import { RunService } from './claude/run.service'
@@ -338,6 +339,7 @@ function registerIpc(): void {
       configStore,
       listTasks: (projectId) => notionWorkspace.listTasks(projectId),
       signals: (projectId) => signals.get(projectId),
+      prFor: (projectId, branch) => signals.prForBranch(projectId, branch)?.number ?? null,
       getBlockChildren: (id, cursor) => notion.getBlockChildren(id, cursor),
       searchPages: (query) => notion.searchPages(query),
       notionInsert: {
@@ -539,6 +541,7 @@ function createClaude(deps: {
   configStore: ReturnType<typeof createOrkioConfigStore>
   listTasks: ClaudeServiceDeps['listTasks']
   signals: ClaudeServiceDeps['signals']
+  prFor: (projectId: string, branch: string) => number | null
   getBlockChildren: ClaudeServiceDeps['getBlockChildren']
   searchPages: ClaudeServiceDeps['searchPages']
   /** Escritas no Notion para publicar artefatos (o token fica no conector). */
@@ -572,6 +575,24 @@ function createClaude(deps: {
         tmpDir,
         env
       }),
+    // Aliases do git/gh e push.default: a política resolve `git p`/`gh m` antes de decidir.
+    policyInputs: async (dir) => {
+      const [gitAliases, pushDefault, ghAliases] = await Promise.all([
+        deps.git.aliases(dir).catch(() => ({})),
+        deps.git.configValue(dir, 'push.default'),
+        new Promise<Record<string, string>>((resolve) => {
+          execFileCb(
+            'gh',
+            ['alias', 'list'],
+            { cwd: dir, env: sanitizeEnv(env), timeout: 5_000, windowsHide: true },
+            (error, stdout) => resolve(error ? {} : parseGhAliases(String(stdout)))
+          )
+        })
+      ])
+      return { aliases: { git: gitAliases, gh: ghAliases }, pushDefault }
+    },
+    currentBranch: (dir) => deps.git.currentBranch(dir),
+    prFor: deps.prFor,
     emit: (message) => {
       service?.onRunEvent(message.event)
       deps.send(IPC_CHANNELS.claude.runEvent, message)

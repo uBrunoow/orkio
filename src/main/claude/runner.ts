@@ -101,6 +101,8 @@ export interface RunnerOptions {
   /** Pasta para o mcp-config temporário (0600, apagado no fim). */
   tmpDir: string
   env: NodeJS.ProcessEnv
+  /** Modo entrega (5C): regras `deny` do modo entrega em vez das padrão. */
+  delivery?: boolean
   onEvent(event: RunLogEvent): void
   onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   spawn?: SpawnFn
@@ -110,6 +112,27 @@ export const RUN_SETTINGS = {
   permissions: {
     blockWritesOutsideWorkingDirectories: true,
     deny: ['Bash(git push *)', 'Bash(gh pr *)', 'Bash(gh api *)']
+  }
+}
+
+/**
+ * Modo entrega (5C): push e gh passam a ser decididos pela política do Orkio (ferramenta de
+ * permissão); o CLI continua negando o que nunca é permitido.
+ */
+export const DELIVERY_RUN_SETTINGS = {
+  permissions: {
+    blockWritesOutsideWorkingDirectories: true,
+    deny: [
+      'Bash(git push --force *)',
+      'Bash(git push -f *)',
+      'Bash(git push --force-with-lease *)',
+      'Bash(git push --delete *)',
+      'Bash(git push --mirror *)',
+      'Bash(gh pr merge *)',
+      'Bash(gh pr close *)',
+      'Bash(gh release *)',
+      'Bash(gh repo *)'
+    ]
   }
 }
 
@@ -154,7 +177,7 @@ export class ClaudeRun {
       '--permission-mode',
       'acceptEdits',
       '--settings',
-      JSON.stringify(RUN_SETTINGS),
+      JSON.stringify(o.delivery ? DELIVERY_RUN_SETTINGS : RUN_SETTINGS),
       '--mcp-config',
       this.mcpConfig,
       '--permission-prompt-tool',

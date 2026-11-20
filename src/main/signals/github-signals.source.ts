@@ -215,8 +215,9 @@ export function detailsQuery(numbers: readonly number[]): string {
         `reviewThreads(first: 100) { nodes { id isResolved } } ` +
         `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
         // 3B: ids estáveis para eventos idempotentes (pedidos de review e reviews com decisão).
-        `timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) { nodes { ... on ReviewRequestedEvent { id createdAt } } } ` +
-        `reviews(last: 20, states: [APPROVED, CHANGES_REQUESTED]) { nodes { id state submittedAt } } }`
+        `timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) { nodes { ... on ReviewRequestedEvent { id createdAt requestedReviewer { ... on User { login } ... on Team { slug } } } } } ` +
+        // 5C: logins só em memória, para pedir review de novo a quem já revisou/foi pedido.
+        `reviews(last: 20, states: [APPROVED, CHANGES_REQUESTED]) { nodes { id state submittedAt author { login } } } }`
     )
     .join(' ')
   return `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`
@@ -234,6 +235,17 @@ const CHECKS: Record<string, ChecksState> = {
   ERROR: 'failure',
   PENDING: 'pending',
   EXPECTED: 'pending'
+}
+
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(\[bot\])?$/
+
+/** Revisor pedido: login de usuário, ou `team:<slug>` para times. */
+function reviewerOf(value: unknown): string | null {
+  if (!isRecord(value)) return null
+  if (typeof value['login'] === 'string' && LOGIN.test(value['login'])) return value['login']
+  if (typeof value['slug'] === 'string' && /^[A-Za-z0-9._-]{1,100}$/.test(value['slug']))
+    return `team:${value['slug']}`
+  return null
 }
 
 export function parseDetails(
@@ -267,7 +279,7 @@ export function parseDetails(
       reviewRequests: Array.isArray(timeline)
         ? timeline.flatMap((t) =>
             isRecord(t) && typeof t['id'] === 'string' && typeof t['createdAt'] === 'string'
-              ? [{ id: t['id'], at: t['createdAt'] }]
+              ? [{ id: t['id'], at: t['createdAt'], reviewer: reviewerOf(t['requestedReviewer']) }]
               : []
           )
         : [],
@@ -281,7 +293,17 @@ export function parseDetails(
                   ? 'changes_requested'
                   : null
             const at = typeof r['submittedAt'] === 'string' ? r['submittedAt'] : null
-            return state && at ? [{ id: r['id'], state, at } as const] : []
+            const author = isRecord(r['author']) ? r['author']['login'] : null
+            return state && at
+              ? [
+                  {
+                    id: r['id'],
+                    state,
+                    at,
+                    author: typeof author === 'string' && LOGIN.test(author) ? author : null
+                  } as const
+                ]
+              : []
           })
         : [],
       unresolvedThreadIds: Array.isArray(threads)

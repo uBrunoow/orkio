@@ -224,3 +224,32 @@ describe('parseUser', () => {
     expect(parseUser({ id: 1 }, null)).toBeNull()
   })
 })
+
+describe('createGitHubClient().requestReviewers (5C)', () => {
+  it('POST requested_reviewers com usuários e times; 422 vira mensagem clara sem vazar token', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => json({ number: 12 }, 201))
+    const client = createGitHubClient({ fetch: fetchMock })
+    await client.requestReviewers(TOKEN, 'acme', 'app', 12, { users: ['ana'], teams: ['core'] })
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('https://api.github.com/repos/acme/app/pulls/12/requested_reviewers')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({ reviewers: ['ana'], team_reviewers: ['core'] })
+
+    const rejecting = createGitHubClient({
+      fetch: async () =>
+        json({ message: `Reviews may only be requested from collaborators ${TOKEN}` }, 422)
+    })
+    const error = await rejecting
+      .requestReviewers(TOKEN, 'acme', 'app', 12, { users: ['x'], teams: [] })
+      .catch((e: unknown) => e)
+    expect(error).toMatchObject({ code: 'invalid', message: expect.stringContaining('revisores') })
+    expectNoLeak(error)
+  })
+
+  it('colaboradores: só logins válidos', async () => {
+    const client = createGitHubClient({
+      fetch: async () => json([{ login: 'ana' }, { login: 'bad login' }, { id: 1 }])
+    })
+    expect(await client.listCollaborators(TOKEN, 'acme', 'app')).toEqual(['ana'])
+  })
+})
