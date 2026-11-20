@@ -165,6 +165,15 @@ export const MIGRATIONS: readonly string[] = [
     result_json TEXT
   );
   CREATE INDEX flow_steps_run ON flow_steps (flow_run_id, id);
+  `,
+  // v7 (Etapa 5B): vínculo tarefa do Notion ↔ task do Backlog.md (alva-flow). Só ids.
+  `
+  CREATE TABLE alva_links (
+    task_page_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    backlog_task_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
   `
 ]
 

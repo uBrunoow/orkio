@@ -217,4 +217,16 @@ describe('migração v4 (4A)', () => {
     db.close()
     await rm(dir, { recursive: true, force: true })
   })
+
+  it('v6 → v7 cria alva_links (um vínculo por tarefa)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v7-'))
+    const file = join(dir, 'orkio.db')
+    openDatabase(file, MIGRATIONS.slice(0, 6)).close()
+    const db = openDatabase(file, MIGRATIONS.slice(0, 7))
+    expect(db.version).toBe(7)
+    db.run("INSERT INTO alva_links VALUES ('t', 'p', 'TASK-1', 'x')")
+    expect(() => db.run("INSERT INTO alva_links VALUES ('t', 'p', 'TASK-2', 'x')")).toThrow()
+    db.close()
+    await rm(dir, { recursive: true, force: true })
+  })
 })
