@@ -31,6 +31,16 @@ export function App(): React.JSX.Element {
     []
   )
 
+  // Tela inicial em tela cheia, sem a navegação.
+  if (page === 'welcome') {
+    return (
+      <WelcomePage
+        onStart={() => setPage('projects')}
+        onOpenIntegrations={() => setPage('integrations')}
+      />
+    )
+  }
+
   return (
     <AppShell
       height="fill"
@@ -59,12 +69,7 @@ export function App(): React.JSX.Element {
         </SideNav>
       }
     >
-      {page === 'welcome' ? (
-        <WelcomePage
-          onStart={() => setPage('projects')}
-          onOpenIntegrations={() => setPage('integrations')}
-        />
-      ) : page === 'projects' ? (
+      {page === 'projects' ? (
         <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
       ) : page === 'board' ? (
         <BoardPage

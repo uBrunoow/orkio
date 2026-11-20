@@ -264,7 +264,9 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   `<div>`/`<span>` cru. Dados densos em `List`/`Item`. Status em `Token` (`Badge` só para contagens).
   Mensagens: `components/Alert.tsx` (Banner; erro = `role="alert"`, aviso = `role="status"`).
 - CSS próprio só na camada `orkio-brand` (`styles/brand.css`, `OrkioLogo.css`), apenas para a
-  marca e com tokens do tema. Nada de CSS de layout.
+  marca e com tokens do tema. Nada de CSS de layout. Exceção: `features/welcome/welcome.css`
+  (abertura laranja + tela "Vamos começar" em tela cheia, sem sidebar: posição fixa, grade de
+  fundo e animações; respeita `prefers-reduced-motion`).
 - Ganchos de teste: papéis/nomes acessíveis primeiro; `data-testid` quando não houver (ex.:
   `device-code`, `project-branch`, `empty-hero`). Nunca classes da Astryx (`astryx-*`, `x…`).
 - CSP: nada de `<style>`/`<script>` inline em produção. `style-src` só é relaxado no dev server.
@@ -453,7 +455,7 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 | Projetos: seletor de pasta no main + `selectionId`                                                          | O renderer nunca escolhe caminhos arbitrários para o main operar (git, fs).                                                                                                                                                                                 |
 | `ConfigStore` JSON (sem SQLite ainda) com backup de arquivo corrompido e modo só leitura para versão futura | Dados pequenos; escrita atômica e migrações bastam. Corrupção não derruba o app; downgrade não destrói dados de uma versão mais nova.                                                                                                                       |
 | GitHub Enterprise salvo como "não verificado"                                                               | A conta conectada é do github.com; não há como validar acesso/push no GHE ainda.                                                                                                                                                                            |
-| App abre em **Projetos**                                                                                    | Com GitHub conectado, é a tela de trabalho; a dica leva a Integrações quando falta conexão.                                                                                                                                                                 |
+| App abre na tela inicial (abertura + "Vamos começar", sem sidebar); "Começar" leva a **Projetos**           | Marca na abertura; a tela inicial vai virar o login com GitHub/Notion. O E2E clica em "Começar" no fixture (a abertura não bloqueia cliques: `pointer-events: none`).                                                                                       |
 | Watcher no diretório do git (não no arquivo HEAD)                                                           | O git troca o HEAD via rename (HEAD.lock → HEAD), o que quebra watchers de arquivo.                                                                                                                                                                         |
 | UI em Astryx com tema Orkio compilado                                                                       | Pedido do produto. Tema estático (`astryx theme build`) mantém a CSP estrita.                                                                                                                                                                               |
 | CSS das camadas da Astryx como arquivo estático                                                             | `ensureSlideRules` só injeta `<style>` se não achar o id; o arquivo estático (gerado e testado contra a versão instalada) evita relaxar a CSP.                                                                                                              |

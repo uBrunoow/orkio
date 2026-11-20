@@ -89,6 +89,8 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
   const { page } = orkio
   await page.evaluate((t) => window.orkio.notion.connect({ kind: 'token', token: t }), TOKEN)
   await page.reload()
+  // O reload volta à tela inicial (sem a navegação).
+  await page.getByRole('button', { name: 'Começar', exact: true }).click()
   await page
     .getByRole('navigation', { name: 'Navegação principal' })
     .getByRole('button', { name: 'Quadro' })
