@@ -9,6 +9,7 @@ import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import { LockIcon, PauseIcon } from '../../components/icons'
+import { useTaskFlowState } from '../task-flows/active-flows'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { tokenColor } from '../notion-workspace/notion-colors'
 
@@ -32,6 +33,7 @@ export function BoardCardBody({
   actions: CardActions | null
 }): React.JSX.Element {
   const label = card.displayId ?? card.title
+  const flow = useTaskFlowState(card.taskId)
   return (
     <VStack gap={2}>
       <HStack gap={2} vAlign="center">
@@ -53,6 +55,14 @@ export function BoardCardBody({
         )}
         {card.sync.state === 'pending' && (
           <Token size="sm" color="yellow" label="Sincronizando" data-testid="card-sync" />
+        )}
+        {flow && (
+          <Token
+            size="sm"
+            color={flow === 'needs_you' ? 'yellow' : 'default'}
+            label={flow === 'needs_you' ? 'Esperando você' : 'Fluxo'}
+            data-testid="card-flow"
+          />
         )}
         <StackItem size="fill">
           {actions && (

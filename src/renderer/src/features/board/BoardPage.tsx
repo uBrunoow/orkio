@@ -21,6 +21,8 @@ import {
   SettingsIcon
 } from '../../components/icons'
 import { ProjectContextPage } from '../claude/ProjectContextPage'
+import { TaskFlowsPage } from '../task-flows/TaskFlowsPage'
+import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardSettings } from './BoardSettings'
@@ -114,7 +116,8 @@ function Board({
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
   /** Tela atual: quadro, fluxo (3C) ou ajustes do Notion (Etapa Orkio/Bloqueada). */
-  const [mode, setMode] = useState<'board' | 'flow' | 'settings' | 'context'>('board')
+  const [mode, setMode] = useState<'board' | 'flow' | 'settings' | 'context' | 'taskflows'>('board')
+  const activeFlows = useActiveFlows(projectId)
   const [selected, setPicked] = useState<string | null>(openTaskId)
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
@@ -178,8 +181,13 @@ function Board({
         }}
         onClose={() => setMode('board')}
         onOpenNotionSettings={() => setMode('settings')}
+        onOpenTaskFlows={() => setMode('taskflows')}
       />
     )
+  }
+
+  if (mode === 'taskflows') {
+    return <TaskFlowsPage projectId={projectId} onClose={() => setMode('flow')} />
   }
 
   if (mode === 'context') {
@@ -312,13 +320,15 @@ function Board({
               headingLevel={2}
             />
           ) : (
-            <BoardColumns
-              stages={view.config.stages}
-              cards={cards}
-              signals={signals.result?.signals ?? {}}
-              selectedTaskId={selected}
-              actions={actions}
-            />
+            <ActiveFlowsProvider value={activeFlows}>
+              <BoardColumns
+                stages={view.config.stages}
+                cards={cards}
+                signals={signals.result?.signals ?? {}}
+                selectedTaskId={selected}
+                actions={actions}
+              />
+            </ActiveFlowsProvider>
           )}
         </StackItem>
         {selectedCard && (

@@ -21,7 +21,10 @@ Claude Code. Hoje existem:
   worktree isolado por tarefa, com briefing do Notion, permissões pelo Orkio e log ao vivo.
 - **Claude Code (4B):** catálogo de comandos (usuário/projeto/plugins), "Rodar de novo", artefatos
   (anexar caminho + commit, publicar no Notion) e contexto do projeto (instruções + páginas).
-- Ainda não existem: login no app (tela inicial), webhooks.
+- **Fluxos de tarefa (5A):** sequências de passos (comandos do Claude Code, gates, ações do
+  Orkio, saltos condicionais) ligadas às colunas, disparadas ao entrar ou à mão.
+- Ainda não existem: push/PR/pedir review nos fluxos (5C), integração alva-flow (5B), login no
+  app (tela inicial), webhooks.
 
 ## Comandos
 
@@ -54,6 +57,7 @@ src/
   shared/agent-run.ts      # tipos das execuções do Claude Code (log normalizado, resumo, status)
   shared/briefing.ts       # blocos do Notion → markdown e montagem do briefing (puro)
   shared/slug.ts           # slug e nome da branch da tarefa (<ID>/<slug>)
+  shared/task-flow.ts      # 5A: fluxos de tarefa (tipos, motor puro, condições, template, validação)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -73,6 +77,7 @@ src/
     db/database.ts         # SQLite (node:sqlite) + migrações por PRAGMA user_version
     board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
+    flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
                            # policy, redact, run.service, claude.service; bridge/permission-mcp.ts
                            # (servidor MCP stdio → out/main/permission-mcp.js)
@@ -430,6 +435,42 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   "Contexto do projeto" limitada a 30.000 caracteres (`buildProjectContext`): o que passar é cortado
   e vira aviso no formulário; página ilegível também. Tela "Contexto do Claude" no quadro.
 
+## Fluxos de tarefa (Etapa 5A)
+
+- **Nome:** "Fluxo do projeto" (3C) = etapas + automações; "Fluxos de tarefa" (5A) = sequências de
+  passos que rodam numa tarefa (`shared/task-flow.ts`, tipos `Flow`/`Step`/`StageFlow`).
+- **Config** (`orkio-config` v6): `flows[projectId] = { flows, bindings }`; a ligação etapa → fluxo
+  (`{ stageId, flowId, enabled, mode: 'on_enter' | 'manual' }`) é editada no "Fluxo do projeto"
+  ("Fluxo desta coluna") e gravada pelo mesmo "Salvar fluxo" (com histórico de configuração).
+- **Passos:** `claude_command` (comando do catálogo, args com `{{briefing_path}}`, `{{task_id}}`,
+  `{{notion_url}}`, `{{flow.<chave>}}`, tempo limite, extrator opcional), `gate` (mensagem, mostra
+  diff/resumo, `onReject` = passo ou `stop`, expiração opcional), `orkio_action` (registro em
+  código; hoje só `noop`) e `branch` (condição sobre resultado de passo, variável ou voltas;
+  `all`/`any`). Extratores também são registrados em código (exemplo: `linhas_orkio`, lê
+  `@orkio chave=valor` do resultado).
+- **Motor puro:** `startFlow`/`afterStep`/`skipStep`/`retryStep`; saltos são resolvidos sem execução;
+  falha/cancelamento **sempre pausam**; gate recusado vai para `onReject`; trava de 50 passos.
+  `validateTaskFlow` (mesma no editor e no main): salto para passo inexistente, volta para trás sem
+  condição de voltas (ou pelo "senão") = erro; comando fora do catálogo/variável desconhecida = aviso.
+- **Execução** (`main/flows/flow-runner.ts`, SQLite v6 `flow_runs`/`flow_steps`):
+  - Um fluxo por tarefa; cada comando é uma execução da 4A (`ClaudeService.startForFlow`, mesmo
+    worktree/branch/limite de paralelismo); execução manual do Claude Code fica bloqueada com
+    fluxo ativo. Briefing montado uma vez por fluxo, só em memória (`flow_json` guarda a cópia do
+    fluxo; `state_json` só variáveis, visitas e resultados).
+  - `on_enter`: `BoardService.onStageChanged` com a origem; dispara só com `manual`/`automation`
+    (nunca `notion`, `rollback` ou `stage_removed`). "Rodar fluxo" no painel = fluxo ligado à
+    etapa atual.
+  - Reabrir o app: gate continua em gate; passo rodando (ou entre passos) vira `interrompido`
+    (Retomar deste passo / Pular / Cancelar). O `dispose()` antes do `cancelAll` da 4A evita que o
+    fechamento conte como falha.
+  - Tarefa saiu da etapa → `awaiting_decision` (Cancelar / Deixar terminar); o passo atual termina,
+    mas o fluxo só avança com a escolha.
+  - Notificação de desktop em gate, pausa e saída da etapa; evento `task-flows:changed` à tela;
+    histórico com `flow_started`, `step_*`, `gate_*`, `flow_paused`, `flow_finished`.
+- **UI:** editor "Fluxos de tarefa" (do Fluxo do projeto), seção "Fluxo" no painel (linha do tempo,
+  gate, pausas, decisão; o log ao vivo é o da seção Claude Code, que segue a execução nova) e token
+  "Fluxo"/"Esperando você" no card (`active-flows.tsx`, contexto React).
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -446,6 +487,9 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   `launchOrkio(..., { claude: { loggedIn, installed } })`. Cenário por palavras no prompt
   (`pedir-shell`, `perguntar`, `tentar-push`, `ler-env`, `demorar`); usa a ponte MCP real.
   O fixture põe uma `ANTHROPIC_API_KEY` falsa no ambiente para provar o filtro.
+- 5A: o simulado tem `demorar-uma-vez` (espera só na primeira vez, marcador em `.orkio/demorou`)
+  e `falhar` (sai com erro). `e2e/task-flows.spec.ts` monta o fluxo pela tela e edita o
+  `orkio-config.json` entre aberturas para trocar os argumentos do passo.
 - 4B: o fixture usa um `HOME` temporário (com `~/.claude/commands/revisar.md`); o cenário
   `escrever-doc` gera `docs/exportar.md`; o Notion simulado registra publicações em
   `notionState(app).published` e responde à busca de páginas (`filter.value: 'page'`).
@@ -503,6 +547,8 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 | Claude Code via CLI (`claude -p`), não Agent SDK                                                            | O SDK exige chave de API; o CLI usa a assinatura/login do usuário e carrega os plugins dele. O Orkio não guarda credenciais da Anthropic.                                                                                                                   |
 | Permissões pelo `--permission-prompt-tool` (servidor MCP do Orkio + socket local)                           | Única forma de o CLI em `-p` perguntar ao app. Bloqueios (push, fora do worktree) ficam no main, não só nas regras do CLI.                                                                                                                                  |
 | Log da execução normalizado e redigido                                                                      | Nunca gravamos o stream cru (traria conteúdo de arquivos lidos, inclusive `.env`).                                                                                                                                                                          |
+| Fluxo de tarefa: falha sempre pausa; reabrir o app nunca segue sozinho                                      | Um agente não deve continuar depois de algo inesperado sem alguém ver; "Pular" é a forma explícita de seguir (e só então a condição enxerga a falha).                                                                                                       |
+| Execução do fluxo guarda uma cópia do fluxo (`flow_json`)                                                   | Editar ou remover o fluxo no meio de uma execução não quebra a execução em curso.                                                                                                                                                                           |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 
 ## Astryx e CSP (regra inegociável)

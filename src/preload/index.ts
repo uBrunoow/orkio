@@ -129,7 +129,8 @@ const api: OrkioApi = {
       ipcRenderer.invoke(flow.save, projectId, {
         stages: draft.stages.map((st) => ({ ...st })),
         rules: draft.rules.map((r) => JSON.parse(JSON.stringify(r)) as unknown),
-        removals: { ...draft.removals }
+        removals: { ...draft.removals },
+        ...(draft.bindings ? { bindings: draft.bindings.map((b) => ({ ...b })) } : {})
       }),
     events: (projectId) => ipcRenderer.invoke(flow.events, projectId),
     exportFile: (content) => ipcRenderer.invoke(flow.exportFile, content),

@@ -92,11 +92,18 @@ export function useTaskRuns(projectId: string, taskId: string) {
     () =>
       window.orkio.claude.onRunEvent((m) => {
         if (m.taskId !== taskId) return
-        if (selected.current === null) {
+        // Execução nova na tarefa (ex.: passo de um fluxo): passa a mostrar o log dela.
+        const isNew =
+          m.runId !== selected.current &&
+          m.event.kind === 'status' &&
+          (m.event.status === 'queued' || m.event.status === 'running')
+        if (selected.current === null || isNew) {
           selected.current = m.runId
           setSelectedRunId(m.runId)
+          setLog([m.event])
+        } else if (m.runId === selected.current) {
+          setLog((prev) => [...prev, m.event])
         }
-        if (m.runId === selected.current) setLog((prev) => [...prev, m.event])
         if (m.event.kind === 'status') void reload()
       }),
     [taskId, reload]

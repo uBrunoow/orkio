@@ -7,7 +7,7 @@
  * - `claude -p ... --mcp-config <arquivo>`: emite stream-json, edita arquivos no cwd (worktree),
  *   e pede permissões pela ponte MCP REAL do Orkio (o mesmo `permission-mcp.js` do app).
  *
- * O cenário vem de palavras no prompt: "pedir-shell", "tentar-push", "perguntar", "demorar",
+ * O cenário vem de palavras no prompt: "pedir-shell", "tentar-push", "perguntar", "demorar", "demorar-uma-vez",
  * "ler-env".
  */
 const { spawn, execFileSync } = require('node:child_process')
@@ -111,6 +111,11 @@ async function main() {
     }
   ])
 
+  if (prompt.includes('falhar')) {
+    process.stderr.write('falha simulada\n')
+    process.exit(1)
+  }
+
   const mcp = bridge(config)
   await mcp.init()
 
@@ -198,7 +203,16 @@ async function main() {
     assistant([{ type: 'text', text: `resposta: ${answer}` }])
   }
 
-  if (prompt.includes('demorar')) {
+  if (prompt.includes('demorar-uma-vez')) {
+    // Espera só na primeira vez (marcador no worktree): para testar fechar o app e retomar.
+    const marker = join(process.cwd(), '.orkio', 'demorou')
+    if (!existsSync(marker)) {
+      mkdirSync(join(process.cwd(), '.orkio'), { recursive: true })
+      writeFileSync(marker, 'x')
+      assistant([{ type: 'text', text: 'Primeira vez: trabalhando por um bom tempo…' }])
+      while (!killed) await sleep(200)
+    }
+  } else if (prompt.includes('demorar')) {
     assistant([{ type: 'text', text: 'Trabalhando por um bom tempo…' }])
     while (!killed) await sleep(200)
   }

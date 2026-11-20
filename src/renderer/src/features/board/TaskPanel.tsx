@@ -23,6 +23,7 @@ import type {
 import { EVENT_LABELS, type EventKind } from '../../../../shared/automation'
 import { CloseIcon, ExternalLinkIcon } from '../../components/icons'
 import { TaskClaudeSection } from '../claude/TaskClaudeSection'
+import { TaskFlowSection } from '../task-flows/TaskFlowSection'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { tokenColor } from '../notion-workspace/notion-colors'
 
@@ -59,6 +60,14 @@ export function TaskPanel({
         ) {
           setRunTick((n) => n + 1)
         }
+      }),
+    [card.taskId]
+  )
+  // Fluxos (5A) também escrevem no histórico.
+  useEffect(
+    () =>
+      window.orkio.taskFlows.onChanged((e) => {
+        if (e.taskId === card.taskId) setRunTick((n) => n + 1)
       }),
     [card.taskId]
   )
@@ -161,6 +170,8 @@ export function TaskPanel({
             <Text type="supporting">Abrir no Notion</Text>
           </HStack>
         )}
+
+        <TaskFlowSection projectId={projectId} taskId={card.taskId} stageId={card.stageId} />
 
         <TaskClaudeSection
           projectId={projectId}
@@ -279,6 +290,30 @@ function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string
       return 'Execução do Claude Code cancelada'
     case 'run_failed':
       return 'Execução do Claude Code falhou'
+    case 'flow_started':
+      return `Fluxo iniciado: ${String(e.detail?.['flow'] ?? '')}`
+    case 'step_started':
+      return `Passo do fluxo começou (${String(e.detail?.['step'] ?? '')})`
+    case 'step_finished':
+      return `Passo do fluxo concluído (${String(e.detail?.['step'] ?? '')})`
+    case 'step_failed':
+      return `Passo do fluxo falhou (${String(e.detail?.['step'] ?? '')})`
+    case 'step_skipped':
+      return `Passo do fluxo pulado (${String(e.detail?.['step'] ?? '')})`
+    case 'gate_waiting':
+      return `Fluxo esperando aprovação (${String(e.detail?.['step'] ?? '')})`
+    case 'gate_approved':
+      return `Aprovação concedida (${String(e.detail?.['step'] ?? '')})`
+    case 'gate_rejected':
+      return `Aprovação recusada (${String(e.detail?.['step'] ?? '')})`
+    case 'flow_paused':
+      return `Fluxo pausado (${String(e.detail?.['reason'] ?? '')})`
+    case 'flow_finished':
+      return e.detail?.['result'] === 'cancelled'
+        ? 'Fluxo cancelado'
+        : e.detail?.['result'] === 'rejected'
+          ? 'Fluxo encerrado (recusado)'
+          : 'Fluxo concluído'
     case 'artifact_attached':
       return `Artefato anexado: ${String(e.detail?.['path'] ?? '')}`
     case 'artifact_published':

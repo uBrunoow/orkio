@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
@@ -14,9 +13,13 @@ import { Selector } from '@astryxdesign/core/Selector'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
+import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationRule, EventKind } from '../../../../shared/automation'
+import type { Flow, StageFlow } from '../../../../shared/task-flow'
+import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import {
   EVENT_DESCRIPTIONS,
   EVENT_KINDS,
@@ -80,12 +83,15 @@ export function FlowPage({
   view,
   onSaved,
   onClose,
-  onOpenNotionSettings
+  onOpenNotionSettings,
+  onOpenTaskFlows
 }: {
   view: BoardView
   onSaved(view: BoardView): void
   onClose(): void
   onOpenNotionSettings(): void
+  /** 5A: editor dos fluxos de tarefa (sequências de passos). */
+  onOpenTaskFlows(): void
 }): React.JSX.Element {
   const [draft, setDraft] = useState<FlowDraft>(() => initialDraft(view))
   const [editing, setEditing] = useState<RuleEditing | null>(null)
@@ -94,6 +100,21 @@ export function FlowPage({
   const [message, setMessage] = useState<{ tone: 'danger' | 'warning'; text: string } | null>(null)
   const [events, setEvents] = useState<ConfigEvent[]>([])
   const [eventsKey, setEventsKey] = useState(0)
+  /** 5A: fluxos de tarefa do projeto e as ligações salvas (para "Fluxo desta coluna"). */
+  const [taskFlows, setTaskFlows] = useState<{ flows: Flow[]; bindings: StageFlow[] } | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void window.orkio.taskFlows.getProject(view.projectId).then((r) => {
+      if (!active || !r.ok) return
+      setTaskFlows({ flows: r.value.flows, bindings: r.value.bindings })
+      // O rascunho ganha as ligações salvas (se ainda não tiver mexido nelas).
+      setDraft((d) => (d.bindings ? d : { ...d, bindings: r.value.bindings }))
+    })
+    return () => {
+      active = false
+    }
+  }, [view.projectId])
 
   const saved = view.config!
   const options = view.statusOptions
@@ -161,7 +182,8 @@ export function FlowPage({
     update((d) => ({
       ...d,
       stages: d.stages.filter((s) => s.id !== id),
-      removals: saved.stages.some((s) => s.id === id) ? { ...d.removals, [id]: null } : d.removals
+      removals: saved.stages.some((s) => s.id === id) ? { ...d.removals, [id]: null } : d.removals,
+      ...(d.bindings ? { bindings: d.bindings.filter((b) => b.stageId !== id) } : {})
     }))
   const moveRule = (id: string, delta: number): void =>
     update((d) => {
@@ -305,10 +327,16 @@ export function FlowPage({
         <Button variant="ghost" label="Exportar JSON" onClick={() => void doExport()} />
         <Button variant="ghost" label="Importar JSON" onClick={() => void doImport()} />
         <Button variant="ghost" label="Etapa Orkio e Bloqueada…" onClick={onOpenNotionSettings} />
+        <Button variant="ghost" label="Fluxos de tarefa…" onClick={onOpenTaskFlows} />
         <Button
           variant="ghost"
           label="Descartar alterações"
-          onClick={() => setDraft(initialDraft(view))}
+          onClick={() =>
+            setDraft({
+              ...initialDraft(view),
+              ...(taskFlows ? { bindings: taskFlows.bindings } : {})
+            })
+          }
         />
         <Button variant="secondary" label="Voltar ao quadro" onClick={onClose} />
       </HStack>
@@ -406,6 +434,23 @@ export function FlowPage({
                       onClick={() => addStageAfter(index)}
                     />
                   </HStack>
+
+                  <StageFlowField
+                    label={label}
+                    flows={taskFlows?.flows ?? null}
+                    binding={draft.bindings?.find((b) => b.stageId === stage.id) ?? null}
+                    onChange={(binding) =>
+                      update((d) => ({
+                        ...d,
+                        bindings: [
+                          ...(d.bindings ?? []).filter((b) => b.stageId !== stage.id),
+                          ...(binding ? [binding] : [])
+                        ]
+                      }))
+                    }
+                    stageId={stage.id}
+                    onOpenTaskFlows={onOpenTaskFlows}
+                  />
 
                   <VStack gap={2}>
                     <Text weight="semibold">Automações para esta etapa</Text>
@@ -814,5 +859,76 @@ function Simulator({ view, draft }: { view: BoardView; draft: FlowDraft }): Reac
         )}
       </VStack>
     </Card>
+  )
+}
+
+/** "Fluxo desta coluna" (5A): fluxo de tarefa ligado à etapa, ligado/desligado e modo. */
+function StageFlowField({
+  label,
+  stageId,
+  flows,
+  binding,
+  onChange,
+  onOpenTaskFlows
+}: {
+  label: string
+  stageId: string
+  flows: Flow[] | null
+  binding: StageFlow | null
+  onChange(binding: StageFlow | null): void
+  onOpenTaskFlows(): void
+}): React.JSX.Element {
+  if (flows === null) return <Skeleton height={32} aria-label="Carregando fluxos de tarefa" />
+  if (flows.length === 0) {
+    return (
+      <HStack gap={1} vAlign="center" wrap="wrap">
+        <Text type="supporting">Nenhum fluxo de tarefa ainda.</Text>
+        <Button size="sm" variant="ghost" label="Criar fluxo" onClick={onOpenTaskFlows} />
+      </HStack>
+    )
+  }
+  return (
+    <VStack gap={2} role="group" aria-label={`Fluxo da coluna ${label}`}>
+      <Selector
+        label={`Fluxo desta coluna (${label})`}
+        options={[
+          { value: '', label: 'Nenhum' },
+          ...flows.map((f) => ({ value: f.id, label: f.name }))
+        ]}
+        value={binding?.flowId ?? ''}
+        onChange={(flowId: string) =>
+          onChange(
+            flowId
+              ? {
+                  stageId,
+                  flowId,
+                  enabled: binding?.enabled ?? true,
+                  mode: binding?.mode ?? 'on_enter'
+                }
+              : null
+          )
+        }
+      />
+      {binding && (
+        <HStack gap={2} vAlign="center" wrap="wrap">
+          <SegmentedControl
+            label={`Quando rodar o fluxo (${label})`}
+            size="sm"
+            value={binding.mode}
+            onChange={(mode) =>
+              onChange({ ...binding, mode: mode === 'manual' ? 'manual' : 'on_enter' })
+            }
+          >
+            <SegmentedControlItem value="on_enter" label="Ao entrar" />
+            <SegmentedControlItem value="manual" label="Manual" />
+          </SegmentedControl>
+          <CheckboxInput
+            label={`Ligado (${label})`}
+            value={binding.enabled}
+            onChange={(enabled) => onChange({ ...binding, enabled })}
+          />
+        </HStack>
+      )}
+    </VStack>
   )
 }
