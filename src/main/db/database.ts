@@ -132,6 +132,39 @@ export const MIGRATIONS: readonly string[] = [
     UNIQUE (task_page_id, path, commit_hash)
   );
   CREATE INDEX task_artifacts_task ON task_artifacts (task_page_id, attached_at);
+  `,
+  // v6 (Etapa 5A): execuções de fluxos de tarefa. `flow_json` é a cópia do fluxo no início
+  // (editar o fluxo não quebra a execução em curso); `vars_json` nunca leva segredos.
+  `
+  CREATE TABLE flow_runs (
+    id TEXT PRIMARY KEY,
+    task_page_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    flow_id TEXT NOT NULL,
+    flow_json TEXT NOT NULL,
+    stage_id TEXT,
+    status TEXT NOT NULL CHECK (status IN
+      ('running', 'waiting_gate', 'paused', 'awaiting_decision', 'finished', 'cancelled')),
+    current_step TEXT,
+    state_json TEXT NOT NULL,
+    pause_reason TEXT,
+    result TEXT,
+    started_at TEXT NOT NULL,
+    ended_at TEXT
+  );
+  CREATE INDEX flow_runs_task ON flow_runs (task_page_id, started_at);
+  CREATE TABLE flow_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    flow_run_id TEXT NOT NULL REFERENCES flow_runs (id) ON DELETE CASCADE,
+    step_id TEXT NOT NULL,
+    run_id TEXT,
+    status TEXT NOT NULL CHECK (status IN
+      ('running', 'ok', 'failed', 'cancelled', 'skipped', 'interrupted', 'approved', 'rejected', 'waiting')),
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    result_json TEXT
+  );
+  CREATE INDEX flow_steps_run ON flow_steps (flow_run_id, id);
   `
 ]
 

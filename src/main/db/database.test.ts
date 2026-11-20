@@ -194,4 +194,27 @@ describe('migração v4 (4A)', () => {
     db.close()
     await rm(dir, { recursive: true, force: true })
   })
+
+  it('v5 → v6 cria flow_runs e flow_steps (status validados, passos apagados com o fluxo)', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v6-'))
+    const file = join(dir, 'orkio.db')
+    openDatabase(file, MIGRATIONS.slice(0, 5)).close()
+    const db = openDatabase(file, MIGRATIONS.slice(0, 6))
+    expect(db.version).toBe(6)
+    db.run(
+      "INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, status, state_json, started_at) VALUES ('fr', 't', 'p', 'f', '{}', 'waiting_gate', '{}', 'x')"
+    )
+    db.run(
+      "INSERT INTO flow_steps (flow_run_id, step_id, status, started_at) VALUES ('fr', 'g', 'waiting', 'x')"
+    )
+    expect(() =>
+      db.run(
+        "INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, status, state_json, started_at) VALUES ('fr2', 't', 'p', 'f', '{}', 'voando', '{}', 'x')"
+      )
+    ).toThrow()
+    db.run("DELETE FROM flow_runs WHERE id = 'fr'")
+    expect(db.all('SELECT * FROM flow_steps')).toEqual([])
+    db.close()
+    await rm(dir, { recursive: true, force: true })
+  })
 })

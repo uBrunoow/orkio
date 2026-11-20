@@ -26,8 +26,9 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
  */
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
+import type { Condition, Flow, ProjectFlows, StageFlow, Step } from '../../shared/task-flow'
 
-export const ORKIO_CONFIG_VERSION = 5
+export const ORKIO_CONFIG_VERSION = 6
 
 export interface StoredProject {
   id: string
@@ -49,6 +50,8 @@ export interface OrkioConfig {
   automation: { paused: boolean }
   /** Contexto do Claude Code por projeto (4B): instruções + páginas de referência (só ids/nomes). */
   claudeContexts: Record<string, ProjectClaudeContext>
+  /** Fluxos de tarefa por projeto (5A) e a ligação de cada um com as etapas. */
+  flows: Record<string, ProjectFlows>
 }
 
 export function emptyConfig(): OrkioConfig {
@@ -57,7 +60,8 @@ export function emptyConfig(): OrkioConfig {
     notion: null,
     boards: {},
     automation: { paused: false },
-    claudeContexts: {}
+    claudeContexts: {},
+    flows: {}
   }
 }
 
@@ -92,7 +96,9 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
         return { ...data, boards, automation: { paused: false } }
       },
       // v4 → v5: nenhum contexto do Claude Code ainda.
-      4: (data) => ({ ...data, claudeContexts: {} })
+      4: (data) => ({ ...data, claudeContexts: {} }),
+      // v5 → v6: nenhum fluxo de tarefa ainda.
+      5: (data) => ({ ...data, flows: {} })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -140,7 +146,18 @@ export function validateConfig(
       if (ctx) claudeContexts[projectId] = ctx
     }
   }
-  const value: OrkioConfig = { projects, notion, boards, automation, claudeContexts }
+  // Fluxos de tarefa: fluxo ou ligação inválidos são descartados sozinhos, com aviso.
+  const flows: Record<string, ProjectFlows> = {}
+  if (isRecord(data['flows'])) {
+    for (const [projectId, raw] of Object.entries(data['flows'])) {
+      const parsed = parseProjectFlows(raw)
+      flows[projectId] = parsed.value
+      if (parsed.dropped > 0) {
+        warnings.push(`${parsed.dropped} fluxo(s) de tarefa inválido(s) foram ignorados.`)
+      }
+    }
+  }
+  const value: OrkioConfig = { projects, notion, boards, automation, claudeContexts, flows }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
 }
 
@@ -325,4 +342,112 @@ export function parseClaudeContext(value: unknown): ProjectClaudeContext | null 
     instructions: value['instructions'].slice(0, CONTEXT_LIMITS.instructions),
     notionPages: pages.slice(0, CONTEXT_LIMITS.pages)
   }
+}
+
+// ---------- Fluxos de tarefa (5A) ----------
+
+const str = (v: unknown): v is string => typeof v === 'string'
+
+export function parseCondition(v: unknown, depth = 0): Condition | null {
+  if (!isRecord(v) || depth > 5) return null
+  switch (v['type']) {
+    case 'step':
+      return str(v['step']) && (v['is'] === 'ok' || v['is'] === 'failed' || v['is'] === 'cancelled')
+        ? { type: 'step', step: v['step'], is: v['is'] }
+        : null
+    case 'var': {
+      const op = v['op']
+      if (!str(v['key']) || (op !== 'eq' && op !== 'neq' && op !== 'exists')) return null
+      return { type: 'var', key: v['key'], op, ...(str(v['value']) ? { value: v['value'] } : {}) }
+    }
+    case 'visits':
+      return str(v['step']) && typeof v['lt'] === 'number' && v['lt'] >= 1
+        ? { type: 'visits', step: v['step'], lt: Math.floor(v['lt']) }
+        : null
+    case 'all':
+    case 'any': {
+      if (!Array.isArray(v['of'])) return null
+      const of = v['of'].map((c) => parseCondition(c, depth + 1))
+      return of.every((c): c is Condition => c !== null) ? { type: v['type'], of } : null
+    }
+    default:
+      return null
+  }
+}
+
+export function parseStep(v: unknown): Step | null {
+  if (!isRecord(v) || !str(v['id']) || !str(v['name'])) return null
+  const base = { id: v['id'], name: v['name'] }
+  switch (v['type']) {
+    case 'claude_command':
+      if (!str(v['command']) || !str(v['args']) || typeof v['timeoutMin'] !== 'number') return null
+      return {
+        ...base,
+        type: 'claude_command',
+        command: v['command'],
+        args: v['args'],
+        timeoutMin: v['timeoutMin'],
+        ...(isRecord(v['extract']) && str(v['extract']['extractor'])
+          ? { extract: { extractor: v['extract']['extractor'] } }
+          : {})
+      }
+    case 'gate': {
+      const show = v['show']
+      if (!str(v['message']) || (show !== 'diff' && show !== 'summary' && show !== 'none')) {
+        return null
+      }
+      return {
+        ...base,
+        type: 'gate',
+        message: v['message'],
+        show,
+        onReject: str(v['onReject']) ? v['onReject'] : 'stop',
+        timeoutMin: typeof v['timeoutMin'] === 'number' ? v['timeoutMin'] : null
+      }
+    }
+    case 'orkio_action':
+      return str(v['action']) ? { ...base, type: 'orkio_action', action: v['action'] } : null
+    case 'branch': {
+      const when = parseCondition(v['when'])
+      if (!when || !str(v['then'])) return null
+      return {
+        ...base,
+        type: 'branch',
+        when,
+        then: v['then'],
+        ...(str(v['else']) ? { else: v['else'] } : {})
+      }
+    }
+    default:
+      return null
+  }
+}
+
+export function parseFlowDef(v: unknown): Flow | null {
+  if (!isRecord(v) || !str(v['id']) || !v['id'] || !str(v['name']) || !Array.isArray(v['steps'])) {
+    return null
+  }
+  const steps = v['steps'].map(parseStep)
+  if (!steps.every((s): s is Step => s !== null)) return null
+  return { id: v['id'], name: v['name'], steps }
+}
+
+function parseBinding(v: unknown): StageFlow | null {
+  if (!isRecord(v) || !str(v['stageId']) || !str(v['flowId'])) return null
+  const mode = v['mode'] === 'manual' ? 'manual' : v['mode'] === 'on_enter' ? 'on_enter' : null
+  if (!mode) return null
+  return { stageId: v['stageId'], flowId: v['flowId'], enabled: v['enabled'] === true, mode }
+}
+
+export function parseProjectFlows(v: unknown): { value: ProjectFlows; dropped: number } {
+  const rawFlows = isRecord(v) && Array.isArray(v['flows']) ? v['flows'] : []
+  const flows = rawFlows.map(parseFlowDef).filter((f): f is Flow => f !== null)
+  const ids = new Set(flows.map((f) => f.id))
+  const rawBindings = isRecord(v) && Array.isArray(v['bindings']) ? v['bindings'] : []
+  // Uma ligação por etapa; ligação para fluxo que sumiu é descartada.
+  const bindings: StageFlow[] = []
+  for (const b of rawBindings.map(parseBinding)) {
+    if (b && ids.has(b.flowId) && !bindings.some((x) => x.stageId === b.stageId)) bindings.push(b)
+  }
+  return { value: { flows, bindings }, dropped: rawFlows.length - flows.length }
 }

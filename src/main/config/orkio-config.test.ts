@@ -47,7 +47,8 @@ describe('orkio-config v2/v3', () => {
       notion: null,
       boards: {},
       automation: { paused: false },
-      claudeContexts: {}
+      claudeContexts: {},
+      flows: {}
     })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
     expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
@@ -230,7 +231,7 @@ describe('orkio-config v2/v3', () => {
     expect(data.claudeContexts).toEqual({})
     expect(data.automation.paused).toBe(true)
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(5)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
 
     const parsed = validateConfig({
       projects: [],
@@ -245,5 +246,65 @@ describe('orkio-config v2/v3', () => {
     expect(parsed?.value.claudeContexts).toEqual({
       ok: { instructions: 'Use pnpm', notionPages: [{ id: 'p1', name: 'Arquitetura' }] }
     })
+  })
+
+  it('migra v5 → v6: sem fluxos; fluxo inválido e ligação órfã são descartados', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 5,
+        projects: [{ ...PROJECT, notionProject: null }],
+        notion: NOTION,
+        boards: {},
+        automation: { paused: false },
+        claudeContexts: {}
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.flows).toEqual({})
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(6)
+
+    const parsed = validateConfig({
+      projects: [],
+      flows: {
+        p1: {
+          flows: [
+            {
+              id: 'f1',
+              name: 'Revisão',
+              steps: [
+                {
+                  id: 'a',
+                  name: 'A',
+                  type: 'claude_command',
+                  command: 'revisar',
+                  args: '',
+                  timeoutMin: 30
+                },
+                {
+                  id: 'b',
+                  name: 'B',
+                  type: 'branch',
+                  when: { type: 'all', of: [{ type: 'visits', step: 'a', lt: 2 }] },
+                  then: 'a'
+                }
+              ]
+            },
+            { id: 'ruim', name: 'X', steps: [{ id: 'z', name: 'Z', type: 'teleporte' }] }
+          ],
+          bindings: [
+            { stageId: 's1', flowId: 'f1', enabled: true, mode: 'on_enter' },
+            { stageId: 's1', flowId: 'f1', enabled: false, mode: 'manual' },
+            { stageId: 's2', flowId: 'ruim', enabled: true, mode: 'manual' }
+          ]
+        }
+      }
+    })
+    expect(parsed?.value.flows['p1']?.flows.map((f) => f.id)).toEqual(['f1'])
+    expect(parsed?.value.flows['p1']?.bindings).toEqual([
+      { stageId: 's1', flowId: 'f1', enabled: true, mode: 'on_enter' }
+    ])
+    expect(parsed?.warning).toContain('1 fluxo(s) de tarefa inválido(s)')
   })
 })
