@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
+import { Collapsible } from '@astryxdesign/core/Collapsible'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
@@ -8,7 +9,7 @@ import { Item } from '@astryxdesign/core/Item'
 import { List } from '@astryxdesign/core/List'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { RunSummary } from '../../../../shared/agent-run'
 import type { BacklogTaskInfo } from '../../../../shared/alva'
@@ -52,6 +53,23 @@ const STEP_STATUS: Record<FlowStepStatus, string> = {
   rejected: 'recusado'
 }
 
+/** O que está trabalhando agora na tarefa (rodapé "Trabalhando há…" do painel). */
+export interface TaskActivity {
+  who: string
+  what: string | null
+  /** ISO 8601: quando o passo atual começou. */
+  since: string
+}
+
+/** "4 passos · 3 ok · 1 falhou": resumo da linha do tempo quando ela está recolhida. */
+function stepSummary(history: FlowRunView['history']): string {
+  const counts = new Map<string, number>()
+  for (const h of history)
+    counts.set(STEP_STATUS[h.status], (counts.get(STEP_STATUS[h.status]) ?? 0) + 1)
+  const total = history.length === 1 ? '1 passo' : `${history.length} passos`
+  return [total, ...[...counts].map(([label, n]) => `${n} ${label}`)].join(' · ')
+}
+
 /**
  * Seção "Fluxo" do painel da tarefa (5A): linha do tempo, gate (aprovar/recusar com diff ou
  * resumo), pausas (retomar/pular/cancelar) e a decisão quando a tarefa sai da etapa. O log ao vivo
@@ -67,14 +85,23 @@ export function TaskFlowSection({
   projectId,
   taskId,
   stageId,
-  pr = null
+  pr = null,
+  onActivityChange,
+  onWaitingChange
 }: {
   projectId: string
   taskId: string
   stageId: string | null
   /** PR da tarefa (sinais da 2D): estado do CI e botão do fluxo de CI vermelho. */
   pr?: TaskPullRequest | null
+  /** Passo rodando agora (ou null): o painel mostra "Trabalhando há…". */
+  onActivityChange?: (activity: TaskActivity | null) => void
+  /** 1 quando o fluxo espera uma decisão sua (gate, escolha, saída da etapa). */
+  onWaitingChange?: (count: number) => void
 }): React.JSX.Element | null {
+  // Passos recolhidos enquanto o fluxo roda ou espera você (a decisão vem primeiro); abertos no
+  // fim. Clicar no resumo vale até a tarefa mudar.
+  const [stepsOpen, setStepsOpen] = useState<boolean | null>(null)
   const [runs, setRuns] = useState<FlowRunView[] | null>(null)
   const [binding, setBinding] = useState<(StageFlow & { flowName: string }) | null>(null)
   const [pending, setPending] = useState<Record<string, string>>({})
@@ -132,6 +159,29 @@ export function TaskFlowSection({
   )
 
   const run = runs?.[0] ?? null
+  const currentStepView = run
+    ? [...run.history].reverse().find((h) => h.stepId === run.currentStep && !h.endedAt)
+    : undefined
+  const activeWho = run?.status === 'running' ? (run.agent?.name ?? 'Fluxo') : null
+  const activeWhat = run?.steps.find((s) => s.id === run.currentStep)?.name ?? null
+  const activeSince = run ? (currentStepView?.startedAt ?? run.startedAt) : null
+  const waitingYou =
+    run &&
+    (run.status === 'waiting_gate' ||
+      run.status === 'awaiting_decision' ||
+      (run.status === 'paused' && run.pauseReason === 'needs_choice'))
+      ? 1
+      : 0
+  useEffect(() => {
+    onActivityChange?.(
+      activeWho && activeSince ? { who: activeWho, what: activeWhat, since: activeSince } : null
+    )
+  }, [activeWho, activeWhat, activeSince, onActivityChange])
+  useEffect(() => {
+    onWaitingChange?.(waitingYou)
+  }, [waitingYou, onWaitingChange])
+  useEffect(() => () => onActivityChange?.(null), [onActivityChange])
+
   const openPr = pr && (pr.state === 'open' || pr.state === 'draft') ? pr : null
   if (!run && !binding && !backlog.linked && !openPr?.checks) return null
   const live = run && run.status !== 'finished' && run.status !== 'cancelled'
@@ -147,9 +197,12 @@ export function TaskFlowSection({
           {run ? `Fluxo: ${run.flowName}${run.agent ? ` · ${run.agent.name}` : ''}` : 'Fluxo'}
         </Heading>
         {run && (
-          <Token
-            size="sm"
-            color={RUN_STATUS[run.status].color}
+          <StatusToken
+            tone={
+              run.status === 'finished' && run.result === 'rejected'
+                ? 'danger'
+                : toneOf(RUN_STATUS[run.status].color)
+            }
             label={
               run.status === 'finished' && run.result === 'rejected'
                 ? 'Recusado'
@@ -172,9 +225,8 @@ export function TaskFlowSection({
 
       {openPr?.checks && (
         <HStack gap={2} vAlign="center" wrap="wrap">
-          <Token
-            size="sm"
-            color={CI_LABEL[openPr.checks].color}
+          <StatusToken
+            tone={toneOf(CI_LABEL[openPr.checks].color)}
             label={`${CI_LABEL[openPr.checks].label} (PR #${openPr.number})`}
             data-testid="pr-ci"
           />
@@ -194,23 +246,33 @@ export function TaskFlowSection({
       )}
 
       {run && run.history.length > 0 && (
-        <List hasDividers density="compact" aria-label="Linha do tempo do fluxo">
-          {run.history.map((h) => (
-            <Item
-              as="li"
-              key={h.seq}
-              label={stepName(h.stepId)}
-              description={[
-                STEP_STATUS[h.status],
-                duration(h.startedAt, h.endedAt),
-                h.costUsd !== null ? `US$ ${h.costUsd.toFixed(2)}` : '',
-                h.message ?? ''
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            />
-          ))}
-        </List>
+        <Collapsible
+          trigger={
+            <Text type="supporting" color="secondary" data-testid="flow-steps-summary">
+              {stepSummary(run.history)}
+            </Text>
+          }
+          isOpen={stepsOpen ?? !(live && run.status !== 'paused')}
+          onOpenChange={setStepsOpen}
+        >
+          <List hasDividers density="compact" aria-label="Linha do tempo do fluxo">
+            {run.history.map((h) => (
+              <Item
+                as="li"
+                key={h.seq}
+                label={stepName(h.stepId)}
+                description={[
+                  STEP_STATUS[h.status],
+                  duration(h.startedAt, h.endedAt),
+                  h.costUsd !== null ? `US$ ${h.costUsd.toFixed(2)}` : '',
+                  h.message ?? ''
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              />
+            ))}
+          </List>
+        </Collapsible>
       )}
 
       {backlog.linked && (
@@ -231,6 +293,8 @@ export function TaskFlowSection({
 
       {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && run.confirm && (
         <ConfirmCard
+          // Uma confirmação nova (push → pedir review) começa do zero, com os padrões dela.
+          key={`${run.id}:${run.currentStep}:${run.confirm.title}`}
           info={run.confirm}
           busy={busy}
           onApprove={(values) =>

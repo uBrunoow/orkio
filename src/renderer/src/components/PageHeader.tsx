@@ -12,14 +12,18 @@ export function PageHeader({
   title,
   subtitle,
   context,
+  meta,
   action
 }: {
   title: string
   subtitle?: string
   /** Linha curta acima do título, ex.: o projeto atual. */
   context?: string
+  /** Metadados numa linha cinza separada por "·" (ex.: "Agendada · Projeto x · há 2 sem"). */
+  meta?: ReadonlyArray<string | null | undefined | false>
   action?: React.ReactNode
 }): React.JSX.Element {
+  const metaLine = meta?.filter(Boolean).join(' · ')
   return (
     <HStack gap={4} vAlign="start" justify="between" wrap="wrap">
       <StackItem size="fill">
@@ -31,6 +35,11 @@ export function PageHeader({
           )}
           <Heading level={1}>{title}</Heading>
           {subtitle && <Text color="secondary">{subtitle}</Text>}
+          {metaLine && (
+            <Text type="supporting" color="secondary" data-testid="page-meta">
+              {metaLine}
+            </Text>
+          )}
         </VStack>
       </StackItem>
       {action}

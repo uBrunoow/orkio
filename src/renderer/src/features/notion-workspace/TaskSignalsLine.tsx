@@ -3,9 +3,9 @@ import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
 import type { TaskSignals } from '../../../../shared/ipc-contract'
 import type { ChecksState, PullRequestState, ReviewDecision } from '../../../../shared/task-signals'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { GitBranchIcon, PullRequestIcon } from '../../components/icons'
 
 type Color = 'default' | 'gray' | 'green' | 'yellow' | 'red' | 'purple'
@@ -62,30 +62,27 @@ export function TaskSignalsLine({
             aria-label={`Abrir a PR #${pr.number} no GitHub`}
             onClick={() => void window.orkio.openExternal(pr.url)}
           />
-          <Token
-            size="sm"
+          <StatusToken
             label={PR_STATE[pr.state].label}
-            color={PR_STATE[pr.state].color}
+            tone={toneOf(PR_STATE[pr.state].color)}
             data-testid="pr-state"
           />
           {pr.reviewDecision && pr.state !== 'merged' && pr.state !== 'closed' && (
-            <Token
-              size="sm"
+            <StatusToken
               label={REVIEW[pr.reviewDecision].label}
-              color={REVIEW[pr.reviewDecision].color}
+              tone={toneOf(REVIEW[pr.reviewDecision].color)}
               data-testid="pr-review"
             />
           )}
           {pr.unresolvedComments !== null && pr.unresolvedComments > 0 && (
-            <Token
-              size="sm"
+            <StatusToken
               label={`${pr.unresolvedComments} ${pr.unresolvedComments === 1 ? 'comentário' : 'comentários'}`}
-              color="yellow"
+              tone="warning"
               data-testid="pr-comments"
             />
           )}
           {pr.checks && pr.state !== 'merged' && pr.state !== 'closed' && (
-            <Token size="sm" label={CHECKS[pr.checks].label} color={CHECKS[pr.checks].color} />
+            <StatusToken label={CHECKS[pr.checks].label} tone={toneOf(CHECKS[pr.checks].color)} />
           )}
           {signals.otherPrs > 0 && (
             <Text type="supporting">

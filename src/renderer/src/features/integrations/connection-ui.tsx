@@ -11,7 +11,7 @@ import { Link } from '@astryxdesign/core/Link'
 import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { StackItem } from '@astryxdesign/core/Stack'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { ConnectedAccount, ConnectionStatus } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
@@ -37,7 +37,7 @@ export function StatusBadge({
 }): React.JSX.Element | null {
   if (status === null) return null
   const token = (label: string, color: 'default' | 'green' | 'yellow' | 'red') => (
-    <Token label={label} color={color} size="sm" data-status={label} />
+    <StatusToken label={label} tone={toneOf(color)} data-status={label} />
   )
   if (activity === 'testing') return token('Verificando…', 'default')
   if (activity === 'authorizing') return token(waitingLabel, 'default')

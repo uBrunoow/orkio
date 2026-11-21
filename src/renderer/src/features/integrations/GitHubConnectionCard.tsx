@@ -151,7 +151,7 @@ function DisconnectedView({
   )
 }
 
-function DeviceFlowView({
+export function DeviceFlowView({
   flow,
   onCancel
 }: {

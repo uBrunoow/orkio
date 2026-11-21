@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
@@ -6,17 +6,20 @@ import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
+import { Grid } from '@astryxdesign/core/Grid'
 import { Item } from '@astryxdesign/core/Item'
+import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { List } from '@astryxdesign/core/List'
 import { MultiSelector } from '@astryxdesign/core/MultiSelector'
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Selector } from '@astryxdesign/core/Selector'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import {
   AGENT_COLORS,
@@ -26,7 +29,6 @@ import {
   AGENT_ROLE_LABELS,
   AGENT_ROLES,
   agentIdFromName,
-  agentInitials,
   buildAgentPrompt,
   defaultAgent,
   validateAgent,
@@ -39,7 +41,9 @@ import {
 import type { ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
-import { PlusIcon, TrashIcon } from '../../components/icons'
+import { isTextField } from '../../app/shortcuts'
+import { BoardIcon, ListIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { AgentAvatar } from './AgentAvatar'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',
@@ -61,27 +65,6 @@ const STATUS_TOKEN: Record<
   archived: { label: 'Arquivado', color: 'gray' }
 }
 
-/** Avatar do agente: iniciais na cor do perfil (cores do tema, via Token). */
-export function AgentAvatar({
-  name,
-  color,
-  testId
-}: {
-  name: string
-  color: AgentColor
-  testId?: string
-}): React.JSX.Element {
-  return (
-    <Token
-      size="sm"
-      color={color}
-      label={agentInitials(name)}
-      aria-label={`Agente: ${name}`}
-      {...(testId ? { 'data-testid': testId } : {})}
-    />
-  )
-}
-
 type Editing = { mode: 'new' | 'edit'; scope: AgentScope; draft: AgentProfile; key: string | null }
 
 /** Tela "Agentes" (8A): perfis, aprovação dos perfis do repositório e regras por coluna. */
@@ -94,6 +77,23 @@ export function AgentsPage(): React.JSX.Element {
   const [commands, setCommands] = useState<string[]>([])
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<AgentFilter>('all')
+  const [layout, setLayout] = useState<'cards' | 'rows'>('cards')
+  const searchBox = useRef<HTMLDivElement | null>(null)
+
+  // "/" foca a busca (fora de campos de texto), como nas listas das referências.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return
+      const input = searchBox.current?.querySelector('input')
+      if (!input) return
+      e.preventDefault()
+      input.focus()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   useEffect(() => {
     let active = true
@@ -223,6 +223,45 @@ export function AgentsPage(): React.JSX.Element {
     } else setMessage({ tone: 'error', text: r.error.message })
   }
 
+  const q = query.trim().toLowerCase()
+  const visibleAgents = (state?.agents ?? []).filter(
+    (a) =>
+      matchesFilter(a, filter) &&
+      (!q ||
+        (a.profile?.name ?? a.id).toLowerCase().includes(q) ||
+        (a.profile ? AGENT_ROLE_LABELS[a.profile.role].toLowerCase().includes(q) : false))
+  )
+  const handlersFor = (a: AgentView): AgentHandlers => ({
+    isReviewing: reviewing === a.key,
+    busy,
+    onEdit: () => {
+      if (!a.profile) return
+      setMessage(null)
+      setEditing({ mode: 'edit', scope: a.scope, draft: a.profile, key: a.key })
+    },
+    onDuplicate: () => {
+      if (!a.profile) return
+      setMessage(null)
+      setEditing({
+        mode: 'new',
+        scope: a.scope,
+        draft: { ...a.profile, id: '', name: `${a.profile.name} (cópia)`, archived: false },
+        key: null
+      })
+    },
+    onArchive: () => {
+      if (!a.profile) return
+      void save({
+        mode: 'edit',
+        scope: a.scope,
+        draft: { ...a.profile, archived: !a.profile.archived },
+        key: a.key
+      })
+    },
+    onReview: () => setReviewing(reviewing === a.key ? null : a.key),
+    onApprove: () => void approve(a)
+  })
+
   return (
     <VStack gap={5} role="region" aria-label="Agentes">
       {header}
@@ -259,48 +298,68 @@ export function AgentsPage(): React.JSX.Element {
           description="Crie um agente (ex.: Ana, implementadora) e atribua tarefas a ele no quadro."
         />
       ) : (
-        <List hasDividers aria-label="Lista de agentes">
-          {state.agents.map((a) => (
-            <AgentRow
-              key={a.key}
-              view={a}
-              state={state}
-              isReviewing={reviewing === a.key}
-              busy={busy}
-              onEdit={() => {
-                if (!a.profile) return
-                setMessage(null)
-                setEditing({ mode: 'edit', scope: a.scope, draft: a.profile, key: a.key })
-              }}
-              onDuplicate={() => {
-                if (!a.profile) return
-                setMessage(null)
-                setEditing({
-                  mode: 'new',
-                  scope: a.scope,
-                  draft: {
-                    ...a.profile,
-                    id: '',
-                    name: `${a.profile.name} (cópia)`,
-                    archived: false
-                  },
-                  key: null
-                })
-              }}
-              onArchive={() => {
-                if (!a.profile) return
-                void save({
-                  mode: 'edit',
-                  scope: a.scope,
-                  draft: { ...a.profile, archived: !a.profile.archived },
-                  key: a.key
-                })
-              }}
-              onReview={() => setReviewing(reviewing === a.key ? null : a.key)}
-              onApprove={() => void approve(a)}
-            />
-          ))}
-        </List>
+        <VStack gap={3}>
+          <HStack
+            gap={3}
+            vAlign="center"
+            wrap="wrap"
+            role="toolbar"
+            aria-label="Filtros de agentes"
+          >
+            <HStack ref={searchBox}>
+              <TextInput
+                type="search"
+                label="Buscar agentes"
+                isLabelHidden
+                placeholder="Buscar agentes  /"
+                hasClear
+                value={query}
+                onChange={setQuery}
+              />
+            </HStack>
+            <SegmentedControl
+              label="Filtrar por estado"
+              size="sm"
+              value={filter}
+              onChange={(v) => setFilter(v as AgentFilter)}
+            >
+              {FILTERS.map((f) => (
+                <SegmentedControlItem
+                  key={f.value}
+                  value={f.value}
+                  label={`${f.label} ${countFor(state.agents, f.value)}`}
+                />
+              ))}
+            </SegmentedControl>
+            <StackItem size="fill" />
+            <SegmentedControl
+              label="Visualização dos agentes"
+              size="sm"
+              value={layout}
+              onChange={(v) => setLayout(v === 'rows' ? 'rows' : 'cards')}
+            >
+              <SegmentedControlItem value="cards" label="Cards" icon={<Icon icon={BoardIcon} />} />
+              <SegmentedControlItem value="rows" label="Linhas" icon={<Icon icon={ListIcon} />} />
+            </SegmentedControl>
+          </HStack>
+          {visibleAgents.length === 0 ? (
+            <Text type="supporting" color="secondary">
+              Nenhum agente com esse filtro.
+            </Text>
+          ) : layout === 'rows' ? (
+            <List hasDividers aria-label="Lista de agentes">
+              {visibleAgents.map((a) => (
+                <AgentRow key={a.key} view={a} state={state} {...handlersFor(a)} />
+              ))}
+            </List>
+          ) : (
+            <Grid columns={{ minWidth: 280 }} gap={3} role="list" aria-label="Lista de agentes">
+              {visibleAgents.map((a) => (
+                <AgentCard key={a.key} view={a} state={state} {...handlersFor(a)} />
+              ))}
+            </Grid>
+          )}
+        </VStack>
       )}
 
       {state && (
@@ -320,19 +379,25 @@ export function AgentsPage(): React.JSX.Element {
   )
 }
 
-function AgentRow({
-  view,
-  state,
-  isReviewing,
-  busy,
-  onEdit,
-  onDuplicate,
-  onArchive,
-  onReview,
-  onApprove
-}: {
-  view: AgentView
-  state: AgentsState
+type AgentFilter = 'all' | AgentView['status']
+
+const FILTERS: readonly { value: AgentFilter; label: string }[] = [
+  { value: 'all', label: 'Todos' },
+  { value: 'ready', label: 'Prontos' },
+  { value: 'needs_review', label: 'Revisar' },
+  { value: 'invalid', label: 'Com erro' },
+  { value: 'archived', label: 'Arquivados' }
+]
+
+function matchesFilter(a: AgentView, f: AgentFilter): boolean {
+  return f === 'all' ? a.status !== 'archived' : a.status === f
+}
+
+function countFor(agents: readonly AgentView[], f: AgentFilter): number {
+  return agents.filter((a) => matchesFilter(a, f)).length
+}
+
+interface AgentHandlers {
   isReviewing: boolean
   busy: boolean
   onEdit(): void
@@ -340,90 +405,167 @@ function AgentRow({
   onArchive(): void
   onReview(): void
   onApprove(): void
-}): React.JSX.Element {
+}
+
+/** Linha de metadados, erros, avisos e a revisão do perfil (igual em linha e card). */
+function AgentDetails({
+  view,
+  state,
+  isReviewing,
+  busy,
+  onReview,
+  onApprove
+}: { view: AgentView; state: AgentsState } & AgentHandlers): React.JSX.Element {
+  const p = view.profile
+  const name = p?.name ?? view.id
+  const flowName = p?.flow ? (state.flows.find((f) => f.id === p.flow)?.name ?? p.flow) : null
+  const details = [
+    view.assigned === 1 ? '1 tarefa' : `${view.assigned} tarefas`,
+    view.usageToday.runs === 1 ? '1 execução hoje' : `${view.usageToday.runs} execuções hoje`,
+    flowName ? `fluxo ${flowName}` : null
+  ].filter(Boolean)
+  return (
+    <VStack gap={2}>
+      <Text type="supporting" color="secondary">
+        {details.join(' · ')}
+      </Text>
+      {view.errors.map((e) => (
+        <Alert key={e} tone="danger">
+          {e}
+        </Alert>
+      ))}
+      {view.warnings.map((w) => (
+        <Text key={w} type="supporting">
+          {w}
+        </Text>
+      ))}
+      {view.status === 'needs_review' && p && (
+        <Alert tone="warning">
+          O perfil de {name} mudou no repositório desde a última aprovação. Revise antes de ele
+          rodar de novo.
+        </Alert>
+      )}
+      {isReviewing && p && (
+        <VStack gap={3}>
+          <ProfileSummary profile={p} state={state} />
+          <TextArea
+            label="O que vai no início da conversa"
+            value={buildAgentPrompt(p)}
+            isReadOnly
+            rows={8}
+            onChange={() => undefined}
+          />
+          <HStack gap={2}>
+            <Button
+              size="sm"
+              variant="primary"
+              label="Aprovar este perfil"
+              isLoading={busy}
+              onClick={onApprove}
+            />
+            <Button size="sm" variant="ghost" label="Fechar" onClick={onReview} />
+          </HStack>
+        </VStack>
+      )}
+    </VStack>
+  )
+}
+
+/** Ações do agente: Revisar (quando pede), Editar e o menu com Duplicar/Arquivar. */
+function AgentActions({
+  view,
+  isReviewing,
+  onEdit,
+  onDuplicate,
+  onArchive,
+  onReview
+}: { view: AgentView } & AgentHandlers): React.JSX.Element | null {
+  const p = view.profile
+  const name = p?.name ?? view.id
+  return (
+    <HStack gap={1} vAlign="center">
+      {view.status === 'needs_review' && p && !isReviewing && (
+        <Button size="sm" variant="secondary" label={`Revisar ${name}`} onClick={onReview} />
+      )}
+      {p && (
+        <>
+          <Button size="sm" variant="ghost" label={`Editar ${name}`} onClick={onEdit} />
+          <MoreMenu
+            label={`Ações de ${name}`}
+            size="sm"
+            items={[
+              { label: `Duplicar ${name}`, onClick: onDuplicate },
+              { label: p.archived ? `Desarquivar ${name}` : `Arquivar ${name}`, onClick: onArchive }
+            ]}
+          />
+        </>
+      )}
+    </HStack>
+  )
+}
+
+function AgentRow(
+  props: { view: AgentView; state: AgentsState } & AgentHandlers
+): React.JSX.Element {
+  const { view } = props
   const p = view.profile
   const name = p?.name ?? view.id
   const status = STATUS_TOKEN[view.status]
-  const flowName = p?.flow ? (state.flows.find((f) => f.id === p.flow)?.name ?? p.flow) : null
-  const details = [
-    p ? AGENT_ROLE_LABELS[p.role] : null,
-    view.file,
-    `${view.assigned} tarefa(s)`,
-    `hoje: ${view.usageToday.runs} execução(ões)`
-  ].filter(Boolean)
   return (
     <Item
       as="li"
       align="start"
-      startContent={<AgentAvatar name={name} color={p?.color ?? 'yellow'} />}
+      startContent={<AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} />}
       label={name}
       description={
-        <VStack gap={2}>
-          <Text type="supporting">{details.join(' · ')}</Text>
-          {flowName && <Text type="supporting">Fluxo preferido: {flowName}</Text>}
-          {view.errors.map((e) => (
-            <Alert key={e} tone="danger">
-              {e}
-            </Alert>
-          ))}
-          {view.warnings.map((w) => (
-            <Text key={w} type="supporting">
-              {w}
-            </Text>
-          ))}
-          {view.status === 'needs_review' && p && (
-            <Alert tone="warning">
-              O perfil de {name} mudou no repositório desde a última aprovação. Revise antes de ele
-              rodar de novo.
-            </Alert>
-          )}
-          {isReviewing && p && (
-            <Card variant="transparent">
-              <VStack gap={3}>
-                <ProfileSummary profile={p} state={state} />
-                <TextArea
-                  label="O que vai no início da conversa"
-                  value={buildAgentPrompt(p)}
-                  isReadOnly
-                  rows={8}
-                  onChange={() => undefined}
-                />
-                <HStack gap={2}>
-                  <Button
-                    size="sm"
-                    variant="primary"
-                    label="Aprovar este perfil"
-                    isLoading={busy}
-                    onClick={onApprove}
-                  />
-                  <Button size="sm" variant="ghost" label="Fechar" onClick={onReview} />
-                </HStack>
-              </VStack>
-            </Card>
-          )}
+        <VStack gap={1}>
+          {p && <Text type="supporting">{AGENT_ROLE_LABELS[p.role]}</Text>}
+          <AgentDetails {...props} />
         </VStack>
       }
       endContent={
         <HStack gap={2} vAlign="center">
-          <Token size="sm" color={status.color} label={status.label} />
-          {view.status === 'needs_review' && p && !isReviewing && (
-            <Button size="sm" variant="secondary" label={`Revisar ${name}`} onClick={onReview} />
-          )}
-          {p && (
-            <>
-              <Button size="sm" variant="ghost" label={`Editar ${name}`} onClick={onEdit} />
-              <Button size="sm" variant="ghost" label={`Duplicar ${name}`} onClick={onDuplicate} />
-              <Button
-                size="sm"
-                variant="ghost"
-                label={p.archived ? `Desarquivar ${name}` : `Arquivar ${name}`}
-                onClick={onArchive}
-              />
-            </>
-          )}
+          <StatusToken tone={toneOf(status.color)} label={status.label} />
+          <AgentActions {...props} />
         </HStack>
       }
     />
+  )
+}
+
+/** Card do agente na grade: avatar, nome, papel e estado no topo; metadados; ações no rodapé. */
+function AgentCard(
+  props: { view: AgentView; state: AgentsState } & AgentHandlers
+): React.JSX.Element {
+  const { view } = props
+  const p = view.profile
+  const name = p?.name ?? view.id
+  const status = STATUS_TOKEN[view.status]
+  return (
+    <Card padding={3} role="listitem" aria-label={name} data-testid="agent-card">
+      <VStack gap={3} height="100%">
+        <HStack gap={2} vAlign="center">
+          <AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} size="md" />
+          <StackItem size="fill">
+            <VStack gap={0.5}>
+              <Text weight="semibold" maxLines={1}>
+                {name}
+              </Text>
+              <Text type="supporting" color="secondary" maxLines={1}>
+                {p ? AGENT_ROLE_LABELS[p.role] : view.file}
+              </Text>
+            </VStack>
+          </StackItem>
+          <StatusToken tone={toneOf(status.color)} label={status.label} />
+        </HStack>
+        <StackItem size="fill">
+          <AgentDetails {...props} />
+        </StackItem>
+        <HStack hAlign="end">
+          <AgentActions {...props} />
+        </HStack>
+      </VStack>
+    </Card>
   )
 }
 

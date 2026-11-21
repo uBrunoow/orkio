@@ -43,10 +43,11 @@ async function choose(page: Page, scope: Locator, label: string, option: string)
     .or(scope.getByRole('button', { name }))
     .first()
     .click()
+  // Perto do fim do painel a lista abre abaixo da janela; o clique é no DOM, sem checar a viewport.
   await page
     .getByRole('option', { name: new RegExp(`^${esc(option)}( |$)`) })
     .first()
-    .click()
+    .evaluate((el) => (el as HTMLElement).click())
 }
 async function open(): Promise<OrkioApp> {
   orkio = await launchOrkio(userDataDir, { validTokens: [NOTION_TOKEN] }, { startPage: 'projects' })
@@ -250,6 +251,8 @@ test('critério 4: fechar o app no meio de um passo e retomar ao reabrir', async
   let flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
   await flow.getByRole('button', { name: 'Rodar fluxo de novo' }).click()
   await expect(flow.getByTestId('flow-status')).toHaveText('Rodando')
+  // Rodapé do painel: quem está trabalhando, há quanto tempo e em qual passo.
+  await expect(panel.getByTestId('task-working')).toContainText('Fluxo trabalhando há')
   await expect(panel.getByRole('list', { name: 'Log da execução' })).toContainText(
     'Primeira vez: trabalhando',
     { timeout: 30_000 }

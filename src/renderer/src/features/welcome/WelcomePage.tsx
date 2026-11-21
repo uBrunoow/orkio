@@ -1,23 +1,100 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
+import { Card } from '@astryxdesign/core/Card'
+import { Grid } from '@astryxdesign/core/Grid'
 import { HStack } from '@astryxdesign/core/HStack'
+import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
+import { Item } from '@astryxdesign/core/Item'
+import { List } from '@astryxdesign/core/List'
+import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { VStack } from '@astryxdesign/core/VStack'
+import type { ConnectionStatus } from '../../../../shared/ipc-contract'
+import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
-import { ClaudeLogo, GitHubLogo, NotionLogo, type SvgIcon } from '../../components/icons'
+import { StatusToken, type StatusTone } from '../../components/StatusToken'
+import {
+  ClaudeLogo,
+  GitHubLogo,
+  NotionLogo,
+  ProjectsIcon,
+  type SvgIcon
+} from '../../components/icons'
+import { LoginPanel } from './LoginPanel'
 import './welcome.css'
 
-const TOOLS: { icon: SvgIcon; index: string; name: string; text: string }[] = [
-  { icon: NotionLogo, index: '01', name: 'Notion', text: 'Planejamento: projetos e tarefas.' },
-  { icon: GitHubLogo, index: '02', name: 'GitHub', text: 'Código: repositórios, branches e PRs.' },
-  { icon: ClaudeLogo, index: '03', name: 'Claude Code', text: 'Execução: roda a tarefa por você.' }
-]
+interface Step {
+  icon: SvgIcon
+  name: string
+  text: string
+  status: { label: string; tone: StatusTone }
+  action: { label: string; onClick(): void } | null
+}
+
+/** Estado das três ferramentas, lido uma vez ao abrir (as mesmas chamadas de Integrações). */
+function useSetupStatus(): {
+  notion: ConnectionStatus | null
+  github: ConnectionStatus | null
+  claude: ClaudeCodeStatus | null
+  oauth: boolean
+  setGithub(s: ConnectionStatus): void
+} {
+  const [oauth, setOauth] = useState(false)
+  const [notion, setNotion] = useState<ConnectionStatus | null>(null)
+  const [github, setGithub] = useState<ConnectionStatus | null>(null)
+  const [claude, setClaude] = useState<ClaudeCodeStatus | null>(null)
+  useEffect(() => {
+    let alive = true
+    void window.orkio.notion
+      .getStatus()
+      .then((s) => alive && setNotion(s))
+      .catch(() => undefined)
+    void window.orkio.github
+      .getStatus()
+      .then((s) => alive && setGithub(s))
+      .catch(() => undefined)
+    void window.orkio.github
+      .getAuthOptions()
+      .then((o) => alive && setOauth(o.oauth))
+      .catch(() => undefined)
+    void window.orkio.claude
+      .status()
+      .then((s) => alive && setClaude(s))
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [])
+  return { notion, github, claude, oauth, setGithub }
+}
+
+function connectionStep(s: ConnectionStatus | null): Step['status'] {
+  if (!s) return { label: 'Verificando', tone: 'neutral' }
+  switch (s.state) {
+    case 'connected':
+      return { label: 'Conectado', tone: 'success' }
+    case 'connecting':
+      return { label: 'Conectando', tone: 'neutral' }
+    case 'error':
+      return { label: 'Precisa reconectar', tone: 'danger' }
+    default:
+      return { label: 'Não conectado', tone: 'warning' }
+  }
+}
+
+function claudeStep(s: ClaudeCodeStatus | null): Step['status'] {
+  if (!s) return { label: 'Verificando', tone: 'neutral' }
+  if (!s.installed) return { label: 'Não encontrado', tone: 'warning' }
+  if (!s.meetsMinimum) return { label: `Atualize para ${s.minimumVersion}`, tone: 'warning' }
+  if (s.loggedIn === false) return { label: 'Sem login', tone: 'warning' }
+  return { label: s.version ? `Pronto, ${s.version}` : 'Pronto', tone: 'success' }
+}
 
 /**
  * Abertura do app: tela laranja com o símbolo se desenhando, o laranja se fecha em círculo e
- * revela a tela "Vamos começar" (sem sidebar). Depois vai ganhar o login com
- * GitHub/Notion. Animações só em CSS (welcome.css); `prefers-reduced-motion` pula tudo.
+ * revela a tela "Vamos começar" (sem sidebar): título, "Começar" e o checklist com o estado
+ * real de Notion, GitHub, Claude Code e projeto. Animações só em CSS (welcome.css); `prefers-reduced-motion` pula tudo.
  */
 export function WelcomePage({
   onStart,
@@ -28,57 +105,142 @@ export function WelcomePage({
 }): React.JSX.Element {
   // A abertura sai do DOM quando a animação de fechar termina.
   const [splash, setSplash] = useState(true)
+  const setup = useSetupStatus()
+  // Login com GitHub primeiro (enquanto não conectado); "Continuar sem GitHub" pula para o checklist.
+  const [skippedLogin, setSkippedLogin] = useState(false)
+  const showLogin = !skippedLogin && setup.github !== null && setup.github.state !== 'connected'
+
+  const steps: Step[] = [
+    {
+      icon: NotionLogo,
+      name: 'Notion',
+      text: 'Onde ficam os projetos e as tarefas.',
+      status: connectionStep(setup.notion),
+      action:
+        setup.notion?.state === 'connected'
+          ? null
+          : { label: 'Conectar o Notion', onClick: onOpenIntegrations }
+    },
+    {
+      icon: GitHubLogo,
+      name: 'GitHub',
+      text: 'Repositórios, branches e PRs de cada tarefa.',
+      status: connectionStep(setup.github),
+      action:
+        setup.github?.state === 'connected'
+          ? null
+          : { label: 'Conectar o GitHub', onClick: onOpenIntegrations }
+    },
+    {
+      icon: ClaudeLogo,
+      name: 'Claude Code',
+      text: 'Roda as tarefas no seu computador, com o seu login.',
+      status: claudeStep(setup.claude),
+      action:
+        claudeStep(setup.claude).tone === 'success'
+          ? null
+          : { label: 'Ver o Claude Code', onClick: onOpenIntegrations }
+    },
+    {
+      icon: ProjectsIcon,
+      name: 'Projeto',
+      text: 'A pasta do repositório que o Orkio vai acompanhar.',
+      status: { label: 'Falta adicionar', tone: 'warning' },
+      action: { label: 'Adicionar projeto', onClick: onStart }
+    }
+  ]
+  const done = steps.filter((s) => s.status.tone === 'success').length
 
   return (
     <VStack className="orkio-intro" role="main" aria-labelledby="welcome-title">
-      <VStack className="orkio-intro__stage" vAlign="between" hAlign="stretch">
-        <HStack gap={3} vAlign="center" className="orkio-intro__reveal orkio-intro__d1">
+      <VStack className="orkio-intro__stage" gap={6}>
+        <HStack className="orkio-intro__reveal orkio-intro__d1">
           <OrkioLogo variant="simple" withWordmark size={24} />
-          <Text type="supporting" className="orkio-intro__mono">
-            {'// desktop'}
-          </Text>
         </HStack>
 
-        <VStack gap={5} hAlign="start" maxWidth={760}>
-          <Text className="orkio-slogan orkio-intro__reveal orkio-intro__d2">
-            Do contexto ao commit
-          </Text>
-          <Text
-            as="h1"
-            id="welcome-title"
-            className="orkio-display orkio-intro__title orkio-intro__reveal orkio-intro__d3"
-          >
-            Vamos começar
-          </Text>
-          <Text color="secondary" className="orkio-intro__reveal orkio-intro__d4">
-            Planejamento no Notion, código no GitHub e execução no Claude Code. O Orkio liga tudo e
-            leva cada tarefa do quadro até a branch.
-          </Text>
-          <HStack gap={2} wrap="wrap" className="orkio-intro__reveal orkio-intro__d5">
-            <Button variant="primary" size="lg" label="Começar" onClick={onStart} />
-            <Button
-              variant="ghost"
-              size="lg"
-              label="Conectar ferramentas"
-              onClick={onOpenIntegrations}
+        {setup.github === null ? null : showLogin ? (
+          <StackItem size="fill">
+            <LoginPanel
+              oauth={setup.oauth}
+              onConnected={setup.setGithub}
+              onSkip={() => setSkippedLogin(true)}
+              onUseToken={onOpenIntegrations}
             />
-          </HStack>
-        </VStack>
+          </StackItem>
+        ) : (
+          <StackItem size="fill">
+            <VStack height="100%" vAlign="center">
+              <Grid columns={{ minWidth: 360, max: 2 }} gap={10} align="center">
+                <VStack gap={4} hAlign="start">
+                  <Text className="orkio-slogan orkio-intro__reveal orkio-intro__d2">
+                    Do contexto ao commit
+                  </Text>
+                  <Text
+                    as="h1"
+                    id="welcome-title"
+                    className="orkio-display orkio-intro__title orkio-intro__reveal orkio-intro__d3"
+                  >
+                    Vamos começar
+                  </Text>
+                  <Text color="secondary" className="orkio-intro__reveal orkio-intro__d4">
+                    O Orkio liga o quadro do Notion, o código no GitHub e o Claude Code, e leva cada
+                    tarefa até a branch.
+                  </Text>
+                  <HStack className="orkio-intro__reveal orkio-intro__d5">
+                    <Button variant="primary" size="lg" label="Começar" onClick={onStart} />
+                  </HStack>
+                </VStack>
 
-        <HStack gap={8} wrap="wrap" vAlign="start" className="orkio-intro__reveal orkio-intro__d6">
-          {TOOLS.map((t) => (
-            <VStack key={t.name} gap={1} className="orkio-intro__tool">
-              <HStack gap={2} vAlign="center">
-                <Text type="supporting" className="orkio-intro__mono">
-                  {t.index}
-                </Text>
-                <Icon icon={t.icon} size="sm" />
-                <Text weight="semibold">{t.name}</Text>
-              </HStack>
-              <Text type="supporting">{t.text}</Text>
+                <Card padding={0} className="orkio-intro__reveal orkio-intro__d6">
+                  <VStack gap={0}>
+                    <HStack gap={2} vAlign="center" padding={4} paddingBlockEnd={2}>
+                      <Heading level={2}>Preparar o Orkio</Heading>
+                      <StackItem size="fill" />
+                      <Text
+                        type="supporting"
+                        color="secondary"
+                        hasTabularNumbers
+                        data-testid="setup-progress"
+                      >
+                        {done} de {steps.length} prontos
+                      </Text>
+                    </HStack>
+                    <List hasDividers aria-label="Preparar o Orkio">
+                      {steps.map((step) => (
+                        <Item
+                          key={step.name}
+                          as="li"
+                          startContent={<Icon icon={step.icon} />}
+                          label={step.name}
+                          description={
+                            <VStack gap={1}>
+                              <Text type="supporting" color="secondary">
+                                {step.text}
+                              </Text>
+                              <StatusToken label={step.status.label} tone={step.status.tone} />
+                            </VStack>
+                          }
+                          {...(step.action
+                            ? {
+                                endContent: (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    label={step.action.label}
+                                    onClick={step.action.onClick}
+                                  />
+                                )
+                              }
+                            : {})}
+                        />
+                      ))}
+                    </List>
+                  </VStack>
+                </Card>
+              </Grid>
             </VStack>
-          ))}
-        </HStack>
+          </StackItem>
+        )}
       </VStack>
 
       {splash && (

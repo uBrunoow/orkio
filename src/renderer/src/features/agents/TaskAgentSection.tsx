@@ -5,7 +5,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AgentBadge, AgentView } from '../../../../shared/agent'
 import { Alert } from '../../components/Alert'
-import { AgentAvatar } from './AgentsPage'
+import { AgentAvatar } from './AgentAvatar'
 
 const NONE = '__nenhum__'
 
@@ -61,7 +61,7 @@ export function TaskAgentSection({
   return (
     <VStack gap={2}>
       <HStack gap={2} vAlign="end">
-        {agent && <AgentAvatar name={agent.name} color={agent.color} />}
+        {agent && <AgentAvatar name={agent.name} color={agent.color} seed={agent.key} />}
         <Selector
           label="Agente"
           description="Roda os fluxos desta tarefa com as instruções e limites dele."

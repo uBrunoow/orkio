@@ -83,7 +83,17 @@ async function historyText(page: Page): Promise<string> {
   const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
   const list = panel.getByRole('list', { name: 'Histórico da tarefa' })
   await expect(list).toBeVisible()
-  const text = (await list.textContent()) ?? ''
+  // Evento por evento, com quem fez; sem o horário relativo ("há 13 segundos"), que muda sozinho.
+  const text = await list.evaluate((el) =>
+    [...el.querySelectorAll('li')]
+      .map((li) => {
+        const copy = li.cloneNode(true) as HTMLElement
+        copy.querySelectorAll('time').forEach((t) => t.remove())
+        return copy.textContent ?? ''
+      })
+      .join('\n')
+  )
+  expect(text).not.toMatch(/agora|há \d/)
   await panel.getByRole('button', { name: 'Fechar' }).click()
   return text
 }

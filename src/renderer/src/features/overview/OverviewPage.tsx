@@ -15,7 +15,7 @@ import { Selector } from '@astryxdesign/core/Selector'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardTaskRef } from '../../../../shared/ipc-contract'
 import {
@@ -207,10 +207,9 @@ function WaitingSection({
               key={w.key}
               data-testid="waiting-item"
               startContent={
-                <Token
-                  size="sm"
+                <StatusToken
                   label={WAITING_LABEL[w.kind].label}
-                  color={WAITING_LABEL[w.kind].color}
+                  tone={toneOf(WAITING_LABEL[w.kind].color)}
                 />
               }
               label={<TaskName task={w.task} />}
@@ -385,14 +384,13 @@ function ProjectCard({
               ['Notion', p.health.notion]
             ] as const
           ).map(([name, level]) => (
-            <Token
+            <StatusToken
               key={name}
-              size="sm"
-              color={HEALTH_COLOR[level]}
+              tone={toneOf(HEALTH_COLOR[level])}
               label={`${name}: ${HEALTH_TEXT[level]}`}
             />
           ))}
-          {p.automationsPaused && <Token size="sm" color="yellow" label="Automações pausadas" />}
+          {p.automationsPaused && <StatusToken tone="warning" label="Automações pausadas" />}
         </HStack>
         {p.health.message && <Text type="supporting">{p.health.message}</Text>}
         {p.hasBoard ? (

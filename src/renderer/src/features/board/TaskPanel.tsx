@@ -1,19 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
 import { IconButton } from '@astryxdesign/core/IconButton'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { Selector } from '@astryxdesign/core/Selector'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
+import { Timer } from '@astryxdesign/core/Timer'
 import { Token } from '@astryxdesign/core/Token'
 import { VStack } from '@astryxdesign/core/VStack'
 import type {
@@ -23,16 +21,12 @@ import type {
   TaskSignals
 } from '../../../../shared/ipc-contract'
 import type { TaskSection } from '../../../../shared/overview'
-import {
-  branchUrl,
-  describeEvent as describe,
-  prNumber,
-  prUrl
-} from '../../../../shared/task-history'
 import { Alert } from '../../components/Alert'
 import { CloseIcon, ExpandIcon, ExternalLinkIcon } from '../../components/icons'
+import { TaskTimeline } from './TaskTimeline'
+import { StatusToken } from '../../components/StatusToken'
 import { TaskClaudeSection } from '../claude/TaskClaudeSection'
-import { TaskFlowSection } from '../task-flows/TaskFlowSection'
+import { TaskFlowSection, type TaskActivity } from '../task-flows/TaskFlowSection'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import type { AgentBadge } from '../../../../shared/agent'
 import { TaskAgentSection } from '../agents/TaskAgentSection'
@@ -135,8 +129,18 @@ export function TaskPanel({
   ])
 
   const label = card.displayId ?? card.title
-  // "Esperando você" sempre no topo (6E): o pedido em si fica na seção Claude Code.
-  const [waiting, setWaiting] = useState(0)
+  // "Esperando você" sempre no topo (6E): pedidos do Claude Code e decisões do fluxo. O pedido em
+  // si fica na seção dele; o aviso leva até lá.
+  const [waitingClaude, setWaitingClaude] = useState(0)
+  const [waitingFlow, setWaitingFlow] = useState(0)
+  const waiting = waitingClaude + waitingFlow
+  const goToWaiting = (): void => {
+    const target =
+      waitingFlow > 0
+        ? document.querySelector('[data-panel-section="flow"]')
+        : document.getElementById(`claude-waiting-${card.taskId}`)
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
   const waitingBanner =
     waiting > 0 ? (
       <Alert
@@ -146,26 +150,51 @@ export function TaskPanel({
             size="sm"
             variant="secondary"
             label={waiting === 1 ? 'Ver pedido' : 'Ver pedidos'}
-            onClick={() =>
-              document
-                .getElementById(`claude-waiting-${card.taskId}`)
-                ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-            }
+            onClick={goToWaiting}
           />
         }
       >
-        {waiting === 1
-          ? 'O Claude Code está esperando você.'
-          : `O Claude Code está esperando você (${waiting} pedidos).`}
+        {waitingFlow > 0 && waitingClaude === 0
+          ? 'O fluxo está esperando a sua decisão.'
+          : waiting === 1
+            ? 'O Claude Code está esperando você.'
+            : `Esperando você (${waiting} pedidos).`}
       </Alert>
     ) : null
+
+  // Quem está trabalhando agora (fluxo primeiro; senão a execução avulsa do Claude Code).
+  const [flowActivity, setFlowActivity] = useState<TaskActivity | null>(null)
+  const [claudeActivity, setClaudeActivity] = useState<TaskActivity | null>(null)
+  const activity = flowActivity ?? claudeActivity
+  const workingFooter = activity ? (
+    <HStack
+      gap={2}
+      vAlign="center"
+      padding={3}
+      role="status"
+      aria-label="Trabalhando agora"
+      data-testid="task-working"
+    >
+      <StatusToken tone="running" label={`${activity.who} trabalhando há`} />
+      <Timer startTime={Date.parse(activity.since)} />
+      {activity.what && (
+        <Text type="supporting" color="secondary" maxLines={1}>
+          · {activity.what}
+        </Text>
+      )}
+    </HStack>
+  ) : null
 
   const tokens = (
     <>
       <HStack gap={2} wrap="wrap" vAlign="center">
         {card.status && <Token size="sm" label={`Notion: ${card.status.name}`} color="default" />}
-        {card.priority && <Token size="sm" label={card.priority.name} />}
-        {card.sync.state === 'pending' && <Token size="sm" color="yellow" label="Sincronizando" />}
+        {card.priority && (
+          <Text type="supporting" color="secondary" data-testid="task-priority">
+            {card.priority.name}
+          </Text>
+        )}
+        {card.sync.state === 'pending' && <StatusToken tone="warning" label="Sincronizando" />}
       </HStack>
       {card.sync.state === 'pending' && card.sync.message && (
         <Text type="supporting">{card.sync.message}</Text>
@@ -220,6 +249,8 @@ export function TaskPanel({
           taskId={card.taskId}
           stageId={card.stageId}
           pr={signals?.pr ?? null}
+          onActivityChange={setFlowActivity}
+          onWaitingChange={setWaitingFlow}
         />
       </VStack>
       <VStack data-panel-section="claude">
@@ -227,7 +258,8 @@ export function TaskPanel({
           projectId={projectId}
           taskId={card.taskId}
           stageName={card.stageId ? stageName(card.stageId) : null}
-          onWaitingChange={setWaiting}
+          onWaitingChange={setWaitingClaude}
+          onActivityChange={setClaudeActivity}
         />
       </VStack>
     </>
@@ -235,109 +267,78 @@ export function TaskPanel({
 
   const historySection = (
     <VStack gap={2} data-panel-section="history">
-      <Heading level={3}>Histórico</Heading>
+      <Heading level={3}>Linha do tempo</Heading>
       {history === null ? (
         <Skeleton height={40} aria-label="Carregando histórico" />
       ) : history.length === 0 ? (
         <Text type="supporting">Sem eventos ainda.</Text>
       ) : (
-        <List hasDividers density="compact" aria-label="Histórico da tarefa">
-          {history.map((e) => (
-            <Item
-              as="li"
-              key={e.id}
-              label={describe(e, stageName)}
-              description={new Date(e.at).toLocaleString('pt-BR', {
-                dateStyle: 'short',
-                timeStyle: 'short'
-              })}
-              {...(prUrl(e)
-                ? {
-                    endContent: (
-                      <IconButton
-                        size="sm"
-                        variant="ghost"
-                        label={`Abrir a PR #${prNumber(e)} no GitHub`}
-                        icon={<Icon icon={ExternalLinkIcon} />}
-                        onClick={() => void window.orkio.openExternal(prUrl(e)!)}
-                      />
-                    )
-                  }
-                : branchUrl(e)
-                  ? {
-                      endContent: (
-                        <IconButton
-                          size="sm"
-                          variant="ghost"
-                          label="Abrir a branch no GitHub"
-                          icon={<Icon icon={ExternalLinkIcon} />}
-                          onClick={() => void window.orkio.openExternal(branchUrl(e)!)}
-                        />
-                      )
-                    }
-                  : {})}
-            />
-          ))}
-        </List>
+        <TaskTimeline history={history} agent={agent} stageName={stageName} />
       )}
     </VStack>
   )
 
   if (variant === 'page') {
     return (
-      <HStack gap={6} vAlign="start" role="region" aria-label={`Tarefa ${label}`}>
-        <StackItem size="fill">
-          <VStack gap={5}>
-            {waitingBanner}
-            {work}
+      <VStack gap={3} role="region" aria-label={`Tarefa ${label}`}>
+        <HStack gap={6} vAlign="start">
+          <StackItem size="fill">
+            <VStack gap={5}>
+              {waitingBanner}
+              {work}
+              {historySection}
+            </VStack>
+          </StackItem>
+          <VStack gap={5} width="calc(var(--spacing-12) * 7)">
+            <VStack gap={3}>{tokens}</VStack>
+            {controls}
           </VStack>
-        </StackItem>
-        <VStack gap={5} width="calc(var(--spacing-12) * 7)">
-          <VStack gap={3}>{tokens}</VStack>
-          {controls}
-          {historySection}
-        </VStack>
-      </HStack>
+        </HStack>
+        {workingFooter}
+      </VStack>
     )
   }
 
   return (
-    <Card role="complementary" aria-label={`Detalhes de ${label}`} padding={0} height="100%">
-      <ScrollableArea label={`Detalhes de ${label} (rolagem)`} height="100%" padding={4}>
-        <VStack gap={4}>
-          <HStack gap={1} vAlign="start">
-            <StackItem size="fill">
-              <VStack gap={1}>
-                <HStack>
-                  <Code>{card.displayId ?? '—'}</Code>
-                </HStack>
-                <Heading level={2}>{card.title}</Heading>
-              </VStack>
-            </StackItem>
-            {onExpand && (
+    <VStack role="complementary" aria-label={`Detalhes de ${label}`} height="100%">
+      <StackItem size="fill">
+        <ScrollableArea label={`Detalhes de ${label} (rolagem)`} height="100%" padding={4}>
+          <VStack gap={4}>
+            <HStack gap={1} vAlign="start">
+              <StackItem size="fill">
+                <VStack gap={1}>
+                  <HStack>
+                    <Code>{card.displayId ?? '—'}</Code>
+                  </HStack>
+                  <Heading level={2}>{card.title}</Heading>
+                </VStack>
+              </StackItem>
+              {onExpand && (
+                <IconButton
+                  size="sm"
+                  variant="ghost"
+                  label="Abrir tarefa"
+                  icon={<Icon icon={ExpandIcon} />}
+                  onClick={onExpand}
+                />
+              )}
               <IconButton
                 size="sm"
                 variant="ghost"
-                label="Abrir tarefa"
-                icon={<Icon icon={ExpandIcon} />}
-                onClick={onExpand}
+                label="Fechar"
+                icon={<Icon icon={CloseIcon} />}
+                onClick={onClose}
               />
-            )}
-            <IconButton
-              size="sm"
-              variant="ghost"
-              label="Fechar"
-              icon={<Icon icon={CloseIcon} />}
-              onClick={onClose}
-            />
-          </HStack>
-          {waitingBanner}
-          {tokens}
-          {controls}
-          {work}
-          {historySection}
-        </VStack>
-      </ScrollableArea>
-    </Card>
+            </HStack>
+            {waitingBanner}
+            {tokens}
+            {controls}
+            {work}
+            {historySection}
+          </VStack>
+        </ScrollableArea>
+      </StackItem>
+      {workingFooter}
+    </VStack>
   )
 }

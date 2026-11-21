@@ -36,9 +36,9 @@ Claude Code. Hoje existem:
 - **Atualizações (6C):** electron-updater lendo o repo público de releases; banner, Configurações
   (Atualizações + Sobre), "O que há de novo"; nunca reinicia por cima de trabalho em andamento.
 - **Interface (6E):** menu com Visão geral, o projeto atual (Quadro, Etapas e automações, Fluxos,
-  Contexto do Claude), Projetos, Agentes, Integrações e Configurações (Ctrl/Cmd+1…9 nessa ordem), rotas tipadas, tarefa em
+  Contexto do Claude), Projetos, Agentes, Integrações e Configurações (Ctrl/Cmd+1…9 nessa ordem), numa coluna só de ícones (tooltip e nome acessível) sob uma barra superior com o seletor de projeto, buscar e o sino de "esperando você", rotas tipadas, tarefa em
   painel ou tela cheia, Command Palette (Ctrl/Cmd+K), card do quadro com um estado só (`cardStatus`).
-  Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`.
+  Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`. Redesign em fases (densidade pelo tema, estado em ponto + texto, moldura, quadro com tarefa em folha sobre as colunas e Kanban/Lista, agentes com avatar geométrico) em `docs/ui-redesign.md`.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
   Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) no repo público
   `uBrunoow/orkio-releases`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -133,6 +133,7 @@ src/
       settings/            # 6C: Configurações (Atualizações, Sobre), UpdateBanner, WhatsNewPanel
     components/Alert.tsx   # mensagens (Banner da Astryx)
     components/PageHeader.tsx  # o único h1 da tela, contexto (projeto) acima e ações à direita
+    components/StatusToken.tsx # estado único: ponto + texto (success/warning/danger/running/neutral)
     components/PageState.tsx   # carregando / vazio (com ação) / erro, iguais em todas as telas
     components/SaveBar.tsx     # barra de salvar fixa (alterações não salvas, Descartar, Salvar)
     components/OrkioLogo/  # logo (símbolo full/simple + wordmark)
@@ -313,7 +314,7 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 - Prettier: sem ponto e vírgula, aspas simples, 100 colunas.
 - **UI com Astryx** (`@astryxdesign/core`). Leia as props com `pnpm exec astryx component <Nome>`
   antes de usar. Layout com `VStack`/`HStack`/`Grid`/`Card`, texto com `Text`/`Heading`, nada de
-  `<div>`/`<span>` cru. Dados densos em `List`/`Item`. Status em `Token` (`Badge` só para contagens).
+  `<div>`/`<span>` cru. Dados densos em `List`/`Item`. Estado em `StatusToken` (ponto colorido + texto, nunca bloco; `Token` só para categoria; `Badge` só para contagens).
   Mensagens: `components/Alert.tsx` (Banner; erro = `role="alert"`, aviso = `role="status"`).
 - CSS próprio só na camada `orkio-brand` (`styles/brand.css`, `OrkioLogo.css`), apenas para a
   marca e com tokens do tema. Nada de CSS de layout. Exceção: `features/welcome/welcome.css`

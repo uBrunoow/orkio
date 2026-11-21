@@ -13,16 +13,16 @@ describe('cardStatus', () => {
     expect(cardStatus(synced, null, undefined)).toBeNull()
   })
 
-  it('esperando você vence tudo e é o único laranja', () => {
+  it('esperando você vence tudo e só o fluxo rodando é laranja', () => {
     const s = cardStatus({ sync: { state: 'failed' } }, 'needs_you', withPr({ checks: 'failure' }))
-    expect(s).toEqual({ kind: 'flow', label: 'Esperando você', tone: 'accent' })
+    expect(s).toEqual({ kind: 'flow', label: 'Esperando você', tone: 'warning' })
     for (const other of [
       cardStatus({ sync: { state: 'failed' } }, null, undefined),
       cardStatus(synced, null, withPr({ checks: 'failure' })),
-      cardStatus(synced, 'running', undefined),
       cardStatus(synced, null, withPr({ state: 'merged' }))
     ])
-      expect(other?.tone).not.toBe('accent')
+      expect(other?.tone).not.toBe('warning')
+    expect(cardStatus(synced, 'running', undefined)?.tone).toBe('running')
   })
 
   it('falhas antes do que está rodando', () => {
@@ -44,11 +44,10 @@ describe('cardStatus', () => {
     expect(cardStatus(synced, null, withPr({ state: 'closed', checks: 'failure' }))).toBeNull()
   })
 
-  it('rodando, sincronizando e PR aberta são neutros', () => {
+  it('sincronizando e PR aberta são neutros', () => {
     expect(cardStatus(synced, 'running', withPr({}))).toMatchObject({
       label: 'Fluxo rodando',
-      tone: 'neutral',
-      isPulsing: true
+      tone: 'running'
     })
     expect(cardStatus({ sync: { state: 'pending' } }, null, withPr({}))?.label).toBe(
       'Sincronizando'
