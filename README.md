@@ -1,363 +1,247 @@
-# Orkio
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="docs/readme/lockup-light.png">
+    <img src="docs/readme/lockup-dark.png" alt="Orkio" height="52">
+  </picture>
+  <p><sub>DO CONTEXTO AO COMMIT</sub></p>
+  <h1>Suas tarefas do Notion viram PRs revisadas. Com você no controle.</h1>
+  <p>
+    O Orkio orquestra Notion, GitHub e Claude Code num app de desktop.<br>
+    Monta o quadro, roda o agente num ambiente isolado por tarefa e move cada card conforme a PR avança.
+  </p>
+  <p>
+    <a href="https://github.com/uBrunoow/orkio-releases/releases/latest"><strong>Download</strong></a> ·
+    <a href="#primeiros-passos"><strong>Primeiros passos</strong></a> ·
+    <a href="docs/configuracao.md"><strong>Configuração</strong></a> ·
+    <a href="docs/desenvolvimento.md"><strong>Desenvolvimento</strong></a> ·
+    <a href="brand/BRAND.md"><strong>Marca</strong></a>
+  </p>
+  <p>
+    <a href="https://github.com/uBrunoow/orkio-releases/releases/latest">
+      <img src="https://img.shields.io/github/v/release/uBrunoow/orkio-releases?color=FF5B1F&label=release" alt="Último release">
+    </a>
+    <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows-desktop-1E1E21?logo=electron&logoColor=white" alt="macOS e Windows">
+    <img src="https://img.shields.io/badge/Electron-45-1E1E21?logo=electron&logoColor=9FEAF9" alt="Electron 45">
+    <img src="https://img.shields.io/badge/TypeScript-strict-1E1E21?logo=typescript&logoColor=3178C6" alt="TypeScript strict">
+    <img src="https://img.shields.io/badge/React-19-1E1E21?logo=react&logoColor=61DAFB" alt="React 19">
+    <br>
+    <img src="https://img.shields.io/badge/Notion-conectado-1E1E21?logo=notion&logoColor=white" alt="Notion">
+    <img src="https://img.shields.io/badge/GitHub-conectado-1E1E21?logo=github&logoColor=white" alt="GitHub">
+    <img src="https://img.shields.io/badge/Claude%20Code-CLI-FF5B1F?logo=anthropic&logoColor=0A0A0B" alt="Claude Code">
+    <img src="https://img.shields.io/badge/licen%C3%A7a-propriet%C3%A1ria-8F8F94" alt="Licença proprietária">
+  </p>
+</div>
 
-App desktop (Electron) de orquestração de desenvolvimento com IA. Conecta planejamento
-(Notion), código (GitHub) e agentes (Claude Code).
+<p align="center">
+  <img src="docs/readme/hero.png" alt="O quadro do projeto com o painel da tarefa aberto: o Claude Code pede para rodar npm test e espera a sua aprovação" width="100%">
+</p>
 
-> Estado atual: só as **conexões de conta** estão implementadas:
->
-> - **Notion** — login com Notion (OAuth) ou, como alternativa, um token colado;
-> - **GitHub** — login com GitHub (OAuth Device Flow) ou, como alternativa, um fine-grained PAT.
+O gargalo deixou de ser o modelo. Virou o caminho entre as ferramentas. A tarefa está no Notion, o
+código no GitHub e o agente num terminal, e quem cola tudo é você: copia o contexto da página, cria
+a branch, acompanha o Claude Code, abre a PR e volta ao Notion para mudar o status.
 
-## Requisitos
+O Orkio faz esse caminho num lugar só. Ele lê as tarefas do Notion, monta um kanban por projeto,
+roda o Claude Code com o seu login num worktree isolado para cada tarefa e acompanha branch, PR,
+revisão e CI no GitHub. Nada vai para a main sem você: o push é só da branch da tarefa, e os
+pontos que importam esperam a sua aprovação.
 
-- Node.js 22.12+ (ou 20.19+)
-- pnpm 10+
-- Linux: um keyring ativo (GNOME Keyring/libsecret ou KWallet). Sem ele o Orkio
-  **não salva** o token (ver [Segurança](#segurança)).
+## Instalar
+
+Baixe o instalador do [último release](https://github.com/uBrunoow/orkio-releases/releases/latest).
+
+- **macOS** (`Orkio-…-mac-arm64.dmg` para Apple Silicon, `…-mac-x64.dmg` para Intel): arraste para
+  Aplicativos. Enquanto o app não tiver assinatura da Apple, a primeira abertura é bloqueada: abra
+  uma vez e depois vá em **Ajustes do Sistema → Privacidade e Segurança → Abrir Mesmo Assim**.
+  (No macOS 15+ o clique direito → Abrir não basta.) Pelo Terminal:
+  `xattr -dr com.apple.quarantine /Applications/Orkio.app`.
+- **Windows** (`Orkio-…-win-x64-setup.exe`): instala no seu usuário, sem pedir administrador.
+  Sem assinatura, o SmartScreen avisa: **Mais informações → Executar assim mesmo**.
+
+<details>
+<summary>Rodar a partir do código</summary>
+
+```bash
+git clone https://github.com/uBrunoow/orkio.git
+cd orkio
+pnpm install   # também baixa o binário do Electron
+pnpm dev       # abre o app com hot reload
+```
+
+Precisa de Node.js 22.12+ (ou 20.19+), pnpm 10+ e `git` no PATH. No Linux, um keyring ativo
+(GNOME Keyring ou KWallet): sem ele o Orkio não salva tokens. Detalhes em
+[docs/desenvolvimento.md](docs/desenvolvimento.md).
+
+</details>
+
+Para rodar tarefas com IA, instale o [Claude Code](https://docs.claude.com/en/docs/claude-code)
+e entre com a sua conta (`claude` no terminal). O Orkio usa esse login e não pede chave de API.
+
+## Primeiros passos
+
+1. **Integrações → Conectar com Notion.** Escolha o workspace e as páginas dos seus bancos.
+2. **Integrações → Conectar com GitHub.** Copie o código, cole em github.com/login/device e autorize.
+3. **Bancos do Notion.** Escolha o banco de Projetos e o de Tarefas e confirme o mapeamento
+   (título, status, ID como `ORK-142` e a relação com o projeto).
+4. **Projetos → Adicionar projeto.** Aponte a pasta do clone; o Orkio acha o repositório no GitHub.
+   Vincule o projeto à página dele no Notion.
+5. **Quadro → Criar quadro.** Confirme as etapas sugeridas e abra uma tarefa.
+6. **Rodar Claude Code** no painel da tarefa. Acompanhe o log e aprove o que o agente pedir.
+
+As apps OAuth e os tokens alternativos estão em [docs/configuracao.md](docs/configuracao.md).
+
+## Tudo o que espera você, numa tela
+
+<p align="center">
+  <img src="docs/readme/visao-geral.png" alt="A Visão geral: o que espera você, execuções em andamento, PRs que precisam de atenção e o andamento de cada projeto" width="100%">
+</p>
+
+A Visão geral junta todos os projetos: gates e perguntas esperando a sua resposta, execuções do
+Claude Code em andamento, PRs com CI vermelho ou alterações pedidas, o quadro de cada projeto em
+barras e a atividade recente. Esperando você é a única coisa que chama atenção.
+
+## Um quadro ligado ao Notion
+
+<p align="center">
+  <img src="docs/readme/etapas.png" alt="Etapas e automações: cada etapa do quadro ligada a uma opção do status no Notion" width="100%">
+</p>
+
+Cada projeto tem um kanban com as suas etapas, e cada etapa corresponde a uma opção do status das
+Tarefas no Notion. Mover um card escreve no Notion só quando o status muda.
+
+- **Sem internet**, a mudança fica pendente e é enviada sozinha depois, mesmo se você fechar o app.
+- **Branch e PR no card**, casadas pelo ID da tarefa (`ORK-142/sync-notion`, ou "ORK-142" no título).
+- **Bloqueada** e **pausar automações** por tarefa, com histórico do que aconteceu e por quê.
+- **O Notion continua a fonte da verdade.** O conteúdo das páginas nunca é gravado em disco.
+
+## O Claude Code trabalha num ambiente só da tarefa
+
+<p align="center">
+  <img src="docs/readme/tarefa.png" alt="A tarefa em tela cheia: log da execução do Claude Code, resumo com arquivos e commits, branch e histórico" width="100%">
+</p>
+
+O Orkio roda o CLI `claude` com o seu login, num worktree próprio da tarefa, com um briefing
+montado da página do Notion. A sua pasta principal nunca é tocada.
+
+- **Permissões pelo Orkio.** Comandos de shell perguntam (uma vez, sempre neste projeto ou negar).
+  Push, `gh pr` e arquivos fora do worktree são bloqueados sem perguntar.
+- **Log ao vivo e redigido.** Segredos e valores do `.env` somem do log antes de gravar.
+- **Resumo ao terminar:** arquivos, commits, testes rodados e custo estimado, com
+  "Abrir no Cursor", "Abrir no VS Code" e "Ver diff".
+- **Catálogo de comandos** do usuário, do projeto e dos plugins, "Rodar de novo" e contexto do
+  projeto (instruções e páginas do Notion) no briefing.
+
+## Fluxos que param quando é a sua vez
+
+<p align="center">
+  <img src="docs/readme/fluxos.png" alt="O editor de Fluxos: passos de comando do Claude Code, aprovação e salto condicional, com validação" width="100%">
+</p>
+
+Um fluxo é uma sequência de passos ligada a uma coluna: comandos do Claude Code, gates de
+aprovação, ações do Orkio e saltos condicionais. Entrou em Em andamento? Implementa, revisa,
+mostra o diff e espera você.
+
+- **Falha sempre pausa.** Reabrir o app nunca segue sozinho; "Pular" é a forma explícita de seguir.
+- **Entrega com gate:** push da branch da tarefa pelo Orkio, PR aberta pelo `/pr` em modo entrega
+  e pedido de review pelo conector. Merge, força e outras branches são bloqueados.
+- **Modelos prontos para o alva-flow**
+  (`/spec`, `/plan`, `/implement`, `/review`, `/commit`, `/pr`) com vínculo ao Backlog.md.
+
+## O GitHub move as tarefas por você
+
+Com o quadro criado, o Orkio acompanha o git e o GitHub em segundo plano e aplica regras simples:
+
+| Quando                                                | Vai para                       | Se estiver em             |
+| ----------------------------------------------------- | ------------------------------ | ------------------------- |
+| Uma branch com o ID (ex.: `ORK-142/sync`) é criada    | Em andamento                   | Prioridades               |
+| A PR é aberta ou fica pronta para review              | Revisando                      | Prioridades, Em andamento |
+| A review pede alterações ou deixa comentários abertos | Revisado                       | Revisando                 |
+| Você pede review de novo                              | Revisando                      | Revisado                  |
+| A PR é mergeada                                       | Finalizada                     | qualquer etapa            |
+| A PR é fechada sem merge                              | Em andamento (com notificação) | qualquer etapa            |
+
+Cada evento age uma vez só, mesmo reiniciando o app. A primeira observação é só linha de base:
+ligar o quadro não move nada pelo histórico antigo. Se você mover a tarefa à mão depois do evento,
+vale a sua escolha. Etapas e regras se editam em **Etapas e automações**, com validação de
+conflitos e ciclos, simulação, exportar/importar e histórico de alterações.
+
+## Conecta o que você já usa
+
+<p align="center">
+  <img src="docs/readme/integracoes.png" alt="Integrações: Notion conectado, bancos do Notion mapeados e GitHub" width="100%">
+</p>
+
+| Integração      | Como conecta                            | Para quê                                              |
+| --------------- | --------------------------------------- | ----------------------------------------------------- |
+| **Notion**      | OAuth (ou token)                        | Projetos, tarefas, status, briefing e publicar docs   |
+| **GitHub**      | OAuth Device Flow (ou fine-grained PAT) | Repositórios, branches, PRs, revisões, CI e reviewers |
+| **Claude Code** | O CLI `claude` com o seu login          | Rodar as tarefas, comandos e plugins                  |
+| **Editores**    | `cursor` e `code` no PATH               | Abrir o worktree da tarefa                            |
+
+As suas assinaturas continuam suas. O Orkio não pede nem guarda chave da Anthropic.
+
+## Seus tokens ficam com você
+
+- Todas as chamadas ao Notion e ao GitHub saem do processo main. A interface não tem acesso a
+  Node e nunca vê um token.
+- Tokens ficam cifrados pelo sistema (Keychain, DPAPI, libsecret/KWallet), com permissão `0600`.
+  Sem criptografia disponível, o Orkio não salva.
+- CSP estrita em produção, navegação bloqueada e links externos só por allowlist.
+- O intermediário OAuth do Notion (no site) só repassa a troca do código e não guarda nada.
+
+Detalhes em [docs/configuracao.md](docs/configuracao.md#segurança).
+
+## Como funciona
+
+```mermaid
+flowchart LR
+  notion(["Notion<br/>projetos · tarefas · status"]) <--> main
+  github(["GitHub<br/>branches · PRs · revisões · CI"]) <--> main
+  ui["Interface (React + Astryx)<br/>sem Node, só window.orkio"] <-->|IPC validado| main
+  main["Processo main (Electron)<br/>conectores · quadro · automações · fluxos"]
+  main --> db[("SQLite + config<br/>no seu computador")]
+  main --> secrets[("Tokens cifrados<br/>safeStorage")]
+  main --> claude["Claude Code CLI<br/>worktree por tarefa"]
+  claude -->|permissões| main
+```
+
+Um app Electron com o processo main como único lugar com rede, disco e segredos. A interface fala
+com ele por uma API mínima e tipada. O estado local (etapas, histórico, execuções, fluxos) fica em
+SQLite no seu computador, só com ids e metadados; o conteúdo continua no Notion e no GitHub. O
+Claude Code roda como processo filho, sem shell, e cada pedido de permissão passa por uma ponte MCP
+local até o Orkio.
+
+## Documentação
+
+| Começar                                   | Aprofundar                                   | Referência                          |
+| ----------------------------------------- | -------------------------------------------- | ----------------------------------- |
+| [Instalar](#instalar)                     | [Configuração](docs/configuracao.md)         | [CLAUDE.md](CLAUDE.md) (convenções) |
+| [Primeiros passos](#primeiros-passos)     | [Desenvolvimento](docs/desenvolvimento.md)   | [Marca](brand/BRAND.md)             |
+| [Integrações](#conecta-o-que-você-já-usa) | [Site e intermediário OAuth](site/README.md) | [Como funciona](#como-funciona)     |
 
 ## Desenvolvimento
 
 ```bash
-pnpm install     # também baixa o binário do Electron (postinstall)
-pnpm dev         # abre o app com hot reload
+pnpm install
+pnpm dev
 ```
 
-Outros comandos:
-
-| Comando          | O que faz                                         |
-| ---------------- | ------------------------------------------------- |
-| `pnpm test`      | Testes unitários (Vitest)                         |
-| `pnpm typecheck` | TypeScript strict para main/preload e renderer    |
-| `pnpm lint`      | ESLint                                            |
-| `pnpm format`    | Prettier                                          |
-| `pnpm build`     | Gera o build em `out/`                            |
-| `pnpm start`     | Roda o build de produção (`out/`) localmente      |
-| `pnpm icons`     | Regenera os ícones a partir de `brand/`           |
-| `pnpm e2e`       | Testes ponta a ponta no app Electron (ver abaixo) |
-| `pnpm dist`      | Empacota para o SO atual (electron-builder)       |
-| `pnpm dist:dir`  | Empacota sem instalador (pasta em `dist/`)        |
-
-## Testes ponta a ponta (E2E)
+Antes de dar uma mudança por concluída:
 
 ```bash
-pnpm e2e
+pnpm typecheck && pnpm lint && pnpm test
+pnpm e2e          # mudou UI, IPC, preload, segurança ou build? Linux headless: xvfb-run -a pnpm e2e
 ```
 
-Faz o build de produção e roda o Playwright (`e2e/`) contra o app Electron real. Não é preciso
-instalar navegadores do Playwright: o teste usa o Electron do projeto.
+O E2E roda o app Electron real com Notion e GitHub simulados e um Claude Code falso no PATH:
+nenhum token real é usado. Leia o [CLAUDE.md](CLAUDE.md) antes de editar e o
+[guia de desenvolvimento](docs/desenvolvimento.md) para build, empacotamento e a interface.
 
-- **Notion, intermediário OAuth e GitHub são simulados**: o teste substitui o `fetch` e o
-  `shell.openExternal` do processo main durante a execução (o código do app não tem nenhum modo
-  de teste). Nenhum token real é usado. O build usa `--mode e2e` (`.env.e2e`, valores falsos).
-- Cada execução usa um `userData` temporário (`--user-data-dir`) e não toca nos seus dados.
-- Cobre: tela inicial, isolamento do renderer, CSP de produção, fontes/logo/botão primário,
-  token inválido (nada salvo), conexão válida (arquivo criptografado, permissão 600, token fora
-  do renderer), reabrir mantendo a conexão, aviso em 503, token revogado, desconectar com
-  confirmação (arquivo apagado) e ausência do token nos logs — para o Notion (token e OAuth) e
-  para o GitHub (Device Flow com código/copiar/abrir/cancelar/expirar/recusar, PAT, rate limit).
-- **Linux sem interface gráfica** (CI/servidor): rode com `xvfb-run -a pnpm e2e`.
-- **Linux sem keyring**: o teste liga a criptografia básica do Electron só durante o teste.
-  No macOS/Windows usa o Keychain/DPAPI de verdade (o macOS pode pedir acesso ao Keychain na
-  primeira execução).
+## Contribuindo
 
-```bash
-pnpm build
-pnpm start
-```
+O repositório é privado. Quem tem acesso abre uma branch e uma pull request; a PR está pronta quando
+o CI passa e segue as regras do [CLAUDE.md](CLAUDE.md): tokens só no main, textos em pt-BR, UI com
+Astryx e tokens do tema, CSP estrita. Problemas de segurança vão direto ao mantenedor, não numa issue.
 
-`pnpm build` gera `out/main`, `out/preload` e `out/renderer`.
+## Licença
 
-Para empacotar (config em `electron-builder.ts`):
-
-```bash
-pnpm dist             # dmg + zip no macOS (arm64 e x64), instalador NSIS no Windows
-pnpm dist:dir         # só a pasta do app, sem instalador
-pnpm smoke:packaged   # smoke test do app empacotado (abre, tela inicial, ponte MCP)
-```
-
-Releases (instaladores publicados por CI em `uBrunoow/orkio-releases`, versões e CHANGELOG,
-assinatura): veja [docs/releases.md](docs/releases.md). Em resumo: `pnpm release patch` e
-`git push --follow-tags`.
-
-## Instalar
-
-Baixe o instalador no site ou em
-[orkio-releases](https://github.com/uBrunoow/orkio-releases/releases/latest).
-
-- **macOS** (`Orkio-…-mac-arm64.dmg` para Apple Silicon, `…-mac-x64.dmg` para Intel): arraste para
-  Aplicativos. Enquanto o app não tiver assinatura da Apple, a primeira abertura é bloqueada: abra
-  uma vez, depois **Ajustes do Sistema → Privacidade e Segurança → "Abrir Mesmo Assim"**. (No
-  macOS 15+ o clique direito → Abrir não basta.) Pelo Terminal:
-  `xattr -dr com.apple.quarantine /Applications/Orkio.app`.
-- **Windows** (`Orkio-…-win-x64-setup.exe`): instala no seu usuário, sem pedir administrador, com
-  atalho no menu Iniciar. Sem assinatura, o SmartScreen avisa: **Mais informações → Executar assim
-  mesmo**.
-
-## Identidade visual e UI
-
-A interface usa o design system **[Astryx](https://github.com/meta/astryx)** (`@astryxdesign/core`)
-com o **tema Orkio** (dark, laranja da marca com texto preto, Inter na UI, JetBrains Mono em
-código). A fonte da verdade da marca continua em [`brand/`](brand/BRAND.md).
-
-- **Tema:** `themes/orkio/` (editado com `pnpm exec astryx experimental theme editor …`) gera a
-  cópia em `src/themes/orkio/` e `src/astryx-themes.ts`. O tema é CSS estático (pré-compilado).
-- **CSP estrita:** a Astryx injetaria alguns estilos em runtime; o Orkio entrega esse CSS como
-  arquivo estático (`pnpm astryx:static-css`, rode após atualizar a Astryx) e não usa componentes
-  que dependem de injeção. Detalhes no `CLAUDE.md`.
-- **Fontes:** locais via `@fontsource` (Inter, Jost no logo e em títulos de destaque, JetBrains Mono).
-- **Ícones:** [Tabler Icons](https://tabler.io/icons) (`@tabler/icons-react`), inclusive os logos do GitHub e do Notion.
-- **Logo:** `<OrkioLogo variant="full|simple" withWordmark size />`.
-- **Ícones do app:** `pnpm icons` gera `build/icon.icns`, `build/icon.ico`, `build/icon.png` e
-  `resources/icon.png` a partir de `brand/orkio-app-icon-1024.png` (png2icons).
-
-## Conectar o Notion (OAuth)
-
-Para quem usa o Orkio é um clique: **Integrações → Conectar com Notion** abre o navegador, a
-pessoa escolhe o workspace e as páginas, clica em **Permitir** e volta para o app já conectado.
-
-### Como funciona
-
-```
-Orkio (main) ──abre navegador──▶ api.notion.com/v1/oauth/authorize?…&state=…
-     ▲                                        │ usuário autoriza
-     │  http://127.0.0.1:47821/oauth/notion/callback?code=…&state=…
-     │  (servidor local, só durante o login; confere o state)
-     ├──POST /notion/token { code } ──▶ intermediário (site/, rotas do site na Vercel)
-     │                                        │ + client_secret (só ele conhece)
-     │                                        ▼
-     │                               api.notion.com/v1/oauth/token
-     ◀──────── access_token + refresh_token ──┘   (o intermediário não guarda nada)
-```
-
-O Notion exige o **client secret** para trocar o código e renovar tokens, e a API REST não
-aceita PKCE. Um app desktop não consegue esconder um segredo, então essa etapa passa pelo
-intermediário: as rotas `/notion/token` e `/notion/refresh` do site do Orkio
-([`site/`](site/README.md), na Vercel). O antigo Worker em [`broker/`](broker/README.md) fica
-até o login real ser confirmado pelo site. Os tokens ficam só no computador da pessoa,
-criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo intermediário.
-
-### Configuração (uma vez, por quem mantém o Orkio)
-
-1. **Crie a conexão OAuth no Notion** (developers.notion.com → _New connection_):
-   - Authentication method: **OAuth**
-   - Installable in: **Any workspace** (ou só os workspaces da sua org)
-   - Redirect URI: `http://127.0.0.1:47821/oauth/notion/callback`
-   - Guarde o **OAuth client ID** (público) e o **client secret** (segredo — não cole em chat,
-     issue ou commit).
-2. **Publique o site** (intermediário incluso) seguindo [`site/README.md`](site/README.md). O
-   client secret vai só para as variáveis de ambiente da Vercel (`NOTION_CLIENT_SECRET`).
-3. **Configure o build do app**: copie `.env.example` para `.env` (dev) ou
-   `.env.production` (build de release) e preencha:
-   ```
-   MAIN_VITE_NOTION_OAUTH_CLIENT_ID=<client ID>
-   MAIN_VITE_NOTION_OAUTH_BROKER_URL=https://<domínio do site>
-   ```
-   Em dev, com o site rodando local (`pnpm --dir site dev`), use `http://127.0.0.1:3000`.
-   Nenhum desses valores é segredo. Sem eles, o app esconde o login com Notion e mostra só
-   a opção de token.
-
-A porta `47821` precisa estar livre no computador durante o login; se estiver ocupada, o
-Orkio avisa. Para desconectar de vez, além de **Desconectar** no Orkio, a pessoa pode
-remover o Orkio em **Notion → Configurações → Conexões**.
-
-## Alternativa: usar um token do Notion
-
-Para workspaces que permitem tokens, o card tem o link discreto **Usar token**. O Orkio
-aceita dois tipos de token. Os dois usam o mesmo header `Authorization: Bearer`.
-
-**Personal Access Token (recomendado para uso pessoal)**
-
-1. Abra <https://www.notion.so/developers/tokens> (Developer portal → _Personal access tokens_).
-2. Clique em **New token**, dê um nome (ex.: “Orkio”) e escolha o workspace.
-3. Copie o token (começa com `ntn_`).
-
-**Token de integração interna**
-
-1. Abra <https://www.notion.so/profile/integrations> e crie uma integração interna.
-2. Copie o _Internal Integration Secret_.
-3. Compartilhe com a integração as páginas que o Orkio poderá ler.
-
-Depois, no Orkio, vá em **Integrações → Notion → Usar token**, cole o token e clique em
-**Conectar**.
-O token é validado em `GET https://api.notion.com/v1/users/me` antes de ser salvo.
-
-Documentação oficial: <https://developers.notion.com/guides/get-started/personal-access-tokens>
-
-## Conectar o GitHub (Device Flow)
-
-Para quem usa: **Integrações → Conectar com GitHub** mostra um código (ex.: `WDJB-MJHT`).
-A pessoa clica em **Copiar** e **Abrir GitHub**, cola o código em github.com/login/device e
-clica em **Authorize**. O Orkio conecta sozinho, sem precisar voltar e clicar em nada.
-
-O Device Flow **não usa client secret** nem redirect, então o GitHub **não** passa pelo
-intermediário (`broker/`): o app fala direto com o GitHub e guarda o token cifrado.
-
-**Escopo pedido: `repo`.** Para OAuth Apps é o único escopo que dá acesso a repositórios
-privados, PRs e comentários e, depois, permite abrir PRs. O GitHub não oferece uma versão
-só-leitura dele (`public_repo` não cobre privados).
-
-### Criar a OAuth App (uma vez, por quem mantém o Orkio)
-
-1. GitHub → **Settings → Developer settings → OAuth Apps → New OAuth App** (para a org:
-   _Organization settings → Developer settings → OAuth Apps_).
-2. Preencha:
-   - **Application name:** `Orkio`
-   - **Homepage URL:** a página do projeto (ex.: o repositório)
-   - **Authorization callback URL:** obrigatório no formulário, mas **não é usado** pelo Device
-     Flow. Pode usar `http://127.0.0.1/`.
-   - Marque **Enable Device Flow**.
-3. Copie o **Client ID** (público). **Não gere client secret** — o Orkio não usa.
-4. No `.env` do app: `MAIN_VITE_GITHUB_CLIENT_ID=<Client ID>`. Sem ele, o card mostra só a
-   opção de token.
-
-**Organizações com restrições:** se a org usa _OAuth App access restrictions_ ou SAML SSO, um
-admin precisa aprovar a OAuth App do Orkio (e, com SSO, cada pessoa autoriza o token para a
-org). Sem isso a conexão funciona, mas os repositórios da org não aparecem nas próximas etapas.
-
-### Alternativa: fine-grained personal access token
-
-**Usar token** no card do GitHub aceita um
-[fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token)
-(GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens):
-escolha os repositórios e dê, no mínimo, **Contents**, **Pull requests** e **Metadata**
-(leitura; escrita em Contents/Pull requests para abrir PRs nas próximas etapas). O token é
-validado em `GET https://api.github.com/user` antes de ser salvo.
-
-## Projetos
-
-Um **projeto** é uma pasta local (clone) ligada a um repositório do GitHub. Em **Projetos →
-Adicionar projeto**:
-
-1. Escolha a pasta (pode ser uma subpasta: o Orkio usa a raiz do repositório e avisa).
-2. O Orkio lê os remotes com o `git` instalado (precisa estar no PATH). Em forks, escolha entre
-   `origin` e `upstream`. Remotes por alias do `~/.ssh/config` (ex.: `git@github-trabalho:org/repo`)
-   ou GitHub Enterprise pedem confirmação; Enterprise fica como "não verificado".
-3. O Orkio confirma no GitHub (com a conta conectada) a branch padrão, a visibilidade e a
-   permissão de push. Repositórios arquivados ou sem push são salvos com aviso.
-
-A lista mostra `owner/repo`, a **branch atual** (atualiza sozinha ao trocar de branch no
-terminal), alterações não commitadas e o status. Se a pasta for movida ou apagada, o projeto
-fica como "Pasta não encontrada" e pode ser **reapontado** para a nova pasta (do mesmo
-repositório). **Remover** só tira o projeto do Orkio; nenhum arquivo é apagado.
-
-Organizações com **SSO (SAML)** ou **restrição de OAuth Apps** respondem 403: o Orkio explica e
-oferece o link para autorizar (SSO) ou pedir a aprovação de um admin.
-
-Os projetos ficam em `<userData>/orkio-config.json` (sem segredos). Se o arquivo estiver
-corrompido, o Orkio guarda uma cópia (`orkio-config.corrupt-<data>.json`) e começa vazio, com aviso.
-
-## Bancos do Notion e tarefas
-
-Em **Integrações → Bancos do Notion** (com o Notion conectado), um assistente em 3 passos:
-
-1. **Projetos:** escolha o banco (data source) com uma página por projeto.
-2. **Tarefas:** escolha o banco de tarefas. Ele precisa de uma **relação** com o banco de Projetos.
-3. **Mapeamento:** o Orkio sugere quais propriedades usar (pelo nome e pelo tipo). Obrigatórias:
-   Título, Status (status ou seleção), **ID** (tipo “ID”/`unique_id`, ex.: `ORK-142`) e Projeto
-   (a relação). Opcionais: Prioridade e Responsável.
-
-Sem uma propriedade do tipo ID, o Orkio não salva e explica como criá-la no Notion (+ nova
-propriedade → **ID**). Com login via Notion (OAuth), só aparecem os bancos escolhidos na
-autorização; se faltar algum, use **Reconectar com Notion** e marque as páginas desses bancos.
-
-Ao abrir o app, o Orkio confere o mapeamento: propriedade **renomeada** gera um aviso (e o nome é
-atualizado); propriedade **apagada** ou com outro tipo bloqueia as tarefas até você revisar o
-mapeamento.
-
-Em **Projetos**, cada projeto pode ser **vinculado** a um projeto do Notion (um para um; o Orkio
-sugere pelo nome). Com o vínculo, **Ver tarefas** lista as tarefas ligadas a ele: ID, título,
-status (com a cor do Notion) e prioridade, com **Atualizar** e um botão para abrir no Notion.
-É só leitura: o Orkio não altera nada no Notion. As tarefas ficam só em memória (cache de 60 s);
-o arquivo de configuração guarda apenas ids e nomes dos bancos, das propriedades e do vínculo.
-
-## Branches e PRs das tarefas
-
-Na lista de tarefas de um projeto, cada tarefa mostra a **branch** (local, remota ou as duas) e a
-**PR** ligada a ela pelo ID, por exemplo `ORK-142/sync-notion`, `feat/ORK-142-sync` ou uma PR com
-"ORK-142" no título. O casamento respeita a palavra inteira: `ORK-14` não se confunde com
-`ORK-142`. O chip da PR mostra número (clique para abrir no GitHub), estado (rascunho, aberta,
-mergeada, fechada), revisão (aprovada, alterações pedidas), comentários de revisão não
-resolvidos e CI. É só leitura.
-
-A lista se atualiza sozinha a cada minuto enquanto o Orkio está em primeiro plano (o GitHub
-responde "nada mudou" na maioria das vezes, sem gastar o limite de requisições) e ao clicar em
-**Atualizar**. Sem GitHub conectado, aparecem só as branches locais, com um aviso.
-
-## Quadro
-
-Em **Quadro**, cada projeto vinculado ao Notion tem um kanban com as **suas etapas**. Ao criar o
-quadro, o Orkio propõe Prioridades, Em andamento, Revisando, Revisado e Finalizada e liga cada
-uma a uma opção do status das Tarefas no Notion (você confirma; várias etapas podem usar a mesma
-opção, ex.: Revisando e Revisado → "Em andamento").
-
-- **Mover** um card (arrastando ou pelo menu "Mover para…") atualiza o status no Notion só quando
-  ele muda. Mover para Revisando mantém "Em andamento" no Notion e guarda a etapa no Orkio.
-- Opcionalmente, **"Mostrar a etapa do Orkio no Notion"** grava a etapa numa propriedade de
-  seleção (existente ou criada como "Etapa Orkio", sempre com sua confirmação).
-- **Sem internet**, a mudança fica pendente ("Sincronizando") e é enviada sozinha depois, mesmo
-  se você fechar o Orkio. Se o Notion recusar, o card volta e uma mensagem explica.
-- Mudou o status direto no Notion? Clique em **Atualizar**: o card vai para a etapa certa.
-- **Bloqueada** é uma marca no card (com filtro); pode ser sincronizada com uma caixa de seleção do
-  Notion. O painel lateral mostra detalhes, branch/PR e o histórico da tarefa.
-
-Para escrever no Notion, a integração precisa da capacidade **Update content** (Inserir/atualizar
-conteúdo). O estado local fica em `<userData>/orkio.db` (só ids, etapas e histórico).
-
-## Automações
-
-Com o quadro criado, o Orkio acompanha o git e o GitHub em segundo plano (enquanto estiver
-aberto, mesmo em outra tela) e move as tarefas sozinho:
-
-| Quando                                                       | Vai para                                 | Se estiver em             |
-| ------------------------------------------------------------ | ---------------------------------------- | ------------------------- |
-| Uma branch com o ID (ex.: `ORK-142/sync`) é criada           | Em andamento                             | Prioridades               |
-| A PR é aberta ou fica pronta para review                     | Revisando                                | Prioridades, Em andamento |
-| A review pede alterações ou deixa comentários não resolvidos | Revisado                                 | Revisando                 |
-| Você pede review de novo (ex.: depois das correções)         | Revisando                                | Revisado                  |
-| A PR é mergeada                                              | Finalizada (o Notion fica "Finalizadas") | qualquer etapa            |
-| A PR é fechada sem merge                                     | Em andamento (com notificação)           | qualquer etapa            |
-
-Cada evento age uma vez só, mesmo reiniciando o app. Tarefas bloqueadas ou com automações
-pausadas (no menu do card ou "Pausar todas" no topo do quadro) não se movem: o histórico mostra o
-evento e por que foi ignorado. Se você mover a tarefa à mão depois do evento, vale a sua escolha.
-O GitHub é consultado a cada minuto sem gastar o limite de requisições quando nada mudou;
-**Atualizar** verifica na hora. Para mudar etapas e automações, use **Fluxo do projeto** no quadro (abaixo).
-
-## Fluxo do projeto
-
-No quadro, **Fluxo do projeto** mostra uma coluna por etapa: nome, cor, status do Notion e as
-automações que levam para ela, escritas em frase ("Quando a PR é aprovada e a tarefa está em
-Revisando, mover para QA"). Dá para criar, reordenar e remover etapas (as tarefas de uma etapa
-removida vão para onde você escolher) e criar, editar, desativar, reordenar e remover automações
-num formulário. Antes de salvar, o Orkio aponta erros (ex.: etapa sem status do Notion) e avisa
-sobre conflitos (qual regra vence pela ordem) e ciclos. **Testar automação** mostra o que
-aconteceria com uma tarefa num evento, sem executar nada. Também há **Restaurar padrão**,
-**Exportar/Importar JSON** (para reaproveitar em outro projeto) e o histórico de alterações.
-
-## Segurança
-
-- Todas as chamadas ao Notion e ao GitHub são feitas no **processo main**. O renderer não tem
-  acesso a Node (`contextIsolation`, `sandbox`, sem `nodeIntegration`) e fala com o main só
-  pela API mínima `window.orkio`.
-- Tokens (OAuth ou colados) são criptografados com `safeStorage` do Electron (Keychain no macOS, DPAPI no
-  Windows, libsecret/KWallet no Linux) e salvos em `<userData>/secrets/notion.bin` e
-  `github.bin` com permissão `0600`.
-- Se não houver criptografia disponível, o token **não é salvo** e o app mostra um erro.
-  No Linux, o backend `basic_text` (chave fixa) é tratado como indisponível.
-- O token nunca volta para o renderer, não aparece em logs e o `.gitignore` bloqueia `*.bin`
-  e `secrets/`.
-- CSP restritiva no `index.html`; navegação e novas janelas bloqueadas; links externos só
-  abrem para a allowlist do main (domínios do Notion, `docs.github.com` e só
-  `github.com/login/device`).
-- Projetos: o seletor de pasta roda no main e o renderer nunca envia caminhos; o git roda via
-  `execFile` (sem shell), com timeout.
-- Permissões do navegador negadas, exceto escrever na área de transferência (botão
-  **Copiar** do código do GitHub).
-- GitHub Device Flow: sem client secret; o polling roda no main e a UI só recebe o código, a
-  URL e a expiração.
-- OAuth: o client secret existe só no intermediário; o app valida o `state`, aceita o redirect
-  só em `127.0.0.1` (e confere o header `Host`) e fecha o servidor local ao terminar.
-
-Para desconectar, use **Desconectar** no card. Isso apaga o arquivo do disco. O token
-continua válido no serviço; para revogar, remova o Orkio em **Notion → Configurações →
-Conexões** ou em **GitHub → Settings → Applications → Authorized OAuth Apps** (ou apague o PAT).
+© Orkio. Todos os direitos reservados. O código não é open source.
