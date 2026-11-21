@@ -94,7 +94,7 @@ describe('RunService', () => {
 
   afterEach(async () => {
     db.close()
-    await rm(dir, { recursive: true, force: true })
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 
   const start = (n: number, over: Partial<Parameters<RunService['start']>[0]> = {}) =>
@@ -107,7 +107,36 @@ describe('RunService', () => {
       briefing: '# ORK',
       ...over
     })
-  const tick = () => new Promise((r) => setTimeout(r, 20))
+  /**
+   * Espera o serviço assentar: todo processo pedido já existe e nada muda (processos, mensagens,
+   * estados, logs) em 3 leituras seguidas. Um intervalo fixo não basta num runner lento.
+   */
+  const tick = async () => {
+    const tasks = ['task-1', 'task-2', 'task-3']
+    const snapshot = async () => {
+      const all = tasks.flatMap((t) => service.list(t))
+      const started = all.filter((r) => r.status !== 'queued').length
+      const logs = await readdir(join(dir, 'runs')).catch(() => [] as string[])
+      return {
+        ready: runs.length >= started,
+        sig: JSON.stringify([
+          runs.length,
+          messages.length,
+          notifications.length,
+          all.map((r) => r.status),
+          logs.length
+        ])
+      }
+    }
+    let last = ''
+    let same = 0
+    for (let i = 0; i < 150 && same < 3; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+      const { ready, sig } = await snapshot()
+      same = ready && sig === last ? same + 1 : 0
+      last = sig
+    }
+  }
   const statusOf = (id: string) => service.view(id)?.status
   /** Espera o n-ésimo processo simulado existir (o status "running" vem antes dele). */
   const spawned = async (n: number) => {
