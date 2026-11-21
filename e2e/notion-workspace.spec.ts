@@ -143,9 +143,9 @@ test('com a propriedade criada no Notion, sugere o mapeamento e salva só ids e 
 
   await card.getByRole('button', { name: 'Salvar' }).click()
   await expect(card.getByTestId('workspace-health')).toHaveText('OK')
-  await expect(card.getByRole('list', { name: 'Configuração dos bancos do Notion' })).toContainText(
-    'Tarefas'
-  )
+  await expect(
+    card.getByRole('group', { name: 'Configuração dos bancos do Notion' })
+  ).toContainText('Tarefas')
 
   const saved = JSON.parse(readFileSync(configFile(), 'utf8')) as {
     notion: { tasksDataSource: { id: string }; mapping: Record<string, { id: string }> }

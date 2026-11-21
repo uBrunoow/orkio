@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
+import { Heading } from '@astryxdesign/core/Heading'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { Item } from '@astryxdesign/core/Item'
@@ -71,7 +71,7 @@ export function ProjectContextPage({ projectId }: { projectId: string }): React.
       />
 
       <VStack gap={2}>
-        <Text weight="semibold">Páginas de referência do Notion</Text>
+        <Heading level={2}>Páginas de referência do Notion</Heading>
         <Text type="supporting">
           Até {CONTEXT_LIMITS.pages} páginas, lidas na hora de rodar. O Orkio guarda só o id e o
           nome. Contexto acima de {CONTEXT_LIMITS.total.toLocaleString('pt-BR')} caracteres é
@@ -104,54 +104,53 @@ export function ProjectContextPage({ projectId }: { projectId: string }): React.
             ))}
           </List>
         )}
-        <Card variant="transparent">
-          <VStack gap={2}>
-            <HStack gap={2} vAlign="end">
-              <StackItem size="fill">
-                <TextInput
-                  type="search"
-                  label="Buscar página no Notion"
-                  placeholder="Título da página"
-                  value={query}
-                  onChange={setQuery}
-                />
-              </StackItem>
-              <Button
-                label="Buscar"
-                isLoading={searching}
-                isDisabled={full}
-                {...(full ? { disabledMessage: 'Limite de páginas atingido.' } : {})}
-                onClick={() => void search()}
+        {/* Sem recuo: alinhado com as instruções acima. */}
+        <VStack gap={2}>
+          <HStack gap={2} vAlign="end">
+            <StackItem size="fill">
+              <TextInput
+                type="search"
+                label="Buscar página no Notion"
+                placeholder="Título da página"
+                value={query}
+                onChange={setQuery}
               />
-            </HStack>
-            {results !== null &&
-              (results.length === 0 ? (
-                <Text type="supporting">
-                  Nenhuma página encontrada. Ela precisa estar compartilhada com o Orkio.
-                </Text>
-              ) : (
-                <List hasDividers density="compact" aria-label="Resultados da busca">
-                  {results.map((p) => (
-                    <Item
-                      as="li"
-                      key={p.id}
-                      label={p.name}
-                      endContent={
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          label={chosen.has(p.id) ? 'Adicionada' : 'Adicionar'}
-                          aria-label={`Adicionar ${p.name}`}
-                          isDisabled={chosen.has(p.id) || full}
-                          onClick={() => setCtx({ ...ctx, notionPages: [...ctx.notionPages, p] })}
-                        />
-                      }
-                    />
-                  ))}
-                </List>
-              ))}
-          </VStack>
-        </Card>
+            </StackItem>
+            <Button
+              label="Buscar"
+              isLoading={searching}
+              isDisabled={full}
+              {...(full ? { disabledMessage: 'Limite de páginas atingido.' } : {})}
+              onClick={() => void search()}
+            />
+          </HStack>
+          {results !== null &&
+            (results.length === 0 ? (
+              <Text type="supporting">
+                Nenhuma página encontrada. Ela precisa estar compartilhada com o Orkio.
+              </Text>
+            ) : (
+              <List hasDividers density="compact" aria-label="Resultados da busca">
+                {results.map((p) => (
+                  <Item
+                    as="li"
+                    key={p.id}
+                    label={p.name}
+                    endContent={
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        label={chosen.has(p.id) ? 'Adicionada' : 'Adicionar'}
+                        aria-label={`Adicionar ${p.name}`}
+                        isDisabled={chosen.has(p.id) || full}
+                        onClick={() => setCtx({ ...ctx, notionPages: [...ctx.notionPages, p] })}
+                      />
+                    }
+                  />
+                ))}
+              </List>
+            ))}
+        </VStack>
       </VStack>
 
       {message &&

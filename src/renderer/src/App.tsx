@@ -157,7 +157,15 @@ export function App(): React.JSX.Element {
   let page: React.ReactNode
   switch (route.name) {
     case 'projects':
-      page = <ProjectsPage onOpenIntegrations={toIntegrations} />
+      page = (
+        <ProjectsPage
+          onOpenIntegrations={toIntegrations}
+          onOpenBoard={(projectId) => {
+            chooseProject(projectId)
+            navigate({ name: 'board', projectId })
+          }}
+        />
+      )
       break
     case 'integrations':
       page = <IntegrationsPage />

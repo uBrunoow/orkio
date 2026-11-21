@@ -127,9 +127,15 @@ export class NotionWorkspaceService {
 
   // ---------- Estado e revalidação ----------
 
-  /** Estado atual; na primeira chamada revalida o schema no Notion. */
+  /**
+   * Estado atual; na primeira chamada revalida o schema no Notion. Se a conexão do Notion mudou
+   * desde a última revalidação (ex.: conectou depois de abrir o app), revalida de novo: o estado
+   * guardado diria "Conecte o Notion" com o Notion já conectado.
+   */
   async getStatus(): Promise<NotionWorkspaceStatus> {
-    return this.status ?? this.revalidate()
+    if (!this.status) return this.revalidate()
+    const connection = await this.deps.notion.connectionMethod().catch(() => null)
+    return connection === this.status.connection ? this.status : this.revalidate()
   }
 
   /**

@@ -287,6 +287,19 @@ describe('NotionWorkspaceService', () => {
       })
     })
 
+    it('conectou depois da primeira leitura → getStatus revalida (não fica "Conecte o Notion")', async () => {
+      await configured()
+      api.connectionMethod.mockResolvedValue(null)
+      const service = await makeService()
+      expect(await service.getStatus()).toMatchObject({ health: 'unverified', connection: null })
+      api.connectionMethod.mockResolvedValue('oauth')
+      expect(await service.getStatus()).toMatchObject({ health: 'ok', connection: 'oauth' })
+      // Sem mudança na conexão, não relê o Notion.
+      api.getDataSource.mockClear()
+      await service.getStatus()
+      expect(api.getDataSource).not.toHaveBeenCalled()
+    })
+
     it('revalidações simultâneas viram uma só', async () => {
       await configured()
       const service = await makeService()
