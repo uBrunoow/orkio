@@ -258,6 +258,35 @@ test('critério 3: merge move para Finalizada e o Notion fica "Finalizadas"', as
   expect(await cspViolations(page)).toEqual([])
 })
 
+test('automação em frase: começa, faz e as execuções vindas da atividade', async () => {
+  const { page } = orkio!
+  await page
+    .getByRole('navigation', { name: 'Navegação principal' })
+    .getByRole('button', { name: 'Etapas e automações' })
+    .click()
+  await page
+    .getByRole('list', { name: 'Etapas do fluxo' })
+    .getByRole('listitem', { name: 'Etapa Finalizada' })
+    .click()
+  await page
+    .getByRole('list', { name: 'Automações para Finalizada' })
+    .getByRole('listitem', { name: 'Merge finaliza a tarefa' })
+    .click()
+  const detail = page.getByRole('region', { name: 'Automação Merge finaliza a tarefa' })
+  await expect(detail.getByTestId('detail-sentence')).toContainText('mover para Finalizada')
+  await expect(detail.getByRole('group', { name: 'Faz' })).toContainText(
+    'Move a tarefa para Finalizada'
+  )
+  const runs = detail.getByTestId('executions')
+  await expect(runs).toContainText('ORK-2')
+  await expect(runs).toContainText('Moveu a tarefa')
+  await expect(detail.getByTestId('detail-column')).toContainText('Ativa')
+  // "Editar" abre o formulário de sempre.
+  await detail.getByRole('button', { name: 'Editar' }).click()
+  await expect(page.getByRole('region', { name: 'Editar automação' })).toBeVisible()
+  await goToBoard(page)
+})
+
 test('critério 4: reiniciar o app não repete automações', async () => {
   const before = await historyText(orkio!.page)
   const finalState = { githubPulls: [pr({ state: 'merged', updatedAt: '2026-11-19T13:00:00Z' })] }

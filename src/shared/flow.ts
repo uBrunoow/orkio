@@ -36,7 +36,7 @@ export const EVENT_DESCRIPTIONS: Record<EventKind, string> = {
 }
 
 /** Frase do gatilho ("a PR é aberta"), para "Quando …". */
-const EVENT_PHRASES: Record<EventKind, string> = {
+export const EVENT_PHRASES: Record<EventKind, string> = {
   'branch.created': 'uma branch da tarefa é criada',
   'pr.opened': 'a PR é aberta',
   'pr.ready_for_review': 'a PR fica pronta para review',

@@ -232,6 +232,22 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   await expect(history).toContainText('Fluxo iniciado: Revisar e entregar')
   await expect(history).toContainText('Aprovação concedida')
   await expect(history).toContainText('Fluxo concluído')
+
+  // Fluxo em frase: como começa, os passos e a execução que acabou de acontecer.
+  await navTo(page, 'Fluxos')
+  await page
+    .getByRole('list', { name: 'Fluxos do projeto' })
+    .getByRole('listitem')
+    .filter({ hasText: 'Revisar e entregar' })
+    .click()
+  const detail = page.getByRole('region', { name: 'Fluxo Revisar e entregar' })
+  await expect(detail.getByTestId('detail-sentence')).toHaveText(
+    'Quando a tarefa entra em Revisando: /revisar, aprovação, salto, /revisar e Nada (teste).'
+  )
+  await expect(detail.getByRole('list', { name: 'Passos em frase' })).toContainText(
+    'Pede sua aprovação'
+  )
+  await expect(detail.getByTestId('executions')).toContainText('Concluído')
   expect(await cspViolations(page)).toEqual([])
 })
 

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useProjectActivity } from '../../components/SentenceDetail'
+import { FlowDetail } from './FlowDetail'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
@@ -84,6 +86,10 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
   const [catalog, setCatalog] = useState<CatalogGroup[] | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  // Fluxo aberto no editor (os outros aparecem em frase, fase 6). Novo fluxo já abre editando.
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [stageNames, setStageNames] = useState<Record<string, string>>({})
+  const flowActivity = useProjectActivity(projectId, 'flow')
 
   useEffect(() => {
     let active = true
@@ -95,6 +101,16 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
         setSelected(r.value.flows[0]?.id ?? null)
       } else setMessage({ tone: 'error', text: r.error.message })
     })
+    // Nomes das colunas para a frase "Quando a tarefa entra em…".
+    void window.orkio.board
+      .get(projectId)
+      .then((r) => {
+        if (active && r.ok)
+          setStageNames(
+            Object.fromEntries((r.value.config?.stages ?? []).map((st) => [st.id, st.name]))
+          )
+      })
+      .catch(() => undefined)
     void window.orkio.claude.catalog(projectId, 'projeto').then((r) => {
       if (active) setCatalog(r.ok ? r.value : [])
     })
@@ -174,7 +190,10 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
                   label={f.name || 'Sem nome'}
                   description={plural(f.steps.length, 'passo', 'passos')}
                   isSelected={f.id === selected}
-                  onClick={() => setSelected(f.id)}
+                  onClick={() => {
+                    setSelected(f.id)
+                    setEditingId(null)
+                  }}
                   {...(errors > 0
                     ? {
                         endContent: (
@@ -194,12 +213,22 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
               const f: Flow = { id: newFlowId(), name: 'Novo fluxo', steps: [] }
               setFlows((all) => [...all, f])
               setSelected(f.id)
+              setEditingId(f.id)
             }}
           />
         </VStack>
 
         <StackItem size="fill">
-          {flow ? (
+          {flow && editingId !== flow.id ? (
+            <FlowDetail
+              flow={flow}
+              bindings={project.bindings.filter((b) => b.flowId === flow.id && b.enabled)}
+              stageName={(id) => stageNames[id] ?? 'coluna removida'}
+              actionLabel={(id) => project.actions.find((a) => a.id === id)?.label ?? id}
+              activity={flowActivity}
+              onEdit={() => setEditingId(flow.id)}
+            />
+          ) : flow ? (
             <FlowEditor
               flow={flow}
               catalog={catalog}
@@ -210,6 +239,7 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
                 setFlows((all) => all.filter((f) => f.id !== flow.id))
                 setSelected(null)
               }}
+              onDone={() => setEditingId(null)}
             />
           ) : (
             <Text type="supporting">Crie ou escolha um fluxo.</Text>
@@ -250,7 +280,8 @@ function FlowEditor({
   project,
   issues,
   onChange,
-  onRemove
+  onRemove,
+  onDone
 }: {
   flow: Flow
   catalog: CatalogGroup[] | null
@@ -258,6 +289,8 @@ function FlowEditor({
   issues: ReturnType<typeof validateTaskFlow>
   onChange(flow: Flow): void
   onRemove(): void
+  /** Volta para o fluxo em frase (o rascunho continua até "Salvar fluxos"). */
+  onDone(): void
 }): React.JSX.Element {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const index = Math.min(selectedIndex, flow.steps.length - 1)
@@ -293,6 +326,7 @@ function FlowEditor({
             onChange={(name) => onChange({ ...flow, name })}
           />
         </StackItem>
+        <Button variant="secondary" label="Ver em frase" onClick={onDone} />
         <Button
           variant="ghost"
           label="Remover fluxo"
