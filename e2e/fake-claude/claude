@@ -102,6 +102,23 @@ async function main() {
   })
   const prompt = JSON.parse(first).message.content[0].text
 
+  // 8A: registra o que o agente recebeu (system prompt extra e modelo), para o E2E conferir.
+  {
+    const orkioDir = join(process.cwd(), '.orkio')
+    mkdirSync(orkioDir, { recursive: true })
+    const flag = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : null)
+    require('node:fs').appendFileSync(
+      join(orkioDir, 'agent-args.log'),
+      JSON.stringify({
+        appendSystemPrompt: flag('--append-system-prompt'),
+        model: flag('--model'),
+        briefingInPrompt: prompt.includes('Briefing da tarefa'),
+        permissionTool: flag('--permission-prompt-tool'),
+        permissionMode: flag('--permission-mode')
+      }) + '\n'
+    )
+  }
+
   out({
     type: 'system',
     subtype: 'init',
