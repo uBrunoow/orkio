@@ -109,6 +109,17 @@ describe('RunService', () => {
     })
   const tick = () => new Promise((r) => setTimeout(r, 20))
   const statusOf = (id: string) => service.view(id)?.status
+  /** Espera o n-ésimo processo simulado existir (o status "running" vem antes dele). */
+  const spawned = async (n: number) => {
+    await vi.waitFor(() => expect(runs).toHaveLength(n), { timeout: 3000 })
+    // Deixa o serviço terminar de registrar a execução antes do teste mexer nela.
+    await new Promise((r) => setImmediate(r))
+  }
+  /** Espera a execução terminar (qualquer estado final), sem depender de um intervalo fixo. */
+  const finished = (id: string) =>
+    vi.waitFor(() => expect(['succeeded', 'failed', 'cancelled']).toContain(statusOf(id)), {
+      timeout: 3000
+    })
 
   it('prompt com briefing; comando instalado com argumentos', () => {
     expect(RunService.composePrompt('command', 'spec', 'foco em UX', '# B')).toBe(
@@ -219,19 +230,20 @@ describe('RunService', () => {
       defaultBranch: 'main',
       displayId: 'ORK-1'
     }
-    await start(1, { delivery: { target, requirePushApproval: false } })
-    await tick()
+    const view1 = await start(1, { delivery: { target, requirePushApproval: false } })
+    await spawned(1)
     const run = runs[0]!
     expect(run.opts.delivery).toBe(true)
     // Primeira vez: pergunta, sem "sempre neste projeto".
     const first = run.ask('Bash', { command: 'gh pr create --fill' }, 'd-1')
-    await tick()
-    expect(messages.at(-1)?.event).toMatchObject({
-      kind: 'permission',
-      state: 'pending',
-      delivery: true
+    await vi.waitFor(() => {
+      expect(messages.at(-1)?.event).toMatchObject({
+        kind: 'permission',
+        state: 'pending',
+        delivery: true
+      })
+      expect(notifications).toContain('Entrega: o Claude Code pede aprovação')
     })
-    expect(notifications).toContain('Entrega: o Claude Code pede aprovação')
     service.answerPermission('run-1', 'd-1', 'allow_always')
     expect(await first).toEqual({ behavior: 'allow' })
     expect(service.allowRules('p1')).toEqual([]) // nada salvo como "sempre"
@@ -255,11 +267,11 @@ describe('RunService', () => {
     expect(history[0]!.detail).toMatchObject({ by: 'claude', owner: 'acme', repo: 'app' })
     run.emit({ kind: 'result', ok: true, durationMs: 1, costUsd: 0, turns: 1, text: '' })
     run.exit(0)
-    await tick()
+    await finished(view1.id)
 
     // Próximo passo (sem a marca): push e gh voltam a ser bloqueados.
     await start(1)
-    await tick()
+    await spawned(2)
     const next = runs[1]!
     expect(next.opts.delivery).toBe(false)
     expect(await next.ask('Bash', { command: 'gh pr comment 3 --body ok' })).toEqual({
@@ -371,10 +383,10 @@ describe('RunService', () => {
 
   it('falha sem result → failed; mantém só os N logs mais recentes por tarefa', async () => {
     for (let i = 0; i < 3; i++) {
-      await start(1)
-      await tick()
+      const view = await start(1)
+      await spawned(i + 1)
       runs.at(-1)!.exit(1)
-      await tick()
+      await finished(view.id)
     }
     expect(service.list('task-1').map((r) => r.status)).toEqual(['failed', 'failed', 'failed'])
     // A limpeza dos logs é assíncrona: espera com prazo (não um intervalo fixo).
