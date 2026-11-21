@@ -1,0 +1,176 @@
+# Releases do Orkio (Etapa 6B)
+
+Os instaladores são gerados pelo GitHub Actions a cada tag `vX.Y.Z` e publicados num repositório
+**público só de binários**, [`uBrunoow/orkio-releases`](https://github.com/uBrunoow/orkio-releases).
+O código continua privado. O site lê o último release de lá (`RELEASES_REPO`) e o auto-update (6C)
+também.
+
+| Sistema | Arquivos                                                                       |
+| ------- | ------------------------------------------------------------------------------ |
+| macOS   | `Orkio-X.Y.Z-mac-arm64.dmg`, `Orkio-X.Y.Z-mac-x64.dmg` (+ `.zip` de cada um)   |
+| Windows | `Orkio-X.Y.Z-win-x64-setup.exe` (instala no perfil do usuário, sem admin)      |
+| Updates | `latest-mac.yml`, `latest.yml` (beta: `beta-mac.yml`, `beta.yml`), `.blockmap` |
+
+## Configuração inicial (uma vez)
+
+### 1. Repositório público de releases
+
+1. Crie `uBrunoow/orkio-releases` como **Public**, marcando **Add a README** (o repositório
+   precisa de um commit: é nele que o GitHub cria as tags dos releases).
+2. Opcional: no README, um link para o site e "Os binários do Orkio são publicados aqui pelo CI".
+
+### 2. Token `RELEASES_TOKEN`
+
+GitHub → Settings → Developer settings → **Fine-grained personal access tokens** → Generate new token:
+
+- **Resource owner:** uBrunoow
+- **Expiration:** 1 ano (anote para renovar; o release falha com "Falta o secret" / 401 quando expirar)
+- **Repository access:** _Only select repositories_ → **só** `orkio-releases`
+- **Permissions → Repository permissions → Contents: Read and write** (Metadata: read-only vem junto).
+  Nada mais.
+
+No repositório **orkio** (o privado): Settings → Secrets and variables → Actions → **New repository
+secret** → `RELEASES_TOKEN` = o token. Ele só consegue criar releases e subir arquivos no
+`orkio-releases`; não lê nem escreve o código.
+
+### 3. Variáveis de build
+
+Em Settings → Secrets and variables → Actions → aba **Variables** (não são segredos: vão dentro do
+binário):
+
+| Variable                            | Valor                                    |
+| ----------------------------------- | ---------------------------------------- |
+| `MAIN_VITE_GITHUB_CLIENT_ID`        | Client ID do OAuth App do GitHub         |
+| `MAIN_VITE_NOTION_OAUTH_CLIENT_ID`  | OAuth client ID da conexão do Notion     |
+| `MAIN_VITE_NOTION_OAUTH_BROKER_URL` | URL do site (intermediário OAuth), https |
+
+Sem elas o release falha (o teste manual só avisa). Também são aceitas como _secrets_ com o mesmo nome.
+
+### 4. Site
+
+Na Vercel, `RELEASES_REPO=uBrunoow/orkio-releases`. O site ignora pre-releases (beta).
+
+## Lançar uma versão
+
+1. Durante o desenvolvimento, escreva as mudanças visíveis em `## [Não lançado]` no `CHANGELOG.md`.
+2. Na `main` atualizada e limpa:
+   ```bash
+   pnpm release patch      # 0.1.0 → 0.1.1   (também: minor, major)
+   pnpm release beta       # 0.1.0 → 0.1.1-beta.1; de novo → 0.1.1-beta.2
+   pnpm release minor --beta   # 0.1.0 → 0.2.0-beta.1
+   ```
+   O script atualiza `package.json`, move "Não lançado" para `## [X.Y.Z] - AAAA-MM-DD`, faz o commit
+   `chore(release): vX.Y.Z` e cria a tag anotada. **Não faz push.**
+3. `git push --follow-tags`. O workflow **Release** (`release.yml`):
+   1. confere tag = versão do `package.json` e a seção no CHANGELOG;
+   2. roda o CI inteiro (lint, typecheck, test, e2e, smoke do pacote Linux);
+   3. cria o **rascunho** do release em `orkio-releases` com as notas do CHANGELOG;
+   4. empacota no macOS e no Windows (`electron-builder --publish always`) e roda o smoke test do
+      app empacotado em cada um;
+   5. confere que todos os arquivos (dmg/zip/exe e os `.yml` do canal) estão lá e publica.
+      Tag `-beta.N` → **pre-release** (canal beta, não vira "Latest").
+
+Se algum passo falhar, o rascunho fica no `orkio-releases` sem ser publicado. Corrija, e rode de
+novo o workflow pela página da execução (Re-run failed jobs) ou lance uma versão nova.
+
+## Testar um pacote sem publicar
+
+Actions → **Package** → _Run workflow_ (branch à escolha). Empacota mac e Windows com
+`--publish never`, roda o smoke test e sobe os arquivos como **artefatos** da execução
+(`orkio-macOS`, `orkio-Windows`, 7 dias). Baixe na página da execução.
+
+Localmente: `pnpm dist` (instalador do SO atual) ou `pnpm dist:dir` + `pnpm smoke:packaged`
+(Linux sem tela: `xvfb-run -a pnpm smoke:packaged`).
+
+## Assinatura
+
+O workflow detecta o que existe e segue sem assinar quando faltam os segredos, com `::warning::`
+no log (aparece no resumo da execução).
+
+### macOS sem Developer ID (hoje)
+
+Build com assinatura **ad-hoc** e sem hardened runtime/notarização. Funciona, mas:
+
+- Na primeira abertura o macOS bloqueia ("A Apple não pôde verificar…"). No macOS 15+ o clique
+  direito → Abrir não resolve mais: abra uma vez, depois **Ajustes do Sistema → Privacidade e
+  Segurança → "Abrir Mesmo Assim"** (pede a senha). Alternativa no Terminal:
+  `xattr -dr com.apple.quarantine /Applications/Orkio.app`.
+- O auto-update do mac (Squirrel.Mac) recusa apps sem Developer ID.
+
+### macOS com Developer ID (passo a passo)
+
+1. **Apple Developer Program** (US$ 99/ano) em developer.apple.com/programs, como pessoa física.
+2. **Certificado:** Xcode → Settings → Accounts → Manage Certificates → **+ → Developer ID
+   Application** (ou developer.apple.com → Certificates, com um CSR do Acesso às Chaves).
+3. **Exportar:** Acesso às Chaves → _Meus Certificados_ → "Developer ID Application: …" (com a
+   chave privada) → Exportar → `.p12` com uma senha forte.
+4. **Base64:** `base64 -i DeveloperID.p12 | pbcopy`.
+5. **Secrets** no repositório `orkio`:
+   - `CSC_LINK` = o base64 do `.p12`
+   - `CSC_KEY_PASSWORD` = a senha do `.p12`
+6. **Notarização**, uma das duas formas:
+   - **API key do App Store Connect** (recomendada): appstoreconnect.apple.com → Users and Access →
+     Integrations → App Store Connect API → _Team Keys_ → gere uma chave com acesso **Developer**.
+     Secrets: `APPLE_API_KEY` = conteúdo do `.p8` (o arquivo inteiro, com BEGIN/END),
+     `APPLE_API_KEY_ID` = Key ID, `APPLE_API_ISSUER` = Issuer ID.
+   - **Apple ID:** account.apple.com → Login e Segurança → **Senhas de app** → gere uma.
+     Secrets: `APPLE_ID` (e-mail), `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` (10 caracteres,
+     em developer.apple.com → Membership).
+7. Pronto: o próximo release sai assinado (hardened runtime + `build/entitlements.mac.plist`, só
+   `allow-jit`) e notarizado. O workflow passa `MAIN_VITE_MAC_SIGNED=1` para o app. A primeira
+   notarização pode demorar.
+
+Local: com o certificado no Keychain, `CSC_NAME="Seu Nome (TEAMID)" pnpm dist` assina; sem
+`CSC_LINK`/`CSC_NAME` o build local é ad-hoc.
+
+### Windows (sem assinatura por enquanto)
+
+O SmartScreen mostra "O Windows protegeu o computador" → **Mais informações → Executar assim
+mesmo**. A reputação melhora com assinatura.
+
+Caminho pronto, desligado: **Microsoft Artifact Signing** (ex-Trusted Signing), cerca de US$ 9,99/mês.
+Hoje a validação de pessoa física só existe para EUA/Canadá; no Brasil, normalmente é preciso uma
+empresa com histórico verificável, ou então um certificado OV de uma autoridade (com chave em
+HSM/nuvem, cerca de US$ 200 a 400/ano, que exigiria outro ajuste no `electron-builder.ts`). Para
+ligar o Artifact Signing:
+
+1. Crie a conta e o perfil de certificado no Azure e um _App registration_ com o papel
+   _Artifact Signing Certificate Profile Signer_.
+2. Secrets: `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`.
+3. Variables: `AZURE_SIGNING_ENDPOINT` (ex.: `https://eus.codesigning.azure.net`),
+   `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE`, `WIN_PUBLISHER_NAME` (igual ao CN do
+   certificado) e por último `WIN_SIGNING=azure`.
+
+## Referência: secrets e variables
+
+| Nome                                                          | Tipo      | Obrigatório               |
+| ------------------------------------------------------------- | --------- | ------------------------- |
+| `RELEASES_TOKEN`                                              | secret    | Sim, para publicar        |
+| `MAIN_VITE_GITHUB_CLIENT_ID`                                  | variable  | Sim, no release           |
+| `MAIN_VITE_NOTION_OAUTH_CLIENT_ID`                            | variable  | Sim, no release           |
+| `MAIN_VITE_NOTION_OAUTH_BROKER_URL`                           | variable  | Sim, no release           |
+| `CSC_LINK`, `CSC_KEY_PASSWORD`                                | secrets   | Opcional (assinatura mac) |
+| `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`       | secrets   | Opcional (notarização)    |
+| ou `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | secrets   | Opcional (notarização)    |
+| `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`   | secrets   | Opcional (Windows)        |
+| `WIN_SIGNING`, `WIN_PUBLISHER_NAME`, `AZURE_SIGNING_*`        | variables | Opcional (Windows)        |
+
+## Detalhes técnicos
+
+- Config do empacotador em `electron-builder.ts` (TypeScript; o modo de assinatura sai do ambiente,
+  testado em `test/electron-builder-config.test.ts`).
+- Nada nativo: o app não tem dependências de runtime além do que o Vite embute, e o SQLite é o
+  `node:sqlite` do Electron (`npmRebuild: false`).
+- **Fuses do Electron:** `RunAsNode` ligado (a ponte MCP de permissões do Claude Code roda o próprio
+  executável com `ELECTRON_RUN_AS_NODE=1`); `NODE_OPTIONS` e `--inspect` desligados; cookies
+  criptografados; só carrega o `app.asar`. A validação de integridade do asar ainda está desligada
+  (falta testar no mac/Windows empacotados).
+- A ponte (`out/main/permission-mcp.js`) roda de dentro do `app.asar` (o Node do Electron lê asar);
+  não precisa de `asarUnpack`.
+- **Smoke test** (`e2e-packaged/`): abre o app empacotado como um usuário (sem `_electron` do
+  Playwright, que dependeria do `--inspect`), conecta pelo CDP, confere a tela inicial e a CSP, e
+  roda a ponte MCP do asar com um socket simulado (initialize → tools/list → tools/call). Roda no
+  Linux em todo PR e no mac arm64 e no Windows ao empacotar. O mac x64 não é testado (os runners são
+  arm64).
+- **Custo do Actions:** em repositório privado, minuto de macOS conta 10x e Windows 2x. Por isso o
+  CI de PR é só Linux; macOS só no release, no teste manual e no E2E opcional do CI (dispatch).

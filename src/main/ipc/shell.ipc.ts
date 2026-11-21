@@ -1,16 +1,19 @@
 import type { IpcMain } from 'electron'
 import { IPC_CHANNELS } from '../../shared/ipc-contract'
+import { RELEASES_PATH_PATTERN } from '../../shared/updates'
 import type { SenderGuard } from './trusted-sender'
 
 /**
  * O que o renderer pode abrir no navegador externo: só https, sem porta/credenciais, e só
  * estes hosts. `pathPrefix` restringe o caminho (ex.: no github.com só a página do Device Flow).
  */
-export const EXTERNAL_URL_RULES: readonly {
+export interface ExternalUrlRule {
   host: string
   pathPrefix?: string
   pathPattern?: RegExp
-}[] = [
+}
+
+export const EXTERNAL_URL_RULES: readonly ExternalUrlRule[] = [
   { host: 'notion.so' },
   { host: 'www.notion.so' },
   { host: 'developers.notion.com' },
@@ -28,10 +31,26 @@ export const EXTERNAL_URL_RULES: readonly {
   {
     host: 'github.com',
     pathPattern: /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/tree\/[A-Za-z0-9._%-]+(\/[A-Za-z0-9._%-]+)*$/
-  }
+  },
+  // DMG/página de versão do repo PÚBLICO de releases (6C, macOS sem assinatura).
+  { host: 'github.com', pathPattern: RELEASES_PATH_PATTERN }
 ]
 
-export function isAllowedExternalUrl(value: unknown): value is string {
+/** Regras do site do Orkio (Configurações > Sobre), a partir do endereço do build. */
+export function siteUrlRules(siteUrl: string | null): ExternalUrlRule[] {
+  if (!siteUrl) return []
+  try {
+    const url = new URL(siteUrl)
+    return url.protocol === 'https:' && !url.port ? [{ host: url.hostname }] : []
+  } catch {
+    return []
+  }
+}
+
+export function isAllowedExternalUrl(
+  value: unknown,
+  extraRules: readonly ExternalUrlRule[] = []
+): value is string {
   if (typeof value !== 'string' || value.length > 2048) return false
   let url: URL
   try {
@@ -40,7 +59,7 @@ export function isAllowedExternalUrl(value: unknown): value is string {
     return false
   }
   if (url.protocol !== 'https:' || url.username || url.password || url.port) return false
-  return EXTERNAL_URL_RULES.some(
+  return [...EXTERNAL_URL_RULES, ...extraRules].some(
     (rule) =>
       rule.host === url.hostname &&
       (!rule.pathPrefix ||
@@ -53,11 +72,12 @@ export function isAllowedExternalUrl(value: unknown): value is string {
 export function registerShellIpc(
   ipc: Pick<IpcMain, 'handle'>,
   openExternal: (url: string) => Promise<void>,
-  isTrustedSender: SenderGuard
+  isTrustedSender: SenderGuard,
+  extraRules: readonly ExternalUrlRule[] = []
 ): void {
   ipc.handle(IPC_CHANNELS.shell.openExternal, async (event, url: unknown) => {
     if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
-    if (!isAllowedExternalUrl(url)) return false
+    if (!isAllowedExternalUrl(url, extraRules)) return false
     await openExternal(url)
     return true
   })

@@ -65,7 +65,8 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
     signals: Object.keys(window.orkio.signals),
     board: Object.keys(window.orkio.board),
     automation: Object.keys(window.orkio.automation),
-    flow: Object.keys(window.orkio.flow)
+    flow: Object.keys(window.orkio.flow),
+    overview: Object.keys(window.orkio.overview)
   }))
   expect(isolation).toEqual({
     require: 'undefined',
@@ -82,8 +83,11 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'claude',
       'signals',
       'projects',
+      'updates',
+      'overview',
       'openExternal'
     ],
+    overview: ['get', 'refresh', 'activity', 'onChanged'],
     notion: [
       'getStatus',
       'connect',

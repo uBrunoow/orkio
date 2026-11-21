@@ -4,6 +4,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
   NOTION_FAKE,
   createUserDataDir,
+  enterApp,
   cspViolations,
   launchOrkio,
   queueFolderPicks,
@@ -89,8 +90,8 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
   const { page } = orkio
   await page.evaluate((t) => window.orkio.notion.connect({ kind: 'token', token: t }), TOKEN)
   await page.reload()
-  // O reload volta à tela inicial (sem a navegação).
-  await page.getByRole('button', { name: 'Começar', exact: true }).click()
+  // O reload volta à abertura: Começar (sem projetos) ou Visão geral.
+  await enterApp(page)
   await page
     .getByRole('navigation', { name: 'Navegação principal' })
     .getByRole('button', { name: 'Quadro' })

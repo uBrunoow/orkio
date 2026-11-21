@@ -1,0 +1,19 @@
+// Tipos de scripts/release-lib.mjs (para os testes em TypeScript).
+export declare const UNRELEASED: string
+export declare const BUMP_KINDS: readonly string[]
+export type BumpKind = 'patch' | 'minor' | 'major' | 'beta'
+export declare function parseVersion(version: string): {
+  major: number
+  minor: number
+  patch: number
+  beta: number | null
+}
+export declare function nextVersion(
+  current: string,
+  kind: BumpKind,
+  options?: { beta?: boolean }
+): string
+export declare function isPrerelease(version: string): boolean
+export declare function extractNotes(changelog: string, version: string): string | null
+export declare function releaseChangelog(changelog: string, version: string, date: string): string
+export declare function parseReleaseArgs(argv: string[]): { kind: BumpKind; beta: boolean }

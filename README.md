@@ -52,6 +52,8 @@ Baixe o instalador do [último release](https://github.com/uBrunoow/orkio-releas
 - **macOS** (`Orkio-…-mac-arm64.dmg` para Apple Silicon, `…-mac-x64.dmg` para Intel): arraste para
   Aplicativos. Enquanto o app não tiver assinatura da Apple, a primeira abertura é bloqueada: abra
   uma vez e depois vá em **Ajustes do Sistema → Privacidade e Segurança → Abrir Mesmo Assim**.
+  (No macOS 15+ o clique direito → Abrir não basta.) Pelo Terminal:
+  `xattr -dr com.apple.quarantine /Applications/Orkio.app`.
 - **Windows** (`Orkio-…-win-x64-setup.exe`): instala no seu usuário, sem pedir administrador.
   Sem assinatura, o SmartScreen avisa: **Mais informações → Executar assim mesmo**.
 
