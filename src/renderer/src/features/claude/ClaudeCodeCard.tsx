@@ -6,7 +6,7 @@ import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusToken } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import { CLAUDE_CODE_DOCS_URL } from '../../../../shared/ipc-contract'
@@ -53,9 +53,8 @@ export function ClaudeCodeCard(): React.JSX.Element {
           icon={<Icon icon={ClaudeLogo} color="primary" size="lg" />}
           badge={
             status === null ? null : (
-              <Token
-                size="sm"
-                color={ready ? 'green' : 'yellow'}
+              <StatusToken
+                tone={ready ? 'success' : 'warning'}
                 label={ready ? 'Pronto' : status.installed ? 'Ação necessária' : 'Não encontrado'}
               />
             )
@@ -74,10 +73,13 @@ export function ClaudeCodeCard(): React.JSX.Element {
               <HStack gap={2} vAlign="center" wrap="wrap">
                 <Text type="supporting">Versão</Text>
                 <Code data-testid="claude-version">{status.version ?? 'desconhecida'}</Code>
-                <Token
-                  size="sm"
-                  color={
-                    status.loggedIn === true ? 'green' : status.loggedIn === false ? 'red' : 'gray'
+                <StatusToken
+                  tone={
+                    status.loggedIn === true
+                      ? 'success'
+                      : status.loggedIn === false
+                        ? 'danger'
+                        : 'neutral'
                   }
                   label={
                     status.loggedIn === true

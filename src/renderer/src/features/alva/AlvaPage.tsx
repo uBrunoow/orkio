@@ -12,6 +12,7 @@ import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AlvaCheckItem, AlvaPrecheck } from '../../../../shared/alva'
 import type { AlvaStatusView, BoardView } from '../../../../shared/ipc-contract'
@@ -161,7 +162,7 @@ export function AlvaPage({
                   )
                 }
                 startContent={
-                  <Token size="sm" color={STATE[i.state].color} label={STATE[i.state].label} />
+                  <StatusToken tone={toneOf(STATE[i.state].color)} label={STATE[i.state].label} />
                 }
               />
             ))}

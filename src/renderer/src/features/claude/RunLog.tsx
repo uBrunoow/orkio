@@ -2,7 +2,7 @@ import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { RunLogEvent, RunStatus } from '../../../../shared/agent-run'
 import {
@@ -101,7 +101,7 @@ export function RunLog({ lines }: { lines: readonly LogLine[] }): React.JSX.Elem
       {lines.map((l, i) => (
         <HStack key={i} gap={2} vAlign="start" role="listitem">
           {l.status ? (
-            <Token size="sm" color={STATUS_COLOR[l.status]} label={STATUS_LABEL[l.status]} />
+            <StatusToken tone={toneOf(STATUS_COLOR[l.status])} label={STATUS_LABEL[l.status]} />
           ) : (
             l.icon && <Icon icon={l.icon} size="sm" color={l.isProblem ? 'error' : 'secondary'} />
           )}

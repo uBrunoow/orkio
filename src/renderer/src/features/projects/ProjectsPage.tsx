@@ -10,7 +10,7 @@ import { List } from '@astryxdesign/core/List'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type {
   ProjectError,
@@ -213,10 +213,9 @@ function ProjectRow({
           <Text weight="semibold" type="large">
             {project.name}
           </Text>
-          <Token
+          <StatusToken
             label={health.label}
-            color={health.color}
-            size="sm"
+            tone={toneOf(health.color)}
             data-health={project.health.state}
           />
         </HStack>
@@ -235,7 +234,7 @@ function ProjectRow({
                   {project.local.branch ?? '(detached HEAD)'}
                 </Code>
                 {project.local.dirty && (
-                  <Token label="alterações não commitadas" color="yellow" size="sm" />
+                  <StatusToken label="alterações não commitadas" tone="warning" />
                 )}
               </>
             )}

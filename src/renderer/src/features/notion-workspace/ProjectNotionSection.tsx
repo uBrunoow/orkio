@@ -385,12 +385,9 @@ function TasksPanel({
               endContent={
                 <HStack gap={2} vAlign="center">
                   {hasPriority && task.priority && (
-                    <Token
-                      label={task.priority.name}
-                      color={tokenColor(task.priority.color)}
-                      size="sm"
-                      data-testid="task-priority"
-                    />
+                    <Text type="supporting" color="secondary" data-testid="task-priority">
+                      {task.priority.name}
+                    </Text>
                   )}
                   {task.status && (
                     <Token

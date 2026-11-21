@@ -31,6 +31,7 @@ import {
 } from '../../../../shared/task-history'
 import { Alert } from '../../components/Alert'
 import { CloseIcon, ExpandIcon, ExternalLinkIcon } from '../../components/icons'
+import { StatusToken } from '../../components/StatusToken'
 import { TaskClaudeSection } from '../claude/TaskClaudeSection'
 import { TaskFlowSection } from '../task-flows/TaskFlowSection'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
@@ -164,8 +165,12 @@ export function TaskPanel({
     <>
       <HStack gap={2} wrap="wrap" vAlign="center">
         {card.status && <Token size="sm" label={`Notion: ${card.status.name}`} color="default" />}
-        {card.priority && <Token size="sm" label={card.priority.name} />}
-        {card.sync.state === 'pending' && <Token size="sm" color="yellow" label="Sincronizando" />}
+        {card.priority && (
+          <Text type="supporting" color="secondary" data-testid="task-priority">
+            {card.priority.name}
+          </Text>
+        )}
+        {card.sync.state === 'pending' && <StatusToken tone="warning" label="Sincronizando" />}
       </HStack>
       {card.sync.state === 'pending' && card.sync.message && (
         <Text type="supporting">{card.sync.message}</Text>

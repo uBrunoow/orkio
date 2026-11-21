@@ -48,7 +48,7 @@ Espaçamento e raios: `--spacing-*` e `--radius-*` do tema. Densidade muda no te
 
 - Laranja: `Button variant="primary"` (uma por área), o símbolo, e estados de agente
   ("Rodando"). Nada mais.
-- Status sempre pelo mapa único (`StatusToken`): sucesso = concluído/OK/aprovado; aviso =
+- Estado = ponto colorido + texto (`StatusToken`), nunca bloco colorido; prioridade é texto cinza. Metadados numa linha cinza separada por `·` (`PageHeader meta`). Status sempre pelo mapa único: sucesso = concluído/OK/aprovado; aviso =
   esperando você / falta configurar / não verificado; erro = falhou / CI vermelho / alterações
   pedidas; laranja = agente rodando; neutro = etapas e prioridade.
 - Ação destrutiva é secundária até a confirmação inline; o vermelho aparece na confirmação.

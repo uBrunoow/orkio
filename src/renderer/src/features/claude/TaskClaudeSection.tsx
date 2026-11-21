@@ -16,6 +16,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type {
   AgentRunView,
@@ -340,9 +341,8 @@ function RunView({
   return (
     <VStack gap={3}>
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Token
-          size="sm"
-          color={STATUS_COLOR[run.status]}
+        <StatusToken
+          tone={toneOf(STATUS_COLOR[run.status])}
           label={STATUS_LABEL[run.status]}
           data-testid="run-status"
         />
@@ -536,9 +536,8 @@ function Workspace({
         <Text type="supporting">Ambiente</Text>
         <Code data-testid="workspace-branch">{workspace.branch}</Code>
         {workspace.changes !== null && workspace.changes > 0 && (
-          <Token
-            size="sm"
-            color="yellow"
+          <StatusToken
+            tone="warning"
             label={plural(workspace.changes, 'mudança não commitada', 'mudanças não commitadas')}
           />
         )}

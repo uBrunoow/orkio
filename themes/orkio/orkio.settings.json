@@ -84,6 +84,16 @@
       "value": "jetbrains-mono",
       "source": "dial",
       "on": "code"
+    },
+    {
+      "thing": "text-size",
+      "value": "small",
+      "source": "dial"
+    },
+    {
+      "thing": "spacing",
+      "value": "compact",
+      "source": "dial"
     }
   ],
   "lifted": [],

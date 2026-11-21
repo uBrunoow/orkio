@@ -15,6 +15,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Token } from '@astryxdesign/core/Token'
+import { StatusToken } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationRule, EventKind } from '../../../../shared/automation'
 import type { Flow, StageFlow } from '../../../../shared/task-flow'
@@ -314,10 +315,9 @@ export function FlowPage({
         description={`${i + 1}ª na ordem · ${EVENT_LABELS[rule.trigger]}`}
         endContent={
           <HStack gap={1} vAlign="center">
-            <Token
-              size="sm"
+            <StatusToken
               label={rule.enabled ? 'Ativa' : 'Desativada'}
-              color={rule.enabled ? 'green' : 'gray'}
+              tone={rule.enabled ? 'success' : 'neutral'}
             />
             <MoreMenu
               size="sm"
@@ -428,11 +428,7 @@ export function FlowPage({
                     {...(problems > 0
                       ? {
                           endContent: (
-                            <Token
-                              size="sm"
-                              color="red"
-                              label={plural(problems, 'erro', 'erros')}
-                            />
+                            <StatusToken tone="danger" label={plural(problems, 'erro', 'erros')} />
                           )
                         }
                       : {})}

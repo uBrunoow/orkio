@@ -8,7 +8,7 @@ import { Item } from '@astryxdesign/core/Item'
 import { List } from '@astryxdesign/core/List'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { RunSummary } from '../../../../shared/agent-run'
 import type { BacklogTaskInfo } from '../../../../shared/alva'
@@ -147,9 +147,8 @@ export function TaskFlowSection({
           {run ? `Fluxo: ${run.flowName}${run.agent ? ` · ${run.agent.name}` : ''}` : 'Fluxo'}
         </Heading>
         {run && (
-          <Token
-            size="sm"
-            color={RUN_STATUS[run.status].color}
+          <StatusToken
+            tone={toneOf(RUN_STATUS[run.status].color)}
             label={
               run.status === 'finished' && run.result === 'rejected'
                 ? 'Recusado'
@@ -172,9 +171,8 @@ export function TaskFlowSection({
 
       {openPr?.checks && (
         <HStack gap={2} vAlign="center" wrap="wrap">
-          <Token
-            size="sm"
-            color={CI_LABEL[openPr.checks].color}
+          <StatusToken
+            tone={toneOf(CI_LABEL[openPr.checks].color)}
             label={`${CI_LABEL[openPr.checks].label} (PR #${openPr.number})`}
             data-testid="pr-ci"
           />

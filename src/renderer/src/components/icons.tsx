@@ -24,6 +24,7 @@ import {
   IconCloudUpload,
   IconSettings,
   IconArrowUp,
+  IconPointFilled,
   IconArrowDown,
   IconPlus,
   IconPlayerPause,
@@ -108,6 +109,8 @@ export const FinishIcon = adapt(IconFlag)
 export const InfoIcon = adapt(IconInfoCircle)
 export const ToolIcon = adapt(IconTool)
 export const OverviewIcon = adapt(IconLayoutDashboard)
+/** Ponto de estado (StatusToken). */
+export const DotIcon = adapt(IconPointFilled)
 
 /** Marca do Claude (estrela de raios), desenhada em currentColor. */
 export const ClaudeLogo: SvgIcon = (props) => (

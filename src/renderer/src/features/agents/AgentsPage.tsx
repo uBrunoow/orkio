@@ -17,6 +17,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { Token } from '@astryxdesign/core/Token'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import {
   AGENT_COLORS,
@@ -405,7 +406,7 @@ function AgentRow({
       }
       endContent={
         <HStack gap={2} vAlign="center">
-          <Token size="sm" color={status.color} label={status.label} />
+          <StatusToken tone={toneOf(status.color)} label={status.label} />
           {view.status === 'needs_review' && p && !isReviewing && (
             <Button size="sm" variant="secondary" label={`Revisar ${name}`} onClick={onReview} />
           )}
