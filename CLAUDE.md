@@ -30,6 +30,8 @@ Claude Code. Hoje existem:
 - **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
   do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
   real ser confirmado).
+- **Agentes (8A):** colegas de IA (nome, papel, instruções, limites) que pegam tarefas do quadro e
+  rodam os fluxos da 5A pelo mesmo Claude Code da 4A, com todas as regras do Orkio.
 - Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
@@ -68,6 +70,7 @@ src/
   shared/alva.ts           # 5B: tipos da pré-checagem, parse da task do Backlog.md (puro)
   shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
   shared/delivery.ts       # 5C: branches protegidas, checkPushBranch, DeliveryTarget/Settings (puro)
+  shared/agent.ts          # 8A: perfil do agente (parse/serialize do .md, validação, prompt, checkAgentFlow)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -79,7 +82,7 @@ src/
     ipc/                   # handlers finos: validam origem e payload, delegam ao conector/serviço
     storage/secure-store.ts  # SEGREDOS (safeStorage)
     storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações)
-    config/orkio-config.ts   # orkio-config.json (schema v4: projects, notion, boards+rules, automation)
+    config/orkio-config.ts   # orkio-config.json (schema v9; migrações v → v+1)
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
     notion/                # notion-workspace.service.ts (bancos, mapeamento, vínculo, tarefas)
@@ -89,6 +92,7 @@ src/
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
     alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts
     delivery/              # 5C: delivery.service.ts (alvo, prévia, push), delivery-actions.ts (ações)
+    agents/                # 8A: agents.service.ts (perfis, confiança, atribuição, regras, uso do dia)
     flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
                            # policy (+ delivery-policy, 5C), redact, run.service, claude.service;
@@ -573,6 +577,36 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - **Segurança:** nenhum token do Orkio no ambiente do Claude (o `gh` usa o `gh auth` do usuário);
   o único POST do conector do GitHub é `requested_reviewers` (caminho validado).
 
+## Agentes (Etapa 8A)
+
+- **Perfil** (`shared/agent.ts`, formato `orkio: agent/v1`): `.orkio/agents/<id>.md` no projeto
+  (versionável pelo usuário) ou `<userData>/agents/<id>.md` ("só neste computador", vale em todos os
+  projetos). Frontmatter num subconjunto estrito de YAML (chaves conhecidas, strings entre aspas,
+  listas simples; nada de âncoras/tags) + corpo = instruções. Arquivo ≤ 16 KB, sem symlink, id = nome
+  do arquivo, até 50 por pasta. `parseAgentFile` nunca lança: erro vira agente `invalid` com motivo.
+- **Escrita:** exceção estreita à regra "nunca tocamos na pasta do usuário": o Orkio grava **só**
+  `.orkio/agents/<id>.md`, atômico, sem commit. Texto com segredo (`redactSecrets`) é recusado.
+- **Confiança** (SQLite v8 `agent_trust`): sha256 aprovado por projeto+agente. Salvar pelo Orkio já
+  aprova; mudou fora (pull, editor) → `needs_review`: não roda até "Revisar" e "Aprovar este perfil".
+- **Execução:** o agente só acrescenta `--append-system-prompt` (`buildAgentPrompt`: quem é, regras
+  do Orkio, instruções) e `--model` (alias validado) ao `claude -p` da 4A. Permissões, política,
+  modo entrega e gates **não mudam**; o perfil só restringe: `delivery: false` e `commands`
+  (allowlist checada contra o fluxo antes de começar, `checkAgentFlow`). Nenhum token no ambiente.
+- **Fluxo (D7):** com fluxo preferido, ele substitui o fluxo da coluna; sem, roda o da coluna com
+  as instruções do agente; coluna sem fluxo ligado não dispara. `flow_runs.agent_json` guarda a
+  cópia do perfil (editar no meio não muda a execução).
+- **Limites (no main):** paralelo por agente → pausa `waiting_agent` (promovida sozinha);
+  passos/dia e custo/dia (dia local, `agent_runs.agent_key`) checados antes de cada comando →
+  `agent_daily_limit`; "Retomar" libera uma vez (`limitBypass`).
+- **Atribuição** (SQLite v8 `agent_assignments`, local, não vai ao Notion): no painel ("Agente") ou
+  por regra da coluna (`orkio-config` v9 → `agents[projectId].assignOnEnter`, tela Agentes). A regra
+  roda dentro da transação do movimento (antes do `flowRunner.onStageChanged`), só com
+  `manual`/`automation`, só se a tarefa não tiver agente nem fluxo ativo. Trocar com fluxo ativo é
+  recusado. Histórico: `agent_assigned`/`agent_unassigned`, "por X" em `flow_started`/`run_started`.
+- **UI:** tela Agentes (lista, editor com prévia do prompt, revisar/aprovar, regras), avatar
+  (`Token` com iniciais, `card-agent`) no card, seção "Agente" no painel, "Rodar como X" no Claude
+  Code. Eventos `agents:changed`.
+
 ## Site (Etapa 6A)
 
 - `site/`: Next.js App Router + TS strict, **package e lockfile próprios** (sem workspace pnpm: o
@@ -619,6 +653,9 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   simulado tem `FakePull.sha`, autores/revisores, POST `requested_reviewers` (registra em
   `notionState(app).reviewRequests` e muda `updated_at`) e colaboradores. O push vai para um
   `origin.git` local (git real).
+- 8A: o Claude simulado grava em `.orkio/agent-args.log` (JSON por execução) o
+  `--append-system-prompt`, `--model`, a ferramenta/modo de permissão e se o briefing veio no prompt.
+  `e2e/agents.spec.ts` cria a Ana pela tela e checa o arquivo, a regra, os gates e a revisão.
 - 5A: o simulado tem `demorar-uma-vez` (espera só na primeira vez, marcador em `.orkio/demorou`)
   e `falhar` (sai com erro). `e2e/task-flows.spec.ts` monta o fluxo pela tela e edita o
   `orkio-config.json` entre aberturas para trocar os argumentos do passo.
@@ -688,6 +725,9 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Pedir review pelo conector (não pelo gh do Claude)                                                          | É uma ação do Orkio depois de um gate, com histórico e link; dispara a automação na hora.                                                                                                                                                                   |
 | Site com package próprio (sem workspace pnpm)                                                               | Isola o Next do install/lockfile/empacotamento do Electron; a Vercel usa `site/` como raiz. O contrato do OAuth é pequeno e testado dos dois lados.                                                                                                         |
 | Intermediário OAuth nas rotas do site (Vercel) em vez do Worker                                             | Um só deploy para site e intermediário; páginas legais no mesmo domínio exigido pelo cadastro público do Notion.                                                                                                                                            |
+| Agente = perfil `.md` + `--append-system-prompt` no CLI do usuário                                          | Sem SDK nem chave da Anthropic; o agente herda permissões, política e gates do Orkio e só pode restringir (entrega, comandos).                                                                                                                              |
+| Perfil do repositório alterado fora do Orkio exige revisão (hash aprovado)                                  | Um pull pode trocar as instruções do agente; nada roda com texto que o usuário não viu.                                                                                                                                                                     |
+| Fluxo preferido do agente substitui o da coluna                                                             | O agente traz o jeito dele de trabalhar; sem preferido, a coluna decide e o agente só dá as instruções.                                                                                                                                                     |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 
 ## Astryx e CSP (regra inegociável)
