@@ -85,7 +85,8 @@ export function isStartRunRequest(value: unknown): value is StartRunRequest {
     typeof v['text'] === 'string' &&
     v['text'].length <= MAX_TEXT &&
     typeof v['briefing'] === 'string' &&
-    v['briefing'].length <= MAX_TEXT
+    v['briefing'].length <= MAX_TEXT &&
+    (v['asAgent'] === undefined || typeof v['asAgent'] === 'boolean')
   )
 }
 

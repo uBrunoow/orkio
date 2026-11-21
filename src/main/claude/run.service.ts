@@ -61,6 +61,9 @@ export interface RunServiceDeps {
     broker: PermissionBroker
     /** Modo entrega (5C): troca as regras `deny` do CLI pelas do modo entrega. */
     delivery: boolean
+    /** Agente (8A): `--append-system-prompt` e `--model`. */
+    appendSystemPrompt: string | null
+    model: string | null
     onEvent(event: RunLogEvent): void
     onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   }): RunHandle
@@ -96,6 +99,20 @@ export interface StartRunInput {
   includeBriefing?: boolean
   /** Modo entrega (5C): só em passo de fluxo marcado; vale só nesta execução. */
   delivery?: { target: DeliveryTarget; requirePushApproval: boolean } | null
+  /**
+   * Agente (8A): instruções no system prompt e modelo. Não muda nenhuma permissão: a política,
+   * o modo entrega e as aprovações são os mesmos de uma execução sem agente.
+   */
+  agent?: RunAgent | null
+}
+
+export interface RunAgent {
+  key: string
+  name: string
+  /** Texto do `--append-system-prompt` (`buildAgentPrompt`). */
+  prompt: string
+  /** Alias do modelo; `null` = padrão do usuário. */
+  model: string | null
 }
 
 /** Fim de uma execução, para quem a pediu (5A: fluxos). */
@@ -212,15 +229,16 @@ export class RunService {
     const id = this.deps.newId?.() ?? randomUUID()
     const startedAt = this.now().toISOString()
     this.deps.db.run(
-      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text)
-       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)`,
+      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text, agent_key)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)`,
       id,
       input.task.id,
       input.project.id,
       input.mode,
       input.command,
       startedAt,
-      redactSecrets(input.text).slice(0, 20_000)
+      redactSecrets(input.text).slice(0, 20_000),
+      input.agent?.key ?? null
     )
     await mkdir(this.deps.runsDir, { recursive: true })
 
@@ -247,7 +265,11 @@ export class RunService {
       start: async () => {
         run.status = 'running'
         this.setStatus(run, 'running')
-        this.taskEvent(run, 'run_started', { mode: input.mode, command: input.command })
+        this.taskEvent(run, 'run_started', {
+          mode: input.mode,
+          command: input.command,
+          ...(input.agent ? { agent: input.agent.name, agentKey: input.agent.key } : {})
+        })
         // Briefing também em arquivo (fora do git: .git/info/exclude do worktree).
         await this.writeBriefing(worktree.path, input.briefing).catch(() => undefined)
         this.collectEnvSecrets(run, worktree.path)
@@ -261,6 +283,12 @@ export class RunService {
           this.log(run, {
             kind: 'text',
             text: `Modo entrega ligado neste passo: push só de ${t.branch} (${t.remote}) e GitHub CLI só em ${t.owner}/${t.repo}.`
+          })
+        }
+        if (input.agent) {
+          this.log(run, {
+            kind: 'text',
+            text: `Rodando como ${input.agent.name}: instruções do agente no início da conversa${input.agent.model ? `, modelo ${input.agent.model}` : ''}. As permissões são as mesmas do Orkio.`
           })
         }
         const broker = new PermissionBroker((req) => this.onPermission(run, req))
@@ -277,6 +305,8 @@ export class RunService {
           sessionId: randomUUID(),
           broker,
           delivery: !!run.delivery,
+          appendSystemPrompt: input.agent?.prompt ?? null,
+          model: input.agent?.model ?? null,
           onEvent: (event) => this.onEvent(run, event),
           onExit: (result) => void this.onExit(run, result)
         })

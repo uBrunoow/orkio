@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Flow, ProjectFlows } from '../../shared/task-flow'
+import { defaultAgent, type AgentProfile } from '../../shared/agent'
 import { BoardStore } from '../board/board.store'
 import type { StageChange } from '../board/board.service'
 import { openDatabase, type Db } from '../db/database'
@@ -58,6 +59,7 @@ let started: {
   briefing: string
   includeBriefing?: boolean
   delivery?: boolean
+  agent?: { key: string; name: string; prompt: string; model: string | null } | null
 }[]
 let cancelled: string[]
 let notifications: string[]
@@ -81,7 +83,8 @@ function makeRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
         args: input.args,
         briefing: input.briefing,
         includeBriefing: input.includeBriefing,
-        delivery: input.delivery
+        delivery: input.delivery,
+        agent: input.agent
       })
       return runId
     },
@@ -640,5 +643,140 @@ describe('FlowRunner', () => {
       await r2.approveGate(id)
       expect(pushes).toBe(1)
     })
+  })
+})
+
+describe('FlowRunner com agentes (8A)', () => {
+  const ANA: AgentProfile = defaultAgent({
+    id: 'ana',
+    name: 'Ana',
+    model: 'sonnet',
+    instructions: 'Testes sempre. Nunca mexa em migrations sem perguntar.'
+  })
+  const OUTRO: Flow = { ...FLOW, id: 'f2', name: 'Fluxo da Ana' }
+  let agents: Record<string, { key: string; profile: AgentProfile } | Error>
+  let limit: string | null
+  const agentRunner = (): FlowRunner =>
+    makeRunner({
+      agentFor: async (_p, taskId) => {
+        const a = agents[taskId]
+        if (a instanceof Error) throw new FlowError('agent', a.message)
+        return a ?? null
+      },
+      agentLimit: () => limit
+    })
+
+  beforeEach(() => {
+    agents = { t1: { key: 'repo:ana', profile: ANA } }
+    limit = null
+    config = { ...config, flows: [FLOW, OUTRO] }
+  })
+
+  it('roda com as instruções e o modelo do agente; o briefing continua igual', async () => {
+    const runner = agentRunner()
+    const view = await runner.startManual('p1', 't1')
+    expect(view.agent).toEqual({ key: 'repo:ana', name: 'Ana', color: 'orange' })
+    expect(started[0]?.briefing).toBe('# ORK-1')
+    expect(started[0]?.agent).toMatchObject({ key: 'repo:ana', name: 'Ana', model: 'sonnet' })
+    expect(started[0]?.agent?.prompt).toContain('Nunca mexa em migrations sem perguntar.')
+    expect(store.events('t1').find((e) => e.kind === 'flow_started')?.detail).toMatchObject({
+      agent: 'Ana',
+      agentKey: 'repo:ana'
+    })
+  })
+
+  it('fluxo preferido do agente substitui o da coluna (se existir no projeto)', async () => {
+    agents = { t1: { key: 'repo:ana', profile: { ...ANA, flow: 'f2' } } }
+    const runner = agentRunner()
+    expect((await runner.startManual('p1', 't1')).flowName).toBe('Fluxo da Ana')
+    await runner.cancel(runner.list('t1')[0]!.id)
+    agents = { t1: { key: 'repo:ana', profile: { ...ANA, flow: 'nao-existe' } } }
+    expect((await runner.startManual('p1', 't1')).flowName).toBe('Revisar e entregar')
+  })
+
+  it('fluxo escolhido à mão não muda, mas usa as instruções do agente', async () => {
+    agents = { t1: { key: 'repo:ana', profile: { ...ANA, flow: 'f2' } } }
+    const runner = agentRunner()
+    const view = await runner.startById('p1', 't1', 'f1')
+    expect(view.flowName).toBe('Revisar e entregar')
+    expect(started[0]?.agent?.name).toBe('Ana')
+  })
+
+  it('agente com menos permissões: fluxo que entrega ou comando fora da lista não começa', async () => {
+    const entrega: Flow = {
+      ...FLOW,
+      steps: [...FLOW.steps, { id: 'push', name: 'Push', type: 'orkio_action', action: 'push' }]
+    }
+    config = { ...config, flows: [entrega] }
+    agents = { t1: { key: 'repo:ana', profile: { ...ANA, delivery: false } } }
+    const runner = agentRunner()
+    await expect(runner.startManual('p1', 't1')).rejects.toMatchObject({ code: 'agent_denied' })
+    agents = { t1: { key: 'repo:ana', profile: { ...ANA, commands: ['revisar'] } } }
+    await expect(runner.startManual('p1', 't1')).rejects.toThrow(/entregar/)
+    expect(started).toEqual([])
+    expect(runner.list('t1')).toEqual([])
+  })
+
+  it('agente que não pode rodar (sem aprovação) impede o fluxo, com a mensagem', async () => {
+    agents = { t1: new Error('O perfil deste agente mudou no repositório.') }
+    const runner = agentRunner()
+    await expect(runner.startManual('p1', 't1')).rejects.toThrow(/mudou no repositório/)
+    enter(runner, 'manual')
+    await flush()
+    expect(notifications).toContain('O fluxo da coluna não começou')
+  })
+
+  it('limite de paralelo do agente: a segunda tarefa espera e começa quando a primeira termina', async () => {
+    agents = {
+      t1: { key: 'repo:ana', profile: ANA },
+      t2: { key: 'repo:ana', profile: ANA },
+      t3: { key: 'local:bob', profile: { ...ANA, id: 'bob', name: 'Bob' } }
+    }
+    const runner = agentRunner()
+    const a = await runner.startManual('p1', 't1')
+    const b = await runner.startManual('p1', 't2')
+    const c = await runner.startManual('p1', 't3')
+    expect(a.status).toBe('running')
+    expect(b).toMatchObject({ status: 'paused', pauseReason: 'waiting_agent' })
+    expect(c.status).toBe('running')
+    expect(started.map((x) => x.agent?.name)).toEqual(['Ana', 'Bob'])
+    await runner.cancel(a.id)
+    await flush()
+    expect(runner.view(b.id).status).toBe('running')
+    expect(started.map((x) => x.agent?.name)).toEqual(['Ana', 'Bob', 'Ana'])
+  })
+
+  it('limite diário: pausa antes do comando; "Retomar" passa por cima uma vez', async () => {
+    limit = 'Ana atingiu o limite de hoje (40 execuções do Claude Code).'
+    const runner = agentRunner()
+    const view = await runner.startManual('p1', 't1')
+    expect(runner.view(view.id)).toMatchObject({
+      status: 'paused',
+      pauseReason: 'agent_daily_limit',
+      currentStep: 'revisar'
+    })
+    expect(started).toEqual([])
+    expect(notifications).toContain('Um fluxo precisa de você')
+    await runner.resume(view.id)
+    expect(started).toHaveLength(1)
+    finish(runner, 'run-1', 'succeeded')
+    await flush()
+    await runner.approveGate(view.id)
+    // Passou por cima só uma vez: o próximo comando pausa de novo.
+    expect(runner.view(view.id).pauseReason).toBe('agent_daily_limit')
+    expect(started).toHaveLength(1)
+  })
+
+  it('editar o agente no meio do fluxo não muda o fluxo em curso (cópia do perfil)', async () => {
+    const runner = agentRunner()
+    const view = await runner.startManual('p1', 't1')
+    agents = {
+      t1: { key: 'repo:ana', profile: { ...ANA, name: 'Ana 2', instructions: 'Outra coisa' } }
+    }
+    finish(runner, 'run-1', 'succeeded')
+    await flush()
+    await runner.approveGate(view.id)
+    expect(started[1]?.agent?.name).toBe('Ana')
+    expect(started[1]?.agent?.prompt).toContain('Nunca mexa em migrations')
   })
 })

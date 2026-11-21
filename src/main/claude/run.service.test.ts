@@ -143,6 +143,28 @@ describe('RunService', () => {
     expect(store.events('task-1').map((e) => e.kind)).toEqual(['run_finished', 'run_started'])
   })
 
+  it('agente (8A): instruções e modelo vão para o CLI; execução fica com o agente; política igual', async () => {
+    const view = await start(1, {
+      agent: { key: 'repo:ana', name: 'Ana', prompt: 'Você é Ana.', model: 'sonnet' }
+    })
+    await tick()
+    const run = runs[0]!
+    expect(run.opts.appendSystemPrompt).toBe('Você é Ana.')
+    expect(run.opts.model).toBe('sonnet')
+    expect(run.opts.delivery).toBe(false)
+    expect(
+      db.get<{ agent_key: string }>('SELECT agent_key FROM agent_runs WHERE id = ?', view.id)
+    ).toEqual({ agent_key: 'repo:ana' })
+    expect(store.events('task-1')[0]?.detail).toMatchObject({ agent: 'Ana', agentKey: 'repo:ana' })
+    // Push continua bloqueado como em qualquer execução.
+    const answer = await run.ask('Bash', { command: 'git push origin HEAD' })
+    expect(answer['behavior']).toBe('deny')
+    run.exit(0)
+    await tick()
+    const log = await service.readLog(view.id)
+    expect(log.some((e) => e.kind === 'text' && e.text.startsWith('Rodando como Ana'))).toBe(true)
+  })
+
   it('shell pede aprovação (notifica); "sempre neste projeto" vale para as próximas', async () => {
     await start(1)
     await tick()
