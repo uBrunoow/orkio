@@ -48,7 +48,8 @@ export type ClaudeCommandStep = StepBase & {
 export type GateStep = StepBase & {
   type: 'gate'
   message: string
-  show: 'diff' | 'summary' | 'none'
+  /** `backlog`: a spec/o plano da task do Backlog.md (alva-flow). */
+  show: 'diff' | 'summary' | 'backlog' | 'none'
   /** Recusar: vai para este passo (ex.: corrigir) ou encerra o fluxo como recusado. */
   onReject: StepId | 'stop'
   /** `null` = espera sem limite. */

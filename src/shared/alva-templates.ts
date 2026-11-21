@@ -40,6 +40,29 @@ const SPEC = (): Step => alva('spec', 'Especificar (/spec)', 'spec', '{{alva.spe
 const PLAN = (): Step => alva('plan', 'Planejar (/plan)', 'plan', '{{alva.task_id}}', 60)
 const always = { type: 'all' as const, of: [] }
 
+/** Gate com a spec (descrição e critérios de aceite) da task do Backlog, antes de planejar. */
+const APPROVE_SPEC = (): Step => ({
+  id: 'aprovar-spec',
+  name: 'Aprovar spec',
+  type: 'gate',
+  message:
+    'Confira a spec e os critérios de aceite antes de planejar. Recusar encerra o fluxo; ajuste a task e rode de novo.',
+  show: 'backlog',
+  onReject: 'stop',
+  timeoutMin: null
+})
+
+/** Gate com o plano técnico da task do Backlog, antes de implementar. */
+const APPROVE_PLAN = (): Step => ({
+  id: 'aprovar-plano',
+  name: 'Aprovar plano',
+  type: 'gate',
+  message: 'Confira o plano (subtarefas e arquivos) antes de implementar. Recusar encerra o fluxo.',
+  show: 'backlog',
+  onReject: 'stop',
+  timeoutMin: null
+})
+
 export const ALVA_TEMPLATE_IDS = {
   plan: 'alva-planejar',
   deliver: 'alva-entregar',
@@ -67,7 +90,7 @@ export function alvaPlanFlow(): Flow {
         name: 'Sem perguntas em aberto?',
         type: 'branch',
         when: { type: 'var', key: 'alva.open_questions', op: 'eq', value: '0' },
-        then: 'plan'
+        then: 'aprovar-spec'
       },
       {
         id: 'perguntas',
@@ -87,16 +110,9 @@ export function alvaPlanFlow(): Flow {
         then: 'spec',
         else: FLOW_END
       },
+      APPROVE_SPEC(),
       PLAN(),
-      {
-        id: 'aprovar-plano',
-        name: 'Aprovar plano',
-        type: 'gate',
-        message: 'Confira o plano na task do Backlog.md antes de implementar.',
-        show: 'summary',
-        onReject: 'stop',
-        timeoutMin: null
-      }
+      APPROVE_PLAN()
     ]
   }
 }
@@ -127,7 +143,9 @@ export function alvaDeliverFlow(): Flow {
         when: { type: 'var', key: 'alva.status', op: 'eq', value: 'Reviewed' },
         then: 'ver-diff'
       },
+      APPROVE_SPEC(),
       PLAN(),
+      APPROVE_PLAN(),
       {
         id: 'ja-revisado',
         name: 'Já revisado (caminho Pequeno)?',

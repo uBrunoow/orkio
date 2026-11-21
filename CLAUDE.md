@@ -454,6 +454,14 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 - Briefing: blocos da página (até 3 níveis, 400 blocos) → markdown + campos + PR; editável antes
   de rodar e gravado em `.orkio/briefing.md` (com `.orkio/.gitignore` = `*`). Não vai ao Notion.
 - Resumo ao terminar: `git diff --stat`/arquivos e commits desde a base e comandos de teste vistos.
+- **Sessão como conversa** (`features/claude/run-transcript.ts` puro + `RunTranscript.tsx`): o log
+  normalizado vira itens: mensagens (markdown da Astryx com `components.code` próprio, porque o
+  `CodeBlock` injeta `<style>`; classe `.orkio-codeblock` na camada da marca), grupos de
+  ferramentas com uma frase (arquivos distintos; só o grupo ao vivo abre sozinho), recibos
+  (aprovada entra no grupo; negada/bloqueada fica visível), aviso de falha e fechamento com turnos,
+  tempo e custo (o texto final só aparece se não repetir a última mensagem). Pedidos pendentes
+  continuam nos cartões do topo. Links do texto passam por `openExternal`. Mantém o papel/nome
+  `list "Log da execução"` usado pelo E2E.
   "Abrir no Cursor/VS Code" (`spawn` sem shell, `cursor`/`code` no PATH) e "Ver diff".
 - Eventos ao renderer: `claude:run-event` (`onRunEvent` → unsubscribe). Histórico da tarefa ganha
   `run_started|finished|cancelled|failed|blocked`.
@@ -514,6 +522,16 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
     mas o fluxo só avança com a escolha.
   - Notificação de desktop em gate, pausa e saída da etapa; evento `task-flows:changed` à tela;
     histórico com `flow_started`, `step_*`, `gate_*`, `flow_paused`, `flow_finished`.
+  - **Problema no fluxo:** `shared/flow-problem.ts` (puro) lê a pausa e a mensagem guardada no passo e
+    devolve causa (`uncommitted`, `credentials`, `push_rejected`, `timed_out`, `claude_error`,
+    `no_task`...), explicação e saídas; `FlowProblemCard` mostra o que o Orkio registrou, o que
+    fazer e os botões (Retomar, "Rodar /commit de novo", "Ver o que falta commitar", "Ver a sessão
+    do passo", Pular, Cancelar). O reconhecimento é por trechos das mensagens do main:
+    `main/flows/flow-problem.test.ts` usa os textos reais e falha se alguém mudar uma.
+    `FlowRunner.rerunFrom` (IPC `taskFlows.rerunFrom`) volta a um comando do Claude Code anterior ao
+    passo parado (só em falha/interrupção) e segue dali; o histórico da falha fica. `claude.diff`
+    devolve também `uncommitted` (de `git status --porcelain`, sem `.orkio/`). Com fluxo em andamento,
+    o botão manual "Rodar Claude Code" dá lugar a uma explicação.
 - **UI:** editor "Fluxos de tarefa" (do Fluxo do projeto), seção "Fluxo" no painel (linha do tempo,
   gate, pausas, decisão; o log ao vivo é o da seção Claude Code, que segue a execução nova) e token
   "Fluxo"/"Esperando você" no card (`active-flows.tsx`, contexto React).
@@ -556,6 +574,17 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   com Docker no projeto, 1 fluxo Alva por vez (configurável até 4); hooks do projeto viram uma linha
   "Hook do projeto rodou" no log (formato do evento não confirmado, leitura tolerante); painel mostra
   "Backlog: TASK-12 · status · critérios" (lido do arquivo) e "Aguardando CI" durante o `/pr`.
+- **Spec e plano na tela:** `alva.taskDocument` (IPC só leitura) devolve o texto da task do
+  Backlog.md (worktree primeiro, depois a pasta do projeto): sem frontmatter nem marcadores HTML,
+  `redactSecrets`, corte em `BACKLOG_DOC_LIMIT`; nada é guardado. `BacklogDocumentView` mostra com
+  `MarkdownText` (markdown da Astryx sem `CodeBlock`). Gate com `show: 'backlog'` (a config aceita o
+  valor); os templates ganharam os gates `aprovar-spec` (depois do /spec) e `aprovar-plano` (depois
+  do /plan), e o painel da tarefa tem a seção recolhível "Spec e plano". Fluxos já salvos não mudam.
+- **Diff na tela:** `lib/diff.ts` (puro) lê o `git diff` unificado em arquivos/hunks/linhas
+  (tolerante a texto cortado) e `components/DiffView.tsx` mostra: resumo, um `Collapsible` por
+  arquivo (abrem sozinhos até 3 arquivos de até 200 linhas), 300 linhas por arquivo + "Mostrar mais",
+  binários/renomeados indicados e os `untracked`. Usado no gate `show: 'diff'` e em "Ver diff". As
+  cores das linhas são classes `.orkio-diff-*` da camada da marca (tons de estado do tema).
 
 ## Entrega (Etapa 5C)
 

@@ -6,7 +6,7 @@
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
 import type { DeliveryTarget } from '../../shared/delivery'
-import { CONTEXT_LIMITS } from '../../shared/agent-run'
+import { CONTEXT_LIMITS, parsePorcelainLine } from '../../shared/agent-run'
 import type {
   ProjectClaudeContext,
   ArtifactCandidate,
@@ -14,6 +14,7 @@ import type {
   ArtifactView,
   CatalogGroup,
   ClaudeCodeStatus,
+  ClaudeDiff,
   ClaudeResult,
   EditorId,
   PermissionAnswer,
@@ -21,7 +22,8 @@ import type {
   RunPreparation,
   StartRunRequest,
   TaskRunsState,
-  TaskWorkspace
+  TaskWorkspace,
+  UncommittedFile
 } from '../../shared/agent-run'
 import {
   blocksToMarkdown,
@@ -463,22 +465,22 @@ export class ClaudeService {
     })
   }
 
-  diff(
-    projectId: string,
-    taskId: string
-  ): Promise<ClaudeResult<{ diff: string; truncated: boolean; untracked: string[] }>> {
+  diff(projectId: string, taskId: string): Promise<ClaudeResult<ClaudeDiff>> {
     return this.wrap(async () => {
       this.project(projectId)
       const wt = this.deps.worktrees.get(taskId)
       if (!wt) return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
       const text = await this.deps.git.diffText(wt.path, wt.baseRef)
-      const untracked = (await this.deps.git.statusPorcelain(wt.path))
-        .filter((l) => l.startsWith('??'))
-        .map((l) => l.slice(3))
+      const status = await this.deps.git.statusPorcelain(wt.path)
+      const untracked = status.filter((l) => l.startsWith('??')).map((l) => l.slice(3))
+      const uncommitted = status
+        .map(parsePorcelainLine)
+        .filter((f): f is UncommittedFile => f !== null && !f.path.startsWith('.orkio/'))
       return ok({
         diff: text.slice(0, MAX_DIFF_CHARS),
         truncated: text.length > MAX_DIFF_CHARS,
-        untracked
+        untracked,
+        uncommitted
       })
     })
   }

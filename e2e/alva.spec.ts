@@ -240,10 +240,24 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
   await q.getByRole('textbox', { name: 'Sua resposta (pergunta 2)' }).fill('Admins e gestores')
   await q.getByRole('button', { name: 'Enviar respostas' }).click()
 
-  // Vínculo + plano: para no gate "Aprovar plano".
+  // Spec pronta: para no gate "Aprovar spec", com a task do Backlog na própria tela.
   await expect(flow.getByTestId('flow-status')).toHaveText('Esperando aprovação', {
     timeout: 30_000
   })
+  const specGate = flow.getByRole('group', { name: 'Aprovação do fluxo' })
+  await expect(specGate).toContainText('Confira a spec')
+  const specDoc = specGate.getByRole('region', { name: 'Spec e plano' })
+  await expect(specDoc).toContainText('Quem pode exportar? → Admins e gestores')
+  await expect(specDoc).toContainText('CA-F01: QUANDO exportar')
+  await expect(specDoc).not.toContainText('SECTION:') // os marcadores HTML ficam de fora
+  await specGate.getByRole('button', { name: 'Aprovar' }).click()
+
+  // O /plan roda e para no gate "Aprovar plano".
+  await expect(flow.getByRole('group', { name: 'Aprovação do fluxo' })).toContainText(
+    'Confira o plano',
+    { timeout: 30_000 }
+  )
+  await expect(flow.getByTestId('flow-status')).toHaveText('Esperando aprovação')
   await expect(flow.getByTestId('alva-task')).toHaveText(
     'Backlog: TASK-1 · Architected · critérios 0/2'
   )
@@ -265,6 +279,10 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
     .getByRole('button', { name: 'Aprovar' })
     .click()
   await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+
+  // A seção "Spec e plano" lê a task a qualquer hora (não só nos gates).
+  await flow.getByRole('button', { name: 'Spec e plano' }).click()
+  await expect(flow.getByRole('region', { name: 'Spec e plano' })).toContainText('CA-F02')
   expect(await cspViolations(page)).toEqual([])
 })
 
@@ -282,7 +300,7 @@ test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado �
   // Review com blocker → /fix → review limpo → gate do diff.
   const gate = flow.getByRole('group', { name: 'Aprovação do fluxo' })
   await expect(gate).toContainText('Confira o diff antes do commit', { timeout: 60_000 })
-  await expect(gate.getByRole('textbox', { name: 'Diff para aprovar' })).toHaveValue(/corrigido/)
+  await expect(gate.getByRole('region', { name: 'Diff para aprovar' })).toContainText('corrigido')
   expect(argsLog().slice(2)).toEqual([
     'implement TASK-1',
     'review TASK-1',
@@ -304,6 +322,20 @@ test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado �
   await expect(push.getByTestId('confirm-stat')).toContainText('exportar.ts')
   expect(git(origin(), 'branch', '--list').trim()).toBe('* main')
   await expect(card(page).getByTestId('card-flow')).toHaveText('Esperando você')
+
+  // Sobrou um arquivo fora de commit: o push é recusado, o cartão explica e oferece rodar o
+  // /commit de novo (que leva o arquivo); depois o fluxo volta ao push.
+  writeFileSync(join(worktree(), 'sobra.txt'), 'esqueci de commitar\n')
+  await push.getByRole('button', { name: 'Fazer push' }).click()
+  const problem = flow.getByRole('group', { name: 'Problema no fluxo' })
+  await expect(problem).toContainText('Um passo falhou', { timeout: 30_000 })
+  await expect(problem).toContainText('Há mudanças não commitadas')
+  await problem.getByRole('button', { name: 'Ver o que falta commitar' }).click()
+  await expect(problem.getByRole('group', { name: 'Ainda sem commit' })).toContainText('sobra.txt')
+  expect(git(origin(), 'branch', '--list').trim()).toBe('* main') // nada foi enviado
+  await problem.getByRole('button', { name: 'Rodar /commit de novo' }).click()
+  await expect(push).toBeVisible({ timeout: 30_000 })
+  expect(git(worktree(), 'status', '--porcelain', '--', 'sobra.txt').trim()).toBe('')
   await push.getByRole('button', { name: 'Fazer push' }).click()
 
   // /pr em modo entrega: o primeiro comando do gh pede aprovação (só nesta execução).

@@ -56,6 +56,7 @@ import {
   IconFlag,
   IconInfoCircle,
   IconTool,
+  IconFileText,
   IconLayoutDashboard,
   type Icon as TablerIcon,
   type IconProps as TablerIconProps
@@ -119,6 +120,7 @@ export const QuestionIcon = adapt(IconHelpCircle)
 export const FinishIcon = adapt(IconFlag)
 export const InfoIcon = adapt(IconInfoCircle)
 export const ToolIcon = adapt(IconTool)
+export const ReadIcon = adapt(IconFileText)
 export const OverviewIcon = adapt(IconLayoutDashboard)
 /** Ponto de estado (StatusToken). */
 export const BellIcon = adapt(IconBell)

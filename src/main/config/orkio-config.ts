@@ -465,7 +465,10 @@ export function parseStep(v: unknown): Step | null {
       }
     case 'gate': {
       const show = v['show']
-      if (!str(v['message']) || (show !== 'diff' && show !== 'summary' && show !== 'none')) {
+      if (
+        !str(v['message']) ||
+        (show !== 'diff' && show !== 'summary' && show !== 'backlog' && show !== 'none')
+      ) {
         return null
       }
       return {

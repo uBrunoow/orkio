@@ -43,6 +43,35 @@ export interface BacklogTaskInfo {
   openQuestions: number
 }
 
+/** Tamanho máximo do texto da task mostrado na tela (o resto é cortado, com aviso). */
+export const BACKLOG_DOC_LIMIT = 60_000
+
+/** A task do Backlog.md para leitura (spec, critérios e plano), só no renderer, nunca guardada. */
+export interface BacklogTaskDocument {
+  info: BacklogTaskInfo
+  /** Markdown sem o frontmatter e sem os marcadores HTML; segredos ocultados no main. */
+  body: string
+  /** O texto passou do limite e foi cortado. */
+  truncated: boolean
+}
+
+/**
+ * Corpo legível da task: tira o frontmatter e os marcadores (`<!-- AC:BEGIN -->`...), junta
+ * linhas em branco e corta no limite (no fim de uma linha).
+ */
+export function backlogTaskBody(markdown: string): { body: string; truncated: boolean } {
+  const withoutFrontmatter = markdown.replace(/^---\r?\n[\s\S]*?\r?\n---[ \t]*\r?\n?/, '')
+  const clean = withoutFrontmatter
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  if (clean.length <= BACKLOG_DOC_LIMIT) return { body: clean, truncated: false }
+  const cut = clean.slice(0, BACKLOG_DOC_LIMIT)
+  const lastBreak = cut.lastIndexOf('\n')
+  return { body: (lastBreak > 0 ? cut.slice(0, lastBreak) : cut).trimEnd(), truncated: true }
+}
+
 function unquote(v: string): string {
   const t = v.trim()
   if ((t.startsWith("'") && t.endsWith("'")) || (t.startsWith('"') && t.endsWith('"'))) {

@@ -73,6 +73,9 @@ export function registerAlvaIpc(
       ? ok(await service.setMaxParallel(projectId, value))
       : INVALID
   )
+  guarded(ch.taskDocument, async (projectId, taskId) =>
+    isId(projectId) && isId(taskId) ? ok(await service.taskDocument(projectId, taskId)) : INVALID
+  )
   guarded(ch.taskSummary, async (projectId, taskId) =>
     isId(projectId) && isId(taskId) ? ok(await service.taskSummary(projectId, taskId)) : INVALID
   )

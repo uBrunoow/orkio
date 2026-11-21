@@ -65,7 +65,7 @@ describe('templates do alva-flow', () => {
           }
         : {}
     )
-    expect(trail).toEqual(['spec', 'perguntas', 'spec', 'plan', 'aprovar-plano'])
+    expect(trail).toEqual(['spec', 'perguntas', 'spec', 'aprovar-spec', 'plan', 'aprovar-plano'])
   })
 
   it('Entregar com vínculo: implement → review → blocker volta ao fix no MÁXIMO 2 vezes', () => {
@@ -89,7 +89,7 @@ describe('templates do alva-flow', () => {
     expect(end).toMatchObject({ kind: 'finished', result: 'done' })
   })
 
-  it('Entregar sem vínculo roda /spec e /plan; caminho Pequeno vai direto ao diff', () => {
+  it('Entregar sem vínculo roda /spec e /plan, cada um com a sua aprovação; caminho Pequeno vai direto ao diff', () => {
     const plain = simulate(alvaDeliverFlow(), { 'alva.linked': 'nao' }, (id) =>
       id === 'spec'
         ? { vars: { 'alva.linked': 'sim', 'alva.status': 'Requirements Defined' } }
@@ -97,7 +97,15 @@ describe('templates do alva-flow', () => {
           ? { vars: { 'alva.review_blocker': 'nao' } }
           : {}
     )
-    expect(plain.trail.slice(0, 5)).toEqual(['spec', 'plan', 'implement', 'review', 'ver-diff'])
+    expect(plain.trail.slice(0, 7)).toEqual([
+      'spec',
+      'aprovar-spec',
+      'plan',
+      'aprovar-plano',
+      'implement',
+      'review',
+      'ver-diff'
+    ])
     const small = simulate(alvaDeliverFlow(), { 'alva.linked': 'nao' }, (id) =>
       id === 'spec' ? { vars: { 'alva.linked': 'sim', 'alva.status': 'Reviewed' } } : {}
     )
@@ -130,6 +138,33 @@ describe('templates do alva-flow', () => {
       (id) => (id === 'ver-diff' ? { gate: 'rejected' } : {})
     )
     expect(trail).toEqual(['ver-diff'])
+    expect(end).toMatchObject({ kind: 'finished', result: 'rejected' })
+  })
+})
+
+describe('gates de spec e plano', () => {
+  it('mostram a task do Backlog e recusar encerra', () => {
+    for (const flow of [alvaPlanFlow(), alvaDeliverFlow()]) {
+      for (const id of ['aprovar-spec', 'aprovar-plano']) {
+        const step = flow.steps.find((s) => s.id === id)
+        expect(step, `${flow.id}:${id}`).toMatchObject({
+          type: 'gate',
+          show: 'backlog',
+          onReject: 'stop'
+        })
+      }
+    }
+  })
+
+  it('recusar a spec encerra antes do /plan', () => {
+    const { trail, end } = simulate(alvaPlanFlow(), {}, (id) =>
+      id === 'spec'
+        ? { vars: { 'alva.status': 'Requirements Defined', 'alva.open_questions': '0' } }
+        : id === 'aprovar-spec'
+          ? { gate: 'rejected' }
+          : {}
+    )
+    expect(trail).toEqual(['spec', 'aprovar-spec'])
     expect(end).toMatchObject({ kind: 'finished', result: 'rejected' })
   })
 })

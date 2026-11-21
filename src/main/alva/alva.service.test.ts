@@ -167,6 +167,30 @@ describe('alva-flow: vínculo e extratores', () => {
     expect(service.getLink('notion-1')).toBe('TASK-3')
   })
 
+  it('taskDocument: texto da task vinculada, sem marcadores e com segredos ocultados', async () => {
+    service.setLink('p1', 'notion-1', 'TASK-2')
+    await write(
+      'task-2 - Listar-tarefas.md',
+      task('TASK-2', 'Architected', {
+        ac: ['- [ ] #1 CA-F01: gera'],
+        questions: ['- [ ] Usar API_KEY=abc123segredo?']
+      })
+    )
+    const doc = await service.taskDocument('p1', 'notion-1')
+    expect(doc?.info).toMatchObject({ id: 'TASK-2', status: 'Architected' })
+    expect(doc?.truncated).toBe(false)
+    expect(doc?.body).toContain('- [ ] #1 CA-F01: gera')
+    expect(doc?.body).not.toContain('<!--')
+    expect(doc?.body).not.toContain('abc123segredo')
+    expect(doc?.body).toContain('API_KEY=[omitido]')
+  })
+
+  it('taskDocument: sem vínculo ou sem o arquivo, devolve null', async () => {
+    expect(await service.taskDocument('p1', 'notion-1')).toBeNull()
+    service.setLink('p1', 'notion-1', 'TASK-99')
+    expect(await service.taskDocument('p1', 'notion-1')).toBeNull()
+  })
+
   it('/spec NÃO cria task: o passo falha com explicação', async () => {
     const r = await runStep('alva-flow:spec', '', async () => undefined)
     expect(r).toEqual({ fail: ALVA_MESSAGES.noTaskCreated })

@@ -166,7 +166,8 @@ const api: OrkioApi = {
     addPlanningStage: (projectId, statusId) =>
       ipcRenderer.invoke(alva.addPlanningStage, projectId, statusId),
     setMaxParallel: (projectId, value) => ipcRenderer.invoke(alva.setMaxParallel, projectId, value),
-    taskSummary: (projectId, taskId) => ipcRenderer.invoke(alva.taskSummary, projectId, taskId)
+    taskSummary: (projectId, taskId) => ipcRenderer.invoke(alva.taskSummary, projectId, taskId),
+    taskDocument: (projectId, taskId) => ipcRenderer.invoke(alva.taskDocument, projectId, taskId)
   },
   agents: {
     list: (projectId) => ipcRenderer.invoke(agents.list, projectId),
@@ -214,6 +215,7 @@ const api: OrkioApi = {
     reject: (id) => ipcRenderer.invoke(taskFlows.reject, id),
     resume: (id) => ipcRenderer.invoke(taskFlows.resume, id),
     skip: (id) => ipcRenderer.invoke(taskFlows.skip, id),
+    rerunFrom: (id, stepId) => ipcRenderer.invoke(taskFlows.rerunFrom, id, stepId),
     cancel: (id) => ipcRenderer.invoke(taskFlows.cancel, id),
     choose: (id, value) => ipcRenderer.invoke(taskFlows.choose, id, value),
     decideLeft: (id, choice) =>

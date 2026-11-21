@@ -47,7 +47,8 @@ export const FLOW_MESSAGES = {
   busy: 'Esta tarefa já tem um fluxo em andamento. Termine ou cancele antes de começar outro.',
   notFound: 'Fluxo não encontrado. Atualize a tela.',
   wrongState: 'O fluxo não está esperando essa ação. Atualize a tela.',
-  flowMissing: 'O fluxo ligado a esta etapa não existe mais. Revise o Fluxo do projeto.'
+  flowMissing: 'O fluxo ligado a esta etapa não existe mais. Revise o Fluxo do projeto.',
+  invalidStep: 'Esse passo não pode ser rodado de novo agora. Atualize a tela.'
 } as const
 
 export class FlowError extends Error {
@@ -635,6 +636,32 @@ export class FlowRunner {
         this.savePersisted(flowRunId, { ...p, limitBypass: true })
       }
       await this.apply(flowRunId, retryStep(this.flow(row), engine, row.current_step))
+    })
+    return this.view(flowRunId)
+  }
+
+  /**
+   * "Rodar de novo o passo anterior": volta a um comando do Claude Code que vem antes do passo
+   * parado (ex.: o /commit antes de um push recusado) e segue o fluxo dali. Só em falha ou
+   * interrupção; o histórico do passo que falhou fica como está.
+   */
+  async rerunFrom(flowRunId: string, stepId: string): Promise<FlowRunView> {
+    await this.withLock(flowRunId, async () => {
+      const row = this.row(flowRunId)
+      if (
+        row.status !== 'paused' ||
+        !row.current_step ||
+        (row.pause_reason !== 'step_failed' && row.pause_reason !== 'interrupted')
+      ) {
+        throw new FlowError('wrong_state', FLOW_MESSAGES.wrongState)
+      }
+      const flow = this.flow(row)
+      const to = flow.steps.findIndex((s) => s.id === stepId)
+      const from = flow.steps.findIndex((s) => s.id === row.current_step)
+      if (to < 0 || from < 0 || to >= from || flow.steps[to]?.type !== 'claude_command') {
+        throw new FlowError('invalid_step', FLOW_MESSAGES.invalidStep)
+      }
+      await this.apply(flowRunId, retryStep(flow, this.persisted(row).engine, stepId))
     })
     return this.view(flowRunId)
   }

@@ -77,6 +77,19 @@ export function TaskPanel({
     return () => clearTimeout(timer)
   }, [focusSection, card.taskId])
   const [history, setHistory] = useState<BoardHistoryEntry[] | null>(null)
+  // "Ver a sessão do passo" (do cartão de problema): abre a execução na seção Claude Code.
+  const [flowLive, setFlowLive] = useState(false)
+  const [openRun, setOpenRun] = useState<{ runId: string; nonce: number } | null>(null)
+  const showRun = (runId: string): void => {
+    setOpenRun({ runId, nonce: Date.now() })
+    setTimeout(
+      () =>
+        document
+          .querySelector('[data-panel-section="claude"]')
+          ?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
+      50
+    )
+  }
   // Execuções do Claude Code também escrevem no histórico (início, fim, bloqueios).
   const [runTick, setRunTick] = useState(0)
   useEffect(
@@ -251,6 +264,8 @@ export function TaskPanel({
           pr={signals?.pr ?? null}
           onActivityChange={setFlowActivity}
           onWaitingChange={setWaitingFlow}
+          onOpenRun={showRun}
+          onLiveChange={setFlowLive}
         />
       </VStack>
       <VStack data-panel-section="claude">
@@ -260,6 +275,8 @@ export function TaskPanel({
           stageName={card.stageId ? stageName(card.stageId) : null}
           onWaitingChange={setWaitingClaude}
           onActivityChange={setClaudeActivity}
+          openRun={openRun}
+          flowActive={flowLive}
         />
       </VStack>
     </>

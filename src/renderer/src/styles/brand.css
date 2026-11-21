@@ -21,4 +21,61 @@
   .orkio-mono-input input {
     font-family: var(--font-family-code);
   }
+
+  /* Bloco de código do texto do Claude (markdown): mono, quebra linha, fundo elevado do tema. */
+  .orkio-codeblock {
+    display: block;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: var(--spacing-2) var(--spacing-3);
+    border-radius: var(--radius-element);
+    background: var(--color-background-muted);
+    font-family: var(--font-family-code);
+  }
+
+  /* Diff do ambiente (DiffView): linhas coloridas pelos tons de estado do tema. */
+  .orkio-diff {
+    overflow: hidden;
+    border-radius: var(--radius-element);
+    background: var(--color-background-muted);
+  }
+
+  .orkio-diff-hunk {
+    padding: 0 var(--spacing-3);
+    color: var(--color-text-secondary);
+    background: var(--color-background-surface);
+    font-family: var(--font-family-code);
+    white-space: pre-wrap;
+  }
+
+  .orkio-diff-line {
+    display: grid;
+    grid-template-columns: var(--spacing-10) var(--spacing-4) minmax(0, 1fr);
+    font-family: var(--font-family-code);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .orkio-diff-no,
+  .orkio-diff-sign {
+    color: var(--color-text-secondary);
+    text-align: end;
+    user-select: none;
+  }
+
+  .orkio-diff-add {
+    background: var(--color-background-green);
+  }
+
+  .orkio-diff-del {
+    background: var(--color-background-red);
+  }
+
+  .orkio-diff-stat-add {
+    color: var(--color-text-success);
+  }
+
+  .orkio-diff-stat-del {
+    color: var(--color-text-error);
+  }
 }

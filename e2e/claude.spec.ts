@@ -336,9 +336,10 @@ test('ver diff e limpar ambiente (a branch fica)', async () => {
   const { page } = orkio!
   const section = page.getByRole('region', { name: 'Claude Code' }).last()
   await section.getByRole('button', { name: 'Ver diff' }).click()
-  await expect(section.getByRole('textbox', { name: 'Diff do ambiente' })).toHaveValue(
-    /src\/exportar\.ts/
-  )
+  const diff = section.getByRole('region', { name: 'Diff do ambiente' })
+  await expect(diff).toContainText('src/exportar.ts')
+  await expect(diff).toContainText('arquivo')
+  await expect(diff).toContainText('+')
   await section.getByRole('button', { name: 'Limpar ambiente' }).click()
   await expect(section.getByTestId('workspace-branch')).toHaveCount(0)
   expect(git(repoDir(), 'branch', '--list', 'ORK-2/*').trim()).toBe(

@@ -278,8 +278,8 @@ test('critérios 1–4: cria a Ana pela tela, regra da coluna, fluxo dela com as
   ).toBeVisible()
   const gate = flow.getByRole('group', { name: 'Aprovação do fluxo' })
   await expect(gate).toContainText('Confira o diff da Ana')
-  await expect(gate.getByRole('textbox', { name: 'Diff para aprovar' })).toHaveValue(
-    /src\/exportar\.ts/
+  await expect(gate.getByRole('region', { name: 'Diff para aprovar' })).toContainText(
+    'src/exportar.ts'
   )
 
   // O Claude recebeu as instruções no system prompt; o briefing continua no prompt; mesmas permissões.

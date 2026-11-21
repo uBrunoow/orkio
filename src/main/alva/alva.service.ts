@@ -9,11 +9,14 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  backlogTaskBody,
   parseBacklogTask,
   sizeFromSpecResult,
   taskFileId,
+  type BacklogTaskDocument,
   type BacklogTaskInfo
 } from '../../shared/alva'
+import { redactSecrets } from '../claude/redact'
 import type { Db } from '../db/database'
 import type { ExtractContext, ExtractResult, FlowExtractor } from '../flows/flow-runner'
 
@@ -46,14 +49,23 @@ async function listTaskFiles(dir: string): Promise<string[]> {
   }
 }
 
-async function readTask(dir: string, file: string): Promise<BacklogTaskInfo | null> {
+async function readTaskFile(
+  dir: string,
+  file: string
+): Promise<{ info: BacklogTaskInfo; markdown: string } | null> {
   try {
     const path = join(dir, 'backlog', 'tasks', file)
     if ((await stat(path)).size > 1024 * 1024) return null
-    return parseBacklogTask(await readFile(path, 'utf8'))
+    const markdown = await readFile(path, 'utf8')
+    const info = parseBacklogTask(markdown)
+    return info ? { info, markdown } : null
   } catch {
     return null
   }
+}
+
+async function readTask(dir: string, file: string): Promise<BacklogTaskInfo | null> {
+  return (await readTaskFile(dir, file))?.info ?? null
 }
 
 export class AlvaService {
@@ -91,14 +103,38 @@ export class AlvaService {
     return null
   }
 
-  private async findTask(dir: string, id: string): Promise<BacklogTaskInfo | null> {
+  /**
+   * A task vinculada para leitura na tela (spec, critérios, plano): o texto sai sem frontmatter e
+   * sem marcadores, com segredos ocultados e cortado no limite. Nada disso é guardado.
+   */
+  async taskDocument(projectId: string, taskId: string): Promise<BacklogTaskDocument | null> {
+    const id = this.getLink(taskId)
+    if (!id) return null
+    for (const dir of [this.deps.worktreePath(taskId), this.deps.projectDir(projectId)]) {
+      if (!dir) continue
+      const found = await this.findTaskFile(dir, id)
+      if (!found) continue
+      const { body, truncated } = backlogTaskBody(found.markdown)
+      return { info: found.info, body: redactSecrets(body), truncated }
+    }
+    return null
+  }
+
+  private async findTaskFile(
+    dir: string,
+    id: string
+  ): Promise<{ info: BacklogTaskInfo; markdown: string } | null> {
     const files = await listTaskFiles(dir)
     // Pelo nome do arquivo (task-12 - …) e confirmando pelo frontmatter.
     for (const f of files.filter((f) => taskFileId(f) === id.toLowerCase())) {
-      const info = await readTask(dir, f)
-      if (info && info.id.toLowerCase() === id.toLowerCase()) return info
+      const found = await readTaskFile(dir, f)
+      if (found && found.info.id.toLowerCase() === id.toLowerCase()) return found
     }
     return null
+  }
+
+  private async findTask(dir: string, id: string): Promise<BacklogTaskInfo | null> {
+    return (await this.findTaskFile(dir, id))?.info ?? null
   }
 
   /** Variáveis no início de um fluxo. */

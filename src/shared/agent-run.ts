@@ -138,6 +138,52 @@ export interface StartRunRequest {
 
 export type EditorId = 'cursor' | 'code'
 
+export type UncommittedStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
+
+/** Arquivo do ambiente da tarefa que ainda não está em nenhum commit. */
+export interface UncommittedFile {
+  path: string
+  status: UncommittedStatus
+}
+
+/** Resultado de "Ver diff": o diff contra a base e o que ainda está fora de commit. */
+export interface ClaudeDiff {
+  diff: string
+  /** O texto passou do limite e foi cortado. */
+  truncated: boolean
+  /** Arquivos novos fora do git (não entram no `git diff`). */
+  untracked: string[]
+  /** Tudo que ainda não foi commitado (modificado, novo, removido, renomeado). */
+  uncommitted: UncommittedFile[]
+}
+
+/**
+ * Uma linha do `git status --porcelain` (v1: "XY caminho") → arquivo e estado. Caminhos entre
+ * aspas perdem as aspas; renomeado fica com o nome novo.
+ */
+export function parsePorcelainLine(line: string): UncommittedFile | null {
+  if (line.length < 4) return null
+  const xy = line.slice(0, 2)
+  let path = line.slice(3)
+  const arrow = path.indexOf(' -> ')
+  if (arrow >= 0) path = path.slice(arrow + 4)
+  if (path.length >= 2 && path.startsWith('"') && path.endsWith('"')) {
+    path = path.slice(1, -1).replace(/\\(["\\])/g, '$1')
+  }
+  if (!path) return null
+  const status: UncommittedStatus =
+    xy === '??'
+      ? 'untracked'
+      : xy.includes('R')
+        ? 'renamed'
+        : xy.includes('D')
+          ? 'deleted'
+          : xy.includes('A')
+            ? 'added'
+            : 'modified'
+  return { path, status }
+}
+
 /** Catálogo de comandos do Claude Code (4B): só nome e descrição. */
 export interface CatalogCommand {
   /** Nome para `/nome` (plugins: `plugin:nome`). */
