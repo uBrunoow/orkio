@@ -66,6 +66,7 @@ function gateFlow(over: Partial<FlowRunView> = {}): FlowRunView {
     taskId: 't1',
     flowId: 'f',
     flowName: 'Revisar',
+    agent: null,
     steps: [
       {
         id: 'ok',

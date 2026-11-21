@@ -13,6 +13,8 @@ export type Route =
   /** Visão geral (6D): o que espera você em todos os projetos. */
   | { name: 'overview' }
   | { name: 'projects' }
+  /** Agentes (8A): perfis, revisão e regras por coluna (escolhe o projeto na própria tela). */
+  | { name: 'agents' }
   | { name: 'integrations' }
   /** Configurações (6C): Atualizações e Sobre. */
   | { name: 'settings' }
@@ -43,6 +45,7 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
   welcome: 'Vamos começar',
   overview: 'Visão geral',
   projects: 'Projetos',
+  agents: 'Agentes',
   integrations: 'Integrações',
   settings: 'Configurações',
   board: 'Quadro',

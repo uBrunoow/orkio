@@ -39,6 +39,7 @@ function flow(over: Partial<FlowRunView> = {}): FlowRunView {
     taskId: 't1',
     flowId: 'f1',
     flowName: 'Revisar',
+    agent: null,
     steps: [
       {
         id: 'rev',

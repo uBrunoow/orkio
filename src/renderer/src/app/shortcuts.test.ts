@@ -26,8 +26,10 @@ describe('globalShortcut', () => {
     expect(go('2')).toEqual({ type: 'navigate', route: { name: 'board' } })
     expect(go('3')).toEqual({ type: 'navigate', route: { name: 'automations' } })
     expect(go('6')).toEqual({ type: 'navigate', route: { name: 'projects' } })
-    expect(go('7')).toEqual({ type: 'navigate', route: { name: 'integrations' } })
-    expect(globalShortcut(key('9', { ctrlKey: true }), false)).toBeNull()
+    expect(go('7')).toEqual({ type: 'navigate', route: { name: 'agents' } })
+    expect(go('8')).toEqual({ type: 'navigate', route: { name: 'integrations' } })
+    expect(go('9')).toEqual({ type: 'navigate', route: { name: 'settings' } })
+    expect(globalShortcut(key('0', { ctrlKey: true }), false)).toBeNull()
   })
 
   it('Voltar: Ctrl+[ sempre; Alt+← fora de campos de texto', () => {

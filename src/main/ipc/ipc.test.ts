@@ -13,6 +13,10 @@ import { registerNotionWorkspaceIpc } from './notion-workspace.ipc'
 import { isAllowedExternalUrl, registerShellIpc, siteUrlRules } from './shell.ipc'
 import { registerUpdatesIpc, type UpdatesIpcService } from './updates.ipc'
 import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
+import { registerAgentsIpc, toProfile } from './agents.ipc'
+import type { AgentsService } from '../agents/agents.service'
+import { AgentError } from '../agents/agents.service'
+import { defaultAgent } from '../../shared/agent'
 
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>
 
@@ -649,6 +653,89 @@ describe('registerFlowIpc / isFlowDraft', () => {
       ok: false,
       cancelled: false
     })
+  })
+})
+
+describe('registerAgentsIpc', () => {
+  const ANA = defaultAgent({ id: 'ana', name: 'Ana', instructions: 'Testes sempre.' })
+  const state = { projectId: 'p1', agents: [], rules: [] }
+
+  function setup(): { ipc: FakeIpc; service: Record<string, ReturnType<typeof vi.fn>> } {
+    const ipc = fakeIpc()
+    const service = {
+      list: vi.fn(async () => state),
+      save: vi.fn(async () => ({})),
+      approve: vi.fn(async () => ({})),
+      assign: vi.fn(async () => undefined),
+      setRules: vi.fn(async () => state),
+      badges: vi.fn(async () => ({}))
+    }
+    registerAgentsIpc(ipc, service as unknown as AgentsService, guard)
+    return { ipc, service }
+  }
+
+  it('recusa origem não confiável', async () => {
+    const { ipc, service } = setup()
+    ipc.trusted = false
+    await expect(ipc.invoke(IPC_CHANNELS.agents.list, 'p1')).rejects.toThrow(/não autorizada/)
+    expect(service['list']).not.toHaveBeenCalled()
+  })
+
+  it('valida o payload antes de chegar ao serviço', async () => {
+    const { ipc, service } = setup()
+    const save = (input: unknown): Promise<unknown> => ipc.invoke(IPC_CHANNELS.agents.save, input)
+    expect(
+      await save({ projectId: 'p1', scope: 'nuvem', profile: ANA, isNew: true })
+    ).toMatchObject({
+      ok: false
+    })
+    expect(
+      await save({
+        projectId: 'p1',
+        scope: 'repo',
+        profile: { ...ANA, delivery: 'sim' },
+        isNew: true
+      })
+    ).toMatchObject({ ok: false })
+    expect(
+      await save({ projectId: '../x', scope: 'repo', profile: ANA, isNew: true })
+    ).toMatchObject({
+      ok: false
+    })
+    expect(service['save']).not.toHaveBeenCalled()
+    expect(await save({ projectId: 'p1', scope: 'repo', profile: ANA, isNew: true })).toEqual({
+      ok: true,
+      value: state
+    })
+    expect(await ipc.invoke(IPC_CHANNELS.agents.assign, 'p1', 't1', 'nuvem:ana')).toMatchObject({
+      ok: false,
+      error: { code: 'invalid' }
+    })
+    expect(await ipc.invoke(IPC_CHANNELS.agents.approve, 'p1', 'repo:ana', 'curto')).toMatchObject({
+      ok: false
+    })
+    expect(
+      await ipc.invoke(IPC_CHANNELS.agents.setRules, 'p1', [{ stageId: 's1', agentKey: 'x' }])
+    ).toMatchObject({ ok: false })
+  })
+
+  it('erros esperados do serviço viram mensagem; inesperados, mensagem genérica', async () => {
+    const { ipc, service } = setup()
+    service['assign']!.mockRejectedValueOnce(new AgentError('busy', 'Tem fluxo.'))
+    expect(await ipc.invoke(IPC_CHANNELS.agents.assign, 'p1', 't1', 'repo:ana')).toEqual({
+      ok: false,
+      error: { code: 'busy', message: 'Tem fluxo.' }
+    })
+    service['assign']!.mockRejectedValueOnce(new Error('segredo ghp_xxxxxxxxxxxxxxxxxxxxxxxx'))
+    const r = await ipc.invoke(IPC_CHANNELS.agents.assign, 'p1', 't1', null)
+    expect(JSON.stringify(r)).not.toContain('ghp_')
+  })
+
+  it('toProfile só aceita a forma certa', () => {
+    expect(toProfile(ANA)).toEqual(ANA)
+    expect(toProfile({ ...ANA, commands: 'tudo' })).toBeNull()
+    expect(toProfile({ ...ANA, limits: null })).toBeNull()
+    expect(toProfile([])).toBeNull()
   })
 })
 

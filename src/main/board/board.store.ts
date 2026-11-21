@@ -52,6 +52,9 @@ export type TaskEventKind =
   | 'flow_finished'
   /** Entrega (5C): push/PR/comentário/resolução/pedido de review feitos por fluxo. */
   | 'delivery'
+  /** Agentes (8A): atribuição da tarefa (à mão ou pela regra da coluna). */
+  | 'agent_assigned'
+  | 'agent_unassigned'
 
 export interface TaskEventRow {
   id: number

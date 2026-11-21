@@ -13,6 +13,7 @@ import {
   IconFolderSearch,
   IconSearch,
   IconFolders,
+  IconRobot,
   IconGitBranch,
   IconGitPullRequest,
   IconLink,
@@ -94,6 +95,7 @@ export const StopIcon = adapt(IconPlayerStop)
 export const EditorIcon = adapt(IconCode)
 export const DiffIcon = adapt(IconFileDiff)
 export const CleanIcon = adapt(IconEraser)
+export const AgentsIcon = adapt(IconRobot)
 export const FlowsIcon = adapt(IconRoute)
 export const StagesIcon = adapt(IconAdjustmentsHorizontal)
 export const SwitchIcon = adapt(IconSelector)

@@ -121,6 +121,8 @@ export interface RunPreparation extends TaskRunsState {
   commands: string[]
   /** Avisos do contexto do projeto (página ilegível, contexto cortado pelo limite). */
   contextWarnings: string[]
+  /** Agente da tarefa (8A): "Rodar como <nome>"; `problem` = não pode rodar agora (e por quê). */
+  agent: { name: string; problem: string | null } | null
 }
 
 export interface StartRunRequest {
@@ -130,6 +132,8 @@ export interface StartRunRequest {
   command: string | null
   text: string
   briefing: string
+  /** 8A: rodar com as instruções do agente da tarefa (padrão: sim, se houver agente). */
+  asAgent?: boolean
 }
 
 export type EditorId = 'cursor' | 'code'

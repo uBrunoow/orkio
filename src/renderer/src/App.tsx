@@ -7,6 +7,7 @@ import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav
 import { VStack } from '@astryxdesign/core/VStack'
 import type { ProjectView } from '../../shared/ipc-contract'
 import {
+  AgentsIcon,
   BoardIcon,
   ClaudeLogo,
   FlowsIcon,
@@ -30,6 +31,7 @@ import {
 import { CommandMenu, type CommandData } from './app/CommandMenu'
 import { SHORTCUTS, globalShortcut, isTextField } from './app/shortcuts'
 import { BoardPage } from './features/board/BoardPage'
+import { AgentsPage } from './features/agents/AgentsPage'
 import { AutomationsPage, ContextPage, FlowsPage } from './features/board/ProjectPages'
 import { TaskPage } from './features/board/TaskPage'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
@@ -279,6 +281,9 @@ export function App(): React.JSX.Element | null {
     case 'context':
       page = <ContextPage project={project} onOpenProjects={toProjects} />
       break
+    case 'agents':
+      page = <AgentsPage />
+      break
     case 'settings':
       page = <SettingsPage />
       break
@@ -362,6 +367,13 @@ export function App(): React.JSX.Element | null {
               isSelected={route.name === 'projects'}
               aria-keyshortcuts={keyshortcut('projects')}
               onClick={toProjects}
+            />
+            <SideNavItem
+              label={ROUTE_TITLES.agents}
+              icon={AgentsIcon}
+              isSelected={route.name === 'agents'}
+              aria-keyshortcuts={keyshortcut('agents')}
+              onClick={() => navigate({ name: 'agents' })}
             />
             <SideNavItem
               label={ROUTE_TITLES.integrations}

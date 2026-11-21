@@ -457,6 +457,10 @@ export type FlowPauseReason =
   | 'needs_choice'
   /** Limite de fluxos em paralelo no projeto: começa sozinho quando outro terminar. */
   | 'waiting_slot'
+  /** Limite de fluxos em paralelo do agente (8A): começa sozinho quando outro terminar. */
+  | 'waiting_agent'
+  /** Limite diário do agente (8A): "Retomar" passa por cima uma vez. */
+  | 'agent_daily_limit'
 
 export interface FlowStepView {
   seq: number
@@ -490,6 +494,8 @@ export interface FlowRunView {
   choice: { prompt: string; options: { value: string; label: string }[] } | null
   /** Confirmação de uma ação do Orkio (5C: push, pedir review) esperando você. */
   confirm: ActionConfirm | null
+  /** Agente que roda o fluxo (8A; cópia do perfil feita no início). */
+  agent: { key: string; name: string; color: string } | null
 }
 
 /** O que uma ação do Orkio mostra antes de agir (gate da ação). */
@@ -516,7 +522,9 @@ export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {
   gate_timeout: 'A aprovação expirou',
   left_stage: 'A tarefa saiu da etapa do fluxo',
   needs_choice: 'O fluxo precisa de uma escolha sua',
-  waiting_slot: 'Aguardando outro fluxo do projeto terminar'
+  waiting_slot: 'Aguardando outro fluxo do projeto terminar',
+  waiting_agent: 'Aguardando o agente terminar outra tarefa',
+  agent_daily_limit: 'O agente atingiu o limite de hoje'
 }
 
 /** Fluxo ativo (não terminado) espera uma ação sua? */

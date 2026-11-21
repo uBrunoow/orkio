@@ -3,6 +3,7 @@
  * Nada de tokens aqui: segredos vão no SecureStore.
  */
 import type { DeliverySettings } from '../../shared/delivery'
+import { parseProjectAgents, type ProjectAgents } from '../../shared/agent'
 import {
   EVENT_KINDS,
   defaultRules,
@@ -30,7 +31,7 @@ import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-ru
 import type { Condition, Flow, ProjectFlows, StageFlow, Step } from '../../shared/task-flow'
 import type { UpdateChannel } from '../../shared/updates'
 
-export const ORKIO_CONFIG_VERSION = 9
+export const ORKIO_CONFIG_VERSION = 10
 
 export interface StoredProject {
   id: string
@@ -56,6 +57,8 @@ export interface OrkioConfig {
   flows: Record<string, ProjectFlows>
   /** Ajustes de entrega por projeto (5C). Ausente = padrão (aprovação para push). */
   delivery: Record<string, DeliverySettings>
+  /** Agentes (8A): regras de atribuição por coluna. Os perfis ficam em arquivos, não aqui. */
+  agents: Record<string, ProjectAgents>
   /** Atualizações (6C): canal, última versão vista ("O que há de novo") e última verificação. */
   updates: UpdatesConfig
 }
@@ -76,6 +79,7 @@ export function emptyConfig(): OrkioConfig {
     claudeContexts: {},
     flows: {},
     delivery: {},
+    agents: {},
     updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
   }
 }
@@ -124,7 +128,9 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
       8: (data) => ({
         ...data,
         updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
-      })
+      }),
+      // v9 → v10 (8A): nenhuma regra de atribuição de agentes ainda.
+      9: (data) => ({ ...data, agents: {} })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -191,6 +197,13 @@ export function validateConfig(
       }
     }
   }
+  const agents: Record<string, ProjectAgents> = {}
+  if (isRecord(data['agents'])) {
+    for (const [projectId, raw] of Object.entries(data['agents'])) {
+      const parsed = parseProjectAgents(raw)
+      if (parsed) agents[projectId] = parsed
+    }
+  }
   const value: OrkioConfig = {
     projects,
     notion,
@@ -199,6 +212,7 @@ export function validateConfig(
     claudeContexts,
     flows,
     delivery,
+    agents,
     updates: parseUpdates(data['updates'])
   }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }

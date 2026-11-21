@@ -18,6 +18,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
 import { AutomationIcon, PauseIcon, RefreshIcon } from '../../components/icons'
 import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
+import { AgentBadgesProvider, useAgentBadges } from '../agents/agent-badges'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardSettings } from './BoardSettings'
@@ -92,6 +93,7 @@ function Board({
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
   const activeFlows = useActiveFlows(projectId)
+  const agentBadges = useAgentBadges(projectId)
   const [selected, setPicked] = useState<string | null>(openTaskId)
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
@@ -280,13 +282,15 @@ function Board({
               />
             ) : (
               <ActiveFlowsProvider value={activeFlows}>
-                <BoardColumns
-                  stages={view.config.stages}
-                  cards={cards}
-                  signals={signals.result?.signals ?? {}}
-                  selectedTaskId={selected}
-                  actions={actions}
-                />
+                <AgentBadgesProvider value={agentBadges}>
+                  <BoardColumns
+                    stages={view.config.stages}
+                    cards={cards}
+                    signals={signals.result?.signals ?? {}}
+                    selectedTaskId={selected}
+                    actions={actions}
+                  />
+                </AgentBadgesProvider>
               </ActiveFlowsProvider>
             )}
           </StackItem>
@@ -294,6 +298,7 @@ function Board({
             <VStack width="min(calc(var(--spacing-12) * 9), 42%)" height="100%">
               <TaskPanel
                 projectId={projectId}
+                agent={agentBadges[selectedCard.taskId] ?? null}
                 card={selectedCard}
                 stages={view.config.stages}
                 signals={signals.result?.signals[selectedCard.taskId]}

@@ -11,6 +11,8 @@ import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import { GitBranchIcon, LockIcon, PauseIcon, PullRequestIcon } from '../../components/icons'
 import { useTaskFlowState } from '../task-flows/active-flows'
+import { useAgentBadge } from '../agents/agent-badges'
+import { AgentAvatar } from '../agents/AgentsPage'
 import { cardStatus } from './card-status'
 
 export interface CardActions {
@@ -36,6 +38,7 @@ export function BoardCardBody({
 }): React.JSX.Element {
   const label = card.displayId ?? card.title
   const flow = useTaskFlowState(card.taskId)
+  const agent = useAgentBadge(card.taskId)
   const status = cardStatus(card, flow, signals)
   const branches = signals
     ? [...new Set([...signals.localBranches, ...signals.remoteBranches])]
@@ -45,6 +48,7 @@ export function BoardCardBody({
     <VStack gap={2}>
       <HStack gap={2} vAlign="center">
         <Code data-testid="card-id">{card.displayId ?? '—'}</Code>
+        {agent && <AgentAvatar name={agent.name} color={agent.color} testId="card-agent" />}
         <StackItem size="fill">
           <HStack gap={2} vAlign="center" hAlign="end">
             {status && (

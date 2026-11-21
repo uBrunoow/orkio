@@ -48,6 +48,13 @@ function automationEvent(e: HistoryEvent): string {
       : label
 }
 
+/** " por Ana" quando um agente fez a ação (8A). */
+function by(e: HistoryEvent): string {
+  return typeof e.detail?.['agent'] === 'string' && e.detail['agent']
+    ? ` por ${e.detail['agent']}`
+    : ''
+}
+
 export function describeEvent(e: HistoryEvent, stageName: (id: string | null) => string): string {
   const rule = typeof e.detail?.['ruleName'] === 'string' ? `“${e.detail['ruleName']}”` : null
   if (e.kind === 'moved' && e.source === 'automation') {
@@ -83,7 +90,7 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     case 'sync_ok':
       return 'Sincronizada com o Notion'
     case 'run_started':
-      return 'Claude Code iniciou uma execução'
+      return `Claude Code iniciou uma execução${by(e)}`
     case 'run_finished':
       return `Claude Code terminou (${filesChanged(Number(e.detail?.['files'] ?? 0))})`
     case 'run_cancelled':
@@ -91,7 +98,13 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     case 'run_failed':
       return 'Execução do Claude Code falhou'
     case 'flow_started':
-      return `Fluxo iniciado: ${String(e.detail?.['flow'] ?? '')}`
+      return `Fluxo iniciado: ${String(e.detail?.['flow'] ?? '')}${by(e)}`
+    case 'agent_assigned':
+      return e.detail?.['by'] === 'rule'
+        ? `Atribuída a ${String(e.detail?.['agent'] ?? '')} pela regra da coluna`
+        : `Atribuída a ${String(e.detail?.['agent'] ?? '')}`
+    case 'agent_unassigned':
+      return 'Atribuição de agente removida'
     case 'step_started':
       return `Passo do fluxo começou (${String(e.detail?.['step'] ?? '')})`
     case 'step_finished':

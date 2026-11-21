@@ -6,6 +6,7 @@ import type { ProjectView } from '../../../../shared/ipc-contract'
 import { BackIcon } from '../../components/icons'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
+import { useAgentBadges } from '../agents/agent-badges'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { TaskPanel } from './TaskPanel'
 import { useBoard } from './useBoard'
@@ -26,6 +27,7 @@ export function TaskPage({
   const projectId = project?.id ?? ''
   const board = useBoard(projectId)
   const signals = useTaskSignals(projectId)
+  const agentBadges = useAgentBadges(projectId)
   const refreshSignals = signals.refresh
   const fetchedAt = board.view?.fetchedAt
   useEffect(() => {
@@ -79,6 +81,7 @@ export function TaskPage({
         <TaskPanel
           variant="page"
           projectId={project.id}
+          agent={agentBadges[card.taskId] ?? null}
           card={card}
           stages={board.view.config.stages}
           signals={signals.result?.signals[card.taskId]}

@@ -577,7 +577,9 @@ export const ACTIVITY_KINDS: Record<ActivityGroup, readonly string[]> = {
     'blocked',
     'unblocked',
     'automation_paused',
-    'automation_resumed'
+    'automation_resumed',
+    'agent_assigned',
+    'agent_unassigned'
   ],
   automation: ['automation', 'moved'],
   claude: [

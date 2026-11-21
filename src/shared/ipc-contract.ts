@@ -54,6 +54,15 @@ import type {
   TaskRunsState
 } from './agent-run'
 
+import type {
+  AgentBadge,
+  AgentKey,
+  AgentProfile,
+  AgentScope,
+  AgentsState,
+  ProjectAgents
+} from './agent'
+
 export type { BoardConfig, BoardStage, StageIssue, StatusOption, TaskSignals }
 
 export const IPC_CHANNELS = {
@@ -86,6 +95,16 @@ export const IPC_CHANNELS = {
     addPlanningStage: 'alva:add-planning-stage',
     setMaxParallel: 'alva:set-max-parallel',
     taskSummary: 'alva:task-summary'
+  },
+  agents: {
+    list: 'agents:list',
+    save: 'agents:save',
+    approve: 'agents:approve',
+    assign: 'agents:assign',
+    setRules: 'agents:set-rules',
+    badges: 'agents:badges',
+    /** Evento main → renderer: agentes ou atribuições de um projeto mudaram. */
+    changed: 'agents:changed'
   },
   taskFlows: {
     getProject: 'task-flows:get-project',
@@ -747,6 +766,30 @@ export interface OrkioApi {
       projectId: string,
       taskId: string
     ): Promise<ClaudeResult<{ linked: string | null; task: BacklogTaskInfo | null }>>
+  }
+  /**
+   * Agentes (8A): perfis (arquivos `.md`), aprovação dos perfis do repositório e atribuição de
+   * tarefas. Agentes não ganham permissões: só instruções, modelo, fluxo preferido e limites.
+   */
+  agents: {
+    list(projectId: string): Promise<ClaudeResult<AgentsState>>
+    save(input: {
+      projectId: string
+      scope: AgentScope
+      profile: AgentProfile
+      isNew: boolean
+    }): Promise<ClaudeResult<AgentsState>>
+    /** Aprova o perfil do repositório exatamente como visto (`hash`). */
+    approve(projectId: string, key: AgentKey, hash: string): Promise<ClaudeResult<AgentsState>>
+    /** `key = null` tira a atribuição. */
+    assign(projectId: string, taskId: string, key: AgentKey | null): Promise<ClaudeResult<null>>
+    setRules(
+      projectId: string,
+      rules: ProjectAgents['assignOnEnter']
+    ): Promise<ClaudeResult<AgentsState>>
+    /** Avatar de cada tarefa atribuída (cards do quadro). */
+    badges(projectId: string): Promise<Record<string, AgentBadge>>
+    onChanged(listener: (event: { projectId: string }) => void): () => void
   }
   /** Fluxos de tarefa (5A): sequências de passos ligadas às colunas do quadro. */
   taskFlows: {

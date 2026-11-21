@@ -174,6 +174,29 @@ export const MIGRATIONS: readonly string[] = [
     backlog_task_id TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+  `,
+  // v8 (Etapa 8A): agentes. Atribuição local (não vai ao Notion), aprovação dos perfis do
+  // repositório (hash do arquivo) e o agente de cada fluxo/execução (cópia do perfil no fluxo).
+  `
+  CREATE TABLE agent_assignments (
+    task_page_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    agent_key TEXT NOT NULL,
+    assigned_at TEXT NOT NULL,
+    assigned_by TEXT NOT NULL CHECK (assigned_by IN ('manual', 'rule'))
+  );
+  CREATE INDEX agent_assignments_project ON agent_assignments (project_id);
+  CREATE TABLE agent_trust (
+    project_id TEXT NOT NULL,
+    agent_id TEXT NOT NULL,
+    approved_hash TEXT NOT NULL,
+    approved_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, agent_id)
+  );
+  ALTER TABLE flow_runs ADD COLUMN agent_key TEXT;
+  ALTER TABLE flow_runs ADD COLUMN agent_json TEXT;
+  ALTER TABLE agent_runs ADD COLUMN agent_key TEXT;
+  CREATE INDEX agent_runs_agent ON agent_runs (agent_key, started_at);
   `
 ]
 

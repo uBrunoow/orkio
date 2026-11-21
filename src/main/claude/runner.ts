@@ -103,10 +103,17 @@ export interface RunnerOptions {
   env: NodeJS.ProcessEnv
   /** Modo entrega (5C): regras `deny` do modo entrega em vez das padrão. */
   delivery?: boolean
+  /** Agente (8A): instruções acrescentadas ao system prompt (o briefing continua no prompt). */
+  appendSystemPrompt?: string | null
+  /** Agente (8A): alias do modelo (`sonnet`, `opus`, `haiku`); ausente = padrão do usuário. */
+  model?: string | null
   onEvent(event: RunLogEvent): void
   onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   spawn?: SpawnFn
 }
+
+/** Só aliases simples chegam ao `--model` (nada que pareça outra flag). */
+const MODEL_ALIAS = /^[a-z][a-z0-9.-]{0,40}$/
 
 export const RUN_SETTINGS = {
   permissions: {
@@ -181,7 +188,9 @@ export class ClaudeRun {
       '--mcp-config',
       this.mcpConfig,
       '--permission-prompt-tool',
-      'mcp__orkio__approve'
+      'mcp__orkio__approve',
+      ...(o.appendSystemPrompt ? ['--append-system-prompt', o.appendSystemPrompt] : []),
+      ...(o.model && MODEL_ALIAS.test(o.model) ? ['--model', o.model] : [])
     ]
     const spawn = o.spawn ?? nodeSpawn
     const child = spawn(o.claudeCommand, args, {

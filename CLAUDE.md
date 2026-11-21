@@ -36,12 +36,14 @@ Claude Code. Hoje existem:
 - **Atualizações (6C):** electron-updater lendo o repo público de releases; banner, Configurações
   (Atualizações + Sobre), "O que há de novo"; nunca reinicia por cima de trabalho em andamento.
 - **Interface (6E):** menu com Visão geral, o projeto atual (Quadro, Etapas e automações, Fluxos,
-  Contexto do Claude), Projetos, Integrações e Configurações (Ctrl/Cmd+1…8 nessa ordem), rotas tipadas, tarefa em
+  Contexto do Claude), Projetos, Agentes, Integrações e Configurações (Ctrl/Cmd+1…9 nessa ordem), rotas tipadas, tarefa em
   painel ou tela cheia, Command Palette (Ctrl/Cmd+K), card do quadro com um estado só (`cardStatus`).
   Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
   Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) no repo público
   `uBrunoow/orkio-releases`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
+- **Agentes (8A):** colegas de IA (nome, papel, instruções, limites) que pegam tarefas do quadro e
+  rodam os fluxos da 5A pelo mesmo Claude Code da 4A, com todas as regras do Orkio.
 - Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
@@ -86,6 +88,7 @@ src/
   shared/updates.ts        # 6C: status das atualizações, versões, recorte do CHANGELOG, URL do DMG
   shared/overview.ts       # 6D: tipos e agregações puras da Visão geral (esperando, PRs, semana...)
   shared/task-history.ts   # texto/links de um evento do histórico (painel da tarefa e atividade)
+  shared/agent.ts          # 8A: perfil do agente (parse/serialize do .md, validação, prompt, checkAgentFlow)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -97,7 +100,7 @@ src/
     ipc/                   # handlers finos: validam origem e payload, delegam ao conector/serviço
     storage/secure-store.ts  # SEGREDOS (safeStorage)
     storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações)
-    config/orkio-config.ts   # orkio-config.json (schema v4: projects, notion, boards+rules, automation)
+    config/orkio-config.ts   # orkio-config.json (schema v10; migrações v → v+1)
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
     notion/                # notion-workspace.service.ts (bancos, mapeamento, vínculo, tarefas)
@@ -109,6 +112,7 @@ src/
     overview/              # 6D: overview.service.ts (agrega stores/caches), badge.ts (ícone do app)
     delivery/              # 5C: delivery.service.ts (alvo, prévia, push), delivery-actions.ts (ações)
     updates/               # 6C: update.service.ts (electron-updater injetado), busy.ts, mac-signature.ts
+    agents/                # 8A: agents.service.ts (perfis, confiança, atribuição, regras, uso do dia)
     flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
                            # policy (+ delivery-policy, 5C), redact, run.service, claude.service;
@@ -605,7 +609,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 ## Visão geral (Etapa 6D)
 
 - **Abertura:** com ao menos um projeto, o app abre na Visão geral; sem projeto, "Vamos começar".
-  Menu: Visão geral · telas do projeto atual · Projetos · Integrações · Configurações. Atalhos Ctrl/Cmd+1…8 na ordem do menu
+  Menu: Visão geral · telas do projeto atual · Projetos · Agentes · Integrações · Configurações. Atalhos Ctrl/Cmd+1…9 na ordem do menu
   (`keydown` no renderer, `aria-keyshortcuts` no item).
 - **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs**:
   `flow_runs` (via `FlowRunner.activeViews`), perguntas/permissões em memória
@@ -632,6 +636,36 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   Linux) e, no Windows, `setOverlayIcon` com um ponto laranja (`overlayDotBitmap`) e descrição.
 - **Clique:** `BoardTaskRef.section` (`flow`/`claude`/`history`) → `TaskPanel focusSection` rola até
   a seção (`data-panel-section`). Cartão do projeto abre o quadro dele (`openProjectId`).
+
+## Agentes (Etapa 8A)
+
+- **Perfil** (`shared/agent.ts`, formato `orkio: agent/v1`): `.orkio/agents/<id>.md` no projeto
+  (versionável pelo usuário) ou `<userData>/agents/<id>.md` ("só neste computador", vale em todos os
+  projetos). Frontmatter num subconjunto estrito de YAML (chaves conhecidas, strings entre aspas,
+  listas simples; nada de âncoras/tags) + corpo = instruções. Arquivo ≤ 16 KB, sem symlink, id = nome
+  do arquivo, até 50 por pasta. `parseAgentFile` nunca lança: erro vira agente `invalid` com motivo.
+- **Escrita:** exceção estreita à regra "nunca tocamos na pasta do usuário": o Orkio grava **só**
+  `.orkio/agents/<id>.md`, atômico, sem commit. Texto com segredo (`redactSecrets`) é recusado.
+- **Confiança** (SQLite v8 `agent_trust`): sha256 aprovado por projeto+agente. Salvar pelo Orkio já
+  aprova; mudou fora (pull, editor) → `needs_review`: não roda até "Revisar" e "Aprovar este perfil".
+- **Execução:** o agente só acrescenta `--append-system-prompt` (`buildAgentPrompt`: quem é, regras
+  do Orkio, instruções) e `--model` (alias validado) ao `claude -p` da 4A. Permissões, política,
+  modo entrega e gates **não mudam**; o perfil só restringe: `delivery: false` e `commands`
+  (allowlist checada contra o fluxo antes de começar, `checkAgentFlow`). Nenhum token no ambiente.
+- **Fluxo (D7):** com fluxo preferido, ele substitui o fluxo da coluna; sem, roda o da coluna com
+  as instruções do agente; coluna sem fluxo ligado não dispara. `flow_runs.agent_json` guarda a
+  cópia do perfil (editar no meio não muda a execução).
+- **Limites (no main):** paralelo por agente → pausa `waiting_agent` (promovida sozinha);
+  passos/dia e custo/dia (dia local, `agent_runs.agent_key`) checados antes de cada comando →
+  `agent_daily_limit`; "Retomar" libera uma vez (`limitBypass`).
+- **Atribuição** (SQLite v8 `agent_assignments`, local, não vai ao Notion): no painel ("Agente") ou
+  por regra da coluna (`orkio-config` v10 → `agents[projectId].assignOnEnter`, tela Agentes). A regra
+  roda dentro da transação do movimento (antes do `flowRunner.onStageChanged`), só com
+  `manual`/`automation`, só se a tarefa não tiver agente nem fluxo ativo. Trocar com fluxo ativo é
+  recusado. Histórico: `agent_assigned`/`agent_unassigned`, "por X" em `flow_started`/`run_started`.
+- **UI:** tela Agentes (lista, editor com prévia do prompt, revisar/aprovar, regras), avatar
+  (`Token` com iniciais, `card-agent`) no card, seção "Agente" no painel, "Rodar como X" no Claude
+  Code. Eventos `agents:changed`.
 
 ## Site (Etapa 6A)
 
@@ -747,6 +781,9 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   `startById` (via `window.orkio` no teste); confere "Esperando você", contador do menu, "Abrir" no
   painel e o sumiço ao aprovar. Com projeto no `orkio-config.json`, o app abre na Visão geral:
   `enterApp(page)` (fixtures) clica em "Começar" ou no menu "Projetos".
+- 8A: o Claude simulado grava em `.orkio/agent-args.log` (JSON por execução) o
+  `--append-system-prompt`, `--model`, a ferramenta/modo de permissão e se o briefing veio no prompt.
+  `e2e/agents.spec.ts` cria a Ana pela tela e checa o arquivo, a regra, os gates e a revisão.
 - 5A: o simulado tem `demorar-uma-vez` (espera só na primeira vez, marcador em `.orkio/demorou`)
   e `falhar` (sai com erro). `e2e/task-flows.spec.ts` monta o fluxo pela tela e edita o
   `orkio-config.json` entre aberturas para trocar os argumentos do passo.
@@ -822,6 +859,9 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Contador no Windows como ícone sobreposto                                                                   | A barra de tarefas do Windows não tem contador numérico (`setBadgeCount` só no macOS/Linux); o ponto com descrição acessível sinaliza sem gerar imagens com texto.                                                                                          |
 | Site com package próprio (sem workspace pnpm)                                                               | Isola o Next do install/lockfile/empacotamento do Electron; a Vercel usa `site/` como raiz. O contrato do OAuth é pequeno e testado dos dois lados.                                                                                                         |
 | Intermediário OAuth nas rotas do site (Vercel) em vez do Worker                                             | Um só deploy para site e intermediário; páginas legais no mesmo domínio exigido pelo cadastro público do Notion.                                                                                                                                            |
+| Agente = perfil `.md` + `--append-system-prompt` no CLI do usuário                                          | Sem SDK nem chave da Anthropic; o agente herda permissões, política e gates do Orkio e só pode restringir (entrega, comandos).                                                                                                                              |
+| Perfil do repositório alterado fora do Orkio exige revisão (hash aprovado)                                  | Um pull pode trocar as instruções do agente; nada roda com texto que o usuário não viu.                                                                                                                                                                     |
+| Fluxo preferido do agente substitui o da coluna                                                             | O agente traz o jeito dele de trabalhar; sem preferido, a coluna decide e o agente só dá as instruções.                                                                                                                                                     |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 | Rotas tipadas no renderer, sem roteador (6E)                                                                | Poucas telas e nenhuma URL externa; o `routerReducer` dá uma chave nova a cada navegação, e clicar no item atual do menu sai de qualquer subtela.                                                                                                           |
 | Tarefa: painel no Quadro + tela cheia (6E)                                                                  | O painel é a prévia sem perder o quadro; a tela cheia dá espaço para log, diff e histórico. O que espera a pessoa sobe para o topo do painel.                                                                                                               |

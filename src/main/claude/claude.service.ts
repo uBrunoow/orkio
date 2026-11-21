@@ -38,7 +38,7 @@ import { errorName } from '../ipc/payload'
 import { NotionApiError } from '../connectors/notion/notion.client'
 import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
-import { RUN_MESSAGES, type RunService } from './run.service'
+import { RUN_MESSAGES, type RunAgent, type RunService } from './run.service'
 import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
 
 export const CLAUDE_MESSAGES = {
@@ -96,6 +96,16 @@ export interface ClaudeServiceDeps {
   flowActive?: (taskId: string) => boolean
   /** Abre a pasta no editor (execFile, sem shell). */
   openEditor(editor: EditorId, path: string): Promise<void>
+  /**
+   * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
+   * pt-BR quando há agente, mas ele não pode rodar (sem aprovação, limite do dia, comando negado).
+   */
+  agentFor?: (projectId: string, taskId: string, command: string | null) => Promise<RunAgent | null>
+  /** 8A: o que o formulário mostra ("Rodar como Ana" ou por que não dá). */
+  agentInfo?: (
+    projectId: string,
+    taskId: string
+  ) => Promise<{ name: string; problem: string | null } | null>
 }
 
 export class ClaudeService {
@@ -176,8 +186,10 @@ export class ClaudeService {
         pr,
         ...(context.markdown ? { projectContext: context.markdown } : {})
       })
+      const agent = (await this.deps.agentInfo?.(projectId, taskId).catch(() => null)) ?? null
       return ok({
         ...state,
+        agent,
         taskId,
         displayId: task.displayId,
         title: task.title,
@@ -194,7 +206,19 @@ export class ClaudeService {
     return this.wrap(async () => {
       // 5A: com fluxo ativo, quem roda o Claude Code na tarefa é o fluxo.
       if (this.deps.flowActive?.(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.flowActive)
-      const started = await this.startRun(req)
+      let agent: RunAgent | null = null
+      if (req.asAgent !== false && this.deps.agentFor) {
+        try {
+          agent = await this.deps.agentFor(
+            req.projectId,
+            req.taskId,
+            req.mode === 'command' ? req.command : null
+          )
+        } catch (error) {
+          return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
+        }
+      }
+      const started = await this.startRun(req, undefined, true, false, agent)
       if (!started.ok) return started
       return ok(await this.taskState(req.taskId))
     })
@@ -211,6 +235,8 @@ export class ClaudeService {
     includeBriefing?: boolean
     /** Modo entrega (5C): só nesta execução. */
     delivery?: boolean
+    /** Agente (8A) do fluxo (cópia do perfil feita no início do fluxo). */
+    agent?: RunAgent | null
   }): Promise<ClaudeResult<string>> {
     return this.wrap(() =>
       this.startRun(
@@ -224,7 +250,8 @@ export class ClaudeService {
         },
         input.timeoutMin,
         input.includeBriefing !== false,
-        input.delivery === true
+        input.delivery === true,
+        input.agent ?? null
       )
     )
   }
@@ -253,7 +280,8 @@ export class ClaudeService {
     req: StartRunRequest,
     timeoutMin?: number,
     includeBriefing = true,
-    delivery = false
+    delivery = false,
+    agent: RunAgent | null = null
   ): Promise<ClaudeResult<string>> {
     const project = this.project(req.projectId)
     const status = await this.getStatus(true)
@@ -289,7 +317,8 @@ export class ClaudeService {
       briefing: req.briefing,
       ...(timeoutMin ? { timeoutMin } : {}),
       includeBriefing,
-      delivery: deliveryInput
+      delivery: deliveryInput,
+      agent
     })
     return ok(view.id)
   }

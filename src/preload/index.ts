@@ -21,6 +21,7 @@ const {
   claude,
   taskFlows,
   alva,
+  agents,
   updates,
   overview
 } = IPC_CHANNELS
@@ -166,6 +167,30 @@ const api: OrkioApi = {
       ipcRenderer.invoke(alva.addPlanningStage, projectId, statusId),
     setMaxParallel: (projectId, value) => ipcRenderer.invoke(alva.setMaxParallel, projectId, value),
     taskSummary: (projectId, taskId) => ipcRenderer.invoke(alva.taskSummary, projectId, taskId)
+  },
+  agents: {
+    list: (projectId) => ipcRenderer.invoke(agents.list, projectId),
+    save: (input) => ipcRenderer.invoke(agents.save, JSON.parse(JSON.stringify(input)) as unknown),
+    approve: (projectId, key, hash) => ipcRenderer.invoke(agents.approve, projectId, key, hash),
+    assign: (projectId, taskId, key) => ipcRenderer.invoke(agents.assign, projectId, taskId, key),
+    setRules: (projectId, rules) =>
+      ipcRenderer.invoke(
+        agents.setRules,
+        projectId,
+        rules.map((r) => ({ stageId: String(r.stageId), agentKey: String(r.agentKey) }))
+      ),
+    badges: (projectId) => ipcRenderer.invoke(agents.badges, projectId),
+    onChanged: (listener) => {
+      const handler = (_event: unknown, payload: unknown): void => {
+        if (isRecord(payload) && typeof payload['projectId'] === 'string') {
+          listener({ projectId: payload['projectId'] })
+        }
+      }
+      ipcRenderer.on(agents.changed, handler)
+      return () => {
+        ipcRenderer.removeListener(agents.changed, handler)
+      }
+    }
   },
   taskFlows: {
     getProject: (projectId) => ipcRenderer.invoke(taskFlows.getProject, projectId),

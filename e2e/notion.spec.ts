@@ -79,6 +79,7 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'flow',
       'automation',
       'alva',
+      'agents',
       'taskFlows',
       'claude',
       'signals',

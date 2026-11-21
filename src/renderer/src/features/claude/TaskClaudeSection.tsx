@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
+import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Heading } from '@astryxdesign/core/Heading'
@@ -218,6 +219,8 @@ function Composer({
   const [briefing, setBriefing] = useState(prep.briefing)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 8A: com agente na tarefa, roda como ele (instruções e modelo) a menos que você desmarque.
+  const [asAgent, setAsAgent] = useState(prep.agent !== null)
 
   const start = async (): Promise<void> => {
     setStarting(true)
@@ -228,7 +231,8 @@ function Composer({
       mode,
       command: mode === 'command' ? command.replace(/^\//, '').trim() : null,
       text,
-      briefing
+      briefing,
+      asAgent
     })
     setStarting(false)
     if (r.ok) onStarted(r.value)
@@ -284,6 +288,17 @@ function Composer({
           <Alert tone="warning">
             Alguns blocos do Notion não foram convertidos: {prep.unsupported.join(', ')}.
           </Alert>
+        )}
+        {prep.agent && (
+          <VStack gap={1}>
+            <CheckboxInput
+              label={`Rodar como ${prep.agent.name}`}
+              description="Instruções e modelo do agente; as permissões são as mesmas."
+              value={asAgent}
+              onChange={setAsAgent}
+            />
+            {asAgent && prep.agent.problem && <Alert tone="warning">{prep.agent.problem}</Alert>}
+          </VStack>
         )}
         <Text type="supporting">
           Edições no ambiente da tarefa são liberadas; comandos de terminal pedem sua aprovação;

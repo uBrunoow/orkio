@@ -81,6 +81,9 @@ import { registerTaskFlowsIpc } from './ipc/task-flows.ipc'
 import { RunService } from './claude/run.service'
 import { WorktreeService } from './claude/worktree.service'
 import { registerClaudeIpc } from './ipc/claude.ipc'
+import { registerAgentsIpc } from './ipc/agents.ipc'
+import { AgentError, AgentsService } from './agents/agents.service'
+import { buildAgentPrompt, commandAllowed } from '../shared/agent'
 import { registerUpdatesIpc } from './ipc/updates.ipc'
 import { UpdateService, type UpdaterLike } from './updates/update.service'
 import { busyCount, describeBusy } from './updates/busy'
@@ -239,6 +242,24 @@ function registerIpc(): void {
       }
       overview?.touch()
     }
+    const send = (channel: string, payload: unknown): void => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(channel, payload)
+      }
+      if (affectsOverview(channel, payload)) overview?.touch()
+    }
+    // Agentes (8A): perfis em arquivos, aprovação, atribuição e limites (nenhuma permissão nova).
+    const agents = new AgentsService({
+      db: boardStore.db,
+      store: boardStore,
+      config: configStore,
+      localDir: join(app.getPath('userData'), 'agents'),
+      hasActiveFlow: (taskId) => flowRunner?.hasActive(taskId) ?? false,
+      stageIds: (projectId) => configStore.get().boards[projectId]?.stages.map((s) => s.id) ?? [],
+      actor: () => userInfo().username,
+      emit: (projectId) => send(IPC_CHANNELS.agents.changed, { projectId })
+    })
+    registerAgentsIpc(ipcMain, agents, isTrustedSender, projectsReady)
     const board = new BoardService({
       config: configStore,
       store: boardStore,
@@ -251,8 +272,12 @@ function registerIpc(): void {
       },
       onSync: broadcast,
       actor: () => userInfo().username,
+      // 8A: a regra da coluna atribui o agente (na mesma transação) antes de o fluxo começar.
       // 5A: entrada/saída de etapa vai para os fluxos (o runner adia o trabalho).
-      onStageChanged: (change) => flowRunner?.onStageChanged(change)
+      onStageChanged: (change) => {
+        agents.onStageChanged(change)
+        flowRunner?.onStageChanged(change)
+      }
     })
     writeQueue = new NotionWriteQueue({
       store: boardStore,
@@ -303,12 +328,6 @@ function registerIpc(): void {
     )
 
     // Automações (3B): motor + agendador em segundo plano.
-    const send = (channel: string, payload: unknown): void => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send(channel, payload)
-      }
-      if (affectsOverview(channel, payload)) overview?.touch()
-    }
     const automation = new AutomationService({
       config: configStore,
       store: boardStore,
@@ -372,6 +391,40 @@ function registerIpc(): void {
           notion.createChildPage(parent, title, markdown),
         appendMarkdown: (pageId, markdown) => notion.appendMarkdown(pageId, markdown)
       },
+      // 8A: "Rodar como <agente>" (instruções e modelo; mesmas permissões).
+      agentFor: async (projectId, taskId, command) => {
+        const runtime = await agents.runtimeFor(projectId, taskId)
+        if (!runtime) return null
+        const limit = agents.limitProblem(runtime)
+        if (limit) throw new AgentError('limit', limit)
+        if (command && !commandAllowed(runtime.profile, command)) {
+          throw new AgentError(
+            'denied',
+            `${runtime.profile.name} não tem permissão para o comando /${command}.`
+          )
+        }
+        return {
+          key: runtime.key,
+          name: runtime.profile.name,
+          prompt: buildAgentPrompt(runtime.profile),
+          model: runtime.profile.model === 'default' ? null : runtime.profile.model
+        }
+      },
+      agentInfo: async (projectId, taskId) => {
+        const key = agents.assignedKey(taskId)
+        if (!key) return null
+        const view = await agents.get(projectId, key)
+        if (!view?.profile) return { name: key, problem: 'O agente desta tarefa não existe mais.' }
+        try {
+          const runtime = await agents.runtimeFor(projectId, taskId)
+          return { name: view.profile.name, problem: runtime ? agents.limitProblem(runtime) : null }
+        } catch (error) {
+          return {
+            name: view.profile.name,
+            problem: error instanceof AgentError ? error.message : 'Agente indisponível.'
+          }
+        }
+      },
       send,
       isTrustedSender,
       ready: projectsReady
@@ -386,6 +439,7 @@ function registerIpc(): void {
       claude: claude.service,
       runs: claude.runs,
       worktrees: claude.worktrees,
+      agents,
       listTasks: (projectId) => notionWorkspace.listTasks(projectId),
       // Entrega (5C): push/pedir review. O token do GitHub fica no conector.
       deliveryActions: createDeliveryActions({
@@ -598,6 +652,7 @@ function createFlowRunner(deps: {
   claude: ClaudeService
   runs: RunService
   worktrees: WorktreeService
+  agents: AgentsService
   listTasks: ClaudeServiceDeps['listTasks']
   deliveryActions: OrkioAction[]
   send: (channel: string, payload: unknown) => void
@@ -690,6 +745,15 @@ function createFlowRunner(deps: {
     initialVars: (projectId, taskId, flow) =>
       flow.tags?.includes('alva') ? alva.initialVars(projectId, taskId) : Promise.resolve({}),
     canStart: (projectId, flow) => alvaFlows.blockReason(projectId, flow),
+    agentFor: async (projectId, taskId) => {
+      try {
+        return await deps.agents.runtimeFor(projectId, taskId)
+      } catch (error) {
+        if (error instanceof AgentError) throw new FlowError(error.code, error.message)
+        throw error
+      }
+    },
+    agentLimit: (agent) => deps.agents.limitProblem(agent),
     concurrencyLimit: (projectId, flow) => alvaFlows.concurrencyLimit(projectId, flow),
     notify: (title, body, ref) =>
       showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, deps.send),
@@ -736,6 +800,8 @@ function createClaude(deps: {
   prFor: (projectId: string, branch: string) => number | null
   getBlockChildren: ClaudeServiceDeps['getBlockChildren']
   searchPages: ClaudeServiceDeps['searchPages']
+  agentFor: ClaudeServiceDeps['agentFor']
+  agentInfo: ClaudeServiceDeps['agentInfo']
   /** Escritas no Notion para publicar artefatos (o token fica no conector). */
   notionInsert: ArtifactsDeps['notion']
   send: (channel: string, payload: unknown) => void
@@ -827,6 +893,8 @@ function createClaude(deps: {
     getBlockChildren: deps.getBlockChildren,
     searchPages: deps.searchPages,
     detect: () => detectClaude({ env }),
+    ...(deps.agentFor ? { agentFor: deps.agentFor } : {}),
+    ...(deps.agentInfo ? { agentInfo: deps.agentInfo } : {}),
     flowActive: (taskId) => flowRunner?.hasActive(taskId) ?? false,
     artifacts: new ArtifactsService({
       db: deps.boardStore.db,

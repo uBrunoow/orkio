@@ -229,4 +229,29 @@ describe('migração v4 (4A)', () => {
     db.close()
     await rm(dir, { recursive: true, force: true })
   })
+
+  it('v7 → v8 cria a atribuição/aprovação de agentes e mantém fluxos antigos', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v8-'))
+    const file = join(dir, 'orkio.db')
+    const old = openDatabase(file, MIGRATIONS.slice(0, 7))
+    old.run(
+      "INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, status, state_json, started_at) VALUES ('fr', 't', 'p', 'f', '{}', 'finished', '{}', 'x')"
+    )
+    old.close()
+    const db = openDatabase(file, MIGRATIONS.slice(0, 8))
+    expect(db.version).toBe(8)
+    expect(
+      db.get<{ agent_key: string | null }>("SELECT agent_key FROM flow_runs WHERE id = 'fr'")
+    ).toEqual({
+      agent_key: null
+    })
+    db.run("INSERT INTO agent_assignments VALUES ('t', 'p', 'repo:ana', 'x', 'manual')")
+    expect(() =>
+      db.run("INSERT INTO agent_assignments VALUES ('t2', 'p', 'repo:ana', 'x', 'robô')")
+    ).toThrow()
+    db.run("INSERT INTO agent_trust VALUES ('p', 'ana', 'h', 'x')")
+    expect(() => db.run("INSERT INTO agent_trust VALUES ('p', 'ana', 'h2', 'x')")).toThrow()
+    db.close()
+    await rm(dir, { recursive: true, force: true })
+  })
 })

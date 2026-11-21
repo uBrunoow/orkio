@@ -37,6 +37,8 @@ import type { BoardStore, TaskEventKind } from '../board/board.store'
 import type { StageChange } from '../board/board.service'
 import type { RunFinished } from '../claude/run.service'
 import { redactSecrets } from '../claude/redact'
+import type { RunAgent } from '../claude/run.service'
+import { buildAgentPrompt, checkAgentFlow, type AgentProfile } from '../../shared/agent'
 import type { Db } from '../db/database'
 import { errorName } from '../ipc/payload'
 
@@ -142,6 +144,8 @@ export interface FlowRunnerDeps {
     includeBriefing: boolean
     /** Modo entrega (5C): só nesta execução. */
     delivery: boolean
+    /** Agente (8A): instruções e modelo; nenhuma permissão a mais. */
+    agent: RunAgent | null
   }): Promise<string>
   cancelClaude(runId: string): void
   extractors: readonly FlowExtractor[]
@@ -157,11 +161,24 @@ export interface FlowRunnerDeps {
    * `null` = sem limite. Excedente espera e começa sozinho quando liberar.
    */
   concurrencyLimit?: (projectId: string, flow: Flow) => number | null
+  /**
+   * 8A: agente atribuído à tarefa (`null` = nenhum). Lança `FlowError` (mensagem pt-BR) quando há
+   * agente, mas ele não pode rodar (sem aprovação, arquivado, apagado).
+   */
+  agentFor?: (projectId: string, taskId: string) => Promise<FlowAgent | null>
+  /** 8A: limite diário do agente atingido? Mensagem pt-BR ou `null`. */
+  agentLimit?: (agent: FlowAgent) => string | null
   notify(title: string, body: string, ref: { projectId: string; taskId: string }): void
   /** Algo mudou no fluxo da tarefa (a tela recarrega). */
   emit(ref: { projectId: string; taskId: string }): void
   now?: () => Date
   newId?: () => string
+}
+
+/** Agente de um fluxo: a cópia do perfil feita no início (editar o perfil não muda o fluxo). */
+export interface FlowAgent {
+  key: string
+  profile: AgentProfile
 }
 
 interface RunRow {
@@ -178,6 +195,8 @@ interface RunRow {
   result: 'done' | 'rejected' | 'cancelled' | null
   started_at: string
   ended_at: string | null
+  agent_key: string | null
+  agent_json: string | null
 }
 
 interface StepRow {
@@ -208,6 +227,8 @@ interface Persisted {
   } | null
   /** Ação do Orkio esperando sua confirmação (só metadados do git/GitHub). */
   pendingConfirm?: ActionConfirm | null
+  /** 8A: você retomou depois do limite diário do agente; vale para o próximo comando. */
+  limitBypass?: boolean
 }
 
 /** Ações que publicam no GitHub (a etapa pode mudar por causa delas). */
@@ -267,11 +288,7 @@ export class FlowRunner {
       }
     }
     // Quem esperava vaga e já pode começar (ex.: o outro fluxo terminou com o app fechado).
-    for (const r of this.deps.db.all<{ project_id: string }>(
-      `SELECT DISTINCT project_id FROM flow_runs WHERE status = 'paused' AND pause_reason = 'waiting_slot'`
-    )) {
-      this.promoteWaiting(r.project_id)
-    }
+    this.promoteWaiting()
   }
 
   dispose(): void {
@@ -309,7 +326,7 @@ export class FlowRunner {
         .flows(change.projectId)
         .bindings.find((b) => b.stageId === change.to && b.enabled && b.mode === 'on_enter')
       if (!binding) return
-      await this.start(change.projectId, change.taskId, change.to, binding.flowId)
+      await this.start(change.projectId, change.taskId, change.to, binding.flowId, true)
     } catch (error) {
       // Não começou ao entrar na coluna (ex.: projeto não pronto): avisa, sem quebrar o quadro.
       if (error instanceof FlowError && error.code !== 'busy') {
@@ -339,7 +356,7 @@ export class FlowRunner {
       .flows(projectId)
       .bindings.find((b) => b.stageId === stageId && b.enabled)
     if (!stageId || !binding) throw new FlowError('no_binding', FLOW_MESSAGES.noBinding)
-    return this.start(projectId, taskId, stageId, binding.flowId)
+    return this.start(projectId, taskId, stageId, binding.flowId, true)
   }
 
   /**
@@ -347,18 +364,31 @@ export class FlowRunner {
    * a tarefa pode mudar de coluna sem interromper.
    */
   async startById(projectId: string, taskId: string, flowId: string): Promise<FlowRunView> {
-    return this.start(projectId, taskId, null, flowId)
+    return this.start(projectId, taskId, null, flowId, false)
   }
 
+  /**
+   * `useAgentFlow`: pela coluna (entrada ou "Rodar fluxo"), o fluxo preferido do agente substitui o
+   * da coluna quando existe no projeto. Fluxo escolhido à mão (`startById`) não muda.
+   */
   private async start(
     projectId: string,
     taskId: string,
     stageId: string | null,
-    flowId: string
+    columnFlowId: string,
+    useAgentFlow: boolean
   ): Promise<FlowRunView> {
     if (this.activeRow(taskId)) throw new FlowError('busy', FLOW_MESSAGES.busy)
-    const flow = this.deps.flows(projectId).flows.find((f) => f.id === flowId)
+    const agent = (await this.deps.agentFor?.(projectId, taskId)) ?? null
+    const flows = this.deps.flows(projectId).flows
+    const preferred = useAgentFlow && agent?.profile.flow ? agent.profile.flow : null
+    const flowId = preferred && flows.some((f) => f.id === preferred) ? preferred : columnFlowId
+    const flow = flows.find((f) => f.id === flowId)
     if (!flow) throw new FlowError('flow_missing', FLOW_MESSAGES.flowMissing)
+    if (agent) {
+      const denied = checkAgentFlow(agent.profile, flow)
+      if (denied) throw new FlowError('agent_denied', denied)
+    }
     const blocked = await this.deps.canStart?.(projectId, flow)
     if (blocked) throw new FlowError('not_ready', blocked)
     const id = this.deps.newId?.() ?? randomUUID()
@@ -367,11 +397,12 @@ export class FlowRunner {
       displayId: '',
       notionUrl: null
     }
-    const waits = !this.hasSlot(projectId, flow)
+    const wait = this.slot(projectId, flow, agent)
+    const waits = wait !== null
     this.deps.store.transaction(() => {
       this.deps.db.run(
-        `INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, stage_id, status, pause_reason, state_json, started_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, stage_id, status, pause_reason, state_json, started_at, agent_key, agent_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         taskId,
         projectId,
@@ -379,12 +410,15 @@ export class FlowRunner {
         JSON.stringify(flow),
         stageId,
         waits ? 'paused' : 'running',
-        waits ? 'waiting_slot' : null,
+        wait,
         JSON.stringify(persisted),
-        this.now()
+        this.now(),
+        agent?.key ?? null,
+        agent ? JSON.stringify(agent) : null
       )
       this.event(this.row(id), 'flow_started', {
         flow: flow.name,
+        ...(agent ? { agent: agent.profile.name, agentKey: agent.key } : {}),
         ...(waits ? { waiting: true } : {})
       })
     })
@@ -396,6 +430,8 @@ export class FlowRunner {
   /** Primeiro passo (com as variáveis iniciais da integração). */
   private async begin(id: string): Promise<void> {
     const row = this.row(id)
+    // Cancelado enquanto esperava a vaga.
+    if (row.status !== 'running' && row.status !== 'paused') return
     const vars = await this.safeInitialVars(row)
     this.deps.db.run(
       `UPDATE flow_runs SET status = 'running', pause_reason = NULL WHERE id = ?`,
@@ -415,36 +451,62 @@ export class FlowRunner {
     }
   }
 
-  /** Cabe mais um fluxo com este marcador no projeto? */
-  private hasSlot(projectId: string, flow: Flow): boolean {
+  /**
+   * Cabe mais um fluxo? `null` = sim; senão o motivo da espera: limite do marcador no projeto
+   * (`waiting_slot`, ex.: Alva com Docker) ou do agente em todas as tarefas (`waiting_agent`).
+   */
+  private slot(
+    projectId: string,
+    flow: Flow,
+    agent: FlowAgent | null,
+    self: string | null = null
+  ): 'waiting_slot' | 'waiting_agent' | null {
+    const active = this.deps.db
+      .all<RunRow>(
+        `SELECT * FROM flow_runs WHERE status IN ('running', 'waiting_gate', 'paused', 'awaiting_decision') AND COALESCE(pause_reason, '') NOT IN ('waiting_slot', 'waiting_agent')`
+      )
+      .filter((r) => r.id !== self)
     const tag = flow.tags?.[0]
     const limit = tag ? (this.deps.concurrencyLimit?.(projectId, flow) ?? null) : null
-    if (!tag || limit === null) return true
-    const busy = this.deps.db
-      .all<RunRow>(
-        `SELECT * FROM flow_runs WHERE project_id = ? AND status IN ('running', 'waiting_gate', 'paused', 'awaiting_decision') AND COALESCE(pause_reason, '') != 'waiting_slot'`,
-        projectId
-      )
-      .filter((r) => this.flow(r).tags?.includes(tag)).length
-    return busy < limit
+    if (tag && limit !== null) {
+      const busy = active.filter(
+        (r) => r.project_id === projectId && this.flow(r).tags?.includes(tag)
+      ).length
+      if (busy >= limit) return 'waiting_slot'
+    }
+    if (agent) {
+      const busy = active.filter((r) => r.agent_key === agent.key).length
+      if (busy >= agent.profile.limits.parallel) return 'waiting_agent'
+    }
+    return null
   }
 
-  /** Um fluxo terminou: começa o próximo que esperava vaga no projeto (o mais antigo). */
-  private promoteWaiting(projectId: string): void {
+  /**
+   * Um fluxo terminou: começa quem esperava vaga (do mais antigo ao mais novo) e já cabe. A vaga é
+   * tomada na hora (status `running`) para dois fluxos não pegarem a mesma.
+   */
+  private promoteWaiting(): void {
     const waiting = this.deps.db.all<RunRow>(
-      `SELECT * FROM flow_runs WHERE project_id = ? AND status = 'paused' AND pause_reason = 'waiting_slot' ORDER BY started_at`,
-      projectId
+      `SELECT * FROM flow_runs WHERE status = 'paused' AND pause_reason IN ('waiting_slot', 'waiting_agent') ORDER BY started_at`
     )
     for (const row of waiting) {
-      if (!this.hasSlot(projectId, this.flow(row))) continue
-      void this.withLock(row.id, async () => {
-        const r = this.row(row.id)
-        if (r.status !== 'paused' || r.pause_reason !== 'waiting_slot') return
-        await this.begin(row.id)
-      }).catch((error: unknown) => {
+      if (this.slot(row.project_id, this.flow(row), this.agentOf(row), row.id) !== null) continue
+      this.deps.db.run(
+        `UPDATE flow_runs SET status = 'running', pause_reason = NULL WHERE id = ? AND status = 'paused'`,
+        row.id
+      )
+      void this.withLock(row.id, () => this.begin(row.id)).catch((error: unknown) => {
         console.error(`[orkio] fluxo (vaga liberada): ${errorName(error)}`)
       })
-      return
+    }
+  }
+
+  private agentOf(row: RunRow): FlowAgent | null {
+    if (!row.agent_json) return null
+    try {
+      return JSON.parse(row.agent_json) as FlowAgent
+    } catch {
+      return null
     }
   }
 
@@ -568,6 +630,10 @@ export class FlowRunner {
       const p = this.persisted(row)
       // Limite de passos: retomar ainda conta, mas o usuário decidiu seguir (zera a trava).
       const engine = row.pause_reason === 'loop_guard' ? { ...p.engine, executed: 0 } : p.engine
+      // Limite do dia do agente: você decidiu seguir; vale para o próximo comando.
+      if (row.pause_reason === 'agent_daily_limit') {
+        this.savePersisted(flowRunId, { ...p, limitBypass: true })
+      }
       await this.apply(flowRunId, retryStep(this.flow(row), engine, row.current_step))
     })
     return this.view(flowRunId)
@@ -834,7 +900,11 @@ export class FlowRunner {
             options: this.persisted(row).pendingChoice!.options
           }
         : null,
-      confirm: row.status === 'waiting_gate' ? (this.persisted(row).pendingConfirm ?? null) : null
+      confirm: row.status === 'waiting_gate' ? (this.persisted(row).pendingConfirm ?? null) : null,
+      agent: (() => {
+        const a = this.agentOf(row)
+        return a ? { key: a.key, name: a.profile.name, color: a.profile.color } : null
+      })()
     }
   }
 
@@ -860,7 +930,35 @@ export class FlowRunner {
       this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
       return
     }
+    if (this.agentLimitReached(flowRunId, decision.stepId)) return
     await this.runStep(this.row(flowRunId), decision.stepId)
+  }
+
+  /**
+   * 8A: antes de cada comando do Claude Code, o limite diário do agente (aplicado aqui, no main).
+   * Atingido → o fluxo pausa no passo (sem rodar); "Retomar" passa por cima uma vez.
+   */
+  private agentLimitReached(flowRunId: string, stepId: string): boolean {
+    const row = this.row(flowRunId)
+    const agent = this.agentOf(row)
+    const step = this.flow(row).steps.find((s) => s.id === stepId)
+    if (!agent || step?.type !== 'claude_command' || !this.deps.agentLimit) return false
+    const p = this.persisted(row)
+    if (p.limitBypass) {
+      this.savePersisted(flowRunId, { ...p, limitBypass: false })
+      return false
+    }
+    const problem = this.deps.agentLimit(agent)
+    if (!problem) return false
+    this.deps.db.run(
+      `UPDATE flow_runs SET status = 'paused', pause_reason = 'agent_daily_limit', current_step = ? WHERE id = ?`,
+      stepId,
+      flowRunId
+    )
+    this.event(row, 'flow_paused', { reason: 'agent_daily_limit', step: stepId })
+    this.notifyRow(row, 'Um fluxo precisa de você', problem)
+    this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
+    return true
   }
 
   private async runStep(row: RunRow, stepId: string): Promise<void> {
@@ -928,7 +1026,8 @@ export class FlowRunner {
         briefing: ctx.briefing,
         timeoutMin: step.timeoutMin,
         includeBriefing: step.includeBriefing !== false,
-        delivery: step.delivery === true
+        delivery: step.delivery === true,
+        agent: this.runAgent(row)
       })
       this.deps.db.run('UPDATE flow_steps SET run_id = ? WHERE id = ?', runId, rowId)
       this.runIndex.set(runId, { flowRunId: row.id, rowId })
@@ -1073,7 +1172,7 @@ export class FlowRunner {
     this.event(row, 'flow_finished', { result })
     this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
     this.briefings.delete(row.id)
-    this.promoteWaiting(row.project_id)
+    this.promoteWaiting()
   }
 
   private closeStep(
@@ -1186,6 +1285,17 @@ export class FlowRunner {
     }
   }
 
+  private runAgent(row: RunRow): RunAgent | null {
+    const a = this.agentOf(row)
+    if (!a) return null
+    return {
+      key: a.key,
+      name: a.profile.name,
+      prompt: buildAgentPrompt(a.profile),
+      model: a.profile.model === 'default' ? null : a.profile.model
+    }
+  }
+
   private extractContext(row: RunRow, stepId: string, command: string): ExtractContext {
     return {
       projectId: row.project_id,
@@ -1265,7 +1375,9 @@ const FLOW_PAUSE_TEXT: Record<FlowPauseReason, string> = {
   gate_timeout: 'A aprovação expirou. Retome para pedir de novo, pule ou cancele.',
   left_stage: 'A tarefa saiu da etapa do fluxo.',
   needs_choice: 'Escolha uma opção no Orkio para o fluxo seguir.',
-  waiting_slot: 'Aguardando outro fluxo do projeto terminar.'
+  waiting_slot: 'Aguardando outro fluxo do projeto terminar.',
+  waiting_agent: 'Aguardando o agente terminar outra tarefa.',
+  agent_daily_limit: 'O agente atingiu o limite de hoje. Retome para passar por cima uma vez.'
 }
 
 /** Extrator de exemplo: linhas `@orkio chave=valor` no texto final do Claude Code. */

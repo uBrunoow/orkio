@@ -34,6 +34,8 @@ import { CloseIcon, ExpandIcon, ExternalLinkIcon } from '../../components/icons'
 import { TaskClaudeSection } from '../claude/TaskClaudeSection'
 import { TaskFlowSection } from '../task-flows/TaskFlowSection'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
+import type { AgentBadge } from '../../../../shared/agent'
+import { TaskAgentSection } from '../agents/TaskAgentSection'
 
 /**
  * Tarefa: dados, ações, branch/PR, fluxo, Claude Code e histórico (task_events).
@@ -42,6 +44,7 @@ import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
  */
 export function TaskPanel({
   projectId,
+  agent,
   card,
   stages,
   signals,
@@ -54,6 +57,8 @@ export function TaskPanel({
   focusSection = null
 }: {
   projectId: string
+  /** Agente da tarefa (8A). */
+  agent: AgentBadge | null
   card: BoardCard
   stages: readonly BoardStage[]
   signals: TaskSignals | undefined
@@ -125,6 +130,7 @@ export function TaskPanel({
     card.blocked,
     card.automationPaused,
     card.sync.state,
+    agent?.key,
     runTick
   ])
 
@@ -207,6 +213,7 @@ export function TaskPanel({
 
   const work = (
     <>
+      <TaskAgentSection projectId={projectId} taskId={card.taskId} agent={agent} />
       <VStack data-panel-section="flow">
         <TaskFlowSection
           projectId={projectId}

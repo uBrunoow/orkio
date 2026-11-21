@@ -50,6 +50,7 @@ describe('orkio-config v2/v3', () => {
       claudeContexts: {},
       flows: {},
       delivery: {},
+      agents: {},
       updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
     })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
@@ -398,7 +399,8 @@ describe('orkio-config v2/v3', () => {
     expect(data.delivery).toEqual(v8.delivery)
     expect(data.projects).toHaveLength(1)
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(9)
+    expect(saved['schemaVersion']).toBe(10)
+    expect(data.agents).toEqual({})
 
     // Inválido volta ao padrão sem derrubar o resto.
     await writeFile(
@@ -418,5 +420,56 @@ describe('orkio-config v2/v3', () => {
     const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-new-'))
     const { data } = await createOrkioConfigStore(join(dir, 'orkio-config.json')).load()
     expect(data.updates.lastSeenVersion).toBeNull()
+  })
+
+  it('v9 → v10: regras de agentes vazias; regras inválidas ou repetidas são ignoradas', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-v10-'))
+    const file = join(dir, 'orkio-config.json')
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 9,
+        projects: [{ ...PROJECT, notionProject: null }],
+        notion: null,
+        boards: {},
+        automation: { paused: false },
+        claudeContexts: {},
+        flows: {},
+        delivery: {},
+        updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.agents).toEqual({})
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(10)
+    expect(saved['agents']).toEqual({})
+
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...saved,
+        agents: {
+          p1: {
+            assignOnEnter: [
+              { stageId: 's1', agentKey: 'repo:ana' },
+              { stageId: 's1', agentKey: 'local:bob' },
+              { stageId: 's2', agentKey: 'nuvem:x' },
+              { stageId: 's3', agentKey: 'local:bob' }
+            ]
+          },
+          p2: 'quebrado'
+        }
+      })
+    )
+    const again = await createOrkioConfigStore(file).load()
+    expect(again.data.agents).toEqual({
+      p1: {
+        assignOnEnter: [
+          { stageId: 's1', agentKey: 'repo:ana' },
+          { stageId: 's3', agentKey: 'local:bob' }
+        ]
+      }
+    })
   })
 })
