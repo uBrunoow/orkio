@@ -86,6 +86,11 @@ Histórico em forma de conversa (`TaskTimeline`: autor, frase, horário; sem bal
 pendente sempre no topo ("Esperando você"); passos do fluxo num resumo recolhível; rodapé
 "Trabalhando há…" com `Timer` enquanto algo roda. Sem campo de chat livre.
 
+## Regras e fluxos
+
+Detalhe em frase antes do formulário (`SentenceDetail`): frase como título, "Começa", "Faz",
+execuções em tabela e coluna de detalhes; o editor fica atrás de "Editar".
+
 ## Agentes
 
 Avatar só pelo `AgentAvatar` (forma geométrica do id, cores do tema; nunca iniciais nem foto).

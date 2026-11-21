@@ -14,8 +14,8 @@ plano a substitui onde houver diferença.
 | 2. Moldura                | Coluna de ícones, barra superior com seletor de projeto, conteúdo em painel                                                   | feita              |
 | 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                     | feita              |
 | 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                   | feita              |
-| 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | feita (aguarda ok) |
-| 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | —                  |
+| 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | feita              |
+| 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | feita (aguarda ok) |
 | 7. Integrações e catálogo | Grade de linhas com logo, categoria e ação                                                                                    | —                  |
 
 ## Fase 1
@@ -149,6 +149,34 @@ plano a substitui onde houver diferença.
 - Campo de mensagem livre na conversa: seria funcionalidade nova no `claude -p` (recusado no plano).
 - Juntar o log ao vivo do Claude Code na mesma conversa: o log tem outra fonte (`onRunEvent`) e
   outro ritmo; fica na seção Claude Code, logo acima.
+
+## Fase 6
+
+**Detalhes em frase** (Etapas e automações; Fluxos)
+
+- `components/SentenceDetail.tsx`: a frase como título (`detail-sentence`), "Começa", "Faz",
+  "Execuções" (tabela Quando · Tarefa · Resultado) e uma coluna de detalhes à direita
+  (`detail-column`). "Editar" abre o editor de sempre.
+- Automações: clicar numa automação (na etapa ou em Notificações) mostra a frase do
+  `describeRule`, as condições, o que faz, as execuções e os detalhes (estado, nome, evento, ordem,
+  última execução); "Ativar/Desativar" ao lado de "Editar". "Voltar para a etapa" volta ao editor
+  da etapa. O menu "Ações da automação" continua igual.
+- Fluxos: escolher um fluxo mostra "Quando a tarefa entra em Revisando: /revisar, aprovação,
+  salto, /revisar e …", uma frase por passo, as execuções e os detalhes (passos, colunas,
+  comandos, id). "Novo fluxo" abre direto no editor; o editor ganhou "Ver em frase".
+- Execuções sem dado novo (`components/executions.ts`, com teste): vêm da atividade do projeto
+  (`overview.activity`, a mesma da Visão geral). Automação: eventos que citam `regra “Nome”`.
+  Fluxo: cada "Fluxo iniciado: Nome" com o primeiro fim seguinte da mesma tarefa.
+- `EVENT_PHRASES` de `shared/flow` passou a ser exportado (texto puro, para o "Começa").
+- E2E: `automation.spec` abre a automação "Merge finaliza a tarefa" e confere frase, "Faz",
+  execução (ORK-2, "Moveu a tarefa") e "Editar"; `task-flows.spec` confere a frase do fluxo, os
+  passos e a execução "Concluído".
+
+**Recusado / adiado**
+
+- Execuções completas e por id da regra: a atividade guarda o nome, não o id; renomear a regra
+  separa o histórico antigo. Um filtro por id exigiria consulta nova no main.
+- Editor de fluxo em grafo: recusado no plano.
 
 ## Extra: tela "Vamos começar"
 

@@ -48,7 +48,9 @@ import { Alert } from '../../components/Alert'
 import { SaveBar } from '../../components/SaveBar'
 import { plural } from '../../lib/format'
 import { DeliverySection } from '../task-flows/DeliverySection'
-import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { ArrowDownIcon, ArrowUpIcon, BackIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { useProjectActivity } from '../../components/SentenceDetail'
+import { RuleDetail } from './RuleDetail'
 import { tokenColor } from '../notion-workspace/notion-colors'
 
 const COLOR_LABELS: Record<NotionColor, string> = {
@@ -110,6 +112,9 @@ export function FlowPage({
   const [taskFlows, setTaskFlows] = useState<{ flows: Flow[]; bindings: StageFlow[] } | null>(null)
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const [showAllEvents, setShowAllEvents] = useState(false)
+  // Automação aberta em frase (fase 6); o formulário só abre em "Editar".
+  const [viewingRule, setViewingRule] = useState<string | null>(null)
+  const automationActivity = useProjectActivity(view.projectId, 'automation')
 
   useEffect(() => {
     let active = true
@@ -304,6 +309,17 @@ export function FlowPage({
   const notifyRules = draft.rules.filter((r) => r.action.type === 'notify')
   const ruleIndex = (id: string): number => draft.rules.findIndex((r) => r.id === id)
 
+  const editRule = (rule: AutomationRule): void => {
+    if (rule.action.type === 'move_to_stage') setSelectedStage(rule.action.stageId)
+    setViewingRule(null)
+    setEditing({ rule: structuredClone(rule), isNew: false })
+  }
+  const toggleRule = (id: string): void =>
+    update((d) => ({
+      ...d,
+      rules: d.rules.map((r) => (r.id === id ? { ...r, enabled: !r.enabled } : r))
+    }))
+
   const ruleItem = (rule: AutomationRule): React.JSX.Element => {
     const i = ruleIndex(rule.id)
     return (
@@ -311,6 +327,19 @@ export function FlowPage({
         as="li"
         key={rule.id}
         aria-label={rule.name}
+        isSelected={viewingRule === rule.id}
+        onClick={(e?: React.MouseEvent) => {
+          // O menu "Ações da automação" fica dentro do item: clicar nele não abre a frase.
+          const target = e?.target as HTMLElement | undefined
+          if (target?.closest?.('[aria-label^="Ações da automação"], [role="menu"]')) return
+          setEditing(null)
+          setViewingRule(rule.id)
+          requestAnimationFrame(() =>
+            document
+              .querySelector('[data-testid="rule-detail-anchor"]')
+              ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+          )
+        }}
         label={describeRule(rule, draft.stages)}
         description={`${i + 1}ª na ordem · ${EVENT_LABELS[rule.trigger]}`}
         endContent={
@@ -325,7 +354,7 @@ export function FlowPage({
               items={[
                 {
                   label: 'Editar',
-                  onClick: () => setEditing({ rule: structuredClone(rule), isNew: false })
+                  onClick: () => editRule(rule)
                 },
                 {
                   label: rule.enabled ? 'Desativar' : 'Ativar',
@@ -384,6 +413,7 @@ export function FlowPage({
   const stageRules = stage
     ? draft.rules.filter((r) => r.action.type === 'move_to_stage' && r.action.stageId === stage.id)
     : []
+  const shownRule = viewingRule ? (draft.rules.find((r) => r.id === viewingRule) ?? null) : null
   const stageErrors = (id: string): number => errors.filter((i) => i.stageId === id).length
 
   return (
@@ -404,7 +434,14 @@ export function FlowPage({
       {message && <Alert tone={message.tone}>{message.text}</Alert>}
 
       <HStack gap={4} vAlign="start">
-        <Card role="region" aria-label="Etapas" padding={3} width="calc(var(--spacing-12) * 5)">
+        <Card
+          role="region"
+          aria-label="Etapas"
+          padding={3}
+          width="calc(var(--spacing-12) * 5)"
+          // Não encolhe quando o detalhe da automação ocupa a coluna ao lado.
+          style={{ flexShrink: 0 }}
+        >
           <VStack gap={2}>
             <Heading level={2}>Etapas</Heading>
             <List density="compact" aria-label="Etapas do fluxo">
@@ -424,6 +461,7 @@ export function FlowPage({
                     onClick={() => {
                       setSelectedStage(st.id)
                       setEditing(null)
+                      setViewingRule(null)
                     }}
                     {...(problems > 0
                       ? {
@@ -449,134 +487,161 @@ export function FlowPage({
         </Card>
 
         <StackItem size="fill">
-          {stage && (
-            <Card role="region" aria-label={`Etapa ${stageLabel}`} padding={4}>
-              <VStack gap={4}>
-                <HStack gap={1} vAlign="center" wrap="wrap">
-                  <Token
-                    size="sm"
-                    label={stageLabel}
-                    color={tokenColor(stage.color ?? 'default')}
-                  />
-                  <StackItem size="fill" />
-                  <IconButton
-                    size="sm"
-                    variant="ghost"
-                    label={`Mover ${stageLabel} para a esquerda`}
-                    icon={<Icon icon={ArrowUpIcon} />}
-                    isDisabled={stageIndex === 0}
-                    onClick={() => stageIndex > 0 && moveStage(stageIndex, -1)}
-                  />
-                  <IconButton
-                    size="sm"
-                    variant="ghost"
-                    label={`Mover ${stageLabel} para a direita`}
-                    icon={<Icon icon={ArrowDownIcon} />}
-                    isDisabled={stageIndex === draft.stages.length - 1}
-                    onClick={() => stageIndex < draft.stages.length - 1 && moveStage(stageIndex, 1)}
-                  />
-                  <IconButton
-                    size="sm"
-                    variant="ghost"
-                    label={`Adicionar etapa depois de ${stageLabel}`}
-                    icon={<Icon icon={PlusIcon} />}
-                    onClick={() => addStageAfter(stageIndex)}
-                  />
-                  <IconButton
-                    size="sm"
-                    variant="ghost"
-                    label={`Remover ${stageLabel}`}
-                    icon={<Icon icon={TrashIcon} />}
-                    onClick={() => removeStage(stage.id)}
-                  />
-                </HStack>
-                <HStack gap={3} wrap="wrap" vAlign="start">
-                  <TextInput
-                    label="Nome"
-                    value={stage.name}
-                    onChange={(value) => updateStage(stage.id, { name: value })}
-                  />
-                  <Selector
-                    label="Status no Notion"
-                    options={options.map((o) => ({ value: o.id, label: o.name }))}
-                    placeholder="Escolha a opção"
-                    {...(stage.notionStatusId && options.some((o) => o.id === stage.notionStatusId)
-                      ? { value: stage.notionStatusId }
-                      : {
-                          status: {
-                            type: 'error' as const,
-                            message: stage.missingStatusName
-                              ? `“${stage.missingStatusName}” não existe no Notion.`
-                              : 'Escolha uma opção.'
-                          }
-                        })}
-                    onChange={(value: string) => setStageStatus(stage.id, value)}
-                  />
-                  <Selector
-                    label="Cor"
-                    options={FLOW_COLORS.map((c) => ({ value: c, label: COLOR_LABELS[c] }))}
-                    value={stage.color ?? 'default'}
-                    onChange={(value: string) =>
-                      updateStage(stage.id, { color: value as NotionColor })
-                    }
-                  />
-                </HStack>
-
-                <StageFlowField
-                  flows={taskFlows?.flows ?? null}
-                  binding={draft.bindings?.find((b) => b.stageId === stage.id) ?? null}
-                  onChange={(binding) =>
-                    update((d) => ({
-                      ...d,
-                      bindings: [
-                        ...(d.bindings ?? []).filter((b) => b.stageId !== stage.id),
-                        ...(binding ? [binding] : [])
-                      ]
-                    }))
-                  }
-                  stageId={stage.id}
-                  onOpenTaskFlows={onOpenTaskFlows}
+          <VStack data-testid="rule-detail-anchor" />
+          {shownRule ? (
+            <VStack gap={2}>
+              <HStack>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  label={stage ? `Voltar para a etapa ${stageLabel}` : 'Voltar para as etapas'}
+                  icon={<Icon icon={BackIcon} />}
+                  onClick={() => setViewingRule(null)}
                 />
-
-                <VStack gap={2}>
-                  <Heading level={3}>Automações que trazem para cá</Heading>
-                  {stageRules.length === 0 ? (
-                    <Text type="supporting">Nenhuma automação leva para cá.</Text>
-                  ) : (
-                    <List
-                      hasDividers
-                      density="compact"
-                      aria-label={`Automações para ${stageLabel}`}
-                    >
-                      {stageRules.map(ruleItem)}
-                    </List>
-                  )}
-                  <HStack>
-                    <Button
+              </HStack>
+              <RuleDetail
+                rule={shownRule}
+                index={ruleIndex(shownRule.id)}
+                total={draft.rules.length}
+                stages={draft.stages}
+                activity={automationActivity}
+                onEdit={() => editRule(shownRule)}
+                onToggle={() => toggleRule(shownRule.id)}
+              />
+            </VStack>
+          ) : (
+            stage && (
+              <Card role="region" aria-label={`Etapa ${stageLabel}`} padding={4}>
+                <VStack gap={4}>
+                  <HStack gap={1} vAlign="center" wrap="wrap">
+                    <Token
                       size="sm"
-                      label="Nova automação"
-                      icon={<Icon icon={PlusIcon} />}
-                      aria-label={`Nova automação para ${stageLabel}`}
+                      label={stageLabel}
+                      color={tokenColor(stage.color ?? 'default')}
+                    />
+                    <StackItem size="fill" />
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      label={`Mover ${stageLabel} para a esquerda`}
+                      icon={<Icon icon={ArrowUpIcon} />}
+                      isDisabled={stageIndex === 0}
+                      onClick={() => stageIndex > 0 && moveStage(stageIndex, -1)}
+                    />
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      label={`Mover ${stageLabel} para a direita`}
+                      icon={<Icon icon={ArrowDownIcon} />}
+                      isDisabled={stageIndex === draft.stages.length - 1}
                       onClick={() =>
-                        setEditing({
-                          isNew: true,
-                          rule: {
-                            id: newId('rule'),
-                            name: '',
-                            enabled: true,
-                            trigger: 'pr.opened',
-                            conditions: { notBlocked: true },
-                            action: { type: 'move_to_stage', stageId: stage.id }
-                          }
-                        })
+                        stageIndex < draft.stages.length - 1 && moveStage(stageIndex, 1)
+                      }
+                    />
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      label={`Adicionar etapa depois de ${stageLabel}`}
+                      icon={<Icon icon={PlusIcon} />}
+                      onClick={() => addStageAfter(stageIndex)}
+                    />
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      label={`Remover ${stageLabel}`}
+                      icon={<Icon icon={TrashIcon} />}
+                      onClick={() => removeStage(stage.id)}
+                    />
+                  </HStack>
+                  <HStack gap={3} wrap="wrap" vAlign="start">
+                    <TextInput
+                      label="Nome"
+                      value={stage.name}
+                      onChange={(value) => updateStage(stage.id, { name: value })}
+                    />
+                    <Selector
+                      label="Status no Notion"
+                      options={options.map((o) => ({ value: o.id, label: o.name }))}
+                      placeholder="Escolha a opção"
+                      {...(stage.notionStatusId &&
+                      options.some((o) => o.id === stage.notionStatusId)
+                        ? { value: stage.notionStatusId }
+                        : {
+                            status: {
+                              type: 'error' as const,
+                              message: stage.missingStatusName
+                                ? `“${stage.missingStatusName}” não existe no Notion.`
+                                : 'Escolha uma opção.'
+                            }
+                          })}
+                      onChange={(value: string) => setStageStatus(stage.id, value)}
+                    />
+                    <Selector
+                      label="Cor"
+                      options={FLOW_COLORS.map((c) => ({ value: c, label: COLOR_LABELS[c] }))}
+                      value={stage.color ?? 'default'}
+                      onChange={(value: string) =>
+                        updateStage(stage.id, { color: value as NotionColor })
                       }
                     />
                   </HStack>
-                </VStack>
 
-                {editing && editing.rule.action.type === 'move_to_stage' && ruleForm}
-              </VStack>
-            </Card>
+                  <StageFlowField
+                    flows={taskFlows?.flows ?? null}
+                    binding={draft.bindings?.find((b) => b.stageId === stage.id) ?? null}
+                    onChange={(binding) =>
+                      update((d) => ({
+                        ...d,
+                        bindings: [
+                          ...(d.bindings ?? []).filter((b) => b.stageId !== stage.id),
+                          ...(binding ? [binding] : [])
+                        ]
+                      }))
+                    }
+                    stageId={stage.id}
+                    onOpenTaskFlows={onOpenTaskFlows}
+                  />
+
+                  <VStack gap={2}>
+                    <Heading level={3}>Automações que trazem para cá</Heading>
+                    {stageRules.length === 0 ? (
+                      <Text type="supporting">Nenhuma automação leva para cá.</Text>
+                    ) : (
+                      <List
+                        hasDividers
+                        density="compact"
+                        aria-label={`Automações para ${stageLabel}`}
+                      >
+                        {stageRules.map(ruleItem)}
+                      </List>
+                    )}
+                    <HStack>
+                      <Button
+                        size="sm"
+                        label="Nova automação"
+                        icon={<Icon icon={PlusIcon} />}
+                        aria-label={`Nova automação para ${stageLabel}`}
+                        onClick={() =>
+                          setEditing({
+                            isNew: true,
+                            rule: {
+                              id: newId('rule'),
+                              name: '',
+                              enabled: true,
+                              trigger: 'pr.opened',
+                              conditions: { notBlocked: true },
+                              action: { type: 'move_to_stage', stageId: stage.id }
+                            }
+                          })
+                        }
+                      />
+                    </HStack>
+                  </VStack>
+
+                  {editing && editing.rule.action.type === 'move_to_stage' && ruleForm}
+                </VStack>
+              </Card>
+            )
           )}
         </StackItem>
       </HStack>
