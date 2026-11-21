@@ -67,14 +67,31 @@ pnpm start
 
 `pnpm build` gera `out/main`, `out/preload` e `out/renderer`.
 
-Para empacotar (config em `electron-builder.yml`):
+Para empacotar (config em `electron-builder.ts`):
 
 ```bash
-pnpm dist        # dmg no macOS, instalador NSIS no Windows, AppImage no Linux
-pnpm dist:dir    # só a pasta do app, sem instalador
+pnpm dist             # dmg + zip no macOS (arm64 e x64), instalador NSIS no Windows
+pnpm dist:dir         # só a pasta do app, sem instalador
+pnpm smoke:packaged   # smoke test do app empacotado (abre, tela inicial, ponte MCP)
 ```
 
-Sem assinatura de código nem auto-update por enquanto.
+Releases (instaladores publicados por CI em `uBrunoow/orkio-releases`, versões e CHANGELOG,
+assinatura): veja [docs/releases.md](docs/releases.md). Em resumo: `pnpm release patch` e
+`git push --follow-tags`.
+
+## Instalar
+
+Baixe o instalador no site ou em
+[orkio-releases](https://github.com/uBrunoow/orkio-releases/releases/latest).
+
+- **macOS** (`Orkio-…-mac-arm64.dmg` para Apple Silicon, `…-mac-x64.dmg` para Intel): arraste para
+  Aplicativos. Enquanto o app não tiver assinatura da Apple, a primeira abertura é bloqueada: abra
+  uma vez, depois **Ajustes do Sistema → Privacidade e Segurança → "Abrir Mesmo Assim"**. (No
+  macOS 15+ o clique direito → Abrir não basta.) Pelo Terminal:
+  `xattr -dr com.apple.quarantine /Applications/Orkio.app`.
+- **Windows** (`Orkio-…-win-x64-setup.exe`): instala no seu usuário, sem pedir administrador, com
+  atalho no menu Iniciar. Sem assinatura, o SmartScreen avisa: **Mais informações → Executar assim
+  mesmo**.
 
 ## Identidade visual e UI
 
