@@ -27,6 +27,9 @@ Claude Code. Hoje existem:
   extratores e templates "Fluxo Alva" sobre os fluxos da 5A.
 - **Entrega (5C):** push da branch da tarefa pelo Orkio (com gate), "modo entrega" por passo para
   `/alva-flow:pr` (gh/push só da branch da tarefa), pedir review pelo conector, CI no painel.
+- **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
+  do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
+  real ser confirmado).
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
   Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) no repo público
   `uBrunoow/orkio-releases`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -48,6 +51,7 @@ pnpm dist:dir     # só a pasta do app em dist/ (sem instalador)
 pnpm smoke:packaged  # smoke do app empacotado (dist/): tela inicial + ponte MCP. Linux: xvfb-run -a
 pnpm release <patch|minor|major|beta> [--beta]  # versão + CHANGELOG + commit + tag (sem push)
 pnpm astryx:static-css  # regenera o CSS estático das camadas da Astryx (após upgrade)
+pnpm --dir site install|dev|test|typecheck|lint|build   # site (package próprio, ver site/README.md)
 ```
 
 Antes de dar uma tarefa por concluída: `pnpm typecheck && pnpm lint && pnpm test`.
@@ -575,6 +579,25 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - **Segurança:** nenhum token do Orkio no ambiente do Claude (o `gh` usa o `gh auth` do usuário);
   o único POST do conector do GitHub é `requested_reviewers` (caminho validado).
 
+## Site (Etapa 6A)
+
+- `site/`: Next.js App Router + TS strict, **package e lockfile próprios** (sem workspace pnpm: o
+  install/empacotamento do app não muda). ESLint/tsc/Vitest da raiz ignoram `site/**`; o site tem os
+  dele. CI: `.github/workflows/ci.yml` (ignora `site/**`) e `site.yml` (lint, typecheck, test,
+  build e o E2E `@site`). Deploy pela Vercel (Root Directory `site`, Ignored Build Step).
+- **Intermediário OAuth** (`site/lib/notion-broker.ts`, rotas em `site/app/notion/*`, runtime Node):
+  mesmo contrato do `broker/` (o app só troca `MAIN_VITE_NOTION_OAUTH_BROKER_URL`). Nada de
+  `console.*` (ESLint + teste). Limitador em memória por IP (20/min) só como defesa mínima; a regra
+  real é o Rate Limiting do Firewall da Vercel. `NOTION_TOKEN_URL` só vale fora da Vercel e em
+  `http://127.0.0.1` (E2E).
+- **Landing:** textos em `site/i18n/pt-BR.ts` (só o que o app faz hoje; ver `site/PRODUCT.md`),
+  visual em `site/DESIGN.md` (tokens da marca, Jost só em títulos/wordmark, fontes locais, sem
+  terceiros). Download pelo último release de `RELEASES_REPO` (ISR 15 min), sugestão por SO no
+  cliente (`site/lib/releases.ts`).
+- E2E `e2e/site-oauth.spec.ts` (`@site`): `next start` do site + Notion simulado em HTTP local; o
+  fixture (`brokerTarget`) manda as chamadas do app ao intermediário para o site de verdade. Pula
+  com aviso se não houver `site/.next` (rode `pnpm --dir site build`).
+
 ## Empacotamento e releases (Etapa 6B)
 
 - **Config:** `electron-builder.ts` (TypeScript, achado pelo nome; `builderConfig(env)` é pura e
@@ -699,6 +722,8 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Entrega: push só da branch da tarefa, nunca força; branch padrão sempre bloqueada                           | A automação nunca pode reescrever histórico nem publicar fora da tarefa; "Exigir aprovação" só decide se há gate, não o que é permitido.                                                                                                                    |
 | Modo entrega por passo (não global), aprovação por execução                                                 | O `/pr` precisa de gh e push; liberar só no passo marcado limita o alcance e o log mostra cada comando liberado.                                                                                                                                            |
 | Pedir review pelo conector (não pelo gh do Claude)                                                          | É uma ação do Orkio depois de um gate, com histórico e link; dispara a automação na hora.                                                                                                                                                                   |
+| Site com package próprio (sem workspace pnpm)                                                               | Isola o Next do install/lockfile/empacotamento do Electron; a Vercel usa `site/` como raiz. O contrato do OAuth é pequeno e testado dos dois lados.                                                                                                         |
+| Intermediário OAuth nas rotas do site (Vercel) em vez do Worker                                             | Um só deploy para site e intermediário; páginas legais no mesmo domínio exigido pelo cadastro público do Notion.                                                                                                                                            |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 | Releases num repo público separado (`orkio-releases`), token fine-grained só nele                           | O código é privado; o site e o auto-update leem releases públicos sem token. O token do CI não lê o código.                                                                                                                                                 |
 | Release como rascunho criado antes da matriz, publicado num job final                                       | Os jobs do mac e do Windows sobem para o mesmo release sem duplicar; nada é publicado se um pacote ou smoke falhar.                                                                                                                                         |
