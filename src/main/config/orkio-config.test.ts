@@ -49,7 +49,8 @@ describe('orkio-config v2/v3', () => {
       automation: { paused: false },
       claudeContexts: {},
       flows: {},
-      delivery: {}
+      delivery: {},
+      agents: {}
     })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
     expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
@@ -343,7 +344,7 @@ describe('orkio-config v2/v3', () => {
     expect(pf.flows[0]).toEqual({ ...flow, tags: ['alva'] })
     expect(pf.alva).toEqual({ maxParallel: 4 })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(8)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
   })
 
   it('v7 → v8: ajustes de entrega vazios (padrão: aprovação para push); inválidos ignorados', async () => {
@@ -364,7 +365,7 @@ describe('orkio-config v2/v3', () => {
     const { data } = await createOrkioConfigStore(file).load()
     expect(data.delivery).toEqual({})
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(8)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
     expect(saved['delivery']).toEqual({})
 
     await writeFile(
@@ -376,5 +377,55 @@ describe('orkio-config v2/v3', () => {
     )
     const again = await createOrkioConfigStore(file).load()
     expect(again.data.delivery).toEqual({ p1: { requirePushApproval: false } })
+  })
+
+  it('v8 → v9: regras de agentes vazias; regras inválidas ou repetidas são ignoradas', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-v9-'))
+    const file = join(dir, 'orkio-config.json')
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 8,
+        projects: [{ ...PROJECT, notionProject: null }],
+        notion: null,
+        boards: {},
+        automation: { paused: false },
+        claudeContexts: {},
+        flows: {},
+        delivery: {}
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.agents).toEqual({})
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(9)
+    expect(saved['agents']).toEqual({})
+
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...saved,
+        agents: {
+          p1: {
+            assignOnEnter: [
+              { stageId: 's1', agentKey: 'repo:ana' },
+              { stageId: 's1', agentKey: 'local:bob' },
+              { stageId: 's2', agentKey: 'nuvem:x' },
+              { stageId: 's3', agentKey: 'local:bob' }
+            ]
+          },
+          p2: 'quebrado'
+        }
+      })
+    )
+    const again = await createOrkioConfigStore(file).load()
+    expect(again.data.agents).toEqual({
+      p1: {
+        assignOnEnter: [
+          { stageId: 's1', agentKey: 'repo:ana' },
+          { stageId: 's3', agentKey: 'local:bob' }
+        ]
+      }
+    })
   })
 })
