@@ -118,6 +118,15 @@ plano a substitui onde houver diferença.
   pessoa escolheu, não um estado.
 - Ordenar ou agrupar agentes por uso: sem dado de ordenação no renderer além do que já vem.
 
+## Extra: tela "Vamos começar"
+
+- Sai a lista "01/02/03" de ferramentas e o rótulo "// desktop" em caixa alta; entra o checklist
+  "Preparar o Orkio" com o estado real de Notion, GitHub e Claude Code (mesmas chamadas de
+  Integrações: `notion.getStatus`, `github.getStatus`, `claude.status`) e do projeto, cada um com
+  `StatusToken` e a ação que falta ("Conectar o Notion", "Adicionar projeto"…), mais "N de 4
+  prontos". Título e "Começar" à esquerda; a abertura animada continua igual.
+- "Conectar ferramentas" saiu: cada linha do checklist já leva à ação certa.
+
 ## Recusado em todas as fases (e por quê)
 
 - Mascotes, logos, nomes e textos das referências: identidade própria.
