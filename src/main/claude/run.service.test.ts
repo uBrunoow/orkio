@@ -94,7 +94,8 @@ describe('RunService', () => {
 
   afterEach(async () => {
     db.close()
-    await rm(dir, { recursive: true, force: true })
+    // Uma execução pode estar fechando o log (.jsonl) agora: tenta de novo se a pasta ainda não esvaziou.
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 
   const start = (n: number, over: Partial<Parameters<RunService['start']>[0]> = {}) =>
@@ -132,7 +133,7 @@ describe('RunService', () => {
 
   it('roda, registra log/histórico e resume arquivos, commits e testes', async () => {
     const view = await start(1)
-    await tick()
+    await spawned(1)
     expect(statusOf(view.id)).toBe('running')
     const run = runs[0]!
     expect(run.opts.cwd).toBe(join(dir, 'wt', 'ORK-1'))
@@ -158,7 +159,7 @@ describe('RunService', () => {
     const view = await start(1, {
       agent: { key: 'repo:ana', name: 'Ana', prompt: 'Você é Ana.', model: 'sonnet' }
     })
-    await tick()
+    await spawned(1)
     const run = runs[0]!
     expect(run.opts.appendSystemPrompt).toBe('Você é Ana.')
     expect(run.opts.model).toBe('sonnet')
@@ -178,10 +179,13 @@ describe('RunService', () => {
 
   it('shell pede aprovação (notifica); "sempre neste projeto" vale para as próximas', async () => {
     await start(1)
-    await tick()
+    await spawned(1)
     const run = runs[0]!
     const answer = run.ask('Bash', { command: 'npm test' }, 'req-1')
-    await tick()
+    await vi.waitFor(
+      () => expect(messages.at(-1)?.event).toMatchObject({ kind: 'permission', state: 'pending' }),
+      { timeout: 3000 }
+    )
     expect(messages.at(-1)?.event).toMatchObject({
       kind: 'permission',
       state: 'pending',
@@ -204,7 +208,7 @@ describe('RunService', () => {
 
   it('push e fora do worktree são bloqueados sem perguntar, e vão para o histórico', async () => {
     await start(1)
-    await tick()
+    await spawned(1)
     const run = runs[0]!
     expect(await run.ask('Bash', { command: 'git push origin HEAD' })).toEqual({
       behavior: 'deny',
@@ -286,7 +290,7 @@ describe('RunService', () => {
 
   it('token errado no socket é recusado', async () => {
     await start(1)
-    await tick()
+    await spawned(1)
     const broker = runs[0]!.opts.broker as PermissionBroker
     expect(
       await askOrkio(broker.socketPath, 'errado', { toolName: 'Bash', input: { command: 'ls' } })
@@ -298,7 +302,7 @@ describe('RunService', () => {
 
   it('sem resposta no prazo: nega e registra', async () => {
     await start(1)
-    await tick()
+    await spawned(1)
     expect(await runs[0]!.ask('Bash', { command: 'make' }, 'req-t')).toEqual({
       behavior: 'deny',
       message: RUN_MESSAGES.timeout
@@ -318,7 +322,10 @@ describe('RunService', () => {
       ]
     }
     const answer = runs[0]!.ask('AskUserQuestion', input, 'q-1')
-    await tick()
+    await vi.waitFor(
+      () => expect(messages.at(-1)?.event).toMatchObject({ kind: 'question', state: 'pending' }),
+      { timeout: 3000 }
+    )
     expect(messages.at(-1)?.event).toMatchObject({
       kind: 'question',
       state: 'pending',
@@ -343,13 +350,16 @@ describe('RunService', () => {
 
   it('cancelar encerra, nega pendências e registra no histórico', async () => {
     const view = await start(1)
-    await tick()
+    await spawned(1)
     const pending = runs[0]!.ask('Bash', { command: 'make' }, 'req-c')
-    await tick()
+    await vi.waitFor(
+      () => expect(messages.at(-1)?.event).toMatchObject({ kind: 'permission', state: 'pending' }),
+      { timeout: 3000 }
+    )
     service.cancel(view.id)
     expect(runs[0]!.cancel).toHaveBeenCalled()
     expect(await pending).toEqual({ behavior: 'deny', message: RUN_MESSAGES.cancelled })
-    await tick()
+    await finished(view.id)
     expect(statusOf(view.id)).toBe('cancelled')
     expect(store.events('task-1')[0]?.kind).toBe('run_cancelled')
   })
@@ -400,7 +410,7 @@ describe('RunService', () => {
     await mkdir(wt, { recursive: true })
     await writeFile(join(wt, '.env'), 'DB_URL="postgres://u:senha-forte-9@h/db"\nDEBUG=true\n')
     const view = await start(1)
-    await tick()
+    await spawned(1)
     const run = runs[0]!
     run.emit({ kind: 'text', text: 'conectei em postgres://u:senha-forte-9@h/db com DEBUG=true' })
     // Arquivo .env criado depois: lido quando o agente o usa.
@@ -421,7 +431,7 @@ describe('RunService', () => {
     const finished: { status: string; resultText: string; message: string | null }[] = []
     service.onFinished((f) => finished.push(f))
     await start(1)
-    await tick()
+    await spawned(1)
     runs[0]!.emit({
       kind: 'result',
       ok: true,
@@ -431,15 +441,15 @@ describe('RunService', () => {
       text: 'pronto @orkio pr=7 token ghp_abcdefghijklmnopqrstuvwxyz0123'
     })
     runs[0]!.exit(0)
-    await tick()
+    await vi.waitFor(() => expect(finished).toHaveLength(1), { timeout: 3000 })
     expect(finished[0]).toMatchObject({ status: 'succeeded', message: null })
     expect(finished[0]!.resultText).toContain('@orkio pr=7')
     expect(finished[0]!.resultText).not.toContain('ghp_abc')
 
     await start(2, { timeoutMin: 0.001 }) // ~60 ms
-    await new Promise((r) => setTimeout(r, 150))
-    expect(runs[1]!.cancel).toHaveBeenCalled()
-    await tick()
+    await spawned(2)
+    await vi.waitFor(() => expect(runs[1]!.cancel).toHaveBeenCalled(), { timeout: 3000 })
+    await vi.waitFor(() => expect(finished).toHaveLength(2), { timeout: 3000 })
     expect(finished[1]).toMatchObject({ status: 'failed', message: RUN_MESSAGES.timedOut })
   })
 })
