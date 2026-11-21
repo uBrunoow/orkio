@@ -127,6 +127,20 @@ plano a substitui onde houver diferença.
   prontos". Título e "Começar" à esquerda; a abertura animada continua igual.
 - "Conectar ferramentas" saiu: cada linha do checklist já leva à ação certa.
 
+## Extra: login com GitHub
+
+- Sem GitHub conectado, a entrada do app (depois da abertura) é "Entrar no Orkio": card central
+  sobre a grade, símbolo, uma frase e "Entrar com GitHub" (referência visual: tela de login com
+  card único e ações secundárias abaixo de "ou"). O login é o Device Flow que Integrações já usa
+  (`github.startDeviceFlow`/`waitDeviceFlow`, token cifrado no main): entrar já conecta a
+  integração. Depois vem o checklist, com o GitHub pronto, pedindo Notion e projeto.
+- "Usar um token" leva a Integrações; "Continuar sem GitHub" vai ao checklist (o app continua
+  usável sem GitHub). Build sem o client ID do GitHub: o botão some e a tela explica.
+- Não é conta do Orkio: não há servidor nem sessão própria; "sair" é desconectar o GitHub em
+  Integrações.
+- E2E: `login.spec.ts` (código, abrir o GitHub, autorizar, checklist); o `enterApp` das fixtures
+  passa por "Continuar sem GitHub".
+
 ## Recusado em todas as fases (e por quê)
 
 - Mascotes, logos, nomes e textos das referências: identidade própria.

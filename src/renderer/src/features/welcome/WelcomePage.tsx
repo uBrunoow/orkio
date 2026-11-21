@@ -21,6 +21,7 @@ import {
   ProjectsIcon,
   type SvgIcon
 } from '../../components/icons'
+import { LoginPanel } from './LoginPanel'
 import './welcome.css'
 
 interface Step {
@@ -36,7 +37,10 @@ function useSetupStatus(): {
   notion: ConnectionStatus | null
   github: ConnectionStatus | null
   claude: ClaudeCodeStatus | null
+  oauth: boolean
+  setGithub(s: ConnectionStatus): void
 } {
+  const [oauth, setOauth] = useState(false)
   const [notion, setNotion] = useState<ConnectionStatus | null>(null)
   const [github, setGithub] = useState<ConnectionStatus | null>(null)
   const [claude, setClaude] = useState<ClaudeCodeStatus | null>(null)
@@ -50,6 +54,10 @@ function useSetupStatus(): {
       .getStatus()
       .then((s) => alive && setGithub(s))
       .catch(() => undefined)
+    void window.orkio.github
+      .getAuthOptions()
+      .then((o) => alive && setOauth(o.oauth))
+      .catch(() => undefined)
     void window.orkio.claude
       .status()
       .then((s) => alive && setClaude(s))
@@ -58,7 +66,7 @@ function useSetupStatus(): {
       alive = false
     }
   }, [])
-  return { notion, github, claude }
+  return { notion, github, claude, oauth, setGithub }
 }
 
 function connectionStep(s: ConnectionStatus | null): Step['status'] {
@@ -98,6 +106,9 @@ export function WelcomePage({
   // A abertura sai do DOM quando a animação de fechar termina.
   const [splash, setSplash] = useState(true)
   const setup = useSetupStatus()
+  // Login com GitHub primeiro (enquanto não conectado); "Continuar sem GitHub" pula para o checklist.
+  const [skippedLogin, setSkippedLogin] = useState(false)
+  const showLogin = !skippedLogin && setup.github !== null && setup.github.state !== 'connected'
 
   const steps: Step[] = [
     {
@@ -147,78 +158,89 @@ export function WelcomePage({
           <OrkioLogo variant="simple" withWordmark size={24} />
         </HStack>
 
-        <StackItem size="fill">
-          <VStack height="100%" vAlign="center">
-            <Grid columns={{ minWidth: 360, max: 2 }} gap={10} align="center">
-              <VStack gap={4} hAlign="start">
-                <Text className="orkio-slogan orkio-intro__reveal orkio-intro__d2">
-                  Do contexto ao commit
-                </Text>
-                <Text
-                  as="h1"
-                  id="welcome-title"
-                  className="orkio-display orkio-intro__title orkio-intro__reveal orkio-intro__d3"
-                >
-                  Vamos começar
-                </Text>
-                <Text color="secondary" className="orkio-intro__reveal orkio-intro__d4">
-                  O Orkio liga o quadro do Notion, o código no GitHub e o Claude Code, e leva cada
-                  tarefa até a branch.
-                </Text>
-                <HStack className="orkio-intro__reveal orkio-intro__d5">
-                  <Button variant="primary" size="lg" label="Começar" onClick={onStart} />
-                </HStack>
-              </VStack>
-
-              <Card padding={0} className="orkio-intro__reveal orkio-intro__d6">
-                <VStack gap={0}>
-                  <HStack gap={2} vAlign="center" padding={4} paddingBlockEnd={2}>
-                    <Heading level={2}>Preparar o Orkio</Heading>
-                    <StackItem size="fill" />
-                    <Text
-                      type="supporting"
-                      color="secondary"
-                      hasTabularNumbers
-                      data-testid="setup-progress"
-                    >
-                      {done} de {steps.length} prontos
-                    </Text>
+        {setup.github === null ? null : showLogin ? (
+          <StackItem size="fill">
+            <LoginPanel
+              oauth={setup.oauth}
+              onConnected={setup.setGithub}
+              onSkip={() => setSkippedLogin(true)}
+              onUseToken={onOpenIntegrations}
+            />
+          </StackItem>
+        ) : (
+          <StackItem size="fill">
+            <VStack height="100%" vAlign="center">
+              <Grid columns={{ minWidth: 360, max: 2 }} gap={10} align="center">
+                <VStack gap={4} hAlign="start">
+                  <Text className="orkio-slogan orkio-intro__reveal orkio-intro__d2">
+                    Do contexto ao commit
+                  </Text>
+                  <Text
+                    as="h1"
+                    id="welcome-title"
+                    className="orkio-display orkio-intro__title orkio-intro__reveal orkio-intro__d3"
+                  >
+                    Vamos começar
+                  </Text>
+                  <Text color="secondary" className="orkio-intro__reveal orkio-intro__d4">
+                    O Orkio liga o quadro do Notion, o código no GitHub e o Claude Code, e leva cada
+                    tarefa até a branch.
+                  </Text>
+                  <HStack className="orkio-intro__reveal orkio-intro__d5">
+                    <Button variant="primary" size="lg" label="Começar" onClick={onStart} />
                   </HStack>
-                  <List hasDividers aria-label="Preparar o Orkio">
-                    {steps.map((step) => (
-                      <Item
-                        key={step.name}
-                        as="li"
-                        startContent={<Icon icon={step.icon} />}
-                        label={step.name}
-                        description={
-                          <VStack gap={1}>
-                            <Text type="supporting" color="secondary">
-                              {step.text}
-                            </Text>
-                            <StatusToken label={step.status.label} tone={step.status.tone} />
-                          </VStack>
-                        }
-                        {...(step.action
-                          ? {
-                              endContent: (
-                                <Button
-                                  size="sm"
-                                  variant="secondary"
-                                  label={step.action.label}
-                                  onClick={step.action.onClick}
-                                />
-                              )
-                            }
-                          : {})}
-                      />
-                    ))}
-                  </List>
                 </VStack>
-              </Card>
-            </Grid>
-          </VStack>
-        </StackItem>
+
+                <Card padding={0} className="orkio-intro__reveal orkio-intro__d6">
+                  <VStack gap={0}>
+                    <HStack gap={2} vAlign="center" padding={4} paddingBlockEnd={2}>
+                      <Heading level={2}>Preparar o Orkio</Heading>
+                      <StackItem size="fill" />
+                      <Text
+                        type="supporting"
+                        color="secondary"
+                        hasTabularNumbers
+                        data-testid="setup-progress"
+                      >
+                        {done} de {steps.length} prontos
+                      </Text>
+                    </HStack>
+                    <List hasDividers aria-label="Preparar o Orkio">
+                      {steps.map((step) => (
+                        <Item
+                          key={step.name}
+                          as="li"
+                          startContent={<Icon icon={step.icon} />}
+                          label={step.name}
+                          description={
+                            <VStack gap={1}>
+                              <Text type="supporting" color="secondary">
+                                {step.text}
+                              </Text>
+                              <StatusToken label={step.status.label} tone={step.status.tone} />
+                            </VStack>
+                          }
+                          {...(step.action
+                            ? {
+                                endContent: (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    label={step.action.label}
+                                    onClick={step.action.onClick}
+                                  />
+                                )
+                              }
+                            : {})}
+                        />
+                      ))}
+                    </List>
+                  </VStack>
+                </Card>
+              </Grid>
+            </VStack>
+          </StackItem>
+        )}
       </VStack>
 
       {splash && (
