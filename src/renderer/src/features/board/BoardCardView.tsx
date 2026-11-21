@@ -11,7 +11,7 @@ import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-
 import { GitBranchIcon, LockIcon, PauseIcon, PullRequestIcon } from '../../components/icons'
 import { useTaskFlowState } from '../task-flows/active-flows'
 import { useAgentBadge } from '../agents/agent-badges'
-import { AgentAvatar } from '../agents/AgentsPage'
+import { AgentAvatar } from '../agents/AgentAvatar'
 import { StatusToken } from '../../components/StatusToken'
 import { cardStatus } from './card-status'
 
@@ -74,7 +74,9 @@ export function BoardCardBody({
     <VStack gap={2}>
       <HStack gap={2} vAlign="center">
         <Code data-testid="card-id">{card.displayId ?? '—'}</Code>
-        {agent && <AgentAvatar name={agent.name} color={agent.color} testId="card-agent" />}
+        {agent && (
+          <AgentAvatar name={agent.name} color={agent.color} seed={agent.key} testId="card-agent" />
+        )}
         <StackItem size="fill">
           <HStack gap={2} vAlign="center" hAlign="end">
             {status && (

@@ -264,7 +264,9 @@ test('critérios 1–4: cria a Ana pela tela, regra da coluna, fluxo dela com as
   await expect(card(page).getByTestId('card-agent')).toHaveCount(0)
   await card(page).getByRole('button', { name: 'Ações de ORK-2' }).click()
   await page.getByRole('menuitem', { name: 'Mover para Em andamento' }).click()
-  await expect(card(page).getByTestId('card-agent')).toHaveText('AN', { timeout: 30_000 })
+  await expect(card(page).getByTestId('card-agent')).toHaveAttribute('aria-label', 'Agente: Ana', {
+    timeout: 30_000
+  })
   await expect(card(page).getByTestId('card-flow')).toHaveText('Esperando você', {
     timeout: 30_000
   })

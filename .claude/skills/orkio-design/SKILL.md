@@ -80,6 +80,11 @@ Card de três linhas (ID + agente + estado + menu / título / metadados cinza). 
 com contador. Tarefa abre numa folha sobre as colunas (abaixo do cabeçalho), nunca num modal que
 cubra a janela; "Abrir tarefa" leva à página inteira. Kanban/Lista por `SegmentedControl`.
 
+## Agentes
+
+Avatar só pelo `AgentAvatar` (forma geométrica do id, cores do tema; nunca iniciais nem foto).
+Lista de agentes em grade de cards com alternância Cards/Linhas, filtros com contagem e busca `/`.
+
 ## Movimento e CSP
 
 Só o movimento dos próprios componentes da Astryx; respeitar `prefers-reduced-motion`. Nada que

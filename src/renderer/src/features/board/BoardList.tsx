@@ -10,7 +10,7 @@ import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-
 import { StatusToken } from '../../components/StatusToken'
 import { useTaskFlowState } from '../task-flows/active-flows'
 import { useAgentBadge } from '../agents/agent-badges'
-import { AgentAvatar } from '../agents/AgentsPage'
+import { AgentAvatar } from '../agents/AgentAvatar'
 import { cardMenuItems, type CardActions } from './BoardCardView'
 import { cardStatus } from './card-status'
 
@@ -100,7 +100,7 @@ function BoardListRow({
             {card.title}
           </Text>
         </StackItem>
-        {agent && <AgentAvatar name={agent.name} color={agent.color} />}
+        {agent && <AgentAvatar name={agent.name} color={agent.color} seed={agent.key} />}
         {status && <StatusToken label={status.label} tone={status.tone} />}
         <Text type="supporting" color="secondary" maxLines={1}>
           {stage?.name ?? 'Sem etapa'}

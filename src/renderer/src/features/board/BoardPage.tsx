@@ -29,7 +29,7 @@ import {
 } from '../../components/icons'
 import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
 import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
-import { AgentAvatar } from '../agents/AgentsPage'
+import { AgentAvatar } from '../agents/AgentAvatar'
 import type { ActiveFlows } from '../task-flows/active-flows'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
@@ -544,7 +544,7 @@ function AgentRow({
           label={`${a.name}: ${a.count === 1 ? '1 tarefa' : `${a.count} tarefas`}${a.running ? ', rodando' : ''}`}
           isPressed={selected === key}
           onPressedChange={(pressed) => onSelect(pressed ? key : null)}
-          icon={<AgentAvatar name={a.name} color={a.color} />}
+          icon={<AgentAvatar name={a.name} color={a.color} seed={key} />}
         >
           <HStack gap={1} vAlign="center">
             <Text>{a.name}</Text>

@@ -12,8 +12,8 @@ plano a substitui onde houver diferença.
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------ |
 | 1. Base visual            | Densidade pelo tema, `StatusToken` (ponto + texto), `PageHeader` compacto com metadados `·`, prioridade e "Rodando" sem bloco | feita              |
 | 2. Moldura                | Coluna de ícones, barra superior com seletor de projeto, conteúdo em painel                                                   | feita              |
-| 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                     | feita (aguarda ok) |
-| 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                   | —                  |
+| 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                     | feita              |
+| 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                   | feita (aguarda ok) |
 | 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | —                  |
 | 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | —                  |
 | 7. Integrações e catálogo | Grade de linhas com logo, categoria e ação                                                                                    | —                  |
@@ -94,6 +94,29 @@ plano a substitui onde houver diferença.
 - Guardar colunas recolhidas e a visualização escolhida: exigiria config nova (main). Fica na
   sessão.
 - Avatar geométrico: fase 4 (hoje ainda é o `Token` com iniciais).
+
+## Fase 4
+
+**Agentes**
+
+- Avatar novo (`features/agents/AgentAvatar.tsx`): quadrado arredondado com uma forma geométrica
+  (círculo, quadrado, triângulo, losango, meia-lua, anel, par de quadrados, cunha), rotação e um
+  ponto de canto, tudo derivado de um hash estável do id do agente; cores do tema para a cor do
+  perfil (`--color-background-*` e `--color-icon-*`). SVG, sem iniciais; o nome fica no
+  `aria-label` ("Agente: Ana"). Substitui o `Token` de iniciais no card, na lista e na faixa do
+  quadro, no painel da tarefa e na tela de Agentes (`card-agent` mantido; o E2E confere o
+  `aria-label` em vez do texto "AN").
+- Tela de Agentes: grade de cards (avatar, nome, papel, estado; tarefas, execuções de hoje e
+  fluxo preferido; "Editar" e o menu "Ações de…" com Duplicar/Arquivar), alternância
+  Cards/Linhas, filtros por estado com contagem (Todos, Prontos, Revisar, Com erro, Arquivados;
+  "Todos" esconde os arquivados) e busca por nome ou papel com atalho `/`.
+- Revisão do perfil continua dentro do card/linha ("Revisar Ana", prévia, "Aprovar este perfil").
+
+**Recusado / adiado**
+
+- Cor laranja no perfil: continua escolhível (dado existente); o laranja do avatar é a cor que a
+  pessoa escolheu, não um estado.
+- Ordenar ou agrupar agentes por uso: sem dado de ordenação no renderer além do que já vem.
 
 ## Recusado em todas as fases (e por quê)
 
