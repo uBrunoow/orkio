@@ -90,7 +90,7 @@ export function FlowPage({
   onSaved(view: BoardView): void
   onClose(): void
   onOpenNotionSettings(): void
-  /** 5A: editor dos fluxos de tarefa (sequências de passos). */
+  /** "Criar fluxo" numa coluna: leva à tela Fluxos (5A). */
   onOpenTaskFlows(): void
 }): React.JSX.Element {
   const [draft, setDraft] = useState<FlowDraft>(() => initialDraft(view))
@@ -321,13 +321,11 @@ export function FlowPage({
   return (
     <VStack gap={5}>
       <HStack gap={2} vAlign="center" wrap="wrap" role="toolbar" aria-label="Ações do fluxo">
-        <Heading level={2}>Fluxo do projeto</Heading>
         <StackItem size="fill" />
         <Button variant="ghost" label="Restaurar padrão" onClick={restoreDefault} />
         <Button variant="ghost" label="Exportar JSON" onClick={() => void doExport()} />
         <Button variant="ghost" label="Importar JSON" onClick={() => void doImport()} />
         <Button variant="ghost" label="Etapa Orkio e Bloqueada…" onClick={onOpenNotionSettings} />
-        <Button variant="ghost" label="Fluxos de tarefa…" onClick={onOpenTaskFlows} />
         <Button
           variant="ghost"
           label="Descartar alterações"
@@ -340,10 +338,6 @@ export function FlowPage({
         />
         <Button variant="secondary" label="Voltar ao quadro" onClick={onClose} />
       </HStack>
-      <Text color="secondary">
-        Cada etapa corresponde a uma opção do status das Tarefas no Notion. As automações de cada
-        coluna levam a tarefa para ela. Nada muda até você salvar.
-      </Text>
 
       {message && <Alert tone={message.tone}>{message.text}</Alert>}
 

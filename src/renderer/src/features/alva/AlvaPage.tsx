@@ -35,13 +35,11 @@ const byName = (view: BoardView, re: RegExp): string | null =>
 export function AlvaPage({
   projectId,
   view,
-  onBoardChanged,
-  onClose
+  onBoardChanged
 }: {
   projectId: string
   view: BoardView
   onBoardChanged(): void
-  onClose(): void
 }): React.JSX.Element {
   const [precheck, setPrecheck] = useState<AlvaPrecheck | null>(null)
   const [checking, setChecking] = useState(false)
@@ -112,8 +110,6 @@ export function AlvaPage({
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Heading level={2}>alva-flow</Heading>
         {precheck?.pluginVersion && <Code>v{precheck.pluginVersion}</Code>}
-        <StackItem size="fill" />
-        <Button variant="ghost" label="Voltar ao quadro" onClick={onClose} />
       </HStack>
       <Text color="secondary">
         Os fluxos Alva rodam os comandos do plugin alva-flow (/spec, /plan, /implement, /review,

@@ -13,20 +13,13 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { VStack } from '@astryxdesign/core/VStack'
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
-import { PageHeader } from '../../components/PageHeader'
 import { NotionLogo, TrashIcon } from '../../components/icons'
 
 /**
  * Contexto do Claude Code do projeto (4B): instruções fixas + páginas de referência do Notion.
  * Vai no briefing de toda execução, dentro de um limite de tamanho (o que passar é cortado com aviso).
  */
-export function ProjectContextPage({
-  projectId,
-  onClose
-}: {
-  projectId: string
-  onClose(): void
-}): React.JSX.Element {
+export function ProjectContextPage({ projectId }: { projectId: string }): React.JSX.Element {
   const [ctx, setCtx] = useState<ProjectClaudeContext | null>(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<{ id: string; name: string }[] | null>(null)
@@ -68,10 +61,6 @@ export function ProjectContextPage({
 
   return (
     <VStack gap={5} maxWidth={880} role="region" aria-label="Contexto do Claude Code">
-      <PageHeader
-        title="Contexto do Claude Code"
-        subtitle="Vai no briefing de toda execução deste projeto, antes da descrição da tarefa."
-      />
       <TextArea
         label="Instruções"
         description="Convenções, comandos de teste, o que evitar. Fica só no seu computador."
@@ -178,7 +167,6 @@ export function ProjectContextPage({
           isLoading={saving}
           onClick={() => void save()}
         />
-        <Button variant="ghost" label="Voltar ao quadro" onClick={onClose} />
       </HStack>
     </VStack>
   )

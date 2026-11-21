@@ -8,7 +8,8 @@ import {
   cspViolations,
   launchOrkio,
   removeDir,
-  type OrkioApp
+  type OrkioApp,
+  navTo
 } from './fixtures'
 
 /**
@@ -147,9 +148,8 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   await expect(card(page)).toBeVisible()
 
   // Editor de fluxos (a partir do Fluxo do projeto).
-  await page.getByRole('button', { name: 'Fluxo do projeto' }).click()
-  await page.getByRole('button', { name: 'Fluxos de tarefa…' }).click()
-  const editor = page.getByRole('region', { name: 'Fluxos de tarefa' })
+  await navTo(page, 'Fluxos')
+  const editor = page.getByRole('region', { name: 'Fluxos do projeto' })
   await editor.getByRole('button', { name: 'Novo fluxo' }).click()
   await editor.getByRole('textbox', { name: 'Nome do fluxo' }).fill('Revisar e entregar')
 
@@ -181,7 +181,7 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   await expect(editor.getByText('Fluxos salvos.')).toBeVisible()
 
   // Liga na coluna Revisando (ao entrar) e salva o Fluxo do projeto.
-  await editor.getByRole('button', { name: 'Voltar ao Fluxo do projeto' }).click()
+  await navTo(page, 'Etapas e automações')
   const rev = page
     .getByRole('list', { name: 'Etapas do fluxo' })
     .getByRole('listitem', { name: 'Etapa Revisando' })

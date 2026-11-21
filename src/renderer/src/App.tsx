@@ -1,44 +1,169 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { AppShell } from '@astryxdesign/core/AppShell'
-import { BoardIcon, IntegrationsIcon, ProjectsIcon, type SvgIcon } from './components/icons'
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
-import type { BoardTaskRef } from '../../shared/ipc-contract'
+import type { ProjectView } from '../../shared/ipc-contract'
+import {
+  BoardIcon,
+  ClaudeLogo,
+  FlowsIcon,
+  IntegrationsIcon,
+  ProjectsIcon,
+  StagesIcon,
+  type SvgIcon
+} from './components/icons'
 import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
+import {
+  ROUTE_TITLES,
+  initialRouter,
+  isProjectRoute,
+  routerReducer,
+  type ProjectRouteName,
+  type Route
+} from './app/routes'
 import { BoardPage } from './features/board/BoardPage'
+import { AutomationsPage, ContextPage, FlowsPage } from './features/board/ProjectPages'
+import { TaskPage } from './features/board/TaskPage'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
 
-type Page = 'welcome' | 'projects' | 'board' | 'integrations'
+/** Preferência de interface (não secreta): último projeto escolhido no menu. */
+const CURRENT_PROJECT_KEY = 'orkio.currentProject'
 
-const PAGES: { id: Exclude<Page, 'welcome'>; label: string; icon: SvgIcon }[] = [
-  { id: 'projects', label: 'Projetos', icon: ProjectsIcon },
-  { id: 'board', label: 'Quadro', icon: BoardIcon },
-  { id: 'integrations', label: 'Integrações', icon: IntegrationsIcon }
+const PROJECT_ITEMS: { name: ProjectRouteName; icon: SvgIcon }[] = [
+  { name: 'board', icon: BoardIcon },
+  { name: 'automations', icon: StagesIcon },
+  { name: 'flows', icon: FlowsIcon },
+  { name: 'context', icon: ClaudeLogo }
 ]
 
-export function App(): React.JSX.Element {
-  const [page, setPage] = useState<Page>('welcome')
-  const [openTask, setOpenTask] = useState<BoardTaskRef | null>(null)
+/** Projetos vinculados ao Notion (os que têm quadro). Relido a cada navegação: é local e barato. */
+function useLinkedProjects(trigger: number): ProjectView[] | null {
+  const [projects, setProjects] = useState<ProjectView[] | null>(null)
+  useEffect(() => {
+    let active = true
+    void window.orkio.projects
+      .list()
+      .then((result) => {
+        if (active) setProjects(result.projects.filter((p) => p.notionProject))
+      })
+      .catch(() => {
+        if (active) setProjects([])
+      })
+    return () => {
+      active = false
+    }
+  }, [trigger])
+  return projects
+}
 
-  // Clique numa notificação de automação: abre a tarefa no quadro.
+export function App(): React.JSX.Element {
+  const [router, dispatch] = useReducer(routerReducer, initialRouter({ name: 'welcome' }))
+  const { route } = router
+  const navigate = useCallback((next: Route) => dispatch({ type: 'navigate', route: next }), [])
+  const projects = useLinkedProjects(router.key)
+  const [chosenProject, setChosenProject] = useState<string | null>(() =>
+    window.localStorage.getItem(CURRENT_PROJECT_KEY)
+  )
+
+  // Projeto atual: o da rota (ex.: notificação) → o escolhido no menu → o primeiro vinculado.
+  const routeProjectId = isProjectRoute(route) ? route.projectId : undefined
+  const project = useMemo(() => {
+    if (!projects) return null
+    return (
+      projects.find((p) => p.id === routeProjectId) ??
+      projects.find((p) => p.id === chosenProject) ??
+      projects[0] ??
+      null
+    )
+  }, [projects, routeProjectId, chosenProject])
+
+  const chooseProject = useCallback((id: string) => {
+    setChosenProject(id)
+    window.localStorage.setItem(CURRENT_PROJECT_KEY, id)
+  }, [])
+
+  // Clique numa notificação de automação: abre a tarefa no quadro do projeto dela.
   useEffect(
     () =>
       window.orkio.board.onOpenTask((ref) => {
-        setOpenTask(ref)
-        setPage('board')
+        chooseProject(ref.projectId)
+        navigate({ name: 'board', projectId: ref.projectId, taskId: ref.taskId })
       }),
-    []
+    [chooseProject, navigate]
   )
 
   // Tela inicial em tela cheia, sem a navegação.
-  if (page === 'welcome') {
+  if (route.name === 'welcome') {
     return (
       <WelcomePage
-        onStart={() => setPage('projects')}
-        onOpenIntegrations={() => setPage('integrations')}
+        onStart={() => navigate({ name: 'projects' })}
+        onOpenIntegrations={() => navigate({ name: 'integrations' })}
       />
     )
+  }
+
+  const toProjects = (): void => navigate({ name: 'projects' })
+  const toIntegrations = (): void => navigate({ name: 'integrations' })
+  const toBoard = (): void => navigate({ name: 'board' })
+
+  let page: React.ReactNode
+  switch (route.name) {
+    case 'projects':
+      page = <ProjectsPage onOpenIntegrations={toIntegrations} />
+      break
+    case 'integrations':
+      page = <IntegrationsPage />
+      break
+    case 'board':
+      page = (
+        <BoardPage
+          project={projects === null ? null : project}
+          openTaskId={route.taskId ?? null}
+          onOpenIntegrations={toIntegrations}
+          onOpenProjects={toProjects}
+          onExpandTask={(taskId) =>
+            project && navigate({ name: 'task', projectId: project.id, taskId })
+          }
+        />
+      )
+      break
+    case 'task':
+      page = (
+        <TaskPage
+          project={projects === null ? null : project}
+          taskId={route.taskId}
+          onBackToBoard={(taskId) =>
+            navigate({ name: 'board', projectId: route.projectId, ...(taskId ? { taskId } : {}) })
+          }
+        />
+      )
+      break
+    case 'automations':
+      page = (
+        <AutomationsPage
+          project={project}
+          onOpenBoard={toBoard}
+          onOpenFlows={() => navigate({ name: 'flows' })}
+          onOpenProjects={toProjects}
+        />
+      )
+      break
+    case 'flows':
+      page = (
+        <FlowsPage
+          project={project}
+          tab={route.tab ?? 'flows'}
+          onTabChange={(tab) => navigate({ name: 'flows', tab })}
+          onOpenBoard={toBoard}
+          onOpenProjects={toProjects}
+        />
+      )
+      break
+    case 'context':
+      page = <ContextPage project={project} onOpenProjects={toProjects} />
+      break
   }
 
   return (
@@ -52,34 +177,58 @@ export function App(): React.JSX.Element {
           aria-label="Navegação principal"
           header={<OrkioLogo variant="simple" withWordmark size={26} />}
         >
-          <SideNavSection title="Orkio" isHeaderHidden>
-            {PAGES.map((item) => (
+          <SideNavSection
+            title={project ? project.name : 'Projeto'}
+            subtitle="Projeto atual"
+            {...(projects && projects.length > 1
+              ? {
+                  endContent: (
+                    <DropdownMenu
+                      button={{ label: 'Trocar projeto', size: 'sm', variant: 'ghost' }}
+                      hasChevron={false}
+                      items={projects.map((p) => ({
+                        label: p.name,
+                        onClick: () => {
+                          chooseProject(p.id)
+                          navigate(isProjectRoute(route) ? { name: route.name } : { name: 'board' })
+                        }
+                      }))}
+                    />
+                  )
+                }
+              : {})}
+          >
+            {PROJECT_ITEMS.map((item) => (
               <SideNavItem
-                key={item.id}
-                label={item.label}
+                key={item.name}
+                label={ROUTE_TITLES[item.name]}
                 icon={item.icon}
-                isSelected={page === item.id}
-                onClick={() => {
-                  setOpenTask(null)
-                  setPage(item.id)
-                }}
+                isSelected={
+                  route.name === item.name || (item.name === 'board' && route.name === 'task')
+                }
+                onClick={() => navigate({ name: item.name })}
               />
             ))}
+          </SideNavSection>
+          <SideNavSection title="Orkio" isHeaderHidden>
+            <SideNavItem
+              label={ROUTE_TITLES.projects}
+              icon={ProjectsIcon}
+              isSelected={route.name === 'projects'}
+              onClick={toProjects}
+            />
+            <SideNavItem
+              label={ROUTE_TITLES.integrations}
+              icon={IntegrationsIcon}
+              isSelected={route.name === 'integrations'}
+              onClick={toIntegrations}
+            />
           </SideNavSection>
         </SideNav>
       }
     >
-      {page === 'projects' ? (
-        <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
-      ) : page === 'board' ? (
-        <BoardPage
-          onOpenIntegrations={() => setPage('integrations')}
-          onOpenProjects={() => setPage('projects')}
-          openTask={openTask}
-        />
-      ) : (
-        <IntegrationsPage />
-      )}
+      {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
+      <Fragment key={router.key}>{page}</Fragment>
     </AppShell>
   )
 }

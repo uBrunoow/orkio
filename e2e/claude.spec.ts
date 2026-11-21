@@ -10,7 +10,8 @@ import {
   launchOrkio,
   notionState,
   removeDir,
-  type OrkioApp
+  type OrkioApp,
+  navTo
 } from './fixtures'
 
 /**
@@ -307,7 +308,7 @@ test('contexto do projeto: instruções + página do Notion entram no briefing',
     .getByRole('complementary', { name: 'Detalhes de ORK-2' })
     .getByRole('button', { name: 'Fechar' })
     .click()
-  await page.getByRole('button', { name: 'Contexto do Claude' }).click()
+  await navTo(page, 'Contexto do Claude')
   const ctx = page.getByRole('region', { name: 'Contexto do Claude Code' })
   await ctx.getByRole('textbox', { name: /^Instruções/ }).fill('Rode pnpm test antes de commitar.')
   await ctx.getByRole('searchbox', { name: 'Buscar página no Notion' }).fill('arquitetura')
@@ -318,7 +319,7 @@ test('contexto do projeto: instruções + página do Notion entram no briefing',
   )
   await ctx.getByRole('button', { name: 'Salvar contexto' }).click()
   await expect(ctx.getByText('Contexto salvo.')).toBeVisible()
-  await ctx.getByRole('button', { name: 'Voltar ao quadro' }).click()
+  await navTo(page, 'Quadro')
 
   const section = await openPanel(page)
   await section.getByRole('button', { name: 'Rodar Claude Code' }).click()

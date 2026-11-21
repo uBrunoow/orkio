@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Code } from '@astryxdesign/core/Code'
@@ -8,6 +9,7 @@ import { Icon } from '@astryxdesign/core/Icon'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { Item } from '@astryxdesign/core/Item'
 import { List } from '@astryxdesign/core/List'
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { Selector } from '@astryxdesign/core/Selector'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { StackItem } from '@astryxdesign/core/Stack'
@@ -21,13 +23,18 @@ import type {
   TaskSignals
 } from '../../../../shared/ipc-contract'
 import { EVENT_LABELS, type EventKind } from '../../../../shared/automation'
-import { CloseIcon, ExternalLinkIcon } from '../../components/icons'
+import { Alert } from '../../components/Alert'
+import { CloseIcon, ExpandIcon, ExternalLinkIcon } from '../../components/icons'
 import { TaskClaudeSection } from '../claude/TaskClaudeSection'
 import { TaskFlowSection } from '../task-flows/TaskFlowSection'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { tokenColor } from '../notion-workspace/notion-colors'
 
-/** Painel lateral da tarefa: dados, ações, branch/PR e histórico (task_events). */
+/**
+ * Tarefa: dados, ações, branch/PR, fluxo, Claude Code e histórico (task_events).
+ * `panel` = prévia ao lado do Quadro (rolagem própria, "Abrir tarefa"); `page` = tela cheia em
+ * duas colunas (trabalho à esquerda, dados e histórico à direita).
+ */
 export function TaskPanel({
   projectId,
   card,
@@ -36,7 +43,9 @@ export function TaskPanel({
   onMove,
   onToggleBlocked,
   onToggleAutomation,
-  onClose
+  onClose,
+  onExpand,
+  variant = 'panel'
 }: {
   projectId: string
   card: BoardCard
@@ -46,6 +55,9 @@ export function TaskPanel({
   onToggleBlocked(blocked: boolean): void
   onToggleAutomation(paused: boolean): void
   onClose(): void
+  /** Abre a tarefa em tela cheia (só no painel). */
+  onExpand?: () => void
+  variant?: 'panel' | 'page'
 }): React.JSX.Element {
   const [history, setHistory] = useState<BoardHistoryEntry[] | null>(null)
   // Execuções do Claude Code também escrevem no histórico (início, fim, bloqueios).
@@ -98,140 +110,213 @@ export function TaskPanel({
     runTick
   ])
 
-  return (
-    <Card role="complementary" aria-label={`Detalhes de ${card.displayId ?? card.title}`}>
-      <VStack gap={4}>
-        <HStack gap={2} vAlign="start">
-          <StackItem size="fill">
-            <VStack gap={1}>
-              <Code>{card.displayId ?? '—'}</Code>
-              <Heading level={2}>{card.title}</Heading>
-            </VStack>
-          </StackItem>
-          <IconButton
+  const label = card.displayId ?? card.title
+  // "Esperando você" sempre no topo (6E): o pedido em si fica na seção Claude Code.
+  const [waiting, setWaiting] = useState(0)
+  const waitingBanner =
+    waiting > 0 ? (
+      <Alert
+        tone="warning"
+        action={
+          <Button
             size="sm"
+            variant="secondary"
+            label={waiting === 1 ? 'Ver pedido' : 'Ver pedidos'}
+            onClick={() =>
+              document
+                .getElementById(`claude-waiting-${card.taskId}`)
+                ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+            }
+          />
+        }
+      >
+        {waiting === 1
+          ? 'O Claude Code está esperando você.'
+          : `O Claude Code está esperando você (${waiting} pedidos).`}
+      </Alert>
+    ) : null
+
+  const tokens = (
+    <>
+      <HStack gap={2} wrap="wrap" vAlign="center">
+        {card.status && (
+          <Token
+            size="sm"
+            label={`Notion: ${card.status.name}`}
+            color={tokenColor(card.status.color)}
+          />
+        )}
+        {card.priority && (
+          <Token size="sm" label={card.priority.name} color={tokenColor(card.priority.color)} />
+        )}
+        {card.sync.state === 'pending' && <Token size="sm" color="yellow" label="Sincronizando" />}
+      </HStack>
+      {card.sync.state === 'pending' && card.sync.message && (
+        <Text type="supporting">{card.sync.message}</Text>
+      )}
+      {card.assignees.length > 0 && (
+        <Text type="supporting">Responsável: {card.assignees.join(', ')}</Text>
+      )}
+      <TaskSignalsLine signals={signals} />
+    </>
+  )
+
+  const controls = (
+    <VStack gap={3}>
+      <Selector
+        label="Mover para"
+        options={stages.map((s) => ({ value: s.id, label: s.name }))}
+        {...(card.stageId ? { value: card.stageId } : { placeholder: 'Sem etapa' })}
+        onChange={(value: string) => {
+          if (value !== card.stageId) onMove(value)
+        }}
+      />
+      <CheckboxInput
+        label="Bloqueada"
+        value={card.blocked}
+        onChange={(checked) => onToggleBlocked(checked)}
+      />
+      <CheckboxInput
+        label="Pausar automações desta tarefa"
+        value={card.automationPaused}
+        onChange={(checked) => onToggleAutomation(checked)}
+      />
+      {card.url && (
+        <HStack>
+          <Button
             variant="ghost"
-            label="Fechar"
-            icon={<Icon icon={CloseIcon} />}
-            onClick={onClose}
+            size="sm"
+            label="Abrir no Notion"
+            icon={<Icon icon={ExternalLinkIcon} />}
+            onClick={() => void window.orkio.openExternal(card.url!)}
           />
         </HStack>
+      )}
+    </VStack>
+  )
 
-        <HStack gap={2} wrap="wrap" vAlign="center">
-          {card.status && (
-            <Token
-              size="sm"
-              label={`Notion: ${card.status.name}`}
-              color={tokenColor(card.status.color)}
+  const work = (
+    <>
+      <TaskFlowSection
+        projectId={projectId}
+        taskId={card.taskId}
+        stageId={card.stageId}
+        pr={signals?.pr ?? null}
+      />
+      <TaskClaudeSection
+        projectId={projectId}
+        taskId={card.taskId}
+        stageName={card.stageId ? stageName(card.stageId) : null}
+        onWaitingChange={setWaiting}
+      />
+    </>
+  )
+
+  const historySection = (
+    <VStack gap={2}>
+      <Heading level={3}>Histórico</Heading>
+      {history === null ? (
+        <Skeleton height={40} aria-label="Carregando histórico" />
+      ) : history.length === 0 ? (
+        <Text type="supporting">Sem eventos ainda.</Text>
+      ) : (
+        <List hasDividers density="compact" aria-label="Histórico da tarefa">
+          {history.map((e) => (
+            <Item
+              as="li"
+              key={e.id}
+              label={describe(e, stageName)}
+              description={new Date(e.at).toLocaleString('pt-BR', {
+                dateStyle: 'short',
+                timeStyle: 'short'
+              })}
+              {...(prUrl(e)
+                ? {
+                    endContent: (
+                      <IconButton
+                        size="sm"
+                        variant="ghost"
+                        label={`Abrir a PR #${prNumber(e)} no GitHub`}
+                        icon={<Icon icon={ExternalLinkIcon} />}
+                        onClick={() => void window.orkio.openExternal(prUrl(e)!)}
+                      />
+                    )
+                  }
+                : branchUrl(e)
+                  ? {
+                      endContent: (
+                        <IconButton
+                          size="sm"
+                          variant="ghost"
+                          label="Abrir a branch no GitHub"
+                          icon={<Icon icon={ExternalLinkIcon} />}
+                          onClick={() => void window.orkio.openExternal(branchUrl(e)!)}
+                        />
+                      )
+                    }
+                  : {})}
             />
-          )}
-          {card.priority && (
-            <Token size="sm" label={card.priority.name} color={tokenColor(card.priority.color)} />
-          )}
-          {card.sync.state === 'pending' && (
-            <Token size="sm" color="yellow" label="Sincronizando" />
-          )}
-        </HStack>
-        {card.sync.state === 'pending' && card.sync.message && (
-          <Text type="supporting">{card.sync.message}</Text>
-        )}
-        {card.assignees.length > 0 && (
-          <Text type="supporting">Responsável: {card.assignees.join(', ')}</Text>
-        )}
-        <TaskSignalsLine signals={signals} />
+          ))}
+        </List>
+      )}
+    </VStack>
+  )
 
-        <Selector
-          label="Mover para"
-          options={stages.map((s) => ({ value: s.id, label: s.name }))}
-          {...(card.stageId ? { value: card.stageId } : { placeholder: 'Sem etapa' })}
-          onChange={(value: string) => {
-            if (value !== card.stageId) onMove(value)
-          }}
-        />
-        <CheckboxInput
-          label="Bloqueada"
-          value={card.blocked}
-          onChange={(checked) => onToggleBlocked(checked)}
-        />
-        <CheckboxInput
-          label="Pausar automações desta tarefa"
-          value={card.automationPaused}
-          onChange={(checked) => onToggleAutomation(checked)}
-        />
-        {card.url && (
-          <HStack gap={2} vAlign="center">
-            <IconButton
-              variant="ghost"
-              size="sm"
-              label="Abrir no Notion"
-              icon={<Icon icon={ExternalLinkIcon} />}
-              onClick={() => void window.orkio.openExternal(card.url!)}
-            />
-            <Text type="supporting">Abrir no Notion</Text>
-          </HStack>
-        )}
-
-        <TaskFlowSection
-          projectId={projectId}
-          taskId={card.taskId}
-          stageId={card.stageId}
-          pr={signals?.pr ?? null}
-        />
-
-        <TaskClaudeSection
-          projectId={projectId}
-          taskId={card.taskId}
-          stageName={card.stageId ? stageName(card.stageId) : null}
-        />
-
-        <VStack gap={2}>
-          <Heading level={3}>Histórico</Heading>
-          {history === null ? (
-            <Skeleton height={40} aria-label="Carregando histórico" />
-          ) : history.length === 0 ? (
-            <Text type="supporting">Sem eventos ainda.</Text>
-          ) : (
-            <List hasDividers density="compact" aria-label="Histórico da tarefa">
-              {history.map((e) => (
-                <Item
-                  as="li"
-                  key={e.id}
-                  label={describe(e, stageName)}
-                  description={new Date(e.at).toLocaleString('pt-BR', {
-                    dateStyle: 'short',
-                    timeStyle: 'short'
-                  })}
-                  {...(prUrl(e)
-                    ? {
-                        endContent: (
-                          <IconButton
-                            size="sm"
-                            variant="ghost"
-                            label={`Abrir a PR #${prNumber(e)} no GitHub`}
-                            icon={<Icon icon={ExternalLinkIcon} />}
-                            onClick={() => void window.orkio.openExternal(prUrl(e)!)}
-                          />
-                        )
-                      }
-                    : branchUrl(e)
-                      ? {
-                          endContent: (
-                            <IconButton
-                              size="sm"
-                              variant="ghost"
-                              label="Abrir a branch no GitHub"
-                              icon={<Icon icon={ExternalLinkIcon} />}
-                              onClick={() => void window.orkio.openExternal(branchUrl(e)!)}
-                            />
-                          )
-                        }
-                      : {})}
-                />
-              ))}
-            </List>
-          )}
+  if (variant === 'page') {
+    return (
+      <HStack gap={6} vAlign="start" role="region" aria-label={`Tarefa ${label}`}>
+        <StackItem size="fill">
+          <VStack gap={5}>
+            {waitingBanner}
+            {work}
+          </VStack>
+        </StackItem>
+        <VStack gap={5} width="calc(var(--spacing-12) * 7)">
+          <VStack gap={3}>{tokens}</VStack>
+          {controls}
+          {historySection}
         </VStack>
-      </VStack>
+      </HStack>
+    )
+  }
+
+  return (
+    <Card role="complementary" aria-label={`Detalhes de ${label}`} padding={0} height="100%">
+      <ScrollableArea label={`Detalhes de ${label} (rolagem)`} height="100%" padding={4}>
+        <VStack gap={4}>
+          <HStack gap={1} vAlign="start">
+            <StackItem size="fill">
+              <VStack gap={1}>
+                <HStack>
+                  <Code>{card.displayId ?? '—'}</Code>
+                </HStack>
+                <Heading level={2}>{card.title}</Heading>
+              </VStack>
+            </StackItem>
+            {onExpand && (
+              <IconButton
+                size="sm"
+                variant="ghost"
+                label="Abrir tarefa"
+                icon={<Icon icon={ExpandIcon} />}
+                onClick={onExpand}
+              />
+            )}
+            <IconButton
+              size="sm"
+              variant="ghost"
+              label="Fechar"
+              icon={<Icon icon={CloseIcon} />}
+              onClick={onClose}
+            />
+          </HStack>
+          {waitingBanner}
+          {tokens}
+          {controls}
+          {work}
+          {historySection}
+        </VStack>
+      </ScrollableArea>
     </Card>
   )
 }
@@ -314,7 +399,7 @@ function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string
     case 'run_started':
       return 'Claude Code iniciou uma execução'
     case 'run_finished':
-      return `Claude Code terminou (${Number(e.detail?.['files'] ?? 0)} arquivo(s) alterado(s))`
+      return `Claude Code terminou (${files(Number(e.detail?.['files'] ?? 0))})`
     case 'run_cancelled':
       return 'Execução do Claude Code cancelada'
     case 'run_failed':
@@ -380,4 +465,8 @@ function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string
     default:
       return e.kind
   }
+}
+
+function files(n: number): string {
+  return n === 1 ? '1 arquivo alterado' : `${n} arquivos alterados`
 }

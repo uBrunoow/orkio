@@ -9,7 +9,8 @@ import {
   queueFolderPicks,
   queueSavePaths,
   removeDir,
-  type OrkioApp
+  type OrkioApp,
+  navTo
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_FLOW_TOKEN_abcdef123456'
@@ -108,8 +109,8 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
   await page.getByRole('menuitem', { name: 'Mover para Revisando' }).click()
   await expect(boardColumn(page, 'Revisando').getByRole('listitem', { name: ORK2 })).toBeVisible()
 
-  await page.getByRole('button', { name: 'Fluxo do projeto' }).click()
-  await expect(page.getByRole('heading', { name: 'Fluxo do projeto' })).toBeVisible()
+  await navTo(page, 'Etapas e automações')
+  await expect(page.getByRole('heading', { level: 1, name: 'Etapas e automações' })).toBeVisible()
 
   // Nova etapa depois de Revisado.
   await page.getByRole('button', { name: 'Adicionar etapa depois de Revisado' }).click()
@@ -185,7 +186,7 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
 
 test('histórico de alterações e exportar/importar JSON', async () => {
   const { app, page } = orkio!
-  await page.getByRole('button', { name: 'Fluxo do projeto' }).click()
+  await navTo(page, 'Etapas e automações')
   const history = page.getByRole('region', { name: 'Alterações do fluxo' })
   await expect(history).toContainText(
     'Etapa “QA” criada entre Revisado e Finalizada (Notion: Em andamento)'

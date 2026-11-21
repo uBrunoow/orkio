@@ -76,13 +76,7 @@ function emptyStep(flow: Flow, type: StepType): Step {
  * Editor dos fluxos de tarefa (5A): lista de fluxos do projeto; para cada um, passos ordenados
  * com formulário por tipo. Comandos vêm do catálogo da 4B. A validação é a mesma do main.
  */
-export function TaskFlowsPage({
-  projectId,
-  onClose
-}: {
-  projectId: string
-  onClose(): void
-}): React.JSX.Element {
+export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.Element {
   const [project, setProject] = useState<TaskFlowsProject | null>(null)
   const [flows, setFlows] = useState<Flow[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -144,9 +138,11 @@ export function TaskFlowsPage({
   }
 
   return (
-    <VStack gap={5} role="region" aria-label="Fluxos de tarefa">
+    <VStack gap={5} role="region" aria-label="Fluxos do projeto">
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Heading level={2}>Fluxos de tarefa</Heading>
+        <Text color="secondary">
+          Ligue um fluxo a uma coluna em Etapas e automações (“Fluxo desta coluna”).
+        </Text>
         <StackItem size="fill" />
         <Button
           variant="primary"
@@ -156,12 +152,7 @@ export function TaskFlowsPage({
           {...(hasErrors ? { disabledMessage: 'Corrija os erros antes de salvar.' } : {})}
           onClick={() => void save()}
         />
-        <Button variant="ghost" label="Voltar ao Fluxo do projeto" onClick={onClose} />
       </HStack>
-      <Text color="secondary">
-        Sequências de passos que rodam numa tarefa. Ligue um fluxo a uma coluna no Fluxo do projeto
-        (“Fluxo desta coluna”).
-      </Text>
       {message &&
         (message.tone === 'error' ? (
           <Alert tone="danger">{message.text}</Alert>

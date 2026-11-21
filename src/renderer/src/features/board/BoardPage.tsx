@@ -5,98 +5,62 @@ import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { Selector } from '@astryxdesign/core/Selector'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { VStack } from '@astryxdesign/core/VStack'
-import type { AutomationStatus, BoardTaskRef, ProjectView } from '../../../../shared/ipc-contract'
+import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
-import {
-  AutomationIcon,
-  ClaudeLogo,
-  PauseIcon,
-  RefreshIcon,
-  SettingsIcon
-} from '../../components/icons'
-import { ProjectContextPage } from '../claude/ProjectContextPage'
-import { TaskFlowsPage } from '../task-flows/TaskFlowsPage'
-import { AlvaPage } from '../alva/AlvaPage'
+import { PageState } from '../../components/PageState'
+import { AutomationIcon, PauseIcon, RefreshIcon } from '../../components/icons'
 import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardSettings } from './BoardSettings'
-import { FlowPage } from './FlowPage'
 import { TaskPanel } from './TaskPanel'
 import { useBoard, type BoardError } from './useBoard'
 
-/** Tela "Quadro": kanban por projeto vinculado ao Notion. */
+/**
+ * Tela "Quadro" do projeto atual (o projeto vem do menu). Etapas e automações, Fluxos e Contexto
+ * do Claude são rotas próprias (6E); aqui fica só o quadro e, sem quadro ainda, a criação dele.
+ */
 export function BoardPage({
+  project,
+  openTaskId,
   onOpenIntegrations,
   onOpenProjects,
-  openTask
+  onExpandTask
 }: {
+  /** Projeto atual vinculado ao Notion (null = nenhum). */
+  project: ProjectView | null
+  /** Tarefa a abrir (notificação, Visão geral, Command Palette). */
+  openTaskId: string | null
   onOpenIntegrations(): void
   onOpenProjects(): void
-  /** Tarefa a abrir (clique numa notificação de automação). */
-  openTask: BoardTaskRef | null
+  /** Abre a tarefa em tela cheia. */
+  onExpandTask(taskId: string): void
 }): React.JSX.Element {
-  const [projects, setProjects] = useState<ProjectView[] | null>(null)
-  const [chosen, setChosen] = useState<string | null>(null)
-  const projectId = openTask?.projectId ?? chosen ?? projects?.[0]?.id ?? null
-
-  useEffect(() => {
-    let active = true
-    void window.orkio.projects
-      .list()
-      .then((result) => {
-        if (!active) return
-        const linked = result.projects.filter((p) => p.notionProject)
-        setProjects(linked)
-      })
-      .catch(() => {
-        if (active) setProjects([])
-      })
-    return () => {
-      active = false
-    }
-  }, [])
-
   return (
     <VStack gap={5}>
       <PageHeader
         title="Quadro"
+        {...(project ? { context: project.name } : {})}
         subtitle="Suas etapas de trabalho, ligadas ao status das tarefas no Notion."
-        action={
-          projects && projects.length > 1 ? (
-            <Selector
-              label="Projeto"
-              isLabelHidden
-              width={260}
-              options={projects.map((p) => ({ value: p.id, label: p.name }))}
-              {...(projectId ? { value: projectId } : {})}
-              onChange={(value: string) => setChosen(value)}
-            />
-          ) : undefined
-        }
       />
-      {projects === null ? (
-        <Skeleton height={120} aria-label="Carregando projetos" />
-      ) : projects.length === 0 || !projectId ? (
-        <EmptyState
+      {!project ? (
+        <PageState
+          kind="empty"
           title="Nenhum projeto vinculado ao Notion"
           description="Vincule um projeto a um projeto do Notion em Projetos para abrir o quadro."
-          headingLevel={2}
-          actions={<Button label="Ir para Projetos" onClick={onOpenProjects} />}
+          action={{ label: 'Ir para Projetos', onClick: onOpenProjects }}
         />
       ) : (
         <Board
-          // Nova tarefa vinda de notificação: remonta com ela selecionada (fechar continua funcionando).
-          key={`${projectId}:${openTask?.taskId ?? ''}`}
-          projectId={projectId}
-          openTaskId={openTask?.projectId === projectId ? openTask.taskId : null}
+          projectId={project.id}
+          openTaskId={openTaskId}
           onOpenIntegrations={onOpenIntegrations}
+          onExpandTask={onExpandTask}
         />
       )}
     </VStack>
@@ -106,20 +70,18 @@ export function BoardPage({
 function Board({
   projectId,
   openTaskId,
-  onOpenIntegrations
+  onOpenIntegrations,
+  onExpandTask
 }: {
   projectId: string
   openTaskId: string | null
   onOpenIntegrations(): void
+  onExpandTask(taskId: string): void
 }): React.JSX.Element {
   const board = useBoard(projectId)
   const automation = useAutomationStatus(projectId)
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
-  /** Tela atual: quadro, fluxo (3C) ou ajustes do Notion (Etapa Orkio/Bloqueada). */
-  const [mode, setMode] = useState<
-    'board' | 'flow' | 'settings' | 'context' | 'taskflows' | 'alva'
-  >('board')
   const activeFlows = useActiveFlows(projectId)
   const [selected, setPicked] = useState<string | null>(openTaskId)
   const [query, setQuery] = useState('')
@@ -153,59 +115,12 @@ function Board({
     return board.error ? (
       <BoardErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
     ) : (
-      <VStack gap={3} aria-label="Carregando quadro">
-        <Skeleton height={48} />
-        <Skeleton height={240} index={1} />
-      </VStack>
+      <PageState kind="loading" label="Carregando quadro" />
     )
   }
 
-  if (!view.config || mode === 'settings') {
-    return (
-      <BoardSettings
-        view={view}
-        onSave={async (input) => {
-          const result = await board.save(input)
-          if (result.ok) setMode('board')
-          return result
-        }}
-        onCancel={view.config ? () => setMode('flow') : undefined}
-      />
-    )
-  }
-
-  if (mode === 'flow') {
-    return (
-      <FlowPage
-        view={view}
-        onSaved={(next) => {
-          board.replace(next)
-          setMode('board')
-        }}
-        onClose={() => setMode('board')}
-        onOpenNotionSettings={() => setMode('settings')}
-        onOpenTaskFlows={() => setMode('taskflows')}
-      />
-    )
-  }
-
-  if (mode === 'alva') {
-    return (
-      <AlvaPage
-        projectId={projectId}
-        view={view}
-        onBoardChanged={() => void board.load(true)}
-        onClose={() => setMode('board')}
-      />
-    )
-  }
-
-  if (mode === 'taskflows') {
-    return <TaskFlowsPage projectId={projectId} onClose={() => setMode('flow')} />
-  }
-
-  if (mode === 'context') {
-    return <ProjectContextPage projectId={projectId} onClose={() => setMode('board')} />
+  if (!view.config) {
+    return <BoardSettings view={view} onSave={(input) => board.save(input)} onCancel={undefined} />
   }
 
   const selectedCard = view.cards.find((c) => c.taskId === selected) ?? null
@@ -257,19 +172,6 @@ function Board({
           label={automation.status?.paused ? 'Retomar automações' : 'Pausar todas'}
           icon={<Icon icon={automation.status?.paused ? AutomationIcon : PauseIcon} />}
           onClick={() => void automation.setPaused(!automation.status?.paused)}
-        />
-        <Button variant="ghost" label="alva-flow" onClick={() => setMode('alva')} />
-        <Button
-          variant="ghost"
-          label="Contexto do Claude"
-          icon={<Icon icon={ClaudeLogo} />}
-          onClick={() => setMode('context')}
-        />
-        <Button
-          variant="ghost"
-          label="Fluxo do projeto"
-          icon={<Icon icon={SettingsIcon} />}
-          onClick={() => setMode('flow')}
         />
       </HStack>
 
@@ -347,7 +249,10 @@ function Board({
           )}
         </StackItem>
         {selectedCard && (
-          <VStack width="calc(var(--spacing-12) * 7)">
+          <VStack
+            width="min(calc(var(--spacing-12) * 9), 42%)"
+            height="calc(100dvh - var(--spacing-12) * 5)"
+          >
             <TaskPanel
               projectId={projectId}
               card={selectedCard}
@@ -359,6 +264,7 @@ function Board({
                 actions.onToggleAutomation(selectedCard.taskId, paused)
               }
               onClose={() => setPicked(null)}
+              onExpand={() => onExpandTask(selectedCard.taskId)}
             />
           </VStack>
         )}
