@@ -6,6 +6,7 @@ import {
   type OrkioApi
 } from '../shared/ipc-contract'
 import type { RunEventMessage } from '../shared/agent-run'
+import type { UpdateStatus } from '../shared/updates'
 
 const {
   notion,
@@ -19,7 +20,8 @@ const {
   shell,
   claude,
   taskFlows,
-  alva
+  alva,
+  updates
 } = IPC_CHANNELS
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
@@ -273,6 +275,32 @@ const api: OrkioApi = {
       ipcRenderer.on(projects.branchChanged, handler)
       return () => {
         ipcRenderer.removeListener(projects.branchChanged, handler)
+      }
+    }
+  },
+  updates: {
+    status: () => ipcRenderer.invoke(updates.status),
+    check: () => ipcRenderer.invoke(updates.check),
+    setChannel: (channel) =>
+      ipcRenderer.invoke(updates.setChannel, channel === 'beta' ? 'beta' : 'stable'),
+    install: (mode) => ipcRenderer.invoke(updates.install, String(mode)),
+    openDownload: () => ipcRenderer.invoke(updates.openDownload),
+    whatsNew: () => ipcRenderer.invoke(updates.whatsNew),
+    markWhatsNewSeen: () => ipcRenderer.invoke(updates.markWhatsNewSeen),
+    releaseNotes: () => ipcRenderer.invoke(updates.releaseNotes),
+    about: () => ipcRenderer.invoke(updates.about),
+    onStatus: (listener) => {
+      const handler = (_event: unknown, payload: unknown): void => {
+        if (
+          isRecord(payload) &&
+          typeof payload['mode'] === 'string' &&
+          typeof payload['phase'] === 'string'
+        )
+          listener(payload as unknown as UpdateStatus)
+      }
+      ipcRenderer.on(updates.statusChanged, handler)
+      return () => {
+        ipcRenderer.removeListener(updates.statusChanged, handler)
       }
     }
   },

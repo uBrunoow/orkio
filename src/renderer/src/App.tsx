@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import { AppShell } from '@astryxdesign/core/AppShell'
-import { BoardIcon, IntegrationsIcon, ProjectsIcon, type SvgIcon } from './components/icons'
+import { VStack } from '@astryxdesign/core/VStack'
+import {
+  BoardIcon,
+  IntegrationsIcon,
+  ProjectsIcon,
+  SettingsIcon,
+  type SvgIcon
+} from './components/icons'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import type { BoardTaskRef } from '../../shared/ipc-contract'
 import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
@@ -8,13 +15,16 @@ import { BoardPage } from './features/board/BoardPage'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
+import { SettingsPage } from './features/settings/SettingsPage'
+import { UpdateBanner } from './features/settings/UpdateBanner'
 
-type Page = 'welcome' | 'projects' | 'board' | 'integrations'
+type Page = 'welcome' | 'projects' | 'board' | 'integrations' | 'settings'
 
 const PAGES: { id: Exclude<Page, 'welcome'>; label: string; icon: SvgIcon }[] = [
   { id: 'projects', label: 'Projetos', icon: ProjectsIcon },
   { id: 'board', label: 'Quadro', icon: BoardIcon },
-  { id: 'integrations', label: 'Integrações', icon: IntegrationsIcon }
+  { id: 'integrations', label: 'Integrações', icon: IntegrationsIcon },
+  { id: 'settings', label: 'Configurações', icon: SettingsIcon }
 ]
 
 export function App(): React.JSX.Element {
@@ -69,17 +79,25 @@ export function App(): React.JSX.Element {
         </SideNav>
       }
     >
-      {page === 'projects' ? (
-        <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
-      ) : page === 'board' ? (
-        <BoardPage
-          onOpenIntegrations={() => setPage('integrations')}
-          onOpenProjects={() => setPage('projects')}
-          openTask={openTask}
+      <VStack gap={4}>
+        {/* Atualização pronta (6C) e "O que há de novo": no topo de qualquer página. */}
+        <UpdateBanner
+          {...(page === 'settings' ? {} : { onOpenSettings: () => setPage('settings') })}
         />
-      ) : (
-        <IntegrationsPage />
-      )}
+        {page === 'projects' ? (
+          <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
+        ) : page === 'board' ? (
+          <BoardPage
+            onOpenIntegrations={() => setPage('integrations')}
+            onOpenProjects={() => setPage('projects')}
+            openTask={openTask}
+          />
+        ) : page === 'settings' ? (
+          <SettingsPage />
+        ) : (
+          <IntegrationsPage />
+        )}
+      </VStack>
     </AppShell>
   )
 }

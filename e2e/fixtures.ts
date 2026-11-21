@@ -904,6 +904,64 @@ export async function openedUrls(app: ElectronApplication): Promise<string[]> {
   return app.evaluate(() => (globalThis as unknown as FakeGlobals).__opened)
 }
 
+/**
+ * 6C: atualização SIMULADA. Pega o mesmo `autoUpdater` (singleton do electron-updater, que fica
+ * fora do bundle) e troca a checagem e a instalação por versões falsas; liga `forceDevUpdateConfig`
+ * (flag oficial do electron-updater) porque o app do E2E não é empacotado. A checagem "acha" a
+ * versão e "baixa" na hora; instalar só conta (o app não fecha).
+ */
+export async function simulateUpdate(
+  app: ElectronApplication,
+  update: { version: string } | null
+): Promise<void> {
+  await app.evaluate((_electron, next) => {
+    type FakeUpdater = {
+      forceDevUpdateConfig: boolean
+      autoDownload: boolean
+      checkForUpdates(): Promise<unknown>
+      quitAndInstall(): void
+      emit(event: string, arg?: unknown): boolean
+    }
+    const g = globalThis as unknown as { __updateInstalls?: number }
+    // O módulo já carregado pelo main (cache do require do Node): o mesmo singleton do app.
+    const Module = (process as unknown as { mainModule: { constructor: unknown } }).mainModule
+      .constructor as { _cache: Record<string, { exports: unknown }> }
+    const key = Object.keys(Module._cache).find((k) =>
+      /[\\/]electron-updater[\\/]out[\\/]main\.js$/.test(k)
+    )
+    if (!key) throw new Error('electron-updater não carregado')
+    const u = (Module._cache[key]!.exports as { autoUpdater: FakeUpdater }).autoUpdater
+    g.__updateInstalls ??= 0
+    u.forceDevUpdateConfig = true
+    u.checkForUpdates = async () => {
+      u.emit('checking-for-update')
+      if (!next) {
+        u.emit('update-not-available', { version: '0.0.0' })
+        return null
+      }
+      const info = {
+        version: next.version,
+        files: [{ url: `Orkio-${next.version}-win-x64-setup.exe` }]
+      }
+      u.emit('update-available', info)
+      if (u.autoDownload) {
+        u.emit('download-progress', { percent: 50 })
+        u.emit('update-downloaded', info)
+      }
+      return { updateInfo: info }
+    }
+    u.quitAndInstall = () => {
+      g.__updateInstalls = (g.__updateInstalls ?? 0) + 1
+    }
+  }, update)
+}
+
+export async function updateInstalls(app: ElectronApplication): Promise<number> {
+  return app.evaluate(
+    () => (globalThis as unknown as { __updateInstalls?: number }).__updateInstalls ?? 0
+  )
+}
+
 export async function cspViolations(page: Page): Promise<string[]> {
   return page.evaluate(() => (window as unknown as { __csp: string[] }).__csp)
 }
