@@ -17,6 +17,11 @@ import {
  * Etapa 6C com o autoUpdater SIMULADO (fixture `simulateUpdate`) e o Claude Code simulado:
  * banner, Configurações > Atualizações, "Atualizar quando terminar" e "O que há de novo".
  */
+// A versão muda a cada release (o commit de versão mexe no package.json): nada de número fixo, ou
+// o CI do próprio Release reprova assim que a versão sobe.
+const APP_VERSION = (
+  JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string }
+).version
 const NOTION_TOKEN = 'ntn_E2E_UPDATES_TOKEN_abcdef123456'
 const ORK2 = 'ORK-2 Listar tarefas do Notion'
 
@@ -130,12 +135,12 @@ test('Configurações: versão, canal e "Procurar atualizações"; banner com a 
   // Sem empacotar, as atualizações ficam desligadas (e nenhum banner aparece).
   await goTo(page, 'Configurações')
   const updates = page.getByRole('region', { name: 'Atualizações' })
-  await expect(updates.getByTestId('current-version')).toHaveText('0.1.0')
+  await expect(updates.getByTestId('current-version')).toHaveText(APP_VERSION)
   await expect(updates.getByTestId('update-status')).toContainText('só no app instalado')
   await expect(updates.getByRole('button', { name: 'Procurar atualizações' })).toBeDisabled()
   await expect(banner(page)).toHaveCount(0)
   // Sobre: versão; o build do E2E não tem site https de verdade, mas o intermediário é https.
-  await expect(page.getByRole('region', { name: 'Sobre' })).toContainText('0.1.0')
+  await expect(page.getByRole('region', { name: 'Sobre' })).toContainText(APP_VERSION)
 
   await simulateUpdate(app, { version: '9.9.9' })
   await updates.getByRole('button', { name: 'Procurar atualizações' }).click()
@@ -209,11 +214,11 @@ test('"O que há de novo" aparece uma vez depois de atualizar', async () => {
   writeFileSync(configFile(), JSON.stringify(config))
 
   let { page } = await open()
-  const panel = page.getByRole('region', { name: 'O que há de novo na versão 0.1.0' })
+  const panel = page.getByRole('region', { name: `O que há de novo na versão ${APP_VERSION}` })
   await expect(panel).toBeVisible()
   await panel.getByRole('button', { name: 'Entendi' }).click()
   await expect(panel).toHaveCount(0)
-  expect(JSON.parse(readFileSync(configFile(), 'utf8')).updates.lastSeenVersion).toBe('0.1.0')
+  expect(JSON.parse(readFileSync(configFile(), 'utf8')).updates.lastSeenVersion).toBe(APP_VERSION)
 
   await close()
   ;({ page } = await open())
