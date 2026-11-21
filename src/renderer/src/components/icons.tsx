@@ -32,6 +32,7 @@ import {
   IconBolt,
   IconX,
   IconList,
+  IconUser,
   IconChevronLeft,
   IconChevronRight,
   IconPlugConnected,
@@ -93,6 +94,7 @@ export const ArrowDownIcon = adapt(IconArrowDown)
 export const PlusIcon = adapt(IconPlus)
 export const CloseIcon = adapt(IconX)
 export const ListIcon = adapt(IconList)
+export const UserIcon = adapt(IconUser)
 export const ColumnCollapseIcon = adapt(IconChevronLeft)
 export const ColumnExpandIcon = adapt(IconChevronRight)
 export const PauseIcon = adapt(IconPlayerPause)

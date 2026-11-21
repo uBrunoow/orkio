@@ -13,8 +13,8 @@ plano a substitui onde houver diferença.
 | 1. Base visual            | Densidade pelo tema, `StatusToken` (ponto + texto), `PageHeader` compacto com metadados `·`, prioridade e "Rodando" sem bloco | feita              |
 | 2. Moldura                | Coluna de ícones, barra superior com seletor de projeto, conteúdo em painel                                                   | feita              |
 | 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                     | feita              |
-| 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                   | feita (aguarda ok) |
-| 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | —                  |
+| 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                   | feita              |
+| 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | feita (aguarda ok) |
 | 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | —                  |
 | 7. Integrações e catálogo | Grade de linhas com logo, categoria e ação                                                                                    | —                  |
 
@@ -117,6 +117,38 @@ plano a substitui onde houver diferença.
 - Cor laranja no perfil: continua escolhível (dado existente); o laranja do avatar é a cor que a
   pessoa escolheu, não um estado.
 - Ordenar ou agrupar agentes por uso: sem dado de ordenação no renderer além do que já vem.
+
+## Fase 5
+
+**Tarefa como conversa** (painel e página da tarefa)
+
+- "Histórico" vira "Linha do tempo" em forma de conversa (`board/TaskTimeline.tsx`): do mais antigo
+  ao mais novo, cada evento com quem falou (agente com o avatar dele, Claude Code, Fluxo, Notion,
+  GitHub, Automação ou Você), a frase de sempre (`describeEvent`) e o horário (`Timestamp`, relativo
+  quando recente). Mesmo autor em sequência mostra o nome só uma vez. Sem balões e sem laranja. A
+  lista mantém o nome "Histórico da tarefa".
+- Na página da tarefa a conversa sobe para a coluna principal (trabalho + conversa); dados e
+  controles ficam à direita.
+- "Esperando você" no topo soma os pedidos do Claude Code e as decisões do fluxo (gate, escolha,
+  saída da etapa); "Ver pedido" rola até a decisão certa.
+- Resumo dos passos recolhível (`Collapsible`): "3 passos · 1 ok · 1 aprovado · 1 recusado".
+  Recolhido enquanto o fluxo roda ou espera você (a decisão vem primeiro), aberto no fim ou na
+  pausa; clicar no resumo troca.
+- Rodapé "Trabalhando há…" (`data-testid="task-working"`): ponto laranja (rodando), quem
+  (agente, "Fluxo" ou "Claude Code"), `Timer` desde o início do passo e o passo atual. Fixo abaixo da
+  rolagem do painel.
+- Cartões de decisão (gate, confirmação de ação, escolha, pergunta do Claude) continuam os
+  mesmos; o cartão de confirmação ganhou `key` por confirmação (push → pedir review não herda mais
+  as escolhas da anterior, o que deixava o E2E do alva instável).
+- "Recusado" deixou de aparecer com ponto verde.
+- E2E: `task-flows.spec` confere o rodapé; `automation.spec` compara o histórico evento a evento
+  sem o horário relativo (que muda entre as leituras).
+
+**Recusado / adiado**
+
+- Campo de mensagem livre na conversa: seria funcionalidade nova no `claude -p` (recusado no plano).
+- Juntar o log ao vivo do Claude Code na mesma conversa: o log tem outra fonte (`onRunEvent`) e
+  outro ritmo; fica na seção Claude Code, logo acima.
 
 ## Extra: tela "Vamos começar"
 

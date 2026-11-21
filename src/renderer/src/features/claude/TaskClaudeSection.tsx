@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { TaskActivity } from '../task-flows/TaskFlowSection'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
@@ -49,13 +50,16 @@ export function TaskClaudeSection({
   projectId,
   taskId,
   stageName,
-  onWaitingChange
+  onWaitingChange,
+  onActivityChange
 }: {
   projectId: string
   taskId: string
   stageName: string | null
   /** Quantos pedidos (permissão/pergunta) esperam a pessoa agora: o painel mostra no topo. */
   onWaitingChange?: (count: number) => void
+  /** Execução rodando agora (ou null): o painel mostra "Trabalhando há…". */
+  onActivityChange?: (activity: TaskActivity | null) => void
 }): React.JSX.Element {
   const runs = useTaskRuns(projectId, taskId)
   const [prep, setPrep] = useState<RunPreparation | null>(null)
@@ -87,6 +91,14 @@ export function TaskClaudeSection({
   useEffect(() => {
     onWaitingChange?.(waiting)
   }, [waiting, onWaitingChange])
+  const runningSince = selected?.status === 'running' ? selected.startedAt : null
+  const runningWhat = selected?.command ? `/${selected.command}` : null
+  useEffect(() => {
+    onActivityChange?.(
+      runningSince ? { who: 'Claude Code', what: runningWhat, since: runningSince } : null
+    )
+  }, [runningSince, runningWhat, onActivityChange])
+  useEffect(() => () => onActivityChange?.(null), [onActivityChange])
 
   return (
     <VStack gap={3} role="region" aria-label="Claude Code">

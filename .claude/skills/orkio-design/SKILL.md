@@ -80,6 +80,12 @@ Card de três linhas (ID + agente + estado + menu / título / metadados cinza). 
 com contador. Tarefa abre numa folha sobre as colunas (abaixo do cabeçalho), nunca num modal que
 cubra a janela; "Abrir tarefa" leva à página inteira. Kanban/Lista por `SegmentedControl`.
 
+## Tarefa
+
+Histórico em forma de conversa (`TaskTimeline`: autor, frase, horário; sem balões). Decisão
+pendente sempre no topo ("Esperando você"); passos do fluxo num resumo recolhível; rodapé
+"Trabalhando há…" com `Timer` enquanto algo roda. Sem campo de chat livre.
+
 ## Agentes
 
 Avatar só pelo `AgentAvatar` (forma geométrica do id, cores do tema; nunca iniciais nem foto).
