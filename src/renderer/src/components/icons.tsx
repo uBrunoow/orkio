@@ -35,6 +35,7 @@ import {
   IconCode,
   IconFileDiff,
   IconEraser,
+  IconLayoutDashboard,
   type Icon as TablerIcon,
   type IconProps as TablerIconProps
 } from '@tabler/icons-react'
@@ -80,6 +81,7 @@ export const StopIcon = adapt(IconPlayerStop)
 export const EditorIcon = adapt(IconCode)
 export const DiffIcon = adapt(IconFileDiff)
 export const CleanIcon = adapt(IconEraser)
+export const OverviewIcon = adapt(IconLayoutDashboard)
 
 /** Marca do Claude (estrela de raios), desenhada em currentColor. */
 export const ClaudeLogo: SvgIcon = (props) => (

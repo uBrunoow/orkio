@@ -19,8 +19,11 @@ const {
   shell,
   claude,
   taskFlows,
-  alva
+  alva,
+  overview
 } = IPC_CHANNELS
+
+const TASK_SECTIONS = ['flow', 'claude', 'history'] as const
 
 // API mínima: o renderer nunca recebe ipcRenderer nem credenciais.
 const api: OrkioApi = {
@@ -107,7 +110,12 @@ const api: OrkioApi = {
           typeof payload['projectId'] === 'string' &&
           typeof payload['taskId'] === 'string'
         ) {
-          listener({ projectId: payload['projectId'], taskId: payload['taskId'] })
+          const section = TASK_SECTIONS.find((x) => x === payload['section'])
+          listener({
+            projectId: payload['projectId'],
+            taskId: payload['taskId'],
+            ...(section ? { section } : {})
+          })
         }
       }
       ipcRenderer.on(board.openTask, handler)
@@ -273,6 +281,23 @@ const api: OrkioApi = {
       ipcRenderer.on(projects.branchChanged, handler)
       return () => {
         ipcRenderer.removeListener(projects.branchChanged, handler)
+      }
+    }
+  },
+  overview: {
+    get: () => ipcRenderer.invoke(overview.get),
+    refresh: () => ipcRenderer.invoke(overview.refresh),
+    activity: (query) => ipcRenderer.invoke(overview.activity, query ?? {}),
+    onChanged: (listener) => {
+      const handler = (_event: unknown, payload: unknown): void => {
+        const waiting = isRecord(payload) ? payload['waiting'] : undefined
+        if (typeof waiting === 'number' && Number.isSafeInteger(waiting) && waiting >= 0) {
+          listener({ waiting })
+        }
+      }
+      ipcRenderer.on(overview.changed, handler)
+      return () => {
+        ipcRenderer.removeListener(overview.changed, handler)
       }
     }
   },

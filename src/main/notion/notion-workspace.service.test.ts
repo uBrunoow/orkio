@@ -413,6 +413,19 @@ describe('NotionWorkspaceService', () => {
       expect(api.queryDataSource).toHaveBeenCalledTimes(2)
     })
 
+    it('Visão geral: tarefas em memória mesmo vencidas, sem rede; nada antes da 1ª leitura', async () => {
+      const service = await configured()
+      await service.link('local-1', 'page-orkio')
+      expect(service.cachedTasks('local-1')).toBeNull()
+      tasksByProject.set('page-orkio', [taskPage(1, 'page-orkio')])
+      await service.listTasks('local-1')
+      api.queryDataSource.mockClear()
+      clock += 10 * 60_000
+      expect(service.cachedTasks('local-1')).toHaveLength(1)
+      expect(api.queryDataSource).not.toHaveBeenCalled()
+      expect(service.cachedHealth()).not.toBeNull()
+    })
+
     it('pagina e trunca em 500 tarefas', async () => {
       const service = await configured()
       await service.link('local-1', 'page-orkio')

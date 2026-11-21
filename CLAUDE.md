@@ -27,6 +27,9 @@ Claude Code. Hoje existem:
   extratores e templates "Fluxo Alva" sobre os fluxos da 5A.
 - **Entrega (5C):** push da branch da tarefa pelo Orkio (com gate), "modo entrega" por passo para
   `/alva-flow:pr` (gh/push só da branch da tarefa), pedir review pelo conector, CI no painel.
+- **Visão geral (6D):** primeira tela de quem já tem projeto: o que espera você (gates, perguntas,
+  permissões, pushes, escritas no Notion com erro), execuções, PRs com atenção, projetos, semana e
+  atividade, de todos os projetos; contador no menu e no ícone do app. Só dados locais e caches.
 - **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
   do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
   real ser confirmado).
@@ -74,6 +77,8 @@ src/
   shared/alva.ts           # 5B: tipos da pré-checagem, parse da task do Backlog.md (puro)
   shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
   shared/delivery.ts       # 5C: branches protegidas, checkPushBranch, DeliveryTarget/Settings (puro)
+  shared/overview.ts       # 6D: tipos e agregações puras da Visão geral (esperando, PRs, semana...)
+  shared/task-history.ts   # texto/links de um evento do histórico (painel da tarefa e atividade)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -94,6 +99,7 @@ src/
     board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
     alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts
+    overview/              # 6D: overview.service.ts (agrega stores/caches), badge.ts (ícone do app)
     delivery/              # 5C: delivery.service.ts (alvo, prévia, push), delivery-actions.ts (ações)
     flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
@@ -579,6 +585,37 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - **Segurança:** nenhum token do Orkio no ambiente do Claude (o `gh` usa o `gh auth` do usuário);
   o único POST do conector do GitHub é `requested_reviewers` (caminho validado).
 
+## Visão geral (Etapa 6D)
+
+- **Abertura:** com ao menos um projeto, o app abre na Visão geral; sem projeto, "Vamos começar".
+  Menu: Visão geral · Quadro · Projetos · Integrações. Atalhos Ctrl/Cmd+1…N na ordem do menu
+  (`keydown` no renderer, `aria-keyshortcuts` no item).
+- **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs**:
+  `flow_runs` (via `FlowRunner.activeViews`), perguntas/permissões em memória
+  (`RunService.waitingRequests`/`activeRuns`), `pending_writes`, `task_events`, `task_state`,
+  `agent_runs`, o último resultado dos sinais (`TaskSignalsService.cached`/`cachedPulls`) e o cache
+  em memória das tarefas do Notion (`NotionWorkspaceService.cachedTasks`, mesmo vencido;
+  `cachedHealth`). "Atualizar" = `scheduler.runNow` de cada projeto com quadro e vínculo.
+- **Títulos:** cache do Notion → último visto (memória) → ID pela branch do worktree
+  (`<ID>/<slug>`) → "Tarefa do Notion". Nada de título no disco.
+- **Esperando você:** gate (ação com confirmação = "Aprovar: …", ex. push), escolha, saída da etapa,
+  fluxo pausado (menos `waiting_slot`), pergunta e permissão do Claude Code, recusa do Notion
+  (`rolled_back` nas últimas 24 h sem `moved`/`reconciled`/`sync_ok` depois) e escrita pendente com
+  erro a partir da 3ª tentativa. Mais antigo primeiro.
+- **PRs:** abertas ligadas a tarefas com CI vermelho, mudanças pedidas, threads não resolvidas ou
+  sem review há `STALE_REVIEW_DAYS` (3) dias (`createdAt` da REST, novo em `PullRequestSummary`).
+- **Semana (7 dias):** finalizadas = entradas na última etapa (tarefas distintas); PRs abertas/
+  mergeadas do cache do repositório (`—` sem cache); custo = soma de `agent_runs.cost` conhecidos;
+  tempo médio em "Revisado" (etapa com esse nome) por passagem que terminou na semana.
+- **Atividade:** `task_events` dos 7 dias, sem `sync_ok` e sem automação sem efeito; filtro por
+  projeto e grupo (`ACTIVITY_KINDS`), paginação por `beforeId`; texto de `shared/task-history.ts`.
+- **Evento `overview:changed { waiting }`:** o `send` do main chama `overview.touch()` (debounce
+  300 ms) em `taskFlows.changed`, `board.changed`, `board:sync-changed` e `claude:run-event` de
+  status/permissão/pergunta. O mesmo total vai para o ícone: `app.setBadgeCount` (Dock/launcher do
+  Linux) e, no Windows, `setOverlayIcon` com um ponto laranja (`overlayDotBitmap`) e descrição.
+- **Clique:** `BoardTaskRef.section` (`flow`/`claude`/`history`) → `TaskPanel focusSection` rola até
+  a seção (`data-panel-section`). Cartão do projeto abre o quadro dele (`openProjectId`).
+
 ## Site (Etapa 6A)
 
 - `site/`: Next.js App Router + TS strict, **package e lockfile próprios** (sem workspace pnpm: o
@@ -655,6 +692,10 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   simulado tem `FakePull.sha`, autores/revisores, POST `requested_reviewers` (registra em
   `notionState(app).reviewRequests` e muda `updated_at`) e colaboradores. O push vai para um
   `origin.git` local (git real).
+- 6D: `e2e/overview.spec.ts` cria o quadro pela tela, salva um fluxo só com gate e o inicia com
+  `startById` (via `window.orkio` no teste); confere "Esperando você", contador do menu, "Abrir" no
+  painel e o sumiço ao aprovar. Com projeto no `orkio-config.json`, o app abre na Visão geral:
+  `enterApp(page)` (fixtures) clica em "Começar" ou no menu "Projetos".
 - 5A: o simulado tem `demorar-uma-vez` (espera só na primeira vez, marcador em `.orkio/demorou`)
   e `falhar` (sai com erro). `e2e/task-flows.spec.ts` monta o fluxo pela tela e edita o
   `orkio-config.json` entre aberturas para trocar os argumentos do passo.
@@ -722,6 +763,8 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Entrega: push só da branch da tarefa, nunca força; branch padrão sempre bloqueada                           | A automação nunca pode reescrever histórico nem publicar fora da tarefa; "Exigir aprovação" só decide se há gate, não o que é permitido.                                                                                                                    |
 | Modo entrega por passo (não global), aprovação por execução                                                 | O `/pr` precisa de gh e push; liberar só no passo marcado limita o alcance e o log mostra cada comando liberado.                                                                                                                                            |
 | Pedir review pelo conector (não pelo gh do Claude)                                                          | É uma ação do Orkio depois de um gate, com histórico e link; dispara a automação na hora.                                                                                                                                                                   |
+| Visão geral só com dados locais e caches; "Atualizar" roda o ciclo das automações                           | Abrir rápido e sem rede; o agendador da 3B já relê git/GitHub/Notion a cada ~60 s, então os caches estão quentes sem chamadas novas.                                                                                                                        |
+| Contador no Windows como ícone sobreposto                                                                   | A barra de tarefas do Windows não tem contador numérico (`setBadgeCount` só no macOS/Linux); o ponto com descrição acessível sinaliza sem gerar imagens com texto.                                                                                          |
 | Site com package próprio (sem workspace pnpm)                                                               | Isola o Next do install/lockfile/empacotamento do Electron; a Vercel usa `site/` como raiz. O contrato do OAuth é pequeno e testado dos dois lados.                                                                                                         |
 | Intermediário OAuth nas rotas do site (Vercel) em vez do Worker                                             | Um só deploy para site e intermediário; páginas legais no mesmo domínio exigido pelo cadastro público do Notion.                                                                                                                                            |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |

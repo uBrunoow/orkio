@@ -20,7 +20,13 @@ import type {
   BoardStage,
   TaskSignals
 } from '../../../../shared/ipc-contract'
-import { EVENT_LABELS, type EventKind } from '../../../../shared/automation'
+import type { TaskSection } from '../../../../shared/overview'
+import {
+  branchUrl,
+  describeEvent as describe,
+  prNumber,
+  prUrl
+} from '../../../../shared/task-history'
 import { CloseIcon, ExternalLinkIcon } from '../../components/icons'
 import { TaskClaudeSection } from '../claude/TaskClaudeSection'
 import { TaskFlowSection } from '../task-flows/TaskFlowSection'
@@ -36,7 +42,8 @@ export function TaskPanel({
   onMove,
   onToggleBlocked,
   onToggleAutomation,
-  onClose
+  onClose,
+  focusSection
 }: {
   projectId: string
   card: BoardCard
@@ -46,7 +53,19 @@ export function TaskPanel({
   onToggleBlocked(blocked: boolean): void
   onToggleAutomation(paused: boolean): void
   onClose(): void
+  /** Seção a mostrar ao abrir (Visão geral, 6D): Fluxo, Claude Code ou Histórico. */
+  focusSection?: TaskSection | null
 }): React.JSX.Element {
+  // Vindo da Visão geral: rola até a seção certa quando o painel abre.
+  useEffect(() => {
+    if (!focusSection) return
+    const timer = setTimeout(() => {
+      document
+        .querySelector(`[data-panel-section="${focusSection}"]`)
+        ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }, 50)
+    return () => clearTimeout(timer)
+  }, [focusSection, card.taskId])
   const [history, setHistory] = useState<BoardHistoryEntry[] | null>(null)
   // Execuções do Claude Code também escrevem no histórico (início, fim, bloqueios).
   const [runTick, setRunTick] = useState(0)
@@ -171,20 +190,24 @@ export function TaskPanel({
           </HStack>
         )}
 
-        <TaskFlowSection
-          projectId={projectId}
-          taskId={card.taskId}
-          stageId={card.stageId}
-          pr={signals?.pr ?? null}
-        />
+        <VStack data-panel-section="flow">
+          <TaskFlowSection
+            projectId={projectId}
+            taskId={card.taskId}
+            stageId={card.stageId}
+            pr={signals?.pr ?? null}
+          />
+        </VStack>
 
-        <TaskClaudeSection
-          projectId={projectId}
-          taskId={card.taskId}
-          stageName={card.stageId ? stageName(card.stageId) : null}
-        />
+        <VStack data-panel-section="claude">
+          <TaskClaudeSection
+            projectId={projectId}
+            taskId={card.taskId}
+            stageName={card.stageId ? stageName(card.stageId) : null}
+          />
+        </VStack>
 
-        <VStack gap={2}>
+        <VStack gap={2} data-panel-section="history">
           <Heading level={3}>Histórico</Heading>
           {history === null ? (
             <Skeleton height={40} aria-label="Carregando histórico" />
@@ -234,150 +257,4 @@ export function TaskPanel({
       </VStack>
     </Card>
   )
-}
-
-/** Link da branch (entrega sem PR conhecida): github.com/<owner>/<repo>/tree/<branch>. */
-function branchUrl(e: BoardHistoryEntry): string | null {
-  if (e.kind !== 'delivery') return null
-  const { owner, repo, branch } = (e.detail ?? {}) as Record<string, unknown>
-  return typeof owner === 'string' && typeof repo === 'string' && typeof branch === 'string'
-    ? `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tree/${branch
-        .split('/')
-        .map(encodeURIComponent)
-        .join('/')}`
-    : null
-}
-
-function prNumber(e: BoardHistoryEntry): number | null {
-  const pr = e.detail?.['pr'] as { number?: unknown } | undefined
-  return typeof pr?.number === 'number' ? pr.number : null
-}
-
-/** Link da PR montado a partir de owner/repo/número (o banco não guarda URLs nem títulos). */
-function prUrl(e: BoardHistoryEntry): string | null {
-  const pr = e.detail?.['pr'] as { number?: unknown; owner?: unknown; repo?: unknown } | undefined
-  return typeof pr?.number === 'number' &&
-    typeof pr.owner === 'string' &&
-    typeof pr.repo === 'string'
-    ? `https://github.com/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/pull/${pr.number}`
-    : null
-}
-
-/** "PR #45 mergeada" / "Branch criada (ORK-1/x)". */
-function automationEvent(e: BoardHistoryEntry): string {
-  const kind = e.detail?.['event']
-  const label =
-    typeof kind === 'string' && kind in EVENT_LABELS ? EVENT_LABELS[kind as EventKind] : 'Evento'
-  const n = prNumber(e)
-  const branch = e.detail?.['branch'] as { name?: unknown } | undefined
-  return n !== null
-    ? `${label} (PR #${n})`
-    : typeof branch?.name === 'string'
-      ? `${label} (${branch.name})`
-      : label
-}
-
-function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string): string {
-  const rule = typeof e.detail?.['ruleName'] === 'string' ? `“${e.detail['ruleName']}”` : null
-  if (e.kind === 'moved' && e.source === 'automation') {
-    return `${automationEvent(e)} → regra ${rule ?? ''}: ${stageName(e.fromStage)} → ${stageName(e.toStage)}`
-  }
-  if (e.kind === 'automation') {
-    const outcome = e.detail?.['outcome']
-    if (outcome === 'skipped') {
-      return `${automationEvent(e)}: regra ${rule ?? ''} ignorada (${String(e.detail?.['reason'] ?? '')})`
-    }
-    if (outcome === 'noop') return `${automationEvent(e)}: já estava em ${stageName(e.fromStage)}`
-    if (outcome === 'notify') return `${automationEvent(e)}: notificação (regra ${rule ?? ''})`
-    return automationEvent(e)
-  }
-  switch (e.kind) {
-    case 'automation_paused':
-      return 'Automações pausadas nesta tarefa'
-    case 'automation_resumed':
-      return 'Automações retomadas nesta tarefa'
-    case 'added':
-      return `Entrou no quadro em ${stageName(e.toStage)}`
-    case 'moved':
-      return `Movida de ${stageName(e.fromStage)} para ${stageName(e.toStage)}`
-    case 'reconciled': {
-      const status =
-        typeof e.detail?.['status'] === 'string' ? ` (status “${e.detail['status']}”)` : ''
-      return `Reposicionada pelo Notion: ${stageName(e.fromStage)} → ${stageName(e.toStage)}${status}`
-    }
-    case 'blocked':
-      return e.source === 'notion' ? 'Marcada como bloqueada no Notion' : 'Marcada como bloqueada'
-    case 'unblocked':
-      return e.source === 'notion' ? 'Desbloqueada no Notion' : 'Desbloqueada'
-    case 'sync_ok':
-      return 'Sincronizada com o Notion'
-    case 'run_started':
-      return 'Claude Code iniciou uma execução'
-    case 'run_finished':
-      return `Claude Code terminou (${Number(e.detail?.['files'] ?? 0)} arquivo(s) alterado(s))`
-    case 'run_cancelled':
-      return 'Execução do Claude Code cancelada'
-    case 'run_failed':
-      return 'Execução do Claude Code falhou'
-    case 'flow_started':
-      return `Fluxo iniciado: ${String(e.detail?.['flow'] ?? '')}`
-    case 'step_started':
-      return `Passo do fluxo começou (${String(e.detail?.['step'] ?? '')})`
-    case 'step_finished':
-      return `Passo do fluxo concluído (${String(e.detail?.['step'] ?? '')})`
-    case 'step_failed':
-      return `Passo do fluxo falhou (${String(e.detail?.['step'] ?? '')})`
-    case 'step_skipped':
-      return `Passo do fluxo pulado (${String(e.detail?.['step'] ?? '')})`
-    case 'gate_waiting':
-      return `Fluxo esperando aprovação (${String(e.detail?.['step'] ?? '')})`
-    case 'gate_approved':
-      return `Aprovação concedida (${String(e.detail?.['step'] ?? '')})`
-    case 'gate_rejected':
-      return `Aprovação recusada (${String(e.detail?.['step'] ?? '')})`
-    case 'flow_paused':
-      return `Fluxo pausado (${String(e.detail?.['reason'] ?? '')})`
-    case 'flow_finished':
-      return e.detail?.['result'] === 'cancelled'
-        ? 'Fluxo cancelado'
-        : e.detail?.['result'] === 'rejected'
-          ? 'Fluxo encerrado (recusado)'
-          : 'Fluxo concluído'
-    case 'artifact_attached':
-      return `Artefato anexado: ${String(e.detail?.['path'] ?? '')}`
-    case 'artifact_published':
-      return `Artefato publicado no Notion: ${String(e.detail?.['path'] ?? '')}`
-    case 'delivery': {
-      const by = e.detail?.['by'] === 'claude' ? 'Claude Code (modo entrega)' : 'Orkio'
-      const branch = typeof e.detail?.['branch'] === 'string' ? e.detail['branch'] : ''
-      const n = prNumber(e)
-      const pr = n !== null ? ` na PR #${n}` : ''
-      switch (e.detail?.['action']) {
-        case 'push':
-          return `Push de ${branch} pelo ${by}`
-        case 'pr_create':
-          return `PR aberta pelo ${by} (${branch})`
-        case 'pr_edit':
-          return `PR atualizada pelo ${by}${pr}`
-        case 'pr_ready':
-          return `PR marcada como pronta pelo ${by}${pr}`
-        case 'pr_comment':
-          return `Comentário${pr} pelo ${by}`
-        case 'thread_reply':
-          return `Resposta a comentário de review${pr} pelo ${by}`
-        case 'thread_resolve':
-          return `Conversa de review resolvida${pr} pelo ${by}`
-        case 'review_request':
-          return `Review pedido${pr} pelo ${by}`
-        default:
-          return `Entrega pelo ${by}`
-      }
-    }
-    case 'run_blocked':
-      return `Claude Code bloqueado: ${String(e.detail?.['reason'] ?? 'ação não permitida')}`
-    case 'rolled_back':
-      return `O Notion recusou a mudança; voltou para ${stageName(e.toStage)}`
-    default:
-      return e.kind
-  }
 }
