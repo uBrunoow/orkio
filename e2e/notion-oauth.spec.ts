@@ -16,7 +16,7 @@ import {
   alerts
 } from './fixtures'
 
-const REDIRECT_URI = 'http://127.0.0.1:47821/oauth/notion/callback'
+const REDIRECT_URI = 'http://localhost:47821/oauth/notion/callback'
 
 // Compartilham o mesmo userData: rodam em ordem.
 test.describe.configure({ mode: 'serial' })

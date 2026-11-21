@@ -26,7 +26,7 @@ async function handleRequest(
 }
 
 const SECRET = 'secret_CLIENT_SECRET_NEVER_IN_RESPONSES'
-const REDIRECT = 'http://127.0.0.1:47821/oauth/notion/callback'
+const REDIRECT = 'http://localhost:47821/oauth/notion/callback'
 const ENV: Env = {
   NOTION_CLIENT_ID: 'client-123',
   NOTION_CLIENT_SECRET: SECRET,

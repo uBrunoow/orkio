@@ -3,11 +3,11 @@ import type { MacConfiguration, NsisOptions, WindowsConfiguration } from 'electr
 import { builderConfig, isMacSigned } from '../electron-builder'
 
 describe('electron-builder.ts', () => {
-  it('publica no repositório público de releases, como rascunho', () => {
+  it('publica nos releases do próprio repositório (público), como rascunho', () => {
     expect(builderConfig({}).publish).toEqual({
       provider: 'github',
       owner: 'uBrunoow',
-      repo: 'orkio-releases',
+      repo: 'orkio',
       releaseType: 'draft'
     })
   })

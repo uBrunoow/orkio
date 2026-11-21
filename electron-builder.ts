@@ -16,7 +16,7 @@
 import type { Configuration } from 'electron-builder'
 
 export const RELEASES_OWNER = 'uBrunoow'
-export const RELEASES_REPO = 'orkio-releases'
+export const RELEASES_REPO = 'orkio'
 
 type Env = Readonly<Record<string, string | undefined>>
 

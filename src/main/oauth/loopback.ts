@@ -32,7 +32,7 @@ export class LoopbackAuthError extends Error {
 }
 
 export interface LoopbackAuthorizeOptions {
-  /** Ex.: http://127.0.0.1:47821/oauth/notion/callback — precisa estar registrado no provedor. */
+  /** Ex.: http://localhost:47821/oauth/notion/callback — precisa estar registrado no provedor. */
   redirectUri: string
   buildAuthorizeUrl(state: string): string
   openExternal(url: string): Promise<void>

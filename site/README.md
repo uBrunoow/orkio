@@ -37,12 +37,12 @@ PKCE. O app desktop não guarda segredos, então essas duas chamadas passam por 
 
 Variáveis (só no painel da Vercel; nunca em arquivo):
 
-| Variável                | Exemplo                                        | Segredo? |
-| ----------------------- | ---------------------------------------------- | -------- |
-| `NOTION_CLIENT_ID`      | id da conexão OAuth do Notion                  | não      |
-| `NOTION_CLIENT_SECRET`  | secret da conexão OAuth                        | **sim**  |
-| `ALLOWED_REDIRECT_URIS` | `http://127.0.0.1:47821/oauth/notion/callback` | não      |
-| `RELEASES_REPO`         | `uBrunoow/orkio-releases` (repo público da 6B) | não      |
+| Variável                | Exemplo                                         | Segredo? |
+| ----------------------- | ----------------------------------------------- | -------- |
+| `NOTION_CLIENT_ID`      | id da conexão OAuth do Notion                   | não      |
+| `NOTION_CLIENT_SECRET`  | secret da conexão OAuth                         | **sim**  |
+| `ALLOWED_REDIRECT_URIS` | `http://localhost:47821/oauth/notion/callback`  | não      |
+| `RELEASES_REPO`         | `uBrunoow/orkio` (repo público com os releases) | não      |
 
 `NOTION_TOKEN_URL` existe só para o E2E local (`e2e/site-oauth.spec.ts`): é ignorada na Vercel e
 aceita apenas `http://127.0.0.1`.
@@ -57,7 +57,7 @@ Notion simulado em HTTP local e faz o login e a renovação pelo app.
 
 - Conteúdo em `i18n/pt-BR.ts` (o inglês entra depois com o mesmo formato); o que o site pode
   afirmar está em `PRODUCT.md`, e o visual em `DESIGN.md`.
-- **Download:** `RELEASES_REPO` (repositório público de binários da 6B) é lido em
+- **Download:** `RELEASES_REPO` (repositório público com os releases da 6B) é lido em
   `GET /repos/{repo}/releases/latest` no servidor, com revalidação a cada 15 min (ISR). Os arquivos
   são classificados pelo nome (`*-arm64.dmg`, `*-x64.dmg`, `*.exe`/`*.msi`). O navegador sugere o
   arquivo do sistema (Client Hints para a arquitetura; no Safari, Apple Silicon com o Intel ao
@@ -72,13 +72,13 @@ Notion simulado em HTTP local e faz o login e a renovação pelo app.
    - Framework: Next.js (detectado). Install: `pnpm install --frozen-lockfile`. Build: `pnpm build`.
    - Node.js: 22.x (_Settings → Build and Deployment_).
 2. **Deploy só quando `site/**`mudar:** _Settings → Git → Ignored Build Step_ → _Custom_:`git diff --quiet HEAD^ HEAD -- .`(roda dentro de`site/`; sem mudanças → pula o deploy).
-Production Branch: `main`.
+   Production Branch: `main`.
 3. **Variáveis** (_Settings → Environment Variables_, ambiente **Production**; em Preview só se
    for testar o login lá):
    - `NOTION_CLIENT_ID` = OAuth client ID da conexão pública do Notion
    - `NOTION_CLIENT_SECRET` = client secret (marque **Sensitive**)
-   - `ALLOWED_REDIRECT_URIS` = `http://127.0.0.1:47821/oauth/notion/callback`
-   - `RELEASES_REPO` = `<owner>/<repo>` de binários (quando existir, 6B)
+   - `ALLOWED_REDIRECT_URIS` = `http://localhost:47821/oauth/notion/callback`
+   - `RELEASES_REPO` = `uBrunoow/orkio` (repositório público com os releases, 6B)
    - `CONTACT_EMAIL` = e-mail das páginas legais
    - `SITE_URL` = `https://<seu domínio>` (links absolutos do Open Graph)
    - **Nunca** defina `NOTION_TOKEN_URL` na Vercel (é só para o E2E local e é ignorada lá).
@@ -93,5 +93,5 @@ Production Branch: `main`.
    Drains_ com captura de corpo.
 7. **Notion:** na conexão OAuth pública, preencha a URL do site, a política de privacidade
    (`https://<domínio>/privacidade`) e os termos (`https://<domínio>/termos`). O redirect URI
-   continua `http://127.0.0.1:47821/oauth/notion/callback`.
+   continua `http://localhost:47821/oauth/notion/callback`.
 8. **Teste:** `curl https://<domínio>/health` → `{"ok":true}`; depois o login real pelo app.

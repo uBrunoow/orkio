@@ -3,8 +3,8 @@
  * (versões, recorte do CHANGELOG, notas em blocos simples, URL do DMG). Sem Node/DOM.
  */
 
-/** Repositório PÚBLICO só de binários (6B). Precisa bater com o `publish` do electron-builder. */
-export const RELEASES_REPO = { owner: 'uBrunoow', repo: 'orkio-releases' } as const
+/** Repositório público do Orkio, onde ficam os releases (6B). Precisa bater com o `publish` do electron-builder. */
+export const RELEASES_REPO = { owner: 'uBrunoow', repo: 'orkio' } as const
 
 export type UpdateChannel = 'stable' | 'beta'
 

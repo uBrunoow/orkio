@@ -8,7 +8,7 @@ workers_dev = true
 # OAuth client ID da conexão do Notion (não é segredo).
 NOTION_CLIENT_ID = ""
 # Redirect URIs aceitos (separados por vírgula). Iguais aos cadastrados no Notion.
-ALLOWED_REDIRECT_URIS = "http://127.0.0.1:47821/oauth/notion/callback"
+ALLOWED_REDIRECT_URIS = "http://localhost:47821/oauth/notion/callback"
 
 # NOTION_CLIENT_SECRET NUNCA vai aqui. Configure com:
 #   pnpm dlx wrangler secret put NOTION_CLIENT_SECRET

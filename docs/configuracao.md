@@ -13,7 +13,7 @@ pessoa escolhe o workspace e as páginas, clica em **Permitir** e volta para o a
 ```
 Orkio (main) ──abre navegador──▶ api.notion.com/v1/oauth/authorize?…&state=…
      ▲                                        │ usuário autoriza
-     │  http://127.0.0.1:47821/oauth/notion/callback?code=…&state=…
+     │  http://localhost:47821/oauth/notion/callback?code=…&state=…
      │  (servidor local, só durante o login; confere o state)
      ├──POST /notion/token { code } ──▶ intermediário (site/, rotas do site na Vercel)
      │                                        │ + client_secret (só ele conhece)
@@ -34,7 +34,8 @@ criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo int
 1. **Crie a conexão OAuth no Notion** (developers.notion.com → _New connection_):
    - Authentication method: **OAuth**
    - Installable in: **Any workspace** (ou só os workspaces da sua org)
-   - Redirect URI: `http://127.0.0.1:47821/oauth/notion/callback`
+   - Redirect URI: `http://localhost:47821/oauth/notion/callback` (o Notion recusa IP, então é
+     `localhost`; o servidor local do app escuta só em loopback)
    - Guarde o **OAuth client ID** (público) e o **client secret** (segredo — não cole em chat,
      issue ou commit).
 2. **Publique o site** (intermediário incluso) seguindo [`site/README.md`](../site/README.md). O
