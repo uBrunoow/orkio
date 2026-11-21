@@ -15,8 +15,8 @@ plano a substitui onde houver diferença.
 | 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                     | feita              |
 | 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                   | feita              |
 | 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | feita              |
-| 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | feita (aguarda ok) |
-| 7. Integrações e catálogo | Grade de linhas com logo, categoria e ação                                                                                    | —                  |
+| 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | feita              |
+| 7. Integrações e catálogo | Grade de linhas com logo, categoria e ação                                                                                    | feita (aguarda ok) |
 
 ## Fase 1
 
@@ -177,6 +177,30 @@ plano a substitui onde houver diferença.
 - Execuções completas e por id da regra: a atividade guarda o nome, não o id; renomear a regra
   separa o histórico antigo. Um filtro por id exigiria consulta nova no main.
 - Editor de fluxo em grafo: recusado no plano.
+
+## Fase 7
+
+**Integrações como catálogo**
+
+- No topo de Integrações, "Catálogo de integrações": grade de duas colunas (`Grid` com largura
+  mínima; vira uma coluna quando não cabe), uma linha por integração com logo, nome, categoria
+  (Planejamento, Código, Execução), uma frase, o estado (`StatusToken`: "Conectado como …", "Não
+  conectado", "Falta escolher os bancos", "Pronto, 2.1.9"…) e a ação ("Conectar", "Configurar" ou
+  "Gerenciar").
+- A ação rola até o card de configuração da integração, que continua inteiro em "Configuração"
+  (fluxo de conexão, token, desconectar, bancos do Notion), e põe o foco no primeiro controle.
+- O destaque "Conecte suas ferramentas" (sem nada conectado) ficou menor.
+- Estado do Claude Code lido com `claude.status()` (o mesmo do card); bancos do Notion só contam
+  como prontos com o Notion conectado, bancos escolhidos e verificação ok.
+- E2E: `github.spec` confere a linha do GitHub antes (categoria, "Não conectado", "Conectar" leva o
+  foco ao card) e depois da conexão ("Conectado como octocat", "Gerenciar").
+
+**Recusado / adiado**
+
+- Integrações que não existem (Slack, Linear…) como "em breve": seria prometer o que o app não
+  faz.
+- Esconder os cards e abrir só o escolhido: os cards são o fluxo de conexão; todos visíveis
+  continuam mais rápidos de escanear e os testes de conexão não mudam.
 
 ## Extra: tela "Vamos começar"
 
