@@ -5,7 +5,7 @@ description: Linguagem de design do app Orkio (Electron + Astryx, tema Orkio). U
 
 # orkio-design
 
-Rascunho gerado na Fase 1 da 6E (sem a skill hue, que não estava instalada), a partir de
+Gerada na Fase 1 da 6E (aprovada; sem a skill hue, que não estava instalada), a partir de
 `brand/BRAND.md`, `themes/orkio/orkio.settings.json`, do CLAUDE.md e dos prints das telas atuais.
 O CLAUDE.md vence esta skill em qualquer conflito.
 

@@ -1,7 +1,7 @@
 # Orkio — system.md (interface-design)
 
 > Criado na Fase 1 da 6E, à mão (a skill interface-design não estava instalada). Coerente com
-> `docs/ui-reorg/orkio-design.SKILL.draft.md`. Regras do CLAUDE.md vencem.
+> `.claude/skills/orkio-design/SKILL.md`. Regras do CLAUDE.md vencem.
 
 ## Intenção
 

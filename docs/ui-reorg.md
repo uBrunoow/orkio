@@ -1,10 +1,11 @@
 # Etapa 6E — Reorganização das telas (Fase 1: diagnóstico)
 
+> Status: **aprovado em 20/11/2026** (recomendações da seção 7). Fase 2 em andamento.
 > Status: **proposta, aguardando aprovação.** Nenhum código do app foi alterado nesta fase.
 > Prints de antes: `docs/ui-reorg/antes/` (build `--mode e2e`, Notion/GitHub/Claude simulados,
 > janela 1280×800, salvo onde indicado). Rascunhos que acompanham este documento:
-> [`docs/ui-reorg/orkio-design.SKILL.draft.md`](ui-reorg/orkio-design.SKILL.draft.md) (linguagem de
-> design, para virar `.claude/skills/orkio-design` depois do seu OK) e
+> [`.claude/skills/orkio-design/SKILL.md`](../.claude/skills/orkio-design/SKILL.md) (linguagem de
+> design) e
 > [`.interface-design/system.md`](../.interface-design/system.md).
 
 ## 0. Como este diagnóstico foi feito (e o que falta)
@@ -433,3 +434,10 @@ Os E2E existentes usam nomes como "Fluxo do projeto", "Fluxos de tarefa…", "Vo
 3. **Ordem da Fase 2** da seção 5 (recomendo como está: base primeiro, porque corrige o bug G1).
 4. **Skills:** sigo com os critérios à mão ou espero você commitar `.claude/skills/`?
 5. **orkio-design:** aprova o rascunho para eu salvar em `.claude/skills/orkio-design/SKILL.md`?
+
+### Decisões (20/11/2026)
+
+Aprovado com as recomendações: renomear para **Etapas e automações** e **Fluxos** (alva-flow como
+aba "Modelos Alva"); clicar no card abre o **painel**, com "Abrir tarefa" para a tela cheia; ordem
+da seção 5; seguir com os critérios à mão até as skills chegarem a `.claude/skills/`; orkio-design
+salva em `.claude/skills/orkio-design/SKILL.md`.
