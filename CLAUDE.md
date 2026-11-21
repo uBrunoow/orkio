@@ -30,6 +30,9 @@ Claude Code. Hoje existem:
 - **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
   do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
   real ser confirmado).
+- **Interface (6E):** menu do projeto atual (Quadro, Etapas e automações, Fluxos, Contexto do
+  Claude), rotas tipadas, tarefa em painel ou tela cheia, Command Palette (Ctrl/Cmd+K) e atalhos.
+  Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`.
 - Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
@@ -96,13 +99,20 @@ src/
                            # (servidor MCP stdio → out/main/permission-mcp.js)
   preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
+    app/routes.ts          # 6E: rotas tipadas + routerReducer (chave nova a cada navegação)
+    app/shortcuts.ts       # 6E: atalhos globais (puro) e isTextField
+    app/CommandMenu.tsx    # 6E: Command Palette (tarefas, telas, trocar projeto)
+    lib/format.ts          # plural, formatUsd (pt-BR)
     features/<feature>/    # componentes + hooks por funcionalidade
       integrations/connection-ui.tsx  # peças comuns dos cards (conectado, erro, token, desconectar)
       projects/            # tela Projetos (useProjects, AddProjectPanel, ActionLink)
       notion-workspace/    # card "Bancos do Notion" (assistente) e seção Notion de cada projeto
-      board/               # tela Quadro (colunas com arrasto, card, painel, ajuste de etapas)
+      board/               # Quadro, painel/tela cheia da tarefa (TaskPanel/TaskPage), ProjectPages
+                           # (Etapas e automações, Fluxos, Contexto), FlowPage (etapas + automações)
     components/Alert.tsx   # mensagens (Banner da Astryx)
-    components/PageHeader.tsx  # título da página + ação
+    components/PageHeader.tsx  # o único h1 da tela, contexto (projeto) acima e ações à direita
+    components/PageState.tsx   # carregando / vazio (com ação) / erro, iguais em todas as telas
+    components/SaveBar.tsx     # barra de salvar fixa (alterações não salvas, Descartar, Salvar)
     components/OrkioLogo/  # logo (símbolo full/simple + wordmark)
     styles/astryx.css      # reset + CSS pré-compilado da Astryx
     styles/brand.css       # camada orkio-brand: só Jost/mono da marca, com tokens do tema
@@ -374,8 +384,8 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 
 ## Fluxo do projeto (Etapa 3C)
 
-- Tela `FlowPage` (botão "Fluxo do projeto" no quadro): rascunho local; nada vale até "Salvar
-  fluxo". O main valida de novo (`validateFlow`, a mesma função) e grava `boards[id].stages/rules`
+- Tela `FlowPage` (menu "Etapas e automações"; antes "Fluxo do projeto"): lista de etapas + editor
+  da etapa escolhida, `SaveBar` no rodapé; rascunho local; nada vale até "Salvar fluxo". O main valida de novo (`validateFlow`, a mesma função) e grava `boards[id].stages/rules`
   (formato da config inalterado, v4).
 - `validateFlow`: **erros** (bloqueiam) = etapa sem status válido, nome vazio/repetido, regra para
   etapa removida (destino ou origem), notificação sem mensagem, etapa removida com tarefas sem
@@ -450,7 +460,8 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 
 ## Fluxos de tarefa (Etapa 5A)
 
-- **Nome:** "Fluxo do projeto" (3C) = etapas + automações; "Fluxos de tarefa" (5A) = sequências de
+- **Nome:** na UI (6E), "Etapas e automações" (3C) e "Fluxos" (5A, com a aba "Modelos Alva" da 5B).
+  No código continuam `FlowPage`/`flow` (3C) e `TaskFlowsPage`/`taskFlows` (5A): sequências de
   passos que rodam numa tarefa (`shared/task-flow.ts`, tipos `Flow`/`Step`/`StageFlow`).
 - **Config** (`orkio-config` v6): `flows[projectId] = { flows, bindings }`; a ligação etapa → fluxo
   (`{ stageId, flowId, enabled, mode: 'on_enter' | 'manual' }`) é editada no "Fluxo do projeto"
@@ -567,7 +578,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   thread_reply, thread_resolve, review_request; `by`: orkio/claude) com owner/repo/branch e PR;
   link para a PR ou `github.com/<o>/<r>/tree/<branch>` (allowlist).
 - **Ajuste por projeto:** `orkio-config` v8 → `delivery[projectId].requirePushApproval` (padrão
-  sim), na tela "Fluxos de tarefa", com histórico de configuração.
+  sim), na seção "Entrega" de Etapas e automações (`DeliverySection`), com histórico de configuração.
 - **CI:** token do CI da PR no painel (sinais 2D) e "Rodar fluxo CI vermelho" (`startById`) quando
   os checks falham e o template existe.
 - **Segurança:** nenhum token do Orkio no ambiente do Claude (o `gh` usa o `gh auth` do usuário);
@@ -689,6 +700,10 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Site com package próprio (sem workspace pnpm)                                                               | Isola o Next do install/lockfile/empacotamento do Electron; a Vercel usa `site/` como raiz. O contrato do OAuth é pequeno e testado dos dois lados.                                                                                                         |
 | Intermediário OAuth nas rotas do site (Vercel) em vez do Worker                                             | Um só deploy para site e intermediário; páginas legais no mesmo domínio exigido pelo cadastro público do Notion.                                                                                                                                            |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
+| Rotas tipadas no renderer, sem roteador (6E)                                                                | Poucas telas e nenhuma URL externa; o `routerReducer` dá uma chave nova a cada navegação, e clicar no item atual do menu sai de qualquer subtela.                                                                                                           |
+| Tarefa: painel no Quadro + tela cheia (6E)                                                                  | O painel é a prévia sem perder o quadro; a tela cheia dá espaço para log, diff e histórico. O que espera a pessoa sobe para o topo do painel.                                                                                                               |
+| Command Palette da Astryx (6E)                                                                              | Monta um `Dialog`; o E2E confirmou que não viola a CSP. Só navega: nada nela escreve no Notion ou roda agente.                                                                                                                                              |
+| Entrega em Etapas e automações (6E)                                                                         | "Exigir aprovação para push" é regra do projeto, não de um fluxo.                                                                                                                                                                                           |
 
 ## Astryx e CSP (regra inegociável)
 

@@ -440,3 +440,28 @@ Aprovado com as recomendações: renomear para **Etapas e automações** e **Flu
 aba "Modelos Alva"); clicar no card abre o **painel**, com "Abrir tarefa" para a tela cheia; ordem
 da seção 5; seguir com os critérios à mão até as skills chegarem a `.claude/skills/`; orkio-design
 salva em `.claude/skills/orkio-design/SKILL.md`.
+
+## Fase 2 — andamento (21/11/2026)
+
+| Passo | Entrega                                                      | Estado                    |
+| ----- | ------------------------------------------------------------ | ------------------------- |
+| 1–3   | Rotas, menu do projeto, PageState, painel/tela cheia, RunLog | feito                     |
+| 4     | Quadro                                                       | feito                     |
+| 5     | Command Palette e atalhos                                    | feito                     |
+| 6     | Etapas e automações (lista + editor, SaveBar, Entrega)       | feito                     |
+| 7     | Fluxos e Modelos Alva                                        | feito                     |
+| 8     | Projetos, Integrações e Contexto                             | feito                     |
+| 9     | Tela inicial e Visão geral                                   | espera a 6D chegar à main |
+
+Prints do depois em `docs/ui-reorg/depois/` (uma pasta por passo).
+
+Diferenças em relação à proposta:
+
+- Passos 1 a 3 num commit só (mexem nos mesmos arquivos).
+- "Ver tarefas" continua na linha do projeto, além de "Abrir quadro": os testes dos sinais (2D)
+  usam essa lista, e ela serve para projetos sem quadro.
+- Ctrl/Cmd+1…4 levam a Quadro, Etapas e automações, Fluxos e Contexto. Com a Visão geral (6D) a
+  numeração muda para a da tabela 4.4.
+- Duas correções fora da UI, achadas pelos testes: "Atualizar" durante um ciclo de automação
+  devolvia o resultado velho (3B), e os Bancos do Notion diziam "Conecte o Notion" com o Notion já
+  conectado (2C).
