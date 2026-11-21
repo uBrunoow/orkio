@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Icon } from '@astryxdesign/core/Icon'
-import { FolderPlusIcon, FolderSearchIcon, TrashIcon } from '../../components/icons'
+import { BoardIcon, FolderPlusIcon, FolderSearchIcon } from '../../components/icons'
 import { Code } from '@astryxdesign/core/Code'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Item } from '@astryxdesign/core/Item'
 import { List } from '@astryxdesign/core/List'
+import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Text } from '@astryxdesign/core/Text'
 import { Token } from '@astryxdesign/core/Token'
@@ -41,9 +42,12 @@ const HEALTH: Record<ProjectHealthState, { label: string; color: TokenColor }> =
 }
 
 export function ProjectsPage({
-  onOpenIntegrations
+  onOpenIntegrations,
+  onOpenBoard
 }: {
   onOpenIntegrations(): void
+  /** Abre o Quadro do projeto (e o torna o projeto atual). */
+  onOpenBoard(projectId: string): void
 }): React.JSX.Element {
   const projects = useProjects()
   const [picking, setPicking] = useState(false)
@@ -149,6 +153,7 @@ export function ProjectsPage({
               project={project}
               onRelocate={() => projects.relocate(project.id)}
               onRemove={() => projects.remove(project.id)}
+              onOpenBoard={() => onOpenBoard(project.id)}
               notion={
                 notionWorkspace?.config ? (
                   <ProjectNotionSection
@@ -171,11 +176,13 @@ function ProjectRow({
   project,
   onRelocate,
   onRemove,
+  onOpenBoard,
   notion
 }: {
   project: ProjectView
   onRelocate(): Promise<ProjectMutationResult>
   onRemove(): Promise<boolean>
+  onOpenBoard(): void
   /** Vínculo com o Notion e tarefas (quando os bancos estão configurados). */
   notion: React.ReactNode
 }): React.JSX.Element {
@@ -233,8 +240,8 @@ function ProjectRow({
               </>
             )}
           </HStack>
-          <Text type="supporting">
-            <Code color="secondary">{project.localPath}</Code>
+          <Text type="supporting" color="secondary">
+            {project.localPath}
           </Text>
           {project.health.message && project.health.state !== 'ok' && (
             <HStack gap={2} vAlign="center" wrap="wrap">
@@ -284,21 +291,36 @@ function ProjectRow({
             />
           </HStack>
         ) : (
-          <HStack gap={2}>
-            <Button
-              variant={folderProblem ? 'primary' : 'secondary'}
-              label={busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
-              icon={<Icon icon={FolderSearchIcon} />}
-              isLoading={busy === 'relocate'}
-              isDisabled={busy !== null && busy !== 'relocate'}
-              onClick={() => void relocate()}
-            />
-            <Button
-              variant="destructive"
-              label="Remover"
-              icon={<Icon icon={TrashIcon} />}
+          <HStack gap={2} vAlign="center">
+            {folderProblem ? (
+              // A pasta sumiu ou mudou: reapontar é a correção, fica à vista.
+              <Button
+                variant="primary"
+                label={busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
+                icon={<Icon icon={FolderSearchIcon} />}
+                isLoading={busy === 'relocate'}
+                isDisabled={busy !== null && busy !== 'relocate'}
+                onClick={() => void relocate()}
+              />
+            ) : (
+              project.notionProject && (
+                <Button
+                  variant="secondary"
+                  label="Abrir quadro"
+                  icon={<Icon icon={BoardIcon} />}
+                  onClick={onOpenBoard}
+                />
+              )
+            )}
+            <MoreMenu
+              label={`Mais ações de ${project.name}`}
               isDisabled={busy !== null}
-              onClick={() => setConfirmingRemove(true)}
+              items={[
+                ...(folderProblem
+                  ? []
+                  : [{ label: 'Reapontar pasta', onClick: () => void relocate() }]),
+                { label: 'Remover do Orkio', onClick: () => setConfirmingRemove(true) }
+              ]}
             />
           </HStack>
         )

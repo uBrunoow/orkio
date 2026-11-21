@@ -3,8 +3,7 @@ import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
+import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList'
 import { Selector } from '@astryxdesign/core/Selector'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Step, Stepper } from '@astryxdesign/core/Stepper'
@@ -150,21 +149,30 @@ function Summary({
         <Alert tone={tone}>
           <VStack gap={1}>
             {status.messages.map((m) => (
-              <Text key={m}>{m}</Text>
+              // Esta tela já é Integrações: o card do Notion está logo acima.
+              <Text key={m}>{m.replace(' em Integrações', ' acima')}</Text>
             ))}
           </VStack>
         </Alert>
       )}
-      <List hasDividers density="compact" aria-label="Configuração dos bancos do Notion">
-        <Item as="li" label="Projetos" description={config.projectsDataSource.name} />
-        <Item as="li" label="Tarefas" description={config.tasksDataSource.name} />
-        {MAPPING_FIELDS.map((field) => {
-          const ref = config.mapping[field]
-          return ref ? (
-            <Item as="li" key={field} label={fieldLabel(field)} description={ref.name} />
-          ) : null
-        })}
-      </List>
+      <VStack role="group" aria-label="Configuração dos bancos do Notion">
+        <MetadataList columns={2} label={{ position: 'start' }}>
+          <MetadataListItem label="Banco de Projetos">
+            {config.projectsDataSource.name}
+          </MetadataListItem>
+          <MetadataListItem label="Banco de Tarefas">
+            {config.tasksDataSource.name}
+          </MetadataListItem>
+          {MAPPING_FIELDS.map((field) => {
+            const ref = config.mapping[field]
+            return ref ? (
+              <MetadataListItem key={field} label={fieldLabel(field)}>
+                {ref.name}
+              </MetadataListItem>
+            ) : null
+          })}
+        </MetadataList>
+      </VStack>
       <HStack gap={2}>
         <Button
           variant={status.health === 'broken' ? 'primary' : 'secondary'}

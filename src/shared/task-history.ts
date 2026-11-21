@@ -85,7 +85,7 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     case 'run_started':
       return 'Claude Code iniciou uma execução'
     case 'run_finished':
-      return `Claude Code terminou (${Number(e.detail?.['files'] ?? 0)} arquivo(s) alterado(s))`
+      return `Claude Code terminou (${filesChanged(Number(e.detail?.['files'] ?? 0))})`
     case 'run_cancelled':
       return 'Execução do Claude Code cancelada'
     case 'run_failed':
@@ -151,4 +151,8 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     default:
       return e.kind
   }
+}
+
+function filesChanged(n: number): string {
+  return n === 1 ? '1 arquivo alterado' : `${n} arquivos alterados`
 }

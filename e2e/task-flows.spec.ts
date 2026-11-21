@@ -8,7 +8,8 @@ import {
   cspViolations,
   launchOrkio,
   removeDir,
-  type OrkioApp
+  type OrkioApp,
+  navTo
 } from './fixtures'
 
 /**
@@ -147,20 +148,23 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   await expect(card(page)).toBeVisible()
 
   // Editor de fluxos (a partir do Fluxo do projeto).
-  await page.getByRole('button', { name: 'Fluxo do projeto' }).click()
-  await page.getByRole('button', { name: 'Fluxos de tarefa…' }).click()
-  const editor = page.getByRole('region', { name: 'Fluxos de tarefa' })
+  await navTo(page, 'Fluxos')
+  const editor = page.getByRole('region', { name: 'Fluxos do projeto' })
   await editor.getByRole('button', { name: 'Novo fluxo' }).click()
   await editor.getByRole('textbox', { name: 'Nome do fluxo' }).fill('Revisar e entregar')
 
+  // "Adicionar passo" insere depois do passo aberto e abre o novo.
   const add = async (type: string): Promise<void> => {
-    await choose(page, editor, 'Tipo do novo passo', type)
     await editor.getByRole('button', { name: 'Adicionar passo' }).click()
+    await page.getByRole('menuitem', { name: type }).click()
   }
+  const step = (n: number) => editor.getByRole('region', { name: `Editar passo ${n}` })
   // 1. Comando do catálogo (agrupado por origem).
   await add('Comando do Claude Code')
-  await choose(page, editor, 'Comando do passo 1', '/revisar')
-  await editor.getByRole('textbox', { name: /^Argumentos do passo 1/ }).fill('primeiro {{task_id}}')
+  await choose(page, step(1), 'Comando', '/revisar')
+  await step(1)
+    .getByRole('textbox', { name: /^Argumentos/ })
+    .fill('primeiro {{task_id}}')
   // 2. Gate.
   await add('Aprovação (gate)')
   // 3. Salto: o padrão volta para o passo 1 sem limite → erro de validação.
@@ -170,22 +174,30 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   await expect(editor.getByRole('button', { name: 'Salvar fluxos' })).toBeDisabled()
   // 4 e 5. Outro comando e a ação de teste.
   await add('Comando do Claude Code')
-  await choose(page, editor, 'Comando do passo 4', '/revisar')
-  await editor.getByRole('textbox', { name: /^Argumentos do passo 4/ }).fill('segundo')
+  await choose(page, step(4), 'Comando', '/revisar')
+  await step(4)
+    .getByRole('textbox', { name: /^Argumentos/ })
+    .fill('segundo')
   await add('Ação do Orkio')
   // Salto: se o passo 1 falhou → pula para a ação final (para frente: válido).
-  await choose(page, editor, 'Resultado (condição 1, passo 3)', 'falhou')
-  await choose(page, editor, 'Então ir para (passo 3)', 'Ação do Orkio (acao)')
+  await editor
+    .getByRole('list', { name: 'Passos do fluxo' })
+    .getByRole('listitem', { name: /^Passo 3:/ })
+    .click()
+  await choose(page, step(3), 'Resultado (condição 1)', 'falhou')
+  await choose(page, step(3), 'Então ir para', 'Ação do Orkio (acao)')
   await expect(problems).toHaveCount(0)
   await editor.getByRole('button', { name: 'Salvar fluxos' }).click()
   await expect(editor.getByText('Fluxos salvos.')).toBeVisible()
 
   // Liga na coluna Revisando (ao entrar) e salva o Fluxo do projeto.
-  await editor.getByRole('button', { name: 'Voltar ao Fluxo do projeto' }).click()
-  const rev = page
+  await navTo(page, 'Etapas e automações')
+  await page
     .getByRole('list', { name: 'Etapas do fluxo' })
     .getByRole('listitem', { name: 'Etapa Revisando' })
-  await choose(page, rev, 'Fluxo desta coluna (Revisando)', 'Revisar e entregar')
+    .click()
+  const rev = page.getByRole('region', { name: 'Etapa Revisando', exact: true })
+  await choose(page, rev, 'Fluxo desta coluna', 'Revisar e entregar')
   await expect(rev.getByRole('radio', { name: 'Ao entrar' })).toBeChecked()
   await page
     .getByRole('region', { name: 'Validação do fluxo' })

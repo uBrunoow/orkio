@@ -22,8 +22,7 @@ import type {
   EditorId,
   RunLogEvent,
   RunMode,
-  RunPreparation,
-  RunStatus
+  RunPreparation
 } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import {
@@ -35,35 +34,26 @@ import {
   StopIcon,
   TerminalIcon
 } from '../../components/icons'
+import { formatUsd, plural } from '../../lib/format'
 import { QuestionCard } from './QuestionCard'
+import { RunLog, STATUS_COLOR, STATUS_LABEL, toLogLine, type LogLine } from './RunLog'
 import { TaskArtifacts } from './TaskArtifacts'
 import { pendingRequests, useTaskRuns, type PendingPermission } from './useTaskRuns'
 
-const STATUS_LABEL: Record<RunStatus, string> = {
-  queued: 'Na fila',
-  running: 'Rodando',
-  succeeded: 'Concluída',
-  failed: 'Falhou',
-  cancelled: 'Cancelada'
-}
-const STATUS_COLOR: Record<RunStatus, 'yellow' | 'orange' | 'green' | 'red' | 'gray'> = {
-  queued: 'yellow',
-  running: 'orange',
-  succeeded: 'green',
-  failed: 'red',
-  cancelled: 'gray'
-}
 const LOG_TAIL = 60
 
 /** Seção "Claude Code" do painel da tarefa (4A). */
 export function TaskClaudeSection({
   projectId,
   taskId,
-  stageName
+  stageName,
+  onWaitingChange
 }: {
   projectId: string
   taskId: string
   stageName: string | null
+  /** Quantos pedidos (permissão/pergunta) esperam a pessoa agora: o painel mostra no topo. */
+  onWaitingChange?: (count: number) => void
 }): React.JSX.Element {
   const runs = useTaskRuns(projectId, taskId)
   const [prep, setPrep] = useState<RunPreparation | null>(null)
@@ -90,6 +80,11 @@ export function TaskClaudeSection({
   const state = runs.state
   const active = state?.activeRunId ?? null
   const selected = state?.runs.find((r) => r.id === runs.selectedRunId) ?? null
+  const live = selected?.status === 'running' || selected?.status === 'queued'
+  const waiting = selected && live ? pendingRequests(runs.log).length : 0
+  useEffect(() => {
+    onWaitingChange?.(waiting)
+  }, [waiting, onWaitingChange])
 
   return (
     <VStack gap={3} role="region" aria-label="Claude Code">
@@ -324,7 +319,7 @@ function RunView({
   const [showAll, setShowAll] = useState(false)
   const live = run.status === 'running' || run.status === 'queued'
   const pending = live ? pendingRequests(log) : []
-  const lines = log.map(describeEvent).filter((l): l is string => l !== null)
+  const lines = log.map(toLogLine).filter((l): l is LogLine => l !== null)
   const shown = showAll ? lines : lines.slice(-LOG_TAIL)
 
   return (
@@ -336,9 +331,7 @@ function RunView({
           label={STATUS_LABEL[run.status]}
           data-testid="run-status"
         />
-        {run.costUsd !== null && (
-          <Text type="supporting">US$ {run.costUsd.toFixed(2)} (estimado)</Text>
-        )}
+        {run.costUsd !== null && <Text type="supporting">{formatUsd(run.costUsd)} (estimado)</Text>}
         {live && (
           <Button
             size="sm"
@@ -359,18 +352,22 @@ function RunView({
         )}
       </HStack>
 
-      {pending.map((p) =>
-        p.kind === 'permission' ? (
-          <PermissionCard key={p.requestId} runId={run.id} request={p} />
-        ) : (
-          <QuestionCard
-            key={p.requestId}
-            questions={p.questions}
-            onAnswer={(answers) =>
-              void window.orkio.claude.answerQuestion(run.id, p.requestId, answers)
-            }
-          />
-        )
+      {pending.length > 0 && (
+        <VStack gap={3} id={`claude-waiting-${run.taskId}`}>
+          {pending.map((p) =>
+            p.kind === 'permission' ? (
+              <PermissionCard key={p.requestId} runId={run.id} request={p} />
+            ) : (
+              <QuestionCard
+                key={p.requestId}
+                questions={p.questions}
+                onAnswer={(answers) =>
+                  void window.orkio.claude.answerQuestion(run.id, p.requestId, answers)
+                }
+              />
+            )
+          )}
+        </VStack>
       )}
 
       {lines.length > LOG_TAIL && (
@@ -381,21 +378,17 @@ function RunView({
           onClick={() => setShowAll((v) => !v)}
         />
       )}
-      <List density="compact" aria-label="Log da execução" aria-live="polite">
-        {shown.map((line, i) => (
-          <Item as="li" key={i} label={line} />
-        ))}
-      </List>
+      <RunLog lines={shown} />
 
       {run.summary && (
         <VStack gap={2} data-testid="run-summary">
           <Text weight="semibold">Resumo</Text>
           <Text>
-            {run.summary.files.length} arquivo(s) alterado(s), {run.summary.commits.length}{' '}
-            commit(s)
+            {plural(run.summary.files.length, 'arquivo alterado', 'arquivos alterados')} ·{' '}
+            {plural(run.summary.commits.length, 'commit', 'commits')} ·{' '}
             {run.summary.tests.length > 0
-              ? `, testes rodados: ${run.summary.tests.join('; ')}`
-              : ', nenhum teste rodado'}
+              ? `testes rodados: ${run.summary.tests.join('; ')}`
+              : 'nenhum teste rodado'}
           </Text>
           {run.summary.files.length > 0 && (
             <List density="compact" aria-label="Arquivos alterados">
@@ -531,7 +524,7 @@ function Workspace({
           <Token
             size="sm"
             color="yellow"
-            label={`${workspace.changes} mudança(s) não commitada(s)`}
+            label={plural(workspace.changes, 'mudança não commitada', 'mudanças não commitadas')}
           />
         )}
       </HStack>
@@ -609,39 +602,6 @@ function Workspace({
       )}
     </VStack>
   )
-}
-
-function describeEvent(e: RunLogEvent): string | null {
-  switch (e.kind) {
-    case 'status':
-      return `● ${STATUS_LABEL[e.status]}${e.message ? `: ${e.message}` : ''}`
-    case 'init':
-      return `Sessão iniciada${e.model ? ` (${e.model})` : ''}`
-    case 'text':
-      return e.text.length > 600 ? `${e.text.slice(0, 600)}…` : e.text
-    case 'tool':
-      return `${e.tool}: ${e.summary}`
-    case 'tool_result':
-      return e.error ? '  ↳ falhou' : null
-    case 'permission':
-      return e.state === 'pending'
-        ? `Aguardando aprovação: ${e.summary}`
-        : e.state === 'allowed'
-          ? `Aprovado: ${e.summary}`
-          : e.state === 'blocked'
-            ? `Bloqueado: ${e.summary}${e.reason ? ` (${e.reason})` : ''}`
-            : `Negado: ${e.summary}`
-    case 'question':
-      return e.state === 'pending'
-        ? `Pergunta: ${e.questions.map((q) => q.question).join(' / ')}`
-        : e.state === 'answered'
-          ? 'Pergunta respondida'
-          : 'Pergunta cancelada'
-    case 'result':
-      return `Terminou${e.turns !== null ? ` em ${e.turns} turno(s)` : ''}${e.text ? `: ${e.text.slice(0, 600)}` : ''}`
-    case 'info':
-      return e.text
-  }
 }
 
 function formatDate(iso: string): string {

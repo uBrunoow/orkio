@@ -16,12 +16,13 @@ import { VStack } from '@astryxdesign/core/VStack'
 import type { AlvaCheckItem, AlvaPrecheck } from '../../../../shared/alva'
 import type { AlvaStatusView, BoardView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
-import { RefreshIcon } from '../../components/icons'
+import { CopyIcon, RefreshIcon } from '../../components/icons'
 
 const STATE: Record<AlvaCheckItem['state'], { label: string; color: 'green' | 'red' | 'yellow' }> =
   {
     ok: { label: 'OK', color: 'green' },
-    missing: { label: 'Falta', color: 'red' },
+    // Falta configurar é aviso (o resto do Orkio funciona), não erro.
+    missing: { label: 'Falta', color: 'yellow' },
     warning: { label: 'Atenção', color: 'yellow' }
   }
 
@@ -35,13 +36,11 @@ const byName = (view: BoardView, re: RegExp): string | null =>
 export function AlvaPage({
   projectId,
   view,
-  onBoardChanged,
-  onClose
+  onBoardChanged
 }: {
   projectId: string
   view: BoardView
   onBoardChanged(): void
-  onClose(): void
 }): React.JSX.Element {
   const [precheck, setPrecheck] = useState<AlvaPrecheck | null>(null)
   const [checking, setChecking] = useState(false)
@@ -112,8 +111,6 @@ export function AlvaPage({
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Heading level={2}>alva-flow</Heading>
         {precheck?.pluginVersion && <Code>v{precheck.pluginVersion}</Code>}
-        <StackItem size="fill" />
-        <Button variant="ghost" label="Voltar ao quadro" onClick={onClose} />
       </HStack>
       <Text color="secondary">
         Os fluxos Alva rodam os comandos do plugin alva-flow (/spec, /plan, /implement, /review,
@@ -126,7 +123,7 @@ export function AlvaPage({
           {precheck && (
             <Token
               size="sm"
-              color={precheck.ready ? 'green' : 'red'}
+              color={precheck.ready ? 'green' : 'yellow'}
               label={precheck.ready ? 'Pronto' : 'Falta configurar'}
               data-testid="alva-ready"
             />
@@ -150,11 +147,22 @@ export function AlvaPage({
                 as="li"
                 key={i.id}
                 label={i.label}
-                description={i.detail}
+                description={
+                  i.fix && i.state !== 'ok' ? (
+                    <VStack gap={1}>
+                      <Text type="supporting">{i.detail}</Text>
+                      <HStack gap={2} vAlign="center" wrap="wrap">
+                        <Code>{i.fix}</Code>
+                        <CopyButton text={i.fix} label={`Copiar comando: ${i.label}`} />
+                      </HStack>
+                    </VStack>
+                  ) : (
+                    i.detail
+                  )
+                }
                 startContent={
                   <Token size="sm" color={STATE[i.state].color} label={STATE[i.state].label} />
                 }
-                {...(i.fix && i.state !== 'ok' ? { endContent: <Code>{i.fix}</Code> } : {})}
               />
             ))}
           </List>
@@ -262,5 +270,28 @@ export function AlvaPage({
           <Text role="status">{message.text}</Text>
         ))}
     </VStack>
+  )
+}
+
+/** Copia o comando de correção para colar no terminal. */
+function CopyButton({ text, label }: { text: string; label: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      label={copied ? 'Copiado' : 'Copiar'}
+      aria-label={label}
+      icon={<Icon icon={CopyIcon} />}
+      onClick={() =>
+        void navigator.clipboard.writeText(text).then(
+          () => {
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 2000)
+          },
+          () => {}
+        )
+      }
+    />
   )
 }

@@ -54,15 +54,15 @@ export function IntegrationsPage(): React.JSX.Element {
 
       <VStack gap={4}>
         <NotionConnectionCard notion={notion} />
+        {/* Bancos do Notion logo depois da conexão: é o passo seguinte do Notion. */}
+        <NotionWorkspaceCard
+          workspace={workspace}
+          notionStatus={notion.status}
+          {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
+        />
         <GitHubConnectionCard github={github} />
         <ClaudeCodeCard />
       </VStack>
-
-      <NotionWorkspaceCard
-        workspace={workspace}
-        notionStatus={notion.status}
-        {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
-      />
     </VStack>
   )
 }

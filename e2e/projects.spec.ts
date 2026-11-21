@@ -269,7 +269,8 @@ test('pasta movida → "Pasta não encontrada" → Reapontar pasta', async () =>
 test('remover só tira do Orkio: a pasta continua no disco', async () => {
   const { page } = orkio!
   const row = projectRow(page, 'velho')
-  await row.getByRole('button', { name: 'Remover' }).click()
+  await row.getByRole('button', { name: /^Mais ações de / }).click()
+  await page.getByRole('menuitem', { name: 'Remover do Orkio' }).click()
   await row.getByRole('group').getByRole('button', { name: 'Remover' }).click()
   await expect(row).toHaveCount(0)
   expect(existsSync(join(work, 'arquivado', 'README.md'))).toBe(true)

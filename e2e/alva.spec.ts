@@ -12,7 +12,8 @@ import {
   removeDir,
   setFakes,
   type FakePull,
-  type OrkioApp
+  type OrkioApp,
+  navTo
 } from './fixtures'
 
 /**
@@ -188,7 +189,8 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
     .click()
   await expect(card(page)).toBeVisible()
 
-  await page.getByRole('button', { name: 'alva-flow', exact: true }).click()
+  await navTo(page, 'Fluxos')
+  await page.getByRole('tab', { name: 'Modelos Alva' }).click()
   const check = page.getByRole('region', { name: 'Pronto para o alva-flow?' })
   await expect(check.getByTestId('alva-ready')).toHaveText('Falta configurar', { timeout: 30_000 })
   const items = check.getByRole('list', { name: 'Itens da pré-checagem' })
@@ -203,7 +205,8 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
   await close()
   const { page: p2 } = await open({ plugin: true, mcpBacklog: true, gh: 'ok' })
   await goToBoard(p2)
-  await p2.getByRole('button', { name: 'alva-flow', exact: true }).click()
+  await navTo(p2, 'Fluxos')
+  await p2.getByRole('tab', { name: 'Modelos Alva' }).click()
   const check2 = p2.getByRole('region', { name: 'Pronto para o alva-flow?' })
   await expect(check2.getByTestId('alva-ready')).toHaveText('Pronto', { timeout: 30_000 })
   await expect(p2.getByRole('region', { name: 'alva-flow', exact: true })).toContainText('v1.0.25')
@@ -220,7 +223,7 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
   await expect(alva.getByRole('list', { name: 'Fluxos Alva criados' })).toContainText(
     'Coluna “Planejando”, ao entrar'
   )
-  await alva.getByRole('button', { name: 'Voltar ao quadro' }).click()
+  await navTo(page, 'Quadro')
 
   await moveTo(page, 'Planejando')
   const panel = await flowPanel(page)
