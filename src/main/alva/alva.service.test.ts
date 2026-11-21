@@ -191,6 +191,59 @@ describe('alva-flow: vínculo e extratores', () => {
     expect(await service.taskDocument('p1', 'notion-1')).toBeNull()
   })
 
+  it('/spec atualiza uma task que já existia no repositório: vincula a ela (não é "sem task")', async () => {
+    // A task-38 já estava no git (de outra rodada ou de outra pessoa); o /spec a reescreve.
+    await write('task-5 - Existente.md', task('TASK-5', 'To Do', { title: 'Existente' }))
+    const r = await runStep('alva-flow:spec', '**Tamanho:** Médio', () =>
+      write(
+        'task-5 - Existente.md',
+        task('TASK-5', 'Requirements Defined', { title: 'Existente', ac: ['- [ ] #1 CA-F01: x'] })
+      )
+    )
+    expect(r.fail).toBeUndefined()
+    expect(r.vars).toMatchObject({
+      'alva.task_id': 'TASK-5',
+      'alva.status': 'Requirements Defined',
+      'alva.linked': 'sim'
+    })
+    expect(service.getLink('notion-1')).toBe('TASK-5')
+  })
+
+  it('/spec cria uma task nova e mexe em outra: a nova é a desta tarefa', async () => {
+    await write('task-5 - Existente.md', task('TASK-5', 'To Do'))
+    const r = await runStep('alva-flow:spec', '', async () => {
+      await write('task-5 - Existente.md', task('TASK-5', 'To Do', { ac: ['- [ ] #1 vizinha'] }))
+      await write('task-6 - Nova.md', task('TASK-6', 'Requirements Defined', { title: 'Nova' }))
+    })
+    expect(r.vars).toMatchObject({ 'alva.task_id': 'TASK-6' })
+    expect(service.getLink('notion-1')).toBe('TASK-6')
+  })
+
+  it('/spec atualiza mais de uma task que já existia: pede a escolha', async () => {
+    await write('task-5 - A.md', task('TASK-5', 'To Do', { title: 'A' }))
+    await write('task-6 - B.md', task('TASK-6', 'To Do', { title: 'B' }))
+    const r = await runStep('alva-flow:spec', '', async () => {
+      await write('task-5 - A.md', task('TASK-5', 'Requirements Defined', { title: 'A' }))
+      await write('task-6 - B.md', task('TASK-6', 'Requirements Defined', { title: 'B' }))
+    })
+    expect(r.choose).toEqual({
+      prompt: ALVA_MESSAGES.chooseChanged,
+      options: [
+        { value: 'TASK-5', label: 'TASK-5 — A' },
+        { value: 'TASK-6', label: 'TASK-6 — B' }
+      ]
+    })
+    expect(service.getLink('notion-1')).toBeNull()
+  })
+
+  it('salvar uma task com o mesmo conteúdo não conta como alteração', async () => {
+    await write('task-5 - Existente.md', task('TASK-5', 'To Do'))
+    const r = await runStep('alva-flow:spec', '', () =>
+      write('task-5 - Existente.md', task('TASK-5', 'To Do'))
+    )
+    expect(r).toEqual({ fail: ALVA_MESSAGES.noTaskCreated })
+  })
+
   it('/spec NÃO cria task: o passo falha com explicação', async () => {
     const r = await runStep('alva-flow:spec', '', async () => undefined)
     expect(r).toEqual({ fail: ALVA_MESSAGES.noTaskCreated })

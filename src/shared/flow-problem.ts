@@ -12,6 +12,7 @@ export type ProblemKind =
   | 'timed_out'
   | 'claude_error'
   | 'no_task'
+  | 'no_link'
   | 'interrupted'
   | 'loop_guard'
   | 'gate_timeout'
@@ -25,7 +26,8 @@ export function classifyMessage(message: string | null): ProblemKind {
   if (/pediu credenciais/i.test(message)) return 'credentials'
   if (/recusou o push/i.test(message)) return 'push_rejected'
   if (/tempo limite esgotado/i.test(message)) return 'timed_out'
-  if (/terminou sem criar task|arquivo da task vinculada/i.test(message)) return 'no_task'
+  if (/usa a task do backlog/i.test(message)) return 'no_link'
+  if (/terminou sem criar|arquivo da task vinculada/i.test(message)) return 'no_task'
   if (/o claude code terminou com erro/i.test(message)) return 'claude_error'
   return 'generic'
 }
@@ -42,7 +44,9 @@ const HINT: Record<ProblemKind, string> = {
   claude_error:
     'O Claude Code encerrou com erro. A sessão do passo mostra o que aconteceu; retome para tentar de novo.',
   no_task:
-    'O /spec terminou sem criar a task em backlog/tasks/ que o Orkio consegue ligar a esta tarefa. Veja a sessão e a pasta backlog/tasks/ do ambiente; retome para rodar de novo.',
+    'O /spec terminou sem criar nem alterar nenhuma task em backlog/tasks/ que o Orkio consiga ligar a esta tarefa. Veja a sessão e a pasta backlog/tasks/ do ambiente; retome para rodar de novo.',
+  no_link:
+    'Este passo usa a task do Backlog, e o fluxo ainda não sabe qual é a desta tarefa (o /spec não foi concluído ou foi pulado). Rode o /spec de novo para criar ou escolher a task e depois retome.',
   interrupted:
     'O Orkio foi fechado enquanto este passo rodava. Retome para rodar de novo; pule só se você sabe que ele já terminou.',
   loop_guard:
@@ -75,12 +79,16 @@ function commandName(step: Step): string | null {
   return step.type === 'claude_command' ? step.command.split(':').pop() || step.command : null
 }
 
-/** O comando do Claude Code mais perto, antes do passo parado. */
-function previousCommand(steps: readonly Step[], currentId: string): Step | null {
+/** O comando do Claude Code mais perto (que passe em `match`), antes do passo parado. */
+function previousCommand(
+  steps: readonly Step[],
+  currentId: string,
+  match: (command: string) => boolean = () => true
+): Step | null {
   const index = steps.findIndex((s) => s.id === currentId)
   for (let i = index - 1; i >= 0; i--) {
     const s = steps[i]
-    if (s?.type === 'claude_command') return s
+    if (s?.type === 'claude_command' && match(s.command)) return s
   }
   return null
 }
@@ -112,7 +120,15 @@ export function describeFlowProblem(run: FlowRunView): FlowProblem | null {
               ? 'daily_limit'
               : 'generic'
 
-  const previous = kind === 'uncommitted' && current ? previousCommand(run.steps, current.id) : null
+  // Rodar de novo o passo que resolve: o /commit antes de um push recusado, o /spec antes de um
+  // passo que não achou a task do Backlog.
+  const previous = !current
+    ? null
+    : kind === 'uncommitted'
+      ? previousCommand(run.steps, current.id)
+      : kind === 'no_link'
+        ? previousCommand(run.steps, current.id, (c) => c.endsWith(':spec'))
+        : null
   const name = previous ? commandName(previous) : null
   return {
     kind,

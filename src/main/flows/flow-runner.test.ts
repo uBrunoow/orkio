@@ -210,6 +210,61 @@ describe('FlowRunner', () => {
     expect(v.history.map((h) => h.status)).toEqual(['failed', 'skipped', 'waiting'])
   })
 
+  it('comando com variável do alva-flow sem valor não roda: pausa explicando, sem gastar uma execução', async () => {
+    config = {
+      flows: [
+        {
+          id: 'f-alva',
+          name: 'Alva',
+          steps: [
+            {
+              id: 'plan',
+              name: 'Planejar',
+              type: 'claude_command',
+              command: 'alva-flow:plan',
+              args: '{{alva.task_id}}',
+              timeoutMin: 5
+            }
+          ]
+        }
+      ],
+      bindings: []
+    }
+    const runner = makeRunner()
+    const { id } = await runner.startById('p1', 't1', 'f-alva')
+    await flush()
+    expect(started).toHaveLength(0) // o Claude Code nem começou
+    const v = runner.view(id)
+    expect(v).toMatchObject({ status: 'paused', pauseReason: 'step_failed', currentStep: 'plan' })
+    expect(v.history[0]).toMatchObject({ status: 'failed', message: FLOW_MESSAGES.noBacklogTask })
+  })
+
+  it('variável do alva-flow com valor roda normalmente', async () => {
+    config = {
+      flows: [
+        {
+          id: 'f-alva',
+          name: 'Alva',
+          steps: [
+            {
+              id: 'plan',
+              name: 'Planejar',
+              type: 'claude_command',
+              command: 'alva-flow:plan',
+              args: '{{alva.task_id}}',
+              timeoutMin: 5
+            }
+          ]
+        }
+      ],
+      bindings: []
+    }
+    const runner = makeRunner({ initialVars: async () => ({ 'alva.task_id': 'TASK-7' }) })
+    await runner.startById('p1', 't1', 'f-alva')
+    await flush()
+    expect(started.map((s) => s.args)).toEqual(['TASK-7'])
+  })
+
   it('rodar de novo um passo anterior: volta ao comando e segue dali (só em falha)', async () => {
     const runner = makeRunner()
     const { id } = await runner.startManual('p1', 't1')

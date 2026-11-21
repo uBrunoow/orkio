@@ -60,7 +60,9 @@ describe('classifyMessage', () => {
     expect(classifyMessage('Tempo limite esgotado: o Orkio cancelou a execução.')).toBe('timed_out')
     expect(classifyMessage('O Claude Code terminou com erro: boom')).toBe('claude_error')
     expect(
-      classifyMessage('O /alva-flow:spec terminou sem criar task em backlog/tasks/. Confira o log')
+      classifyMessage(
+        'O /alva-flow:spec terminou sem criar nem alterar nenhuma task em backlog/tasks/. Confira o log'
+      )
     ).toBe('no_task')
     expect(classifyMessage('Qualquer outra coisa')).toBe('generic')
     expect(classifyMessage(null)).toBe('generic')
@@ -106,6 +108,43 @@ describe('describeFlowProblem', () => {
       })
     )
     expect(p?.kind).toBe('credentials')
+  })
+
+  it('passo que usa a task do Backlog sem vínculo: explica e oferece rodar o /spec de novo', () => {
+    const spec: Step = {
+      id: 'spec',
+      name: 'Especificar (/spec)',
+      type: 'claude_command',
+      command: 'alva-flow:spec',
+      args: '{{alva.spec_arg}}',
+      timeoutMin: 120
+    }
+    const plan: Step = {
+      id: 'plan',
+      name: 'Planejar (/plan)',
+      type: 'claude_command',
+      command: 'alva-flow:plan',
+      args: '{{alva.task_id}}',
+      timeoutMin: 60
+    }
+    const p = describeFlowProblem(
+      run({
+        steps: [spec, plan],
+        currentStep: 'plan',
+        history: [
+          entry({
+            stepId: 'plan',
+            message:
+              'Este passo usa a task do Backlog, mas o fluxo ainda não sabe qual é a desta tarefa.'
+          })
+        ]
+      })
+    )
+    expect(p).toMatchObject({
+      kind: 'no_link',
+      rerun: { stepId: 'spec', label: 'Rodar /spec de novo' }
+    })
+    expect(p?.hint).toContain('/spec')
   })
 
   it('interrupção, limite de passos, prazo do gate e limite do agente', () => {
