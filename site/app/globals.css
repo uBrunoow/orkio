@@ -1,0 +1,138 @@
+/* Tokens da marca (brand/tokens.css) — única fonte de cores e medidas do site. */
+:root {
+  --bg: #0a0a0b;
+  --surface: #141416;
+  --raised: #1e1e21;
+  --border: #2c2c30;
+  --text: #f2f2f0;
+  --muted: #8f8f94;
+  --accent: #ff5b1f;
+  --accent-hover: #ff7440;
+  --accent-tint: #3a1a0e;
+  --accent-tint-text: #ffb08f;
+  --on-accent: #0a0a0b;
+  --success: #3dd68c;
+  --warning: #f5c518;
+  --danger: #f0445c;
+  --radius: 8px;
+  --radius-card: 12px;
+  --max: 1120px;
+  --gutter: clamp(1.25rem, 4vw, 2.5rem);
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    var(--font-ui),
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+dl,
+dd,
+figure {
+  margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: inherit;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+code,
+kbd {
+  font-family: var(--font-mono), ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.9em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.skip {
+  position: absolute;
+  left: 1rem;
+  top: -100px;
+  z-index: 100;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip:focus {
+  top: 1rem;
+}
+
+.container {
+  width: 100%;
+  max-width: var(--max);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

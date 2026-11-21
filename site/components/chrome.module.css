@@ -1,0 +1,140 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: saturate(140%) blur(10px);
+}
+
+.headerInner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 64px;
+}
+
+.brandLink {
+  text-decoration: none;
+  border-radius: var(--radius);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.logoSymbol {
+  color: var(--accent);
+}
+
+.wordmarkSmall,
+.wordmark {
+  font-family: var(--font-brand), system-ui, sans-serif;
+  letter-spacing: 0.25em;
+  color: var(--text);
+}
+
+.wordmarkSmall {
+  font-weight: 400;
+  font-size: 1.05rem;
+}
+
+.wordmark {
+  font-weight: 300;
+  font-size: clamp(2.4rem, 6vw, 3.6rem);
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.nav a {
+  display: inline-block;
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 0.95rem;
+  text-decoration: none;
+}
+
+.nav a:hover {
+  color: var(--text);
+}
+
+.nav .navCta {
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.nav .navCta:hover {
+  border-color: var(--accent);
+}
+
+@media (max-width: 760px) {
+  .nav li:not(:last-child) {
+    display: none;
+  }
+}
+
+.hub {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hub 2.8s ease-in-out infinite;
+}
+
+@keyframes hub {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(1.35);
+  }
+}
+
+.footer {
+  border-top: 1px solid var(--border);
+  padding-block: 2.5rem;
+  margin-top: 4rem;
+}
+
+.footerInner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.footerBrand {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.footerTag,
+.copy {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.footerLinks {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.footerLinks a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.footerLinks a:hover {
+  color: var(--text);
+}

@@ -52,3 +52,46 @@ aceita apenas `http://127.0.0.1`.
 Com o site rodando local, o app em dev usa `MAIN_VITE_NOTION_OAUTH_BROKER_URL=http://127.0.0.1:3000`.
 O E2E `@site` (`pnpm e2e --grep @site`, depois de `pnpm --dir site build`) sobe o `next start`, um
 Notion simulado em HTTP local e faz o login e a renovação pelo app.
+
+## Landing e páginas legais
+
+- Conteúdo em `i18n/pt-BR.ts` (o inglês entra depois com o mesmo formato); o que o site pode
+  afirmar está em `PRODUCT.md`, e o visual em `DESIGN.md`.
+- **Download:** `RELEASES_REPO` (repositório público de binários da 6B) é lido em
+  `GET /repos/{repo}/releases/latest` no servidor, com revalidação a cada 15 min (ISR). Os arquivos
+  são classificados pelo nome (`*-arm64.dmg`, `*-x64.dmg`, `*.exe`/`*.msi`). O navegador sugere o
+  arquivo do sistema (Client Hints para a arquitetura; no Safari, Apple Silicon com o Intel ao
+  lado). Sem release, o botão leva à página de releases; sem `RELEASES_REPO`, mostra "em breve".
+- `/privacidade` e `/termos` usam `CONTACT_EMAIL`; sem ele aparece o marcador `[contato a definir]`.
+- Sem cookies, rastreadores, fontes ou scripts de terceiros. Fontes locais (`app/fonts/`, OFL).
+
+## Configurar na Vercel (passo a passo)
+
+1. **Projeto:** _Add New → Project_ → importe o repositório do GitHub.
+   - **Root Directory:** `site` (deixe _Include files outside the root directory_ desligado).
+   - Framework: Next.js (detectado). Install: `pnpm install --frozen-lockfile`. Build: `pnpm build`.
+   - Node.js: 22.x (_Settings → Build and Deployment_).
+2. **Deploy só quando `site/**`mudar:** _Settings → Git → Ignored Build Step_ → _Custom_:`git diff --quiet HEAD^ HEAD -- .`(roda dentro de`site/`; sem mudanças → pula o deploy).
+Production Branch: `main`.
+3. **Variáveis** (_Settings → Environment Variables_, ambiente **Production**; em Preview só se
+   for testar o login lá):
+   - `NOTION_CLIENT_ID` = OAuth client ID da conexão pública do Notion
+   - `NOTION_CLIENT_SECRET` = client secret (marque **Sensitive**)
+   - `ALLOWED_REDIRECT_URIS` = `http://127.0.0.1:47821/oauth/notion/callback`
+   - `RELEASES_REPO` = `<owner>/<repo>` de binários (quando existir, 6B)
+   - `CONTACT_EMAIL` = e-mail das páginas legais
+   - `SITE_URL` = `https://<seu domínio>` (links absolutos do Open Graph)
+   - **Nunca** defina `NOTION_TOKEN_URL` na Vercel (é só para o E2E local e é ignorada lá).
+4. **Domínio:** _Settings → Domains_ → adicione o domínio e siga os registros DNS indicados. Use o
+   domínio final em `MAIN_VITE_NOTION_OAUTH_BROKER_URL` no build de release do app.
+5. **Firewall** (_Firewall → Configure → New Rule_):
+   - Nome: `Intermediário OAuth`; _If_ **Request Path** _starts with_ `/notion/`;
+   - _Then_ **Rate Limit**: 20 requisições / 60 s por **IP**, ação **Deny (429)**.
+   - Se o seu plano não mostrar _Rate Limit_, o limitador em memória do site continua valendo (é
+     só a defesa mínima). Ligue também o **Attack Challenge Mode** em caso de abuso.
+6. **Logs:** os runtime logs mostram rota, status e IP, nunca corpo/headers. Não adicione _Log
+   Drains_ com captura de corpo.
+7. **Notion:** na conexão OAuth pública, preencha a URL do site, a política de privacidade
+   (`https://<domínio>/privacidade`) e os termos (`https://<domínio>/termos`). O redirect URI
+   continua `http://127.0.0.1:47821/oauth/notion/callback`.
+8. **Teste:** `curl https://<domínio>/health` → `{"ok":true}`; depois o login real pelo app.
