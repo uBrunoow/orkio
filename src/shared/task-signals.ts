@@ -19,6 +19,8 @@ export interface PullRequestSummary {
   /** Commit no topo da branch da PR (REST `head.sha`); para conferir o push (5C). */
   headSha?: string | null
   updatedAt: string
+  /** Quando foi aberta (REST `created_at`); Visão geral (6D): PR sem review há N dias. */
+  createdAt?: string | null
   /** Quando foi fechada/mergeada (REST `closed_at`); `null` se aberta. */
   closedAt?: string | null
 }

@@ -27,11 +27,17 @@ Claude Code. Hoje existem:
   extratores e templates "Fluxo Alva" sobre os fluxos da 5A.
 - **Entrega (5C):** push da branch da tarefa pelo Orkio (com gate), "modo entrega" por passo para
   `/alva-flow:pr` (gh/push só da branch da tarefa), pedir review pelo conector, CI no painel.
+- **Visão geral (6D):** primeira tela de quem já tem projeto: o que espera você (gates, perguntas,
+  permissões, pushes, escritas no Notion com erro), execuções, PRs com atenção, projetos, semana e
+  atividade, de todos os projetos; contador no menu e no ícone do app. Só dados locais e caches.
 - **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
   do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
   real ser confirmado).
 - **Atualizações (6C):** electron-updater lendo o repo público de releases; banner, Configurações
   (Atualizações + Sobre), "O que há de novo"; nunca reinicia por cima de trabalho em andamento.
+- **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
+  Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) no repo público
+  `uBrunoow/orkio-releases`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
 - Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
@@ -45,7 +51,10 @@ pnpm typecheck    # tsc em todos os projetos (node, web, e2e, broker)
 pnpm lint         # ESLint
 pnpm build        # build em out/
 pnpm icons        # regenera ícones a partir de brand/orkio-app-icon-1024.png
-pnpm dist         # empacota (electron-builder.yml)
+pnpm dist         # empacota (electron-builder.ts)
+pnpm dist:dir     # só a pasta do app em dist/ (sem instalador)
+pnpm smoke:packaged  # smoke do app empacotado (dist/): tela inicial + ponte MCP. Linux: xvfb-run -a
+pnpm release <patch|minor|major|beta> [--beta]  # versão + CHANGELOG + commit + tag (sem push)
 pnpm astryx:static-css  # regenera o CSS estático das camadas da Astryx (após upgrade)
 pnpm --dir site install|dev|test|typecheck|lint|build   # site (package próprio, ver site/README.md)
 ```
@@ -71,6 +80,8 @@ src/
   shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
   shared/delivery.ts       # 5C: branches protegidas, checkPushBranch, DeliveryTarget/Settings (puro)
   shared/updates.ts        # 6C: status das atualizações, versões, recorte do CHANGELOG, URL do DMG
+  shared/overview.ts       # 6D: tipos e agregações puras da Visão geral (esperando, PRs, semana...)
+  shared/task-history.ts   # texto/links de um evento do histórico (painel da tarefa e atividade)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -91,6 +102,7 @@ src/
     board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
     alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts
+    overview/              # 6D: overview.service.ts (agrega stores/caches), badge.ts (ícone do app)
     delivery/              # 5C: delivery.service.ts (alvo, prévia, push), delivery-actions.ts (ações)
     updates/               # 6C: update.service.ts (electron-updater injetado), busy.ts, mac-signature.ts
     flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
@@ -578,11 +590,42 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - **Segurança:** nenhum token do Orkio no ambiente do Claude (o `gh` usa o `gh auth` do usuário);
   o único POST do conector do GitHub é `requested_reviewers` (caminho validado).
 
+## Visão geral (Etapa 6D)
+
+- **Abertura:** com ao menos um projeto, o app abre na Visão geral; sem projeto, "Vamos começar".
+  Menu: Visão geral · Quadro · Projetos · Integrações. Atalhos Ctrl/Cmd+1…N na ordem do menu
+  (`keydown` no renderer, `aria-keyshortcuts` no item).
+- **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs**:
+  `flow_runs` (via `FlowRunner.activeViews`), perguntas/permissões em memória
+  (`RunService.waitingRequests`/`activeRuns`), `pending_writes`, `task_events`, `task_state`,
+  `agent_runs`, o último resultado dos sinais (`TaskSignalsService.cached`/`cachedPulls`) e o cache
+  em memória das tarefas do Notion (`NotionWorkspaceService.cachedTasks`, mesmo vencido;
+  `cachedHealth`). "Atualizar" = `scheduler.runNow` de cada projeto com quadro e vínculo.
+- **Títulos:** cache do Notion → último visto (memória) → ID pela branch do worktree
+  (`<ID>/<slug>`) → "Tarefa do Notion". Nada de título no disco.
+- **Esperando você:** gate (ação com confirmação = "Aprovar: …", ex. push), escolha, saída da etapa,
+  fluxo pausado (menos `waiting_slot`), pergunta e permissão do Claude Code, recusa do Notion
+  (`rolled_back` nas últimas 24 h sem `moved`/`reconciled`/`sync_ok` depois) e escrita pendente com
+  erro a partir da 3ª tentativa. Mais antigo primeiro.
+- **PRs:** abertas ligadas a tarefas com CI vermelho, mudanças pedidas, threads não resolvidas ou
+  sem review há `STALE_REVIEW_DAYS` (3) dias (`createdAt` da REST, novo em `PullRequestSummary`).
+- **Semana (7 dias):** finalizadas = entradas na última etapa (tarefas distintas); PRs abertas/
+  mergeadas do cache do repositório (`—` sem cache); custo = soma de `agent_runs.cost` conhecidos;
+  tempo médio em "Revisado" (etapa com esse nome) por passagem que terminou na semana.
+- **Atividade:** `task_events` dos 7 dias, sem `sync_ok` e sem automação sem efeito; filtro por
+  projeto e grupo (`ACTIVITY_KINDS`), paginação por `beforeId`; texto de `shared/task-history.ts`.
+- **Evento `overview:changed { waiting }`:** o `send` do main chama `overview.touch()` (debounce
+  300 ms) em `taskFlows.changed`, `board.changed`, `board:sync-changed` e `claude:run-event` de
+  status/permissão/pergunta. O mesmo total vai para o ícone: `app.setBadgeCount` (Dock/launcher do
+  Linux) e, no Windows, `setOverlayIcon` com um ponto laranja (`overlayDotBitmap`) e descrição.
+- **Clique:** `BoardTaskRef.section` (`flow`/`claude`/`history`) → `TaskPanel focusSection` rola até
+  a seção (`data-panel-section`). Cartão do projeto abre o quadro dele (`openProjectId`).
+
 ## Site (Etapa 6A)
 
 - `site/`: Next.js App Router + TS strict, **package e lockfile próprios** (sem workspace pnpm: o
   install/empacotamento do app não muda). ESLint/tsc/Vitest da raiz ignoram `site/**`; o site tem os
-  dele. CI: `.github/workflows/app.yml` (ignora `site/**`) e `site.yml` (lint, typecheck, test,
+  dele. CI: `.github/workflows/ci.yml` (ignora `site/**`) e `site.yml` (lint, typecheck, test,
   build e o E2E `@site`). Deploy pela Vercel (Root Directory `site`, Ignored Build Step).
 - **Intermediário OAuth** (`site/lib/notion-broker.ts`, rotas em `site/app/notion/*`, runtime Node):
   mesmo contrato do `broker/` (o app só troca `MAIN_VITE_NOTION_OAUTH_BROKER_URL`). Nada de
@@ -631,6 +674,36 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   última verificação, status) e Sobre (links do site a partir de `MAIN_VITE_SITE_URL` ou da origem
   https do intermediário; sem isso, sem links).
 
+## Empacotamento e releases (Etapa 6B)
+
+- **Config:** `electron-builder.ts` (TypeScript, achado pelo nome; `builderConfig(env)` é pura e
+  testada em `test/electron-builder-config.test.ts`). Nomes com a arquitetura
+  (`Orkio-<v>-mac-<arch>.dmg|zip`, `Orkio-<v>-win-<arch>-setup.exe`): o site
+  (`site/lib/releases.ts`) e o auto-update (6C) dependem deles. Linux comentado.
+- **Assinatura pelo ambiente:** mac assinado só com `CSC_LINK`/`CSC_NAME` (hardened runtime,
+  `build/entitlements.mac.plist` só com `allow-jit`, notarização se houver `APPLE_*`); senão ad-hoc
+  (`identity: '-'`) **sem** hardened runtime. Windows só com `WIN_SIGNING=azure` + `AZURE_SIGNING_*`.
+  O workflow passa `MAIN_VITE_MAC_SIGNED=1` no build quando o mac é assinado.
+- **Fuses:** `runAsNode` **ligado** (a ponte MCP roda o executável com `ELECTRON_RUN_AS_NODE=1`; não
+  desligue), `onlyLoadAppFromAsar` e cookies criptografados ligados, `NODE_OPTIONS`/`--inspect`
+  desligados. Integridade do asar ainda desligada (falta testar no mac/Windows).
+- Sem dependências de runtime hoje; `npmRebuild: false`. Não exclua `node_modules` em `files` (o
+  `electron-updater` da 6C é dependência de runtime).
+- **Smoke** (`e2e-packaged/`, config própria): abre o binário de `dist/` com
+  `--remote-debugging-port` e conecta por CDP (o `_electron` do Playwright precisa do `--inspect`,
+  desligado pelo fuse), confere tela inicial/CSP, e roda `app.asar/out/main/permission-mcp.js` com
+  `ELECTRON_RUN_AS_NODE` contra um socket simulado.
+- **Versões:** `version` do `package.json` + tag `vX.Y.Z` (beta: `X.Y.Z-beta.N` → pre-release).
+  `pnpm release` (`scripts/release.mjs`, lógica pura em `release-lib.mjs`) exige `main` limpa e
+  itens em `## [Não lançado]`; move para `## [X.Y.Z] - AAAA-MM-DD` (formato lido pelo release e
+  pela 6C). Não faz push.
+- **Workflows:** `ci.yml` (PR/push na main, sem `site/**`; lint, typecheck, test, e2e Linux,
+  `package-smoke` Linux; E2E no macOS só por dispatch). `package.yml` (dispatch = empacota sem
+  publicar e sobe artefatos; `workflow_call` com `publish`). `release.yml` (tag): `release-check` →
+  `ci.yml` → rascunho em `orkio-releases` (notas do CHANGELOG) → `package.yml` com
+  `--publish always` → confere arquivos e publica. Segredos só no `env` do passo; sem `set -x`.
+- Passo a passo (repo, token, Apple, Microsoft, custos): `docs/releases.md`.
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -658,6 +731,10 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   simulado tem `FakePull.sha`, autores/revisores, POST `requested_reviewers` (registra em
   `notionState(app).reviewRequests` e muda `updated_at`) e colaboradores. O push vai para um
   `origin.git` local (git real).
+- 6D: `e2e/overview.spec.ts` cria o quadro pela tela, salva um fluxo só com gate e o inicia com
+  `startById` (via `window.orkio` no teste); confere "Esperando você", contador do menu, "Abrir" no
+  painel e o sumiço ao aprovar. Com projeto no `orkio-config.json`, o app abre na Visão geral:
+  `enterApp(page)` (fixtures) clica em "Começar" ou no menu "Projetos".
 - 5A: o simulado tem `demorar-uma-vez` (espera só na primeira vez, marcador em `.orkio/demorou`)
   e `falhar` (sai com erro). `e2e/task-flows.spec.ts` monta o fluxo pela tela e edita o
   `orkio-config.json` entre aberturas para trocar os argumentos do passo.
@@ -691,7 +768,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Main e preload saem em **CommonJS** (sem `"type": "module"`)                                                | Preload com `sandbox: true` não pode ser ESM. O preload só pode dar `require('electron')`: tudo o mais é empacotado nele.                                                                                                                                   |
 | `postinstall: install-electron`                                                                             | O Electron 45 não baixa o binário na instalação, e o `electron-vite` precisa dele (`path.txt`). Sem isso `pnpm dev` falha num clone novo.                                                                                                                   |
 | React e `@fontsource/*` em `devDependencies`                                                                | O Vite já os embute no bundle do renderer; assim o pacote do electron-builder não leva `node_modules` desnecessários.                                                                                                                                       |
-| Não definir `productName` no `package.json`                                                                 | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.yml`.                                                                                                   |
+| Não definir `productName` no `package.json`                                                                 | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.ts`.                                                                                                    |
 | Fontes nunca viram `data:` URI                                                                              | A CSP só permite `font-src 'self'` (`assetsInlineLimit` no `electron.vite.config.ts`).                                                                                                                                                                      |
 | Notion via OAuth com intermediário (`broker/`, Cloudflare Worker)                                           | O Notion exige client secret na troca do código/renovação e a API REST não aceita PKCE. O secret fica só no Worker, que é stateless e não loga. O MCP do Notion aceita PKCE, mas trocaria a API REST pelas ferramentas MCP (decisão da Etapa 1.5).          |
 | Redirect em loopback com porta fixa `47821`                                                                 | O Notion exige redirect URI exato e registrado. `127.0.0.1` (não `localhost`) evita ambiguidade IPv4/IPv6 (RFC 8252). Porta ocupada → mensagem clara.                                                                                                       |
@@ -729,9 +806,16 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Entrega: push só da branch da tarefa, nunca força; branch padrão sempre bloqueada                           | A automação nunca pode reescrever histórico nem publicar fora da tarefa; "Exigir aprovação" só decide se há gate, não o que é permitido.                                                                                                                    |
 | Modo entrega por passo (não global), aprovação por execução                                                 | O `/pr` precisa de gh e push; liberar só no passo marcado limita o alcance e o log mostra cada comando liberado.                                                                                                                                            |
 | Pedir review pelo conector (não pelo gh do Claude)                                                          | É uma ação do Orkio depois de um gate, com histórico e link; dispara a automação na hora.                                                                                                                                                                   |
+| Visão geral só com dados locais e caches; "Atualizar" roda o ciclo das automações                           | Abrir rápido e sem rede; o agendador da 3B já relê git/GitHub/Notion a cada ~60 s, então os caches estão quentes sem chamadas novas.                                                                                                                        |
+| Contador no Windows como ícone sobreposto                                                                   | A barra de tarefas do Windows não tem contador numérico (`setBadgeCount` só no macOS/Linux); o ponto com descrição acessível sinaliza sem gerar imagens com texto.                                                                                          |
 | Site com package próprio (sem workspace pnpm)                                                               | Isola o Next do install/lockfile/empacotamento do Electron; a Vercel usa `site/` como raiz. O contrato do OAuth é pequeno e testado dos dois lados.                                                                                                         |
 | Intermediário OAuth nas rotas do site (Vercel) em vez do Worker                                             | Um só deploy para site e intermediário; páginas legais no mesmo domínio exigido pelo cadastro público do Notion.                                                                                                                                            |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
+| Releases num repo público separado (`orkio-releases`), token fine-grained só nele                           | O código é privado; o site e o auto-update leem releases públicos sem token. O token do CI não lê o código.                                                                                                                                                 |
+| Release como rascunho criado antes da matriz, publicado num job final                                       | Os jobs do mac e do Windows sobem para o mesmo release sem duplicar; nada é publicado se um pacote ou smoke falhar.                                                                                                                                         |
+| mac sem Developer ID = ad-hoc sem hardened runtime                                                          | Apple Silicon exige assinatura; hardened runtime com ad-hoc recusa o Electron Framework (validação de bibliotecas).                                                                                                                                         |
+| Fuse `RunAsNode` ligado                                                                                     | A ponte MCP de permissões é um processo que o CLI do Claude abre com o executável do Orkio + `ELECTRON_RUN_AS_NODE`.                                                                                                                                        |
+| CI de PR só no Linux (smoke do pacote incluso)                                                              | Em repo privado, minuto de macOS custa 10x; o mac roda no release, no teste manual e por dispatch.                                                                                                                                                          |
 
 ## Astryx e CSP (regra inegociável)
 

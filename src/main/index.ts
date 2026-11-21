@@ -8,6 +8,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  nativeImage,
   Notification,
   safeStorage,
   session,
@@ -86,6 +87,9 @@ import { busyCount, describeBusy } from './updates/busy'
 import { isMacAppSigned } from './updates/mac-signature'
 import { changelogSection } from '../shared/updates'
 import { autoUpdater } from 'electron-updater'
+import { registerOverviewIpc } from './ipc/overview.ipc'
+import { OverviewService } from './overview/overview.service'
+import { applyWaitingBadge, overlayDotBitmap } from './overview/badge'
 import appIcon from '../../resources/icon.png?asset'
 import changelog from '../../CHANGELOG.md?raw'
 
@@ -233,6 +237,7 @@ function registerIpc(): void {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.board.syncChanged, event)
       }
+      overview?.touch()
     }
     const board = new BoardService({
       config: configStore,
@@ -302,6 +307,7 @@ function registerIpc(): void {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(channel, payload)
       }
+      if (affectsOverview(channel, payload)) overview?.touch()
     }
     const automation = new AutomationService({
       config: configStore,
@@ -398,7 +404,42 @@ function registerIpc(): void {
       ready: projectsReady
     })
 
+    // Visão geral (6D): agrega o que já está no app; nunca chama APIs sozinha.
+    overview = new OverviewService({
+      db: boardStore.db,
+      config: () => configStore.get(),
+      projects: async () => (await projects!.list()).projects,
+      flows: () => flowRunner?.activeViews() ?? [],
+      requests: () => claude.runs.waitingRequests(),
+      runs: () => claude.runs.activeRuns(),
+      cachedTasks: (projectId) => notionWorkspace.cachedTasks(projectId),
+      notionHealth: () => notionWorkspace.cachedHealth(),
+      signals: (projectId) => signals.cached(projectId)?.signals ?? null,
+      pulls: (projectId) => signals.cachedPulls(projectId),
+      refresh: async (projectId) => {
+        await scheduler?.runNow(projectId)
+      },
+      changed: (waiting) => {
+        applyWaitingBadge(
+          {
+            platform: process.platform,
+            setBadgeCount: (count) => app.setBadgeCount(count),
+            windows: () => BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed()),
+            overlayIcon: () =>
+              nativeImage.createFromBitmap(overlayDotBitmap(), { width: 16, height: 16 })
+          },
+          waiting
+        )
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.overview.changed, { waiting })
+        }
+      }
+    })
+    registerOverviewIpc(ipcMain, overview, isTrustedSender, projectsReady)
+
     void projectsReady.then(async () => {
+      // Total inicial de "Esperando você" (badge do ícone e menu lateral).
+      overview?.touch()
       // Retoma o que ficou pendente quando o app fechou.
       writeQueue?.start()
       // Liga os HeadWatchers (eventos locais na hora) e começa os ciclos.
@@ -407,6 +448,7 @@ function registerIpc(): void {
     })
   } else {
     registerBoardIpc(ipcMain, unavailableBoard(), isTrustedSender, projectsReady)
+    registerOverviewIpc(ipcMain, null, isTrustedSender, projectsReady)
   }
   const siteUrl = readSiteUrl()
   registerShellIpc(
@@ -538,6 +580,16 @@ let scheduler: AutomationScheduler | null = null
 let claudeRuns: RunService | null = null
 let flowRunner: FlowRunner | null = null
 let updates: UpdateService | null = null
+let overview: OverviewService | null = null
+
+/** Eventos que mudam "Esperando você"/"Em execução" (texto do log não conta). */
+function affectsOverview(channel: string, payload: unknown): boolean {
+  if (channel === IPC_CHANNELS.claude.runEvent) {
+    const kind = (payload as { event?: { kind?: unknown } } | null)?.event?.kind
+    return kind === 'status' || kind === 'permission' || kind === 'question'
+  }
+  return channel === IPC_CHANNELS.taskFlows.changed || channel === IPC_CHANNELS.board.changed
+}
 
 function createFlowRunner(deps: {
   boardStore: BoardStore
@@ -892,6 +944,7 @@ void app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   updates?.stop()
+  overview?.dispose()
   flowRunner?.dispose()
   claudeRuns?.cancelAll()
   projects?.dispose()

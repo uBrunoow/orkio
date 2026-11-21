@@ -11,6 +11,7 @@ import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationStatus, BoardTaskRef, ProjectView } from '../../../../shared/ipc-contract'
+import type { TaskSection } from '../../../../shared/overview'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
 import {
@@ -35,16 +36,24 @@ import { useBoard, type BoardError } from './useBoard'
 export function BoardPage({
   onOpenIntegrations,
   onOpenProjects,
-  openTask
+  openTask,
+  openProjectId = null
 }: {
   onOpenIntegrations(): void
   onOpenProjects(): void
-  /** Tarefa a abrir (clique numa notificação de automação). */
+  /** Tarefa a abrir (notificação ou Visão geral), com a seção do painel. */
   openTask: BoardTaskRef | null
+  /** Projeto a mostrar (cartão da Visão geral). */
+  openProjectId?: string | null
 }): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[] | null>(null)
   const [chosen, setChosen] = useState<string | null>(null)
-  const projectId = openTask?.projectId ?? chosen ?? projects?.[0]?.id ?? null
+  const projectId =
+    openTask?.projectId ??
+    chosen ??
+    (openProjectId && projects?.some((p) => p.id === openProjectId) ? openProjectId : null) ??
+    projects?.[0]?.id ??
+    null
 
   useEffect(() => {
     let active = true
@@ -96,6 +105,7 @@ export function BoardPage({
           key={`${projectId}:${openTask?.taskId ?? ''}`}
           projectId={projectId}
           openTaskId={openTask?.projectId === projectId ? openTask.taskId : null}
+          focusSection={openTask?.projectId === projectId ? (openTask.section ?? null) : null}
           onOpenIntegrations={onOpenIntegrations}
         />
       )}
@@ -106,10 +116,12 @@ export function BoardPage({
 function Board({
   projectId,
   openTaskId,
+  focusSection,
   onOpenIntegrations
 }: {
   projectId: string
   openTaskId: string | null
+  focusSection: TaskSection | null
   onOpenIntegrations(): void
 }): React.JSX.Element {
   const board = useBoard(projectId)
@@ -359,6 +371,7 @@ function Board({
                 actions.onToggleAutomation(selectedCard.taskId, paused)
               }
               onClose={() => setPicked(null)}
+              focusSection={selectedCard.taskId === openTaskId ? focusSection : null}
             />
           </VStack>
         )}

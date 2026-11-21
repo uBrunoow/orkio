@@ -56,6 +56,8 @@ export class TaskSignalsService {
   private readonly now: () => Date
   private readonly remotes = new Map<string, RemoteState>()
   private readonly minInterval: number
+  /** Último resultado de cada projeto (Visão geral, 6D: lida sem rede). */
+  private readonly lastResults = new Map<string, TaskSignalsResult>()
 
   constructor(private readonly deps: TaskSignalsDeps) {
     this.now = deps.now ?? (() => new Date())
@@ -154,7 +156,22 @@ export class TaskSignalsService {
       fetchedAt: this.now().toISOString()
     }
     if (action) result.action = action
+    this.lastResults.set(projectId, result)
     return { ok: true, value: result }
+  }
+
+  /** Último resultado conhecido do projeto (sem rede); `null` se ainda não houve leitura. */
+  cached(projectId: string): TaskSignalsResult | null {
+    return this.lastResults.get(projectId) ?? null
+  }
+
+  /** PRs do repositório no último resultado do GitHub (abertas e fechadas há até 30 dias). */
+  cachedPulls(projectId: string): PullRequestSummary[] | null {
+    const repo = this.deps.store.get().projects.find((p) => p.id === projectId)?.repo
+    if (!repo) return null
+    return (
+      this.remotes.get(`${projectId}:${repo.owner}/${repo.name}`.toLowerCase())?.last?.pulls ?? null
+    )
   }
 
   /** PR aberta (ou rascunho) mais recente da branch, pelo último resultado conhecido (sem rede). */
