@@ -9,6 +9,7 @@ import type { TaskSignals } from './task-signals'
 import type { Flow, FlowRunView, ProjectFlows } from './task-flow'
 import type { AlvaPrecheck, BacklogTaskInfo } from './alva'
 import type { DeliverySettings } from './delivery'
+import type { ActivityPage, ActivityQuery, OverviewSnapshot, TaskSection } from './overview'
 
 /** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
 export interface TaskFlowsProject extends ProjectFlows {
@@ -169,6 +170,14 @@ export const IPC_CHANNELS = {
   },
   shell: {
     openExternal: 'shell:open-external'
+  },
+  /** Visão geral (6D): agregação de todos os projetos, só dados locais e caches. */
+  overview: {
+    get: 'overview:get',
+    refresh: 'overview:refresh',
+    activity: 'overview:activity',
+    /** Evento main → renderer: algo relevante mudou (com o total de "Esperando você"). */
+    changed: 'overview:changed'
   }
 } as const
 
@@ -485,6 +494,8 @@ export interface AutomationStatus {
 export interface BoardTaskRef {
   projectId: string
   taskId: string
+  /** Seção do painel da tarefa a mostrar (Visão geral, 6D). */
+  section?: TaskSection
 }
 
 // ---------- Projetos ----------
@@ -841,9 +852,21 @@ export interface OrkioApi {
     /** Assina mudanças de branch. Devolve a função para cancelar a inscrição. */
     onBranchChanged(listener: (event: BranchChangedEvent) => void): () => void
   }
+  /** Visão geral (6D): tudo de todos os projetos, sem chamar APIs ao abrir. */
+  overview: {
+    get(): Promise<OverviewResult<OverviewSnapshot>>
+    /** Verifica git/GitHub/Notion agora (ciclo das automações) e devolve a visão nova. */
+    refresh(): Promise<OverviewResult<OverviewSnapshot>>
+    activity(query?: ActivityQuery): Promise<OverviewResult<ActivityPage>>
+    /** Algo mudou (gate, pergunta, execução, automação). Devolve a função para cancelar. */
+    onChanged(listener: (event: { waiting: number }) => void): () => void
+  }
   /** Abre um link no navegador padrão. Só domínios da allowlist do main são aceitos. */
   openExternal(url: string): Promise<boolean>
 }
+
+export type OverviewResult<T> =
+  { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
 
 export const NOTION_TOKEN_DOCS_URL =
   'https://developers.notion.com/guides/get-started/personal-access-tokens'
