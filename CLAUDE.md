@@ -30,6 +30,9 @@ Claude Code. Hoje existem:
 - **Visão geral (6D):** primeira tela de quem já tem projeto: o que espera você (gates, perguntas,
   permissões, pushes, escritas no Notion com erro), execuções, PRs com atenção, projetos, semana e
   atividade, de todos os projetos; contador no menu e no ícone do app. Só dados locais e caches.
+- **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
+  do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
+  real ser confirmado).
 - Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
@@ -45,6 +48,7 @@ pnpm build        # build em out/
 pnpm icons        # regenera ícones a partir de brand/orkio-app-icon-1024.png
 pnpm dist         # empacota (electron-builder.yml)
 pnpm astryx:static-css  # regenera o CSS estático das camadas da Astryx (após upgrade)
+pnpm --dir site install|dev|test|typecheck|lint|build   # site (package próprio, ver site/README.md)
 ```
 
 Antes de dar uma tarefa por concluída: `pnpm typecheck && pnpm lint && pnpm test`.
@@ -606,6 +610,25 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - **Clique:** `BoardTaskRef.section` (`flow`/`claude`/`history`) → `TaskPanel focusSection` rola até
   a seção (`data-panel-section`). Cartão do projeto abre o quadro dele (`openProjectId`).
 
+## Site (Etapa 6A)
+
+- `site/`: Next.js App Router + TS strict, **package e lockfile próprios** (sem workspace pnpm: o
+  install/empacotamento do app não muda). ESLint/tsc/Vitest da raiz ignoram `site/**`; o site tem os
+  dele. CI: `.github/workflows/app.yml` (ignora `site/**`) e `site.yml` (lint, typecheck, test,
+  build e o E2E `@site`). Deploy pela Vercel (Root Directory `site`, Ignored Build Step).
+- **Intermediário OAuth** (`site/lib/notion-broker.ts`, rotas em `site/app/notion/*`, runtime Node):
+  mesmo contrato do `broker/` (o app só troca `MAIN_VITE_NOTION_OAUTH_BROKER_URL`). Nada de
+  `console.*` (ESLint + teste). Limitador em memória por IP (20/min) só como defesa mínima; a regra
+  real é o Rate Limiting do Firewall da Vercel. `NOTION_TOKEN_URL` só vale fora da Vercel e em
+  `http://127.0.0.1` (E2E).
+- **Landing:** textos em `site/i18n/pt-BR.ts` (só o que o app faz hoje; ver `site/PRODUCT.md`),
+  visual em `site/DESIGN.md` (tokens da marca, Jost só em títulos/wordmark, fontes locais, sem
+  terceiros). Download pelo último release de `RELEASES_REPO` (ISR 15 min), sugestão por SO no
+  cliente (`site/lib/releases.ts`).
+- E2E `e2e/site-oauth.spec.ts` (`@site`): `next start` do site + Notion simulado em HTTP local; o
+  fixture (`brokerTarget`) manda as chamadas do app ao intermediário para o site de verdade. Pula
+  com aviso se não houver `site/.next` (rode `pnpm --dir site build`).
+
 ## Testes
 
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
@@ -706,6 +729,8 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Pedir review pelo conector (não pelo gh do Claude)                                                          | É uma ação do Orkio depois de um gate, com histórico e link; dispara a automação na hora.                                                                                                                                                                   |
 | Visão geral só com dados locais e caches; "Atualizar" roda o ciclo das automações                           | Abrir rápido e sem rede; o agendador da 3B já relê git/GitHub/Notion a cada ~60 s, então os caches estão quentes sem chamadas novas.                                                                                                                        |
 | Contador no Windows como ícone sobreposto                                                                   | A barra de tarefas do Windows não tem contador numérico (`setBadgeCount` só no macOS/Linux); o ponto com descrição acessível sinaliza sem gerar imagens com texto.                                                                                          |
+| Site com package próprio (sem workspace pnpm)                                                               | Isola o Next do install/lockfile/empacotamento do Electron; a Vercel usa `site/` como raiz. O contrato do OAuth é pequeno e testado dos dois lados.                                                                                                         |
+| Intermediário OAuth nas rotas do site (Vercel) em vez do Worker                                             | Um só deploy para site e intermediário; páginas legais no mesmo domínio exigido pelo cadastro público do Notion.                                                                                                                                            |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 
 ## Astryx e CSP (regra inegociável)
