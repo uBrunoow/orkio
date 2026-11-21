@@ -3,7 +3,7 @@
 > Status: **aprovado em 20/11/2026** (recomendações da seção 7). Fase 2 em andamento.
 > Status: **proposta, aguardando aprovação.** Nenhum código do app foi alterado nesta fase.
 > Prints de antes: `docs/ui-reorg/antes/` (build `--mode e2e`, Notion/GitHub/Claude simulados,
-> janela 1280×800, salvo onde indicado). Rascunhos que acompanham este documento:
+> janela 1280×800, salvo onde indicado). Acompanham este documento:
 > [`.claude/skills/orkio-design/SKILL.md`](../.claude/skills/orkio-design/SKILL.md) (linguagem de
 > design) e
 > [`.interface-design/system.md`](../.interface-design/system.md).
