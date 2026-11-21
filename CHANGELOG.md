@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.1] - 2026-11-21
+
 ### Corrigido
 
 - O `/spec` que atualiza uma task que já existia em `backlog/tasks/` (em vez de criar uma nova)
