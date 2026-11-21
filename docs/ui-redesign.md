@@ -10,9 +10,9 @@ plano a substitui onde houver diferença.
 
 | Fase                      | Escopo                                                                                                                        | Estado             |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| 1. Base visual            | Densidade pelo tema, `StatusToken` (ponto + texto), `PageHeader` compacto com metadados `·`, prioridade e "Rodando" sem bloco | feita (aguarda ok) |
-| 2. Moldura                | Coluna de ícones, barra superior com seletor de projeto, conteúdo em painel                                                   | —                  |
-| 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                     | —                  |
+| 1. Base visual            | Densidade pelo tema, `StatusToken` (ponto + texto), `PageHeader` compacto com metadados `·`, prioridade e "Rodando" sem bloco | feita              |
+| 2. Moldura                | Coluna de ícones, barra superior com seletor de projeto, conteúdo em painel                                                   | feita              |
+| 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                     | feita (aguarda ok) |
 | 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                   | —                  |
 | 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | —                  |
 | 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | —                  |
@@ -67,6 +67,33 @@ plano a substitui onde houver diferença.
   mostra o projeto atual. Reavaliar na fase 3 com os avatares.
 - Ponto no item atual da coluna: o estado selecionado da Astryx já o destaca.
 - Cabeçalho do painel com ícone + contador + Lista/Kanban: vem com o Quadro (fase 3).
+
+## Fase 3
+
+**Quadro**
+
+- Card de três linhas: ID + avatar do agente + estado (`StatusToken`) + menu; título (até 2
+  linhas); linha cinza com bloqueada, automações pausadas, branch, PR, prioridade, responsáveis.
+- `cardStatus` usa o mapa único: "Esperando você" amarelo, falhas em vermelho, "Fluxo rodando"
+  laranja (o único laranja de estado; antes era "Esperando você").
+- Colunas com contador e botão "Recolher <etapa>": recolhida vira uma faixa estreita com
+  "Expandir <etapa>", contagem e nome na vertical. Continua aceitando cards arrastados. Estado só
+  na sessão da tela (nada salvo em config).
+- Faixa "Agentes" acima das colunas (só quando há tarefas com agente): avatar, nome e quantas
+  tarefas; clicar filtra o quadro pelo agente; ponto laranja = agente com fluxo rodando.
+- Alternância Kanban/Lista (`SegmentedControl`), sem dado novo: a lista mostra uma linha por
+  tarefa na ordem das etapas, com estado, etapa e o mesmo menu "Ações de…".
+- Tarefa aberta numa folha sobre as colunas, como o "side peek" do Notion (pedido na revisão da fase 2):
+  sobrepõe as colunas em vez de empurrá-las; "Abrir tarefa" expande para a página inteira;
+  "Fechar" e Esc fecham. A folha fica abaixo do cabeçalho e dos filtros, que continuam ao
+  alcance ("Atualizar" com a tarefa aberta). O `Drawer` da Astryx cobria a janela toda e
+  escondia o cabeçalho; por isso foi recusado.
+
+**Recusado / adiado**
+
+- Guardar colunas recolhidas e a visualização escolhida: exigiria config nova (main). Fica na
+  sessão.
+- Avatar geométrico: fase 4 (hoje ainda é o `Token` com iniciais).
 
 ## Recusado em todas as fases (e por quê)
 

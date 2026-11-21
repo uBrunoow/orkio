@@ -74,6 +74,12 @@ esquerda (rótulo no tooltip e no nome acessível) + conteúdo num painel com bo
 na coluna não existe (a Astryx esconde `endContent` recolhido): use o ponto no ícone e o número no
 sino.
 
+## Quadro
+
+Card de três linhas (ID + agente + estado + menu / título / metadados cinza). Colunas recolhíveis
+com contador. Tarefa abre numa folha sobre as colunas (abaixo do cabeçalho), nunca num modal que
+cubra a janela; "Abrir tarefa" leva à página inteira. Kanban/Lista por `SegmentedControl`.
+
 ## Movimento e CSP
 
 Só o movimento dos próprios componentes da Astryx; respeitar `prefers-reduced-motion`. Nada que

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
@@ -307,7 +306,7 @@ export function TaskPanel({
   }
 
   return (
-    <Card role="complementary" aria-label={`Detalhes de ${label}`} padding={0} height="100%">
+    <VStack role="complementary" aria-label={`Detalhes de ${label}`} height="100%">
       <ScrollableArea label={`Detalhes de ${label} (rolagem)`} height="100%" padding={4}>
         <VStack gap={4}>
           <HStack gap={1} vAlign="start">
@@ -343,6 +342,6 @@ export function TaskPanel({
           {historySection}
         </VStack>
       </ScrollableArea>
-    </Card>
+    </VStack>
   )
 }

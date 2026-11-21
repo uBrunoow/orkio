@@ -31,6 +31,9 @@ import {
   IconPlayerPause,
   IconBolt,
   IconX,
+  IconList,
+  IconChevronLeft,
+  IconChevronRight,
   IconPlugConnected,
   IconRefresh,
   IconTrash,
@@ -89,6 +92,9 @@ export const ArrowUpIcon = adapt(IconArrowUp)
 export const ArrowDownIcon = adapt(IconArrowDown)
 export const PlusIcon = adapt(IconPlus)
 export const CloseIcon = adapt(IconX)
+export const ListIcon = adapt(IconList)
+export const ColumnCollapseIcon = adapt(IconChevronLeft)
+export const ColumnExpandIcon = adapt(IconChevronRight)
 export const PauseIcon = adapt(IconPlayerPause)
 export const AutomationIcon = adapt(IconBolt)
 export const TerminalIcon = adapt(IconTerminal2)

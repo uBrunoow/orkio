@@ -4,11 +4,13 @@ import { HStack } from '@astryxdesign/core/HStack'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Heading } from '@astryxdesign/core/Heading'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
-import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { Icon } from '@astryxdesign/core/Icon'
+import { IconButton } from '@astryxdesign/core/IconButton'
 import { Text } from '@astryxdesign/core/Text'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
+import { ColumnCollapseIcon, ColumnExpandIcon, DotIcon } from '../../components/icons'
 import { BoardCardBody, BoardCardItem, type CardActions } from './BoardCardView'
 
 /** Movimento mínimo (px) para virar arrasto: cliques e o menu do card continuam funcionando. */
@@ -46,6 +48,15 @@ export function BoardColumns({
   actions: CardActions
 }): React.JSX.Element {
   const [drag, setDrag] = useState<DragState | null>(null)
+  // Colunas recolhidas (só nesta sessão da tela): viram uma faixa estreita com nome e contagem.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const toggleCollapsed = (id: string): void =>
+    setCollapsed((cur) => {
+      const next = new Set(cur)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   const columnEls = useRef(new Map<string, HTMLElement>())
   const cardEls = useRef(new Map<string, HTMLElement>())
   const teardown = useRef<(() => void) | null>(null)
@@ -137,7 +148,7 @@ export function BoardColumns({
       return
     }
     if (e.ctrlKey || e.metaKey) return
-    const grid = columns.map((c) => byColumn.get(c.id) ?? [])
+    const grid = columns.map((c) => (collapsed.has(c.id) ? [] : (byColumn.get(c.id) ?? [])))
     const col = grid.findIndex((list) => list.some((c) => c.taskId === taskId))
     const row = grid[col]?.findIndex((c) => c.taskId === taskId) ?? -1
     if (col < 0 || row < 0) return
@@ -168,7 +179,7 @@ export function BoardColumns({
   return (
     <>
       <HStack
-        gap={4}
+        gap={3}
         vAlign="stretch"
         role="list"
         aria-label="Etapas do quadro"
@@ -182,6 +193,45 @@ export function BoardColumns({
           const items = byColumn.get(column.id) ?? []
           const visible = drag ? items.filter((c) => c.taskId !== drag.taskId) : items
           const isTarget = drag?.target === column.id
+          const setColumnEl = (el: HTMLDivElement | null): void => {
+            if (el) columnEls.current.set(column.id, el)
+            else columnEls.current.delete(column.id)
+          }
+          if (collapsed.has(column.id)) {
+            return (
+              <VStack
+                key={column.id}
+                role="listitem"
+                aria-label={column.name}
+                data-stage-id={column.id}
+                data-collapsed="true"
+                height="100%"
+                style={{ flexShrink: 0 }}
+              >
+                <Card variant={isTarget ? 'default' : 'muted'} padding={0} height="100%">
+                  <VStack ref={setColumnEl} gap={2} padding={2} hAlign="center" height="100%">
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      label={`Expandir ${column.name}`}
+                      icon={<Icon icon={ColumnExpandIcon} />}
+                      onClick={() => toggleCollapsed(column.id)}
+                    />
+                    <Text type="supporting" hasTabularNumbers data-testid="column-count">
+                      {items.length}
+                    </Text>
+                    <Text
+                      type="supporting"
+                      color="secondary"
+                      style={{ writingMode: 'vertical-rl', whiteSpace: 'nowrap' }}
+                    >
+                      {column.name}
+                    </Text>
+                  </VStack>
+                </Card>
+              </VStack>
+            )
+          }
           return (
             <VStack
               key={column.id}
@@ -194,18 +244,9 @@ export function BoardColumns({
               style={{ flexShrink: 0 }}
             >
               <Card variant={isTarget ? 'default' : 'muted'} padding={0} height="100%">
-                <VStack
-                  ref={(el: HTMLDivElement | null) => {
-                    if (el) columnEls.current.set(column.id, el)
-                    else columnEls.current.delete(column.id)
-                  }}
-                  height="100%"
-                >
+                <VStack ref={setColumnEl} height="100%">
                   <HStack gap={2} vAlign="center" padding={3} paddingBlockEnd={1}>
-                    <StatusDot
-                      variant={column.stage ? 'neutral' : 'warning'}
-                      label={column.stage ? `Etapa ${column.name}` : 'Sem etapa'}
-                    />
+                    <Icon icon={DotIcon} size="sm" color={column.stage ? 'tertiary' : 'warning'} />
                     <Tooltip
                       content={
                         column.stage
@@ -221,6 +262,13 @@ export function BoardColumns({
                     <Text type="supporting" hasTabularNumbers data-testid="column-count">
                       {items.length}
                     </Text>
+                    <IconButton
+                      size="sm"
+                      variant="ghost"
+                      label={`Recolher ${column.name}`}
+                      icon={<Icon icon={ColumnCollapseIcon} />}
+                      onClick={() => toggleCollapsed(column.id)}
+                    />
                   </HStack>
                   <StackItem size="fill">
                     <ScrollableArea

@@ -5,7 +5,6 @@ import { StackItem } from '@astryxdesign/core/Stack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { Text } from '@astryxdesign/core/Text'
-import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Button } from '@astryxdesign/core/Button'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
@@ -13,6 +12,7 @@ import { GitBranchIcon, LockIcon, PauseIcon, PullRequestIcon } from '../../compo
 import { useTaskFlowState } from '../task-flows/active-flows'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentsPage'
+import { StatusToken } from '../../components/StatusToken'
 import { cardStatus } from './card-status'
 
 export interface CardActions {
@@ -22,6 +22,32 @@ export interface CardActions {
   onToggleAutomation(taskId: string, paused: boolean): void
   /** Abre a tarefa em tela cheia (Ctrl/Cmd+Enter no card). */
   onExpand?(taskId: string): void
+}
+
+/** Itens do menu "Ações de …" (card do quadro e linha da lista). */
+export function cardMenuItems(
+  card: BoardCard,
+  stages: readonly BoardStage[],
+  actions: CardActions
+): React.ComponentProps<typeof MoreMenu>['items'] {
+  return [
+    { label: 'Abrir detalhes', onClick: () => actions.onOpen(card.taskId) },
+    {
+      label: card.blocked ? 'Desmarcar bloqueada' : 'Marcar como bloqueada',
+      onClick: () => actions.onToggleBlocked(card.taskId, !card.blocked)
+    },
+    {
+      label: card.automationPaused ? 'Retomar automações' : 'Pausar automações',
+      onClick: () => actions.onToggleAutomation(card.taskId, !card.automationPaused)
+    },
+    { type: 'divider' },
+    ...stages
+      .filter((s) => s.id !== card.stageId)
+      .map((s) => ({
+        label: `Mover para ${s.name}`,
+        onClick: () => actions.onMove(card.taskId, s.id)
+      }))
+  ]
 }
 
 /** Conteúdo do card (no quadro e no "fantasma" do arrasto). */
@@ -52,49 +78,25 @@ export function BoardCardBody({
         <StackItem size="fill">
           <HStack gap={2} vAlign="center" hAlign="end">
             {status && (
-              <HStack
-                gap={1}
-                vAlign="center"
+              <StatusToken
+                label={status.label}
+                tone={status.tone}
                 data-testid={`card-${status.kind === 'pr' ? 'status' : status.kind}`}
-              >
-                <StatusDot
-                  variant={status.tone}
-                  label={status.label}
-                  isPulsing={status.isPulsing ?? false}
-                />
-                <Text type="supporting" color={status.tone === 'neutral' ? 'secondary' : 'primary'}>
-                  {status.label}
-                </Text>
-              </HStack>
+              />
             )}
             {actions && (
               <MoreMenu
                 label={`Ações de ${label}`}
                 size="sm"
-                items={[
-                  { label: 'Abrir detalhes', onClick: () => actions.onOpen(card.taskId) },
-                  {
-                    label: card.blocked ? 'Desmarcar bloqueada' : 'Marcar como bloqueada',
-                    onClick: () => actions.onToggleBlocked(card.taskId, !card.blocked)
-                  },
-                  {
-                    label: card.automationPaused ? 'Retomar automações' : 'Pausar automações',
-                    onClick: () => actions.onToggleAutomation(card.taskId, !card.automationPaused)
-                  },
-                  { type: 'divider' },
-                  ...stages
-                    .filter((s) => s.id !== card.stageId)
-                    .map((s) => ({
-                      label: `Mover para ${s.name}`,
-                      onClick: () => actions.onMove(card.taskId, s.id)
-                    }))
-                ]}
+                items={cardMenuItems(card, stages, actions)}
               />
             )}
           </HStack>
         </StackItem>
       </HStack>
-      <Text weight="semibold">{card.title}</Text>
+      <Text weight="semibold" maxLines={2}>
+        {card.title}
+      </Text>
       <HStack gap={2} vAlign="center" wrap="wrap">
         {card.blocked && (
           <HStack vAlign="center" role="img" aria-label="Bloqueada" data-testid="card-blocked">

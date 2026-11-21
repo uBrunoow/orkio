@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
+import { Card } from '@astryxdesign/core/Card'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
+import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Selector } from '@astryxdesign/core/Selector'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
+import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
@@ -16,11 +19,21 @@ import { isTextField } from '../../app/shortcuts'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
-import { AutomationIcon, PauseIcon, RefreshIcon } from '../../components/icons'
+import {
+  AutomationIcon,
+  BoardIcon,
+  DotIcon,
+  ListIcon,
+  PauseIcon,
+  RefreshIcon
+} from '../../components/icons'
 import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
-import { AgentBadgesProvider, useAgentBadges } from '../agents/agent-badges'
+import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
+import { AgentAvatar } from '../agents/AgentsPage'
+import type { ActiveFlows } from '../task-flows/active-flows'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
+import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
 import { TaskPanel } from './TaskPanel'
 import { useBoard, type BoardError } from './useBoard'
@@ -98,6 +111,8 @@ function Board({
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
   const [onlyBlocked, setOnlyBlocked] = useState(false)
+  const [agentKey, setAgentKey] = useState<string | null>(null)
+  const [layout, setLayout] = useState<'kanban' | 'list'>('kanban')
   const { view } = board
 
   // Esc fecha o painel (fora de campos de texto e de diálogos, que tratam o próprio Esc).
@@ -131,9 +146,10 @@ function Board({
           c.title.toLowerCase().includes(q) ||
           (c.displayId ?? '').toLowerCase().includes(q)) &&
         (!priority || c.priority?.name === priority) &&
-        (!onlyBlocked || c.blocked)
+        (!onlyBlocked || c.blocked) &&
+        (!agentKey || agentBadges[c.taskId]?.key === agentKey)
     )
-  }, [view?.cards, query, priority, onlyBlocked])
+  }, [view?.cards, query, priority, onlyBlocked, agentKey, agentBadges])
 
   const header = (action?: React.ReactNode): React.JSX.Element => (
     <PageHeader title="Quadro" context={projectName} action={action} />
@@ -217,7 +233,24 @@ function Board({
           />
         )}
         <CheckboxInput label="Só bloqueadas" value={onlyBlocked} onChange={setOnlyBlocked} />
+        <StackItem size="fill" />
+        <SegmentedControl
+          label="Visualização do quadro"
+          size="sm"
+          value={layout}
+          onChange={(v) => setLayout(v === 'list' ? 'list' : 'kanban')}
+        >
+          <SegmentedControlItem value="kanban" label="Kanban" icon={<Icon icon={BoardIcon} />} />
+          <SegmentedControlItem value="list" label="Lista" icon={<Icon icon={ListIcon} />} />
+        </SegmentedControl>
       </HStack>
+      <AgentRow
+        cards={view.cards}
+        badges={agentBadges}
+        flows={activeFlows}
+        selected={agentKey}
+        onSelect={setAgentKey}
+      />
 
       {view.pendingCount > 0 && (
         <Alert
@@ -272,17 +305,29 @@ function Board({
       )}
 
       <StackItem size="fill">
-        <HStack gap={4} vAlign="stretch" height="100%" minHeight="calc(var(--spacing-12) * 6)">
-          <StackItem size="fill">
-            {view.cards.length === 0 ? (
-              <EmptyState
-                title="Nenhuma tarefa neste projeto"
-                description="As tarefas do Notion ligadas a este projeto aparecem aqui."
-                headingLevel={2}
-              />
-            ) : (
-              <ActiveFlowsProvider value={activeFlows}>
-                <AgentBadgesProvider value={agentBadges}>
+        <VStack
+          height="100%"
+          minHeight="calc(var(--spacing-12) * 6)"
+          style={{ position: 'relative' }}
+        >
+          {view.cards.length === 0 ? (
+            <EmptyState
+              title="Nenhuma tarefa neste projeto"
+              description="As tarefas do Notion ligadas a este projeto aparecem aqui."
+              headingLevel={2}
+            />
+          ) : (
+            <ActiveFlowsProvider value={activeFlows}>
+              <AgentBadgesProvider value={agentBadges}>
+                {layout === 'list' ? (
+                  <BoardList
+                    stages={view.config.stages}
+                    cards={cards}
+                    signals={signals.result?.signals ?? {}}
+                    selectedTaskId={selected}
+                    actions={actions}
+                  />
+                ) : (
                   <BoardColumns
                     stages={view.config.stages}
                     cards={cards}
@@ -290,12 +335,26 @@ function Board({
                     selectedTaskId={selected}
                     actions={actions}
                   />
-                </AgentBadgesProvider>
-              </ActiveFlowsProvider>
-            )}
-          </StackItem>
+                )}
+              </AgentBadgesProvider>
+            </ActiveFlowsProvider>
+          )}
+          {/* Tarefa aberta numa folha sobre as colunas (como o "side peek" do Notion); "Abrir
+              tarefa" expande para a página inteira. Cabeçalho e filtros continuam ao alcance. */}
           {selectedCard && (
-            <VStack width="min(calc(var(--spacing-12) * 9), 42%)" height="100%">
+            <Card
+              padding={0}
+              height="100%"
+              data-testid="task-sheet"
+              style={{
+                position: 'absolute',
+                insetBlock: 0,
+                insetInlineEnd: 0,
+                width: 'min(calc(var(--spacing-12) * 10), 62%)',
+                boxShadow: 'var(--shadow-high)',
+                zIndex: 10
+              }}
+            >
               <TaskPanel
                 projectId={projectId}
                 agent={agentBadges[selectedCard.taskId] ?? null}
@@ -311,9 +370,9 @@ function Board({
                 focusSection={selectedCard.taskId === openTaskId ? focusSection : null}
                 onExpand={() => onExpandTask(selectedCard.taskId)}
               />
-            </VStack>
+            </Card>
           )}
-        </HStack>
+        </VStack>
       </StackItem>
     </VStack>
   )
@@ -433,6 +492,69 @@ function AutomationLine({
       {!status.paused && status.github === 'disconnected' && (
         <Button size="sm" variant="ghost" label="Conectar GitHub" onClick={onOpenIntegrations} />
       )}
+    </HStack>
+  )
+}
+
+/**
+ * Agentes com tarefas neste quadro: avatar, nome e quantas tarefas. Clicar filtra o quadro pelo
+ * agente; o ponto laranja marca agente com fluxo rodando agora.
+ */
+function AgentRow({
+  cards,
+  badges,
+  flows,
+  selected,
+  onSelect
+}: {
+  cards: readonly { taskId: string }[]
+  badges: AgentBadges
+  flows: ActiveFlows
+  selected: string | null
+  onSelect(key: string | null): void
+}): React.JSX.Element | null {
+  const agents = new Map<
+    string,
+    { name: string; color: AgentBadges[string]['color']; count: number; running: boolean }
+  >()
+  for (const { taskId } of cards) {
+    const badge = badges[taskId]
+    if (!badge) continue
+    const cur = agents.get(badge.key) ?? {
+      name: badge.name,
+      color: badge.color,
+      count: 0,
+      running: false
+    }
+    cur.count += 1
+    if (flows[taskId] === 'running') cur.running = true
+    agents.set(badge.key, cur)
+  }
+  if (agents.size === 0) return null
+  const list = [...agents.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'pt-BR'))
+  return (
+    <HStack gap={2} vAlign="center" wrap="wrap" role="group" aria-label="Agentes do quadro">
+      <Text type="supporting" color="secondary">
+        Agentes
+      </Text>
+      {list.map(([key, a]) => (
+        <ToggleButton
+          key={key}
+          size="sm"
+          label={`${a.name}: ${a.count === 1 ? '1 tarefa' : `${a.count} tarefas`}${a.running ? ', rodando' : ''}`}
+          isPressed={selected === key}
+          onPressedChange={(pressed) => onSelect(pressed ? key : null)}
+          icon={<AgentAvatar name={a.name} color={a.color} />}
+        >
+          <HStack gap={1} vAlign="center">
+            <Text>{a.name}</Text>
+            <Text type="supporting" color="secondary" hasTabularNumbers>
+              {a.count}
+            </Text>
+            {a.running && <Icon icon={DotIcon} size="sm" color="accent" />}
+          </HStack>
+        </ToggleButton>
+      ))}
     </HStack>
   )
 }
