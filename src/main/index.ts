@@ -1004,6 +1004,11 @@ function createNotionOAuthDeps(): NotionOAuthDeps | null {
   }
 }
 
+// Em dev no Linux não há .desktop instalado: o GNOME (Wayland) mostra uma engrenagem na doca. O
+// `predev` cria ~/.local/share/applications/orkio-dev.desktop com o ícone; aqui a janela se
+// identifica com ele (app_id/WM_CLASS). Empacotado, o .desktop vem do instalador.
+if (process.platform === 'linux' && !app.isPackaged) app.setDesktopName('orkio-dev.desktop')
+
 void app.whenReady().then(() => {
   // Nenhuma permissão do navegador (câmera, notificações etc.), exceto ESCREVER na área de
   // transferência (botão "Copiar" do código do GitHub). Ler a área de transferência continua negado.
