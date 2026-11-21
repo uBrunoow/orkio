@@ -91,6 +91,11 @@ pendente sempre no topo ("Esperando você"); passos do fluxo num resumo recolhí
 Detalhe em frase antes do formulário (`SentenceDetail`): frase como título, "Começa", "Faz",
 execuções em tabela e coluna de detalhes; o editor fica atrás de "Editar".
 
+## Integrações
+
+Catálogo no topo (grade de duas colunas: logo, nome, categoria, estado, ação) e os cards de
+configuração abaixo; a ação leva ao card. Nunca listar integração que o app não tem.
+
 ## Agentes
 
 Avatar só pelo `AgentAvatar` (forma geométrica do id, cores do tema; nunca iniciais nem foto).
