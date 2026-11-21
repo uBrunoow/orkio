@@ -6,6 +6,7 @@
  * - variáveis iniciais (`alva.task_id`, `alva.spec_arg` com o ID e a URL do Notion);
  * - resumo para o painel (id, título, status, critérios) lido do arquivo, nunca guardado.
  */
+import { createHash } from 'node:crypto'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -22,9 +23,11 @@ import type { ExtractContext, ExtractResult, FlowExtractor } from '../flows/flow
 
 export const ALVA_MESSAGES = {
   noTaskCreated:
-    'O /alva-flow:spec terminou sem criar task em backlog/tasks/. Confira o log; retome para tentar de novo.',
+    'O /alva-flow:spec terminou sem criar nem alterar nenhuma task em backlog/tasks/. Confira o log; retome para tentar de novo.',
   noTaskFile: 'Não achei o arquivo da task vinculada no ambiente da tarefa.',
-  choose: 'O /alva-flow:spec criou mais de uma task. Qual é a desta tarefa?'
+  choose: 'O /alva-flow:spec criou mais de uma task. Qual é a desta tarefa?',
+  chooseChanged:
+    'O /alva-flow:spec atualizou mais de uma task que já existia. Qual é a desta tarefa?'
 } as const
 
 export interface AlvaServiceDeps {
@@ -47,6 +50,49 @@ async function listTaskFiles(dir: string): Promise<string[]> {
   } catch {
     return []
   }
+}
+
+/** Impressão digital de cada task (nome → hash do conteúdo), para ver o que um passo criou ou mudou. */
+async function taskSignatures(dir: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  for (const f of await listTaskFiles(dir)) {
+    try {
+      const path = join(dir, 'backlog', 'tasks', f)
+      const size = (await stat(path)).size
+      // Arquivo enorme não é lido: o tamanho já mostra se mudou.
+      out[f] =
+        size > 1024 * 1024
+          ? `size:${size}`
+          : createHash('sha1')
+              .update(await readFile(path))
+              .digest('hex')
+    } catch {
+      // Sumiu entre a listagem e a leitura: fica de fora.
+    }
+  }
+  return out
+}
+
+/**
+ * Snapshot de um passo: nome → hash. Formato antigo (só os nomes) ainda é lido: sem hash não dá para
+ * saber se uma task mudou, então só as novas contam.
+ */
+function readSnapshot(snapshot: unknown): Map<string, string | null> {
+  if (Array.isArray(snapshot)) {
+    return new Map(
+      (snapshot as unknown[])
+        .filter((v): v is string => typeof v === 'string')
+        .map((f) => [f, null])
+    )
+  }
+  if (snapshot !== null && typeof snapshot === 'object') {
+    return new Map(
+      Object.entries(snapshot as Record<string, unknown>).filter(
+        (e): e is [string, string] => typeof e[1] === 'string'
+      )
+    )
+  }
+  return new Map()
 }
 
 async function readTaskFile(
@@ -155,7 +201,7 @@ export class AlvaService {
   readonly extractor: FlowExtractor = {
     id: 'alva',
     label: 'alva-flow: task do Backlog.md (status, perguntas, blocker)',
-    snapshot: async (ctx) => (ctx.worktreePath ? await listTaskFiles(ctx.worktreePath) : []),
+    snapshot: async (ctx) => (ctx.worktreePath ? await taskSignatures(ctx.worktreePath) : {}),
     extract: ({ resultText, ctx, snapshot }) => this.extract(ctx, resultText, snapshot),
     resolveChoice: async ({ ctx, value }) => {
       this.setLink(ctx.projectId, ctx.taskId, value)
@@ -172,27 +218,35 @@ export class AlvaService {
     if (!dir) return {}
     let id = this.getLink(ctx.taskId)
     if (!id) {
-      // Sem vínculo: a task nova é a que apareceu em backlog/tasks/ durante o passo.
-      const before = new Set(Array.isArray(snapshot) ? (snapshot as string[]) : [])
-      const created: BacklogTaskInfo[] = []
-      for (const f of await listTaskFiles(dir)) {
-        if (before.has(f)) continue
-        const info = await readTask(dir, f)
-        if (info) created.push(info)
-      }
-      if (created.length === 0) {
+      // Sem vínculo: a task desta tarefa é a que o passo criou em backlog/tasks/. Se não criou
+      // nenhuma, mas atualizou uma que já existia (de outra rodada, de outra pessoa), é essa: o
+      // /spec retoma a task em vez de criar outra.
+      const before = readSnapshot(snapshot)
+      const now = await taskSignatures(dir)
+      const createdFiles = Object.keys(now).filter((f) => !before.has(f))
+      const changedFiles = Object.keys(now).filter((f) => {
+        const old = before.get(f)
+        return old !== undefined && old !== null && old !== now[f]
+      })
+      const read = async (files: string[]): Promise<BacklogTaskInfo[]> =>
+        (await Promise.all(files.map((f) => readTask(dir, f)))).filter(
+          (t): t is BacklogTaskInfo => t !== null
+        )
+      const created = await read(createdFiles)
+      const candidates = created.length > 0 ? created : await read(changedFiles)
+      if (candidates.length === 0) {
         return ctx.command.endsWith(':spec') ? { fail: ALVA_MESSAGES.noTaskCreated } : {}
       }
-      if (created.length > 1) {
+      if (candidates.length > 1) {
         return {
           vars: this.sizeVars(ctx, resultText, null),
           choose: {
-            prompt: ALVA_MESSAGES.choose,
-            options: created.map((t) => ({ value: t.id, label: `${t.id} — ${t.title}` }))
+            prompt: created.length > 0 ? ALVA_MESSAGES.choose : ALVA_MESSAGES.chooseChanged,
+            options: candidates.map((t) => ({ value: t.id, label: `${t.id} — ${t.title}` }))
           }
         }
       }
-      id = created[0]!.id
+      id = candidates[0]!.id
       this.setLink(ctx.projectId, ctx.taskId, id)
     }
     return { vars: await this.varsFor(ctx, id, resultText) }

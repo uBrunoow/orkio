@@ -551,9 +551,12 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 - **Vínculo** (SQLite v7 `alva_links`, só ids): o 1º `/spec` recebe `alva.spec_arg` = "ORK-142 —
   título. Tarefa no Notion: <url>. Briefing completo em .orkio/briefing.md." (o `/pr` acha o link do
   Notion na task e não pergunta). Depois do passo, o extrator `alva` compara `backlog/tasks/` antes e
-  depois no worktree: uma task nova → vínculo; várias → o fluxo pausa pedindo a escolha
-  (`needs_choice`); nenhuma → passo falha com explicação. Com vínculo, `alva.task_id`/`alva.spec_arg`
-  = ID.
+  depois no worktree (snapshot = nome → hash do conteúdo): uma task nova → vínculo; várias → o fluxo
+  pausa pedindo a escolha (`needs_choice`); nenhuma nova, mas uma **alterada** (o /spec retomou uma
+  task que já estava no repositório) → vínculo nela (várias alteradas → escolha); nem criada nem
+  alterada → passo falha com explicação. Com vínculo, `alva.task_id`/`alva.spec_arg` = ID. Comando
+  com variável `alva.*` sem valor (task não vinculada) **não roda**: o passo falha antes de gastar
+  uma execução (`FLOW_MESSAGES.noBacklogTask`) e o cartão de problema oferece "Rodar /spec de novo".
 - **Variáveis:** `alva.task_id`, `alva.status`, `alva.open_questions`, `alva.linked`,
   `alva.review_blocker` (`sim` se o `/review` deixou `Executed`), `alva.size` (Médio/Grande pela
   linha "**Tamanho:**" do resultado do `/spec`, heurística; Pequeno = status `Reviewed` depois do

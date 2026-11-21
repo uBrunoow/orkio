@@ -48,7 +48,9 @@ export const FLOW_MESSAGES = {
   notFound: 'Fluxo não encontrado. Atualize a tela.',
   wrongState: 'O fluxo não está esperando essa ação. Atualize a tela.',
   flowMissing: 'O fluxo ligado a esta etapa não existe mais. Revise o Fluxo do projeto.',
-  invalidStep: 'Esse passo não pode ser rodado de novo agora. Atualize a tela.'
+  invalidStep: 'Esse passo não pode ser rodado de novo agora. Atualize a tela.',
+  noBacklogTask:
+    'Este passo usa a task do Backlog, mas o fluxo ainda não sabe qual é a desta tarefa. Rode o /spec de novo (ou escolha a task) e depois retome.'
 } as const
 
 export class FlowError extends Error {
@@ -1038,13 +1040,18 @@ export class FlowRunner {
       const snap = ex?.snapshot
         ? await ex.snapshot(this.extractContext(row, step.id, step.command)).catch(() => undefined)
         : undefined
-      const { text } = renderArgs(step.args, {
+      const { text, missing } = renderArgs(step.args, {
         briefingPath: '.orkio/briefing.md',
         taskId: ctx.displayId,
         ...(ctx.title ? { taskTitle: ctx.title } : {}),
         notionUrl: ctx.notionUrl,
         vars: this.persisted(this.row(row.id)).engine.vars
       })
+      // Variável do alva-flow sem valor (a task do Backlog não foi vinculada): o comando rodaria com
+      // o argumento vazio e gastaria uma execução à toa. Para antes de começar.
+      if (missing.some((name) => name.startsWith('alva.'))) {
+        throw new FlowError('missing_vars', FLOW_MESSAGES.noBacklogTask)
+      }
       const runId = await this.deps.startClaude({
         projectId: row.project_id,
         taskId: row.task_page_id,

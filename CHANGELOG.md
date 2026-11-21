@@ -29,6 +29,13 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   "Ver a sessão do passo", Retomar, Pular e Cancelar. Com um fluxo em andamento, o botão manual do
   Claude Code dá lugar a uma explicação em vez de falhar ao clicar.
 
+### Corrigido
+
+- O `/spec` que atualiza uma task que já existia em `backlog/tasks/` (em vez de criar uma nova)
+  agora vincula a tarefa a ela; antes o passo falhava com "terminou sem criar task".
+- Um passo do alva-flow que usa a task do Backlog não roda mais com o argumento vazio quando a task
+  não foi vinculada: o fluxo para antes de gastar uma execução e oferece "Rodar /spec de novo".
+
 ## [0.1.0] - 2026-11-20
 
 ### Adicionado
