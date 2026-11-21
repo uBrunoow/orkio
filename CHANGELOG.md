@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.0] - 2026-11-21
+
 ### Adicionado
 
 - Instaladores para macOS (Apple Silicon e Intel) e Windows, publicados por CI a cada versão.
