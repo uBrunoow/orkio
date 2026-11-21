@@ -11,6 +11,7 @@ import {
   IconFolderPlus,
   IconFolderSearch,
   IconFolders,
+  IconRobot,
   IconGitBranch,
   IconGitPullRequest,
   IconLink,
@@ -80,6 +81,7 @@ export const StopIcon = adapt(IconPlayerStop)
 export const EditorIcon = adapt(IconCode)
 export const DiffIcon = adapt(IconFileDiff)
 export const CleanIcon = adapt(IconEraser)
+export const AgentsIcon = adapt(IconRobot)
 
 /** Marca do Claude (estrela de raios), desenhada em currentColor. */
 export const ClaudeLogo: SvgIcon = (props) => (

@@ -495,6 +495,9 @@ export interface AgentsState {
   projectId: string
   agents: AgentView[]
   rules: ProjectAgents['assignOnEnter']
+  /** Etapas do quadro e fluxos de tarefa do projeto (para o editor). */
+  stages: { id: string; name: string }[]
+  flows: { id: string; name: string }[]
 }
 
 /** O que o card do quadro mostra. */

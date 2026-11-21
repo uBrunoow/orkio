@@ -10,6 +10,8 @@ import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import { LockIcon, PauseIcon } from '../../components/icons'
 import { useTaskFlowState } from '../task-flows/active-flows'
+import { useAgentBadge } from '../agents/agent-badges'
+import { AgentAvatar } from '../agents/AgentsPage'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { tokenColor } from '../notion-workspace/notion-colors'
 
@@ -34,6 +36,7 @@ export function BoardCardBody({
 }): React.JSX.Element {
   const label = card.displayId ?? card.title
   const flow = useTaskFlowState(card.taskId)
+  const agent = useAgentBadge(card.taskId)
   return (
     <VStack gap={2}>
       <HStack gap={2} vAlign="center">
@@ -64,6 +67,7 @@ export function BoardCardBody({
             data-testid="card-flow"
           />
         )}
+        {agent && <AgentAvatar name={agent.name} color={agent.color} testId="card-agent" />}
         <StackItem size="fill">
           {actions && (
             <HStack hAlign="end">

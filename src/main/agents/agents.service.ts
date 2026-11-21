@@ -125,7 +125,14 @@ export class AgentsService {
     const agents = entries
       .map((e) => this.toView(projectId, e, counts.get(agentKey(e.scope, e.id)) ?? 0))
       .sort((a, b) => (a.profile?.name ?? a.id).localeCompare(b.profile?.name ?? b.id, 'pt-BR'))
-    return { projectId, agents, rules: this.rules(projectId) }
+    const config = this.deps.config.get()
+    return {
+      projectId,
+      agents,
+      rules: this.rules(projectId),
+      stages: (config.boards[projectId]?.stages ?? []).map((st) => ({ id: st.id, name: st.name })),
+      flows: (config.flows[projectId]?.flows ?? []).map((f) => ({ id: f.id, name: f.name }))
+    }
   }
 
   /** Um agente (lido do disco agora). `null` = arquivo não existe. */

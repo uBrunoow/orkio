@@ -26,10 +26,13 @@ import { TaskClaudeSection } from '../claude/TaskClaudeSection'
 import { TaskFlowSection } from '../task-flows/TaskFlowSection'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { tokenColor } from '../notion-workspace/notion-colors'
+import type { AgentBadge } from '../../../../shared/agent'
+import { TaskAgentSection } from '../agents/TaskAgentSection'
 
 /** Painel lateral da tarefa: dados, ações, branch/PR e histórico (task_events). */
 export function TaskPanel({
   projectId,
+  agent,
   card,
   stages,
   signals,
@@ -39,6 +42,8 @@ export function TaskPanel({
   onClose
 }: {
   projectId: string
+  /** Agente da tarefa (8A). */
+  agent: AgentBadge | null
   card: BoardCard
   stages: readonly BoardStage[]
   signals: TaskSignals | undefined
@@ -95,6 +100,7 @@ export function TaskPanel({
     card.blocked,
     card.automationPaused,
     card.sync.state,
+    agent?.key,
     runTick
   ])
 
@@ -170,6 +176,8 @@ export function TaskPanel({
             <Text type="supporting">Abrir no Notion</Text>
           </HStack>
         )}
+
+        <TaskAgentSection projectId={projectId} taskId={card.taskId} agent={agent} />
 
         <TaskFlowSection
           projectId={projectId}
@@ -277,6 +285,13 @@ function automationEvent(e: BoardHistoryEntry): string {
       : label
 }
 
+/** " por Ana" quando um agente fez a ação (8A). */
+function by(e: BoardHistoryEntry): string {
+  return typeof e.detail?.['agent'] === 'string' && e.detail['agent']
+    ? ` por ${e.detail['agent']}`
+    : ''
+}
+
 function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string): string {
   const rule = typeof e.detail?.['ruleName'] === 'string' ? `“${e.detail['ruleName']}”` : null
   if (e.kind === 'moved' && e.source === 'automation') {
@@ -312,7 +327,7 @@ function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string
     case 'sync_ok':
       return 'Sincronizada com o Notion'
     case 'run_started':
-      return 'Claude Code iniciou uma execução'
+      return `Claude Code iniciou uma execução${by(e)}`
     case 'run_finished':
       return `Claude Code terminou (${Number(e.detail?.['files'] ?? 0)} arquivo(s) alterado(s))`
     case 'run_cancelled':
@@ -320,7 +335,13 @@ function describe(e: BoardHistoryEntry, stageName: (id: string | null) => string
     case 'run_failed':
       return 'Execução do Claude Code falhou'
     case 'flow_started':
-      return `Fluxo iniciado: ${String(e.detail?.['flow'] ?? '')}`
+      return `Fluxo iniciado: ${String(e.detail?.['flow'] ?? '')}${by(e)}`
+    case 'agent_assigned':
+      return e.detail?.['by'] === 'rule'
+        ? `Atribuída a ${String(e.detail?.['agent'] ?? '')} pela regra da coluna`
+        : `Atribuída a ${String(e.detail?.['agent'] ?? '')}`
+    case 'agent_unassigned':
+      return 'Atribuição de agente removida'
     case 'step_started':
       return `Passo do fluxo começou (${String(e.detail?.['step'] ?? '')})`
     case 'step_finished':

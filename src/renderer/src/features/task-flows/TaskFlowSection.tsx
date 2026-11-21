@@ -143,7 +143,9 @@ export function TaskFlowSection({
     <VStack gap={3} role="region" aria-label="Fluxo da tarefa">
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Icon icon={AutomationIcon} />
-        <Heading level={3}>{run ? `Fluxo: ${run.flowName}` : 'Fluxo'}</Heading>
+        <Heading level={3}>
+          {run ? `Fluxo: ${run.flowName}${run.agent ? ` · ${run.agent.name}` : ''}` : 'Fluxo'}
+        </Heading>
         {run && (
           <Token
             size="sm"
@@ -283,22 +285,26 @@ export function TaskFlowSection({
         />
       )}
 
-      {run?.status === 'paused' && run.pauseReason === 'waiting_slot' && (
-        <VStack gap={2}>
-          <Alert tone="warning">
-            Aguardando outro fluxo Alva deste projeto terminar (Docker e portas). Começa sozinho.
-          </Alert>
-          <Button
-            size="sm"
-            variant="ghost"
-            label="Cancelar fluxo"
-            onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
-          />
-        </VStack>
-      )}
+      {run?.status === 'paused' &&
+        (run.pauseReason === 'waiting_slot' || run.pauseReason === 'waiting_agent') && (
+          <VStack gap={2}>
+            <Alert tone="warning">
+              {run.pauseReason === 'waiting_agent'
+                ? `Aguardando ${run.agent?.name ?? 'o agente'} terminar outra tarefa (limite de fluxos ao mesmo tempo). Começa sozinho.`
+                : 'Aguardando outro fluxo Alva deste projeto terminar (Docker e portas). Começa sozinho.'}
+            </Alert>
+            <Button
+              size="sm"
+              variant="ghost"
+              label="Cancelar fluxo"
+              onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
+            />
+          </VStack>
+        )}
 
       {run?.status === 'paused' &&
         run.pauseReason !== 'waiting_slot' &&
+        run.pauseReason !== 'waiting_agent' &&
         run.pauseReason !== 'needs_choice' && (
           <VStack gap={2}>
             <Alert tone="warning">
