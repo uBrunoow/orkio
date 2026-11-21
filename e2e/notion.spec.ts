@@ -82,6 +82,7 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'claude',
       'signals',
       'projects',
+      'updates',
       'openExternal'
     ],
     notion: [
