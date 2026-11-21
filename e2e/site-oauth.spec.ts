@@ -24,7 +24,7 @@ import {
 const SITE = resolve(__dirname, '..', 'site')
 const CLIENT_ID = 'e2e-client-id'
 const CLIENT_SECRET = 'secret_E2E_SITE_NUNCA_NO_APP'
-const REDIRECT_URI = 'http://127.0.0.1:47821/oauth/notion/callback'
+const REDIRECT_URI = 'http://localhost:47821/oauth/notion/callback'
 
 test.describe.configure({ mode: 'serial' })
 test.skip(

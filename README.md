@@ -10,15 +10,15 @@
     Monta o quadro, roda o agente num ambiente isolado por tarefa e move cada card conforme a PR avança.
   </p>
   <p>
-    <a href="https://github.com/uBrunoow/orkio-releases/releases/latest"><strong>Download</strong></a> ·
+    <a href="https://github.com/uBrunoow/orkio/releases/latest"><strong>Download</strong></a> ·
     <a href="#primeiros-passos"><strong>Primeiros passos</strong></a> ·
     <a href="docs/configuracao.md"><strong>Configuração</strong></a> ·
     <a href="docs/desenvolvimento.md"><strong>Desenvolvimento</strong></a> ·
     <a href="brand/BRAND.md"><strong>Marca</strong></a>
   </p>
   <p>
-    <a href="https://github.com/uBrunoow/orkio-releases/releases/latest">
-      <img src="https://img.shields.io/github/v/release/uBrunoow/orkio-releases?color=FF5B1F&label=release" alt="Último release">
+    <a href="https://github.com/uBrunoow/orkio/releases/latest">
+      <img src="https://img.shields.io/github/v/release/uBrunoow/orkio?color=FF5B1F&label=release" alt="Último release">
     </a>
     <img src="https://img.shields.io/badge/macOS%20%C2%B7%20Windows-desktop-1E1E21?logo=electron&logoColor=white" alt="macOS e Windows">
     <img src="https://img.shields.io/badge/Electron-45-1E1E21?logo=electron&logoColor=9FEAF9" alt="Electron 45">
@@ -47,7 +47,7 @@ pontos que importam esperam a sua aprovação.
 
 ## Instalar
 
-Baixe o instalador do [último release](https://github.com/uBrunoow/orkio-releases/releases/latest).
+Baixe o instalador do [último release](https://github.com/uBrunoow/orkio/releases/latest).
 
 - **macOS** (`Orkio-…-mac-arm64.dmg` para Apple Silicon, `…-mac-x64.dmg` para Intel): arraste para
   Aplicativos. Enquanto o app não tiver assinatura da Apple, a primeira abertura é bloqueada: abra

@@ -1,9 +1,10 @@
 # Releases do Orkio (Etapa 6B)
 
-Os instaladores são gerados pelo GitHub Actions a cada tag `vX.Y.Z` e publicados num repositório
-**público só de binários**, [`uBrunoow/orkio-releases`](https://github.com/uBrunoow/orkio-releases).
-O código continua privado. O site lê o último release de lá (`RELEASES_REPO`) e o auto-update (6C)
-também.
+Os instaladores são gerados pelo GitHub Actions a cada tag `vX.Y.Z` e publicados nos releases do
+próprio repositório, [`uBrunoow/orkio`](https://github.com/uBrunoow/orkio/releases), que é
+**público**: o site lê o último release de lá (`RELEASES_REPO`) e o auto-update (6C) também, sem
+token. (Antes o código era privado e os binários iam para um repositório separado; um release de
+repositório privado exigiria um token embutido no app, que daria acesso ao código.)
 
 | Sistema | Arquivos                                                                       |
 | ------- | ------------------------------------------------------------------------------ |
@@ -13,27 +14,15 @@ também.
 
 ## Configuração inicial (uma vez)
 
-### 1. Repositório público de releases
+### 1. Repositório público e permissão do Actions
 
-1. Crie `uBrunoow/orkio-releases` como **Public**, marcando **Add a README** (o repositório
-   precisa de um commit: é nele que o GitHub cria as tags dos releases).
-2. Opcional: no README, um link para o site e "Os binários do Orkio são publicados aqui pelo CI".
+1. O repositório `uBrunoow/orkio` precisa ser **Public** (Settings → General → Danger Zone →
+   Change visibility).
+2. Settings → Actions → General → **Workflow permissions**: pode ficar em _Read repository contents_.
+   O `release.yml` pede `contents: write` só nos jobs que publicam (`draft`, `package`, `finalize`)
+   e usa o `GITHUB_TOKEN` do próprio workflow. Não há token pessoal para criar nem renovar.
 
-### 2. Token `RELEASES_TOKEN`
-
-GitHub → Settings → Developer settings → **Fine-grained personal access tokens** → Generate new token:
-
-- **Resource owner:** uBrunoow
-- **Expiration:** 1 ano (anote para renovar; o release falha com "Falta o secret" / 401 quando expirar)
-- **Repository access:** _Only select repositories_ → **só** `orkio-releases`
-- **Permissions → Repository permissions → Contents: Read and write** (Metadata: read-only vem junto).
-  Nada mais.
-
-No repositório **orkio** (o privado): Settings → Secrets and variables → Actions → **New repository
-secret** → `RELEASES_TOKEN` = o token. Ele só consegue criar releases e subir arquivos no
-`orkio-releases`; não lê nem escreve o código.
-
-### 3. Variáveis de build
+### 2. Variáveis de build
 
 Em Settings → Secrets and variables → Actions → aba **Variables** (não são segredos: vão dentro do
 binário):
@@ -46,9 +35,9 @@ binário):
 
 Sem elas o release falha (o teste manual só avisa). Também são aceitas como _secrets_ com o mesmo nome.
 
-### 4. Site
+### 3. Site
 
-Na Vercel, `RELEASES_REPO=uBrunoow/orkio-releases`. O site ignora pre-releases (beta).
+Na Vercel, `RELEASES_REPO=uBrunoow/orkio`. O site ignora pre-releases (beta).
 
 ## Lançar uma versão
 
@@ -64,13 +53,14 @@ Na Vercel, `RELEASES_REPO=uBrunoow/orkio-releases`. O site ignora pre-releases (
 3. `git push --follow-tags`. O workflow **Release** (`release.yml`):
    1. confere tag = versão do `package.json` e a seção no CHANGELOG;
    2. roda o CI inteiro (lint, typecheck, test, e2e, smoke do pacote Linux);
-   3. cria o **rascunho** do release em `orkio-releases` com as notas do CHANGELOG;
+   3. cria o **rascunho** do release com as notas do CHANGELOG;
    4. empacota no macOS e no Windows (`electron-builder --publish always`) e roda o smoke test do
       app empacotado em cada um;
    5. confere que todos os arquivos (dmg/zip/exe e os `.yml` do canal) estão lá e publica.
       Tag `-beta.N` → **pre-release** (canal beta, não vira "Latest").
 
-Se algum passo falhar, o rascunho fica no `orkio-releases` sem ser publicado. Corrija, e rode de
+Se algum passo falhar, o rascunho fica lá sem ser publicado (rascunho só aparece para quem tem
+acesso de escrita ao repositório). Corrija, e rode de
 novo o workflow pela página da execução (Re-run failed jobs) ou lance uma versão nova.
 
 ## Testar um pacote sem publicar
@@ -145,7 +135,6 @@ ligar o Artifact Signing:
 
 | Nome                                                          | Tipo      | Obrigatório               |
 | ------------------------------------------------------------- | --------- | ------------------------- |
-| `RELEASES_TOKEN`                                              | secret    | Sim, para publicar        |
 | `MAIN_VITE_GITHUB_CLIENT_ID`                                  | variable  | Sim, no release           |
 | `MAIN_VITE_NOTION_OAUTH_CLIENT_ID`                            | variable  | Sim, no release           |
 | `MAIN_VITE_NOTION_OAUTH_BROKER_URL`                           | variable  | Sim, no release           |
@@ -172,5 +161,6 @@ ligar o Artifact Signing:
   roda a ponte MCP do asar com um socket simulado (initialize → tools/list → tools/call). Roda no
   Linux em todo PR e no mac arm64 e no Windows ao empacotar. O mac x64 não é testado (os runners são
   arm64).
-- **Custo do Actions:** em repositório privado, minuto de macOS conta 10x e Windows 2x. Por isso o
-  CI de PR é só Linux; macOS só no release, no teste manual e no E2E opcional do CI (dispatch).
+- **Custo do Actions:** o CI de PR é só Linux; macOS só no release, no teste manual e no E2E
+  opcional do CI (dispatch). A decisão veio de quando o repositório era privado (minuto de macOS
+  conta 10x); em repositório público os runners padrão são gratuitos.

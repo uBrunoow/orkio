@@ -343,16 +343,16 @@ describe('registerProjectsIpc', () => {
 
 describe('shell.openExternal', () => {
   it('allowlist do repo público de releases (6C): só DMG e página de versão', () => {
-    const base = 'https://github.com/uBrunoow/orkio-releases/releases'
+    const base = 'https://github.com/uBrunoow/orkio/releases'
     expect(isAllowedExternalUrl(`${base}/download/v1.2.0/Orkio-1.2.0-mac-arm64.dmg`)).toBe(true)
     expect(isAllowedExternalUrl(`${base}/tag/v1.2.0-beta.1`)).toBe(true)
     expect(isAllowedExternalUrl(`${base}/download/v1.2.0/Orkio-1.2.0-win-x64-setup.exe`)).toBe(
       false
     )
-    expect(isAllowedExternalUrl('https://github.com/uBrunoow/orkio/releases/tag/v1.2.0')).toBe(
+    expect(isAllowedExternalUrl('https://github.com/uBrunoow/outro-repo/releases/tag/v1.2.0')).toBe(
       false
     )
-    expect(isAllowedExternalUrl('https://github.com/uBrunoow/orkio-releases/settings')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/uBrunoow/orkio/settings')).toBe(false)
   })
 
   it('site do Orkio só com https e sem porta (Configurações > Sobre)', () => {

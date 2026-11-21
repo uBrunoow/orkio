@@ -8,7 +8,7 @@ import { clientIp, createRateLimiter } from './rate-limit'
 const ENV: BrokerEnv = {
   NOTION_CLIENT_ID: 'id',
   NOTION_CLIENT_SECRET: 'secret_NUNCA_NA_RESPOSTA',
-  ALLOWED_REDIRECT_URIS: 'http://127.0.0.1:47821/oauth/notion/callback'
+  ALLOWED_REDIRECT_URIS: 'http://localhost:47821/oauth/notion/callback'
 }
 
 afterEach(() => {

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Orkio — orquestração de desenvolvimento com IA (Notion, GitHub, Claude Code).",
   "author": "Orkio",
-  "homepage": "https://github.com/uBrunoow/orkio-releases",
+  "homepage": "https://github.com/uBrunoow/orkio",
   "main": "./out/main/index.js",
   "scripts": {
     "postinstall": "install-electron",

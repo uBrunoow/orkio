@@ -1,7 +1,7 @@
 # Empacota o app para macOS (dmg + zip, arm64 e x64) e Windows (nsis x64), roda o smoke test do
 # pacote e sobe os arquivos como artefatos do job.
 # - Manual (workflow_dispatch): só empacota, NÃO publica. Baixe os arquivos na página da execução.
-# - release.yml (workflow_call com publish: true): publica no rascunho do release em orkio-releases.
+# - release.yml (workflow_call com publish: true): publica no rascunho do release deste repositório.
 # Segredos: só no `env` do passo que precisa; nunca `set -x` nem `echo` de valores.
 name: Package
 
@@ -10,12 +10,15 @@ on:
   workflow_call:
     inputs:
       publish:
-        description: 'Publicar no rascunho do release (RELEASES_TOKEN)'
+        description: 'Publicar no rascunho do release (GITHUB_TOKEN)'
         type: boolean
         default: false
 
+# contents: write porque o release.yml chama este workflow para publicar (um workflow chamado só
+# pode reduzir as permissões de quem chama). O GITHUB_TOKEN só vai para o electron-builder com
+# publish: true; no dispatch manual não publica nada (--publish never).
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   package:
@@ -114,7 +117,7 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          GH_TOKEN: ${{ inputs.publish && secrets.RELEASES_TOKEN || '' }}
+          GH_TOKEN: ${{ inputs.publish && github.token || '' }}
         run: |
           if [ -n "${APPLE_API_KEY_PATH:-}" ]; then export APPLE_API_KEY="$APPLE_API_KEY_PATH"; fi
           if [ "$RUNNER_OS" = "macOS" ]; then platform="--mac"; else platform="--win"; fi

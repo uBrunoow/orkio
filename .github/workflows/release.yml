@@ -1,7 +1,7 @@
 # Release por tag: `pnpm release <patch|minor|major|beta>` + `git push --follow-tags`.
 # vX.Y.Z → release estável; vX.Y.Z-beta.N → pre-release (canal beta).
-# Os binários vão para o repositório PÚBLICO uBrunoow/orkio-releases (secret RELEASES_TOKEN,
-# fine-grained, Contents: read/write só nele). Passo a passo em docs/releases.md.
+# Os binários vão para os releases deste mesmo repositório (público), com o GITHUB_TOKEN do
+# workflow (contents: write só nos jobs que publicam). Passo a passo em docs/releases.md.
 name: Release
 
 on:
@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASES_REPO: uBrunoow/orkio-releases
+  RELEASES_REPO: ${{ github.repository }}
 
 jobs:
   verify:
@@ -41,6 +41,8 @@ jobs:
   draft:
     needs: [verify, ci]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,13 +50,9 @@ jobs:
           node-version: 22
       - name: Criar o rascunho do release
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::Falta o secret RELEASES_TOKEN (ver docs/releases.md)."
-            exit 1
-          fi
           tag="$GITHUB_REF_NAME"
           if state=$(gh release view "$tag" -R "$RELEASES_REPO" --json isDraft --jq .isDraft 2>/dev/null); then
             if [ "$state" != "true" ]; then
@@ -71,6 +69,8 @@ jobs:
 
   package:
     needs: [verify, draft]
+    permissions:
+      contents: write
     uses: ./.github/workflows/package.yml
     with:
       publish: true
@@ -80,6 +80,8 @@ jobs:
   finalize:
     needs: [verify, package]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -87,7 +89,7 @@ jobs:
           node-version: 22
       - name: Publicar o release
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.verify.outputs.prerelease }}
         run: |
           tag="$GITHUB_REF_NAME"

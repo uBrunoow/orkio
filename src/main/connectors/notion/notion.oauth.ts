@@ -12,7 +12,9 @@ import { NOTION_API_BASE_URL, NotionApiError } from './notion.client'
 
 export const NOTION_OAUTH_AUTHORIZE_URL = `${NOTION_API_BASE_URL}/oauth/authorize`
 /** Precisa estar cadastrada em "Redirect URIs" da conexão OAuth no Notion e no intermediário. */
-export const NOTION_OAUTH_REDIRECT_URI = 'http://127.0.0.1:47821/oauth/notion/callback'
+// `localhost` e não `127.0.0.1`: o Notion recusa IP em redirect URI. O servidor local escuta só em
+// 127.0.0.1 (loopback.ts) e confere o header Host.
+export const NOTION_OAUTH_REDIRECT_URI = 'http://localhost:47821/oauth/notion/callback'
 /** Tempo máximo para o usuário autorizar no navegador. */
 export const NOTION_OAUTH_TIMEOUT_MS = 5 * 60_000
 export const NOTION_BROKER_TIMEOUT_MS = 15_000

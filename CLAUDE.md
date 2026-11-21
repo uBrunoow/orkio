@@ -40,8 +40,8 @@ Claude Code. Hoje existem:
   painel ou tela cheia, Command Palette (Ctrl/Cmd+K), card do quadro com um estado só (`cardStatus`).
   Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`. Redesign em fases (densidade pelo tema, estado em ponto + texto, moldura, quadro com tarefa em folha sobre as colunas e Kanban/Lista, agentes com avatar geométrico) em `docs/ui-redesign.md`.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
-  Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) no repo público
-  `uBrunoow/orkio-releases`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
+  Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
+  (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
 - **Agentes (8A):** colegas de IA (nome, papel, instruções, limites) que pegam tarefas do quadro e
   rodam os fluxos da 5A pelo mesmo Claude Code da 4A, com todas as regras do Orkio.
 - Ainda não existem: login no app (tela inicial), webhooks.
@@ -207,7 +207,7 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - Usamos `fetch` nativo (não o SDK). Timeout de 10 s; 429 respeita `Retry-After` (uma
   nova tentativa se a espera for de até 5 s).
 - Conexão principal: OAuth (`notion.oauth.ts`): `owner=user`, redirect
-  `http://127.0.0.1:47821/oauth/notion/callback`, troca/renovação via `broker/`.
+  `http://localhost:47821/oauth/notion/callback`, troca/renovação via `broker/`.
   Token colado continua como alternativa ("Usar token").
 - Registro salvo (`secrets/notion.bin`, cifrado) é versionado: `v: 2` com
   `method: 'token' | 'oauth'`. Registros `v: 1` (Etapa 1) são lidos como `token`.
@@ -690,7 +690,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 ## Atualizações automáticas (Etapa 6C)
 
 - **electron-updater** (dependência de runtime, a única em `dependencies`; fica fora do bundle) com
-  `publish` github → `uBrunoow/orkio-releases` (`RELEASES_REPO` em `shared/updates.ts`; precisa bater
+  `publish` github → `uBrunoow/orkio` (`RELEASES_REPO` em `shared/updates.ts`; precisa bater
   com o electron-builder da 6B). O feed é público: nada de token.
 - `UpdateService` (`main/updates/`) recebe o `autoUpdater` como `UpdaterLike`. Ligado só com
   `app.isPackaged` fora do Linux (ou `forceDevUpdateConfig`, flag oficial, usada no E2E). Checa 10 s
@@ -747,7 +747,8 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - **Workflows:** `ci.yml` (PR/push na main, sem `site/**`; lint, typecheck, test, e2e Linux,
   `package-smoke` Linux; E2E no macOS só por dispatch). `package.yml` (dispatch = empacota sem
   publicar e sobe artefatos; `workflow_call` com `publish`). `release.yml` (tag): `release-check` →
-  `ci.yml` → rascunho em `orkio-releases` (notas do CHANGELOG) → `package.yml` com
+  `ci.yml` → rascunho do release (notas do CHANGELOG, `GITHUB_TOKEN` com `contents: write` só nos
+  jobs que publicam) → `package.yml` com
   `--publish always` → confere arquivos e publica. Segredos só no `env` do passo; sem `set -x`.
 - Passo a passo (repo, token, Apple, Microsoft, custos): `docs/releases.md`.
 
@@ -868,7 +869,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Tarefa: painel no Quadro + tela cheia (6E)                                                                  | O painel é a prévia sem perder o quadro; a tela cheia dá espaço para log, diff e histórico. O que espera a pessoa sobe para o topo do painel.                                                                                                               |
 | Command Palette da Astryx (6E)                                                                              | Monta um `Dialog`; o E2E confirmou que não viola a CSP. Só navega: nada nela escreve no Notion ou roda agente.                                                                                                                                              |
 | Entrega em Etapas e automações (6E)                                                                         | "Exigir aprovação para push" é regra do projeto, não de um fluxo.                                                                                                                                                                                           |
-| Releases num repo público separado (`orkio-releases`), token fine-grained só nele                           | O código é privado; o site e o auto-update leem releases públicos sem token. O token do CI não lê o código.                                                                                                                                                 |
+| Releases no próprio repo, que é público (`GITHUB_TOKEN`, sem token pessoal)                                 | Release de repo privado exigiria um token embutido no app (que leria o código). Antes era um repo só de binários (`orkio-releases`); com o código público, um repo só basta.                                                                                |
 | Release como rascunho criado antes da matriz, publicado num job final                                       | Os jobs do mac e do Windows sobem para o mesmo release sem duplicar; nada é publicado se um pacote ou smoke falhar.                                                                                                                                         |
 | mac sem Developer ID = ad-hoc sem hardened runtime                                                          | Apple Silicon exige assinatura; hardened runtime com ad-hoc recusa o Electron Framework (validação de bibliotecas).                                                                                                                                         |
 | Fuse `RunAsNode` ligado                                                                                     | A ponte MCP de permissões é um processo que o CLI do Claude abre com o executável do Orkio + `ELECTRON_RUN_AS_NODE`.                                                                                                                                        |

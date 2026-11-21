@@ -236,7 +236,7 @@ describe('UpdateService', () => {
     expect(s).toMatchObject({ mode: 'manual', phase: 'available', version: '1.1.0' })
     expect(await t.service.openDownload()).toBe(true)
     expect(t.opened).toEqual([
-      'https://github.com/uBrunoow/orkio-releases/releases/download/v1.1.0/Orkio-1.1.0-mac-arm64.dmg'
+      'https://github.com/uBrunoow/orkio/releases/download/v1.1.0/Orkio-1.1.0-mac-arm64.dmg'
     ])
     expect((await t.service.install('now')).state).toBe('unavailable')
     expect(t.updater.installs).toHaveLength(0)

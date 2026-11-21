@@ -9,7 +9,7 @@ import { NOTION_MESSAGES, NotionConnector, type NotionOAuthDeps } from './notion
 import type { NotionOAuthBroker, NotionTokenSet } from './notion.oauth'
 
 const NOW = new Date('2026-11-19T12:00:00.000Z')
-const REDIRECT = 'http://127.0.0.1:47821/oauth/notion/callback'
+const REDIRECT = 'http://localhost:47821/oauth/notion/callback'
 
 function tokens(n: number): NotionTokenSet {
   return {
