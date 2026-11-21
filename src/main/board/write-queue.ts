@@ -79,6 +79,11 @@ export class NotionWriteQueue {
     this.kick()
   }
 
+  /** Escritas ainda não confirmadas pelo Notion (6C: a atualização espera por elas). */
+  pendingCount(): number {
+    return this.deps.store.allPending().length
+  }
+
   /** Espera o processamento em andamento (testes). */
   async idle(): Promise<void> {
     while (this.running) await this.running

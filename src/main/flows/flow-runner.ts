@@ -757,6 +757,28 @@ export class FlowRunner {
     return out
   }
 
+  /**
+   * Fluxos com passo rodando ou entre passos (6C: a atualização espera por eles). Gate, pausa e
+   * decisão pendente não contam: sobrevivem a reabrir o app.
+   */
+  runningList(): { projectId: string; taskId: string; flowName: string; step: string | null }[] {
+    return this.deps.db
+      .all<RunRow>(`SELECT * FROM flow_runs WHERE status = 'running' ORDER BY started_at`)
+      .map((r) => {
+        let flowName = 'Fluxo'
+        let step: string | null = null
+        try {
+          const flow = JSON.parse(r.flow_json) as Flow
+          flowName = flow.name || flowName
+          const current = flow.steps.find((s) => s.id === r.current_step)
+          step = current ? current.name || current.id : null
+        } catch {
+          // cópia ilegível: só o nome genérico
+        }
+        return { projectId: r.project_id, taskId: r.task_page_id, flowName, step }
+      })
+  }
+
   /** Fluxos ativos de todos os projetos (Visão geral, 6D). */
   activeViews(): FlowRunView[] {
     return this.deps.db

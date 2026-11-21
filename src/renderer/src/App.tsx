@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { Badge } from '@astryxdesign/core/Badge'
+import { VStack } from '@astryxdesign/core/VStack'
 import {
   BoardIcon,
   IntegrationsIcon,
   OverviewIcon,
   ProjectsIcon,
+  SettingsIcon,
   type SvgIcon
 } from './components/icons'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
@@ -17,15 +19,18 @@ import { OverviewPage } from './features/overview/OverviewPage'
 import { useWaitingCount } from './features/overview/useOverview'
 import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
+import { SettingsPage } from './features/settings/SettingsPage'
+import { UpdateBanner } from './features/settings/UpdateBanner'
 
-type Page = 'welcome' | 'overview' | 'board' | 'projects' | 'integrations'
+type Page = 'welcome' | 'overview' | 'board' | 'projects' | 'integrations' | 'settings'
 
 /** Ordem do menu = atalhos Ctrl/Cmd+1, 2, 3… */
 const PAGES: { id: Exclude<Page, 'welcome'>; label: string; icon: SvgIcon }[] = [
   { id: 'overview', label: 'Visão geral', icon: OverviewIcon },
   { id: 'board', label: 'Quadro', icon: BoardIcon },
   { id: 'projects', label: 'Projetos', icon: ProjectsIcon },
-  { id: 'integrations', label: 'Integrações', icon: IntegrationsIcon }
+  { id: 'integrations', label: 'Integrações', icon: IntegrationsIcon },
+  { id: 'settings', label: 'Configurações', icon: SettingsIcon }
 ]
 
 const IS_MAC = navigator.userAgent.includes('Mac')
@@ -134,32 +139,38 @@ export function App(): React.JSX.Element | null {
         </SideNav>
       }
     >
-      {page === 'overview' ? (
-        <OverviewPage
-          onOpenTask={(ref) => {
-            setOpenProjectId(null)
-            setOpenTask(ref)
-            setPage('board')
-          }}
-          onOpenProject={(projectId) => {
-            setOpenTask(null)
-            setOpenProjectId(projectId)
-            setPage('board')
-          }}
-          onOpenProjects={() => go('projects')}
-        />
-      ) : page === 'projects' ? (
-        <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
-      ) : page === 'board' ? (
-        <BoardPage
-          onOpenIntegrations={() => setPage('integrations')}
-          onOpenProjects={() => setPage('projects')}
-          openTask={openTask}
-          openProjectId={openProjectId}
-        />
-      ) : (
-        <IntegrationsPage />
-      )}
+      <VStack gap={4}>
+        {/* Atualização pronta (6C) e "O que há de novo": no topo de qualquer página. */}
+        <UpdateBanner {...(page === 'settings' ? {} : { onOpenSettings: () => go('settings') })} />
+        {page === 'overview' ? (
+          <OverviewPage
+            onOpenTask={(ref) => {
+              setOpenProjectId(null)
+              setOpenTask(ref)
+              setPage('board')
+            }}
+            onOpenProject={(projectId) => {
+              setOpenTask(null)
+              setOpenProjectId(projectId)
+              setPage('board')
+            }}
+            onOpenProjects={() => go('projects')}
+          />
+        ) : page === 'projects' ? (
+          <ProjectsPage onOpenIntegrations={() => setPage('integrations')} />
+        ) : page === 'board' ? (
+          <BoardPage
+            onOpenIntegrations={() => setPage('integrations')}
+            onOpenProjects={() => setPage('projects')}
+            openTask={openTask}
+            openProjectId={openProjectId}
+          />
+        ) : page === 'settings' ? (
+          <SettingsPage />
+        ) : (
+          <IntegrationsPage />
+        )}
+      </VStack>
     </AppShell>
   )
 }

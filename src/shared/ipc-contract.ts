@@ -9,6 +9,13 @@ import type { TaskSignals } from './task-signals'
 import type { Flow, FlowRunView, ProjectFlows } from './task-flow'
 import type { AlvaPrecheck, BacklogTaskInfo } from './alva'
 import type { DeliverySettings } from './delivery'
+import type {
+  ReleaseNotes,
+  UpdateChannel,
+  UpdateInstallMode,
+  UpdateInstallResult,
+  UpdateStatus
+} from './updates'
 import type { ActivityPage, ActivityQuery, OverviewSnapshot, TaskSection } from './overview'
 
 /** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
@@ -170,6 +177,19 @@ export const IPC_CHANNELS = {
   },
   shell: {
     openExternal: 'shell:open-external'
+  },
+  updates: {
+    status: 'updates:status',
+    check: 'updates:check',
+    setChannel: 'updates:set-channel',
+    install: 'updates:install',
+    openDownload: 'updates:open-download',
+    whatsNew: 'updates:whats-new',
+    markWhatsNewSeen: 'updates:mark-whats-new-seen',
+    releaseNotes: 'updates:release-notes',
+    about: 'updates:about',
+    /** Evento main → renderer: o status das atualizações mudou. */
+    statusChanged: 'updates:status-changed'
   },
   /** Visão geral (6D): agregação de todos os projetos, só dados locais e caches. */
   overview: {
@@ -852,6 +872,24 @@ export interface OrkioApi {
     /** Assina mudanças de branch. Devolve a função para cancelar a inscrição. */
     onBranchChanged(listener: (event: BranchChangedEvent) => void): () => void
   }
+  /** Atualizações automáticas (6C). Tudo roda no main; o renderer só vê o status. */
+  updates: {
+    status(): Promise<UpdateStatus>
+    /** "Procurar atualizações". */
+    check(): Promise<UpdateStatus>
+    setChannel(channel: UpdateChannel): Promise<UpdateStatus>
+    /** `if_idle`: instala se nada estiver rodando, senão devolve o que está rodando. */
+    install(mode: UpdateInstallMode): Promise<UpdateInstallResult>
+    /** macOS sem assinatura: abre o DMG da arquitetura no navegador (URL montada no main). */
+    openDownload(): Promise<boolean>
+    /** Notas para mostrar uma vez depois de atualizar (`null` = nada). */
+    whatsNew(): Promise<ReleaseNotes | null>
+    markWhatsNewSeen(): Promise<void>
+    /** Notas da versão atual (botão "Ver novidades desta versão"). */
+    releaseNotes(): Promise<ReleaseNotes | null>
+    about(): Promise<AboutInfo>
+    onStatus(listener: (status: UpdateStatus) => void): () => void
+  }
   /** Visão geral (6D): tudo de todos os projetos, sem chamar APIs ao abrir. */
   overview: {
     get(): Promise<OverviewResult<OverviewSnapshot>>
@@ -863,6 +901,12 @@ export interface OrkioApi {
   }
   /** Abre um link no navegador padrão. Só domínios da allowlist do main são aceitos. */
   openExternal(url: string): Promise<boolean>
+}
+
+/** Configurações > Sobre. Links do site só se o build souber o endereço. */
+export interface AboutInfo {
+  version: string
+  links: { site: string; privacy: string; terms: string } | null
 }
 
 export type OverviewResult<T> =

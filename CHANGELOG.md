@@ -9,6 +9,11 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 ### Adicionado
 
 - Instaladores para macOS (Apple Silicon e Intel) e Windows, publicados por CI a cada versão.
+- Atualizações automáticas: o Orkio procura versões novas ao abrir e a cada 4 horas, baixa em
+  segundo plano e instala ao reiniciar, sem interromper execuções do Claude Code, fluxos ou
+  escritas no Notion.
+- Tela Configurações com Atualizações (canal Estável ou Beta) e Sobre.
+- "O que há de novo" depois de cada atualização.
 
 ## [0.1.0] - 2026-11-20
 

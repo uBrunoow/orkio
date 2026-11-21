@@ -48,9 +48,14 @@ import { authorizeViaLoopback } from './oauth/loopback'
 import { ProjectsService } from './projects/projects.service'
 import { registerGitHubIpc } from './ipc/github.ipc'
 import { registerNotionIpc } from './ipc/notion.ipc'
-import { registerShellIpc } from './ipc/shell.ipc'
+import { isAllowedExternalUrl, registerShellIpc, siteUrlRules } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
-import { IPC_CHANNELS, type AutomationStatus, type BoardSyncEvent } from '../shared/ipc-contract'
+import {
+  IPC_CHANNELS,
+  type AboutInfo,
+  type AutomationStatus,
+  type BoardSyncEvent
+} from '../shared/ipc-contract'
 import { SecureStore } from './storage/secure-store'
 import { ClaudeService, type ClaudeServiceDeps } from './claude/claude.service'
 import { detectClaude } from './claude/detect'
@@ -76,10 +81,17 @@ import { registerTaskFlowsIpc } from './ipc/task-flows.ipc'
 import { RunService } from './claude/run.service'
 import { WorktreeService } from './claude/worktree.service'
 import { registerClaudeIpc } from './ipc/claude.ipc'
+import { registerUpdatesIpc } from './ipc/updates.ipc'
+import { UpdateService, type UpdaterLike } from './updates/update.service'
+import { busyCount, describeBusy } from './updates/busy'
+import { isMacAppSigned } from './updates/mac-signature'
+import { changelogSection } from '../shared/updates'
+import { autoUpdater } from 'electron-updater'
 import { registerOverviewIpc } from './ipc/overview.ipc'
 import { OverviewService } from './overview/overview.service'
 import { applyWaitingBadge, overlayDotBitmap } from './overview/badge'
 import appIcon from '../../resources/icon.png?asset'
+import changelog from '../../CHANGELOG.md?raw'
 
 const RENDERER_HTML = join(__dirname, '../renderer/index.html')
 const DEV_SERVER_URL = app.isPackaged ? undefined : process.env['ELECTRON_RENDERER_URL']
@@ -438,7 +450,128 @@ function registerIpc(): void {
     registerBoardIpc(ipcMain, unavailableBoard(), isTrustedSender, projectsReady)
     registerOverviewIpc(ipcMain, null, isTrustedSender, projectsReady)
   }
-  registerShellIpc(ipcMain, (url) => shell.openExternal(url), isTrustedSender)
+  const siteUrl = readSiteUrl()
+  registerShellIpc(
+    ipcMain,
+    (url) => shell.openExternal(url),
+    isTrustedSender,
+    siteUrlRules(siteUrl)
+  )
+
+  // Atualizações automáticas (6C). Funcionam mesmo com a config em modo só leitura ou sem o banco
+  // local: é assim que se sai de um downgrade.
+  updates = createUpdates({
+    configStore,
+    ready: projectsReady,
+    taskLabel: async (projectId, taskId) => {
+      const r = await notionWorkspace.listTasks(projectId)
+      return r.ok ? (r.value.tasks.find((t) => t.id === taskId)?.displayId ?? null) : null
+    }
+  })
+  registerUpdatesIpc(
+    ipcMain,
+    updates,
+    () => ({ version: app.getVersion(), links: siteLinks(siteUrl) }),
+    isTrustedSender
+  )
+  void projectsReady.then(() => updates?.start())
+}
+
+/** Endereço do site (Sobre): `MAIN_VITE_SITE_URL` ou a origem do intermediário OAuth (é o site). */
+function readSiteUrl(): string | null {
+  const raw =
+    import.meta.env.MAIN_VITE_SITE_URL || import.meta.env.MAIN_VITE_NOTION_OAUTH_BROKER_URL
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'https:' && !url.port ? url.origin : null
+  } catch {
+    return null
+  }
+}
+
+function siteLinks(siteUrl: string | null): AboutInfo['links'] {
+  return siteUrl
+    ? { site: siteUrl, privacy: `${siteUrl}/privacidade`, terms: `${siteUrl}/termos` }
+    : null
+}
+
+/** Mesmo desligamento do fechamento normal, esperando as execuções saírem (até 12 s). */
+async function shutdownWork(): Promise<void> {
+  flowRunner?.dispose()
+  claudeRuns?.cancelAll()
+  const deadline = Date.now() + 12_000
+  while ((claudeRuns?.activeList().some((r) => !r.queued) ?? false) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  writeQueue?.stop()
+  scheduler?.stop()
+}
+
+function createUpdates(deps: {
+  configStore: ReturnType<typeof createOrkioConfigStore>
+  ready: Promise<void>
+  taskLabel: (projectId: string, taskId: string) => Promise<string | null>
+}): UpdateService {
+  const busyInput = (): Omit<Parameters<typeof describeBusy>[0], 'taskLabel'> => ({
+    runs: claudeRuns?.activeList() ?? [],
+    flows: flowRunner?.runningList() ?? [],
+    pendingWrites: writeQueue?.pendingCount() ?? 0
+  })
+  const version = app.getVersion()
+  return new UpdateService({
+    // O tipo do electron-updater é um emissor tipado; usamos só o pedaço descrito em UpdaterLike.
+    updater: autoUpdater as unknown as UpdaterLike,
+    currentVersion: version,
+    isPackaged: () => app.isPackaged,
+    platform: process.platform,
+    arch: process.arch,
+    macSigned: () =>
+      isMacAppSigned(
+        (command, args) =>
+          new Promise((resolve, reject) => {
+            execFileCb(
+              command,
+              args,
+              { timeout: 10_000, windowsHide: true },
+              (error, _out, stderr) => {
+                if (error && (error as NodeJS.ErrnoException).code === 'ENOENT') reject(error)
+                else
+                  resolve({
+                    code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
+                    stderr: String(stderr)
+                  })
+              }
+            )
+          }),
+        app.getPath('exe'),
+        import.meta.env.MAIN_VITE_MAC_SIGNED === '1'
+      ),
+    settings: {
+      get: () => deps.configStore.get().updates,
+      save: async (patch) => {
+        await deps.ready
+        await deps.configStore.update((c) => ({ ...c, updates: { ...c.updates, ...patch } }))
+      },
+      writable: () => !deps.configStore.readOnly
+    },
+    busyCount: () => busyCount(busyInput()),
+    busyItems: () => describeBusy({ ...busyInput(), taskLabel: deps.taskLabel }),
+    shutdownWork,
+    openExternal: async (url) => {
+      // Mesma allowlist do renderer: só o repo público de releases.
+      if (isAllowedExternalUrl(url)) await shell.openExternal(url)
+    },
+    releaseNotes: () => {
+      const notes = changelogSection(changelog, version)
+      return notes === null ? null : { version, notes }
+    },
+    emit: (status) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.updates.statusChanged, status)
+      }
+    }
+  })
 }
 
 let projects: ProjectsService | null = null
@@ -446,6 +579,7 @@ let writeQueue: NotionWriteQueue | null = null
 let scheduler: AutomationScheduler | null = null
 let claudeRuns: RunService | null = null
 let flowRunner: FlowRunner | null = null
+let updates: UpdateService | null = null
 let overview: OverviewService | null = null
 
 /** Eventos que mudam "Esperando você"/"Em execução" (texto do log não conta). */
@@ -809,6 +943,7 @@ void app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  updates?.stop()
   overview?.dispose()
   flowRunner?.dispose()
   claudeRuns?.cancelAll()
