@@ -29,8 +29,9 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  */
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
 import type { Condition, Flow, ProjectFlows, StageFlow, Step } from '../../shared/task-flow'
+import type { UpdateChannel } from '../../shared/updates'
 
-export const ORKIO_CONFIG_VERSION = 9
+export const ORKIO_CONFIG_VERSION = 10
 
 export interface StoredProject {
   id: string
@@ -58,6 +59,15 @@ export interface OrkioConfig {
   delivery: Record<string, DeliverySettings>
   /** Agentes (8A): regras de atribuição por coluna. Os perfis ficam em arquivos, não aqui. */
   agents: Record<string, ProjectAgents>
+  /** Atualizações (6C): canal, última versão vista ("O que há de novo") e última verificação. */
+  updates: UpdatesConfig
+}
+
+export interface UpdatesConfig {
+  channel: UpdateChannel
+  /** `null` = instalação nova (nada a mostrar no "O que há de novo"). */
+  lastSeenVersion: string | null
+  lastCheckAt: string | null
 }
 
 export function emptyConfig(): OrkioConfig {
@@ -69,7 +79,8 @@ export function emptyConfig(): OrkioConfig {
     claudeContexts: {},
     flows: {},
     delivery: {},
-    agents: {}
+    agents: {},
+    updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
   }
 }
 
@@ -112,8 +123,14 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
       6: (data) => ({ ...data }),
       // v7 → v8 (5C): ajustes de entrega por projeto (padrão: exigir aprovação para push).
       7: (data) => ({ ...data, delivery: {} }),
-      // v8 → v9 (8A): nenhuma regra de atribuição de agentes ainda.
-      8: (data) => ({ ...data, agents: {} })
+      // v8 → v9 (6C): canal Estável. Sem versão vista: a primeira abertura só registra a versão
+      // (quem chega à 6C instalou na mão); o "O que há de novo" vale a partir da próxima.
+      8: (data) => ({
+        ...data,
+        updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
+      }),
+      // v9 → v10 (8A): nenhuma regra de atribuição de agentes ainda.
+      9: (data) => ({ ...data, agents: {} })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -195,9 +212,21 @@ export function validateConfig(
     claudeContexts,
     flows,
     delivery,
-    agents
+    agents,
+    updates: parseUpdates(data['updates'])
   }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
+}
+
+/** Bloco de atualizações inválido volta ao padrão (nunca derruba a config). */
+export function parseUpdates(value: unknown): UpdatesConfig {
+  const v = isRecord(value) ? value : {}
+  const str = (x: unknown): string | null => (typeof x === 'string' && x ? x : null)
+  return {
+    channel: v['channel'] === 'beta' ? 'beta' : 'stable',
+    lastSeenVersion: str(v['lastSeenVersion']),
+    lastCheckAt: str(v['lastCheckAt'])
+  }
 }
 
 function nameRef(value: unknown): { id: string; name: string } | null {

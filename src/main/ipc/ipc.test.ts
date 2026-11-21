@@ -10,7 +10,8 @@ import { isFlowDraft, registerFlowIpc } from './flow.ipc'
 import { registerAutomationIpc } from './automation.ipc'
 import { registerNotionIpc } from './notion.ipc'
 import { registerNotionWorkspaceIpc } from './notion-workspace.ipc'
-import { isAllowedExternalUrl, registerShellIpc } from './shell.ipc'
+import { isAllowedExternalUrl, registerShellIpc, siteUrlRules } from './shell.ipc'
+import { registerUpdatesIpc, type UpdatesIpcService } from './updates.ipc'
 import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
 import { registerAgentsIpc, toProfile } from './agents.ipc'
 import type { AgentsService } from '../agents/agents.service'
@@ -341,6 +342,27 @@ describe('registerProjectsIpc', () => {
 })
 
 describe('shell.openExternal', () => {
+  it('allowlist do repo público de releases (6C): só DMG e página de versão', () => {
+    const base = 'https://github.com/uBrunoow/orkio-releases/releases'
+    expect(isAllowedExternalUrl(`${base}/download/v1.2.0/Orkio-1.2.0-mac-arm64.dmg`)).toBe(true)
+    expect(isAllowedExternalUrl(`${base}/tag/v1.2.0-beta.1`)).toBe(true)
+    expect(isAllowedExternalUrl(`${base}/download/v1.2.0/Orkio-1.2.0-win-x64-setup.exe`)).toBe(
+      false
+    )
+    expect(isAllowedExternalUrl('https://github.com/uBrunoow/orkio/releases/tag/v1.2.0')).toBe(
+      false
+    )
+    expect(isAllowedExternalUrl('https://github.com/uBrunoow/orkio-releases/settings')).toBe(false)
+  })
+
+  it('site do Orkio só com https e sem porta (Configurações > Sobre)', () => {
+    const rules = siteUrlRules('https://orkio.example')
+    expect(isAllowedExternalUrl('https://orkio.example/privacidade', rules)).toBe(true)
+    expect(isAllowedExternalUrl('https://orkio.example/privacidade')).toBe(false)
+    expect(siteUrlRules('http://127.0.0.1:3000')).toEqual([])
+    expect(siteUrlRules(null)).toEqual([])
+  })
+
   it('allowlist: só https nos domínios do Notion', () => {
     expect(isAllowedExternalUrl('https://developers.notion.com/guides/x')).toBe(true)
     expect(isAllowedExternalUrl('https://www.notion.so/profile/integrations')).toBe(true)
@@ -714,5 +736,50 @@ describe('registerAgentsIpc', () => {
     expect(toProfile({ ...ANA, commands: 'tudo' })).toBeNull()
     expect(toProfile({ ...ANA, limits: null })).toBeNull()
     expect(toProfile([])).toBeNull()
+  })
+})
+
+describe('updates IPC (6C)', () => {
+  function service(): UpdatesIpcService {
+    const status = {
+      mode: 'auto' as const,
+      phase: 'idle' as const,
+      currentVersion: '1.0.0',
+      channel: 'stable' as const,
+      version: null,
+      progress: null,
+      lastCheckAt: null,
+      error: null,
+      installWhenIdle: false,
+      busy: [],
+      channelNote: null
+    }
+    return {
+      getStatus: vi.fn(() => status),
+      check: vi.fn(async () => status),
+      setChannel: vi.fn(async () => status),
+      install: vi.fn(async () => ({ state: 'installing' as const })),
+      openDownload: vi.fn(async () => true),
+      whatsNew: vi.fn(() => null),
+      markWhatsNewSeen: vi.fn(async () => undefined),
+      releaseNotes: vi.fn(() => null)
+    }
+  }
+
+  it('valida canal e modo de instalação; recusa origem não confiável', async () => {
+    const ipc = fakeIpc()
+    const s = service()
+    registerUpdatesIpc(ipc, s, () => ({ version: '1.0.0', links: null }), guard)
+    const ch = IPC_CHANNELS.updates
+    await ipc.invoke(ch.setChannel, 'nightly')
+    expect(s.setChannel).not.toHaveBeenCalled()
+    await ipc.invoke(ch.setChannel, 'beta')
+    expect(s.setChannel).toHaveBeenCalledWith('beta')
+    expect(await ipc.invoke(ch.install, 'rm -rf')).toMatchObject({ state: 'unavailable' })
+    expect(s.install).not.toHaveBeenCalled()
+    expect(await ipc.invoke(ch.install, 'when_idle')).toEqual({ state: 'installing' })
+    ipc.trusted = false
+    await expect(ipc.invoke(ch.install, 'now')).rejects.toThrow('Origem de IPC não autorizada')
+    expect(s.install).toHaveBeenCalledTimes(1)
   })
 })

@@ -514,6 +514,8 @@ export interface GitHubPullItem {
   /** Commit no topo da branch da PR (para conferir se o push chegou). */
   headSha: string | null
   updatedAt: string
+  /** Quando a PR foi aberta (REST `created_at`). */
+  createdAt: string | null
   closedAt: string | null
 }
 
@@ -555,6 +557,7 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
     headRef: head ?? '',
     headSha: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : null,
     updatedAt,
+    createdAt: stringOrNull(value['created_at']),
     closedAt: stringOrNull(value['closed_at'])
   }
 }

@@ -177,6 +177,9 @@ describe('RunService', () => {
       suggestion: 'npm test'
     })
     expect(notifications).toContain('O Claude Code pede aprovação')
+    expect(service.waitingRequests()).toEqual([
+      expect.objectContaining({ requestId: 'req-1', kind: 'permission', summary: 'npm test' })
+    ])
     service.answerPermission('run-1', 'req-1', 'allow_always')
     expect(await answer).toEqual({ behavior: 'allow' })
     expect(await run.ask('Bash', { command: 'npm test -- --watch=false' })).toEqual({
@@ -309,7 +312,17 @@ describe('RunService', () => {
       state: 'pending',
       questions: [{ question: 'Qual banco?', options: ['Postgres', 'SQLite'], multiSelect: false }]
     })
+    // Visão geral (6D): a pergunta aparece em "Esperando você" até ser respondida.
+    expect(service.waitingRequests()).toEqual([
+      expect.objectContaining({
+        runId: 'run-1',
+        requestId: 'q-1',
+        kind: 'question',
+        summary: 'Qual banco?'
+      })
+    ])
     service.answerQuestion('run-1', 'q-1', { 'Qual banco?': 'SQLite' })
+    expect(service.waitingRequests()).toEqual([])
     expect(await answer).toEqual({
       behavior: 'allow',
       updatedInput: { ...input, answers: { 'Qual banco?': 'SQLite' } }
@@ -337,6 +350,12 @@ describe('RunService', () => {
     await tick()
     expect(runs).toHaveLength(2)
     expect(statusOf(third.id)).toBe('queued')
+    expect(
+      service
+        .activeRuns()
+        .map((r) => r.status)
+        .sort()
+    ).toEqual(['queued', 'running', 'running'])
     const first = runs.find((r) => r.opts.cwd.endsWith('ORK-1'))!
     first.emit({ kind: 'result', ok: true, durationMs: 1, costUsd: 0, turns: 1, text: '' })
     first.exit(0)
