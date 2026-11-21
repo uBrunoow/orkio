@@ -478,6 +478,23 @@ export class NotionWorkspaceService {
     })
   }
 
+  /**
+   * Tarefas já em memória (mesmo vencidas), sem rede; `null` se nunca foram lidas. Para a Visão
+   * geral (6D), que mostra ID/título sem chamar o Notion ao abrir.
+   */
+  cachedTasks(projectId: string): NotionTask[] | null {
+    let best: CacheEntry<CachedTasks> | null = null
+    for (const [key, entry] of this.tasksCache) {
+      if (key.startsWith(`${projectId}:`) && key.endsWith(`:${this.configVersion}`)) best = entry
+    }
+    return best?.value.tasks ?? null
+  }
+
+  /** Saúde do mapeamento já conhecida (sem revalidar); `null` = ainda não verificada. */
+  cachedHealth(): NotionWorkspaceStatus['health'] | null {
+    return this.status?.health ?? null
+  }
+
   /** Esquece as tarefas em cache de um projeto (ex.: depois de escrever no Notion). */
   invalidateTasks(projectId: string): void {
     this.dropTasksCache(projectId)

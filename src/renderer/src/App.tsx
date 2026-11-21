@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { Badge } from '@astryxdesign/core/Badge'
 import { Kbd } from '@astryxdesign/core/Kbd'
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
@@ -9,6 +10,7 @@ import {
   ClaudeLogo,
   FlowsIcon,
   IntegrationsIcon,
+  OverviewIcon,
   ProjectsIcon,
   SearchIcon,
   StagesIcon,
@@ -24,11 +26,13 @@ import {
   type Route
 } from './app/routes'
 import { CommandMenu, type CommandData } from './app/CommandMenu'
-import { globalShortcut, isTextField } from './app/shortcuts'
+import { SHORTCUTS, globalShortcut, isTextField } from './app/shortcuts'
 import { BoardPage } from './features/board/BoardPage'
 import { AutomationsPage, ContextPage, FlowsPage } from './features/board/ProjectPages'
 import { TaskPage } from './features/board/TaskPage'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
+import { OverviewPage } from './features/overview/OverviewPage'
+import { useWaitingCount } from './features/overview/useOverview'
 import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
 
@@ -62,11 +66,36 @@ function useLinkedProjects(trigger: number): ProjectView[] | null {
   return projects
 }
 
-export function App(): React.JSX.Element {
+/** `aria-keyshortcuts` do item do menu (mesmo atalho da paleta). */
+function keyshortcut(route: Route['name']): string | undefined {
+  const keys = SHORTCUTS.find((s) => s.route.name === route)?.keys
+  return keys?.replace('mod', navigator.userAgent.includes('Mac') ? 'Meta' : 'Control')
+}
+
+export function App(): React.JSX.Element | null {
   const [router, dispatch] = useReducer(routerReducer, initialRouter({ name: 'welcome' }))
   const { route } = router
   const navigate = useCallback((next: Route) => dispatch({ type: 'navigate', route: next }), [])
   const projects = useLinkedProjects(router.key)
+  // Quem já tem projeto abre na Visão geral (6D); sem projeto, "Vamos começar".
+  const [ready, setReady] = useState(false)
+  useEffect(() => {
+    let active = true
+    void window.orkio.projects
+      .list()
+      .then((r) => {
+        if (!active) return
+        if (r.projects.length > 0) dispatch({ type: 'reset', route: { name: 'overview' } })
+        setReady(true)
+      })
+      .catch(() => {
+        if (active) setReady(true)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+  const waiting = useWaitingCount(ready && route.name !== 'welcome')
   const [chosenProject, setChosenProject] = useState<string | null>(() =>
     window.localStorage.getItem(CURRENT_PROJECT_KEY)
   )
@@ -93,7 +122,12 @@ export function App(): React.JSX.Element {
     () =>
       window.orkio.board.onOpenTask((ref) => {
         chooseProject(ref.projectId)
-        navigate({ name: 'board', projectId: ref.projectId, taskId: ref.taskId })
+        navigate({
+          name: 'board',
+          projectId: ref.projectId,
+          taskId: ref.taskId,
+          ...(ref.section ? { section: ref.section } : {})
+        })
       }),
     [chooseProject, navigate]
   )
@@ -140,6 +174,8 @@ export function App(): React.JSX.Element {
     navigate(command.route)
   }
 
+  if (!ready) return null
+
   // Tela inicial em tela cheia, sem a navegação.
   if (route.name === 'welcome') {
     return (
@@ -156,6 +192,26 @@ export function App(): React.JSX.Element {
 
   let page: React.ReactNode
   switch (route.name) {
+    case 'overview':
+      page = (
+        <OverviewPage
+          onOpenTask={(ref) => {
+            chooseProject(ref.projectId)
+            navigate({
+              name: 'board',
+              projectId: ref.projectId,
+              taskId: ref.taskId,
+              ...(ref.section ? { section: ref.section } : {})
+            })
+          }}
+          onOpenProject={(projectId) => {
+            chooseProject(projectId)
+            navigate({ name: 'board', projectId })
+          }}
+          onOpenProjects={toProjects}
+        />
+      )
+      break
     case 'projects':
       page = (
         <ProjectsPage
@@ -175,6 +231,7 @@ export function App(): React.JSX.Element {
         <BoardPage
           project={projects === null ? null : project}
           openTaskId={route.taskId ?? null}
+          focusSection={route.section ?? null}
           onOpenIntegrations={toIntegrations}
           onOpenProjects={toProjects}
           onExpandTask={(taskId) =>
@@ -231,6 +288,26 @@ export function App(): React.JSX.Element {
           aria-label="Navegação principal"
           header={<OrkioLogo variant="simple" withWordmark size={26} />}
         >
+          <SideNavSection title="Orkio" isHeaderHidden>
+            <SideNavItem
+              label={ROUTE_TITLES.overview}
+              icon={OverviewIcon}
+              isSelected={route.name === 'overview'}
+              aria-keyshortcuts={keyshortcut('overview')}
+              {...(waiting > 0
+                ? {
+                    endContent: (
+                      <Badge
+                        label={String(waiting)}
+                        variant="orange"
+                        aria-label={`${waiting} esperando você`}
+                      />
+                    )
+                  }
+                : {})}
+              onClick={() => navigate({ name: 'overview' })}
+            />
+          </SideNavSection>
           <SideNavSection
             title={project ? project.name : 'Projeto'}
             subtitle="Projeto atual"
@@ -260,6 +337,7 @@ export function App(): React.JSX.Element {
                 isSelected={
                   route.name === item.name || (item.name === 'board' && route.name === 'task')
                 }
+                aria-keyshortcuts={keyshortcut(item.name)}
                 onClick={() => navigate({ name: item.name })}
               />
             ))}
@@ -275,12 +353,14 @@ export function App(): React.JSX.Element {
               label={ROUTE_TITLES.projects}
               icon={ProjectsIcon}
               isSelected={route.name === 'projects'}
+              aria-keyshortcuts={keyshortcut('projects')}
               onClick={toProjects}
             />
             <SideNavItem
               label={ROUTE_TITLES.integrations}
               icon={IntegrationsIcon}
               isSelected={route.name === 'integrations'}
+              aria-keyshortcuts={keyshortcut('integrations')}
               onClick={toIntegrations}
             />
           </SideNavSection>

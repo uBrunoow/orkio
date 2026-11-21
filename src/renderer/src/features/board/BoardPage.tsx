@@ -11,6 +11,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
+import type { TaskSection } from '../../../../shared/overview'
 import { isTextField } from '../../app/shortcuts'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
@@ -30,6 +31,7 @@ import { useBoard, type BoardError } from './useBoard'
 export function BoardPage({
   project,
   openTaskId,
+  focusSection = null,
   onOpenIntegrations,
   onOpenProjects,
   onExpandTask
@@ -38,6 +40,8 @@ export function BoardPage({
   project: ProjectView | null
   /** Tarefa a abrir (notificação, Visão geral, Command Palette). */
   openTaskId: string | null
+  /** Seção do painel a mostrar ao abrir a tarefa (Visão geral, 6D). */
+  focusSection?: TaskSection | null
   onOpenIntegrations(): void
   onOpenProjects(): void
   /** Abre a tarefa em tela cheia. */
@@ -61,6 +65,7 @@ export function BoardPage({
       projectId={project.id}
       projectName={project.name}
       openTaskId={openTaskId}
+      focusSection={focusSection}
       onOpenIntegrations={onOpenIntegrations}
       onExpandTask={onExpandTask}
     />
@@ -71,12 +76,14 @@ function Board({
   projectId,
   projectName,
   openTaskId,
+  focusSection,
   onOpenIntegrations,
   onExpandTask
 }: {
   projectId: string
   projectName: string
   openTaskId: string | null
+  focusSection: TaskSection | null
   onOpenIntegrations(): void
   onExpandTask(taskId: string): void
 }): React.JSX.Element {
@@ -296,6 +303,7 @@ function Board({
                   actions.onToggleAutomation(selectedCard.taskId, paused)
                 }
                 onClose={() => setPicked(null)}
+                focusSection={selectedCard.taskId === openTaskId ? focusSection : null}
                 onExpand={() => onExpandTask(selectedCard.taskId)}
               />
             </VStack>

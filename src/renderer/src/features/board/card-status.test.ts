@@ -50,7 +50,9 @@ describe('cardStatus', () => {
       tone: 'neutral',
       isPulsing: true
     })
-    expect(cardStatus({ sync: { state: 'pending' } }, null, withPr({}))?.label).toBe('Sincronizando')
+    expect(cardStatus({ sync: { state: 'pending' } }, null, withPr({}))?.label).toBe(
+      'Sincronizando'
+    )
     expect(cardStatus(synced, null, withPr({}))?.label).toBe('Em revisão')
     expect(cardStatus(synced, null, withPr({ state: 'draft' }))?.label).toBe('PR rascunho')
   })

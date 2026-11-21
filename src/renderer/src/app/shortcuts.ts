@@ -8,15 +8,25 @@ export interface Shortcut {
   /** Formato do `Kbd` da Astryx (`mod` = Ctrl, ou ⌘ no Mac). */
   keys: string
   label: string
-  route?: Route
+  route: Route
+  /** Tela do projeto atual (só faz sentido com um projeto vinculado). */
+  isProjectScreen?: boolean
 }
 
-/** Telas do projeto atual por número, na ordem do menu. */
+/** Telas por número, na ordem do menu: Visão geral, as do projeto atual, Projetos, Integrações. */
 export const SHORTCUTS: readonly Shortcut[] = [
-  { keys: 'mod+1', label: ROUTE_TITLES.board, route: { name: 'board' } },
-  { keys: 'mod+2', label: ROUTE_TITLES.automations, route: { name: 'automations' } },
-  { keys: 'mod+3', label: ROUTE_TITLES.flows, route: { name: 'flows' } },
-  { keys: 'mod+4', label: ROUTE_TITLES.context, route: { name: 'context' } }
+  { keys: 'mod+1', label: ROUTE_TITLES.overview, route: { name: 'overview' } },
+  { keys: 'mod+2', label: ROUTE_TITLES.board, route: { name: 'board' }, isProjectScreen: true },
+  {
+    keys: 'mod+3',
+    label: ROUTE_TITLES.automations,
+    route: { name: 'automations' },
+    isProjectScreen: true
+  },
+  { keys: 'mod+4', label: ROUTE_TITLES.flows, route: { name: 'flows' }, isProjectScreen: true },
+  { keys: 'mod+5', label: ROUTE_TITLES.context, route: { name: 'context' }, isProjectScreen: true },
+  { keys: 'mod+6', label: ROUTE_TITLES.projects, route: { name: 'projects' } },
+  { keys: 'mod+7', label: ROUTE_TITLES.integrations, route: { name: 'integrations' } }
 ]
 
 export type GlobalAction =
@@ -39,7 +49,7 @@ export function globalShortcut(e: KeyInput, isMac: boolean): GlobalAction | null
     if (e.key === '[') return { type: 'back' }
     const n = Number(e.key)
     const shortcut = Number.isInteger(n) && n >= 1 ? SHORTCUTS[n - 1] : undefined
-    if (shortcut?.route) return { type: 'navigate', route: shortcut.route }
+    if (shortcut) return { type: 'navigate', route: shortcut.route }
     return null
   }
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'ArrowLeft') {

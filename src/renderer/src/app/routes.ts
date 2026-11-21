@@ -3,15 +3,18 @@
  * uma rota, e toda navegação gera uma chave nova (clicar no item atual remonta a página e sai de
  * qualquer subtela). Pilha simples para "Voltar".
  */
+import type { TaskSection } from '../../../shared/overview'
 
 /** Telas de um projeto (dependem do projeto atual do menu). */
 export type ProjectRouteName = 'board' | 'automations' | 'flows' | 'context'
 
 export type Route =
   | { name: 'welcome' }
+  /** Visão geral (6D): o que espera você em todos os projetos. */
+  | { name: 'overview' }
   | { name: 'projects' }
   | { name: 'integrations' }
-  | { name: 'board'; projectId?: string; taskId?: string }
+  | { name: 'board'; projectId?: string; taskId?: string; section?: TaskSection }
   | { name: 'automations'; projectId?: string }
   | { name: 'flows'; projectId?: string; tab?: FlowsTab }
   | { name: 'context'; projectId?: string }
@@ -36,6 +39,7 @@ export function isProjectRoute(route: Route): route is Extract<Route, { name: Pr
 /** Títulos das telas (menu, cabeçalho e, depois, a Command Palette). */
 export const ROUTE_TITLES: Record<RouteName, string> = {
   welcome: 'Vamos começar',
+  overview: 'Visão geral',
   projects: 'Projetos',
   integrations: 'Integrações',
   board: 'Quadro',
@@ -52,11 +56,16 @@ export interface RouterState {
   history: Route[]
 }
 
-export type RouterAction = { type: 'navigate'; route: Route } | { type: 'back' }
+export type RouterAction =
+  | { type: 'navigate'; route: Route }
+  | { type: 'back' }
+  /** Troca a tela sem entrar na pilha do "Voltar" (tela inicial decidida ao abrir). */
+  | { type: 'reset'; route: Route }
 
 const MAX_HISTORY = 30
 
 export function routerReducer(state: RouterState, action: RouterAction): RouterState {
+  if (action.type === 'reset') return initialRouter(action.route, state.key + 1)
   if (action.type === 'back') {
     const previous = state.history.at(-1)
     if (!previous) return state
@@ -69,6 +78,6 @@ export function routerReducer(state: RouterState, action: RouterAction): RouterS
   }
 }
 
-export function initialRouter(route: Route): RouterState {
-  return { route, key: 0, history: [] }
+export function initialRouter(route: Route, key = 0): RouterState {
+  return { route, key, history: [] }
 }

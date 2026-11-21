@@ -197,11 +197,11 @@ test('Command Palette e atalhos: Ctrl+K acha a tarefa, Ctrl+número troca de tel
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await expect(page.getByRole('tab', { name: 'Modelos Alva', selected: true })).toBeVisible()
-  await page.keyboard.press('Control+2')
+  await page.keyboard.press('Control+3')
   await expect(h1(page, 'Etapas e automações')).toBeVisible()
   await page.keyboard.press('Alt+ArrowLeft')
   await expect(h1(page, 'Fluxos')).toBeVisible()
-  await page.keyboard.press('Control+1')
+  await page.keyboard.press('Control+2')
   await expect(h1(page, 'Quadro')).toBeVisible()
 
   // Quadro pelo teclado: foco no card, Ctrl+Enter abre em tela cheia.

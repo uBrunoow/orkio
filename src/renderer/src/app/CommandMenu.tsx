@@ -7,7 +7,7 @@ import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import type { SearchableItem, SearchSource } from '@astryxdesign/core/Typeahead'
 import type { BoardCard, ProjectView } from '../../../shared/ipc-contract'
-import { ROUTE_TITLES, type Route } from './routes'
+import type { Route } from './routes'
 import { SHORTCUTS } from './shortcuts'
 
 export interface CommandData {
@@ -26,35 +26,20 @@ export type CommandItem = SearchableItem<CommandData>
 /** Comandos fixos de navegação, com o atalho de cada um. */
 function navigationItems(hasProject: boolean): CommandItem[] {
   const group = 'Ir para'
-  const project: CommandItem[] = hasProject
-    ? SHORTCUTS.filter((s) => s.route).map((s) => ({
-        id: `go:${s.route!.name}${s.route!.name === 'flows' && s.route!.tab ? `:${s.route!.tab}` : ''}`,
-        label: s.label,
-        auxiliaryData: { group, route: s.route!, keys: s.keys }
-      }))
-    : []
-  return [
-    ...project,
-    ...(hasProject
-      ? [
-          {
-            id: 'go:flows:alva',
-            label: 'Modelos Alva',
-            auxiliaryData: { group, route: { name: 'flows', tab: 'alva' } as Route }
-          }
-        ]
-      : []),
-    {
-      id: 'go:projects',
-      label: ROUTE_TITLES.projects,
-      auxiliaryData: { group, route: { name: 'projects' } }
-    },
-    {
-      id: 'go:integrations',
-      label: ROUTE_TITLES.integrations,
-      auxiliaryData: { group, route: { name: 'integrations' } }
-    }
-  ]
+  const id = (route: Route): string =>
+    `go:${route.name}${route.name === 'flows' && route.tab ? `:${route.tab}` : ''}`
+  const items: CommandItem[] = SHORTCUTS.filter((s) => hasProject || !s.isProjectScreen).map(
+    (s) => ({
+      id: id(s.route),
+      label: s.label,
+      auxiliaryData: { group, route: s.route, keys: s.keys }
+    })
+  )
+  if (hasProject) {
+    const alva: Route = { name: 'flows', tab: 'alva' }
+    items.push({ id: id(alva), label: 'Modelos Alva', auxiliaryData: { group, route: alva } })
+  }
+  return items
 }
 
 /** Tarefas de todos os projetos vinculados (o main responde do cache de 60 s quando pode). */

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import {
   _electron as electron,
+  expect,
   type ElectronApplication,
   type Locator,
   type Page
@@ -874,9 +875,9 @@ export async function launchOrkio(
   await page.setViewportSize({ width: 1100, height: 720 })
   // Recarrega para que o status inicial já passe pelos simuladores acima.
   await page.reload()
-  // O app abre em Projetos; os specs de integrações começam em Integrações.
-  // Tela inicial: "Começar" leva a Projetos (como era a tela de abertura antes dela).
-  await page.getByRole('button', { name: 'Começar', exact: true }).click()
+  // Sem projeto: "Vamos começar" → Projetos. Com projeto (reaberturas): Visão geral → Projetos.
+  // Os specs de integrações começam em Integrações.
+  await enterApp(page)
   if ((options.startPage ?? 'integrations') === 'integrations') {
     await page
       .getByRole('navigation', { name: 'Navegação principal' })
@@ -884,6 +885,18 @@ export async function launchOrkio(
       .click()
   }
   return { app, page, logs }
+}
+
+/**
+ * Entra no app depois de abrir/recarregar e vai para Projetos: clica em "Começar" (tela inicial,
+ * sem projetos) ou no menu (com projetos o app abre na Visão geral).
+ */
+export async function enterApp(page: Page): Promise<void> {
+  const start = page.getByRole('button', { name: 'Começar', exact: true })
+  const nav = page.getByRole('navigation', { name: 'Navegação principal' })
+  await expect(start.or(nav)).toBeVisible()
+  if (await start.isVisible()) await start.click()
+  else await nav.getByRole('button', { name: 'Projetos' }).click()
 }
 
 export async function setFakes(

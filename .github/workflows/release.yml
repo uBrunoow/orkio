@@ -1,0 +1,116 @@
+# Release por tag: `pnpm release <patch|minor|major|beta>` + `git push --follow-tags`.
+# vX.Y.Z → release estável; vX.Y.Z-beta.N → pre-release (canal beta).
+# Os binários vão para o repositório PÚBLICO uBrunoow/orkio-releases (secret RELEASES_TOKEN,
+# fine-grained, Contents: read/write só nele). Passo a passo em docs/releases.md.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASES_REPO: uBrunoow/orkio-releases
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: check
+        run: node scripts/release-check.mjs "$GITHUB_REF_NAME"
+
+  ci:
+    needs: verify
+    uses: ./.github/workflows/ci.yml
+
+  # Cria o rascunho antes da matriz: os jobs do mac e do Windows sobem para o mesmo release
+  # (sem isso, os dois poderiam criar rascunhos duplicados ao mesmo tempo).
+  draft:
+    needs: [verify, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Criar o rascunho do release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Falta o secret RELEASES_TOKEN (ver docs/releases.md)."
+            exit 1
+          fi
+          tag="$GITHUB_REF_NAME"
+          if state=$(gh release view "$tag" -R "$RELEASES_REPO" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$state" != "true" ]; then
+              echo "::error::O release $tag já foi publicado em $RELEASES_REPO. Lance uma versão nova."
+              exit 1
+            fi
+            echo "Rascunho $tag já existe; os arquivos serão substituídos."
+            exit 0
+          fi
+          node scripts/changelog-notes.mjs "$tag" > "$RUNNER_TEMP/notes.md"
+          flags=(--draft --title "Orkio $tag" --notes-file "$RUNNER_TEMP/notes.md")
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$tag" -R "$RELEASES_REPO" "${flags[@]}"
+
+  package:
+    needs: [verify, draft]
+    uses: ./.github/workflows/package.yml
+    with:
+      publish: true
+    secrets: inherit
+
+  # Só publica se todos os pacotes (e os smoke tests) passaram; senão o rascunho fica lá.
+  finalize:
+    needs: [verify, package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Publicar o release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          node scripts/changelog-notes.mjs "$tag" > "$RUNNER_TEMP/notes.md"
+          assets=$(gh release view "$tag" -R "$RELEASES_REPO" --json assets --jq '[.assets[].name] | join(" ")')
+          for pattern in '-mac-arm64.dmg' '-mac-x64.dmg' '-mac-arm64.zip' '-mac-x64.zip' '-win-x64-setup.exe'; do
+            case " $assets " in
+              *"$pattern"*) ;;
+              *) echo "::error::Falta o arquivo *$pattern no rascunho $tag."; exit 1 ;;
+            esac
+          done
+          if [ "$PRERELEASE" = "true" ]; then
+            channel_files=('beta-mac.yml' 'beta.yml')
+            flags=(--prerelease --latest=false)
+          else
+            channel_files=('latest-mac.yml' 'latest.yml')
+            flags=(--prerelease=false --latest)
+          fi
+          for f in "${channel_files[@]}"; do
+            case " $assets " in
+              *" $f "*) ;;
+              *) echo "::error::Falta o $f no rascunho $tag (auto-update)."; exit 1 ;;
+            esac
+          done
+          gh release edit "$tag" -R "$RELEASES_REPO" --draft=false --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
+          echo "Publicado: https://github.com/$RELEASES_REPO/releases/tag/$tag"

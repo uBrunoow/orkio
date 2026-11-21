@@ -5,6 +5,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
   NOTION_FAKE,
   createUserDataDir,
+  enterApp,
   cspViolations,
   externalCalls,
   launchOrkio,
@@ -132,8 +133,8 @@ test('branch local e PR aparecem na tarefa certa', async () => {
     expect(status.state).toBe('connected')
   }
   await page.reload()
-  // O reload volta à tela inicial.
-  await page.getByRole('button', { name: 'Começar', exact: true }).click()
+  // O reload volta à abertura: Começar (sem projetos) ou Visão geral.
+  await enterApp(page)
 
   const row = page.getByRole('listitem', { name: 'orkio-app' })
   await row.getByRole('button', { name: 'Ver tarefas' }).click()

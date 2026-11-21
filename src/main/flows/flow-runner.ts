@@ -757,6 +757,15 @@ export class FlowRunner {
     return out
   }
 
+  /** Fluxos ativos de todos os projetos (Visão geral, 6D). */
+  activeViews(): FlowRunView[] {
+    return this.deps.db
+      .all<{ id: string }>(
+        `SELECT id FROM flow_runs WHERE status IN ('running', 'waiting_gate', 'paused', 'awaiting_decision') ORDER BY started_at`
+      )
+      .map((r) => this.view(r.id))
+  }
+
   /** Há fluxo ativo na tarefa? (a execução manual do Claude Code fica bloqueada). */
   hasActive(taskId: string): boolean {
     return this.activeRow(taskId) !== null

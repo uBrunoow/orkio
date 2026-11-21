@@ -114,6 +114,9 @@ export interface RunFinished {
 interface Pending {
   resolve(decision: BridgeDecision): void
   timer: NodeJS.Timeout
+  /** Quando o pedido chegou e se é pergunta (AskUserQuestion) ou permissão (Visão geral, 6D). */
+  since: string
+  kind: 'question' | 'permission'
   tool: string
   summary: string
   input: Record<string, unknown>
@@ -159,6 +162,15 @@ export const RUN_MESSAGES = {
 const TEST_COMMAND =
   /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|e2e|vitest|jest)\b|\b(vitest|jest|pytest|go test|cargo test|playwright test)\b/
 
+/** Primeira pergunta do AskUserQuestion (e quantas há), para listas curtas. */
+function questionSummary(input: Record<string, unknown>): string {
+  const questions = Array.isArray(input['questions']) ? (input['questions'] as unknown[]) : []
+  const first = questions[0] as Record<string, unknown> | undefined
+  const text = typeof first?.['question'] === 'string' ? first['question'].slice(0, 200) : ''
+  if (questions.length > 1) return `${questions.length} perguntas${text ? `: ${text}` : ''}`
+  return text || 'Pergunta do Claude Code'
+}
+
 export class RunService {
   private readonly active = new Map<string, ActiveRun>()
   private readonly queue: ActiveRun[] = []
@@ -198,6 +210,42 @@ export class RunService {
       return includeBriefing ? `${line}\n\n${brief}` : line
     }
     return `${text.trim()}\n\n---\n\n${brief}`
+  }
+
+  /** Pedidos esperando você (perguntas e permissões), em memória; para a Visão geral (6D). */
+  waitingRequests(): {
+    runId: string
+    projectId: string
+    taskId: string
+    requestId: string
+    kind: 'question' | 'permission'
+    summary: string
+    since: string
+  }[] {
+    return [...this.active.values()].flatMap((run) =>
+      [...run.pending].map(([requestId, p]) => ({
+        runId: run.id,
+        projectId: run.projectId,
+        taskId: run.taskId,
+        requestId,
+        kind: p.kind,
+        summary: scrubText(
+          p.kind === 'question' ? questionSummary(p.input) : p.summary,
+          run.secrets
+        ),
+        since: p.since
+      }))
+    )
+  }
+
+  /** Execuções na fila ou rodando (em memória); para a Visão geral (6D). */
+  activeRuns(): { runId: string; projectId: string; taskId: string; status: RunStatus }[] {
+    return [...this.active.values(), ...this.queue].map((r) => ({
+      runId: r.id,
+      projectId: r.projectId,
+      taskId: r.taskId,
+      status: r.status
+    }))
   }
 
   isRunning(taskId: string): boolean {
@@ -526,6 +574,8 @@ export class RunService {
       run.pending.set(requestId, {
         resolve,
         timer,
+        since: this.now().toISOString(),
+        kind: decision.decision === 'question' ? 'question' : 'permission',
         tool: req.toolName,
         summary,
         input: req.input,

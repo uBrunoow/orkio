@@ -37,7 +37,9 @@ export function BoardCardBody({
   const label = card.displayId ?? card.title
   const flow = useTaskFlowState(card.taskId)
   const status = cardStatus(card, flow, signals)
-  const branches = signals ? [...new Set([...signals.localBranches, ...signals.remoteBranches])] : []
+  const branches = signals
+    ? [...new Set([...signals.localBranches, ...signals.remoteBranches])]
+    : []
   const pr = signals?.pr ?? null
   return (
     <VStack gap={2}>

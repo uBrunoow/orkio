@@ -20,11 +20,13 @@ describe('globalShortcut', () => {
     expect(globalShortcut(key('k', { metaKey: true }), false)).toBeNull()
   })
 
-  it('Ctrl+número leva às telas do projeto na ordem do menu', () => {
-    expect(globalShortcut(key('2', { ctrlKey: true }), false)).toEqual({
-      type: 'navigate',
-      route: { name: 'automations' }
-    })
+  it('Ctrl+número segue a ordem do menu', () => {
+    const go = (n: string): unknown => globalShortcut(key(n, { ctrlKey: true }), false)
+    expect(go('1')).toEqual({ type: 'navigate', route: { name: 'overview' } })
+    expect(go('2')).toEqual({ type: 'navigate', route: { name: 'board' } })
+    expect(go('3')).toEqual({ type: 'navigate', route: { name: 'automations' } })
+    expect(go('6')).toEqual({ type: 'navigate', route: { name: 'projects' } })
+    expect(go('7')).toEqual({ type: 'navigate', route: { name: 'integrations' } })
     expect(globalShortcut(key('9', { ctrlKey: true }), false)).toBeNull()
   })
 

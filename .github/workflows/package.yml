@@ -1,0 +1,142 @@
+# Empacota o app para macOS (dmg + zip, arm64 e x64) e Windows (nsis x64), roda o smoke test do
+# pacote e sobe os arquivos como artefatos do job.
+# - Manual (workflow_dispatch): só empacota, NÃO publica. Baixe os arquivos na página da execução.
+# - release.yml (workflow_call com publish: true): publica no rascunho do release em orkio-releases.
+# Segredos: só no `env` do passo que precisa; nunca `set -x` nem `echo` de valores.
+name: Package
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      publish:
+        description: 'Publicar no rascunho do release (RELEASES_TOKEN)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    env:
+      PUBLISH: ${{ inputs.publish && 'always' || 'never' }}
+      # Não são segredos (vão dentro do binário): `vars`, com `secrets` como alternativa.
+      MAIN_VITE_GITHUB_CLIENT_ID: ${{ vars.MAIN_VITE_GITHUB_CLIENT_ID || secrets.MAIN_VITE_GITHUB_CLIENT_ID }}
+      MAIN_VITE_NOTION_OAUTH_CLIENT_ID: ${{ vars.MAIN_VITE_NOTION_OAUTH_CLIENT_ID || secrets.MAIN_VITE_NOTION_OAUTH_CLIENT_ID }}
+      MAIN_VITE_NOTION_OAUTH_BROKER_URL: ${{ vars.MAIN_VITE_NOTION_OAUTH_BROKER_URL || secrets.MAIN_VITE_NOTION_OAUTH_BROKER_URL }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Variáveis de build
+        run: |
+          missing=""
+          for name in MAIN_VITE_GITHUB_CLIENT_ID MAIN_VITE_NOTION_OAUTH_CLIENT_ID MAIN_VITE_NOTION_OAUTH_BROKER_URL; do
+            if [ -z "${!name}" ]; then missing="$missing $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            if [ "$PUBLISH" = "always" ]; then
+              echo "::error::Faltam variáveis de build:$missing (Settings → Secrets and variables → Actions → Variables)."
+              exit 1
+            fi
+            echo "::warning::Faltam variáveis de build:$missing. O login com GitHub/Notion fica indisponível neste pacote."
+          fi
+
+      - name: Modo de assinatura (macOS)
+        if: runner.os == 'macOS'
+        env:
+          HAS_CSC: ${{ secrets.CSC_LINK != '' }}
+          HAS_APPLE_ID: ${{ secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+          HAS_APPLE_API: ${{ secrets.APPLE_API_KEY != '' && secrets.APPLE_API_KEY_ID != '' && secrets.APPLE_API_ISSUER != '' }}
+        run: |
+          if [ "$HAS_CSC" = "true" ]; then
+            echo "MAIN_VITE_MAC_SIGNED=1" >> "$GITHUB_ENV"
+            if [ "$HAS_APPLE_ID" != "true" ] && [ "$HAS_APPLE_API" != "true" ]; then
+              echo "::warning::macOS assinado com Developer ID, mas SEM notarização (faltam APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID ou APPLE_API_KEY/APPLE_API_KEY_ID/APPLE_API_ISSUER)."
+            fi
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "::warning::macOS SEM assinatura Developer ID (falta o secret CSC_LINK): build ad-hoc, o Gatekeeper avisa na primeira abertura e o auto-update do mac não funciona."
+          fi
+
+      - name: Chave da API da Apple (notarização)
+        if: runner.os == 'macOS'
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          # APPLE_API_KEY guarda o CONTEÚDO do .p8; o electron-builder quer o caminho do arquivo.
+          if [ -n "$APPLE_API_KEY_P8" ]; then
+            key="$RUNNER_TEMP/apple-api-key.p8"
+            printf '%s' "$APPLE_API_KEY_P8" > "$key"
+            chmod 600 "$key"
+            echo "APPLE_API_KEY_PATH=$key" >> "$GITHUB_ENV"
+          fi
+
+      - name: Modo de assinatura (Windows)
+        if: runner.os == 'Windows' && vars.WIN_SIGNING != 'azure'
+        run: |
+          echo "::warning::Windows SEM assinatura (WIN_SIGNING não é 'azure'): o SmartScreen avisa na instalação."
+
+      - name: Build
+        run: pnpm build
+
+      - name: Empacotar
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          WIN_SIGNING: ${{ vars.WIN_SIGNING }}
+          WIN_PUBLISHER_NAME: ${{ vars.WIN_PUBLISHER_NAME }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          GH_TOKEN: ${{ inputs.publish && secrets.RELEASES_TOKEN || '' }}
+        run: |
+          if [ -n "${APPLE_API_KEY_PATH:-}" ]; then export APPLE_API_KEY="$APPLE_API_KEY_PATH"; fi
+          if [ "$RUNNER_OS" = "macOS" ]; then platform="--mac"; else platform="--win"; fi
+          pnpm exec electron-builder "$platform" --publish "$PUBLISH"
+
+      - name: Smoke test do app empacotado
+        run: pnpm smoke:packaged --trace off
+
+      - name: Remover a chave da Apple
+        if: always() && runner.os == 'macOS'
+        run: rm -f "$RUNNER_TEMP/apple-api-key.p8"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orkio-${{ runner.os }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.exe
+            dist/*.blockmap
+            dist/*.yml
+            !dist/builder-debug.yml
+            !dist/builder-effective-config.yaml
