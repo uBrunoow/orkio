@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements do Orkio (hardened runtime). Só o mínimo:
+  - allow-jit: o V8 do Electron (12+) usa MAP_JIT. Também vale para o processo que roda a ponte
+    MCP com ELECTRON_RUN_AS_NODE (é o mesmo executável).
+  Não usamos allow-unsigned-executable-memory (desnecessário desde o Electron 12) nem
+  disable-library-validation (não há módulo nativo). Keychain (safeStorage) e rede não pedem
+  entitlement fora do sandbox da App Store.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+  </dict>
+</plist>

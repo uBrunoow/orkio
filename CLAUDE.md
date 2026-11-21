@@ -30,6 +30,9 @@ Claude Code. Hoje existem:
 - **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
   do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
   real ser confirmado).
+- **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
+  Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) no repo público
+  `uBrunoow/orkio-releases`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
 - Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
@@ -43,7 +46,10 @@ pnpm typecheck    # tsc em todos os projetos (node, web, e2e, broker)
 pnpm lint         # ESLint
 pnpm build        # build em out/
 pnpm icons        # regenera ícones a partir de brand/orkio-app-icon-1024.png
-pnpm dist         # empacota (electron-builder.yml)
+pnpm dist         # empacota (electron-builder.ts)
+pnpm dist:dir     # só a pasta do app em dist/ (sem instalador)
+pnpm smoke:packaged  # smoke do app empacotado (dist/): tela inicial + ponte MCP. Linux: xvfb-run -a
+pnpm release <patch|minor|major|beta> [--beta]  # versão + CHANGELOG + commit + tag (sem push)
 pnpm astryx:static-css  # regenera o CSS estático das camadas da Astryx (após upgrade)
 pnpm --dir site install|dev|test|typecheck|lint|build   # site (package próprio, ver site/README.md)
 ```
@@ -577,7 +583,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 
 - `site/`: Next.js App Router + TS strict, **package e lockfile próprios** (sem workspace pnpm: o
   install/empacotamento do app não muda). ESLint/tsc/Vitest da raiz ignoram `site/**`; o site tem os
-  dele. CI: `.github/workflows/app.yml` (ignora `site/**`) e `site.yml` (lint, typecheck, test,
+  dele. CI: `.github/workflows/ci.yml` (ignora `site/**`) e `site.yml` (lint, typecheck, test,
   build e o E2E `@site`). Deploy pela Vercel (Root Directory `site`, Ignored Build Step).
 - **Intermediário OAuth** (`site/lib/notion-broker.ts`, rotas em `site/app/notion/*`, runtime Node):
   mesmo contrato do `broker/` (o app só troca `MAIN_VITE_NOTION_OAUTH_BROKER_URL`). Nada de
@@ -591,6 +597,36 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - E2E `e2e/site-oauth.spec.ts` (`@site`): `next start` do site + Notion simulado em HTTP local; o
   fixture (`brokerTarget`) manda as chamadas do app ao intermediário para o site de verdade. Pula
   com aviso se não houver `site/.next` (rode `pnpm --dir site build`).
+
+## Empacotamento e releases (Etapa 6B)
+
+- **Config:** `electron-builder.ts` (TypeScript, achado pelo nome; `builderConfig(env)` é pura e
+  testada em `test/electron-builder-config.test.ts`). Nomes com a arquitetura
+  (`Orkio-<v>-mac-<arch>.dmg|zip`, `Orkio-<v>-win-<arch>-setup.exe`): o site
+  (`site/lib/releases.ts`) e o auto-update (6C) dependem deles. Linux comentado.
+- **Assinatura pelo ambiente:** mac assinado só com `CSC_LINK`/`CSC_NAME` (hardened runtime,
+  `build/entitlements.mac.plist` só com `allow-jit`, notarização se houver `APPLE_*`); senão ad-hoc
+  (`identity: '-'`) **sem** hardened runtime. Windows só com `WIN_SIGNING=azure` + `AZURE_SIGNING_*`.
+  O workflow passa `MAIN_VITE_MAC_SIGNED=1` no build quando o mac é assinado.
+- **Fuses:** `runAsNode` **ligado** (a ponte MCP roda o executável com `ELECTRON_RUN_AS_NODE=1`; não
+  desligue), `onlyLoadAppFromAsar` e cookies criptografados ligados, `NODE_OPTIONS`/`--inspect`
+  desligados. Integridade do asar ainda desligada (falta testar no mac/Windows).
+- Sem dependências de runtime hoje; `npmRebuild: false`. Não exclua `node_modules` em `files` (o
+  `electron-updater` da 6C é dependência de runtime).
+- **Smoke** (`e2e-packaged/`, config própria): abre o binário de `dist/` com
+  `--remote-debugging-port` e conecta por CDP (o `_electron` do Playwright precisa do `--inspect`,
+  desligado pelo fuse), confere tela inicial/CSP, e roda `app.asar/out/main/permission-mcp.js` com
+  `ELECTRON_RUN_AS_NODE` contra um socket simulado.
+- **Versões:** `version` do `package.json` + tag `vX.Y.Z` (beta: `X.Y.Z-beta.N` → pre-release).
+  `pnpm release` (`scripts/release.mjs`, lógica pura em `release-lib.mjs`) exige `main` limpa e
+  itens em `## [Não lançado]`; move para `## [X.Y.Z] - AAAA-MM-DD` (formato lido pelo release e
+  pela 6C). Não faz push.
+- **Workflows:** `ci.yml` (PR/push na main, sem `site/**`; lint, typecheck, test, e2e Linux,
+  `package-smoke` Linux; E2E no macOS só por dispatch). `package.yml` (dispatch = empacota sem
+  publicar e sobe artefatos; `workflow_call` com `publish`). `release.yml` (tag): `release-check` →
+  `ci.yml` → rascunho em `orkio-releases` (notas do CHANGELOG) → `package.yml` com
+  `--publish always` → confere arquivos e publica. Segredos só no `env` do passo; sem `set -x`.
+- Passo a passo (repo, token, Apple, Microsoft, custos): `docs/releases.md`.
 
 ## Testes
 
@@ -648,7 +684,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Main e preload saem em **CommonJS** (sem `"type": "module"`)                                                | Preload com `sandbox: true` não pode ser ESM. O preload só pode dar `require('electron')`: tudo o mais é empacotado nele.                                                                                                                                   |
 | `postinstall: install-electron`                                                                             | O Electron 45 não baixa o binário na instalação, e o `electron-vite` precisa dele (`path.txt`). Sem isso `pnpm dev` falha num clone novo.                                                                                                                   |
 | React e `@fontsource/*` em `devDependencies`                                                                | O Vite já os embute no bundle do renderer; assim o pacote do electron-builder não leva `node_modules` desnecessários.                                                                                                                                       |
-| Não definir `productName` no `package.json`                                                                 | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.yml`.                                                                                                   |
+| Não definir `productName` no `package.json`                                                                 | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.ts`.                                                                                                    |
 | Fontes nunca viram `data:` URI                                                                              | A CSP só permite `font-src 'self'` (`assetsInlineLimit` no `electron.vite.config.ts`).                                                                                                                                                                      |
 | Notion via OAuth com intermediário (`broker/`, Cloudflare Worker)                                           | O Notion exige client secret na troca do código/renovação e a API REST não aceita PKCE. O secret fica só no Worker, que é stateless e não loga. O MCP do Notion aceita PKCE, mas trocaria a API REST pelas ferramentas MCP (decisão da Etapa 1.5).          |
 | Redirect em loopback com porta fixa `47821`                                                                 | O Notion exige redirect URI exato e registrado. `127.0.0.1` (não `localhost`) evita ambiguidade IPv4/IPv6 (RFC 8252). Porta ocupada → mensagem clara.                                                                                                       |
@@ -689,6 +725,11 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 | Site com package próprio (sem workspace pnpm)                                                               | Isola o Next do install/lockfile/empacotamento do Electron; a Vercel usa `site/` como raiz. O contrato do OAuth é pequeno e testado dos dois lados.                                                                                                         |
 | Intermediário OAuth nas rotas do site (Vercel) em vez do Worker                                             | Um só deploy para site e intermediário; páginas legais no mesmo domínio exigido pelo cadastro público do Notion.                                                                                                                                            |
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
+| Releases num repo público separado (`orkio-releases`), token fine-grained só nele                           | O código é privado; o site e o auto-update leem releases públicos sem token. O token do CI não lê o código.                                                                                                                                                 |
+| Release como rascunho criado antes da matriz, publicado num job final                                       | Os jobs do mac e do Windows sobem para o mesmo release sem duplicar; nada é publicado se um pacote ou smoke falhar.                                                                                                                                         |
+| mac sem Developer ID = ad-hoc sem hardened runtime                                                          | Apple Silicon exige assinatura; hardened runtime com ad-hoc recusa o Electron Framework (validação de bibliotecas).                                                                                                                                         |
+| Fuse `RunAsNode` ligado                                                                                     | A ponte MCP de permissões é um processo que o CLI do Claude abre com o executável do Orkio + `ELECTRON_RUN_AS_NODE`.                                                                                                                                        |
+| CI de PR só no Linux (smoke do pacote incluso)                                                              | Em repo privado, minuto de macOS custa 10x; o mac roda no release, no teste manual e por dispatch.                                                                                                                                                          |
 
 ## Astryx e CSP (regra inegociável)
 
