@@ -63,7 +63,10 @@ Cuidados:
 - O commit de versão vai direto para a `main` (o repositório não tem proteção de branch). Se um dia
   houver, o `release-on-merge.yml` precisa de um token que possa empurrar nela.
 - Duas PRs com rótulo mergeadas em seguida lançam duas versões, uma de cada vez (`concurrency`).
-- Se o push da versão falhar (a `main` andou no meio), rode o workflow de novo ou lance à mão.
+- Duas PRs mergeadas quase juntas não derrubam a versão: o workflow usa a `main` de agora e, se o
+  push for recusado porque ela andou, refaz o commit de versão em cima da nova (até 3 tentativas,
+  `scripts/release-bump-push.sh`). A versão pode levar junto o que entrou na `main` nesse intervalo.
+- Se mesmo assim o workflow falhar, rode-o de novo (ele pega a `main` atual) ou lance à mão.
 - Não use um token pessoal para empurrar a tag: ele dispararia o `release.yml` duas vezes.
 
 ## Lançar à mão
