@@ -4,6 +4,7 @@ import { Kbd } from '@astryxdesign/core/Kbd'
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
+import { VStack } from '@astryxdesign/core/VStack'
 import type { ProjectView } from '../../shared/ipc-contract'
 import {
   BoardIcon,
@@ -13,6 +14,7 @@ import {
   OverviewIcon,
   ProjectsIcon,
   SearchIcon,
+  SettingsIcon,
   StagesIcon,
   type SvgIcon
 } from './components/icons'
@@ -35,6 +37,8 @@ import { OverviewPage } from './features/overview/OverviewPage'
 import { useWaitingCount } from './features/overview/useOverview'
 import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
+import { SettingsPage } from './features/settings/SettingsPage'
+import { UpdateBanner } from './features/settings/UpdateBanner'
 
 /** Preferência de interface (não secreta): último projeto escolhido no menu. */
 const CURRENT_PROJECT_KEY = 'orkio.currentProject'
@@ -275,6 +279,9 @@ export function App(): React.JSX.Element | null {
     case 'context':
       page = <ContextPage project={project} onOpenProjects={toProjects} />
       break
+    case 'settings':
+      page = <SettingsPage />
+      break
   }
 
   return (
@@ -363,12 +370,27 @@ export function App(): React.JSX.Element | null {
               aria-keyshortcuts={keyshortcut('integrations')}
               onClick={toIntegrations}
             />
+            <SideNavItem
+              label={ROUTE_TITLES.settings}
+              icon={SettingsIcon}
+              isSelected={route.name === 'settings'}
+              aria-keyshortcuts={keyshortcut('settings')}
+              onClick={() => navigate({ name: 'settings' })}
+            />
           </SideNavSection>
         </SideNav>
       }
     >
       {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
-      <Fragment key={router.key}>{page}</Fragment>
+      <VStack gap={4}>
+        {/* Atualização pronta (6C) e "O que há de novo": no topo de qualquer página. */}
+        <UpdateBanner
+          {...(route.name === 'settings'
+            ? {}
+            : { onOpenSettings: () => navigate({ name: 'settings' }) })}
+        />
+        <Fragment key={router.key}>{page}</Fragment>
+      </VStack>
       <CommandMenu
         isOpen={paletteOpen}
         onOpenChange={setPaletteOpen}

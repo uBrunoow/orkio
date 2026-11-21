@@ -14,6 +14,8 @@ export type Route =
   | { name: 'overview' }
   | { name: 'projects' }
   | { name: 'integrations' }
+  /** Configurações (6C): Atualizações e Sobre. */
+  | { name: 'settings' }
   | { name: 'board'; projectId?: string; taskId?: string; section?: TaskSection }
   | { name: 'automations'; projectId?: string }
   | { name: 'flows'; projectId?: string; tab?: FlowsTab }
@@ -42,6 +44,7 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
   overview: 'Visão geral',
   projects: 'Projetos',
   integrations: 'Integrações',
+  settings: 'Configurações',
   board: 'Quadro',
   automations: 'Etapas e automações',
   flows: 'Fluxos',

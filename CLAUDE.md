@@ -33,8 +33,10 @@ Claude Code. Hoje existem:
 - **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
   do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
   real ser confirmado).
+- **Atualizações (6C):** electron-updater lendo o repo público de releases; banner, Configurações
+  (Atualizações + Sobre), "O que há de novo"; nunca reinicia por cima de trabalho em andamento.
 - **Interface (6E):** menu com Visão geral, o projeto atual (Quadro, Etapas e automações, Fluxos,
-  Contexto do Claude), Projetos e Integrações (Ctrl/Cmd+1…7 nessa ordem), rotas tipadas, tarefa em
+  Contexto do Claude), Projetos, Integrações e Configurações (Ctrl/Cmd+1…8 nessa ordem), rotas tipadas, tarefa em
   painel ou tela cheia, Command Palette (Ctrl/Cmd+K), card do quadro com um estado só (`cardStatus`).
   Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
@@ -81,6 +83,7 @@ src/
   shared/alva.ts           # 5B: tipos da pré-checagem, parse da task do Backlog.md (puro)
   shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
   shared/delivery.ts       # 5C: branches protegidas, checkPushBranch, DeliveryTarget/Settings (puro)
+  shared/updates.ts        # 6C: status das atualizações, versões, recorte do CHANGELOG, URL do DMG
   shared/overview.ts       # 6D: tipos e agregações puras da Visão geral (esperando, PRs, semana...)
   shared/task-history.ts   # texto/links de um evento do histórico (painel da tarefa e atividade)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
@@ -105,6 +108,7 @@ src/
     alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts
     overview/              # 6D: overview.service.ts (agrega stores/caches), badge.ts (ícone do app)
     delivery/              # 5C: delivery.service.ts (alvo, prévia, push), delivery-actions.ts (ações)
+    updates/               # 6C: update.service.ts (electron-updater injetado), busy.ts, mac-signature.ts
     flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
                            # policy (+ delivery-policy, 5C), redact, run.service, claude.service;
@@ -122,6 +126,7 @@ src/
       notion-workspace/    # card "Bancos do Notion" (assistente) e seção Notion de cada projeto
       board/               # Quadro, painel/tela cheia da tarefa (TaskPanel/TaskPage), ProjectPages
                            # (Etapas e automações, Fluxos, Contexto), FlowPage (etapas + automações)
+      settings/            # 6C: Configurações (Atualizações, Sobre), UpdateBanner, WhatsNewPanel
     components/Alert.tsx   # mensagens (Banner da Astryx)
     components/PageHeader.tsx  # o único h1 da tela, contexto (projeto) acima e ações à direita
     components/PageState.tsx   # carregando / vazio (com ação) / erro, iguais em todas as telas
@@ -600,7 +605,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 ## Visão geral (Etapa 6D)
 
 - **Abertura:** com ao menos um projeto, o app abre na Visão geral; sem projeto, "Vamos começar".
-  Menu: Visão geral · telas do projeto atual · Projetos · Integrações. Atalhos Ctrl/Cmd+1…7 na ordem do menu
+  Menu: Visão geral · telas do projeto atual · Projetos · Integrações · Configurações. Atalhos Ctrl/Cmd+1…8 na ordem do menu
   (`keydown` no renderer, `aria-keyshortcuts` no item).
 - **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs**:
   `flow_runs` (via `FlowRunner.activeViews`), perguntas/permissões em memória
@@ -646,6 +651,40 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - E2E `e2e/site-oauth.spec.ts` (`@site`): `next start` do site + Notion simulado em HTTP local; o
   fixture (`brokerTarget`) manda as chamadas do app ao intermediário para o site de verdade. Pula
   com aviso se não houver `site/.next` (rode `pnpm --dir site build`).
+
+## Atualizações automáticas (Etapa 6C)
+
+- **electron-updater** (dependência de runtime, a única em `dependencies`; fica fora do bundle) com
+  `publish` github → `uBrunoow/orkio-releases` (`RELEASES_REPO` em `shared/updates.ts`; precisa bater
+  com o electron-builder da 6B). O feed é público: nada de token.
+- `UpdateService` (`main/updates/`) recebe o `autoUpdater` como `UpdaterLike`. Ligado só com
+  `app.isPackaged` fora do Linux (ou `forceDevUpdateConfig`, flag oficial, usada no E2E). Checa 10 s
+  depois de abrir e a cada 4 h (±10%) e em "Procurar atualizações".
+- **Modos:** Windows e macOS assinado = `auto` (`autoDownload`, `autoInstallOnAppQuit`; instala ao
+  sair ou em "Reiniciar e atualizar"). macOS sem Developer ID (`codesign -dv` no bundle: ad-hoc ou
+  sem TeamIdentifier; sem `codesign`, vale `MAIN_VITE_MAC_SIGNED=1` do build) = `manual`: não baixa;
+  "Baixar" abre `releases/download/vX/Orkio-X-mac-<arch>.dmg` (allowlist só desse repo: DMG e
+  `releases/tag/vX`). A URL é montada no main.
+- **Nunca reinicia por cima de trabalho:** ocupado = execuções do Claude (rodando/fila), fluxos com
+  `status = 'running'` (passo rodando ou entre passos) e escritas pendentes no Notion. Gate/pausa não
+  contam (sobrevivem a reabrir). `install('if_idle')` devolve a lista; "Atualizar quando terminar"
+  consulta a cada 2 s e instala depois de 5 s seguidos ocioso; "agora mesmo assim" = `shutdownWork`
+  (mesmo caminho do `before-quit`: `dispose` do fluxo, `cancelAll`, espera até 12 s) e
+  `quitAndInstall(false, true)`.
+- **Canal:** `orkio-config` v9 → `updates.channel` (`stable`/`beta` → `allowPrerelease`);
+  `allowDowngrade` sempre falso (voltar a Estável numa beta mostra aviso e espera a próxima estável).
+- **Falhas:** silenciosas no uso; status com `friendlyUpdateError` (pt-BR, nunca a mensagem crua) e
+  `updates.lastCheckAt`. `autoUpdater.logger = null` (o padrão imprime URLs).
+- **O que há de novo:** `CHANGELOG.md` (Keep a Changelog, `## [X.Y.Z] - data`) embutido no main com
+  `?raw`; `changelogSection` + `noteBlocks` viram texto simples (nada de HTML). Mostra uma vez quando
+  a versão atual > `updates.lastSeenVersion` (gravada ao mostrar); `null` (instalação nova ou vinda
+  de antes da 6C) só registra. Config só leitura → não mostra.
+- **Downgrade:** config de versão futura fica só leitura e SQLite futuro deixa o quadro indisponível,
+  sem tocar nos arquivos (`test/update-data-compat.test.ts`); o updater funciona mesmo assim.
+- **UI:** `UpdateBanner` no topo do conteúdo (Banner `info`, "Agora não" na sessão), `InstallControls`
+  (lista do que está rodando + escolhas, inline), Configurações > Atualizações (versão, canal,
+  última verificação, status) e Sobre (links do site a partir de `MAIN_VITE_SITE_URL` ou da origem
+  https do intermediário; sem isso, sem links).
 
 ## Empacotamento e releases (Etapa 6B)
 
@@ -714,6 +753,10 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - 4B: o fixture usa um `HOME` temporário (com `~/.claude/commands/revisar.md`); o cenário
   `escrever-doc` gera `docs/exportar.md`; o Notion simulado registra publicações em
   `notionState(app).published` e responde à busca de páginas (`filter.value: 'page'`).
+- 6C: `simulateUpdate(app, { version })` acha o `autoUpdater` no cache de módulos do main, liga
+  `forceDevUpdateConfig` e troca `checkForUpdates` (acha e "baixa" na hora) e `quitAndInstall` (só
+  conta: `updateInstalls(app)`). `e2e/updates.spec.ts` usa o `demorar` do Claude simulado para provar
+  que "Atualizar quando terminar" espera a execução.
 - Diálogos simulados: `queueFolderPicks` (abrir) e `queueSavePaths` ("Salvar como…").
 - GitHub simulado (3B): `githubPrDetails[n].reviews`/`reviewRequests` e `FakePull.updatedAt` (o
   Orkio só relê detalhes quando `updated_at` muda). `notionInitialStatus` mantém o Notion

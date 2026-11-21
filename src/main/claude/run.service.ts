@@ -212,6 +212,18 @@ export class RunService {
     return `${text.trim()}\n\n---\n\n${brief}`
   }
 
+  /** Execuções rodando ou na fila (6C: a atualização não reinicia por cima delas). */
+  activeList(): { projectId: string; taskId: string; queued: boolean }[] {
+    return [
+      ...[...this.active.values()].map((r) => ({
+        projectId: r.projectId,
+        taskId: r.taskId,
+        queued: false
+      })),
+      ...this.queue.map((r) => ({ projectId: r.projectId, taskId: r.taskId, queued: true }))
+    ]
+  }
+
   /** Pedidos esperando você (perguntas e permissões), em memória; para a Visão geral (6D). */
   waitingRequests(): {
     runId: string

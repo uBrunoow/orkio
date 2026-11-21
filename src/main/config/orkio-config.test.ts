@@ -49,7 +49,8 @@ describe('orkio-config v2/v3', () => {
       automation: { paused: false },
       claudeContexts: {},
       flows: {},
-      delivery: {}
+      delivery: {},
+      updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
     })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
     expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
@@ -343,7 +344,7 @@ describe('orkio-config v2/v3', () => {
     expect(pf.flows[0]).toEqual({ ...flow, tags: ['alva'] })
     expect(pf.alva).toEqual({ maxParallel: 4 })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(8)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
   })
 
   it('v7 → v8: ajustes de entrega vazios (padrão: aprovação para push); inválidos ignorados', async () => {
@@ -364,7 +365,7 @@ describe('orkio-config v2/v3', () => {
     const { data } = await createOrkioConfigStore(file).load()
     expect(data.delivery).toEqual({})
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(8)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
     expect(saved['delivery']).toEqual({})
 
     await writeFile(
@@ -376,5 +377,46 @@ describe('orkio-config v2/v3', () => {
     )
     const again = await createOrkioConfigStore(file).load()
     expect(again.data.delivery).toEqual({ p1: { requirePushApproval: false } })
+  })
+
+  it('v8 → v9: canal Estável e nenhuma versão vista ainda', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-v9-'))
+    const file = join(dir, 'orkio-config.json')
+    const v8 = {
+      schemaVersion: 8,
+      projects: [{ ...PROJECT, notionProject: null }],
+      notion: null,
+      boards: {},
+      automation: { paused: false },
+      claudeContexts: {},
+      flows: {},
+      delivery: { p1: { requirePushApproval: false } }
+    }
+    await writeFile(file, JSON.stringify(v8))
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.updates).toEqual({ channel: 'stable', lastSeenVersion: null, lastCheckAt: null })
+    expect(data.delivery).toEqual(v8.delivery)
+    expect(data.projects).toHaveLength(1)
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(9)
+
+    // Inválido volta ao padrão sem derrubar o resto.
+    await writeFile(
+      file,
+      JSON.stringify({ ...saved, updates: { channel: 'nightly', lastSeenVersion: 3 } })
+    )
+    const again = await createOrkioConfigStore(file).load()
+    expect(again.data.updates).toEqual({
+      channel: 'stable',
+      lastSeenVersion: null,
+      lastCheckAt: null
+    })
+    expect(again.data.projects).toHaveLength(1)
+  })
+
+  it('instalação nova começa sem versão vista (nada a mostrar no "O que há de novo")', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-new-'))
+    const { data } = await createOrkioConfigStore(join(dir, 'orkio-config.json')).load()
+    expect(data.updates.lastSeenVersion).toBeNull()
   })
 })
