@@ -5,12 +5,13 @@ import { StackItem } from '@astryxdesign/core/Stack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
+import { StatusDot } from '@astryxdesign/core/StatusDot'
+import { Button } from '@astryxdesign/core/Button'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
-import { LockIcon, PauseIcon } from '../../components/icons'
+import { GitBranchIcon, LockIcon, PauseIcon, PullRequestIcon } from '../../components/icons'
 import { useTaskFlowState } from '../task-flows/active-flows'
-import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
+import { cardStatus } from './card-status'
 
 export interface CardActions {
   onOpen(taskId: string): void
@@ -35,39 +36,32 @@ export function BoardCardBody({
 }): React.JSX.Element {
   const label = card.displayId ?? card.title
   const flow = useTaskFlowState(card.taskId)
+  const status = cardStatus(card, flow, signals)
+  const branches = signals ? [...new Set([...signals.localBranches, ...signals.remoteBranches])] : []
+  const pr = signals?.pr ?? null
   return (
     <VStack gap={2}>
       <HStack gap={2} vAlign="center">
         <Code data-testid="card-id">{card.displayId ?? '—'}</Code>
-        {card.blocked && (
-          <HStack vAlign="center" role="img" aria-label="Bloqueada" data-testid="card-blocked">
-            <Icon icon={LockIcon} size="sm" color="secondary" />
-          </HStack>
-        )}
-        {card.automationPaused && (
-          <HStack
-            vAlign="center"
-            role="img"
-            aria-label="Automações pausadas"
-            data-testid="card-automation-paused"
-          >
-            <Icon icon={PauseIcon} size="sm" color="secondary" />
-          </HStack>
-        )}
-        {card.sync.state === 'pending' && (
-          <Token size="sm" color="yellow" label="Sincronizando" data-testid="card-sync" />
-        )}
-        {flow && (
-          <Token
-            size="sm"
-            color={flow === 'needs_you' ? 'yellow' : 'default'}
-            label={flow === 'needs_you' ? 'Esperando você' : 'Fluxo'}
-            data-testid="card-flow"
-          />
-        )}
         <StackItem size="fill">
-          {actions && (
-            <HStack hAlign="end">
+          <HStack gap={2} vAlign="center" hAlign="end">
+            {status && (
+              <HStack
+                gap={1}
+                vAlign="center"
+                data-testid={`card-${status.kind === 'pr' ? 'status' : status.kind}`}
+              >
+                <StatusDot
+                  variant={status.tone}
+                  label={status.label}
+                  isPulsing={status.isPulsing ?? false}
+                />
+                <Text type="supporting" color={status.tone === 'neutral' ? 'secondary' : 'primary'}>
+                  {status.label}
+                </Text>
+              </HStack>
+            )}
+            {actions && (
               <MoreMenu
                 label={`Ações de ${label}`}
                 size="sm"
@@ -90,18 +84,56 @@ export function BoardCardBody({
                     }))
                 ]}
               />
-            </HStack>
-          )}
+            )}
+          </HStack>
         </StackItem>
       </HStack>
       <Text weight="semibold">{card.title}</Text>
       <HStack gap={2} vAlign="center" wrap="wrap">
-        {card.priority && (
-          <Token size="sm" label={card.priority.name} data-testid="card-priority" />
+        {card.blocked && (
+          <HStack vAlign="center" role="img" aria-label="Bloqueada" data-testid="card-blocked">
+            <Icon icon={LockIcon} size="sm" color="secondary" />
+          </HStack>
         )}
-        {card.assignees.length > 0 && <Text type="supporting">{card.assignees.join(', ')}</Text>}
+        {card.automationPaused && (
+          <HStack
+            vAlign="center"
+            role="img"
+            aria-label="Automações pausadas"
+            data-testid="card-automation-paused"
+          >
+            <Icon icon={PauseIcon} size="sm" color="secondary" />
+          </HStack>
+        )}
+        {branches[0] && (
+          <HStack gap={1} vAlign="center" data-testid="card-branch">
+            <Icon icon={GitBranchIcon} size="sm" color="secondary" />
+            <Text type="supporting" color="secondary" maxLines={1}>
+              <Code>{branches[0]}</Code>
+            </Text>
+          </HStack>
+        )}
+        {pr && (
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Icon icon={PullRequestIcon} />}
+            label={`#${pr.number}`}
+            aria-label={`Abrir a PR #${pr.number} no GitHub`}
+            onClick={() => void window.orkio.openExternal(pr.url)}
+          />
+        )}
+        {card.priority && (
+          <Text type="supporting" color="secondary" data-testid="card-priority">
+            {card.priority.name}
+          </Text>
+        )}
+        {card.assignees.length > 0 && (
+          <Text type="supporting" color="secondary">
+            {card.assignees.join(', ')}
+          </Text>
+        )}
       </HStack>
-      <TaskSignalsLine signals={signals} />
     </VStack>
   )
 }

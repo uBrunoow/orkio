@@ -465,3 +465,33 @@ Diferenças em relação à proposta:
 - Duas correções fora da UI, achadas pelos testes: "Atualizar" durante um ciclo de automação
   devolvia o resultado velho (3B), e os Bancos do Notion diziam "Conecte o Notion" com o Notion já
   conectado (2C).
+
+## Fase 3 — proposta a partir das referências (Compozy e OpenBot)
+
+Prints enviados: quadro de sessões por estado de atenção, sessão com subagentes, "Enquanto você
+estava fora", cards de agentes, editor de loop em grafo, detalhe de automação, marketplace e uma
+lista de conversas com "Não lidas". Pegamos os **padrões**, não a identidade: nada de rostos de
+agente, gradientes, azul/ciano ou fundo de partículas. Continua valendo o CLAUDE.md (Astryx, tokens,
+CSP, preto piano, laranja só onde a pessoa precisa agir, Jost só em logo/títulos, mono em IDs).
+
+### O que muda no plano
+
+| # | Padrão da referência | Como fica no Orkio | Onde |
+| - | -------------------- | ------------------ | ---- |
+| A | Quadro por "quem tem o próximo passo" (Precisa de você, Trabalhando, Esperando, Em revisão, Concluída) | **Visão geral** (6D) ganha uma visão em colunas por atenção, de todos os projetos, derivada do que já existe: gate, pergunta, permissão, fluxo pausado/falhou → *Precisa de você*; execução do Claude Code ou fluxo rodando → *Trabalhando*; esperando CI, vaga ou outra tarefa → *Esperando*; PR aberta → *Em revisão*; finalizada → *Concluída*. Lista ⇄ Kanban no cabeçalho. O Quadro do projeto continua com as etapas do Notion. | Passo 9 (junto da 6D) |
+| B | Laranja só em "Precisa de você" | Ponto/Token laranja só nesse estado e no botão primário; falha em vermelho (`--color-danger`), concluída em verde discreto, o resto neutro. Já é a regra da marca; vira regra explícita na skill. | Skill + todos os cards |
+| C | Card compacto: projeto em cima, título, rodapé com agente/fluxo e tempo, estado à direita | Card do Quadro e da Visão geral: projeto (texto secundário), título, rodapé com ID (mono), branch/PR `#n`, passo do fluxo e "há 4 min"; à direita o motivo ("Pergunta", "Falhou", "Checks falhando"). | Passo 4b |
+| D | "Enquanto você estava fora": uma frase + linha do tempo em blocos + contagem por tipo | Topo da Visão geral, só quando houve atividade desde a última abertura: "6 horas, 2 decisões para você", faixa de blocos por hora (laranja = precisa de você, vermelho = deu errado, neutro = nada), e contagens que filtram a lista. Dados de `task_events`/`flow_runs` (SQLite), sem rede. | Passo 9 |
+| E | Sessão com subagentes e barra "Esperando…" acima do campo | Tela cheia da tarefa: o log da execução agrupa chamadas de ferramenta em blocos recolhíveis e o que espera a pessoa (gate, pergunta, permissão) vira uma barra fixa no rodapé, com as ações ali. | Passo 3b (TaskPage/RunLog) |
+| F | Detalhe de automação: frase-resumo, "Como funciona" (Começa/Faz), execuções recentes e painel de detalhes | Clicar numa regra em Etapas e automações abre o detalhe: frase (`describeRule`), Começa/Faz, últimas execuções da regra (movida/ignorada e por quê, de `task_events`) e painel lateral em `MetadataList`. Mesmo padrão para um fluxo da 5A (execuções recentes). | Passo 6b |
+| G | Cards de agentes com estado e atividade | Sem "agentes sempre ligados" no Orkio. O equivalente é **Execuções**: cards dos fluxos/execuções ativos com estado, projeto, passo atual e tempo. Entra como seção da Visão geral, não como tela nova. | Passo 9 |
+| H | Editor de loop em grafo | **Não agora.** Um grafo precisa de canvas/SVG fora da Astryx e arrasto próprio (risco de CSP e acessibilidade). Fluxos continuam em lista; cada passo ganha o tipo em mono (`claude_command`, `gate`…) como os nós da referência. | Passo 7b (só o rótulo) |
+| I | Marketplace em grade com logo, categoria e ação | Integrações em grade de 2 colunas (logo, nome, categoria em mono, ação à direita) e o catálogo de comandos do Claude Code no mesmo formato. | Passo 8b |
+| J | Rail de ícones com contadores e rodapé "8 precisam de você · 7 trabalhando" | Menu lateral ganha contador em "Visão geral" (Badge = contagem) e uma linha de status no rodapé do menu. Seletor "Todos os projetos" no topo do menu. | Passo 9 |
+
+### Ordem sugerida
+
+1. B + C (cards e cor de estado) no Quadro.
+2. A, D, G, J com o passo 9, quando a 6D chegar à main.
+3. E (tela cheia da tarefa), F (detalhe de regra), I (Integrações em grade).
+4. H fica registrado como fora do escopo.
