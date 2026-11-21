@@ -10,6 +10,7 @@ import {
   ipcMain,
   nativeImage,
   Notification,
+  screen,
   safeStorage,
   session,
   shell,
@@ -99,10 +100,20 @@ import changelog from '../../CHANGELOG.md?raw'
 const RENDERER_HTML = join(__dirname, '../renderer/index.html')
 const DEV_SERVER_URL = app.isPackaged ? undefined : process.env['ELECTRON_RENDERER_URL']
 
+/** Janela inicial: 90% da área útil da tela principal (quase cheia, centralizada). */
+function initialWindowSize(): { width: number; height: number } {
+  const { width, height } = screen.getPrimaryDisplay().workAreaSize
+  return {
+    // Nunca menor que o tamanho antigo (1100×760), nem maior que a tela.
+    width: Math.min(width, Math.max(1100, Math.round(width * 0.9))),
+    height: Math.min(height, Math.max(760, Math.round(height * 0.9)))
+  }
+}
+
 function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 760,
+    ...initialWindowSize(),
+    center: true,
     minWidth: 720,
     minHeight: 520,
     show: false,
