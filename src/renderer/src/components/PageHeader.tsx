@@ -20,7 +20,7 @@ export function PageHeader({
   action?: React.ReactNode
 }): React.JSX.Element {
   return (
-    <HStack gap={4} vAlign="start" justify="between">
+    <HStack gap={4} vAlign="start" justify="between" wrap="wrap">
       <VStack gap={1}>
         {context && (
           <Text type="supporting" color="secondary" data-testid="page-context">

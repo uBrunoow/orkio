@@ -11,7 +11,6 @@ import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-
 import { LockIcon, PauseIcon } from '../../components/icons'
 import { useTaskFlowState } from '../task-flows/active-flows'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
-import { tokenColor } from '../notion-workspace/notion-colors'
 
 export interface CardActions {
   onOpen(taskId: string): void
@@ -96,12 +95,7 @@ export function BoardCardBody({
       <Text weight="semibold">{card.title}</Text>
       <HStack gap={2} vAlign="center" wrap="wrap">
         {card.priority && (
-          <Token
-            size="sm"
-            label={card.priority.name}
-            color={tokenColor(card.priority.color)}
-            data-testid="card-priority"
-          />
+          <Token size="sm" label={card.priority.name} data-testid="card-priority" />
         )}
         {card.assignees.length > 0 && <Text type="supporting">{card.assignees.join(', ')}</Text>}
       </HStack>

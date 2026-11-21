@@ -28,7 +28,6 @@ import { CloseIcon, ExpandIcon, ExternalLinkIcon } from '../../components/icons'
 import { TaskClaudeSection } from '../claude/TaskClaudeSection'
 import { TaskFlowSection } from '../task-flows/TaskFlowSection'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
-import { tokenColor } from '../notion-workspace/notion-colors'
 
 /**
  * Tarefa: dados, ações, branch/PR, fluxo, Claude Code e histórico (task_events).
@@ -139,16 +138,8 @@ export function TaskPanel({
   const tokens = (
     <>
       <HStack gap={2} wrap="wrap" vAlign="center">
-        {card.status && (
-          <Token
-            size="sm"
-            label={`Notion: ${card.status.name}`}
-            color={tokenColor(card.status.color)}
-          />
-        )}
-        {card.priority && (
-          <Token size="sm" label={card.priority.name} color={tokenColor(card.priority.color)} />
-        )}
+        {card.status && <Token size="sm" label={`Notion: ${card.status.name}`} color="default" />}
+        {card.priority && <Token size="sm" label={card.priority.name} />}
         {card.sync.state === 'pending' && <Token size="sm" color="yellow" label="Sincronizando" />}
       </HStack>
       {card.sync.state === 'pending' && card.sync.message && (

@@ -8,6 +8,7 @@ import { Selector } from '@astryxdesign/core/Selector'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { TextInput } from '@astryxdesign/core/TextInput'
+import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
@@ -41,39 +42,39 @@ export function BoardPage({
   /** Abre a tarefa em tela cheia. */
   onExpandTask(taskId: string): void
 }): React.JSX.Element {
-  return (
-    <VStack gap={5}>
-      <PageHeader
-        title="Quadro"
-        {...(project ? { context: project.name } : {})}
-        subtitle="Suas etapas de trabalho, ligadas ao status das tarefas no Notion."
-      />
-      {!project ? (
+  if (!project) {
+    return (
+      <VStack gap={5}>
+        <PageHeader title="Quadro" />
         <PageState
           kind="empty"
           title="Nenhum projeto vinculado ao Notion"
           description="Vincule um projeto a um projeto do Notion em Projetos para abrir o quadro."
           action={{ label: 'Ir para Projetos', onClick: onOpenProjects }}
         />
-      ) : (
-        <Board
-          projectId={project.id}
-          openTaskId={openTaskId}
-          onOpenIntegrations={onOpenIntegrations}
-          onExpandTask={onExpandTask}
-        />
-      )}
-    </VStack>
+      </VStack>
+    )
+  }
+  return (
+    <Board
+      projectId={project.id}
+      projectName={project.name}
+      openTaskId={openTaskId}
+      onOpenIntegrations={onOpenIntegrations}
+      onExpandTask={onExpandTask}
+    />
   )
 }
 
 function Board({
   projectId,
+  projectName,
   openTaskId,
   onOpenIntegrations,
   onExpandTask
 }: {
   projectId: string
+  projectName: string
   openTaskId: string | null
   onOpenIntegrations(): void
   onExpandTask(taskId: string): void
@@ -111,16 +112,30 @@ function Board({
     )
   }, [view?.cards, query, priority, onlyBlocked])
 
+  const header = (action?: React.ReactNode): React.JSX.Element => (
+    <PageHeader title="Quadro" context={projectName} action={action} />
+  )
+
   if (!view) {
-    return board.error ? (
-      <BoardErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
-    ) : (
-      <PageState kind="loading" label="Carregando quadro" />
+    return (
+      <VStack gap={5}>
+        {header()}
+        {board.error ? (
+          <BoardErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
+        ) : (
+          <PageState kind="loading" label="Carregando quadro" />
+        )}
+      </VStack>
     )
   }
 
   if (!view.config) {
-    return <BoardSettings view={view} onSave={(input) => board.save(input)} onCancel={undefined} />
+    return (
+      <VStack gap={5}>
+        {header()}
+        <BoardSettings view={view} onSave={(input) => board.save(input)} onCancel={undefined} />
+      </VStack>
+    )
   }
 
   const selectedCard = view.cards.find((c) => c.taskId === selected) ?? null
@@ -133,8 +148,30 @@ function Board({
   }
 
   return (
-    <VStack gap={4}>
-      <HStack gap={3} vAlign="end" wrap="wrap" role="toolbar" aria-label="Filtros do quadro">
+    // Ocupa a altura útil da janela: as colunas e o painel rolam por dentro.
+    <VStack gap={4} height="calc(100dvh - var(--spacing-6) * 2)">
+      {header(
+        <HStack gap={2} vAlign="center" wrap="wrap" hAlign="end">
+          <AutomationLine status={automation.status} onOpenIntegrations={onOpenIntegrations} />
+          <Button
+            variant="ghost"
+            label="Atualizar"
+            icon={<Icon icon={RefreshIcon} />}
+            isLoading={board.loading || automation.running}
+            onClick={() => {
+              // Verifica git/GitHub agora (automações) e relê o Notion.
+              void automation.runNow().then(() => board.load(true))
+            }}
+          />
+          <Button
+            variant="ghost"
+            label={automation.status?.paused ? 'Retomar automações' : 'Pausar todas'}
+            icon={<Icon icon={automation.status?.paused ? AutomationIcon : PauseIcon} />}
+            onClick={() => void automation.setPaused(!automation.status?.paused)}
+          />
+        </HStack>
+      )}
+      <HStack gap={3} vAlign="center" wrap="wrap" role="toolbar" aria-label="Filtros do quadro">
         <TextInput
           type="search"
           label="Buscar tarefas"
@@ -156,26 +193,8 @@ function Board({
           />
         )}
         <CheckboxInput label="Só bloqueadas" value={onlyBlocked} onChange={setOnlyBlocked} />
-        <StackItem size="fill" />
-        <Button
-          variant="ghost"
-          label="Atualizar"
-          icon={<Icon icon={RefreshIcon} />}
-          isLoading={board.loading || automation.running}
-          onClick={() => {
-            // Verifica git/GitHub agora (automações) e relê o Notion.
-            void automation.runNow().then(() => board.load(true))
-          }}
-        />
-        <Button
-          variant="ghost"
-          label={automation.status?.paused ? 'Retomar automações' : 'Pausar todas'}
-          icon={<Icon icon={automation.status?.paused ? AutomationIcon : PauseIcon} />}
-          onClick={() => void automation.setPaused(!automation.status?.paused)}
-        />
       </HStack>
 
-      <AutomationLine status={automation.status} />
       {view.pendingCount > 0 && (
         <Alert
           tone="warning"
@@ -228,47 +247,46 @@ function Board({
         <Text type="supporting">Mostrando as 500 tarefas mais recentes deste projeto.</Text>
       )}
 
-      <HStack gap={4} vAlign="start">
-        <StackItem size="fill">
-          {view.cards.length === 0 ? (
-            <EmptyState
-              title="Nenhuma tarefa neste projeto"
-              description="As tarefas do Notion ligadas a este projeto aparecem aqui."
-              headingLevel={2}
-            />
-          ) : (
-            <ActiveFlowsProvider value={activeFlows}>
-              <BoardColumns
-                stages={view.config.stages}
-                cards={cards}
-                signals={signals.result?.signals ?? {}}
-                selectedTaskId={selected}
-                actions={actions}
+      <StackItem size="fill">
+        <HStack gap={4} vAlign="stretch" height="100%" minHeight="calc(var(--spacing-12) * 6)">
+          <StackItem size="fill">
+            {view.cards.length === 0 ? (
+              <EmptyState
+                title="Nenhuma tarefa neste projeto"
+                description="As tarefas do Notion ligadas a este projeto aparecem aqui."
+                headingLevel={2}
               />
-            </ActiveFlowsProvider>
+            ) : (
+              <ActiveFlowsProvider value={activeFlows}>
+                <BoardColumns
+                  stages={view.config.stages}
+                  cards={cards}
+                  signals={signals.result?.signals ?? {}}
+                  selectedTaskId={selected}
+                  actions={actions}
+                />
+              </ActiveFlowsProvider>
+            )}
+          </StackItem>
+          {selectedCard && (
+            <VStack width="min(calc(var(--spacing-12) * 9), 42%)" height="100%">
+              <TaskPanel
+                projectId={projectId}
+                card={selectedCard}
+                stages={view.config.stages}
+                signals={signals.result?.signals[selectedCard.taskId]}
+                onMove={(stageId) => actions.onMove(selectedCard.taskId, stageId)}
+                onToggleBlocked={(blocked) => actions.onToggleBlocked(selectedCard.taskId, blocked)}
+                onToggleAutomation={(paused) =>
+                  actions.onToggleAutomation(selectedCard.taskId, paused)
+                }
+                onClose={() => setPicked(null)}
+                onExpand={() => onExpandTask(selectedCard.taskId)}
+              />
+            </VStack>
           )}
-        </StackItem>
-        {selectedCard && (
-          <VStack
-            width="min(calc(var(--spacing-12) * 9), 42%)"
-            height="calc(100dvh - var(--spacing-12) * 5)"
-          >
-            <TaskPanel
-              projectId={projectId}
-              card={selectedCard}
-              stages={view.config.stages}
-              signals={signals.result?.signals[selectedCard.taskId]}
-              onMove={(stageId) => actions.onMove(selectedCard.taskId, stageId)}
-              onToggleBlocked={(blocked) => actions.onToggleBlocked(selectedCard.taskId, blocked)}
-              onToggleAutomation={(paused) =>
-                actions.onToggleAutomation(selectedCard.taskId, paused)
-              }
-              onClose={() => setPicked(null)}
-              onExpand={() => onExpandTask(selectedCard.taskId)}
-            />
-          </VStack>
-        )}
-      </HStack>
+        </HStack>
+      </StackItem>
     </VStack>
   )
 }
@@ -351,25 +369,42 @@ function useAutomationStatus(projectId: string): {
   }
 }
 
-function AutomationLine({ status }: { status: AutomationStatus | null }): React.JSX.Element | null {
+/** Estado das automações, curto, no cabeçalho do quadro. */
+function AutomationLine({
+  status,
+  onOpenIntegrations
+}: {
+  status: AutomationStatus | null
+  onOpenIntegrations(): void
+}): React.JSX.Element | null {
   if (!status) return null
   const time = (iso: string | null): string =>
     iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
   const text = status.paused
-    ? 'Automações pausadas para todos os projetos. Os eventos são registrados no histórico, sem mover tarefas.'
+    ? 'Automações pausadas para todos os projetos'
     : status.github === 'disconnected'
-      ? 'Automações: só eventos locais (conecte o GitHub em Integrações para PRs e reviews).'
+      ? 'Automações só com eventos locais'
       : status.github === 'rate_limited'
-        ? `Automações: limite do GitHub atingido; próxima verificação às ${time(status.nextRunAt)}.`
+        ? `Limite do GitHub: próxima verificação às ${time(status.nextRunAt)}`
         : status.github === 'ok'
-          ? `Automações ativas: GitHub verificado às ${time(status.lastRunAt)}.`
+          ? `GitHub verificado às ${time(status.lastRunAt)}`
           : status.lastRunAt
-            ? `Automações: última verificação às ${time(status.lastRunAt)}${status.error ? ` (${status.error})` : ''}.`
-            : 'Automações: aguardando a primeira verificação.'
+            ? `Verificado às ${time(status.lastRunAt)}${status.error ? ` (${status.error})` : ''}`
+            : 'Aguardando a primeira verificação'
+  const detail = status.paused
+    ? 'Os eventos são registrados no histórico, sem mover tarefas.'
+    : 'As automações movem as tarefas pelos eventos do git e do GitHub.'
   return (
     <HStack gap={2} vAlign="center" data-testid="automation-status">
-      <Icon icon={status.paused ? PauseIcon : AutomationIcon} size="sm" color="secondary" />
-      <Text type="supporting">{text}</Text>
+      <Tooltip content={detail} placement="below">
+        <HStack gap={1} vAlign="center">
+          <Icon icon={status.paused ? PauseIcon : AutomationIcon} size="sm" color="secondary" />
+          <Text type="supporting">{text}</Text>
+        </HStack>
+      </Tooltip>
+      {!status.paused && status.github === 'disconnected' && (
+        <Button size="sm" variant="ghost" label="Conectar GitHub" onClick={onOpenIntegrations} />
+      )}
     </HStack>
   )
 }

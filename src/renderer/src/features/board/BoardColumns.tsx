@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Card } from '@astryxdesign/core/Card'
-import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Heading } from '@astryxdesign/core/Heading'
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { StatusDot } from '@astryxdesign/core/StatusDot'
 import { Text } from '@astryxdesign/core/Text'
+import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import { BoardCardBody, BoardCardItem, type CardActions } from './BoardCardView'
@@ -135,6 +136,7 @@ export function BoardColumns({
         role="list"
         aria-label="Etapas do quadro"
         isScrollable
+        height="100%"
         paddingBlockEnd={2}
       >
         {columns.map((column) => {
@@ -148,56 +150,73 @@ export function BoardColumns({
               aria-label={column.name}
               data-stage-id={column.id}
               width="calc(var(--spacing-12) * 6)"
+              height="100%"
               // Colunas não encolhem: o quadro rola na horizontal.
               style={{ flexShrink: 0 }}
             >
               <Card variant={isTarget ? 'default' : 'muted'} padding={0} height="100%">
                 <VStack
-                  gap={3}
                   ref={(el: HTMLDivElement | null) => {
                     if (el) columnEls.current.set(column.id, el)
                     else columnEls.current.delete(column.id)
                   }}
-                  padding={3}
-                  minHeight="100%"
+                  height="100%"
                 >
-                  <HStack gap={2} vAlign="center">
+                  <HStack gap={2} vAlign="center" padding={3} paddingBlockEnd={1}>
                     <StatusDot
                       variant={column.stage ? 'neutral' : 'warning'}
                       label={column.stage ? `Etapa ${column.name}` : 'Sem etapa'}
                     />
-                    <Heading level={3}>{column.name}</Heading>
+                    <Tooltip
+                      content={
+                        column.stage
+                          ? `Status no Notion: ${column.stage.notionStatus.name}`
+                          : 'Status do Notion que nenhuma etapa usa'
+                      }
+                      placement="below"
+                      alignment="start"
+                    >
+                      <Heading level={3}>{column.name}</Heading>
+                    </Tooltip>
                     <StackItem size="fill" />
                     <Text type="supporting" hasTabularNumbers data-testid="column-count">
                       {items.length}
                     </Text>
                   </HStack>
-                  <Text type="supporting">
-                    {column.stage
-                      ? `Notion: ${column.stage.notionStatus.name}`
-                      : 'Status do Notion sem etapa no quadro'}
-                  </Text>
-                  <VStack gap={2} role="list" aria-label={`Tarefas em ${column.name}`}>
-                    {visible.map((card) => (
-                      <BoardCardItem
-                        key={card.taskId}
-                        card={card}
-                        stages={stages}
-                        signals={signals[card.taskId]}
-                        actions={actions}
-                        isSelected={selectedTaskId === card.taskId}
-                        cardRef={(el) => {
-                          if (el) cardEls.current.set(card.taskId, el)
-                          else cardEls.current.delete(card.taskId)
-                        }}
-                        onPointerDown={onPointerDown}
-                      />
-                    ))}
-                    {isTarget && drag && <Card variant="muted" height={drag.height} aria-hidden />}
-                    {visible.length === 0 && !isTarget && (
-                      <EmptyState isCompact title="Nenhuma tarefa" headingLevel={4} />
-                    )}
-                  </VStack>
+                  <StackItem size="fill">
+                    <ScrollableArea
+                      label={`Tarefas em ${column.name} (rolagem)`}
+                      height="100%"
+                      padding={3}
+                      paddingBlockStart={2}
+                    >
+                      <VStack gap={2} role="list" aria-label={`Tarefas em ${column.name}`}>
+                        {visible.map((card) => (
+                          <BoardCardItem
+                            key={card.taskId}
+                            card={card}
+                            stages={stages}
+                            signals={signals[card.taskId]}
+                            actions={actions}
+                            isSelected={selectedTaskId === card.taskId}
+                            cardRef={(el) => {
+                              if (el) cardEls.current.set(card.taskId, el)
+                              else cardEls.current.delete(card.taskId)
+                            }}
+                            onPointerDown={onPointerDown}
+                          />
+                        ))}
+                        {isTarget && drag && (
+                          <Card variant="muted" height={drag.height} aria-hidden />
+                        )}
+                        {visible.length === 0 && !isTarget && (
+                          <Text type="supporting" color="secondary">
+                            Nenhuma tarefa
+                          </Text>
+                        )}
+                      </VStack>
+                    </ScrollableArea>
+                  </StackItem>
                 </VStack>
               </Card>
             </VStack>
