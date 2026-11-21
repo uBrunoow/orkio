@@ -15,7 +15,7 @@
   interface-design, escala/medida/truncamento do better-typography e as regras de UX de produto do
   ui-ux-pro-max). Quando as skills estiverem em `.claude/skills/` (instaladas sem `-g` e commitadas),
   refaço a auditoria com elas e marco aqui o que mudou.
-- **Prints:** 23 telas e estados, capturados com o Playwright do E2E (`e2e/fixtures.ts`), sem
+- **Prints:** 24 telas e estados, capturados com o Playwright do E2E (`e2e/fixtures.ts`), sem
   nenhum gancho novo no app.
 - **Visão geral (6D):** ainda não existe na `main`; está sendo construída em outra thread. Ela entra
   na arquitetura abaixo e na lista de telas a auditar quando chegar (critérios na seção 3.12).
