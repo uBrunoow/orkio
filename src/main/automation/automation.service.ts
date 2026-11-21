@@ -53,22 +53,31 @@ export interface CycleResult {
 
 export class AutomationService {
   private readonly now: () => Date
-  private running = new Map<string, Promise<CycleResult>>()
+  private running = new Map<string, { promise: Promise<CycleResult>; force: boolean }>()
 
   constructor(private readonly deps: AutomationServiceDeps) {
     this.now = deps.now ?? (() => new Date())
   }
 
-  /** Um ciclo por projeto de cada vez (chamadas simultâneas esperam o mesmo ciclo). */
+  /**
+   * Um ciclo por projeto de cada vez (chamadas simultâneas esperam o mesmo ciclo). "Atualizar"
+   * (force) durante um ciclo comum não pode devolver o resultado velho: espera e roda um forçado.
+   */
   run(projectId: string, options: { force?: boolean } = {}): Promise<CycleResult> {
-    let current = this.running.get(projectId)
-    if (!current) {
-      current = this.cycle(projectId, options.force === true).finally(() => {
-        this.running.delete(projectId)
-      })
-      this.running.set(projectId, current)
+    const force = options.force === true
+    const current = this.running.get(projectId)
+    if (current) {
+      if (!force || current.force) return current.promise
+      return current.promise.then(
+        () => this.run(projectId, { force: true }),
+        () => this.run(projectId, { force: true })
+      )
     }
-    return current
+    const promise = this.cycle(projectId, force).finally(() => {
+      this.running.delete(projectId)
+    })
+    this.running.set(projectId, { promise, force })
+    return promise
   }
 
   private async cycle(projectId: string, force: boolean): Promise<CycleResult> {

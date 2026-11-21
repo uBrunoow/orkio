@@ -130,6 +130,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
   let notifications: AutomationNotification[]
   let changed: string[]
   let clock: number
+  const signalForces: boolean[] = []
 
   function build(): void {
     const store = new BoardStore(db)
@@ -160,7 +161,8 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
       store,
       board,
       signals: {
-        get: async () => {
+        get: async (_projectId, options) => {
+          signalForces.push(options?.force === true)
           const signals: Record<string, TaskSignals> = {}
           for (const id of [T1, T2]) {
             const pr = world.pr[id]
@@ -279,6 +281,15 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
     queue.stop()
     db.close()
     await rm(dir, { recursive: true, force: true })
+  })
+
+  it('"Atualizar" durante um ciclo comum espera e roda um ciclo forçado (não devolve o velho)', async () => {
+    signalForces.length = 0
+    const plain = automation.run('p1')
+    const forced = automation.run('p1', { force: true })
+    const again = automation.run('p1')
+    await Promise.all([plain, forced, again])
+    expect(signalForces).toEqual([false, true])
   })
 
   it('primeiro ciclo é linha de base: nada se move', async () => {
