@@ -14,6 +14,20 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   escritas no Notion.
 - Tela Configurações com Atualizações (canal Estável ou Beta) e Sobre.
 - "O que há de novo" depois de cada atualização.
+- A sessão do Claude Code na tarefa agora é uma conversa: respostas completas em markdown,
+  ferramentas agrupadas numa frase ("Rodou 6 comandos · Editou 2 arquivos") que abre os detalhes,
+  falhas e bloqueios em destaque e o fechamento com turnos, tempo e custo.
+- Spec e plano da task do Backlog.md na própria tarefa: os gates "Aprovar spec" e "Aprovar plano"
+  (novos nos fluxos Alva) mostram o texto, os critérios e as perguntas em aberto antes de você
+  aprovar, e a seção "Spec e plano" deixa ler a task a qualquer hora.
+- Diff legível nos gates e em "Ver diff": resumo de arquivos e +/−, um cartão por arquivo com as
+  linhas adicionadas e removidas coloridas e numeradas, arquivos novos, renomeados e binários
+  indicados, e os arquivos novos ainda fora do git listados.
+- Quando um passo do fluxo falha ou o fluxo para, um cartão explica o que aconteceu e o que fazer:
+  o motivo registrado, a causa provável (arquivos fora de commit, credenciais do git, push
+  recusado, tempo esgotado...) e as saídas: "Rodar /commit de novo", "Ver o que falta commitar",
+  "Ver a sessão do passo", Retomar, Pular e Cancelar. Com um fluxo em andamento, o botão manual do
+  Claude Code dá lugar a uma explicação em vez de falhar ao clicar.
 
 ## [0.1.0] - 2026-11-20
 

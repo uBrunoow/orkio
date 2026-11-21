@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { TaskActivity } from '../task-flows/TaskFlowSection'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -28,6 +28,7 @@ import type {
   RunPreparation
 } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
+import { DiffView } from '../../components/DiffView'
 import {
   CleanIcon,
   DiffIcon,
@@ -39,11 +40,11 @@ import {
 } from '../../components/icons'
 import { formatUsd, plural } from '../../lib/format'
 import { QuestionCard } from './QuestionCard'
-import { RunLog, STATUS_COLOR, STATUS_LABEL, toLogLine, type LogLine } from './RunLog'
+import { RunTranscript } from './RunTranscript'
+import { buildTranscript } from './run-transcript'
+import { STATUS_COLOR, STATUS_LABEL } from './run-status'
 import { TaskArtifacts } from './TaskArtifacts'
 import { pendingRequests, useTaskRuns, type PendingPermission } from './useTaskRuns'
-
-const LOG_TAIL = 60
 
 /** Seção "Claude Code" do painel da tarefa (4A). */
 export function TaskClaudeSection({
@@ -51,7 +52,9 @@ export function TaskClaudeSection({
   taskId,
   stageName,
   onWaitingChange,
-  onActivityChange
+  onActivityChange,
+  openRun = null,
+  flowActive = false
 }: {
   projectId: string
   taskId: string
@@ -60,8 +63,18 @@ export function TaskClaudeSection({
   onWaitingChange?: (count: number) => void
   /** Execução rodando agora (ou null): o painel mostra "Trabalhando há…". */
   onActivityChange?: (activity: TaskActivity | null) => void
+  /** Pedido para exibir a sessão de uma execução (ex.: o passo de um fluxo que falhou). */
+  openRun?: { runId: string; nonce: number } | null
+  /** A tarefa tem um fluxo em andamento: o Claude Code roda pelos passos dele, não à mão. */
+  flowActive?: boolean
 }): React.JSX.Element {
   const runs = useTaskRuns(projectId, taskId)
+  const selectRun = runs.select
+  const openRunId = openRun?.runId ?? null
+  const openRunNonce = openRun?.nonce ?? null
+  useEffect(() => {
+    if (openRunId && openRunNonce !== null) void selectRun(openRunId)
+  }, [openRunId, openRunNonce, selectRun])
   const [prep, setPrep] = useState<RunPreparation | null>(null)
   const [initial, setInitial] = useState<RunInitial>(EMPTY_INITIAL)
   const [preparing, setPreparing] = useState(false)
@@ -124,7 +137,13 @@ export function TaskClaudeSection({
           projectId={projectId}
         />
       ) : (
-        !active && (
+        !active &&
+        (flowActive ? (
+          <Text type="supporting">
+            Há um fluxo em andamento nesta tarefa: o Claude Code roda pelos passos dele. Termine ou
+            cancele o fluxo para rodar à mão.
+          </Text>
+        ) : (
           <Button
             variant="primary"
             label="Rodar Claude Code"
@@ -132,7 +151,7 @@ export function TaskClaudeSection({
             isLoading={preparing}
             onClick={() => void prepare()}
           />
-        )
+        ))
       )}
 
       {selected && (
@@ -140,7 +159,7 @@ export function TaskClaudeSection({
           run={selected}
           log={runs.log}
           onCancel={() => void window.orkio.claude.cancel(selected.id)}
-          {...(!active && !prep ? { onRerun: () => void prepare(selected) } : {})}
+          {...(!active && !prep && !flowActive ? { onRerun: () => void prepare(selected) } : {})}
         />
       )}
 
@@ -186,7 +205,7 @@ export function TaskClaudeSection({
                         onClick={() => void runs.select(r.id)}
                       />
                     )}
-                    {!active && !prep && (
+                    {!active && !prep && !flowActive && (
                       <Button
                         size="sm"
                         variant="ghost"
@@ -344,11 +363,9 @@ function RunView({
   onCancel(): void
   onRerun?: () => void
 }): React.JSX.Element {
-  const [showAll, setShowAll] = useState(false)
   const live = run.status === 'running' || run.status === 'queued'
   const pending = live ? pendingRequests(log) : []
-  const lines = log.map(toLogLine).filter((l): l is LogLine => l !== null)
-  const shown = showAll ? lines : lines.slice(-LOG_TAIL)
+  const items = useMemo(() => buildTranscript(log, live), [log, live])
 
   return (
     <VStack gap={3}>
@@ -397,15 +414,7 @@ function RunView({
         </VStack>
       )}
 
-      {lines.length > LOG_TAIL && (
-        <Button
-          size="sm"
-          variant="ghost"
-          label={showAll ? 'Mostrar só o fim' : `Mostrar tudo (${lines.length})`}
-          onClick={() => setShowAll((v) => !v)}
-        />
-      )}
-      <RunLog lines={shown} />
+      <RunTranscript items={items} />
 
       {run.summary && (
         <VStack gap={2} data-testid="run-summary">
@@ -502,7 +511,11 @@ function Workspace({
   suggestCleanup: boolean
   onChanged(): void
 }): React.JSX.Element {
-  const [diff, setDiff] = useState<string | null>(null)
+  const [diff, setDiff] = useState<{
+    diff: string
+    truncated: boolean
+    untracked: string[]
+  } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmFiles, setConfirmFiles] = useState<string[] | null>(null)
 
@@ -520,14 +533,7 @@ function Workspace({
       setError(r.error.message)
       return
     }
-    const untracked = r.value.untracked.length
-      ? `\n\nArquivos novos (fora do diff): ${r.value.untracked.join(', ')}`
-      : ''
-    setDiff(
-      (r.value.diff || 'Sem diferenças em relação à base.') +
-        (r.value.truncated ? '\n\n… (diff cortado)' : '') +
-        untracked
-    )
+    setDiff(r.value)
   }
   const cleanup = async (force: boolean): Promise<void> => {
     const r = await window.orkio.claude.cleanup(projectId, taskId, force)
@@ -618,12 +624,11 @@ function Workspace({
         </Card>
       )}
       {diff !== null && (
-        <TextArea
+        <DiffView
           label="Diff do ambiente"
-          value={diff}
-          isReadOnly
-          rows={16}
-          controlClassName="orkio-mono-input"
+          diff={diff.diff}
+          truncated={diff.truncated}
+          untracked={diff.untracked}
         />
       )}
     </VStack>

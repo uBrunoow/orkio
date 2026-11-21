@@ -1,4 +1,5 @@
-# Release por tag: `pnpm release <patch|minor|major|beta>` + `git push --follow-tags`.
+# Release por tag. Dois caminhos: (1) rótulo `release:*` na PR + merge (release-on-merge.yml cria a
+# tag e dispara este workflow); (2) à mão: `pnpm release <patch|minor|major|beta>` + `git push --follow-tags`.
 # vX.Y.Z → release estável; vX.Y.Z-beta.N → pre-release (canal beta).
 # Os binários vão para os releases deste mesmo repositório (público), com o GITHUB_TOKEN do
 # workflow (contents: write só nos jobs que publicam). Passo a passo em docs/releases.md.
@@ -7,6 +8,9 @@ name: Release
 on:
   push:
     tags: ['v*.*.*']
+  # Disparado pelo release-on-merge.yml com `--ref vX.Y.Z` (tags empurradas pelo GITHUB_TOKEN não
+  # disparam o `push` acima). Sempre com a tag como ref: `$GITHUB_REF_NAME` é a tag.
+  workflow_dispatch:
 
 permissions:
   contents: read

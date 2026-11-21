@@ -108,6 +108,28 @@ describe('ClaudeService', () => {
     expect(r.value.workspace).toBeNull()
   })
 
+  it('diff: devolve o texto, os arquivos novos e o que ainda está fora de commit', async () => {
+    const { service, deps, worktrees } = setup()
+    worktrees.get.mockReturnValue({ path: '/wt', branch: 'ORK-7/x', baseRef: 'origin/main' })
+    ;(deps.git.statusPorcelain as ReturnType<typeof vi.fn>).mockResolvedValue([
+      ' M src/a.ts',
+      '?? docs/novo.md',
+      '?? .orkio/',
+      'R  velho.ts -> novo.ts'
+    ])
+    const r = await service.diff('p1', 'task-1')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.diff).toContain('diff --git')
+    expect(r.value.truncated).toBe(false)
+    expect(r.value.untracked).toEqual(['docs/novo.md', '.orkio/'])
+    expect(r.value.uncommitted).toEqual([
+      { path: 'src/a.ts', status: 'modified' },
+      { path: 'docs/novo.md', status: 'untracked' },
+      { path: 'novo.ts', status: 'renamed' }
+    ]) // o que é interno do Orkio (.orkio/) não conta
+  })
+
   it('página ilegível: briefing só com os campos, com aviso', async () => {
     const { service } = setup({
       getBlockChildren: async () => {

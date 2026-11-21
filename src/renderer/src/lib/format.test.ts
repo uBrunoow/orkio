@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatUsd, plural } from './format'
+import { formatDuration, formatUsd, plural } from './format'
 
 describe('format', () => {
   it('plural', () => {
@@ -12,5 +12,12 @@ describe('format', () => {
   it('dólar com vírgula', () => {
     expect(formatUsd(0.0123)).toBe('US$ 0,01')
     expect(formatUsd(1234.5)).toBe('US$ 1.234,50')
+  })
+  it('duração curta', () => {
+    expect(formatDuration(400)).toBe('1 s')
+    expect(formatDuration(39_000)).toBe('39 s')
+    expect(formatDuration(18 * 60_000)).toBe('18 min')
+    expect(formatDuration(65 * 60_000)).toBe('1 h 05 min')
+    expect(formatDuration(120 * 60_000)).toBe('2 h')
   })
 })

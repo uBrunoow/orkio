@@ -103,6 +103,11 @@ export function registerTaskFlowsIpc(
   act(ch.reject, (id) => runner.rejectGate(id))
   act(ch.resume, (id) => runner.resume(id))
   act(ch.skip, (id) => runner.skip(id))
+  guarded(ch.rerunFrom, GENERIC, async (id, stepId) =>
+    isId(id) && typeof stepId === 'string' && stepId.length > 0 && stepId.length <= 100
+      ? service.act(() => runner.rerunFrom(id, stepId))
+      : INVALID
+  )
   act(ch.cancel, (id) => runner.cancel(id))
   guarded(ch.choose, GENERIC, async (id, value) =>
     isId(id) && typeof value === 'string' && value.length <= 200

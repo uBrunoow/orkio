@@ -262,7 +262,13 @@ function stepSummary(step: Step): string {
     case 'gate':
       return [
         `“${step.message}”`,
-        step.show === 'diff' ? 'mostra o diff' : step.show === 'summary' ? 'mostra o resumo' : null,
+        step.show === 'diff'
+          ? 'mostra o diff'
+          : step.show === 'summary'
+            ? 'mostra o resumo'
+            : step.show === 'backlog'
+              ? 'mostra a spec e o plano'
+              : null,
         `recusar → ${step.onReject === 'stop' ? 'encerra' : step.onReject}`
       ]
         .filter(Boolean)
@@ -550,6 +556,7 @@ function StepForm({
               options={[
                 { value: 'diff', label: 'Diff do ambiente' },
                 { value: 'summary', label: 'Resumo da última execução' },
+                { value: 'backlog', label: 'Spec e plano (task do Backlog)' },
                 { value: 'none', label: 'Nada' }
               ]}
               value={step.show}

@@ -39,7 +39,34 @@ Sem elas o release falha (o teste manual só avisa). Também são aceitas como _
 
 Na Vercel, `RELEASES_REPO=uBrunoow/orkio`. O site ignora pre-releases (beta).
 
-## Lançar uma versão
+## Lançar ao mergear (rótulo na PR)
+
+O caminho do dia a dia: a PR decide se sai uma versão e de que tipo, e o merge faz o resto.
+
+1. Escreva as mudanças visíveis em `## [Não lançado]` do `CHANGELOG.md` (dentro da própria PR).
+2. Ponha **um** rótulo na PR: `release:patch`, `release:minor`, `release:major` ou `release:beta`.
+   O check **Release (rótulo da PR)** mostra na hora a versão que vai sair (ex.: "Ao mergear, sai a
+   versão v0.2.0") e falha se o CHANGELOG não tiver o que lançar ou se houver mais de um rótulo.
+   Sem rótulo, o merge não lança nada.
+3. Mergeie. O workflow **Release ao mergear** (`release-on-merge.yml`), na `main`:
+   1. acha a PR do commit e lê o rótulo;
+   2. roda `node scripts/release.mjs <tipo>`: sobe o `package.json`, move "Não lançado" para
+      `## [X.Y.Z] - AAAA-MM-DD`, faz o commit `chore(release): vX.Y.Z` e cria a tag;
+   3. empurra o commit e a tag para a `main` (`git push --atomic`);
+   4. dispara o **Release** (`release.yml`) com `--ref vX.Y.Z`. Tags empurradas com o `GITHUB_TOKEN`
+      não disparam workflows (regra do GitHub, contra laços), por isso o disparo é explícito.
+4. O **Release** segue o mesmo caminho de sempre (abaixo): CI, rascunho, pacotes no macOS e no
+   Windows, smoke tests e publicação. Se algo falhar, o rascunho fica lá e nada é publicado.
+
+Cuidados:
+
+- O commit de versão vai direto para a `main` (o repositório não tem proteção de branch). Se um dia
+  houver, o `release-on-merge.yml` precisa de um token que possa empurrar nela.
+- Duas PRs com rótulo mergeadas em seguida lançam duas versões, uma de cada vez (`concurrency`).
+- Se o push da versão falhar (a `main` andou no meio), rode o workflow de novo ou lance à mão.
+- Não use um token pessoal para empurrar a tag: ele dispararia o `release.yml` duas vezes.
+
+## Lançar à mão
 
 1. Durante o desenvolvimento, escreva as mudanças visíveis em `## [Não lançado]` no `CHANGELOG.md`.
 2. Na `main` atualizada e limpa:

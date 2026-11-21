@@ -150,3 +150,47 @@ export function parseReleaseArgs(argv) {
   }
   return { kind: /** @type {'patch'|'minor'|'major'|'beta'} */ (kinds[0]), beta }
 }
+
+export const RELEASE_LABEL_PREFIX = 'release:'
+
+/**
+ * Rótulos de uma PR → tipo de release (`release:patch|minor|major|beta`).
+ * Sem rótulo de release: `null` (a PR não lança versão). Mais de um, ou um desconhecido: erro.
+ * @param {readonly string[]} labels
+ * @returns {'patch'|'minor'|'major'|'beta' | null}
+ */
+export function releaseKindFromLabels(labels) {
+  const kinds = [
+    ...new Set(
+      labels
+        .filter((l) => l.startsWith(RELEASE_LABEL_PREFIX))
+        .map((l) => l.slice(RELEASE_LABEL_PREFIX.length))
+    )
+  ]
+  if (kinds.length === 0) return null
+  if (kinds.length > 1) {
+    throw new Error(
+      `A PR tem mais de um rótulo de release (${kinds.map((k) => RELEASE_LABEL_PREFIX + k).join(', ')}). Deixe só um.`
+    )
+  }
+  const kind = kinds[0]
+  if (!BUMP_KINDS.includes(kind)) {
+    throw new Error(
+      `Rótulo desconhecido: ${RELEASE_LABEL_PREFIX}${kind}. Use ${BUMP_KINDS.map((k) => RELEASE_LABEL_PREFIX + k).join(', ')}.`
+    )
+  }
+  return /** @type {'patch'|'minor'|'major'|'beta'} */ (kind)
+}
+
+/**
+ * O que a PR pede: sem rótulo de release → `{ release: false }`; com rótulo → o tipo, a versão que
+ * vai sair e a conferência do CHANGELOG (erro em pt-BR se não houver o que lançar). Não escreve nada.
+ * @param {{ labels: readonly string[], currentVersion: string, changelog: string, today: string }} input
+ */
+export function planRelease({ labels, currentVersion, changelog, today }) {
+  const kind = releaseKindFromLabels(labels)
+  if (kind === null) return { release: false }
+  const version = nextVersion(currentVersion, kind)
+  releaseChangelog(changelog, version, today)
+  return { release: true, kind, version, prerelease: isPrerelease(version) }
+}

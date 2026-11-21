@@ -20,7 +20,6 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { ALVA_TEMPLATE_IDS } from '../../../../shared/alva-templates'
 import type { TaskPullRequest } from '../../../../shared/task-signals'
 import {
-  FLOW_PAUSE_LABEL,
   type ActionConfirm,
   type FlowRunStatus,
   type FlowRunView,
@@ -29,6 +28,10 @@ import {
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
 import { AutomationIcon, ExternalLinkIcon, PlayIcon } from '../../components/icons'
+import { DiffView } from '../../components/DiffView'
+import { describeFlowProblem } from '../../../../shared/flow-problem'
+import { FlowProblemCard } from './FlowProblemCard'
+import { BacklogDocumentView } from '../alva/BacklogDocumentView'
 
 type TokenColor = 'gray' | 'green' | 'red' | 'yellow' | 'orange' | 'blue'
 
@@ -87,7 +90,9 @@ export function TaskFlowSection({
   stageId,
   pr = null,
   onActivityChange,
-  onWaitingChange
+  onWaitingChange,
+  onOpenRun,
+  onLiveChange
 }: {
   projectId: string
   taskId: string
@@ -98,10 +103,15 @@ export function TaskFlowSection({
   onActivityChange?: (activity: TaskActivity | null) => void
   /** 1 quando o fluxo espera uma decisão sua (gate, escolha, saída da etapa). */
   onWaitingChange?: (count: number) => void
+  /** Abre a sessão (log) de uma execução do Claude Code desta tarefa. */
+  onOpenRun?: (runId: string) => void
+  /** O fluxo da tarefa está em andamento (o Claude Code manual fica bloqueado). */
+  onLiveChange?: (live: boolean) => void
 }): React.JSX.Element | null {
   // Passos recolhidos enquanto o fluxo roda ou espera você (a decisão vem primeiro); abertos no
   // fim. Clicar no resumo vale até a tarefa mudar.
   const [stepsOpen, setStepsOpen] = useState<boolean | null>(null)
+  const [specOpen, setSpecOpen] = useState(false)
   const [runs, setRuns] = useState<FlowRunView[] | null>(null)
   const [binding, setBinding] = useState<(StageFlow & { flowName: string }) | null>(null)
   const [pending, setPending] = useState<Record<string, string>>({})
@@ -181,6 +191,12 @@ export function TaskFlowSection({
     onWaitingChange?.(waitingYou)
   }, [waitingYou, onWaitingChange])
   useEffect(() => () => onActivityChange?.(null), [onActivityChange])
+  // Fluxo em andamento (rodando, esperando ou pausado): o Claude Code roda pelos passos dele.
+  const liveNow = !!run && run.status !== 'finished' && run.status !== 'cancelled'
+  useEffect(() => {
+    onLiveChange?.(liveNow)
+  }, [liveNow, onLiveChange])
+  useEffect(() => () => onLiveChange?.(false), [onLiveChange])
 
   const openPr = pr && (pr.state === 'open' || pr.state === 'draft') ? pr : null
   if (!run && !binding && !backlog.linked && !openPr?.checks) return null
@@ -188,6 +204,7 @@ export function TaskFlowSection({
   const stepName = (id: string | null): string =>
     run?.steps.find((s) => s.id === id)?.name ?? id ?? ''
   const current = run?.steps.find((s) => s.id === run.currentStep) ?? null
+  const problem = run ? describeFlowProblem(run) : null
 
   return (
     <VStack gap={3} role="region" aria-label="Fluxo da tarefa">
@@ -283,6 +300,23 @@ export function TaskFlowSection({
         </Text>
       )}
 
+      {backlog.task && (
+        <Collapsible
+          chevronPosition="start"
+          isOpen={specOpen}
+          onOpenChange={setSpecOpen}
+          trigger={
+            <Text type="supporting" color="primary">
+              Spec e plano
+            </Text>
+          }
+        >
+          {specOpen && (
+            <BacklogDocumentView projectId={projectId} taskId={taskId} refreshKey={tick} />
+          )}
+        </Collapsible>
+      )}
+
       {run?.status === 'running' && current?.type === 'claude_command' && (
         <Text type="supporting" data-testid="flow-running-step">
           {/:pr$/.test(current.command) && !/--comments/.test(current.args)
@@ -366,38 +400,19 @@ export function TaskFlowSection({
           </VStack>
         )}
 
-      {run?.status === 'paused' &&
-        run.pauseReason !== 'waiting_slot' &&
-        run.pauseReason !== 'waiting_agent' &&
-        run.pauseReason !== 'needs_choice' && (
-          <VStack gap={2}>
-            <Alert tone="warning">
-              {run.pauseReason ? FLOW_PAUSE_LABEL[run.pauseReason] : 'Fluxo pausado'}
-              {current ? ` — ${current.name}` : ''}.
-            </Alert>
-            <HStack gap={2} wrap="wrap">
-              <Button
-                size="sm"
-                variant="primary"
-                label="Retomar deste passo"
-                isLoading={busy}
-                onClick={() => void act(() => window.orkio.taskFlows.resume(run.id))}
-              />
-              <Button
-                size="sm"
-                variant="secondary"
-                label="Pular"
-                onClick={() => void act(() => window.orkio.taskFlows.skip(run.id))}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                label="Cancelar fluxo"
-                onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
-              />
-            </HStack>
-          </VStack>
-        )}
+      {run && problem && (
+        <FlowProblemCard
+          projectId={projectId}
+          taskId={taskId}
+          problem={problem}
+          busy={busy}
+          onResume={() => void act(() => window.orkio.taskFlows.resume(run.id))}
+          onRerun={(stepId) => void act(() => window.orkio.taskFlows.rerunFrom(run.id, stepId))}
+          onSkip={() => void act(() => window.orkio.taskFlows.skip(run.id))}
+          onCancel={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
+          {...(onOpenRun ? { onOpenRun } : {})}
+        />
+      )}
 
       {run?.status === 'awaiting_decision' && (
         <VStack gap={2}>
@@ -577,26 +592,21 @@ function GateCard({
   projectId: string
   taskId: string
   message: string
-  show: 'diff' | 'summary' | 'none'
+  show: 'diff' | 'summary' | 'backlog' | 'none'
   busy: boolean
   onApprove(): void
   onReject(): void
 }): React.JSX.Element {
   const [detail, setDetail] = useState<string | null>(null)
+  const [diffData, setDiffData] = useState<
+    { diff: string; truncated: boolean; untracked: string[] } | { error: string } | null
+  >(null)
 
   useEffect(() => {
     let active = true
     if (show === 'diff') {
       void window.orkio.claude.diff(projectId, taskId).then((r) => {
-        if (!active) return
-        if (!r.ok) {
-          setDetail(r.error.message)
-          return
-        }
-        const extra = r.value.untracked.length
-          ? `\n\nArquivos novos fora do git: ${r.value.untracked.join(', ')}`
-          : ''
-        setDetail((r.value.diff || 'Sem diferenças em relação à base.') + extra)
+        if (active) setDiffData(r.ok ? r.value : { error: r.error.message })
       })
     } else if (show === 'summary') {
       void window.orkio.claude.state(projectId, taskId).then((r) => {
@@ -614,12 +624,25 @@ function GateCard({
     <Card role="group" aria-label="Aprovação do fluxo">
       <VStack gap={2}>
         <Text weight="semibold">{message}</Text>
-        {show !== 'none' && detail !== null && (
+        {show === 'backlog' && <BacklogDocumentView projectId={projectId} taskId={taskId} />}
+        {show === 'diff' &&
+          diffData &&
+          ('error' in diffData ? (
+            <Alert tone="danger">{diffData.error}</Alert>
+          ) : (
+            <DiffView
+              label="Diff para aprovar"
+              diff={diffData.diff}
+              truncated={diffData.truncated}
+              untracked={diffData.untracked}
+            />
+          ))}
+        {show === 'summary' && detail !== null && (
           <TextArea
-            label={show === 'diff' ? 'Diff para aprovar' : 'Resumo para aprovar'}
+            label="Resumo para aprovar"
             value={detail}
             isReadOnly
-            rows={show === 'diff' ? 12 : 5}
+            rows={5}
             controlClassName="orkio-mono-input"
           />
         )}

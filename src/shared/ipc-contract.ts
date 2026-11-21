@@ -7,7 +7,7 @@ import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
 import type { FlowDraft } from './flow'
 import type { TaskSignals } from './task-signals'
 import type { Flow, FlowRunView, ProjectFlows } from './task-flow'
-import type { AlvaPrecheck, BacklogTaskInfo } from './alva'
+import type { AlvaPrecheck, BacklogTaskDocument, BacklogTaskInfo } from './alva'
 import type { DeliverySettings } from './delivery'
 import type {
   ReleaseNotes,
@@ -44,6 +44,7 @@ import type {
   ArtifactView,
   CatalogGroup,
   ClaudeCodeStatus,
+  ClaudeDiff,
   ClaudeResult,
   EditorId,
   PermissionAnswer,
@@ -94,7 +95,8 @@ export const IPC_CHANNELS = {
     createTemplates: 'alva:create-templates',
     addPlanningStage: 'alva:add-planning-stage',
     setMaxParallel: 'alva:set-max-parallel',
-    taskSummary: 'alva:task-summary'
+    taskSummary: 'alva:task-summary',
+    taskDocument: 'alva:task-document'
   },
   agents: {
     list: 'agents:list',
@@ -117,6 +119,7 @@ export const IPC_CHANNELS = {
     startById: 'task-flows:start-by-id',
     reject: 'task-flows:reject',
     resume: 'task-flows:resume',
+    rerunFrom: 'task-flows:rerun-from',
     skip: 'task-flows:skip',
     cancel: 'task-flows:cancel',
     decideLeft: 'task-flows:decide-left',
@@ -766,6 +769,11 @@ export interface OrkioApi {
       projectId: string,
       taskId: string
     ): Promise<ClaudeResult<{ linked: string | null; task: BacklogTaskInfo | null }>>
+    /** Texto da task (spec, critérios, plano) para ler e aprovar; só leitura, segredos ocultados. */
+    taskDocument(
+      projectId: string,
+      taskId: string
+    ): Promise<ClaudeResult<{ linked: string | null; doc: BacklogTaskDocument | null }>>
   }
   /**
    * Agentes (8A): perfis (arquivos `.md`), aprovação dos perfis do repositório e atribuição de
@@ -813,6 +821,8 @@ export interface OrkioApi {
     startById(projectId: string, taskId: string, flowId: string): Promise<ClaudeResult<FlowRunView>>
     reject(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     resume(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
+    /** Volta a um comando anterior ao passo parado (ex.: /commit antes do push) e segue dali. */
+    rerunFrom(flowRunId: string, stepId: string): Promise<ClaudeResult<FlowRunView>>
     skip(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     cancel(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     decideLeft(flowRunId: string, choice: 'cancel' | 'continue'): Promise<ClaudeResult<FlowRunView>>
@@ -837,10 +847,7 @@ export interface OrkioApi {
     /** Remove o worktree (a branch fica). Com mudanças pendentes, exige `force`. */
     cleanup(projectId: string, taskId: string, force: boolean): Promise<ClaudeResult<TaskRunsState>>
     openEditor(projectId: string, taskId: string, editor: EditorId): Promise<ClaudeResult<null>>
-    diff(
-      projectId: string,
-      taskId: string
-    ): Promise<ClaudeResult<{ diff: string; truncated: boolean; untracked: string[] }>>
+    diff(projectId: string, taskId: string): Promise<ClaudeResult<ClaudeDiff>>
     /** Comandos/skills instalados (usuário, projeto, plugins). Só metadados; recarrega a cada chamada. */
     catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>>
     /** Contexto do projeto: instruções + páginas de referência do Notion (ids e nomes). */

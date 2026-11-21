@@ -210,6 +210,39 @@ describe('FlowRunner', () => {
     expect(v.history.map((h) => h.status)).toEqual(['failed', 'skipped', 'waiting'])
   })
 
+  it('rodar de novo um passo anterior: volta ao comando e segue dali (só em falha)', async () => {
+    const runner = makeRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    // Sem falha ainda: não há o que refazer.
+    await expect(runner.rerunFrom(id, 'revisar')).rejects.toMatchObject({ code: 'wrong_state' })
+    finish(runner, 'run-1', 'succeeded')
+    await flush()
+    await runner.approveGate(id)
+    await flush()
+    finish(runner, 'run-2', 'failed') // 'entregar' falha
+    await flush()
+    expect(runner.view(id)).toMatchObject({ status: 'paused', currentStep: 'entregar' })
+
+    // Só comandos do Claude Code antes do passo parado: nem gate, nem passo à frente, nem o mesmo.
+    await expect(runner.rerunFrom(id, 'ok')).rejects.toMatchObject({ code: 'invalid_step' })
+    await expect(runner.rerunFrom(id, 'fim')).rejects.toMatchObject({ code: 'invalid_step' })
+    await expect(runner.rerunFrom(id, 'entregar')).rejects.toMatchObject({ code: 'invalid_step' })
+    await expect(runner.rerunFrom(id, 'nao-existe')).rejects.toMatchObject({ code: 'invalid_step' })
+
+    await runner.rerunFrom(id, 'revisar')
+    expect(started).toHaveLength(3)
+    expect(started[2]!.command).toBe('revisar')
+    const v = runner.view(id)
+    expect(v).toMatchObject({ status: 'running', currentStep: 'revisar', pauseReason: null })
+    // O histórico mantém a falha de 'entregar' como aconteceu.
+    expect(v.history.map((h) => [h.stepId, h.status])).toEqual([
+      ['revisar', 'ok'],
+      ['ok', 'approved'],
+      ['entregar', 'failed'],
+      ['revisar', 'running']
+    ])
+  })
+
   it('gate recusado com "stop" encerra como recusado; ações fora de hora são recusadas', async () => {
     const runner = makeRunner()
     const { id } = await runner.startManual('p1', 't1')

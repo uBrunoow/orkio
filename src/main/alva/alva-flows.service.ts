@@ -3,7 +3,7 @@
  * ligação nas colunas, coluna opcional "Planejando", limite de fluxos Alva em paralelo e o resumo
  * da task do Backlog.md para o painel.
  */
-import type { AlvaPrecheck, BacklogTaskInfo } from '../../shared/alva'
+import type { AlvaPrecheck, BacklogTaskDocument, BacklogTaskInfo } from '../../shared/alva'
 import type { ClaudeResult } from '../../shared/agent-run'
 import { ALVA_TEMPLATE_IDS, alvaTemplates } from '../../shared/alva-templates'
 import type { FlowStageDraft } from '../../shared/flow'
@@ -197,6 +197,16 @@ export class AlvaFlowsService {
     return {
       linked: this.deps.alva.getLink(taskId),
       task: await this.deps.alva.taskSummary(projectId, taskId)
+    }
+  }
+
+  async taskDocument(
+    projectId: string,
+    taskId: string
+  ): Promise<{ linked: string | null; doc: BacklogTaskDocument | null }> {
+    return {
+      linked: this.deps.alva.getLink(taskId),
+      doc: await this.deps.alva.taskDocument(projectId, taskId)
     }
   }
 }

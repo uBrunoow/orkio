@@ -36,7 +36,13 @@ export function stepSentence(
       return `Roda /${step.command || '…'}${step.args ? ` ${step.args}` : ''} no Claude Code (até ${step.timeoutMin} min)${step.delivery ? ', em modo entrega' : ''}.`
     case 'gate': {
       const show =
-        step.show === 'diff' ? ' mostrando o diff' : step.show === 'summary' ? ' com o resumo' : ''
+        step.show === 'diff'
+          ? ' mostrando o diff'
+          : step.show === 'summary'
+            ? ' com o resumo'
+            : step.show === 'backlog'
+              ? ' com a spec e o plano'
+              : ''
       const reject =
         step.onReject === 'stop'
           ? 'recusar encerra'

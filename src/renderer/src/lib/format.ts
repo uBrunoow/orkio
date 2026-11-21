@@ -16,3 +16,13 @@ const USD = new Intl.NumberFormat('pt-BR', {
 export function formatUsd(value: number): string {
   return USD.format(value).replace(/\u00a0/g, ' ')
 }
+
+/** Duração curta: "8 s", "3 min", "1 h 05 min". */
+export function formatDuration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000))
+  if (seconds < 60) return `${seconds} s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes} min`
+  const rest = minutes % 60
+  return `${Math.floor(minutes / 60)} h${rest ? ` ${String(rest).padStart(2, '0')} min` : ''}`
+}

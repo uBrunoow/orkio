@@ -17,3 +17,13 @@ export declare function isPrerelease(version: string): boolean
 export declare function extractNotes(changelog: string, version: string): string | null
 export declare function releaseChangelog(changelog: string, version: string, date: string): string
 export declare function parseReleaseArgs(argv: string[]): { kind: BumpKind; beta: boolean }
+export declare const RELEASE_LABEL_PREFIX: string
+export declare function releaseKindFromLabels(labels: readonly string[]): BumpKind | null
+export type ReleasePlan =
+  { release: false } | { release: true; kind: BumpKind; version: string; prerelease: boolean }
+export declare function planRelease(input: {
+  labels: readonly string[]
+  currentVersion: string
+  changelog: string
+  today: string
+}): ReleasePlan

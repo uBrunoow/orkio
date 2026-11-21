@@ -218,8 +218,8 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   await expect(flow.getByTestId('flow-status')).toHaveText('Esperando aprovação')
   const gate = flow.getByRole('group', { name: 'Aprovação do fluxo' })
   await expect(gate).toContainText('Pode seguir?')
-  await expect(gate.getByRole('textbox', { name: 'Diff para aprovar' })).toHaveValue(
-    /src\/exportar\.ts/
+  await expect(gate.getByRole('region', { name: 'Diff para aprovar' })).toContainText(
+    'src/exportar.ts'
   )
   await gate.getByRole('button', { name: 'Aprovar' }).click()
   await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
@@ -314,6 +314,13 @@ test('critério 5: passo que falha pausa o fluxo e nada segue sozinho', async ()
   await flow.getByRole('button', { name: 'Rodar fluxo de novo' }).click()
   await expect(flow.getByTestId('flow-status')).toHaveText('Pausado', { timeout: 30_000 })
   await expect(flow).toContainText('Um passo falhou')
+  // O cartão de problema: o que foi registrado, o que fazer e a sessão do passo.
+  const problem = flow.getByRole('group', { name: 'Problema no fluxo' })
+  await expect(problem).toContainText('O que o Orkio registrou')
+  await expect(problem).toContainText('O Claude Code terminou com erro')
+  await expect(problem).toContainText('A sessão do passo mostra o que aconteceu')
+  await problem.getByRole('button', { name: 'Ver a sessão do passo' }).click()
+  await expect(panel.getByTestId('run-status')).toHaveText('Falhou')
   const timeline = flow.getByRole('list', { name: 'Linha do tempo do fluxo' })
   await expect(timeline.getByRole('listitem')).toHaveCount(1)
   await expect(timeline).toContainText('falhou')
