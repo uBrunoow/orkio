@@ -31,6 +31,17 @@ function flowStage(page: Page, name: string): Locator {
     .getByRole('list', { name: 'Etapas do fluxo' })
     .getByRole('listitem', { name: `Etapa ${name}`, exact: true })
 }
+/** Escolhe a etapa na lista e devolve o editor dela. */
+async function openStage(page: Page, name: string): Promise<Locator> {
+  await flowStage(page, name).click()
+  const editor = page.getByRole('region', { name: `Etapa ${name}`, exact: true })
+  await expect(editor).toBeVisible()
+  return editor
+}
+async function flowMenu(page: Page, item: string): Promise<void> {
+  await page.getByRole('button', { name: 'Mais ações do fluxo' }).click()
+  await page.getByRole('menuitem', { name: item }).click()
+}
 /** Selector da Astryx: gatilho com nome começando pelo rótulo (button sem valor, combobox com valor). */
 async function choose(page: Page, scope: Locator, label: string, option: string): Promise<void> {
   const name = new RegExp(`^${label}( |$)`)
@@ -113,11 +124,13 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
   await expect(page.getByRole('heading', { level: 1, name: 'Etapas e automações' })).toBeVisible()
 
   // Nova etapa depois de Revisado.
-  await page.getByRole('button', { name: 'Adicionar etapa depois de Revisado' }).click()
-  const fresh = flowStage(page, 'etapa 5')
-  await fresh.getByLabel('Nome da etapa 5').fill('QA')
-  const qa = flowStage(page, 'QA')
-  await choose(page, qa, 'Status no Notion da etapa 5', 'Em andamento')
+  const revisado = await openStage(page, 'Revisado')
+  await revisado.getByRole('button', { name: 'Adicionar etapa depois de Revisado' }).click()
+  const fresh = page.getByRole('region', { name: 'Etapa etapa 5', exact: true })
+  await fresh.getByLabel('Nome', { exact: true }).fill('QA')
+  const qa = page.getByRole('region', { name: 'Etapa QA', exact: true })
+  await choose(page, qa, 'Status no Notion', 'Em andamento')
+  await expect(page.getByTestId('unsaved-changes')).toHaveText('1 alteração não salva')
 
   // Regra: PR aprovada em Revisando → QA.
   await qa.getByRole('button', { name: 'Nova automação para QA' }).click()
@@ -136,7 +149,7 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
   )
 
   // Conflito avisado antes de salvar: outra regra para o mesmo gatilho/origem.
-  const fin = flowStage(page, 'Finalizada')
+  const fin = await openStage(page, 'Finalizada')
   await fin.getByRole('button', { name: 'Nova automação para Finalizada' }).click()
   const form2 = page.getByRole('region', { name: 'Nova automação' })
   await choose(page, form2, 'Quando', 'PR aprovada')
@@ -195,7 +208,7 @@ test('histórico de alterações e exportar/importar JSON', async () => {
 
   const file = join(userDataDir, 'fluxo.json')
   await queueSavePaths(app, [file])
-  await page.getByRole('button', { name: 'Exportar JSON' }).click()
+  await flowMenu(page, 'Exportar JSON')
   await expect(page.getByText('Fluxo exportado.')).toBeVisible()
   const exported = JSON.parse(readFileSync(file, 'utf8')) as {
     format: string
@@ -210,16 +223,16 @@ test('histórico de alterações e exportar/importar JSON', async () => {
   const future = join(userDataDir, 'futuro.json')
   writeFileSync(future, JSON.stringify({ ...exported, version: 9 }))
   await queueFolderPicks(app, [future])
-  await page.getByRole('button', { name: 'Importar JSON' }).click()
+  await flowMenu(page, 'Importar JSON')
   await expect(page.getByRole('alert').filter({ hasText: 'versão mais nova' })).toBeVisible()
 
   // Importa o exportado: vira rascunho (precisa salvar).
   await queueFolderPicks(app, [file])
-  await page.getByRole('button', { name: 'Importar JSON' }).click()
+  await flowMenu(page, 'Importar JSON')
   await expect(page.getByText(/Fluxo importado no rascunho/)).toBeVisible()
   await expect(flowStage(page, 'QA')).toBeVisible()
   await page.getByRole('button', { name: 'Descartar alterações' }).click()
-  await page.getByRole('button', { name: 'Voltar ao quadro' }).click()
+  await navTo(page, 'Quadro')
   await expect(boardColumn(page, 'QA')).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
 })

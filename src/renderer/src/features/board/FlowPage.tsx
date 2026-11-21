@@ -26,6 +26,7 @@ import {
   EVENT_LABELS,
   FLOW_COLORS,
   describeRule,
+  diffFlow,
   exportFlow,
   fromBoardStages,
   importFlow,
@@ -43,6 +44,9 @@ import type {
   NotionResult
 } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
+import { SaveBar } from '../../components/SaveBar'
+import { plural } from '../../lib/format'
+import { DeliverySection } from '../task-flows/DeliverySection'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { tokenColor } from '../notion-workspace/notion-colors'
 
@@ -81,14 +85,15 @@ interface RuleEditing {
  */
 export function FlowPage({
   view,
+  header,
   onSaved,
-  onClose,
   onOpenNotionSettings,
   onOpenTaskFlows
 }: {
   view: BoardView
+  /** Cabeçalho da página com as ações do fluxo à direita. */
+  header(action: React.ReactNode): React.ReactNode
   onSaved(view: BoardView): void
-  onClose(): void
   onOpenNotionSettings(): void
   /** "Criar fluxo" numa coluna: leva à tela Fluxos (5A). */
   onOpenTaskFlows(): void
@@ -102,6 +107,8 @@ export function FlowPage({
   const [eventsKey, setEventsKey] = useState(0)
   /** 5A: fluxos de tarefa do projeto e as ligações salvas (para "Fluxo desta coluna"). */
   const [taskFlows, setTaskFlows] = useState<{ flows: Flow[]; bindings: StageFlow[] } | null>(null)
+  const [selectedStage, setSelectedStage] = useState<string | null>(null)
+  const [showAllEvents, setShowAllEvents] = useState(false)
 
   useEffect(() => {
     let active = true
@@ -149,6 +156,30 @@ export function FlowPage({
   const errors = issues.filter((i) => i.level === 'error')
   const warnings = issues.filter((i) => i.level === 'warning')
 
+  // Rascunho salvo (o que "Descartar" restaura) e quantas mudanças o rascunho tem.
+  const baseline = useMemo(
+    (): FlowDraft => ({
+      ...initialDraft(view),
+      ...(taskFlows ? { bindings: taskFlows.bindings } : {})
+    }),
+    [view, taskFlows]
+  )
+  const changeCount = useMemo(() => {
+    const named = (d: FlowDraft) => ({
+      stages: d.stages.map((st) => ({
+        id: st.id,
+        name: st.name,
+        notionStatus: { name: options.find((o) => o.id === st.notionStatusId)?.name ?? '' },
+        ...(st.color ? { color: st.color } : {})
+      })),
+      rules: d.rules
+    })
+    const flowChanges = diffFlow(named(baseline), named(draft)).length
+    const bindingChanges =
+      JSON.stringify(baseline.bindings ?? []) === JSON.stringify(draft.bindings ?? []) ? 0 : 1
+    return flowChanges + bindingChanges
+  }, [baseline, draft, options])
+
   const update = (patch: (d: FlowDraft) => FlowDraft): void => {
     setDraft((d) => patch(structuredClone(d)))
     setAcceptWarnings(false)
@@ -172,12 +203,16 @@ export function FlowPage({
       stages.splice(index + delta, 0, s!)
       return { ...d, stages }
     })
-  const addStageAfter = (index: number): void =>
+  const addStageAfter = (index: number): void => {
+    const id = newId('stage')
     update((d) => {
       const stages = [...d.stages]
-      stages.splice(index + 1, 0, { id: newId('stage'), name: '', notionStatusId: null })
+      stages.splice(index + 1, 0, { id, name: '', notionStatusId: null })
       return { ...d, stages }
     })
+    setSelectedStage(id)
+    setEditing(null)
+  }
   const removeStage = (id: string): void =>
     update((d) => ({
       ...d,
@@ -318,59 +353,155 @@ export function FlowPage({
     )
   }
 
+  const ruleForm = editing && (
+    <RuleForm
+      editing={editing}
+      stages={draft.stages}
+      onCancel={() => setEditing(null)}
+      onApply={(rule) => {
+        const named = { ...rule, name: rule.name.trim() || EVENT_LABELS[rule.trigger] }
+        update((d) => ({
+          ...d,
+          rules: editing.isNew
+            ? [...d.rules, named]
+            : d.rules.map((r) => (r.id === named.id ? named : r))
+        }))
+        setEditing(null)
+      }}
+    />
+  )
+
+  const discard = (): void => {
+    setDraft(baseline)
+    setEditing(null)
+    setAcceptWarnings(false)
+    setMessage(null)
+  }
+
+  const stage = draft.stages.find((st) => st.id === selectedStage) ?? draft.stages[0] ?? null
+  const stageIndex = stage ? draft.stages.indexOf(stage) : -1
+  const stageLabel = stage ? stage.name || `etapa ${stageIndex + 1}` : ''
+  const stageRules = stage
+    ? draft.rules.filter((r) => r.action.type === 'move_to_stage' && r.action.stageId === stage.id)
+    : []
+  const stageErrors = (id: string): number => errors.filter((i) => i.stageId === id).length
+
   return (
     <VStack gap={5}>
-      <HStack gap={2} vAlign="center" wrap="wrap" role="toolbar" aria-label="Ações do fluxo">
-        <StackItem size="fill" />
-        <Button variant="ghost" label="Restaurar padrão" onClick={restoreDefault} />
-        <Button variant="ghost" label="Exportar JSON" onClick={() => void doExport()} />
-        <Button variant="ghost" label="Importar JSON" onClick={() => void doImport()} />
-        <Button variant="ghost" label="Etapa Orkio e Bloqueada…" onClick={onOpenNotionSettings} />
-        <Button
-          variant="ghost"
-          label="Descartar alterações"
-          onClick={() =>
-            setDraft({
-              ...initialDraft(view),
-              ...(taskFlows ? { bindings: taskFlows.bindings } : {})
-            })
-          }
+      {header(
+        <MoreMenu
+          label="Mais ações do fluxo"
+          items={[
+            { label: 'Etapa Orkio e Bloqueada…', onClick: onOpenNotionSettings },
+            { type: 'divider' },
+            { label: 'Restaurar padrão', onClick: restoreDefault },
+            { label: 'Exportar JSON', onClick: () => void doExport() },
+            { label: 'Importar JSON', onClick: () => void doImport() }
+          ]}
         />
-        <Button variant="secondary" label="Voltar ao quadro" onClick={onClose} />
-      </HStack>
+      )}
 
       {message && <Alert tone={message.tone}>{message.text}</Alert>}
 
-      <HStack
-        gap={4}
-        vAlign="start"
-        isScrollable
-        paddingBlockEnd={2}
-        role="list"
-        aria-label="Etapas do fluxo"
-      >
-        {draft.stages.map((stage, index) => {
-          const label = stage.name || `etapa ${index + 1}`
-          const rules = draft.rules.filter(
-            (r) => r.action.type === 'move_to_stage' && r.action.stageId === stage.id
-          )
-          return (
-            <VStack
-              key={stage.id}
-              role="listitem"
-              aria-label={`Etapa ${label}`}
-              width="calc(var(--spacing-12) * 7)"
-              style={{ flexShrink: 0 }}
-            >
-              <Card variant="muted" padding={3}>
-                <VStack gap={3}>
+      <HStack gap={4} vAlign="start">
+        <Card role="region" aria-label="Etapas" padding={3} width="calc(var(--spacing-12) * 5)">
+          <VStack gap={2}>
+            <Heading level={2}>Etapas</Heading>
+            <List density="compact" aria-label="Etapas do fluxo">
+              {draft.stages.map((st, index) => {
+                const label = st.name || `etapa ${index + 1}`
+                const count = taskCounts[st.id] ?? 0
+                const problems = stageErrors(st.id)
+                const status = options.find((o) => o.id === st.notionStatusId)?.name
+                return (
+                  <Item
+                    as="li"
+                    key={st.id}
+                    aria-label={`Etapa ${label}`}
+                    label={label}
+                    description={`${status ? `Notion: ${status}` : 'Sem status'} · ${plural(count, 'tarefa', 'tarefas')}`}
+                    isSelected={stage?.id === st.id}
+                    onClick={() => {
+                      setSelectedStage(st.id)
+                      setEditing(null)
+                    }}
+                    {...(problems > 0
+                      ? {
+                          endContent: (
+                            <Token
+                              size="sm"
+                              color="red"
+                              label={plural(problems, 'erro', 'erros')}
+                            />
+                          )
+                        }
+                      : {})}
+                  />
+                )
+              })}
+            </List>
+            <HStack>
+              <Button
+                size="sm"
+                variant="ghost"
+                label="Adicionar etapa no fim"
+                icon={<Icon icon={PlusIcon} />}
+                onClick={() => addStageAfter(draft.stages.length - 1)}
+              />
+            </HStack>
+          </VStack>
+        </Card>
+
+        <StackItem size="fill">
+          {stage && (
+            <Card role="region" aria-label={`Etapa ${stageLabel}`} padding={4}>
+              <VStack gap={4}>
+                <HStack gap={1} vAlign="center" wrap="wrap">
+                  <Token
+                    size="sm"
+                    label={stageLabel}
+                    color={tokenColor(stage.color ?? 'default')}
+                  />
+                  <StackItem size="fill" />
+                  <IconButton
+                    size="sm"
+                    variant="ghost"
+                    label={`Mover ${stageLabel} para a esquerda`}
+                    icon={<Icon icon={ArrowUpIcon} />}
+                    isDisabled={stageIndex === 0}
+                    onClick={() => stageIndex > 0 && moveStage(stageIndex, -1)}
+                  />
+                  <IconButton
+                    size="sm"
+                    variant="ghost"
+                    label={`Mover ${stageLabel} para a direita`}
+                    icon={<Icon icon={ArrowDownIcon} />}
+                    isDisabled={stageIndex === draft.stages.length - 1}
+                    onClick={() => stageIndex < draft.stages.length - 1 && moveStage(stageIndex, 1)}
+                  />
+                  <IconButton
+                    size="sm"
+                    variant="ghost"
+                    label={`Adicionar etapa depois de ${stageLabel}`}
+                    icon={<Icon icon={PlusIcon} />}
+                    onClick={() => addStageAfter(stageIndex)}
+                  />
+                  <IconButton
+                    size="sm"
+                    variant="ghost"
+                    label={`Remover ${stageLabel}`}
+                    icon={<Icon icon={TrashIcon} />}
+                    onClick={() => removeStage(stage.id)}
+                  />
+                </HStack>
+                <HStack gap={3} wrap="wrap" vAlign="start">
                   <TextInput
-                    label={`Nome da etapa ${index + 1}`}
+                    label="Nome"
                     value={stage.name}
                     onChange={(value) => updateStage(stage.id, { name: value })}
                   />
                   <Selector
-                    label={`Status no Notion da etapa ${index + 1}`}
+                    label="Status no Notion"
                     options={options.map((o) => ({ value: o.id, label: o.name }))}
                     placeholder="Escolha a opção"
                     {...(stage.notionStatusId && options.some((o) => o.id === stage.notionStatusId)
@@ -386,116 +517,98 @@ export function FlowPage({
                     onChange={(value: string) => setStageStatus(stage.id, value)}
                   />
                   <Selector
-                    label={`Cor da etapa ${index + 1}`}
+                    label="Cor"
                     options={FLOW_COLORS.map((c) => ({ value: c, label: COLOR_LABELS[c] }))}
                     value={stage.color ?? 'default'}
                     onChange={(value: string) =>
                       updateStage(stage.id, { color: value as NotionColor })
                     }
                   />
-                  <HStack gap={1} vAlign="center" wrap="wrap">
-                    <Token size="sm" label={label} color={tokenColor(stage.color ?? 'default')} />
-                    <Text type="supporting">{taskCounts[stage.id] ?? 0} tarefa(s)</Text>
-                    <StackItem size="fill" />
-                    <IconButton
+                </HStack>
+
+                <StageFlowField
+                  flows={taskFlows?.flows ?? null}
+                  binding={draft.bindings?.find((b) => b.stageId === stage.id) ?? null}
+                  onChange={(binding) =>
+                    update((d) => ({
+                      ...d,
+                      bindings: [
+                        ...(d.bindings ?? []).filter((b) => b.stageId !== stage.id),
+                        ...(binding ? [binding] : [])
+                      ]
+                    }))
+                  }
+                  stageId={stage.id}
+                  onOpenTaskFlows={onOpenTaskFlows}
+                />
+
+                <VStack gap={2}>
+                  <Heading level={3}>Automações que trazem para cá</Heading>
+                  {stageRules.length === 0 ? (
+                    <Text type="supporting">Nenhuma automação leva para cá.</Text>
+                  ) : (
+                    <List
+                      hasDividers
+                      density="compact"
+                      aria-label={`Automações para ${stageLabel}`}
+                    >
+                      {stageRules.map(ruleItem)}
+                    </List>
+                  )}
+                  <HStack>
+                    <Button
                       size="sm"
-                      variant="ghost"
-                      label={`Mover ${label} para a esquerda`}
-                      icon={<Icon icon={ArrowUpIcon} />}
-                      isDisabled={index === 0}
-                      onClick={() => index > 0 && moveStage(index, -1)}
-                    />
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      label={`Mover ${label} para a direita`}
-                      icon={<Icon icon={ArrowDownIcon} />}
-                      isDisabled={index === draft.stages.length - 1}
-                      onClick={() => index < draft.stages.length - 1 && moveStage(index, 1)}
-                    />
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      label={`Remover ${label}`}
-                      icon={<Icon icon={TrashIcon} />}
-                      onClick={() => removeStage(stage.id)}
-                    />
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      label={`Adicionar etapa depois de ${label}`}
+                      label="Nova automação"
                       icon={<Icon icon={PlusIcon} />}
-                      onClick={() => addStageAfter(index)}
+                      aria-label={`Nova automação para ${stageLabel}`}
+                      onClick={() =>
+                        setEditing({
+                          isNew: true,
+                          rule: {
+                            id: newId('rule'),
+                            name: '',
+                            enabled: true,
+                            trigger: 'pr.opened',
+                            conditions: { notBlocked: true },
+                            action: { type: 'move_to_stage', stageId: stage.id }
+                          }
+                        })
+                      }
                     />
                   </HStack>
-
-                  <StageFlowField
-                    label={label}
-                    flows={taskFlows?.flows ?? null}
-                    binding={draft.bindings?.find((b) => b.stageId === stage.id) ?? null}
-                    onChange={(binding) =>
-                      update((d) => ({
-                        ...d,
-                        bindings: [
-                          ...(d.bindings ?? []).filter((b) => b.stageId !== stage.id),
-                          ...(binding ? [binding] : [])
-                        ]
-                      }))
-                    }
-                    stageId={stage.id}
-                    onOpenTaskFlows={onOpenTaskFlows}
-                  />
-
-                  <VStack gap={2}>
-                    <Text weight="semibold">Automações para esta etapa</Text>
-                    {rules.length === 0 ? (
-                      <Text type="supporting">Nenhuma automação leva para cá.</Text>
-                    ) : (
-                      <List hasDividers density="compact" aria-label={`Automações para ${label}`}>
-                        {rules.map(ruleItem)}
-                      </List>
-                    )}
-                    <HStack>
-                      <Button
-                        size="sm"
-                        label="Nova automação"
-                        icon={<Icon icon={PlusIcon} />}
-                        aria-label={`Nova automação para ${label}`}
-                        onClick={() =>
-                          setEditing({
-                            isNew: true,
-                            rule: {
-                              id: newId('rule'),
-                              name: '',
-                              enabled: true,
-                              trigger: 'pr.opened',
-                              conditions: { notBlocked: true },
-                              action: { type: 'move_to_stage', stageId: stage.id }
-                            }
-                          })
-                        }
-                      />
-                    </HStack>
-                  </VStack>
                 </VStack>
-              </Card>
-            </VStack>
-          )
-        })}
+
+                {editing && editing.rule.action.type === 'move_to_stage' && ruleForm}
+              </VStack>
+            </Card>
+          )}
+        </StackItem>
       </HStack>
 
-      <HStack>
-        <Button
-          size="sm"
-          label="Adicionar etapa no fim"
-          icon={<Icon icon={PlusIcon} />}
-          onClick={() => addStageAfter(draft.stages.length - 1)}
-        />
-      </HStack>
+      {removedWithTasks.length > 0 && (
+        <Card role="region" aria-label="Etapas removidas">
+          <VStack gap={3}>
+            <Heading level={2}>Etapas removidas com tarefas</Heading>
+            {removedWithTasks.map((s) => (
+              <Selector
+                key={s.id}
+                label={`Para onde vão ${plural(taskCounts[s.id] ?? 0, 'a tarefa', 'as tarefas')} de “${s.name}”`}
+                options={draft.stages.map((d) => ({ value: d.id, label: d.name || '(sem nome)' }))}
+                placeholder="Escolha a etapa"
+                {...(draft.removals[s.id] ? { value: draft.removals[s.id]! } : {})}
+                onChange={(value: string) =>
+                  update((d) => ({ ...d, removals: { ...d.removals, [s.id]: value } }))
+                }
+              />
+            ))}
+          </VStack>
+        </Card>
+      )}
 
       <Card role="region" aria-label="Notificações">
         <VStack gap={2}>
-          <Text weight="semibold">Notificações (sem mover a tarefa)</Text>
+          <Heading level={2}>Notificações</Heading>
+          <Text type="supporting">Avisam no desktop sem mover a tarefa.</Text>
           {notifyRules.length === 0 ? (
             <Text type="supporting">Nenhuma.</Text>
           ) : (
@@ -523,50 +636,56 @@ export function FlowPage({
               }
             />
           </HStack>
+          {editing && editing.rule.action.type === 'notify' && ruleForm}
         </VStack>
       </Card>
 
-      {editing && (
-        <RuleForm
-          editing={editing}
-          stages={draft.stages}
-          onCancel={() => setEditing(null)}
-          onApply={(rule) => {
-            const named = { ...rule, name: rule.name.trim() || EVENT_LABELS[rule.trigger] }
-            update((d) => ({
-              ...d,
-              rules: editing.isNew
-                ? [...d.rules, named]
-                : d.rules.map((r) => (r.id === named.id ? named : r))
-            }))
-            setEditing(null)
-          }}
-        />
-      )}
-
-      {removedWithTasks.length > 0 && (
-        <Card role="region" aria-label="Etapas removidas">
-          <VStack gap={3}>
-            <Text weight="semibold">Etapas removidas com tarefas</Text>
-            {removedWithTasks.map((s) => (
-              <Selector
-                key={s.id}
-                label={`Para onde vão as ${taskCounts[s.id]} tarefa(s) de “${s.name}”`}
-                options={draft.stages.map((d) => ({ value: d.id, label: d.name || '(sem nome)' }))}
-                placeholder="Escolha a etapa"
-                {...(draft.removals[s.id] ? { value: draft.removals[s.id]! } : {})}
-                onChange={(value: string) =>
-                  update((d) => ({ ...d, removals: { ...d.removals, [s.id]: value } }))
-                }
-              />
-            ))}
-          </VStack>
-        </Card>
-      )}
+      <DeliverySection projectId={view.projectId} />
 
       <Simulator view={view} draft={draft} />
 
-      <VStack gap={2} role="region" aria-label="Validação do fluxo">
+      <Card role="region" aria-label="Alterações do fluxo">
+        <VStack gap={2}>
+          <Heading level={2}>Alterações salvas</Heading>
+          {events.length === 0 ? (
+            <Text type="supporting">Nenhuma alteração registrada.</Text>
+          ) : (
+            <List hasDividers density="compact" aria-label="Histórico de configuração">
+              {(showAllEvents ? events : events.slice(0, 5)).map((e) => (
+                <Item
+                  as="li"
+                  key={e.id}
+                  label={e.changes.join(' · ')}
+                  description={`${e.actor} · ${new Date(e.at).toLocaleString('pt-BR', {
+                    dateStyle: 'short',
+                    timeStyle: 'short'
+                  })}`}
+                />
+              ))}
+            </List>
+          )}
+          {events.length > 5 && !showAllEvents && (
+            <HStack>
+              <Button
+                size="sm"
+                variant="ghost"
+                label={`Ver todas (${events.length})`}
+                onClick={() => setShowAllEvents(true)}
+              />
+            </HStack>
+          )}
+        </VStack>
+      </Card>
+
+      <SaveBar
+        label="Validação do fluxo"
+        changes={changeCount}
+        saveLabel="Salvar fluxo"
+        isSaving={saving}
+        isDisabled={errors.length > 0 || (warnings.length > 0 && !acceptWarnings)}
+        onSave={() => void save()}
+        onDiscard={discard}
+      >
         {errors.length > 0 && (
           <Alert tone="danger">
             <VStack gap={1}>
@@ -594,39 +713,7 @@ export function FlowPage({
             onChange={setAcceptWarnings}
           />
         )}
-        <HStack gap={2}>
-          <Button
-            variant="primary"
-            label="Salvar fluxo"
-            isLoading={saving}
-            isDisabled={errors.length > 0 || (warnings.length > 0 && !acceptWarnings)}
-            onClick={() => void save()}
-          />
-        </HStack>
-      </VStack>
-
-      <Card role="region" aria-label="Alterações do fluxo">
-        <VStack gap={2}>
-          <Text weight="semibold">Alterações do fluxo</Text>
-          {events.length === 0 ? (
-            <Text type="supporting">Nenhuma alteração registrada.</Text>
-          ) : (
-            <List hasDividers density="compact" aria-label="Histórico de configuração">
-              {events.map((e) => (
-                <Item
-                  as="li"
-                  key={e.id}
-                  label={e.changes.join(' · ')}
-                  description={`${e.actor} · ${new Date(e.at).toLocaleString('pt-BR', {
-                    dateStyle: 'short',
-                    timeStyle: 'short'
-                  })}`}
-                />
-              ))}
-            </List>
-          )}
-        </VStack>
-      </Card>
+      </SaveBar>
     </VStack>
   )
 }
@@ -817,8 +904,8 @@ function Simulator({ view, draft }: { view: BoardView; draft: FlowDraft }): Reac
 
   return (
     <Card role="region" aria-label="Testar automação">
-      <VStack gap={3}>
-        <Text weight="semibold">Testar automação</Text>
+      <VStack gap={2}>
+        <Heading level={2}>Testar automação</Heading>
         <Text type="supporting">
           Mostra o que aconteceria com o rascunho atual. Nada é executado nem enviado ao Notion.
         </Text>
@@ -858,14 +945,12 @@ function Simulator({ view, draft }: { view: BoardView; draft: FlowDraft }): Reac
 
 /** "Fluxo desta coluna" (5A): fluxo de tarefa ligado à etapa, ligado/desligado e modo. */
 function StageFlowField({
-  label,
   stageId,
   flows,
   binding,
   onChange,
   onOpenTaskFlows
 }: {
-  label: string
   stageId: string
   flows: Flow[] | null
   binding: StageFlow | null
@@ -882,9 +967,9 @@ function StageFlowField({
     )
   }
   return (
-    <VStack gap={2} role="group" aria-label={`Fluxo da coluna ${label}`}>
+    <VStack gap={2} role="group" aria-label="Fluxo desta coluna">
       <Selector
-        label={`Fluxo desta coluna (${label})`}
+        label="Fluxo desta coluna"
         options={[
           { value: '', label: 'Nenhum' },
           ...flows.map((f) => ({ value: f.id, label: f.name }))
@@ -906,7 +991,7 @@ function StageFlowField({
       {binding && (
         <HStack gap={2} vAlign="center" wrap="wrap">
           <SegmentedControl
-            label={`Quando rodar o fluxo (${label})`}
+            label="Quando rodar o fluxo"
             size="sm"
             value={binding.mode}
             onChange={(mode) =>
@@ -917,7 +1002,7 @@ function StageFlowField({
             <SegmentedControlItem value="manual" label="Manual" />
           </SegmentedControl>
           <CheckboxInput
-            label={`Ligado (${label})`}
+            label="Ligado"
             value={binding.enabled}
             onChange={(enabled) => onChange({ ...binding, enabled })}
           />

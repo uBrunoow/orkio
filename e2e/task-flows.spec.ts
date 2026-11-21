@@ -182,10 +182,12 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
 
   // Liga na coluna Revisando (ao entrar) e salva o Fluxo do projeto.
   await navTo(page, 'Etapas e automações')
-  const rev = page
+  await page
     .getByRole('list', { name: 'Etapas do fluxo' })
     .getByRole('listitem', { name: 'Etapa Revisando' })
-  await choose(page, rev, 'Fluxo desta coluna (Revisando)', 'Revisar e entregar')
+    .click()
+  const rev = page.getByRole('region', { name: 'Etapa Revisando', exact: true })
+  await choose(page, rev, 'Fluxo desta coluna', 'Revisar e entregar')
   await expect(rev.getByRole('radio', { name: 'Ao entrar' })).toBeChecked()
   await page
     .getByRole('region', { name: 'Validação do fluxo' })

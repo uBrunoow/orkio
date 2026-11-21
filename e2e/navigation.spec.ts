@@ -108,10 +108,23 @@ test('menu do projeto: cada tela tem o próprio título e o menu sempre sai das 
   // Subtela de Etapas e automações; clicar no mesmo item volta ao começo da tela (G1).
   await navTo(page, 'Etapas e automações')
   await expect(h1(page, 'Etapas e automações')).toBeVisible()
-  await page.getByRole('button', { name: 'Etapa Orkio e Bloqueada…' }).click()
+  await page.getByRole('button', { name: 'Mais ações do fluxo' }).click()
+  await page.getByRole('menuitem', { name: 'Etapa Orkio e Bloqueada…' }).click()
   await expect(page.getByRole('heading', { name: 'Ajustar quadro' })).toBeVisible()
   await navTo(page, 'Etapas e automações')
-  await expect(page.getByRole('button', { name: 'Etapa Orkio e Bloqueada…' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Mais ações do fluxo' })).toBeVisible()
+  // Entrega (5C) é regra do projeto: fica aqui, não em Fluxos.
+  const approval = page
+    .getByRole('region', { name: 'Entrega' })
+    .getByRole('checkbox', { name: 'Exigir minha aprovação para push' })
+  await expect(approval).toBeChecked()
+  // Grava na hora (o estado vem do main depois do clique).
+  await approval.click()
+  await expect(approval).not.toBeChecked()
+  await navTo(page, 'Etapas e automações')
+  await expect(approval).not.toBeChecked()
+  await approval.click()
+  await expect(approval).toBeChecked()
 
   // Fluxos com a aba Modelos Alva; Contexto do Claude; e o Quadro de volta.
   await navTo(page, 'Fluxos')

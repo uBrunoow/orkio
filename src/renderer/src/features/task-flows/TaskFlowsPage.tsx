@@ -4,7 +4,6 @@ import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { Item } from '@astryxdesign/core/Item'
@@ -141,7 +140,8 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
     <VStack gap={5} role="region" aria-label="Fluxos do projeto">
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Text color="secondary">
-          Ligue um fluxo a uma coluna em Etapas e automações (“Fluxo desta coluna”).
+          Ligue um fluxo a uma coluna em Etapas e automações (“Fluxo desta coluna”). O ajuste de
+          push fica lá também, em Entrega.
         </Text>
         <StackItem size="fill" />
         <Button
@@ -159,25 +159,6 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
         ) : (
           <Text role="status">{message.text}</Text>
         ))}
-
-      <Card role="region" aria-label="Entrega">
-        <VStack gap={2}>
-          <Heading level={3}>Entrega</Heading>
-          <CheckboxInput
-            label="Exigir minha aprovação para push"
-            description="Antes de cada push da branch da tarefa (pelo Orkio ou pelo Claude Code em modo entrega), o fluxo mostra commits, diff e destino e espera você. A branch padrão (main/master, develop, production, release) nunca recebe push, com ou sem este ajuste."
-            value={project.delivery.requirePushApproval}
-            onChange={(on) =>
-              void window.orkio.taskFlows
-                .setDelivery(projectId, { requirePushApproval: on })
-                .then((r) => {
-                  if (r.ok) setProject(r.value)
-                  else setMessage({ tone: 'error', text: r.error.message })
-                })
-            }
-          />
-        </VStack>
-      </Card>
 
       <HStack gap={5} vAlign="start">
         <VStack gap={2} width="calc(var(--spacing-12) * 5)" style={{ flexShrink: 0 }}>
