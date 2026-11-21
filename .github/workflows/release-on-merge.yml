@@ -41,6 +41,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # A main de agora, não o commit que disparou: outra PR pode ter sido mergeada depois (e
+          # rodar o workflow de novo também pega a main atual).
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -51,7 +54,7 @@ jobs:
           LABELS: ${{ steps.labels.outputs.labels }}
         run: node scripts/release-plan.mjs
 
-      - name: Versão, CHANGELOG, commit e tag
+      - name: Versão, CHANGELOG, commit e tag, e enviar
         if: steps.plan.outputs.release == 'true'
         env:
           KIND: ${{ steps.plan.outputs.kind }}
@@ -59,15 +62,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          node scripts/release.mjs "$KIND"
-          # O script e o plano têm que concordar na versão.
-          test "$(node -p "require('./package.json').version")" = "$VERSION"
-
-      - name: Enviar o commit e a tag
-        if: steps.plan.outputs.release == 'true'
-        env:
-          VERSION: ${{ steps.plan.outputs.version }}
-        run: git push --atomic origin main "refs/tags/v$VERSION"
+          # Refaz em cima da main de agora se outra PR entrar no meio (até 3 tentativas).
+          bash scripts/release-bump-push.sh "$KIND" "$VERSION"
 
       - name: Disparar o Release
         if: steps.plan.outputs.release == 'true'

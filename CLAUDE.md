@@ -789,7 +789,10 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   dispara o `release.yml` com `--ref vX.Y.Z` (tags empurradas com o `GITHUB_TOKEN` não disparam
   workflows; `workflow_dispatch` é a exceção). A lógica é pura e testada
   (`releaseKindFromLabels`/`planRelease` em `scripts/release-lib.mjs`, `scripts/release-plan.mjs`).
-  Sem rótulo, nada é lançado. Nunca empurre a tag com um token pessoal (dispararia duas vezes).
+  Sem rótulo, nada é lançado. Nunca empurre a tag com um token pessoal (dispararia duas vezes). O
+  workflow faz checkout da `main` de agora (não do SHA que disparou) e `scripts/release-bump-push.sh`
+  refaz o commit de versão em cima dela se o push for recusado (outra PR no meio; até 3 tentativas,
+  testado em `test/release-bump-push.test.ts` com uma origem local).
 - Passo a passo (repo, token, Apple, Microsoft, custos): `docs/releases.md`.
 
 ## Testes
