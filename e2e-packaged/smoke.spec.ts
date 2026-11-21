@@ -72,6 +72,9 @@ test('o app empacotado abre na tela inicial e fecha', async () => {
       )
     })
     await page.reload()
+    // Instalação nova e sem GitHub conectado: o app abre no login e só depois mostra o checklist.
+    await expect(page.getByText('Entrar no Orkio')).toBeVisible()
+    await page.getByRole('button', { name: 'Continuar sem GitHub' }).click()
     await expect(page.getByText('Vamos começar')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Começar', exact: true })).toBeVisible()
     // Renderer isolado também no pacote.
