@@ -173,7 +173,7 @@ function Board({
 
   return (
     // Ocupa a altura útil da janela: as colunas e o painel rolam por dentro.
-    <VStack gap={4} height="calc(100dvh - var(--spacing-6) * 2)">
+    <VStack gap={4} height="100%">
       {header(
         <HStack gap={2} vAlign="center" wrap="wrap" hAlign="end">
           <AutomationLine status={automation.status} onOpenIntegrations={onOpenIntegrations} />

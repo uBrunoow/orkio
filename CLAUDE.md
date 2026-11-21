@@ -36,7 +36,7 @@ Claude Code. Hoje existem:
 - **Atualizações (6C):** electron-updater lendo o repo público de releases; banner, Configurações
   (Atualizações + Sobre), "O que há de novo"; nunca reinicia por cima de trabalho em andamento.
 - **Interface (6E):** menu com Visão geral, o projeto atual (Quadro, Etapas e automações, Fluxos,
-  Contexto do Claude), Projetos, Agentes, Integrações e Configurações (Ctrl/Cmd+1…9 nessa ordem), rotas tipadas, tarefa em
+  Contexto do Claude), Projetos, Agentes, Integrações e Configurações (Ctrl/Cmd+1…9 nessa ordem), numa coluna só de ícones (tooltip e nome acessível) sob uma barra superior com o seletor de projeto, buscar e o sino de "esperando você", rotas tipadas, tarefa em
   painel ou tela cheia, Command Palette (Ctrl/Cmd+K), card do quadro com um estado só (`cardStatus`).
   Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`. Redesign em fases (densidade pelo tema, estado em ponto + texto, moldura, quadro, agentes) em `docs/ui-redesign.md`.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e

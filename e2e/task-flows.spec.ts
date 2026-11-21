@@ -43,10 +43,11 @@ async function choose(page: Page, scope: Locator, label: string, option: string)
     .or(scope.getByRole('button', { name }))
     .first()
     .click()
+  // Perto do fim do painel a lista abre abaixo da janela; o clique é no DOM, sem checar a viewport.
   await page
     .getByRole('option', { name: new RegExp(`^${esc(option)}( |$)`) })
     .first()
-    .click()
+    .evaluate((el) => (el as HTMLElement).click())
 }
 async function open(): Promise<OrkioApp> {
   orkio = await launchOrkio(userDataDir, { validTokens: [NOTION_TOKEN] }, { startPage: 'projects' })

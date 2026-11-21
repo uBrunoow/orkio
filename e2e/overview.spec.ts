@@ -167,7 +167,12 @@ test('gate pendente aparece em "Esperando você", abre a tarefa no fluxo e some 
   await expect(item).toContainText('ORK-2')
   await expect(item).toContainText('Listar tarefas do Notion')
   await expect(item).toContainText('orkio-app · Aprovação no fluxo: Aprovar entrega')
-  await expect(nav(page).getByLabel('1 esperando você')).toBeVisible()
+  // A coluna de ícones não tem contador; ele fica no sino da barra superior.
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Barra superior' })
+      .getByRole('button', { name: '1 esperando você' })
+  ).toBeVisible()
 
   // "Abrir" leva ao painel da tarefa, na seção do fluxo.
   await item.getByRole('button', { name: 'Abrir' }).click()

@@ -44,6 +44,30 @@ plano a substitui onde houver diferença.
   grande, ajustar o tema (`--on heading`), nunca a página.
 - Avatares, quadro e agentes ficam para as fases 3 e 4.
 
+## Fase 2
+
+- **Barra superior** (`TopNav`, "Barra superior"): logo com wordmark, seletor do projeto atual
+  (menu quando há mais de um projeto; texto quando há um) e, à direita, Buscar (Ctrl/Cmd+K) e o sino
+  com o contador de "esperando você" (leva à Visão geral). Substitui o "Projeto atual" do menu.
+- **Coluna de ícones**: `SideNav` recolhido fixo (sem botão de recolher); o rótulo vai no tooltip e
+  no nome acessível. Ctrl/Cmd+1…9 e `aria-keyshortcuts` mantidos. Grupos: Visão geral · telas do
+  projeto · Projetos, Agentes, Integrações, Configurações.
+- **Contador na coluna**: a Astryx esconde `endContent` no modo recolhido, então a Visão geral troca
+  o ícone por uma versão com ponto laranja quando há algo esperando (`OverviewAttentionIcon`); o
+  número fica no sino da barra superior.
+- **Painel**: o conteúdo já ficava no painel com borda e raio do `AppShell` (`variant="elevated"`); só
+  o Quadro usa a altura toda (colunas com rolagem própria), as outras telas rolam o painel.
+- `routes.ts`, `shortcuts.ts` e a Command Palette não mudaram.
+- Testes: `overview.spec` lê o contador no sino ("1 esperando você"); `choose()` do
+  `task-flows.spec` clica na opção pelo DOM, porque a lista abre abaixo da janela no fim do painel.
+
+**Recusado / adiado**
+
+- "Todos os projetos ▾": não há escopo "todos" nos dados (as telas de projeto exigem um). O seletor
+  mostra o projeto atual. Reavaliar na fase 3 com os avatares.
+- Ponto no item atual da coluna: o estado selecionado da Astryx já o destaca.
+- Cabeçalho do painel com ícone + contador + Lista/Kanban: vem com o Quadro (fase 3).
+
 ## Recusado em todas as fases (e por quê)
 
 - Mascotes, logos, nomes e textos das referências: identidade própria.

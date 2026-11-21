@@ -1,17 +1,24 @@
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { Badge } from '@astryxdesign/core/Badge'
-import { Kbd } from '@astryxdesign/core/Kbd'
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
+import { HStack } from '@astryxdesign/core/HStack'
+import { IconButton } from '@astryxdesign/core/IconButton'
+import { Icon } from '@astryxdesign/core/Icon'
+import { StackItem } from '@astryxdesign/core/Stack'
+import { Text } from '@astryxdesign/core/Text'
+import { TopNav } from '@astryxdesign/core/TopNav'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { ProjectView } from '../../shared/ipc-contract'
 import {
   AgentsIcon,
+  BellIcon,
   BoardIcon,
   ClaudeLogo,
   FlowsIcon,
   IntegrationsIcon,
+  OverviewAttentionIcon,
   OverviewIcon,
   ProjectsIcon,
   SearchIcon,
@@ -289,58 +296,80 @@ export function App(): React.JSX.Element | null {
       break
   }
 
+  const goOverview = (): void => navigate({ name: 'overview' })
+  const waitingLabel = waiting > 0 ? `${waiting} esperando você` : 'Nada esperando você'
+
+  const projectPicker =
+    projects && projects.length > 1 ? (
+      <DropdownMenu
+        button={{
+          label: project ? project.name : 'Projetos',
+          size: 'sm',
+          variant: 'ghost',
+          'aria-label': `Projeto atual: ${project ? project.name : 'nenhum'}. Trocar projeto`
+        }}
+        items={projects.map((p) => ({
+          label: p.name,
+          onClick: () => {
+            chooseProject(p.id)
+            navigate(isProjectRoute(route) ? { name: route.name } : { name: 'board' })
+          }
+        }))}
+      />
+    ) : (
+      <Text type="supporting" data-testid="current-project">
+        {project ? project.name : 'Nenhum projeto'}
+      </Text>
+    )
+
   return (
     <AppShell
       height="fill"
       contentPadding={6}
       // Sem gaveta mobile: as camadas deslizantes da Astryx injetam <style> (bloqueado pela CSP).
       mobileNav={false}
+      topNav={
+        <TopNav
+          label="Barra superior"
+          heading={<OrkioLogo variant="simple" withWordmark size={18} />}
+          startContent={projectPicker}
+          endContent={
+            <HStack gap={1} vAlign="center">
+              <IconButton
+                size="sm"
+                variant="ghost"
+                icon={<Icon icon={SearchIcon} />}
+                label="Buscar (Ctrl K)"
+                aria-keyshortcuts={navigator.userAgent.includes('Mac') ? 'Meta+K' : 'Control+K'}
+                onClick={() => setPaletteOpen(true)}
+              />
+              <IconButton
+                size="sm"
+                variant="ghost"
+                icon={<Icon icon={BellIcon} />}
+                label={waitingLabel}
+                onClick={goOverview}
+              />
+              {waiting > 0 && <Badge label={String(waiting)} variant="orange" aria-hidden="true" />}
+            </HStack>
+          }
+        />
+      }
       sideNav={
         <SideNav
           aria-label="Navegação principal"
-          header={<OrkioLogo variant="simple" withWordmark size={26} />}
+          collapsible={{ isCollapsed: true, hasButton: false }}
         >
           <SideNavSection title="Orkio" isHeaderHidden>
             <SideNavItem
               label={ROUTE_TITLES.overview}
-              icon={OverviewIcon}
+              icon={waiting > 0 ? OverviewAttentionIcon : OverviewIcon}
               isSelected={route.name === 'overview'}
               aria-keyshortcuts={keyshortcut('overview')}
-              {...(waiting > 0
-                ? {
-                    endContent: (
-                      <Badge
-                        label={String(waiting)}
-                        variant="orange"
-                        aria-label={`${waiting} esperando você`}
-                      />
-                    )
-                  }
-                : {})}
-              onClick={() => navigate({ name: 'overview' })}
+              onClick={goOverview}
             />
           </SideNavSection>
-          <SideNavSection
-            title={project ? project.name : 'Projeto'}
-            subtitle="Projeto atual"
-            {...(projects && projects.length > 1
-              ? {
-                  endContent: (
-                    <DropdownMenu
-                      button={{ label: 'Trocar projeto', size: 'sm', variant: 'ghost' }}
-                      hasChevron={false}
-                      items={projects.map((p) => ({
-                        label: p.name,
-                        onClick: () => {
-                          chooseProject(p.id)
-                          navigate(isProjectRoute(route) ? { name: route.name } : { name: 'board' })
-                        }
-                      }))}
-                    />
-                  )
-                }
-              : {})}
-          >
+          <SideNavSection title={project ? project.name : 'Projeto'} isHeaderHidden>
             {PROJECT_ITEMS.map((item) => (
               <SideNavItem
                 key={item.name}
@@ -354,13 +383,7 @@ export function App(): React.JSX.Element | null {
               />
             ))}
           </SideNavSection>
-          <SideNavSection title="Orkio" isHeaderHidden>
-            <SideNavItem
-              label="Buscar"
-              icon={SearchIcon}
-              endContent={<Kbd keys="mod+k" />}
-              onClick={() => setPaletteOpen(true)}
-            />
+          <SideNavSection title="Geral" isHeaderHidden>
             <SideNavItem
               label={ROUTE_TITLES.projects}
               icon={ProjectsIcon}
@@ -394,14 +417,17 @@ export function App(): React.JSX.Element | null {
       }
     >
       {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
-      <VStack gap={4}>
+      {/* Só o Quadro usa a altura toda (colunas com rolagem própria); as outras telas rolam o painel. */}
+      <VStack gap={4} {...(route.name === 'board' ? { height: '100%' as const } : {})}>
         {/* Atualização pronta (6C) e "O que há de novo": no topo de qualquer página. */}
         <UpdateBanner
           {...(route.name === 'settings'
             ? {}
             : { onOpenSettings: () => navigate({ name: 'settings' }) })}
         />
-        <Fragment key={router.key}>{page}</Fragment>
+        <StackItem size="fill">
+          <Fragment key={router.key}>{page}</Fragment>
+        </StackItem>
       </VStack>
       <CommandMenu
         isOpen={paletteOpen}

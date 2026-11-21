@@ -67,6 +67,13 @@ Espaçamento e raios: `--spacing-*` e `--radius-*` do tema. Densidade muda no te
 - Formulários longos: lista à esquerda + editor à direita, barra de salvar fixa quando há
   rascunho.
 
+## Moldura
+
+Barra superior fina (logo, projeto atual, buscar, sino com contador) + coluna só de ícones à
+esquerda (rótulo no tooltip e no nome acessível) + conteúdo num painel com borda e raio. Contador
+na coluna não existe (a Astryx esconde `endContent` recolhido): use o ponto no ícone e o número no
+sino.
+
 ## Movimento e CSP
 
 Só o movimento dos próprios componentes da Astryx; respeitar `prefers-reduced-motion`. Nada que

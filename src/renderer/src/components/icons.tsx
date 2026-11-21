@@ -25,6 +25,7 @@ import {
   IconSettings,
   IconArrowUp,
   IconPointFilled,
+  IconBell,
   IconArrowDown,
   IconPlus,
   IconPlayerPause,
@@ -110,6 +111,7 @@ export const InfoIcon = adapt(IconInfoCircle)
 export const ToolIcon = adapt(IconTool)
 export const OverviewIcon = adapt(IconLayoutDashboard)
 /** Ponto de estado (StatusToken). */
+export const BellIcon = adapt(IconBell)
 export const DotIcon = adapt(IconPointFilled)
 
 /** Marca do Claude (estrela de raios), desenhada em currentColor. */
@@ -121,3 +123,12 @@ export const ClaudeLogo: SvgIcon = (props) => (
 ClaudeLogo.displayName = 'ClaudeLogo'
 export const SearchIcon = adapt(IconSearch)
 export const CopyIcon = adapt(IconCopy)
+
+/** Visão geral com um ponto de atenção (há algo esperando você); a coluna de ícones não mostra contador. */
+export const OverviewAttentionIcon: SvgIcon = (props) => (
+  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+    <OverviewIcon width={24} height={24} />
+    <circle cx="19" cy="5" r="4" fill="var(--color-accent)" />
+  </svg>
+)
+OverviewAttentionIcon.displayName = 'OverviewAttentionIcon'
