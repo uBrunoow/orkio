@@ -1080,3 +1080,11 @@ export function ghCalls(userDataDir: string): string[] {
   const file = join(`${userDataDir}-bin`, 'gh-calls.log')
   return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean) : []
 }
+
+/** 6E: item do menu lateral (Quadro, Etapas e automações, Fluxos, Contexto do Claude, ...). */
+export async function navTo(page: Page, name: string): Promise<void> {
+  await page
+    .getByRole('navigation', { name: 'Navegação principal' })
+    .getByRole('button', { name, exact: true })
+    .click()
+}

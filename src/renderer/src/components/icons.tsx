@@ -9,7 +9,9 @@ import {
   IconDatabase,
   IconExternalLink,
   IconFolderPlus,
+  IconCopy,
   IconFolderSearch,
+  IconSearch,
   IconFolders,
   IconRobot,
   IconGitBranch,
@@ -36,6 +38,17 @@ import {
   IconCode,
   IconFileDiff,
   IconEraser,
+  IconRoute,
+  IconAdjustmentsHorizontal,
+  IconSelector,
+  IconArrowsMaximize,
+  IconArrowLeft,
+  IconMessage,
+  IconShieldCheck,
+  IconHelpCircle,
+  IconFlag,
+  IconInfoCircle,
+  IconTool,
   IconLayoutDashboard,
   type Icon as TablerIcon,
   type IconProps as TablerIconProps
@@ -83,6 +96,17 @@ export const EditorIcon = adapt(IconCode)
 export const DiffIcon = adapt(IconFileDiff)
 export const CleanIcon = adapt(IconEraser)
 export const AgentsIcon = adapt(IconRobot)
+export const FlowsIcon = adapt(IconRoute)
+export const StagesIcon = adapt(IconAdjustmentsHorizontal)
+export const SwitchIcon = adapt(IconSelector)
+export const ExpandIcon = adapt(IconArrowsMaximize)
+export const BackIcon = adapt(IconArrowLeft)
+export const MessageIcon = adapt(IconMessage)
+export const PermissionIcon = adapt(IconShieldCheck)
+export const QuestionIcon = adapt(IconHelpCircle)
+export const FinishIcon = adapt(IconFlag)
+export const InfoIcon = adapt(IconInfoCircle)
+export const ToolIcon = adapt(IconTool)
 export const OverviewIcon = adapt(IconLayoutDashboard)
 
 /** Marca do Claude (estrela de raios), desenhada em currentColor. */
@@ -92,3 +116,5 @@ export const ClaudeLogo: SvgIcon = (props) => (
   </svg>
 )
 ClaudeLogo.displayName = 'ClaudeLogo'
+export const SearchIcon = adapt(IconSearch)
+export const CopyIcon = adapt(IconCopy)

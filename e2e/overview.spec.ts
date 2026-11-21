@@ -124,7 +124,9 @@ test('gate pendente aparece em "Esperando você", abre a tarefa no fluxo e some 
   await expect(page.getByRole('heading', { level: 1, name: 'Visão geral' })).toBeVisible()
   await expect(waitingRegion(page)).toContainText('Nada esperando por você agora.')
   // Cartão do projeto: mini barra por etapa e total de tarefas do quadro.
-  const projectCard = page.getByRole('group', { name: 'orkio-app' })
+  const projectCard = page
+    .getByRole('region', { name: 'Por projeto' })
+    .getByRole('group', { name: 'orkio-app' })
   await expect(
     projectCard.getByRole('progressbar', { name: /^Prioridades: \d+ de 2$/ })
   ).toBeVisible()
@@ -197,7 +199,7 @@ test('com projeto configurado, o app abre direto na Visão geral (sem "Vamos com
   await expect(page.getByRole('heading', { level: 1, name: 'Visão geral' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Começar', exact: true })).toHaveCount(0)
   // Atalhos na ordem do menu.
-  await page.keyboard.press(`${MOD}+3`)
+  await page.keyboard.press(`${MOD}+6`)
   await expect(page.getByRole('heading', { level: 1, name: 'Projetos' })).toBeVisible()
   await page.keyboard.press(`${MOD}+1`)
   await expect(page.getByRole('heading', { level: 1, name: 'Visão geral' })).toBeVisible()

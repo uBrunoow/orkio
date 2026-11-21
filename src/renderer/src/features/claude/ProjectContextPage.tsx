@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
+import { Heading } from '@astryxdesign/core/Heading'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { Item } from '@astryxdesign/core/Item'
@@ -13,20 +13,13 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { VStack } from '@astryxdesign/core/VStack'
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
-import { PageHeader } from '../../components/PageHeader'
 import { NotionLogo, TrashIcon } from '../../components/icons'
 
 /**
  * Contexto do Claude Code do projeto (4B): instruções fixas + páginas de referência do Notion.
  * Vai no briefing de toda execução, dentro de um limite de tamanho (o que passar é cortado com aviso).
  */
-export function ProjectContextPage({
-  projectId,
-  onClose
-}: {
-  projectId: string
-  onClose(): void
-}): React.JSX.Element {
+export function ProjectContextPage({ projectId }: { projectId: string }): React.JSX.Element {
   const [ctx, setCtx] = useState<ProjectClaudeContext | null>(null)
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<{ id: string; name: string }[] | null>(null)
@@ -68,10 +61,6 @@ export function ProjectContextPage({
 
   return (
     <VStack gap={5} maxWidth={880} role="region" aria-label="Contexto do Claude Code">
-      <PageHeader
-        title="Contexto do Claude Code"
-        subtitle="Vai no briefing de toda execução deste projeto, antes da descrição da tarefa."
-      />
       <TextArea
         label="Instruções"
         description="Convenções, comandos de teste, o que evitar. Fica só no seu computador."
@@ -82,7 +71,7 @@ export function ProjectContextPage({
       />
 
       <VStack gap={2}>
-        <Text weight="semibold">Páginas de referência do Notion</Text>
+        <Heading level={2}>Páginas de referência do Notion</Heading>
         <Text type="supporting">
           Até {CONTEXT_LIMITS.pages} páginas, lidas na hora de rodar. O Orkio guarda só o id e o
           nome. Contexto acima de {CONTEXT_LIMITS.total.toLocaleString('pt-BR')} caracteres é
@@ -115,54 +104,53 @@ export function ProjectContextPage({
             ))}
           </List>
         )}
-        <Card variant="transparent">
-          <VStack gap={2}>
-            <HStack gap={2} vAlign="end">
-              <StackItem size="fill">
-                <TextInput
-                  type="search"
-                  label="Buscar página no Notion"
-                  placeholder="Título da página"
-                  value={query}
-                  onChange={setQuery}
-                />
-              </StackItem>
-              <Button
-                label="Buscar"
-                isLoading={searching}
-                isDisabled={full}
-                {...(full ? { disabledMessage: 'Limite de páginas atingido.' } : {})}
-                onClick={() => void search()}
+        {/* Sem recuo: alinhado com as instruções acima. */}
+        <VStack gap={2}>
+          <HStack gap={2} vAlign="end">
+            <StackItem size="fill">
+              <TextInput
+                type="search"
+                label="Buscar página no Notion"
+                placeholder="Título da página"
+                value={query}
+                onChange={setQuery}
               />
-            </HStack>
-            {results !== null &&
-              (results.length === 0 ? (
-                <Text type="supporting">
-                  Nenhuma página encontrada. Ela precisa estar compartilhada com o Orkio.
-                </Text>
-              ) : (
-                <List hasDividers density="compact" aria-label="Resultados da busca">
-                  {results.map((p) => (
-                    <Item
-                      as="li"
-                      key={p.id}
-                      label={p.name}
-                      endContent={
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          label={chosen.has(p.id) ? 'Adicionada' : 'Adicionar'}
-                          aria-label={`Adicionar ${p.name}`}
-                          isDisabled={chosen.has(p.id) || full}
-                          onClick={() => setCtx({ ...ctx, notionPages: [...ctx.notionPages, p] })}
-                        />
-                      }
-                    />
-                  ))}
-                </List>
-              ))}
-          </VStack>
-        </Card>
+            </StackItem>
+            <Button
+              label="Buscar"
+              isLoading={searching}
+              isDisabled={full}
+              {...(full ? { disabledMessage: 'Limite de páginas atingido.' } : {})}
+              onClick={() => void search()}
+            />
+          </HStack>
+          {results !== null &&
+            (results.length === 0 ? (
+              <Text type="supporting">
+                Nenhuma página encontrada. Ela precisa estar compartilhada com o Orkio.
+              </Text>
+            ) : (
+              <List hasDividers density="compact" aria-label="Resultados da busca">
+                {results.map((p) => (
+                  <Item
+                    as="li"
+                    key={p.id}
+                    label={p.name}
+                    endContent={
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        label={chosen.has(p.id) ? 'Adicionada' : 'Adicionar'}
+                        aria-label={`Adicionar ${p.name}`}
+                        isDisabled={chosen.has(p.id) || full}
+                        onClick={() => setCtx({ ...ctx, notionPages: [...ctx.notionPages, p] })}
+                      />
+                    }
+                  />
+                ))}
+              </List>
+            ))}
+        </VStack>
       </VStack>
 
       {message &&
@@ -178,7 +166,6 @@ export function ProjectContextPage({
           isLoading={saving}
           onClick={() => void save()}
         />
-        <Button variant="ghost" label="Voltar ao quadro" onClick={onClose} />
       </HStack>
     </VStack>
   )
