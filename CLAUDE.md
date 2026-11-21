@@ -779,6 +779,14 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   `ci.yml` → rascunho do release (notas do CHANGELOG, `GITHUB_TOKEN` com `contents: write` só nos
   jobs que publicam) → `package.yml` com
   `--publish always` → confere arquivos e publica. Segredos só no `env` do passo; sem `set -x`.
+- **Release ao mergear:** PR com **um** rótulo `release:patch|minor|major|beta` + merge na `main` =
+  versão. `release-label.yml` (na PR) mostra a versão que sairá e falha cedo (CHANGELOG vazio, mais
+  de um rótulo); `release-on-merge.yml` (push na main) acha a PR do commit, roda
+  `scripts/release.mjs <tipo>`, empurra o commit `chore(release): vX.Y.Z` e a tag (`--atomic`) e
+  dispara o `release.yml` com `--ref vX.Y.Z` (tags empurradas com o `GITHUB_TOKEN` não disparam
+  workflows; `workflow_dispatch` é a exceção). A lógica é pura e testada
+  (`releaseKindFromLabels`/`planRelease` em `scripts/release-lib.mjs`, `scripts/release-plan.mjs`).
+  Sem rótulo, nada é lançado. Nunca empurre a tag com um token pessoal (dispararia duas vezes).
 - Passo a passo (repo, token, Apple, Microsoft, custos): `docs/releases.md`.
 
 ## Testes

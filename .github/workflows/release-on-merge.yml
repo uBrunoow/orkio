@@ -1,0 +1,79 @@
+# Release ao mergear: a PR mergeada na main com o rótulo `release:patch|minor|major|beta` sobe a
+# versão, move o CHANGELOG, cria o commit `chore(release): vX.Y.Z` e a tag, e dispara o Release.
+# Sem o rótulo, nada acontece. Passo a passo em docs/releases.md.
+#
+# Por que dispara o Release à mão: tags empurradas com o GITHUB_TOKEN não disparam workflows
+# (regra do GitHub, para evitar laços); `workflow_dispatch` é a exceção.
+name: Release ao mergear
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Uma versão de cada vez (as duas empurram para a main).
+concurrency:
+  group: release-on-merge
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    # O commit de versão feito por este workflow não gera outra versão.
+    if: ${{ !startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # empurrar o commit de versão e a tag
+      pull-requests: read # achar a PR do commit
+      actions: write # disparar o release.yml
+    steps:
+      - name: Rótulos da PR mergeada
+        id: labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          labels=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null) | .labels[].name] | tojson')
+          echo "labels=$labels" >> "$GITHUB_OUTPUT"
+          echo "Rótulos: $labels"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Há release?
+        id: plan
+        env:
+          LABELS: ${{ steps.labels.outputs.labels }}
+        run: node scripts/release-plan.mjs
+
+      - name: Versão, CHANGELOG, commit e tag
+        if: steps.plan.outputs.release == 'true'
+        env:
+          KIND: ${{ steps.plan.outputs.kind }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/release.mjs "$KIND"
+          # O script e o plano têm que concordar na versão.
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+
+      - name: Enviar o commit e a tag
+        if: steps.plan.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: git push --atomic origin main "refs/tags/v$VERSION"
+
+      - name: Disparar o Release
+        if: steps.plan.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          gh workflow run release.yml --ref "v$VERSION"
+          echo "Release v$VERSION disparado: https://github.com/$GITHUB_REPOSITORY/actions/workflows/release.yml" >> "$GITHUB_STEP_SUMMARY"

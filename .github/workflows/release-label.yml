@@ -1,0 +1,27 @@
+# Mostra, na PR, o que o rótulo `release:*` vai fazer ao mergear (versão que sai) e falha cedo se o
+# CHANGELOG não tiver o que lançar. Sem o rótulo, a PR não lança versão. Ver docs/releases.md.
+name: Release (rótulo da PR)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: O que este rótulo lança
+        env:
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/release-plan.mjs
