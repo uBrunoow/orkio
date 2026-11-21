@@ -154,3 +154,51 @@ test('tarefa: painel com rolagem própria, tela cheia e volta ao quadro com o pa
   await expect(page.getByRole('complementary', { name: 'Detalhes de ORK-2' })).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
 })
+
+test('Command Palette e atalhos: Ctrl+K acha a tarefa, Ctrl+número troca de tela, teclado no quadro', async () => {
+  const { page } = orkio!
+  // Esc fecha o painel.
+  await page.getByRole('heading', { level: 1, name: 'Quadro' }).click()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('complementary', { name: 'Detalhes de ORK-2' })).toBeHidden()
+
+  // Paleta pelo teclado: busca sem acento, Enter abre a tarefa no painel.
+  await page.keyboard.press('Control+k')
+  const palette = page.getByRole('dialog', { name: 'Buscar tarefas e comandos' })
+  await expect(palette).toBeVisible()
+  await page.keyboard.type('listar tarefas')
+  await expect(palette.getByRole('option', { name: /ORK-2/ })).toBeVisible()
+  await expect(palette.getByRole('option', { name: /ORK-2/ })).toContainText(
+    'orkio-app · Em andamento'
+  )
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(palette).toBeHidden()
+  await expect(page.getByRole('complementary', { name: 'Detalhes de ORK-2' })).toBeVisible()
+
+  // Telas pela paleta e pelos atalhos; Alt+← volta.
+  await page.keyboard.press('Control+k')
+  await expect(palette).toBeVisible()
+  await page.keyboard.type('modelos')
+  await expect(palette.getByRole('option', { name: 'Modelos Alva' })).toBeVisible()
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('tab', { name: 'Modelos Alva', selected: true })).toBeVisible()
+  await page.keyboard.press('Control+2')
+  await expect(h1(page, 'Etapas e automações')).toBeVisible()
+  await page.keyboard.press('Alt+ArrowLeft')
+  await expect(h1(page, 'Fluxos')).toBeVisible()
+  await page.keyboard.press('Control+1')
+  await expect(h1(page, 'Quadro')).toBeVisible()
+
+  // Quadro pelo teclado: foco no card, Ctrl+Enter abre em tela cheia.
+  const card = page.getByRole('listitem', { name: ORK2, exact: true })
+  await card.focus()
+  await page.keyboard.press('m')
+  await expect(page.getByRole('menuitem', { name: 'Abrir detalhes' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await card.focus()
+  await page.keyboard.press('Control+Enter')
+  await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()
+  expect(await cspViolations(page)).toEqual([])
+})

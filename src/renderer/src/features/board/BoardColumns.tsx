@@ -126,6 +126,43 @@ export function BoardColumns({
 
   useEffect(() => () => teardown.current?.(), [])
 
+  /** Teclado no quadro: J/K ou ↑/↓ no card ao lado, ←/→ na coluna ao lado, M abre o menu. */
+  function onKeyDown(e: React.KeyboardEvent): void {
+    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-task-id]')
+    if (!el || e.target !== el || e.altKey || e.shiftKey) return
+    const taskId = el.dataset['taskId'] ?? ''
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      actions.onExpand?.(taskId)
+      return
+    }
+    if (e.ctrlKey || e.metaKey) return
+    const grid = columns.map((c) => byColumn.get(c.id) ?? [])
+    const col = grid.findIndex((list) => list.some((c) => c.taskId === taskId))
+    const row = grid[col]?.findIndex((c) => c.taskId === taskId) ?? -1
+    if (col < 0 || row < 0) return
+    let next: BoardCard | undefined
+    const key = e.key.toLowerCase()
+    if (key === 'j' || key === 'arrowdown') next = grid[col]?.[row + 1]
+    else if (key === 'k' || key === 'arrowup') next = grid[col]?.[row - 1]
+    else if (key === 'arrowleft' || key === 'arrowright') {
+      const step = key === 'arrowleft' ? -1 : 1
+      for (let c = col + step; c >= 0 && c < grid.length; c += step) {
+        const list = grid[c] ?? []
+        if (list.length > 0) {
+          next = list[Math.min(row, list.length - 1)]
+          break
+        }
+      }
+    } else if (key === 'm') {
+      e.preventDefault()
+      el.querySelector<HTMLButtonElement>('button[aria-label^="Ações de"]')?.click()
+      return
+    } else return
+    e.preventDefault()
+    if (next) cardEls.current.get(next.taskId)?.focus()
+  }
+
   const dragged = drag ? cards.find((c) => c.taskId === drag.taskId) : undefined
 
   return (
@@ -135,6 +172,8 @@ export function BoardColumns({
         vAlign="stretch"
         role="list"
         aria-label="Etapas do quadro"
+        aria-keyshortcuts="J K ArrowLeft ArrowRight M Control+Enter"
+        onKeyDown={onKeyDown}
         isScrollable
         height="100%"
         paddingBlockEnd={2}

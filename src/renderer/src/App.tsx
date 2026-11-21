@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { Kbd } from '@astryxdesign/core/Kbd'
 import { AppShell } from '@astryxdesign/core/AppShell'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
@@ -9,6 +10,7 @@ import {
   FlowsIcon,
   IntegrationsIcon,
   ProjectsIcon,
+  SearchIcon,
   StagesIcon,
   type SvgIcon
 } from './components/icons'
@@ -21,6 +23,8 @@ import {
   type ProjectRouteName,
   type Route
 } from './app/routes'
+import { CommandMenu, type CommandData } from './app/CommandMenu'
+import { globalShortcut, isTextField } from './app/shortcuts'
 import { BoardPage } from './features/board/BoardPage'
 import { AutomationsPage, ContextPage, FlowsPage } from './features/board/ProjectPages'
 import { TaskPage } from './features/board/TaskPage'
@@ -93,6 +97,48 @@ export function App(): React.JSX.Element {
       }),
     [chooseProject, navigate]
   )
+
+  // Atalhos globais e Command Palette (fora da tela inicial).
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const inShell = route.name !== 'welcome'
+  useEffect(() => {
+    if (!inShell) return
+    const isMac = navigator.userAgent.includes('Mac')
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.defaultPrevented || e.isComposing) return
+      const action = globalShortcut(
+        {
+          key: e.key,
+          ctrlKey: e.ctrlKey,
+          metaKey: e.metaKey,
+          altKey: e.altKey,
+          shiftKey: e.shiftKey,
+          inTextField: isTextField(e.target)
+        },
+        isMac
+      )
+      if (!action) return
+      e.preventDefault()
+      if (action.type === 'palette') setPaletteOpen((open) => !open)
+      else if (action.type === 'back') dispatch({ type: 'back' })
+      else navigate(action.route)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [inShell, navigate])
+
+  const runCommand = (command: CommandData): void => {
+    if (command.projectId) {
+      chooseProject(command.projectId)
+      navigate(isProjectRoute(route) ? { name: route.name } : { name: 'board' })
+      return
+    }
+    if (!command.route) return
+    if (isProjectRoute(command.route) && command.route.projectId) {
+      chooseProject(command.route.projectId)
+    }
+    navigate(command.route)
+  }
 
   // Tela inicial em tela cheia, sem a navegação.
   if (route.name === 'welcome') {
@@ -212,6 +258,12 @@ export function App(): React.JSX.Element {
           </SideNavSection>
           <SideNavSection title="Orkio" isHeaderHidden>
             <SideNavItem
+              label="Buscar"
+              icon={SearchIcon}
+              endContent={<Kbd keys="mod+k" />}
+              onClick={() => setPaletteOpen(true)}
+            />
+            <SideNavItem
               label={ROUTE_TITLES.projects}
               icon={ProjectsIcon}
               isSelected={route.name === 'projects'}
@@ -229,6 +281,13 @@ export function App(): React.JSX.Element {
     >
       {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
       <Fragment key={router.key}>{page}</Fragment>
+      <CommandMenu
+        isOpen={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        projects={projects ?? []}
+        currentProjectId={project?.id ?? null}
+        onRun={runCommand}
+      />
     </AppShell>
   )
 }

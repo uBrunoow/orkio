@@ -17,6 +17,8 @@ export interface CardActions {
   onMove(taskId: string, stageId: string): void
   onToggleBlocked(taskId: string, blocked: boolean): void
   onToggleAutomation(taskId: string, paused: boolean): void
+  /** Abre a tarefa em tela cheia (Ctrl/Cmd+Enter no card). */
+  onExpand?(taskId: string): void
 }
 
 /** Conteúdo do card (no quadro e no "fantasma" do arrasto). */

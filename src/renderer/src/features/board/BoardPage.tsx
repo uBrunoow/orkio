@@ -11,6 +11,7 @@ import { TextInput } from '@astryxdesign/core/TextInput'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
+import { isTextField } from '../../app/shortcuts'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
@@ -90,6 +91,19 @@ function Board({
   const [onlyBlocked, setOnlyBlocked] = useState(false)
   const { view } = board
 
+  // Esc fecha o painel (fora de campos de texto e de diálogos, que tratam o próprio Esc).
+  useEffect(() => {
+    if (!selected) return
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented || isTextField(e.target)) return
+      if (e.target instanceof Element && e.target.closest('dialog, [role="dialog"], [role="menu"]'))
+        return
+      setPicked(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [selected])
+
   // Branches/PRs depois de carregar o quadro.
   const fetchedAt = view?.fetchedAt
   useEffect(() => {
@@ -144,7 +158,8 @@ function Board({
     onMove: (taskId: string, stageId: string) => void board.move(taskId, stageId),
     onToggleBlocked: (taskId: string, blocked: boolean) => void board.setBlocked(taskId, blocked),
     onToggleAutomation: (taskId: string, paused: boolean) =>
-      void board.setAutomationPaused(taskId, paused)
+      void board.setAutomationPaused(taskId, paused),
+    onExpand: onExpandTask
   }
 
   return (
