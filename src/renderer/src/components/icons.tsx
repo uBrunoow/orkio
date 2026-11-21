@@ -9,6 +9,7 @@ import {
   IconDatabase,
   IconExternalLink,
   IconFolderPlus,
+  IconCopy,
   IconFolderSearch,
   IconSearch,
   IconFolders,
@@ -112,3 +113,4 @@ export const ClaudeLogo: SvgIcon = (props) => (
 )
 ClaudeLogo.displayName = 'ClaudeLogo'
 export const SearchIcon = adapt(IconSearch)
+export const CopyIcon = adapt(IconCopy)

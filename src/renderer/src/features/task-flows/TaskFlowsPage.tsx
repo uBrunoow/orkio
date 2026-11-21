@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { Code } from '@astryxdesign/core/Code'
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
+import { Heading } from '@astryxdesign/core/Heading'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { IconButton } from '@astryxdesign/core/IconButton'
@@ -28,6 +29,7 @@ import {
   type StepType
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
+import { plural } from '../../lib/format'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
 
 const newFlowId = (): string =>
@@ -170,11 +172,15 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
                   as="li"
                   key={f.id}
                   label={f.name || 'Sem nome'}
-                  description={`${f.steps.length} passo(s)`}
+                  description={plural(f.steps.length, 'passo', 'passos')}
                   isSelected={f.id === selected}
                   onClick={() => setSelected(f.id)}
                   {...(errors > 0
-                    ? { endContent: <Token size="sm" color="red" label={`${errors} erro(s)`} /> }
+                    ? {
+                        endContent: (
+                          <Token size="sm" color="red" label={plural(errors, 'erro', 'erros')} />
+                        )
+                      }
                     : {})}
                 />
               )
@@ -214,6 +220,30 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
   )
 }
 
+/** Uma linha que resume o passo (lista de passos). */
+function stepSummary(step: Step): string {
+  switch (step.type) {
+    case 'claude_command':
+      return [
+        `/${step.command || '…'} ${step.args}`.trim(),
+        `${step.timeoutMin} min`,
+        ...(step.delivery ? ['modo entrega'] : [])
+      ].join(' · ')
+    case 'gate':
+      return [
+        `“${step.message}”`,
+        step.show === 'diff' ? 'mostra o diff' : step.show === 'summary' ? 'mostra o resumo' : null,
+        `recusar → ${step.onReject === 'stop' ? 'encerra' : step.onReject}`
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    case 'orkio_action':
+      return step.action
+    case 'branch':
+      return `ir para ${step.then}${step.else ? ` · senão ${step.else}` : ' · senão segue'}`
+  }
+}
+
 function FlowEditor({
   flow,
   catalog,
@@ -229,16 +259,29 @@ function FlowEditor({
   onChange(flow: Flow): void
   onRemove(): void
 }): React.JSX.Element {
-  const [addType, setAddType] = useState<StepType>('claude_command')
-  const setStep = (index: number, step: Step): void =>
-    onChange({ ...flow, steps: flow.steps.map((s, i) => (i === index ? step : s)) })
-  const move = (index: number, delta: number): void => {
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const index = Math.min(selectedIndex, flow.steps.length - 1)
+  const step = index >= 0 ? flow.steps[index] : undefined
+  const setStep = (i: number, next: Step): void =>
+    onChange({ ...flow, steps: flow.steps.map((s, j) => (j === i ? next : s)) })
+  const move = (i: number, delta: number): void => {
     const steps = [...flow.steps]
-    const [s] = steps.splice(index, 1)
-    steps.splice(index + delta, 0, s!)
+    const [s] = steps.splice(i, 1)
+    steps.splice(i + delta, 0, s!)
     onChange({ ...flow, steps })
+    setSelectedIndex(i + delta)
+  }
+  // Novo passo entra depois do selecionado (ou no fim) e já fica aberto.
+  const add = (type: StepType): void => {
+    const at = flow.steps.length === 0 ? 0 : index + 1
+    const steps = [...flow.steps]
+    steps.splice(at, 0, emptyStep(flow, type))
+    onChange({ ...flow, steps })
+    setSelectedIndex(at)
   }
   const stepOptions = flow.steps.map((s) => ({ value: s.id, label: `${s.name} (${s.id})` }))
+  const problemsOf = (id: string): number =>
+    issues.filter((i) => i.stepId === id && i.level === 'error').length
 
   return (
     <VStack gap={4}>
@@ -268,110 +311,123 @@ function FlowEditor({
         </VStack>
       )}
 
-      <VStack gap={3} role="list" aria-label="Passos do fluxo">
-        {flow.steps.map((step, index) => (
-          <Card
-            key={`${index}:${step.type}`}
-            role="listitem"
-            aria-label={`Passo ${index + 1}: ${step.name}`}
-            variant="muted"
-            padding={3}
-          >
-            <VStack gap={3}>
-              <HStack gap={2} vAlign="center" wrap="wrap">
-                <Text type="supporting">{index + 1}.</Text>
-                <Token size="sm" label={STEP_TYPE_LABEL[step.type]} />
-                <Code>{step.id}</Code>
-                <StackItem size="fill" />
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  label={`Subir passo ${index + 1}`}
-                  icon={<Icon icon={ArrowUpIcon} />}
-                  isDisabled={index === 0}
-                  onClick={() => index > 0 && move(index, -1)}
-                />
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  label={`Descer passo ${index + 1}`}
-                  icon={<Icon icon={ArrowDownIcon} />}
-                  isDisabled={index === flow.steps.length - 1}
-                  onClick={() => index < flow.steps.length - 1 && move(index, 1)}
-                />
-                <IconButton
-                  size="sm"
-                  variant="ghost"
-                  label={`Remover passo ${index + 1}`}
-                  icon={<Icon icon={TrashIcon} />}
-                  onClick={() =>
-                    onChange({ ...flow, steps: flow.steps.filter((_, i) => i !== index) })
+      <VStack gap={2}>
+        <HStack gap={2} vAlign="center">
+          <Heading level={3}>Passos</Heading>
+          <StackItem size="fill" />
+          <DropdownMenu
+            button={{ label: 'Adicionar passo', size: 'sm', variant: 'secondary' }}
+            items={(Object.keys(STEP_TYPE_LABEL) as StepType[]).map((t) => ({
+              label: STEP_TYPE_LABEL[t],
+              onClick: () => add(t)
+            }))}
+          />
+        </HStack>
+        {flow.steps.length === 0 ? (
+          <Text type="supporting">Nenhum passo ainda. Use “Adicionar passo”.</Text>
+        ) : (
+          <List hasDividers density="compact" aria-label="Passos do fluxo">
+            {flow.steps.map((s, i) => {
+              const problems = problemsOf(s.id)
+              return (
+                <Item
+                  as="li"
+                  key={`${i}:${s.type}`}
+                  aria-label={`Passo ${i + 1}: ${s.name}`}
+                  label={`${i + 1}. ${s.name}`}
+                  description={stepSummary(s)}
+                  isSelected={i === index}
+                  onClick={() => setSelectedIndex(i)}
+                  endContent={
+                    <HStack gap={1} vAlign="center">
+                      {problems > 0 && (
+                        <Token size="sm" color="red" label={plural(problems, 'erro', 'erros')} />
+                      )}
+                      <Token size="sm" label={STEP_TYPE_LABEL[s.type]} />
+                    </HStack>
                   }
                 />
-              </HStack>
-              <HStack gap={2} wrap="wrap">
-                <TextInput
-                  label={`Nome do passo ${index + 1}`}
-                  value={step.name}
-                  onChange={(name) => setStep(index, { ...step, name })}
-                />
-                <TextInput
-                  label={`Chave do passo ${index + 1}`}
-                  description="Usada em saltos e condições."
-                  value={step.id}
-                  onChange={(id) => setStep(index, { ...step, id: id.toLowerCase() })}
-                />
-              </HStack>
-              <StepForm
-                index={index}
-                step={step}
-                catalog={catalog}
-                project={project}
-                stepOptions={stepOptions}
-                onChange={(s) => setStep(index, s)}
-              />
-            </VStack>
-          </Card>
-        ))}
+              )
+            })}
+          </List>
+        )}
       </VStack>
 
-      <HStack gap={2} vAlign="end">
-        <Selector
-          label="Tipo do novo passo"
-          options={(Object.keys(STEP_TYPE_LABEL) as StepType[]).map((t) => ({
-            value: t,
-            label: STEP_TYPE_LABEL[t]
-          }))}
-          value={addType}
-          onChange={(v: string) => setAddType(v as StepType)}
-        />
-        <Button
-          variant="secondary"
-          label="Adicionar passo"
-          icon={<Icon icon={PlusIcon} />}
-          onClick={() => onChange({ ...flow, steps: [...flow.steps, emptyStep(flow, addType)] })}
-        />
-      </HStack>
+      {step && (
+        <Card role="region" aria-label={`Editar passo ${index + 1}`} variant="muted" padding={4}>
+          <VStack gap={3}>
+            <HStack gap={2} vAlign="center" wrap="wrap">
+              <Heading level={3}>{`Passo ${index + 1}`}</Heading>
+              <Token size="sm" label={STEP_TYPE_LABEL[step.type]} />
+              <StackItem size="fill" />
+              <IconButton
+                size="sm"
+                variant="ghost"
+                label="Subir passo"
+                icon={<Icon icon={ArrowUpIcon} />}
+                isDisabled={index === 0}
+                onClick={() => index > 0 && move(index, -1)}
+              />
+              <IconButton
+                size="sm"
+                variant="ghost"
+                label="Descer passo"
+                icon={<Icon icon={ArrowDownIcon} />}
+                isDisabled={index === flow.steps.length - 1}
+                onClick={() => index < flow.steps.length - 1 && move(index, 1)}
+              />
+              <IconButton
+                size="sm"
+                variant="ghost"
+                label="Remover passo"
+                icon={<Icon icon={TrashIcon} />}
+                onClick={() => {
+                  onChange({ ...flow, steps: flow.steps.filter((_, i) => i !== index) })
+                  setSelectedIndex(Math.max(0, index - 1))
+                }}
+              />
+            </HStack>
+            <HStack gap={2} wrap="wrap">
+              <TextInput
+                label="Nome"
+                value={step.name}
+                onChange={(name) => setStep(index, { ...step, name })}
+              />
+              <TextInput
+                label="Chave"
+                description="Usada em saltos e condições."
+                value={step.id}
+                onChange={(id) => setStep(index, { ...step, id: id.toLowerCase() })}
+              />
+            </HStack>
+            <StepForm
+              key={index}
+              step={step}
+              catalog={catalog}
+              project={project}
+              stepOptions={stepOptions}
+              onChange={(s) => setStep(index, s)}
+            />
+          </VStack>
+        </Card>
+      )}
     </VStack>
   )
 }
 
 function StepForm({
-  index,
   step,
   catalog,
   project,
   stepOptions,
   onChange
 }: {
-  index: number
   step: Step
   catalog: CatalogGroup[] | null
   project: TaskFlowsProject
   stepOptions: { value: string; label: string }[]
   onChange(step: Step): void
 }): React.JSX.Element {
-  const n = index + 1
   switch (step.type) {
     case 'claude_command': {
       const options: SelectorOptionType[] =
@@ -390,7 +446,7 @@ function StepForm({
         <VStack gap={2}>
           {options.length > 0 ? (
             <Selector
-              label={`Comando do passo ${n}`}
+              label="Comando"
               hasSearch
               searchPlaceholder="Buscar comando…"
               isLoading={catalog === null}
@@ -400,20 +456,20 @@ function StepForm({
             />
           ) : (
             <TextInput
-              label={`Comando do passo ${n}`}
+              label="Comando"
               description="Nenhum comando no catálogo; digite o nome."
               value={step.command}
               onChange={(command) => onChange({ ...step, command: command.replace(/^\//, '') })}
             />
           )}
           <TextInput
-            label={`Argumentos do passo ${n}`}
+            label="Argumentos"
             description="Variáveis: {{briefing_path}}, {{task_id}}, {{notion_url}}, {{flow.<chave>}}"
             value={step.args}
             onChange={(args) => onChange({ ...step, args })}
           />
           <CheckboxInput
-            label={`Modo entrega (passo ${n})`}
+            label="Modo entrega"
             description="Só neste passo: o Claude Code pode criar/atualizar a PR (gh) e fazer push da branch da tarefa, com sua aprovação na primeira vez. Merge, força e outras branches continuam bloqueados."
             value={step.delivery === true}
             onChange={(on) => {
@@ -424,12 +480,12 @@ function StepForm({
           />
           <HStack gap={2} wrap="wrap">
             <TextInput
-              label={`Tempo limite em minutos (passo ${n})`}
+              label="Tempo limite em minutos"
               value={String(step.timeoutMin)}
               onChange={(v) => onChange({ ...step, timeoutMin: Number(v) || 0 })}
             />
             <Selector
-              label={`Gravar variáveis (passo ${n})`}
+              label="Gravar variáveis"
               options={[
                 { value: '', label: 'Não gravar' },
                 ...project.extractors.map((e) => ({ value: e.id, label: e.label }))
@@ -449,14 +505,14 @@ function StepForm({
       return (
         <VStack gap={2}>
           <TextArea
-            label={`Mensagem do gate (passo ${n})`}
+            label="Mensagem do gate"
             value={step.message}
             rows={2}
             onChange={(message) => onChange({ ...step, message })}
           />
           <HStack gap={2} wrap="wrap">
             <Selector
-              label={`Mostrar ao aprovar (passo ${n})`}
+              label="Mostrar ao aprovar"
               options={[
                 { value: 'diff', label: 'Diff do ambiente' },
                 { value: 'summary', label: 'Resumo da última execução' },
@@ -466,7 +522,7 @@ function StepForm({
               onChange={(v: string) => onChange({ ...step, show: v as typeof step.show })}
             />
             <Selector
-              label={`Ao recusar (passo ${n})`}
+              label="Ao recusar"
               options={[
                 { value: 'stop', label: 'Encerrar o fluxo' },
                 ...stepOptions.map((o) => ({ ...o, label: `Ir para ${o.label}` }))
@@ -475,7 +531,7 @@ function StepForm({
               onChange={(v: string) => onChange({ ...step, onReject: v })}
             />
             <TextInput
-              label={`Expira em minutos (passo ${n})`}
+              label="Expira em minutos"
               description="Vazio = espera sem limite."
               value={step.timeoutMin === null ? '' : String(step.timeoutMin)}
               onChange={(v) => onChange({ ...step, timeoutMin: v.trim() ? Number(v) || 0 : null })}
@@ -486,14 +542,14 @@ function StepForm({
     case 'orkio_action':
       return (
         <Selector
-          label={`Ação do Orkio (passo ${n})`}
+          label="Ação do Orkio"
           options={project.actions.map((a) => ({ value: a.id, label: a.label }))}
           value={step.action}
           onChange={(action: string) => onChange({ ...step, action })}
         />
       )
     case 'branch':
-      return <BranchForm n={n} step={step} stepOptions={stepOptions} onChange={onChange} />
+      return <BranchForm step={step} stepOptions={stepOptions} onChange={onChange} />
   }
 }
 
@@ -530,12 +586,10 @@ function fromRows(join: 'all' | 'any', rows: Row[]): Condition {
 }
 
 function BranchForm({
-  n,
   step,
   stepOptions,
   onChange
 }: {
-  n: number
   step: Extract<Step, { type: 'branch' }>
   stepOptions: { value: string; label: string }[]
   onChange(step: Step): void
@@ -550,7 +604,7 @@ function BranchForm({
       <HStack gap={2} vAlign="center">
         <Text>Se</Text>
         <Selector
-          label={`Combinar condições (passo ${n})`}
+          label="Combinar condições"
           isLabelHidden
           options={[
             { value: 'all', label: 'todas as condições' },
@@ -567,10 +621,10 @@ function BranchForm({
           vAlign="end"
           wrap="wrap"
           role="group"
-          aria-label={`Condição ${i + 1} do passo ${n}`}
+          aria-label={`Condição ${i + 1}`}
         >
           <Selector
-            label={`Tipo da condição ${i + 1} (passo ${n})`}
+            label={`Tipo da condição ${i + 1}`}
             options={[
               { value: 'step', label: 'Resultado de um passo' },
               { value: 'var', label: 'Variável do fluxo' },
@@ -594,12 +648,12 @@ function BranchForm({
           {row.type === 'var' ? (
             <>
               <TextInput
-                label={`Variável (condição ${i + 1}, passo ${n})`}
+                label={`Variável (condição ${i + 1})`}
                 value={row.key}
                 onChange={(key) => setRows(rows.map((r, k) => (k === i ? { ...row, key } : r)))}
               />
               <Selector
-                label={`Comparação (condição ${i + 1}, passo ${n})`}
+                label={`Comparação (condição ${i + 1})`}
                 options={[
                   { value: 'eq', label: 'é igual a' },
                   { value: 'neq', label: 'é diferente de' },
@@ -612,7 +666,7 @@ function BranchForm({
               />
               {row.op !== 'exists' && (
                 <TextInput
-                  label={`Valor (condição ${i + 1}, passo ${n})`}
+                  label={`Valor (condição ${i + 1})`}
                   value={row.value}
                   onChange={(value) =>
                     setRows(rows.map((r, k) => (k === i ? { ...row, value } : r)))
@@ -623,7 +677,7 @@ function BranchForm({
           ) : (
             <>
               <Selector
-                label={`Passo (condição ${i + 1}, passo ${n})`}
+                label={`Passo (condição ${i + 1})`}
                 options={stepOptions}
                 {...(row.step ? { value: row.step } : {})}
                 onChange={(s: string) =>
@@ -632,7 +686,7 @@ function BranchForm({
               />
               {row.type === 'step' ? (
                 <Selector
-                  label={`Resultado (condição ${i + 1}, passo ${n})`}
+                  label={`Resultado (condição ${i + 1})`}
                   options={[
                     { value: 'ok', label: 'deu certo' },
                     { value: 'failed', label: 'falhou' },
@@ -645,7 +699,7 @@ function BranchForm({
                 />
               ) : (
                 <TextInput
-                  label={`Menos de quantas voltas (condição ${i + 1}, passo ${n})`}
+                  label={`Menos de quantas voltas (condição ${i + 1})`}
                   value={String(row.lt)}
                   onChange={(v) =>
                     setRows(
@@ -662,7 +716,7 @@ function BranchForm({
             <IconButton
               size="sm"
               variant="ghost"
-              label={`Remover condição ${i + 1} do passo ${n}`}
+              label={`Remover condição ${i + 1}`}
               icon={<Icon icon={TrashIcon} />}
               onClick={() => setRows(rows.filter((_, k) => k !== i))}
             />
@@ -678,13 +732,13 @@ function BranchForm({
           onClick={() => setRows([...rows, { type: 'visits', step: firstStep, lt: 2 }])}
         />
         <Selector
-          label={`Então ir para (passo ${n})`}
+          label="Então ir para"
           options={stepOptions}
           {...(step.then ? { value: step.then } : {})}
           onChange={(then: string) => onChange({ ...step, then })}
         />
         <Selector
-          label={`Senão (passo ${n})`}
+          label="Senão"
           options={[{ value: '', label: 'Seguir para o próximo' }, ...stepOptions]}
           value={step.else ?? ''}
           onChange={(v: string) => {
