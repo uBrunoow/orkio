@@ -42,6 +42,9 @@ Claude Code. Hoje existem:
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
   Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
+- **Tarefa como sessão (fase 8 do redesign):** a tarefa é uma conversa só (eventos, execuções do
+  Claude Code, fluxo) com "em que pé está" no topo e um campo de mensagem que continua a última
+  sessão do Claude Code da tarefa (`--resume`). Detalhes em "Sessão da tarefa" abaixo.
 - **Agentes (8A):** colegas de IA (nome, papel, instruções, limites) que pegam tarefas do quadro e
   rodam os fluxos da 5A pelo mesmo Claude Code da 4A, com todas as regras do Orkio.
 - Ainda não existem: login no app (tela inicial), webhooks.
@@ -128,7 +131,8 @@ src/
       integrations/connection-ui.tsx  # peças comuns dos cards (conectado, erro, token, desconectar)
       projects/            # tela Projetos (useProjects, AddProjectPanel, ActionLink)
       notion-workspace/    # card "Bancos do Notion" (assistente) e seção Notion de cada projeto
-      board/               # Quadro, painel/tela cheia da tarefa (TaskPanel/TaskPage), ProjectPages
+      board/               # Quadro, tarefa como sessão (TaskPanel/TaskPage, TaskSession, TaskDetails,
+                           # TaskProgressStrip, task-session.ts, task-progress.ts), ProjectPages
                            # (Etapas e automações, Fluxos, Contexto), FlowPage (etapas + automações)
       settings/            # 6C: Configurações (Atualizações, Sobre), UpdateBanner, WhatsNewPanel
     components/Alert.tsx   # mensagens (Banner da Astryx)
@@ -460,11 +464,33 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   ferramentas com uma frase (arquivos distintos; só o grupo ao vivo abre sozinho), recibos
   (aprovada entra no grupo; negada/bloqueada fica visível), aviso de falha e fechamento com turnos,
   tempo e custo (o texto final só aparece se não repetir a última mensagem). Pedidos pendentes
-  continuam nos cartões do topo. Links do texto passam por `openExternal`. Mantém o papel/nome
+  ficam em cartões no fim da sessão, acima do campo. Links do texto passam por `openExternal`. Mantém o papel/nome
   `list "Log da execução"` usado pelo E2E.
   "Abrir no Cursor/VS Code" (`spawn` sem shell, `cursor`/`code` no PATH) e "Ver diff".
 - Eventos ao renderer: `claude:run-event` (`onRunEvent` → unsubscribe). Histórico da tarefa ganha
   `run_started|finished|cancelled|failed|blocked`.
+
+## Sessão da tarefa (fase 8)
+
+- **Tela** (`board/TaskPanel.tsx`): "em que pé está" (`TaskProgressStrip`, puro em
+  `task-progress.ts`), "Esperando você" no topo, a conversa (`TaskSession`, puro em
+  `task-session.ts`: `task_events` + execuções em ordem, sem `run_*`/`step_started|finished`/
+  `sync_ok`, que a execução já conta) e, no fim, o fluxo, os pedidos de permissão/pergunta,
+  "Trabalhando há…" e o campo (`claude/SessionComposer.tsx`). Estado em `TaskDetails.tsx`
+  (etapa, Mudanças, GitHub, Documentos, Agente, Opções, "Histórico completo" recolhido). Painel do
+  Quadro em abas Sessão · Mudanças · Detalhes (todas montadas; a inativa com `display: none`);
+  tela cheia em duas colunas. Execução na conversa: `claude/RunBlock.tsx` (conversa inteira;
+  depois dela a spec/plano do Backlog.md em /spec e /plan e os arquivos/commits/diff).
+- **Continuar a conversa** (`ClaudeService.send`, IPC `claude:send`): sem `fresh`, usa a sessão
+  mais recente da tarefa (`agent_runs.session_id`, SQLite v9; `RunService.lastSession`) com
+  `--resume <id>` (mesmo id) no mesmo worktree e manda só o texto (o briefing já foi lido); sem
+  sessão, começa uma com o briefing do Notion. `/comando args` = modo comando. Com um passo de
+  fluxo rodando (`FlowRunner.isBusy`: `running` ou fila `waiting_slot`/`waiting_agent`) é
+  recusado; com o fluxo esperando você, aceito. Permissões, política e redação são as de sempre.
+- "Nova sessão…" abre o formulário completo da 4A (`claude/session-parts.tsx`: briefing editável,
+  modo, catálogo, rodar como agente); "Rodar de novo" em cada execução terminada o abre preenchido.
+- E2E: `expectTaskHistory(scope, ...textos)` e `taskTab(panel, nome)` (fixtures). O Claude simulado
+  responde "Continuei a sessão: …" com `--resume` e grava `resume`/`sessionId` em `agent-args.log`.
 
 ## Claude Code (Etapa 4B)
 
@@ -530,10 +556,10 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
     `main/flows/flow-problem.test.ts` usa os textos reais e falha se alguém mudar uma.
     `FlowRunner.rerunFrom` (IPC `taskFlows.rerunFrom`) volta a um comando do Claude Code anterior ao
     passo parado (só em falha/interrupção) e segue dali; o histórico da falha fica. `claude.diff`
-    devolve também `uncommitted` (de `git status --porcelain`, sem `.orkio/`). Com fluxo em andamento,
-    o botão manual "Rodar Claude Code" dá lugar a uma explicação.
-- **UI:** editor "Fluxos de tarefa" (do Fluxo do projeto), seção "Fluxo" no painel (linha do tempo,
-  gate, pausas, decisão; o log ao vivo é o da seção Claude Code, que segue a execução nova) e token
+    devolve também `uncommitted` (de `git status --porcelain`, sem `.orkio/`). Com um passo rodando,
+    o campo da sessão fica bloqueado; "Ver a sessão do passo" abre e mostra a execução na conversa.
+- **UI:** editor "Fluxos de tarefa" (do Fluxo do projeto), bloco "Fluxo" no fim da sessão (passos
+  recolhidos, gate, pausas, decisão; a conversa do passo atual aparece logo acima) e token
   "Fluxo"/"Esperando você" no card (`active-flows.tsx`, contexto React).
 
 ## alva-flow (Etapa 5B)
@@ -575,14 +601,15 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   "Planejando" criada pelo mesmo caminho do "Salvar fluxo" com o status escolhido.
 - **Execução:** cartão de perguntas com várias por vez, múltipla escolha e "Outro" (texto livre);
   com Docker no projeto, 1 fluxo Alva por vez (configurável até 4); hooks do projeto viram uma linha
-  "Hook do projeto rodou" no log (formato do evento não confirmado, leitura tolerante); painel mostra
-  "Backlog: TASK-12 · status · critérios" (lido do arquivo) e "Aguardando CI" durante o `/pr`.
+  "Hook do projeto rodou" no log (formato do evento não confirmado, leitura tolerante); Detalhes →
+  Documentos mostra "Backlog: TASK-12 · status · critérios" (lido do arquivo; Spec/Plano também na
+  faixa "em que pé está") e o fluxo mostra "Aguardando CI" durante o `/pr`.
 - **Spec e plano na tela:** `alva.taskDocument` (IPC só leitura) devolve o texto da task do
   Backlog.md (worktree primeiro, depois a pasta do projeto): sem frontmatter nem marcadores HTML,
   `redactSecrets`, corte em `BACKLOG_DOC_LIMIT`; nada é guardado. `BacklogDocumentView` mostra com
   `MarkdownText` (markdown da Astryx sem `CodeBlock`). Gate com `show: 'backlog'` (a config aceita o
   valor); os templates ganharam os gates `aprovar-spec` (depois do /spec) e `aprovar-plano` (depois
-  do /plan), e o painel da tarefa tem a seção recolhível "Spec e plano". Fluxos já salvos não mudam.
+  do /plan), e Detalhes → Documentos tem o "Spec e plano" recolhível. Fluxos já salvos não mudam.
 - **Diff na tela:** `lib/diff.ts` (puro) lê o `git diff` unificado em arquivos/hunks/linhas
   (tolerante a texto cortado) e `components/DiffView.tsx` mostra: resumo, um `Collapsible` por
   arquivo (abrem sozinhos até 3 arquivos de até 200 linhas), 300 linhas por arquivo + "Mostrar mais",

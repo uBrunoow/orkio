@@ -197,6 +197,10 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE flow_runs ADD COLUMN agent_json TEXT;
   ALTER TABLE agent_runs ADD COLUMN agent_key TEXT;
   CREATE INDEX agent_runs_agent ON agent_runs (agent_key, started_at);
+  `,
+  // v9: sessão do Claude Code de cada execução (só o id), para continuar a conversa (--resume).
+  `
+  ALTER TABLE agent_runs ADD COLUMN session_id TEXT;
   `
 ]
 

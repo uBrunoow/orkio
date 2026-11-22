@@ -94,6 +94,8 @@ export interface RunnerOptions {
   cwd: string
   prompt: string
   sessionId: string
+  /** Continua esta sessão (`--resume`, mesmo id) em vez de começar uma nova. */
+  resume?: boolean
   broker: PermissionBroker
   /** Executável do Node do Electron e o script do servidor MCP de permissões. */
   nodePath: string
@@ -179,8 +181,7 @@ export class ClaudeRun {
       '--verbose',
       '--input-format',
       'stream-json',
-      '--session-id',
-      o.sessionId,
+      ...(o.resume ? ['--resume', o.sessionId] : ['--session-id', o.sessionId]),
       '--permission-mode',
       'acceptEdits',
       '--settings',

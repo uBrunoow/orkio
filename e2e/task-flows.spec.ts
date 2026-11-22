@@ -9,7 +9,8 @@ import {
   launchOrkio,
   removeDir,
   type OrkioApp,
-  navTo
+  navTo,
+  expectTaskHistory
 } from './fixtures'
 
 /**
@@ -228,10 +229,17 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   await expect(timeline).toContainText('aprovado')
   await expect(card(page).getByTestId('card-flow')).toHaveCount(0)
 
-  const history = panel.getByRole('list', { name: 'Histórico da tarefa' })
-  await expect(history).toContainText('Fluxo iniciado: Revisar e entregar')
-  await expect(history).toContainText('Aprovação concedida')
-  await expect(history).toContainText('Fluxo concluído')
+  // A sessão conta o fluxo (eventos e as execuções dos passos); o histórico completo também.
+  const conversation = panel.getByRole('list', { name: 'Conversa da tarefa' })
+  await expect(conversation).toContainText('Fluxo iniciado: Revisar e entregar')
+  await expect(conversation).toContainText('Aprovação concedida')
+  await expect(conversation.getByTestId('session-run')).toHaveCount(2)
+  await expectTaskHistory(
+    panel,
+    'Fluxo iniciado: Revisar e entregar',
+    'Aprovação concedida',
+    'Fluxo concluído'
+  )
 
   // Fluxo em frase: como começa, os passos e a execução que acabou de acontecer.
   await navTo(page, 'Fluxos')
@@ -269,7 +277,7 @@ test('critério 4: fechar o app no meio de um passo e retomar ao reabrir', async
   await expect(flow.getByTestId('flow-status')).toHaveText('Rodando')
   // Rodapé do painel: quem está trabalhando, há quanto tempo e em qual passo.
   await expect(panel.getByTestId('task-working')).toContainText('Fluxo trabalhando há')
-  await expect(panel.getByRole('list', { name: 'Log da execução' })).toContainText(
+  await expect(panel.getByRole('list', { name: 'Log da execução' }).last()).toContainText(
     'Primeira vez: trabalhando',
     { timeout: 30_000 }
   )
@@ -320,7 +328,9 @@ test('critério 5: passo que falha pausa o fluxo e nada segue sozinho', async ()
   await expect(problem).toContainText('O Claude Code terminou com erro')
   await expect(problem).toContainText('A sessão do passo mostra o que aconteceu')
   await problem.getByRole('button', { name: 'Ver a sessão do passo' }).click()
-  await expect(panel.getByTestId('run-status')).toHaveText('Falhou')
+  const failedRun = panel.getByTestId('session-run').last()
+  await expect(failedRun.getByTestId('run-status')).toHaveText('Falhou')
+  await expect(failedRun.getByRole('list', { name: 'Log da execução' })).toBeVisible()
   const timeline = flow.getByRole('list', { name: 'Linha do tempo do fluxo' })
   await expect(timeline.getByRole('listitem')).toHaveCount(1)
   await expect(timeline).toContainText('falhou')

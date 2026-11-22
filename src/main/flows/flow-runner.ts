@@ -888,6 +888,20 @@ export class FlowRunner {
     return this.activeRow(taskId) !== null
   }
 
+  /**
+   * O fluxo da tarefa está rodando um passo (ou vai começar um sozinho: fila de vaga/agente)?
+   * Esperando você (gate, escolha, pausa por falha, saída da etapa) não conta.
+   */
+  isBusy(taskId: string): boolean {
+    const row = this.activeRow(taskId)
+    if (!row) return false
+    return (
+      row.status === 'running' ||
+      (row.status === 'paused' &&
+        (row.pause_reason === 'waiting_slot' || row.pause_reason === 'waiting_agent'))
+    )
+  }
+
   view(flowRunId: string): FlowRunView {
     const row = this.row(flowRunId)
     const flow = this.flow(row)

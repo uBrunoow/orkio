@@ -113,6 +113,8 @@ async function main() {
         appendSystemPrompt: flag('--append-system-prompt'),
         model: flag('--model'),
         briefingInPrompt: prompt.includes('Briefing da tarefa'),
+        resume: flag('--resume'),
+        sessionId: flag('--session-id'),
         permissionTool: flag('--permission-prompt-tool'),
         permissionMode: flag('--permission-mode')
       }) + '\n'
@@ -133,7 +135,9 @@ async function main() {
       type: 'text',
       text: leaked.length
         ? `VAZOU: ${leaked.join(',')}`
-        : `Li o briefing (${prompt.includes('Critérios de aceite') ? 'com critérios' : 'sem critérios'}).`
+        : args.includes('--resume')
+          ? `Continuei a sessão: ${prompt.slice(0, 80)}`
+          : `Li o briefing (${prompt.includes('Critérios de aceite') ? 'com critérios' : 'sem critérios'}).`
     }
   ])
 

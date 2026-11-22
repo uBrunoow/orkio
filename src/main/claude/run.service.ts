@@ -58,6 +58,8 @@ export interface RunServiceDeps {
     cwd: string
     prompt: string
     sessionId: string
+    /** Continua a sessão `sessionId` (`--resume`). */
+    resume: boolean
     broker: PermissionBroker
     /** Modo entrega (5C): troca as regras `deny` do CLI pelas do modo entrega. */
     delivery: boolean
@@ -104,6 +106,11 @@ export interface StartRunInput {
    * o modo entrega e as aprovações são os mesmos de uma execução sem agente.
    */
   agent?: RunAgent | null
+  /**
+   * Continua a conversa desta sessão do Claude Code (`--resume`), no mesmo worktree. O prompt
+   * vai como está (sem o briefing, que a sessão já leu).
+   */
+  resumeSessionId?: string | null
 }
 
 export interface RunAgent {
@@ -226,6 +233,8 @@ export class RunService {
       // Sem o briefing: o comando recebe só os argumentos ($ARGUMENTS), ex.: um task-ID.
       return includeBriefing ? `${line}\n\n${brief}` : line
     }
+    // Resposta numa sessão que já leu o briefing: só o texto.
+    if (!includeBriefing) return text.trim()
     return `${text.trim()}\n\n---\n\n${brief}`
   }
 
@@ -288,9 +297,11 @@ export class RunService {
     if (!worktree) throw new Error('Prepare o ambiente da tarefa antes de rodar.')
     const id = this.deps.newId?.() ?? randomUUID()
     const startedAt = this.now().toISOString()
+    const resume = !!input.resumeSessionId
+    const sessionId = input.resumeSessionId || randomUUID()
     this.deps.db.run(
-      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text, agent_key)
-       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?)`,
+      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text, agent_key, session_id)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
       id,
       input.task.id,
       input.project.id,
@@ -298,7 +309,8 @@ export class RunService {
       input.command,
       startedAt,
       redactSecrets(input.text).slice(0, 20_000),
-      input.agent?.key ?? null
+      input.agent?.key ?? null,
+      sessionId
     )
     await mkdir(this.deps.runsDir, { recursive: true })
 
@@ -328,6 +340,7 @@ export class RunService {
         this.taskEvent(run, 'run_started', {
           mode: input.mode,
           command: input.command,
+          ...(resume ? { resumed: true } : {}),
           ...(input.agent ? { agent: input.agent.name, agentKey: input.agent.key } : {})
         })
         // Briefing também em arquivo (fora do git: .git/info/exclude do worktree).
@@ -360,9 +373,10 @@ export class RunService {
             input.command,
             input.text,
             input.briefing,
-            input.includeBriefing !== false
+            input.includeBriefing !== false && !resume
           ),
-          sessionId: randomUUID(),
+          sessionId,
+          resume,
           broker,
           delivery: !!run.delivery,
           appendSystemPrompt: input.agent?.prompt ?? null,
@@ -473,6 +487,16 @@ export class RunService {
     )
   }
 
+  /** Sessão do Claude Code mais recente da tarefa (para continuar a conversa), ou `null`. */
+  lastSession(taskId: string): string | null {
+    return (
+      this.deps.db.get<{ session_id: string }>(
+        'SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1',
+        taskId
+      )?.session_id ?? null
+    )
+  }
+
   list(taskId: string): AgentRunView[] {
     return this.deps.db
       .all<{ id: string }>(
@@ -510,6 +534,8 @@ export class RunService {
       cost: number | null
       summary: string | null
       input_text: string | null
+      session_id: string | null
+      agent_key: string | null
     }>('SELECT * FROM agent_runs WHERE id = ?', runId)
     if (!r) return null
     const wt = this.deps.worktrees.get(r.task_page_id)
@@ -526,7 +552,9 @@ export class RunService {
       text: r.input_text,
       branch: wt?.branch ?? null,
       worktreePath: wt?.path ?? null,
-      summary: r.summary ? (JSON.parse(r.summary) as RunSummary) : null
+      summary: r.summary ? (JSON.parse(r.summary) as RunSummary) : null,
+      hasSession: r.session_id !== null,
+      agentKey: r.agent_key
     }
   }
 

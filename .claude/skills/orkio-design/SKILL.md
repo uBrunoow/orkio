@@ -82,9 +82,18 @@ cubra a janela; "Abrir tarefa" leva à página inteira. Kanban/Lista por `Segmen
 
 ## Tarefa
 
-Histórico em forma de conversa (`TaskTimeline`: autor, frase, horário; sem balões). Decisão
-pendente sempre no topo ("Esperando você"); passos do fluxo num resumo recolhível; rodapé
-"Trabalhando há…" com `Timer` enquanto algo roda. Sem campo de chat livre.
+A tarefa é uma **sessão** (fase 8 do redesign): em cima, "em que pé está" (`TaskProgressStrip`:
+Spec, Plano, Código, PR, Revisão, Merge; feito = ícone verde, atual = ponto, problema = alerta) e o
+aviso "Esperando você" que leva ao pedido. No centro, uma conversa só (`TaskSession`: eventos numa
+linha cinza com autor e horário, separadores de dia, execuções do Claude Code em `RunBlock`, todas com a
+conversa inteira, como uma sessão do Claude Code; logo abaixo de cada uma, o que ela produziu:
+spec/plano do Backlog.md e arquivos/commits/diff, abertos só na mais recente). No fim, o
+que acontece agora (fluxo, pedidos de permissão/pergunta, "Trabalhando há…" com `Timer`) e o campo
+de mensagem (`SessionComposer`: continua a última sessão; `/` sugere comandos; "Parar" enquanto
+roda). O pedido pendente fica logo acima do campo, onde o olho já está; o topo só avisa e rola até
+ele. Estado (etapa, mudanças, GitHub, documentos, agente, opções, histórico completo recolhido)
+em abas no painel do Quadro (Sessão · Mudanças · Detalhes) e numa coluna à direita na tela cheia.
+Sem balões nem cor de destaque na conversa.
 
 ## Regras e fluxos
 

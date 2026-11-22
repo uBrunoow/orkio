@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ClaudeCodeStatus } from '../../shared/agent-run'
 import type { NotionTask } from '../../shared/ipc-contract'
-import { isStartRunRequest } from '../ipc/claude.ipc'
+import { isSendMessageRequest, isStartRunRequest } from '../ipc/claude.ipc'
 import { CLAUDE_MESSAGES, ClaudeService, type ClaudeServiceDeps } from './claude.service'
 import { WorktreeError } from './worktree.service'
 
@@ -31,6 +31,7 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
   const runs = {
     start: vi.fn(async () => ({ id: 'run-1' })),
     list: vi.fn(() => []),
+    lastSession: vi.fn(() => null as string | null),
     isRunning: vi.fn(() => false),
     cancel: vi.fn(() => {
       throw new Error('not found')
@@ -270,5 +271,65 @@ describe('ClaudeService', () => {
     expect(runs.start).toHaveBeenCalledWith(
       expect.objectContaining({ mode: 'command', command: 'revisar', text: 'ORK-7', timeoutMin: 5 })
     )
+  })
+
+  it('mensagem da sessão: continua a última sessão sem repetir o briefing', async () => {
+    const { service, runs, deps } = setup()
+    runs.lastSession.mockReturnValue('sess-9')
+    const r = await service.send({ projectId: 'p1', taskId: 'task-1', text: '  Rode os testes  ' })
+    expect(r.ok).toBe(true)
+    expect(runs.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'prompt',
+        command: null,
+        text: 'Rode os testes',
+        briefing: '',
+        resumeSessionId: 'sess-9'
+      })
+    )
+    // Sem sessão nova, nada do Notion é lido.
+    expect(deps.getBlockChildren).not.toHaveBeenCalled()
+  })
+
+  it('mensagem da sessão: sem sessão (ou "nova sessão") começa com o briefing; /comando vira comando', async () => {
+    const { service, runs } = setup()
+    runs.lastSession.mockReturnValue('sess-9')
+    await service.send({ projectId: 'p1', taskId: 'task-1', text: '/revisar ORK-7', fresh: true })
+    const call = runs.start.mock.calls[0] as unknown as [Record<string, unknown>]
+    expect(call[0]).toMatchObject({
+      mode: 'command',
+      command: 'revisar',
+      text: 'ORK-7',
+      resumeSessionId: null
+    })
+    expect(String(call[0]['briefing'])).toContain('Exportar CSV')
+    expect(
+      await service.send({ projectId: 'p1', taskId: 'task-1', text: '/../x; rm' })
+    ).toMatchObject({ ok: false, error: { code: 'invalid' } })
+    expect(await service.send({ projectId: 'p1', taskId: 'task-1', text: '   ' })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid' }
+    })
+  })
+
+  it('mensagem da sessão: fluxo rodando bloqueia; fluxo esperando você aceita', async () => {
+    const busy = setup({ flowActive: () => true, flowBusy: () => true })
+    expect(
+      await busy.service.send({ projectId: 'p1', taskId: 'task-1', text: 'oi' })
+    ).toMatchObject({ ok: false, error: { code: 'flow_running' } })
+    expect(busy.runs.start).not.toHaveBeenCalled()
+    const waiting = setup({ flowActive: () => true, flowBusy: () => false })
+    expect((await waiting.service.send({ projectId: 'p1', taskId: 'task-1', text: 'oi' })).ok).toBe(
+      true
+    )
+  })
+
+  it('valida o payload da mensagem vinda do renderer', () => {
+    const base = { projectId: 'p1', taskId: 'task-1', text: 'x' }
+    expect(isSendMessageRequest(base)).toBe(true)
+    expect(isSendMessageRequest({ ...base, fresh: true, asAgent: false })).toBe(true)
+    expect(isSendMessageRequest({ ...base, taskId: '../x' })).toBe(false)
+    expect(isSendMessageRequest({ ...base, fresh: 'sim' })).toBe(false)
+    expect(isSendMessageRequest({ ...base, text: 'x'.repeat(300_000) })).toBe(false)
   })
 })

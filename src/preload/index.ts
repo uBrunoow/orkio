@@ -247,7 +247,16 @@ const api: OrkioApi = {
         mode: request.mode,
         command: request.command,
         text: request.text,
-        briefing: request.briefing
+        briefing: request.briefing,
+        ...(request.asAgent !== undefined ? { asAgent: request.asAgent } : {})
+      }),
+    send: (request) =>
+      ipcRenderer.invoke(claude.send, {
+        projectId: request.projectId,
+        taskId: request.taskId,
+        text: request.text,
+        ...(request.fresh !== undefined ? { fresh: request.fresh } : {}),
+        ...(request.asAgent !== undefined ? { asAgent: request.asAgent } : {})
       }),
     cancel: (runId) => ipcRenderer.invoke(claude.cancel, runId),
     answerPermission: (runId, requestId, answer) =>

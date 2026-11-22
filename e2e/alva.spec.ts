@@ -13,7 +13,9 @@ import {
   setFakes,
   type FakePull,
   type OrkioApp,
-  navTo
+  navTo,
+  expectTaskHistory,
+  taskTab
 } from './fixtures'
 
 /**
@@ -258,9 +260,21 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
     { timeout: 30_000 }
   )
   await expect(flow.getByTestId('flow-status')).toHaveText('Esperando aprovação')
-  await expect(flow.getByTestId('alva-task')).toHaveText(
+  // Em que pé está: spec e plano feitos (lidos do Backlog.md); o código é o próximo.
+  await expect(panel.getByTestId('progress-spec')).toHaveAttribute('data-state', 'done')
+  await expect(panel.getByTestId('progress-plan')).toHaveAttribute(
+    'aria-label',
+    'Plano: feito (critérios 0/2)'
+  )
+  // A spec e o plano aparecem na conversa, logo depois do /spec e do /plan que os escreveram.
+  await expect(panel.getByTestId('run-document')).toHaveCount(2)
+  await expect(panel.getByTestId('run-document').last()).toContainText('Plano no Backlog.md')
+  await expect(panel.getByTestId('run-document').last()).toContainText('CA-F02')
+  const details = await taskTab(panel, 'Detalhes')
+  await expect(details.getByTestId('alva-task')).toHaveText(
     'Backlog: TASK-1 · Architected · critérios 0/2'
   )
+  await taskTab(panel, 'Sessão')
   const taskFile = join(
     worktree(),
     'backlog',
@@ -280,9 +294,11 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
     .click()
   await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
 
-  // A seção "Spec e plano" lê a task a qualquer hora (não só nos gates).
-  await flow.getByRole('button', { name: 'Spec e plano' }).click()
-  await expect(flow.getByRole('region', { name: 'Spec e plano' })).toContainText('CA-F02')
+  // "Spec e plano" (Detalhes → Documentos) lê a task a qualquer hora (não só nos gates).
+  const docs = await taskTab(panel, 'Detalhes')
+  await docs.getByRole('button', { name: 'Spec e plano' }).click()
+  await expect(docs.getByRole('region', { name: 'Spec e plano' })).toContainText('CA-F02')
+  await taskTab(panel, 'Sessão')
   expect(await cspViolations(page)).toEqual([])
 })
 
@@ -382,10 +398,12 @@ test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado �
   expect(env).not.toContain(NOTION_TOKEN)
 
   // Histórico com cada entrega e o link.
-  const history = panel.getByRole('list', { name: 'Histórico da tarefa' })
-  await expect(history).toContainText(`Push de ${taskBranch()} pelo Orkio`)
-  await expect(history).toContainText('PR aberta pelo Claude Code (modo entrega)')
-  await expect(history).toContainText('Claude Code bloqueado')
+  await expectTaskHistory(
+    panel,
+    `Push de ${taskBranch()} pelo Orkio`,
+    'PR aberta pelo Claude Code (modo entrega)',
+    'Claude Code bloqueado'
+  )
   expect(await cspViolations(page)).toEqual([])
   expect(logs.join('\n')).not.toContain(GITHUB_PAT)
 })
@@ -457,12 +475,17 @@ test('5C critério 3: alterações pedidas → Revisado → --comments → push 
   expect(log.at(-2)).toBe(`deny:git push origin ${taskBranch()}`)
   expect(log.at(-1)).toMatch(/^allow:gh api graphql -f query='mutation \{ resolveReviewThread/)
   expect(ghCalls(userDataDir).at(-1)).toMatch(/^api graphql -f query=mutation/)
-  const history = panel.getByRole('list', { name: 'Histórico da tarefa' })
-  await expect(history).toContainText('Conversa de review resolvida')
-  await expect(history).toContainText('Review pedido na PR #7 pelo Orkio')
+  // A sessão mostra as entregas com o link da PR; o histórico completo também.
+  const conversation = panel.getByRole('list', { name: 'Conversa da tarefa' })
+  await expect(conversation).toContainText('Review pedido na PR #7 pelo Orkio')
   await expect(
-    history.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).first()
+    conversation.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).first()
   ).toBeVisible()
+  await expectTaskHistory(
+    panel,
+    'Conversa de review resolvida',
+    'Review pedido na PR #7 pelo Orkio'
+  )
 
   // Com o fluxo parado e o CI vermelho, o painel oferece o fluxo de CI.
   await expect(flow.getByRole('button', { name: 'Rodar fluxo CI vermelho' })).toBeVisible()

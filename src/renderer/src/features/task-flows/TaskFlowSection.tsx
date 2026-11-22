@@ -12,7 +12,6 @@ import { TextArea } from '@astryxdesign/core/TextArea'
 import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { RunSummary } from '../../../../shared/agent-run'
-import type { BacklogTaskInfo } from '../../../../shared/alva'
 import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Code } from '@astryxdesign/core/Code'
@@ -74,9 +73,9 @@ function stepSummary(history: FlowRunView['history']): string {
 }
 
 /**
- * Seção "Fluxo" do painel da tarefa (5A): linha do tempo, gate (aprovar/recusar com diff ou
- * resumo), pausas (retomar/pular/cancelar) e a decisão quando a tarefa sai da etapa. O log ao vivo
- * do passo atual é o da seção Claude Code, logo abaixo.
+ * Fluxo da tarefa (5A), no fim da sessão: estado, passos (recolhidos), gate (aprovar/recusar com
+ * diff ou resumo), pausas (retomar/pular/cancelar) e a decisão quando a tarefa sai da etapa. A
+ * conversa do passo atual (Claude Code) aparece logo acima, na sessão.
  */
 const CI_LABEL = {
   success: { label: 'CI passou', color: 'green' },
@@ -111,15 +110,10 @@ export function TaskFlowSection({
   // Passos recolhidos enquanto o fluxo roda ou espera você (a decisão vem primeiro); abertos no
   // fim. Clicar no resumo vale até a tarefa mudar.
   const [stepsOpen, setStepsOpen] = useState<boolean | null>(null)
-  const [specOpen, setSpecOpen] = useState(false)
   const [runs, setRuns] = useState<FlowRunView[] | null>(null)
   const [binding, setBinding] = useState<(StageFlow & { flowName: string }) | null>(null)
   const [pending, setPending] = useState<Record<string, string>>({})
   const [ciFlow, setCiFlow] = useState<{ id: string; name: string } | null>(null)
-  const [backlog, setBacklog] = useState<{ linked: string | null; task: BacklogTaskInfo | null }>({
-    linked: null,
-    task: null
-  })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
@@ -139,10 +133,6 @@ export function TaskFlowSection({
       )
       const ci = r.value.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.ci)
       setCiFlow(ci ? { id: ci.id, name: ci.name } : null)
-    })
-    // alva-flow (5B): task do Backlog.md vinculada (lida do arquivo, nada guardado).
-    void window.orkio.alva.taskSummary(projectId, taskId).then((r) => {
-      if (active && r.ok) setBacklog(r.value)
     })
     return () => {
       active = false
@@ -199,7 +189,7 @@ export function TaskFlowSection({
   useEffect(() => () => onLiveChange?.(false), [onLiveChange])
 
   const openPr = pr && (pr.state === 'open' || pr.state === 'draft') ? pr : null
-  if (!run && !binding && !backlog.linked && !openPr?.checks) return null
+  if (!run && !binding && !openPr?.checks) return null
   const live = run && run.status !== 'finished' && run.status !== 'cancelled'
   const stepName = (id: string | null): string =>
     run?.steps.find((s) => s.id === id)?.name ?? id ?? ''
@@ -292,36 +282,11 @@ export function TaskFlowSection({
         </Collapsible>
       )}
 
-      {backlog.linked && (
-        <Text type="supporting" data-testid="alva-task">
-          {backlog.task
-            ? `Backlog: ${backlog.task.id} · ${backlog.task.status} · critérios ${backlog.task.criteria.done}/${backlog.task.criteria.total}${backlog.task.openQuestions > 0 ? ` · ${backlog.task.openQuestions} pergunta(s) em aberto` : ''}`
-            : `Backlog: ${backlog.linked} (arquivo não encontrado no ambiente)`}
-        </Text>
-      )}
-
-      {backlog.task && (
-        <Collapsible
-          chevronPosition="start"
-          isOpen={specOpen}
-          onOpenChange={setSpecOpen}
-          trigger={
-            <Text type="supporting" color="primary">
-              Spec e plano
-            </Text>
-          }
-        >
-          {specOpen && (
-            <BacklogDocumentView projectId={projectId} taskId={taskId} refreshKey={tick} />
-          )}
-        </Collapsible>
-      )}
-
       {run?.status === 'running' && current?.type === 'claude_command' && (
         <Text type="supporting" data-testid="flow-running-step">
           {/:pr$/.test(current.command) && !/--comments/.test(current.args)
             ? 'Aguardando CI do GitHub: o /pr acompanha os checks até terminar (pode levar vários minutos).'
-            : `Rodando /${current.command}. O log ao vivo está em Claude Code, logo abaixo.`}
+            : `Rodando /${current.command}. A conversa ao vivo está logo acima.`}
         </Text>
       )}
 

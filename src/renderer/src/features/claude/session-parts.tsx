@@ -1,238 +1,34 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { TaskActivity } from '../task-flows/TaskFlowSection'
+import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
 import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Selector, type SelectorOptionType } from '@astryxdesign/core/Selector'
 import { StackItem } from '@astryxdesign/core/Stack'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Text } from '@astryxdesign/core/Text'
 import { TextArea } from '@astryxdesign/core/TextArea'
 import { TextInput } from '@astryxdesign/core/TextInput'
-import { Token } from '@astryxdesign/core/Token'
-import { StatusToken, toneOf } from '../../components/StatusToken'
+import { StatusToken } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
-import type {
-  AgentRunView,
-  CatalogGroup,
-  EditorId,
-  RunLogEvent,
-  RunMode,
-  RunPreparation
-} from '../../../../shared/agent-run'
+import type { CatalogGroup, EditorId, RunMode, RunPreparation } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import { DiffView } from '../../components/DiffView'
-import {
-  CleanIcon,
-  DiffIcon,
-  EditorIcon,
-  PlayIcon,
-  RefreshIcon,
-  StopIcon,
-  TerminalIcon
-} from '../../components/icons'
-import { formatUsd, plural } from '../../lib/format'
-import { QuestionCard } from './QuestionCard'
-import { RunTranscript } from './RunTranscript'
-import { buildTranscript } from './run-transcript'
-import { STATUS_COLOR, STATUS_LABEL } from './run-status'
-import { TaskArtifacts } from './TaskArtifacts'
-import { pendingRequests, useTaskRuns, type PendingPermission } from './useTaskRuns'
+import { CleanIcon, DiffIcon, EditorIcon, PlayIcon, RefreshIcon } from '../../components/icons'
+import { plural } from '../../lib/format'
+import type { PendingPermission, useTaskRuns } from './useTaskRuns'
 
-/** Seção "Claude Code" do painel da tarefa (4A). */
-export function TaskClaudeSection({
-  projectId,
-  taskId,
-  stageName,
-  onWaitingChange,
-  onActivityChange,
-  openRun = null,
-  flowActive = false
-}: {
-  projectId: string
-  taskId: string
-  stageName: string | null
-  /** Quantos pedidos (permissão/pergunta) esperam a pessoa agora: o painel mostra no topo. */
-  onWaitingChange?: (count: number) => void
-  /** Execução rodando agora (ou null): o painel mostra "Trabalhando há…". */
-  onActivityChange?: (activity: TaskActivity | null) => void
-  /** Pedido para exibir a sessão de uma execução (ex.: o passo de um fluxo que falhou). */
-  openRun?: { runId: string; nonce: number } | null
-  /** A tarefa tem um fluxo em andamento: o Claude Code roda pelos passos dele, não à mão. */
-  flowActive?: boolean
-}): React.JSX.Element {
-  const runs = useTaskRuns(projectId, taskId)
-  const selectRun = runs.select
-  const openRunId = openRun?.runId ?? null
-  const openRunNonce = openRun?.nonce ?? null
-  useEffect(() => {
-    if (openRunId && openRunNonce !== null) void selectRun(openRunId)
-  }, [openRunId, openRunNonce, selectRun])
-  const [prep, setPrep] = useState<RunPreparation | null>(null)
-  const [initial, setInitial] = useState<RunInitial>(EMPTY_INITIAL)
-  const [preparing, setPreparing] = useState(false)
-  const [message, setMessage] = useState<string | null>(null)
-
-  /** Abre o formulário; "Rodar de novo" vem com modo/comando/texto da execução anterior. */
-  const prepare = async (from: AgentRunView | null = null): Promise<void> => {
-    setPreparing(true)
-    setMessage(null)
-    const r = await window.orkio.claude.prepare(projectId, taskId)
-    setPreparing(false)
-    if (!r.ok) {
-      setMessage(r.error.message)
-      return
-    }
-    setInitial(
-      from ? { mode: from.mode, command: from.command ?? '', text: from.text ?? '' } : EMPTY_INITIAL
-    )
-    setPrep(r.value)
-  }
-
-  const state = runs.state
-  const active = state?.activeRunId ?? null
-  const selected = state?.runs.find((r) => r.id === runs.selectedRunId) ?? null
-  const live = selected?.status === 'running' || selected?.status === 'queued'
-  const waiting = selected && live ? pendingRequests(runs.log).length : 0
-  useEffect(() => {
-    onWaitingChange?.(waiting)
-  }, [waiting, onWaitingChange])
-  const runningSince = selected?.status === 'running' ? selected.startedAt : null
-  const runningWhat = selected?.command ? `/${selected.command}` : null
-  useEffect(() => {
-    onActivityChange?.(
-      runningSince ? { who: 'Claude Code', what: runningWhat, since: runningSince } : null
-    )
-  }, [runningSince, runningWhat, onActivityChange])
-  useEffect(() => () => onActivityChange?.(null), [onActivityChange])
-
-  return (
-    <VStack gap={3} role="region" aria-label="Claude Code">
-      <HStack gap={2} vAlign="center">
-        <Icon icon={TerminalIcon} />
-        <Heading level={3}>Claude Code</Heading>
-      </HStack>
-      {message && <Alert tone="danger">{message}</Alert>}
-      {runs.error && <Alert tone="danger">{runs.error}</Alert>}
-
-      {state === null ? (
-        <Skeleton height={40} aria-label="Carregando execuções" />
-      ) : prep && !active ? (
-        <Composer
-          prep={prep}
-          initial={initial}
-          onCancel={() => setPrep(null)}
-          onStarted={(s) => {
-            setPrep(null)
-            runs.setState(s)
-            void runs.select(s.activeRunId)
-          }}
-          projectId={projectId}
-        />
-      ) : (
-        !active &&
-        (flowActive ? (
-          <Text type="supporting">
-            Há um fluxo em andamento nesta tarefa: o Claude Code roda pelos passos dele. Termine ou
-            cancele o fluxo para rodar à mão.
-          </Text>
-        ) : (
-          <Button
-            variant="primary"
-            label="Rodar Claude Code"
-            icon={<Icon icon={PlayIcon} />}
-            isLoading={preparing}
-            onClick={() => void prepare()}
-          />
-        ))
-      )}
-
-      {selected && (
-        <RunView
-          run={selected}
-          log={runs.log}
-          onCancel={() => void window.orkio.claude.cancel(selected.id)}
-          {...(!active && !prep && !flowActive ? { onRerun: () => void prepare(selected) } : {})}
-        />
-      )}
-
-      {state && (
-        <TaskArtifacts
-          projectId={projectId}
-          taskId={taskId}
-          runId={selected?.id ?? null}
-          refreshKey={`${state.runs.length}:${state.activeRunId ?? ''}:${state.workspace?.changes ?? ''}`}
-        />
-      )}
-
-      {state?.workspace && (
-        <Workspace
-          projectId={projectId}
-          taskId={taskId}
-          workspace={state.workspace}
-          isBusy={active !== null}
-          suggestCleanup={stageName !== null && /finaliz/i.test(stageName)}
-          onChanged={() => void runs.reload()}
-        />
-      )}
-
-      {state && state.runs.length > 1 && (
-        <VStack gap={1}>
-          <Text type="supporting">Execuções anteriores</Text>
-          <List hasDividers density="compact" aria-label="Execuções do Claude Code">
-            {state.runs.map((r) => (
-              <Item
-                as="li"
-                key={r.id}
-                label={`${STATUS_LABEL[r.status]} · ${r.command ? `/${r.command}` : 'prompt'}`}
-                description={formatDate(r.startedAt)}
-                endContent={
-                  <HStack gap={1} vAlign="center">
-                    {r.id === runs.selectedRunId ? (
-                      <Token size="sm" label="Exibindo" />
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        label="Ver log"
-                        onClick={() => void runs.select(r.id)}
-                      />
-                    )}
-                    {!active && !prep && !flowActive && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        label="Rodar de novo"
-                        aria-label={`Rodar de novo (${formatDate(r.startedAt)})`}
-                        onClick={() => void prepare(r)}
-                      />
-                    )}
-                  </HStack>
-                }
-              />
-            ))}
-          </List>
-        </VStack>
-      )}
-    </VStack>
-  )
-}
-
-interface RunInitial {
+export interface RunInitial {
   mode: RunMode
   command: string
   text: string
 }
-const EMPTY_INITIAL: RunInitial = { mode: 'prompt', command: '', text: '' }
+export const EMPTY_INITIAL: RunInitial = { mode: 'prompt', command: '', text: '' }
 
-function Composer({
+/** "Nova sessão": modo, comando do catálogo, briefing editável e "Rodar como" (4A). */
+export function Composer({
   prep,
   initial,
   projectId,
@@ -352,101 +148,7 @@ function Composer({
   )
 }
 
-function RunView({
-  run,
-  log,
-  onCancel,
-  onRerun
-}: {
-  run: AgentRunView
-  log: readonly RunLogEvent[]
-  onCancel(): void
-  onRerun?: () => void
-}): React.JSX.Element {
-  const live = run.status === 'running' || run.status === 'queued'
-  const pending = live ? pendingRequests(log) : []
-  const items = useMemo(() => buildTranscript(log, live), [log, live])
-
-  return (
-    <VStack gap={3}>
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <StatusToken
-          tone={toneOf(STATUS_COLOR[run.status])}
-          label={STATUS_LABEL[run.status]}
-          data-testid="run-status"
-        />
-        {run.costUsd !== null && <Text type="supporting">{formatUsd(run.costUsd)} (estimado)</Text>}
-        {live && (
-          <Button
-            size="sm"
-            variant="secondary"
-            label="Cancelar execução"
-            icon={<Icon icon={StopIcon} />}
-            onClick={onCancel}
-          />
-        )}
-        {!live && onRerun && (
-          <Button
-            size="sm"
-            variant="secondary"
-            label="Rodar de novo"
-            icon={<Icon icon={PlayIcon} />}
-            onClick={onRerun}
-          />
-        )}
-      </HStack>
-
-      {pending.length > 0 && (
-        <VStack gap={3} id={`claude-waiting-${run.taskId}`}>
-          {pending.map((p) =>
-            p.kind === 'permission' ? (
-              <PermissionCard key={p.requestId} runId={run.id} request={p} />
-            ) : (
-              <QuestionCard
-                key={p.requestId}
-                questions={p.questions}
-                onAnswer={(answers) =>
-                  void window.orkio.claude.answerQuestion(run.id, p.requestId, answers)
-                }
-              />
-            )
-          )}
-        </VStack>
-      )}
-
-      <RunTranscript items={items} />
-
-      {run.summary && (
-        <VStack gap={2} data-testid="run-summary">
-          <Text weight="semibold">Resumo</Text>
-          <Text>
-            {plural(run.summary.files.length, 'arquivo alterado', 'arquivos alterados')} ·{' '}
-            {plural(run.summary.commits.length, 'commit', 'commits')} ·{' '}
-            {run.summary.tests.length > 0
-              ? `testes rodados: ${run.summary.tests.join('; ')}`
-              : 'nenhum teste rodado'}
-          </Text>
-          {run.summary.files.length > 0 && (
-            <List density="compact" aria-label="Arquivos alterados">
-              {run.summary.files.slice(0, 50).map((f) => (
-                <Item as="li" key={f} label={<Code>{f}</Code>} />
-              ))}
-            </List>
-          )}
-          {run.summary.commits.length > 0 && (
-            <List density="compact" aria-label="Commits">
-              {run.summary.commits.map((c) => (
-                <Item as="li" key={c.hash} label={c.subject} startContent={<Code>{c.hash}</Code>} />
-              ))}
-            </List>
-          )}
-        </VStack>
-      )}
-    </VStack>
-  )
-}
-
-function PermissionCard({
+export function PermissionCard({
   runId,
   request
 }: {
@@ -496,7 +198,8 @@ function PermissionCard({
   )
 }
 
-function Workspace({
+/** Ambiente da tarefa: editores, diff e limpar (4A). */
+export function Workspace({
   projectId,
   taskId,
   workspace,
@@ -635,7 +338,7 @@ function Workspace({
   )
 }
 
-function formatDate(iso: string): string {
+export function formatDate(iso: string): string {
   return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
 }
 

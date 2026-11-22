@@ -59,12 +59,42 @@ async function goTo(page: Page, name: 'Quadro' | 'Integrações'): Promise<void>
 function card(page: Page): Locator {
   return page.getByRole('listitem', { name: ORK2, exact: true })
 }
+function panelOf(page: Page): Locator {
+  return page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+}
+/** Abre a tarefa no Quadro e devolve a sessão (conversa + campo de mensagem). */
 async function openPanel(page: Page): Promise<Locator> {
   await goTo(page, 'Quadro')
   await card(page).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = panelOf(page)
   await expect(panel).toBeVisible()
-  return panel.getByRole('region', { name: 'Claude Code' })
+  return session(page)
+}
+function session(page: Page): Locator {
+  return panelOf(page).getByRole('region', { name: 'Sessão da tarefa' })
+}
+/** Aba do painel da tarefa (Sessão, Mudanças, Detalhes). */
+async function tab(page: Page, name: 'Sessão' | 'Mudanças' | 'Detalhes'): Promise<Locator> {
+  await panelOf(page).getByRole('tab', { name }).click()
+  return panelOf(page).getByRole('tabpanel', { name })
+}
+/** A execução mais recente na conversa (a que fica aberta). */
+function lastRun(section: Locator): Locator {
+  return section.getByTestId('session-run').last()
+}
+/** Histórico completo (recolhido na aba Detalhes). */
+async function history(page: Page): Promise<Locator> {
+  const details = await tab(page, 'Detalhes')
+  const list = details.getByRole('list', { name: 'Histórico da tarefa' })
+  if (!(await list.isVisible())) await details.getByText('Histórico completo').click()
+  return list
+}
+function argsLog(): Record<string, unknown>[] {
+  const wt = join(userDataDir, 'worktrees', 'proj-claude', 'ORK-2', '.orkio', 'agent-args.log')
+  return readFileSync(wt, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((l) => JSON.parse(l) as Record<string, unknown>)
 }
 
 test.beforeAll(() => {
@@ -154,7 +184,10 @@ test('card do Claude Code: versão e login, sem e-mail nem credenciais', async (
 test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e resumo', async () => {
   const { page } = orkio!
   const section = await openPanel(page)
-  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
+  await expect(section.getByTestId('session-context')).toContainText(
+    'Começa uma sessão nova com o briefing do Notion.'
+  )
+  await section.getByRole('button', { name: 'Nova sessão…' }).click()
 
   await expect(section.getByTestId('run-branch')).toHaveText('ORK-2/listar-tarefas-do-notion')
   const briefing = section.getByRole('textbox', { name: /^Briefing da tarefa/ })
@@ -169,7 +202,10 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
     .fill('Implemente: pedir-shell perguntar tentar-push ler-env')
   await section.getByRole('button', { name: 'Rodar', exact: true }).click()
 
-  // Shell pede aprovação: "sempre neste projeto".
+  // Shell pede aprovação (no fim da sessão, e o topo avisa): "sempre neste projeto".
+  await expect(
+    panelOf(page).getByRole('status').filter({ hasText: 'esperando você' })
+  ).toBeVisible()
   const approval = section.getByRole('group', { name: 'Pedido de aprovação' })
   await expect(approval).toContainText('npm test')
   await approval.getByRole('button', { name: 'Sempre neste projeto: npm test' }).click()
@@ -179,8 +215,9 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   await question.getByRole('radio', { name: 'Ponto e vírgula' }).check()
   await question.getByRole('button', { name: 'Responder' }).click()
 
-  await expect(section.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
-  const log = section.getByRole('list', { name: 'Log da execução' })
+  const run = lastRun(section)
+  await expect(run.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  const log = run.getByRole('list', { name: 'Log da execução' })
   await expect(log).toContainText('com critérios')
   await expect(log).toContainText('push: deny')
   await expect(log).toContainText('fora: deny')
@@ -190,12 +227,27 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   await expect(log).not.toContainText('VAZOU')
   await expect(log).not.toContainText('valor-super-secreto')
   await expect(log).not.toContainText('abcdefghijklmnop')
+  await expect(run.getByTestId('run-summary')).toContainText('1 commit')
+  await expect(run.getByTestId('run-summary')).toContainText('npm test')
+  // O que a execução mudou fica logo abaixo da conversa: arquivos, commits e o diff.
+  await expect(run.getByRole('list', { name: 'Arquivos alterados' })).toContainText(
+    'src/exportar.ts'
+  )
+  await expect(run.getByRole('list', { name: 'Commits' })).toContainText(
+    'feat: exportar CSV (simulado)'
+  )
+  await run.getByRole('button', { name: 'Ver o diff da tarefa' }).click()
+  await expect(run.getByRole('region', { name: 'Diff da tarefa' })).toContainText('src/exportar.ts')
 
-  const summary = section.getByTestId('run-summary')
-  await expect(summary).toContainText('src/exportar.ts')
-  await expect(summary).toContainText('feat: exportar CSV (simulado)')
-  await expect(summary).toContainText('npm test')
-  await expect(section.getByTestId('workspace-branch')).toHaveText('ORK-2/listar-tarefas-do-notion')
+  // Em que pé está: código em andamento, com o commit.
+  await expect(panelOf(page).getByTestId('progress-code')).toHaveAttribute('aria-label', /1 commit/)
+
+  // Mudanças: arquivos e ambiente.
+  const changes = await tab(page, 'Mudanças')
+  await expect(changes.getByTestId('changes-summary')).toContainText('1 commit')
+  await expect(changes).toContainText('src/exportar.ts')
+  await expect(changes.getByTestId('workspace-branch')).toHaveText('ORK-2/listar-tarefas-do-notion')
+  await tab(page, 'Sessão')
 
   // Pasta principal intocada: mesma branch, mesma mudança não commitada, nenhum arquivo novo.
   expect(git(repoDir(), 'branch', '--show-current').trim()).toBe('main')
@@ -213,38 +265,75 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   expect(disk).not.toContain('sk-ant-api03')
   expect(disk).not.toContain('E2E-NAO-PODE-VAZAR')
 
-  // Histórico da tarefa.
-  const history = page.getByRole('list', { name: 'Histórico da tarefa' })
-  await expect(history).toContainText('Claude Code iniciou uma execução')
-  await expect(history).toContainText('Claude Code terminou')
-  await expect(history).toContainText('Claude Code bloqueado')
+  // Histórico completo da tarefa (na aba Detalhes).
+  const list = await history(page)
+  await expect(list).toContainText('Claude Code iniciou uma execução')
+  await expect(list).toContainText('Claude Code terminou')
+  await expect(list).toContainText('Claude Code bloqueado')
+  await tab(page, 'Sessão')
 })
 
-test('"sempre neste projeto" vale na próxima execução; cancelar encerra', async () => {
+test('mensagem no campo continua a mesma sessão (--resume), sem repetir o briefing', async () => {
   const { page } = orkio!
-  const section = page.getByRole('region', { name: 'Claude Code' }).last()
-  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
+  const section = session(page)
+  await expect(section.getByTestId('session-context')).toContainText(
+    'Continua a sessão no ambiente da tarefa.'
+  )
+  const first = argsLog().at(-1)!
   await section
-    .getByRole('textbox', { name: /^O que o Claude Code deve fazer/ })
-    .fill('pedir-shell demorar')
-  await section.getByRole('button', { name: 'Rodar', exact: true }).click()
+    .getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+    .fill('Agora troque o separador por vírgula')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  const run = lastRun(section)
+  await expect(run).toContainText('Agora troque o separador por vírgula')
+  await expect(run.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  await expect(run.getByRole('list', { name: 'Log da execução' })).toContainText(
+    'Continuei a sessão: Agora troque o separador por vírgula'
+  )
+  const resumed = argsLog().at(-1)!
+  expect(resumed['resume']).toBe(first['sessionId'])
+  expect(resumed['sessionId']).toBeNull()
+  expect(resumed['briefingInPrompt']).toBe(false)
+  // A execução anterior continua inteira na conversa (as respostas do Claude, não um resumo).
+  await expect(section.getByTestId('session-run')).toHaveCount(2)
+  await expect(
+    section.getByTestId('session-run').first().getByRole('list', { name: 'Log da execução' })
+  ).toContainText('com critérios')
+})
 
-  const log = section.getByRole('list', { name: 'Log da execução' })
+test('"sempre neste projeto" vale na próxima execução; parar encerra', async () => {
+  const { page } = orkio!
+  const section = session(page)
+  await section
+    .getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+    .fill('pedir-shell demorar')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+
+  const run = lastRun(section)
+  const log = run.getByRole('list', { name: 'Log da execução' })
   await expect(log).toContainText('shell: allow')
   await expect(section.getByRole('group', { name: 'Pedido de aprovação' })).toHaveCount(0)
   await expect(log).toContainText('Trabalhando por um bom tempo')
-  await section.getByRole('button', { name: 'Cancelar execução' }).click()
-  await expect(section.getByTestId('run-status')).toHaveText('Cancelada', { timeout: 20_000 })
-  await expect(page.getByRole('list', { name: 'Histórico da tarefa' })).toContainText(
-    'Execução do Claude Code cancelada'
-  )
-  await expect(section.getByRole('list', { name: 'Execuções do Claude Code' })).toBeVisible()
+  await expect(section.getByTestId('task-working')).toContainText('Claude Code trabalhando há')
+  await section.getByRole('button', { name: 'Parar' }).click()
+  await expect(run.getByTestId('run-status')).toHaveText('Cancelada', { timeout: 20_000 })
+  await expect(await history(page)).toContainText('Execução do Claude Code cancelada')
+  await tab(page, 'Sessão')
+  await expect(section.getByTestId('session-run')).toHaveCount(3)
 })
 
-test('catálogo de comandos: agrupado, com busca, e rodar um comando instalado', async () => {
+test('catálogo de comandos: "/" sugere no campo; nova sessão agrupada, com busca', async () => {
   const { page } = orkio!
-  const section = page.getByRole('region', { name: 'Claude Code' }).last()
-  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
+  const section = session(page)
+  const field = section.getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+  await field.fill('/rev')
+  const suggestions = section.getByRole('list', { name: 'Comandos sugeridos' })
+  await expect(suggestions).toContainText('/revisar')
+  await suggestions.getByText('/revisar').click()
+  await expect(field).toHaveValue('/revisar ')
+  await field.fill('')
+
+  await section.getByRole('button', { name: 'Nova sessão…' }).click()
   await section.getByRole('radio', { name: 'Comando instalado' }).click()
   await section.getByRole('button', { name: /^Comando/ }).click()
   await expect(page.getByText('Seus comandos')).toBeVisible()
@@ -252,26 +341,29 @@ test('catálogo de comandos: agrupado, com busca, e rodar um comando instalado',
   await expect(section).not.toContainText('CORPO')
   await section.getByRole('button', { name: 'Recarregar' }).click()
   await section.getByRole('button', { name: 'Rodar', exact: true }).click()
-  await expect(section.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  await expect(lastRun(section).getByTestId('run-status')).toHaveText('Concluída', {
+    timeout: 30_000
+  })
+  await expect(lastRun(section)).toContainText('/revisar')
 })
 
 test('"Rodar de novo" reabre com o mesmo comando; artefato anexado e publicado no Notion', async () => {
   const { app, page } = orkio!
-  const section = page.getByRole('region', { name: 'Claude Code' }).last()
-  // A execução exibida é a do /revisar (teste anterior).
-  await section.getByRole('button', { name: 'Rodar de novo', exact: true }).click()
+  const section = session(page)
+  // A execução mais recente é a do /revisar (teste anterior).
+  await lastRun(section).getByRole('button', { name: 'Rodar de novo' }).click()
   await expect(section.getByRole('radio', { name: 'Comando instalado' })).toBeChecked()
   await expect(section.getByRole('button', { name: 'Comando /revisar' })).toBeVisible()
   await section.getByRole('button', { name: 'Cancelar', exact: true }).click()
 
-  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
-  await section
-    .getByRole('textbox', { name: /^O que o Claude Code deve fazer/ })
-    .fill('escrever-doc')
-  await section.getByRole('button', { name: 'Rodar', exact: true }).click()
-  await expect(section.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  await section.getByRole('textbox', { name: 'Mensagem para o Claude Code' }).fill('escrever-doc')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(lastRun(section).getByTestId('run-status')).toHaveText('Concluída', {
+    timeout: 30_000
+  })
 
-  const artifacts = page.getByRole('region', { name: 'Artefatos da tarefa' })
+  const changes = await tab(page, 'Mudanças')
+  const artifacts = changes.getByRole('region', { name: 'Artefatos da tarefa' })
   await artifacts.getByRole('button', { name: 'Anexar docs/exportar.md' }).click()
   const attached = artifacts.getByRole('list', { name: 'Artefatos anexados' })
   await expect(attached).toContainText('docs/exportar.md')
@@ -290,6 +382,7 @@ test('"Rodar de novo" reabre com o mesmo comando; artefato anexado e publicado n
     .getByRole('button', { name: 'Publicar', exact: true })
     .click()
   await expect(attached).toContainText('No Notion (seção)')
+  await tab(page, 'Sessão')
 
   const published = (await notionState(app)).published
   expect(published.map((p) => [p.kind, p.parent])).toEqual([
@@ -304,10 +397,7 @@ test('"Rodar de novo" reabre com o mesmo comando; artefato anexado e publicado n
 
 test('contexto do projeto: instruções + página do Notion entram no briefing', async () => {
   const { page } = orkio!
-  await page
-    .getByRole('complementary', { name: 'Detalhes de ORK-2' })
-    .getByRole('button', { name: 'Fechar' })
-    .click()
+  await panelOf(page).getByRole('button', { name: 'Fechar' }).click()
   await navTo(page, 'Contexto do Claude')
   const ctx = page.getByRole('region', { name: 'Contexto do Claude Code' })
   await ctx.getByRole('textbox', { name: /^Instruções/ }).fill('Rode pnpm test antes de commitar.')
@@ -322,7 +412,7 @@ test('contexto do projeto: instruções + página do Notion entram no briefing',
   await navTo(page, 'Quadro')
 
   const section = await openPanel(page)
-  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
+  await section.getByRole('button', { name: 'Nova sessão…' }).click()
   const briefing = section.getByRole('textbox', { name: /^Briefing da tarefa/ })
   await expect(briefing).toHaveValue(/## Contexto do projeto/)
   await expect(briefing).toHaveValue(/Rode pnpm test antes de commitar\./)
@@ -334,14 +424,14 @@ test('contexto do projeto: instruções + página do Notion entram no briefing',
 
 test('ver diff e limpar ambiente (a branch fica)', async () => {
   const { page } = orkio!
-  const section = page.getByRole('region', { name: 'Claude Code' }).last()
-  await section.getByRole('button', { name: 'Ver diff' }).click()
-  const diff = section.getByRole('region', { name: 'Diff do ambiente' })
+  const changes = await tab(page, 'Mudanças')
+  await changes.getByRole('button', { name: 'Ver diff' }).click()
+  const diff = changes.getByRole('region', { name: 'Diff do ambiente' })
   await expect(diff).toContainText('src/exportar.ts')
   await expect(diff).toContainText('arquivo')
   await expect(diff).toContainText('+')
-  await section.getByRole('button', { name: 'Limpar ambiente' }).click()
-  await expect(section.getByTestId('workspace-branch')).toHaveCount(0)
+  await changes.getByRole('button', { name: 'Limpar ambiente' }).click()
+  await expect(changes.getByTestId('workspace-branch')).toHaveCount(0)
   expect(git(repoDir(), 'branch', '--list', 'ORK-2/*').trim()).toBe(
     'ORK-2/listar-tarefas-do-notion'
   )
@@ -349,15 +439,14 @@ test('ver diff e limpar ambiente (a branch fica)', async () => {
   expect(await cspViolations(page)).toEqual([])
 })
 
-test('sem login no Claude Code: card avisa e rodar mostra erro claro', async () => {
+test('sem login no Claude Code: card avisa e mandar mensagem mostra erro claro', async () => {
   await close()
   const { page } = await open({ loggedIn: false })
   const claudeCard = page.getByRole('region', { name: 'Claude Code' })
   await expect(claudeCard).toContainText('Não logado')
   const section = await openPanel(page)
-  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
-  await section.getByRole('textbox', { name: /^O que o Claude Code deve fazer/ }).fill('x')
-  await section.getByRole('button', { name: 'Rodar', exact: true }).click()
+  await section.getByRole('textbox', { name: 'Mensagem para o Claude Code' }).fill('x')
+  await section.getByRole('button', { name: 'Enviar' }).click()
   await expect(section.getByRole('alert')).toContainText('não está logado')
   await close()
   const joined = allLogs.join('\n')

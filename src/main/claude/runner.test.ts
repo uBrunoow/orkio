@@ -17,6 +17,7 @@ afterEach(async () => {
 async function argsOf(extra: {
   appendSystemPrompt?: string | null
   model?: string | null
+  resume?: boolean
 }): Promise<string[]> {
   let captured: string[] = []
   const spawn = ((_cmd: string, args: string[]) => {
@@ -76,5 +77,16 @@ describe('ClaudeRun (8A: agente)', () => {
     const args = await argsOf({ model: '--dangerously-skip-permissions' })
     expect(args).not.toContain('--model')
     expect(args).not.toContain('--dangerously-skip-permissions')
+  })
+})
+
+describe('ClaudeRun (sessão)', () => {
+  it('sessão nova usa --session-id; continuar usa --resume com o mesmo id', async () => {
+    const fresh = await argsOf({})
+    expect(fresh[fresh.indexOf('--session-id') + 1]).toBe('s1')
+    expect(fresh).not.toContain('--resume')
+    const resumed = await argsOf({ resume: true })
+    expect(resumed[resumed.indexOf('--resume') + 1]).toBe('s1')
+    expect(resumed).not.toContain('--session-id')
   })
 })

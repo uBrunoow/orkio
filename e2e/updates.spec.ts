@@ -181,11 +181,11 @@ test('"Atualizar quando terminar" espera a execução do Claude acabar', async (
   await page.getByRole('listitem', { name: ORK2, exact: true }).click()
   const section = page
     .getByRole('complementary', { name: 'Detalhes de ORK-2' })
-    .getByRole('region', { name: 'Claude Code' })
-  await section.getByRole('button', { name: 'Rodar Claude Code' }).click()
-  await section.getByRole('textbox', { name: /^O que o Claude Code deve fazer/ }).fill('demorar')
-  await section.getByRole('button', { name: 'Rodar', exact: true }).click()
-  await expect(section.getByRole('list', { name: 'Log da execução' })).toContainText(
+    .getByRole('region', { name: 'Sessão da tarefa' })
+  await section.getByRole('textbox', { name: 'Mensagem para o Claude Code' }).fill('demorar')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  const run = section.getByTestId('session-run').last()
+  await expect(run.getByRole('list', { name: 'Log da execução' })).toContainText(
     'Trabalhando por um bom tempo'
   )
 
@@ -197,11 +197,11 @@ test('"Atualizar quando terminar" espera a execução do Claude acabar', async (
   await expect(banner(page)).toContainText('Vai reiniciar e atualizar assim que tudo terminar')
   await page.waitForTimeout(7_000)
   expect(await updateInstalls(app)).toBe(0)
-  await expect(section.getByTestId('run-status')).not.toHaveText('Cancelada')
+  await expect(run.getByTestId('run-status')).not.toHaveText('Cancelada')
 
   // A execução termina → instala sozinho (depois de alguns segundos ocioso).
-  await section.getByRole('button', { name: 'Cancelar execução' }).click()
-  await expect(section.getByTestId('run-status')).toHaveText('Cancelada', { timeout: 20_000 })
+  await section.getByRole('button', { name: 'Parar' }).click()
+  await expect(run.getByTestId('run-status')).toHaveText('Cancelada', { timeout: 20_000 })
   await expect.poll(() => updateInstalls(app), { timeout: 20_000 }).toBe(1)
   expect(await cspViolations(page)).toEqual([])
 })

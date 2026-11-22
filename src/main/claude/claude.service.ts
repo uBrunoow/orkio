@@ -19,7 +19,9 @@ import type {
   EditorId,
   PermissionAnswer,
   RunLogEvent,
+  RunMode,
   RunPreparation,
+  SendMessageRequest,
   StartRunRequest,
   TaskRunsState,
   TaskWorkspace,
@@ -57,6 +59,8 @@ export const CLAUDE_MESSAGES = {
   emptyPrompt: 'Escreva o que o Claude Code deve fazer.',
   flowActive:
     'Esta tarefa tem um fluxo em andamento. Use o fluxo (ou cancele-o) para rodar o Claude Code.',
+  flowRunning:
+    'O fluxo está rodando um passo agora. Espere ele parar ou pedir algo para mandar a mensagem.',
   pageUnavailable: 'Não deu para ler a página da tarefa no Notion; o briefing usa só os campos.',
   generic: 'Algo deu errado. Tente novamente.'
 } as const
@@ -96,6 +100,11 @@ export interface ClaudeServiceDeps {
   artifacts: ArtifactsService
   /** 5A: a tarefa tem fluxo ativo? (bloqueia a execução manual). */
   flowActive?: (taskId: string) => boolean
+  /**
+   * 5A: o fluxo está rodando (ou vai começar sozinho) um passo agora? Bloqueia a mensagem da
+   * sessão; um fluxo esperando você (gate, pausa, escolha) aceita a conversa.
+   */
+  flowBusy?: (taskId: string) => boolean
   /** Abre a pasta no editor (execFile, sem shell). */
   openEditor(editor: EditorId, path: string): Promise<void>
   /**
@@ -226,6 +235,49 @@ export class ClaudeService {
     })
   }
 
+  /**
+   * Mensagem do campo da sessão: continua a última sessão do Claude Code da tarefa (`--resume`,
+   * mesmo worktree, sem repetir o briefing) ou, sem sessão (ou com `fresh`), começa uma com o
+   * briefing do Notion. `/comando args` roda o comando instalado.
+   */
+  send(req: SendMessageRequest): Promise<ClaudeResult<TaskRunsState>> {
+    return this.wrap(async () => {
+      const busy = this.deps.flowBusy ?? this.deps.flowActive
+      if (busy?.(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
+      const text = req.text.trim()
+      if (!text) return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
+      const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text)
+      const mode: RunMode = slash ? 'command' : 'prompt'
+      const command = slash ? slash[1]! : null
+      const args = slash ? (slash[2] ?? '').trim() : text
+      const session = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
+      let briefing = ''
+      if (!session) {
+        const prep = await this.prepare(req.projectId, req.taskId)
+        if (!prep.ok) return prep
+        briefing = prep.value.briefing
+      }
+      let agent: RunAgent | null = null
+      if (req.asAgent !== false && this.deps.agentFor) {
+        try {
+          agent = await this.deps.agentFor(req.projectId, req.taskId, command)
+        } catch (error) {
+          return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
+        }
+      }
+      const started = await this.startRun(
+        { projectId: req.projectId, taskId: req.taskId, mode, command, text: args, briefing },
+        undefined,
+        true,
+        false,
+        agent,
+        session
+      )
+      if (!started.ok) return started
+      return ok(await this.taskState(req.taskId))
+    })
+  }
+
   /** Passo `claude_command` de um fluxo (5A): mesma execução da 4A; devolve o id ou o erro. */
   startForFlow(input: {
     projectId: string
@@ -283,7 +335,8 @@ export class ClaudeService {
     timeoutMin?: number,
     includeBriefing = true,
     delivery = false,
-    agent: RunAgent | null = null
+    agent: RunAgent | null = null,
+    resumeSessionId: string | null = null
   ): Promise<ClaudeResult<string>> {
     const project = this.project(req.projectId)
     const status = await this.getStatus(true)
@@ -320,7 +373,8 @@ export class ClaudeService {
       ...(timeoutMin ? { timeoutMin } : {}),
       includeBriefing,
       delivery: deliveryInput,
-      agent
+      agent,
+      resumeSessionId
     })
     return ok(view.id)
   }

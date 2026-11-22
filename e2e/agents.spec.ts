@@ -8,7 +8,9 @@ import {
   cspViolations,
   launchOrkio,
   removeDir,
-  type OrkioApp
+  type OrkioApp,
+  expectTaskHistory,
+  taskTab
 } from './fixtures'
 
 /**
@@ -291,7 +293,7 @@ test('critérios 1–4: cria a Ana pela tela, regra da coluna, fluxo dela com as
   expect(first?.['briefingInPrompt']).toBe(true)
   expect(first?.['permissionTool']).toBe('mcp__orkio__approve')
   expect(first?.['permissionMode']).toBe('acceptEdits')
-  await expect(panel.getByRole('list', { name: 'Log da execução' })).toContainText(
+  await expect(panel.getByRole('list', { name: 'Log da execução' }).first()).toContainText(
     'Rodando como Ana'
   )
 
@@ -302,16 +304,22 @@ test('critérios 1–4: cria a Ana pela tela, regra da coluna, fluxo dela com as
   expect(git(origin(), 'branch', '--list').trim()).toBe('* main')
 
   // Critério 3: "por Ana" no histórico; atribuída pela regra.
-  const history = panel.getByRole('list', { name: 'Histórico da tarefa' })
-  await expect(history).toContainText('Atribuída a Ana pela regra da coluna')
-  await expect(history).toContainText('Fluxo iniciado: Implementar e entregar por Ana')
-  await expect(history).toContainText('Claude Code iniciou uma execução por Ana')
+  // Na sessão, a execução aparece como da Ana (avatar e nome).
+  await expect(panel.getByTestId('session-run').last()).toContainText('Ana')
+  await expectTaskHistory(
+    panel,
+    'Atribuída a Ana pela regra da coluna',
+    'Fluxo iniciado: Implementar e entregar por Ana',
+    'Claude Code iniciou uma execução por Ana'
+  )
+  const details = await taskTab(panel, 'Detalhes')
   await expect(
-    panel
+    details
       .getByRole('button', { name: /^Agente/ })
-      .or(panel.getByRole('combobox', { name: /^Agente/ }))
+      .or(details.getByRole('combobox', { name: /^Agente/ }))
       .first()
   ).toContainText('Ana')
+  await taskTab(panel, 'Sessão')
 
   // Recusar o push encerra o fluxo (recusado); nada vai para o GitHub.
   await push.getByRole('button', { name: 'Recusar e encerrar' }).click()

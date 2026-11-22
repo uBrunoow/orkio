@@ -17,6 +17,7 @@ plano a substitui onde houver diferença.
 | 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | feita              |
 | 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | feita              |
 | 7. Integrações e catálogo | Grade de linhas com logo, categoria e ação                                                                                    | feita (aguarda ok) |
+| 8. Tarefa como sessão     | Conversa única, campo de mensagem (`--resume`), "em que pé está", estado em abas/coluna                                       | feita              |
 
 ## Fase 1
 
@@ -231,3 +232,55 @@ plano a substitui onde houver diferença.
 - Balão da pessoa em laranja: laranja só na ação principal, símbolo e agente rodando.
 - Campo de chat livre (Queue/Steer/Interrupt): seria funcionalidade nova no `claude -p`.
 - Editor de fluxo em grafo: exige canvas fora da Astryx (CSP, acessibilidade).
+
+## Fase 8
+
+**Tarefa como sessão** (painel e página da tarefa). Diagnóstico: a tarefa era uma pilha das peças
+do sistema (Agente, Fluxo, Claude Code com log, artefatos, ambiente, execuções anteriores, linha
+do tempo), com três históricos separados; não respondia "em que pé está e o que eu faço agora".
+Prints em `docs/ui-redesign/fase-8/` (antes = fase 5).
+
+- **Conversa única** (`board/TaskSession.tsx`, modelo puro `task-session.ts`): eventos do
+  `task_events` e execuções do Claude Code em ordem de tempo, com separador de dia; fica de fora o
+  que a execução já conta (`run_*`, `step_started/finished`, `sync_ok`). Execução em
+  `claude/RunBlock.tsx`: "Você" com a mensagem (modo prompt), quem rodou (agente ou Claude Code),
+  comando, estado, duração e custo e a conversa inteira (`RunTranscript`: respostas em markdown,
+  ferramentas agrupadas numa frase), como uma sessão do Claude Code. Logo abaixo, o que ela
+  produziu: em /spec e /plan (com task vinculada), a task do Backlog.md (`BacklogDocumentView`,
+  versão atual do arquivo, aberta só na execução mais recente que a mexeu); em execuções com
+  resumo, arquivos, commits e "Ver o diff da tarefa" (abertos na mais recente que mudou arquivos);
+  e "Rodar de novo". (Primeira versão mostrava só a última fala; pedido do usuário: ler as
+  respostas, a spec, o plano e a implementação na própria conversa.) Mostra os 30 itens mais recentes
+  ("Mostrar N itens anteriores"). Lista "Conversa da tarefa".
+- **Campo de mensagem** (`claude/SessionComposer.tsx`): `claude.send` continua a última sessão da
+  tarefa (`--resume <session_id>`, mesmo worktree, só o texto: o briefing já foi lido) ou, sem
+  sessão, começa uma com o briefing do Notion. `/` sugere comandos do catálogo; Ctrl/Cmd+Enter
+  envia; "Parar" enquanto roda; bloqueado com um passo de fluxo rodando (`FlowRunner.isBusy`);
+  com o fluxo esperando você (gate, pausa, escolha) a conversa é aceita. "Nova sessão…" abre o
+  formulário completo de antes (`session-parts.tsx`).
+- **Em que pé está** (`TaskProgressStrip`, modelo puro `task-progress.ts`): Spec e Plano (só com
+  task do Backlog.md vinculada, pelo status), Código (commits do resumo, sem commit no ambiente),
+  PR (número e CI), Revisão (aprovada, alterações pedidas, comentários abertos), Merge. O primeiro
+  marco não feito é o atual; com algo esperando você, ele vira "esperando você".
+- **Pedido pendente no fim**, logo acima do campo (fluxo, permissão, pergunta); o aviso do topo
+  continua e "Ver pedido" rola até ele. Exceção consciente à regra "esperando você no topo": numa
+  conversa, o fim é onde o olho está.
+- **Estado** (`TaskDetails.tsx`): etapa (Mover para + Notion), Mudanças (resumo, arquivos,
+  ambiente, artefatos), GitHub, Documentos (Backlog + "Spec e plano", saíram do bloco do fluxo),
+  Agente, Opções e "Histórico completo" recolhido (lista "Histórico da tarefa", todos os eventos).
+  No painel do Quadro: abas Sessão · Mudanças · Detalhes (as três montadas, a inativa com
+  `display: none`, para o fluxo e os pedidos seguirem vivos fora da aba); o painel abre rolado até
+  o fim da conversa. Na tela cheia: sessão à esquerda, estado à direita.
+- **Main**: `agent_runs.session_id` (SQLite v9); `RunService.lastSession`; `ClaudeRun` usa
+  `--resume <id>` em vez de `--session-id` ao continuar; `ClaudeService.send` (IPC `claude:send`,
+  payload validado). `AgentRunView` ganhou `hasSession` e `agentKey`. O preload passava a escolha
+  "Rodar como" sem o `asAgent`: corrigido.
+- **E2E**: helpers `expectTaskHistory` e `taskTab` (fixtures); o Claude simulado responde
+  "Continuei a sessão: …" com `--resume` e registra `resume`/`sessionId` em `agent-args.log`.
+
+**Recusado / adiado**
+
+- Mensagem na fila enquanto o Claude trabalha: o CLI fecha a entrada ao terminar o turno; por ora
+  o campo pede para esperar ou parar.
+- Campo fixo no rodapé da tela cheia: exigiria CSS de layout; na página ele fica no fim da
+  conversa, e no painel o painel abre rolado até ele.

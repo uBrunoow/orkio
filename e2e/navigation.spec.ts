@@ -9,7 +9,8 @@ import {
   launchOrkio,
   navTo,
   removeDir,
-  type OrkioApp
+  type OrkioApp,
+  expectTaskHistory
 } from './fixtures'
 
 /**
@@ -151,10 +152,15 @@ test('tarefa: painel com rolagem própria, tela cheia e volta ao quadro com o pa
   await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()
   await expect(page.getByTestId('page-context')).toHaveText('ORK-2 · orkio-app')
   const task = page.getByRole('region', { name: 'Tarefa ORK-2' })
-  await expect(task.getByRole('region', { name: 'Claude Code' })).toBeVisible()
-  await expect(task.getByRole('list', { name: 'Histórico da tarefa' })).toContainText(
+  // Tela cheia: em que pé está, a sessão (conversa + campo) e o estado ao lado.
+  await expect(task.getByRole('list', { name: 'Andamento da tarefa' })).toBeVisible()
+  const session = task.getByRole('region', { name: 'Sessão da tarefa' })
+  await expect(session.getByRole('list', { name: 'Conversa da tarefa' })).toContainText(
     'Entrou no quadro'
   )
+  await expect(session.getByRole('textbox', { name: /^Mensagem para/ })).toBeVisible()
+  await expect(task.getByRole('region', { name: 'Mudanças' })).toBeVisible()
+  await expectTaskHistory(task, 'Entrou no quadro')
   // O menu marca o Quadro enquanto a tarefa está aberta.
   await expect(
     page
