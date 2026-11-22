@@ -49,6 +49,7 @@ export const FLOW_MESSAGES = {
   wrongState: 'O fluxo não está esperando essa ação. Atualize a tela.',
   flowMissing: 'O fluxo ligado a esta etapa não existe mais. Revise o Fluxo do projeto.',
   invalidStep: 'Esse passo não pode ser rodado de novo agora. Atualize a tela.',
+  emptyReply: 'Escreva a resposta para o Claude.',
   noBacklogTask:
     'Este passo usa a task do Backlog, mas o fluxo ainda não sabe qual é a desta tarefa. Rode o /spec de novo (ou escolha a task) e depois retome.'
 } as const
@@ -149,6 +150,11 @@ export interface FlowRunnerDeps {
     delivery: boolean
     /** Agente (8A): instruções e modelo; nenhuma permissão a mais. */
     agent: RunAgent | null
+    /**
+     * Resposta sua ("Responder e continuar"): continua a sessão do passo parado com este texto,
+     * em vez de rodar o comando de novo (sem briefing, mesma conversa).
+     */
+    reply?: string
   }): Promise<string>
   cancelClaude(runId: string): void
   extractors: readonly FlowExtractor[]
@@ -234,6 +240,8 @@ interface Persisted {
   pendingConfirm?: ActionConfirm | null
   /** 8A: você retomou depois do limite diário do agente; vale para o próximo comando. */
   limitBypass?: boolean
+  /** Resposta ao Claude no passo parado; o próximo início desse passo a manda na mesma sessão. */
+  pendingReply?: { stepId: string; text: string } | null
 }
 
 /** Ações que publicam no GitHub (a etapa pode mudar por causa delas). */
@@ -640,6 +648,40 @@ export class FlowRunner {
         this.savePersisted(flowRunId, { ...p, limitBypass: true })
       }
       await this.apply(flowRunId, retryStep(this.flow(row), engine, row.current_step))
+    })
+    return this.view(flowRunId)
+  }
+
+  /**
+   * "Responder e continuar": você responde ao Claude (ex.: as perguntas que ficaram sem resposta)
+   * e o passo parado segue na MESMA sessão, sem rodar o comando do zero. Só num comando do Claude
+   * Code, com o fluxo pausado por falha, interrupção ou limite.
+   */
+  async resumeWithReply(flowRunId: string, text: string): Promise<FlowRunView> {
+    const reply = text.trim()
+    if (!reply) throw new FlowError('invalid_reply', FLOW_MESSAGES.emptyReply)
+    await this.withLock(flowRunId, async () => {
+      const row = this.row(flowRunId)
+      if (
+        row.status !== 'paused' ||
+        !row.current_step ||
+        row.pause_reason === 'waiting_slot' ||
+        row.pause_reason === 'waiting_agent' ||
+        row.pause_reason === 'needs_choice'
+      ) {
+        throw new FlowError('wrong_state', FLOW_MESSAGES.wrongState)
+      }
+      const flow = this.flow(row)
+      if (flow.steps.find((s) => s.id === row.current_step)?.type !== 'claude_command') {
+        throw new FlowError('invalid_step', FLOW_MESSAGES.invalidStep)
+      }
+      const p = this.persisted(row)
+      this.savePersisted(flowRunId, {
+        ...p,
+        pendingReply: { stepId: row.current_step, text: reply }
+      })
+      const engine = row.pause_reason === 'loop_guard' ? { ...p.engine, executed: 0 } : p.engine
+      await this.apply(flowRunId, retryStep(flow, engine, row.current_step))
     })
     return this.view(flowRunId)
   }
@@ -1068,7 +1110,13 @@ export class FlowRunner {
       if (missing.some((name) => name.startsWith('alva.'))) {
         throw new FlowError('missing_vars', FLOW_MESSAGES.noBacklogTask)
       }
+      // Resposta sua guardada para este passo: consome e manda na mesma sessão.
+      const persisted = this.persisted(this.row(row.id))
+      const reply =
+        persisted.pendingReply?.stepId === step.id ? persisted.pendingReply.text : undefined
+      if (reply !== undefined) this.savePersisted(row.id, { ...persisted, pendingReply: null })
       const runId = await this.deps.startClaude({
+        ...(reply !== undefined ? { reply } : {}),
         projectId: row.project_id,
         taskId: row.task_page_id,
         command: step.command,

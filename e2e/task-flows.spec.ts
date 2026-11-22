@@ -338,6 +338,19 @@ test('critério 5: passo que falha pausa o fluxo e nada segue sozinho', async ()
   await page.waitForTimeout(1500)
   await expect(flow.getByTestId('flow-status')).toHaveText('Pausado')
   await expect(timeline.getByRole('listitem')).toHaveCount(1)
+
+  // Responder e continuar: a resposta vai na mesma sessão do passo (sem rodar o comando do zero)
+  // e, dando certo, o fluxo segue para o próximo passo (o gate).
+  await problem
+    .getByRole('textbox', { name: 'Responder ao Claude' })
+    .fill('Formato: CSV; só admins')
+  await problem.getByRole('button', { name: 'Responder e continuar' }).click()
+  await expect(flow.getByTestId('flow-status')).toHaveText('Esperando aprovação', {
+    timeout: 30_000
+  })
+  const conversation = panel.getByRole('list', { name: 'Conversa da tarefa' })
+  await expect(conversation).toContainText('Formato: CSV; só admins')
+  await expect(conversation).toContainText('Continuei a sessão: Formato: CSV; só admins')
   await flow.getByRole('button', { name: 'Cancelar fluxo' }).click()
   await expect(flow.getByTestId('flow-status')).toHaveText('Cancelado')
 })

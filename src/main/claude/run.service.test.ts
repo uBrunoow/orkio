@@ -84,6 +84,7 @@ describe('RunService', () => {
       emit: (m) => messages.push(m),
       notify: (title) => notifications.push(title),
       approvalTimeoutMs: 200,
+      questionTimeoutMs: 1500,
       keepPerTask: 2,
       newId: (() => {
         let n = 0
@@ -329,6 +330,38 @@ describe('RunService', () => {
     await start(1)
     await spawned(1)
     expect(await runs[0]!.ask('Bash', { command: 'make' }, 'req-t')).toEqual({
+      behavior: 'deny',
+      message: RUN_MESSAGES.timeout
+    })
+  })
+
+  it('pergunta do Claude espera bem mais que uma permissão: passa do prazo da permissão sem ser negada', async () => {
+    await start(1)
+    await spawned(1)
+    const input = {
+      questions: [{ question: 'Formato?', options: [{ label: 'CSV' }], multiSelect: false }]
+    }
+    let settled = false
+    const answer = runs[0]!.ask('AskUserQuestion', input, 'q-slow').then((a) => {
+      settled = true
+      return a
+    })
+    await new Promise((r) => setTimeout(r, 500)) // 2,5× o prazo da permissão (200 ms)
+    expect(settled).toBe(false)
+    expect(service.waitingRequests()).toEqual([
+      expect.objectContaining({ requestId: 'q-slow', kind: 'question' })
+    ])
+    service.answerQuestion('run-1', 'q-slow', { 'Formato?': 'CSV' })
+    expect(await answer).toMatchObject({ behavior: 'allow' })
+  })
+
+  it('pergunta sem resposta no prazo longo também é negada', async () => {
+    await start(1)
+    await spawned(1)
+    const input = {
+      questions: [{ question: 'Formato?', options: [{ label: 'CSV' }], multiSelect: false }]
+    }
+    expect(await runs[0]!.ask('AskUserQuestion', input, 'q-late')).toEqual({
       behavior: 'deny',
       message: RUN_MESSAGES.timeout
     })

@@ -224,6 +224,7 @@ const api: OrkioApi = {
     resume: (id) => ipcRenderer.invoke(taskFlows.resume, id),
     skip: (id) => ipcRenderer.invoke(taskFlows.skip, id),
     rerunFrom: (id, stepId) => ipcRenderer.invoke(taskFlows.rerunFrom, id, stepId),
+    resumeWithReply: (id, text) => ipcRenderer.invoke(taskFlows.resumeWithReply, id, text),
     cancel: (id) => ipcRenderer.invoke(taskFlows.cancel, id),
     choose: (id, value) => ipcRenderer.invoke(taskFlows.choose, id, value),
     decideLeft: (id, choice) =>

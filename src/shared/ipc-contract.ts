@@ -126,6 +126,7 @@ export const IPC_CHANNELS = {
     reject: 'task-flows:reject',
     resume: 'task-flows:resume',
     rerunFrom: 'task-flows:rerun-from',
+    resumeWithReply: 'task-flows:resume-reply',
     skip: 'task-flows:skip',
     cancel: 'task-flows:cancel',
     decideLeft: 'task-flows:decide-left',
@@ -839,6 +840,8 @@ export interface OrkioApi {
     resume(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     /** Volta a um comando anterior ao passo parado (ex.: /commit antes do push) e segue dali. */
     rerunFrom(flowRunId: string, stepId: string): Promise<ClaudeResult<FlowRunView>>
+    /** Responde ao Claude no passo parado e segue na mesma sessão. */
+    resumeWithReply(flowRunId: string, text: string): Promise<ClaudeResult<FlowRunView>>
     skip(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     cancel(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     decideLeft(flowRunId: string, choice: 'cancel' | 'continue'): Promise<ClaudeResult<FlowRunView>>

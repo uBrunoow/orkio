@@ -324,6 +324,36 @@ describe('ClaudeService', () => {
     )
   })
 
+  it('passo do fluxo com resposta: continua a sessão (--resume) só com o texto; sem sessão, explica', async () => {
+    const { service, runs } = setup()
+    runs.lastSession.mockReturnValue('sess-7')
+    const flowInput = {
+      projectId: 'p1',
+      taskId: 'task-1',
+      command: 'alva-flow:spec',
+      args: 'ORK-7',
+      briefing: 'b',
+      timeoutMin: 5,
+      reply: 'Formato: CSV'
+    }
+    expect(await service.startForFlow(flowInput)).toEqual({ ok: true, value: 'run-1' })
+    expect(runs.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: 'prompt',
+        command: null,
+        text: 'Formato: CSV',
+        briefing: '',
+        resumeSessionId: 'sess-7',
+        timeoutMin: 5
+      })
+    )
+    runs.lastSession.mockReturnValue(null)
+    expect(await service.startForFlow(flowInput)).toMatchObject({
+      ok: false,
+      error: { code: 'no_session' }
+    })
+  })
+
   it('valida o payload da mensagem vinda do renderer', () => {
     const base = { projectId: 'p1', taskId: 'task-1', text: 'x' }
     expect(isSendMessageRequest(base)).toBe(true)

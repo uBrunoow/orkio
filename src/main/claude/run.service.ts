@@ -82,6 +82,8 @@ export interface RunServiceDeps {
   maxParallel?: number
   keepPerTask?: number
   approvalTimeoutMs?: number
+  /** Pergunta do Claude (AskUserQuestion): espera bem mais que uma permissão (padrão 24 h). */
+  questionTimeoutMs?: number
   now?: () => Date
   newId?: () => string
 }
@@ -176,7 +178,7 @@ interface ActiveRun {
 
 export const RUN_MESSAGES = {
   busy: 'Esta tarefa já tem uma execução em andamento. Espere terminar ou cancele.',
-  timeout: 'Sem resposta em 10 minutos: o Orkio negou o pedido.',
+  timeout: 'Sem resposta no prazo: o Orkio negou o pedido.',
   denied: 'Negado por você no Orkio.',
   cancelled: 'Execução cancelada.',
   notFound: 'Execução não encontrada.',
@@ -203,11 +205,13 @@ export class RunService {
   private readonly logWrites = new Map<string, Promise<void>>()
   private readonly finishListeners = new Set<(info: RunFinished) => void>()
   private readonly approvalTimeoutMs: number
+  private readonly questionTimeoutMs: number
 
   constructor(private readonly deps: RunServiceDeps) {
     this.maxParallel = deps.maxParallel ?? 2
     this.keepPerTask = deps.keepPerTask ?? 10
     this.approvalTimeoutMs = deps.approvalTimeoutMs ?? 10 * 60_000
+    this.questionTimeoutMs = deps.questionTimeoutMs ?? 24 * 60 * 60_000
     // Execuções que ficaram "em andamento" (app fechado/derrubado): o processo não existe mais.
     deps.db.run(
       `UPDATE agent_runs SET status = 'failed', ended_at = ? WHERE status IN ('queued', 'running')`,
@@ -628,19 +632,25 @@ export class RunService {
       return { behavior: 'deny', message: decision.reason }
     }
     return new Promise<BridgeDecision>((resolve) => {
-      const timer = setTimeout(() => {
-        const p = run.pending.get(requestId)
-        if (!p) return
-        this.log(run, {
-          kind: 'permission',
-          requestId,
-          tool: req.toolName,
-          summary,
-          state: 'denied',
-          reason: RUN_MESSAGES.timeout
-        })
-        this.resolvePending(run, requestId, p, { behavior: 'deny', message: RUN_MESSAGES.timeout })
-      }, this.approvalTimeoutMs)
+      const timer = setTimeout(
+        () => {
+          const p = run.pending.get(requestId)
+          if (!p) return
+          this.log(run, {
+            kind: 'permission',
+            requestId,
+            tool: req.toolName,
+            summary,
+            state: 'denied',
+            reason: RUN_MESSAGES.timeout
+          })
+          this.resolvePending(run, requestId, p, {
+            behavior: 'deny',
+            message: RUN_MESSAGES.timeout
+          })
+        },
+        decision.decision === 'question' ? this.questionTimeoutMs : this.approvalTimeoutMs
+      )
       run.pending.set(requestId, {
         resolve,
         timer,
