@@ -6,6 +6,13 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Corrigido
+
+- Login com Notion: os erros do serviço de login dizem a causa (site fora do alcance, intermediário
+  local parado em dev ou endereço de retorno não liberado no intermediário) em vez de sempre pedir
+  para verificar a internet. Um build com a URL do intermediário trocada pelo endereço de retorno
+  do app esconde o login com Notion em vez de falhar a cada tentativa.
+
 ## [0.2.1] - 2026-11-21
 
 ### Corrigido
