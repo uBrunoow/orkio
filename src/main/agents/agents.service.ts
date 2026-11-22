@@ -9,6 +9,8 @@
  * - Perfil do repositório alterado fora do Orkio (hash ≠ aprovado) → `needs_review`: não roda até
  *   você aprovar. Mesmo aprovado, ele não dá permissão nenhuma além das do Orkio.
  * - Nada de segredo: nome e instruções que a redação alteraria são recusados.
+ * - Embutidos (8B, `builtin:<id>`): catálogo do app (`shared/agent-presets.ts`), só leitura e já
+ *   aprovados; valem em todos os projetos. Para mudar, duplique (vira um perfil comum).
  */
 import { createHash, randomBytes } from 'node:crypto'
 import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -29,8 +31,10 @@ import {
   type AgentScope,
   type AgentsState,
   type AgentView,
-  type ProjectAgents
+  type ProjectAgents,
+  type WritableAgentScope
 } from '../../shared/agent'
+import { BUILTIN_AGENTS, builtinAgent } from '../../shared/agent-presets'
 import type { BoardStore } from '../board/board.store'
 import type { StageChange } from '../board/board.service'
 import type { OrkioConfig } from '../config/orkio-config'
@@ -52,6 +56,8 @@ export const AGENT_MESSAGES = {
   archived: 'Este agente está arquivado.',
   needsReview: 'O perfil deste agente mudou no repositório. Revise e aprove na tela Agentes.',
   stale: 'O perfil mudou desde que você abriu. Atualize a tela e revise de novo.',
+  builtin:
+    'Os agentes embutidos não podem ser alterados. Use “Duplicar” para criar uma cópia editável.',
   badStage: 'Etapa não encontrada no quadro deste projeto.'
 } as const
 
@@ -113,7 +119,8 @@ export class AgentsService {
     const project = this.project(projectId)
     const entries = [
       ...(await this.readDir('repo', this.repoDir(project.localPath))),
-      ...(await this.readDir('local', this.deps.localDir))
+      ...(await this.readDir('local', this.deps.localDir)),
+      ...BUILTIN_AGENTS.map((p) => builtinEntry(p.id)!)
     ]
     const counts = new Map<string, number>()
     for (const r of this.deps.db.all<{ agent_key: string; n: number }>(
@@ -140,8 +147,14 @@ export class AgentsService {
     const parsed = parseAgentKey(key)
     if (!parsed) return null
     const project = this.project(projectId)
-    const dir = parsed.scope === 'repo' ? this.repoDir(project.localPath) : this.deps.localDir
-    const entry = await this.readOne(parsed.scope, dir, parsed.id)
+    const entry =
+      parsed.scope === 'builtin'
+        ? builtinEntry(parsed.id)
+        : await this.readOne(
+            parsed.scope,
+            parsed.scope === 'repo' ? this.repoDir(project.localPath) : this.deps.localDir,
+            parsed.id
+          )
     if (!entry) return null
     const assigned =
       this.deps.db.get<{ n: number }>(
@@ -189,12 +202,41 @@ export class AgentsService {
   }
 
   assignedKey(taskId: string): AgentKey | null {
-    return (
-      this.deps.db.get<{ agent_key: string }>(
-        'SELECT agent_key FROM agent_assignments WHERE task_page_id = ?',
-        taskId
-      )?.agent_key ?? null
+    return this.assignment(taskId)?.key ?? null
+  }
+
+  /** Agente da tarefa e se foi escolhido à mão (o orquestrador não passa por cima disso). */
+  assignment(taskId: string): { key: AgentKey; manual: boolean } | null {
+    const r = this.deps.db.get<{ agent_key: string; assigned_by: string }>(
+      'SELECT agent_key, assigned_by FROM agent_assignments WHERE task_page_id = ?',
+      taskId
     )
+    return r ? { key: r.agent_key, manual: r.assigned_by === 'manual' } : null
+  }
+
+  /** Atribuições do projeto (tarefa → agente), para o orquestrador. */
+  assignments(projectId: string): Map<string, { key: AgentKey; manual: boolean }> {
+    const out = new Map<string, { key: AgentKey; manual: boolean }>()
+    for (const r of this.deps.db.all<{
+      task_page_id: string
+      agent_key: string
+      assigned_by: string
+    }>(
+      'SELECT task_page_id, agent_key, assigned_by FROM agent_assignments WHERE project_id = ?',
+      projectId
+    )) {
+      out.set(r.task_page_id, { key: r.agent_key, manual: r.assigned_by === 'manual' })
+    }
+    return out
+  }
+
+  /**
+   * 8B: o orquestrador atribui a tarefa. Síncrono e sem ler disco: chame dentro da transação do
+   * movimento, ANTES de mover (o fluxo da coluna lê o agente ao começar).
+   */
+  assignByOrchestrator(projectId: string, taskId: string, key: AgentKey, name: string): void {
+    if (this.assignedKey(taskId) === key) return
+    this.insertAssignment(projectId, taskId, key, name, 'orchestrator')
   }
 
   /** Avatares dos cards do quadro. */
@@ -236,6 +278,8 @@ export class AgentsService {
     profile: AgentProfile
     isNew: boolean
   }): Promise<AgentView> {
+    if (input.scope === 'builtin') throw new AgentError('builtin', AGENT_MESSAGES.builtin)
+    const scope: WritableAgentScope = input.scope
     const project = this.project(input.projectId)
     const profile = normalize(input.profile)
     const errors = validateAgent(profile)
@@ -246,16 +290,16 @@ export class AgentsService {
     ) {
       throw new AgentError('secret', AGENT_MESSAGES.secret)
     }
-    const dir = input.scope === 'repo' ? this.repoDir(project.localPath) : this.deps.localDir
-    const existing = await this.readOne(input.scope, dir, profile.id)
+    const dir = scope === 'repo' ? this.repoDir(project.localPath) : this.deps.localDir
+    const existing = await this.readOne(scope, dir, profile.id)
     if (input.isNew && existing) throw new AgentError('exists', AGENT_MESSAGES.exists)
     if (!input.isNew && !existing) throw new AgentError('not_found', AGENT_MESSAGES.notFound)
     const text = serializeAgent(profile)
-    await this.writeAtomic(input.scope, dir, project.localPath, profile.id, text)
-    const key = agentKey(input.scope, profile.id)
-    if (input.scope === 'repo') this.trust(input.projectId, profile.id, hashOf(text))
+    await this.writeAtomic(scope, dir, project.localPath, profile.id, text)
+    const key = agentKey(scope, profile.id)
+    if (scope === 'repo') this.trust(input.projectId, profile.id, hashOf(text))
     this.deps.store.addConfigEvent(input.projectId, this.now().toISOString(), this.deps.actor(), [
-      `${input.isNew ? 'Agente criado' : profile.archived ? 'Agente arquivado' : 'Agente alterado'}: ${profile.name} (${input.scope === 'repo' ? 'repositório' : 'este computador'})`
+      `${input.isNew ? 'Agente criado' : profile.archived ? 'Agente arquivado' : 'Agente alterado'}: ${profile.name} (${scope === 'repo' ? 'repositório' : 'este computador'})`
     ])
     this.deps.emit(input.projectId)
     const view = await this.get(input.projectId, key)
@@ -380,7 +424,7 @@ export class AgentsService {
     taskId: string,
     key: AgentKey,
     name: string,
-    by: 'manual' | 'rule'
+    by: 'manual' | 'rule' | 'orchestrator'
   ): void {
     this.deps.db.run(
       `INSERT INTO agent_assignments (task_page_id, project_id, agent_key, assigned_at, assigned_by)
@@ -392,7 +436,8 @@ export class AgentsService {
       projectId,
       key,
       this.now().toISOString(),
-      by
+      // A tabela só distingue "à mão" de "automático" (o detalhe do evento diz quem).
+      by === 'manual' ? 'manual' : 'rule'
     )
     this.taskEvent(projectId, taskId, 'agent_assigned', { agentKey: key, agent: name, by })
   }
@@ -408,7 +453,7 @@ export class AgentsService {
       projectId,
       at: this.now().toISOString(),
       kind,
-      source: detail['by'] === 'rule' ? 'automation' : 'manual',
+      source: detail['by'] === 'manual' ? 'manual' : 'automation',
       fromStage: null,
       toStage: null,
       detail
@@ -444,7 +489,11 @@ export class AgentsService {
   private toView(projectId: string, e: FileEntry, assigned: number): AgentView {
     const key = agentKey(e.scope, e.id)
     const file =
-      e.scope === 'repo' ? `.orkio/agents/${e.id}.md` : `agents/${e.id}.md (este computador)`
+      e.scope === 'repo'
+        ? `.orkio/agents/${e.id}.md`
+        : e.scope === 'local'
+          ? `agents/${e.id}.md (este computador)`
+          : 'Embutido no Orkio'
     const hash = e.text === null ? '' : hashOf(e.text)
     const usageToday = this.usage(key)
     const base = { key, scope: e.scope, id: e.id, file, hash, assigned, usageToday }
@@ -573,6 +622,13 @@ export class AgentsService {
       throw new AgentError('write_failed', AGENT_MESSAGES.writeFailed)
     }
   }
+}
+
+/** Perfil embutido como se fosse um arquivo (mesmo caminho de leitura e validação). */
+function builtinEntry(id: string): FileEntry | null {
+  const profile = builtinAgent(id)
+  if (!profile) return null
+  return { scope: 'builtin', id, file: '', text: serializeAgent(profile), error: null }
 }
 
 function hashOf(text: string): string {

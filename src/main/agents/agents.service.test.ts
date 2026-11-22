@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defaultAgent, serializeAgent, type AgentProfile } from '../../shared/agent'
+import { BUILTIN_AGENTS } from '../../shared/agent-presets'
 import { BoardStore } from '../board/board.store'
 import { createOrkioConfigStore } from '../config/orkio-config'
 import { openDatabase, type Db } from '../db/database'
@@ -85,7 +86,9 @@ describe('perfis', () => {
     await service.save({ projectId: 'p1', scope: 'local', profile: ANA, isNew: true })
     expect(await readFile(join(localDir, 'ana.md'), 'utf8')).toContain('name: "Ana"')
     const { agents } = await service.list('p1')
-    expect(agents.map((a) => [a.key, a.status])).toEqual([['local:ana', 'ready']])
+    expect(agents.filter((a) => a.scope !== 'builtin').map((a) => [a.key, a.status])).toEqual([
+      ['local:ana', 'ready']
+    ])
   })
 
   it('não duplica id, não troca id e recusa segredos', async () => {
@@ -142,7 +145,7 @@ describe('perfis', () => {
     await symlink(join(dir, 'fora.md'), repoFile('lnk'))
     await writeFile(join(projectDir, '.orkio', 'agents', 'NAO VALE.md'), serializeAgent(ANA))
     const { agents } = await service.list('p1')
-    expect(agents.map((a) => [a.id, a.status])).toEqual([
+    expect(agents.filter((a) => a.scope !== 'builtin').map((a) => [a.id, a.status])).toEqual([
       ['bob', 'invalid'],
       ['eve', 'invalid'],
       ['lnk', 'invalid']
@@ -281,5 +284,53 @@ describe('limites diários', () => {
         profile: { ...ana.profile, limits: { ...ana.profile.limits, stepsPerDay: 10 } }
       })
     ).toMatch(/custo/)
+  })
+})
+
+describe('agentes embutidos (8B)', () => {
+  it('aparecem em todo projeto, prontos, sem arquivo e sem aprovação', async () => {
+    const { agents } = await service.list('p1')
+    const builtin = agents.filter((a) => a.scope === 'builtin')
+    expect(builtin.map((a) => a.key).sort()).toEqual(
+      BUILTIN_AGENTS.map((p) => `builtin:${p.id}`).sort()
+    )
+    expect(builtin.every((a) => a.status === 'ready' && a.file === 'Embutido no Orkio')).toBe(true)
+    const rev = await service.get('p1', 'builtin:revisor')
+    expect(rev?.profile?.delivery).toBe(false)
+    expect(await service.get('p1', 'builtin:nao-existe')).toBeNull()
+  })
+
+  it('não podem ser alterados (só duplicados)', async () => {
+    const profile = BUILTIN_AGENTS[0]!
+    await expect(
+      service.save({ projectId: 'p1', scope: 'builtin', profile, isNew: false })
+    ).rejects.toMatchObject({ code: 'builtin' })
+    const copy = await service.save({
+      projectId: 'p1',
+      scope: 'repo',
+      profile: { ...profile, id: 'implementador-time', name: 'Implementador do time' },
+      isNew: true
+    })
+    expect(copy.status).toBe('ready')
+    expect(await readFile(repoFile('implementador-time'), 'utf8')).toContain(
+      'Implementador do time'
+    )
+  })
+
+  it('o orquestrador atribui na transação, com histórico e sem marcar como "à mão"', async () => {
+    store.transaction(() =>
+      service.assignByOrchestrator('p1', 't1', 'builtin:implementador', 'Implementador')
+    )
+    expect(service.assignment('t1')).toEqual({ key: 'builtin:implementador', manual: false })
+    expect(service.assignments('p1').get('t1')?.key).toBe('builtin:implementador')
+    const ev = store.events('t1')[0]!
+    expect(ev.kind).toBe('agent_assigned')
+    expect(ev.source).toBe('automation')
+    expect(ev.detail).toMatchObject({ by: 'orchestrator', agent: 'Implementador' })
+    // Mesma atribuição de novo: nada muda.
+    service.assignByOrchestrator('p1', 't1', 'builtin:implementador', 'Implementador')
+    expect(store.events('t1')).toHaveLength(1)
+    await service.assign('p1', 't1', 'builtin:revisor')
+    expect(service.assignment('t1')).toEqual({ key: 'builtin:revisor', manual: true })
   })
 })

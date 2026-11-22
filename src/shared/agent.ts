@@ -14,12 +14,20 @@ import type { Flow } from './task-flow'
 
 export const AGENT_FORMAT = 'agent/v1'
 
-export const AGENT_ROLES = ['implementer', 'reviewer', 'triager', 'documenter', 'custom'] as const
+export const AGENT_ROLES = [
+  'implementer',
+  'reviewer',
+  'qa',
+  'triager',
+  'documenter',
+  'custom'
+] as const
 export type AgentRole = (typeof AGENT_ROLES)[number]
 
 export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
   implementer: 'Implementador(a)',
   reviewer: 'Revisor(a)',
+  qa: 'QA e testes',
   triager: 'Triagem',
   documenter: 'Documentação',
   custom: 'Outro papel'
@@ -82,10 +90,19 @@ export interface AgentProfile {
   instructions: string
 }
 
-/** Onde o perfil mora: no repositório do projeto ou só neste computador. */
-export type AgentScope = 'repo' | 'local'
+/**
+ * Onde o perfil mora: no repositório do projeto, só neste computador ou embutido no Orkio
+ * (`builtin`: catálogo pré-criado, só leitura, já aprovado; "Duplicar" gera uma cópia editável).
+ */
+export type AgentScope = 'repo' | 'local' | 'builtin'
 
-/** `repo:<id>` (vale no projeto) ou `local:<id>` (vale em todos os seus projetos). */
+/** Escopos em que o Orkio grava o perfil (o embutido vem do código). */
+export type WritableAgentScope = Exclude<AgentScope, 'builtin'>
+
+/**
+ * `repo:<id>` (vale no projeto), `local:<id>` (vale em todos os seus projetos) ou `builtin:<id>`
+ * (catálogo do Orkio, vale em todos).
+ */
 export type AgentKey = string
 
 export function agentKey(scope: AgentScope, id: string): AgentKey {
@@ -94,7 +111,7 @@ export function agentKey(scope: AgentScope, id: string): AgentKey {
 
 export function parseAgentKey(key: unknown): { scope: AgentScope; id: string } | null {
   if (typeof key !== 'string') return null
-  const m = /^(repo|local):(.+)$/.exec(key)
+  const m = /^(repo|local|builtin):(.+)$/.exec(key)
   if (!m || !AGENT_ID.test(m[2]!)) return null
   return { scope: m[1] as AgentScope, id: m[2]! }
 }

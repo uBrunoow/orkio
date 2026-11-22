@@ -63,6 +63,7 @@ import type {
   AgentsState,
   ProjectAgents
 } from './agent'
+import type { OrchestratorConfig, OrchestratorState } from './orchestrator'
 
 export type { BoardConfig, BoardStage, StageIssue, StatusOption, TaskSignals }
 
@@ -105,6 +106,10 @@ export const IPC_CHANNELS = {
     assign: 'agents:assign',
     setRules: 'agents:set-rules',
     badges: 'agents:badges',
+    /** 8B: orquestrador (estado, salvar, rodar agora). */
+    orchestrator: 'agents:orchestrator',
+    saveOrchestrator: 'agents:save-orchestrator',
+    runOrchestrator: 'agents:run-orchestrator',
     /** Evento main → renderer: agentes ou atribuições de um projeto mudaram. */
     changed: 'agents:changed'
   },
@@ -797,6 +802,15 @@ export interface OrkioApi {
     ): Promise<ClaudeResult<AgentsState>>
     /** Avatar de cada tarefa atribuída (cards do quadro). */
     badges(projectId: string): Promise<Record<string, AgentBadge>>
+    /** 8B: orquestrador do projeto (config, validação, carga dos agentes, última rodada). */
+    orchestrator(projectId: string): Promise<ClaudeResult<OrchestratorState>>
+    /** Valida de novo no main; erros bloqueiam. */
+    saveOrchestrator(
+      projectId: string,
+      config: OrchestratorConfig
+    ): Promise<ClaudeResult<OrchestratorState>>
+    /** Uma rodada agora (sem esperar o ciclo de ~60 s). */
+    runOrchestrator(projectId: string): Promise<ClaudeResult<OrchestratorState>>
     onChanged(listener: (event: { projectId: string }) => void): () => void
   }
   /** Fluxos de tarefa (5A): sequências de passos ligadas às colunas do quadro. */

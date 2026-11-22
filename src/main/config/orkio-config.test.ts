@@ -51,6 +51,7 @@ describe('orkio-config v2/v3', () => {
       flows: {},
       delivery: {},
       agents: {},
+      orchestrator: {},
       updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
     })
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
@@ -399,7 +400,7 @@ describe('orkio-config v2/v3', () => {
     expect(data.delivery).toEqual(v8.delivery)
     expect(data.projects).toHaveLength(1)
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(10)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
     expect(data.agents).toEqual({})
 
     // Inválido volta ao padrão sem derrubar o resto.
@@ -442,7 +443,7 @@ describe('orkio-config v2/v3', () => {
     const { data } = await createOrkioConfigStore(file).load()
     expect(data.agents).toEqual({})
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(10)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
     expect(saved['agents']).toEqual({})
 
     await writeFile(
@@ -471,5 +472,65 @@ describe('orkio-config v2/v3', () => {
         ]
       }
     })
+  })
+
+  it('v10 → v11: orquestrador desligado; config inválida volta ao padrão sem derrubar o resto', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-v11-'))
+    const file = join(dir, 'orkio-config.json')
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 10,
+        projects: [{ ...PROJECT, notionProject: null }],
+        notion: null,
+        boards: {},
+        automation: { paused: false },
+        claudeContexts: {},
+        flows: {},
+        delivery: {},
+        agents: { p1: { assignOnEnter: [{ stageId: 's1', agentKey: 'repo:ana' }] } },
+        updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.orchestrator).toEqual({})
+    expect(data.agents['p1']?.assignOnEnter).toHaveLength(1)
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(11)
+    expect(saved['orchestrator']).toEqual({})
+
+    await writeFile(
+      file,
+      JSON.stringify({
+        ...saved,
+        orchestrator: {
+          p1: {
+            enabled: true,
+            queueStageId: 'fila',
+            maxActive: 99,
+            lanes: [
+              { stageId: 'dev', agents: ['builtin:implementador', 'nuvem:x'], next: 'rev' },
+              { stageId: 'dev', agents: ['repo:ana'], next: null },
+              { stageId: 'rev', agents: ['builtin:revisor'], next: null }
+            ]
+          },
+          p2: 'quebrado'
+        }
+      })
+    )
+    const again = await createOrkioConfigStore(file).load()
+    expect(again.data.orchestrator).toEqual({
+      p1: {
+        enabled: true,
+        enabledSince: null,
+        queueStageId: 'fila',
+        maxActive: 10,
+        lanes: [
+          { stageId: 'dev', agents: ['builtin:implementador'], next: 'rev' },
+          { stageId: 'rev', agents: ['builtin:revisor'], next: null }
+        ]
+      }
+    })
+    expect(again.data.projects).toHaveLength(1)
   })
 })

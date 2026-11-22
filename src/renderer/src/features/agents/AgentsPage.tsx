@@ -44,6 +44,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { isTextField } from '../../app/shortcuts'
 import { BoardIcon, ListIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { AgentAvatar } from './AgentAvatar'
+import { OrchestratorSection } from './OrchestratorSection'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',
@@ -244,8 +245,14 @@ export function AgentsPage(): React.JSX.Element {
       setMessage(null)
       setEditing({
         mode: 'new',
-        scope: a.scope,
-        draft: { ...a.profile, id: '', name: `${a.profile.name} (cópia)`, archived: false },
+        // Embutido não é gravável: a cópia vai para o repositório (dá para trocar no editor).
+        scope: a.scope === 'builtin' ? 'repo' : a.scope,
+        draft: {
+          ...a.profile,
+          id: '',
+          name: a.scope === 'builtin' ? `${a.profile.name} do time` : `${a.profile.name} (cópia)`,
+          archived: false
+        },
         key: null
       })
     },
@@ -362,6 +369,10 @@ export function AgentsPage(): React.JSX.Element {
         </VStack>
       )}
 
+      {state && state.stages.length > 0 && (
+        <OrchestratorSection projectId={projectId} agents={state} />
+      )}
+
       {state && (
         <AssignRules
           key={JSON.stringify(state.rules)}
@@ -377,6 +388,13 @@ export function AgentsPage(): React.JSX.Element {
       )}
     </VStack>
   )
+}
+
+/** "Revisor(a) · Embutido": o catálogo do Orkio se distingue dos perfis do time. */
+function roleLine(view: AgentView): string {
+  if (!view.profile) return view.file
+  const role = AGENT_ROLE_LABELS[view.profile.role]
+  return view.scope === 'builtin' ? `${role} · Embutido` : role
 }
 
 type AgentFilter = 'all' | AgentView['status']
@@ -487,7 +505,10 @@ function AgentActions({
       {view.status === 'needs_review' && p && !isReviewing && (
         <Button size="sm" variant="secondary" label={`Revisar ${name}`} onClick={onReview} />
       )}
-      {p && (
+      {p && view.scope === 'builtin' && (
+        <Button size="sm" variant="ghost" label={`Duplicar ${name}`} onClick={onDuplicate} />
+      )}
+      {p && view.scope !== 'builtin' && (
         <>
           <Button size="sm" variant="ghost" label={`Editar ${name}`} onClick={onEdit} />
           <MoreMenu
@@ -519,7 +540,7 @@ function AgentRow(
       label={name}
       description={
         <VStack gap={1}>
-          {p && <Text type="supporting">{AGENT_ROLE_LABELS[p.role]}</Text>}
+          {p && <Text type="supporting">{roleLine(view)}</Text>}
           <AgentDetails {...props} />
         </VStack>
       }
@@ -552,7 +573,7 @@ function AgentCard(
                 {name}
               </Text>
               <Text type="supporting" color="secondary" maxLines={1}>
-                {p ? AGENT_ROLE_LABELS[p.role] : view.file}
+                {p ? roleLine(view) : view.file}
               </Text>
             </VStack>
           </StackItem>
