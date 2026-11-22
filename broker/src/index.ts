@@ -89,8 +89,10 @@ export async function handleRequest(
     const redirectUri = boundedString(body['redirect_uri'], 512)
     if (!code || !redirectUri) return json(400, { error: 'invalid_request' })
     if (!allowedRedirects(env).has(redirectUri)) {
+      // Código próprio (não `invalid_request`): o app mostra que a lista de redirect URIs do
+      // intermediário (ALLOWED_REDIRECT_URIS) não tem o endereço de retorno desta versão.
       return json(400, {
-        error: 'invalid_request',
+        error: 'redirect_uri_not_allowed',
         error_description: 'redirect_uri não permitido.'
       })
     }
