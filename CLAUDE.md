@@ -44,6 +44,8 @@ Claude Code. Hoje existem:
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
 - **Agentes (8A):** colegas de IA (nome, papel, instruções, limites) que pegam tarefas do quadro e
   rodam os fluxos da 5A pelo mesmo Claude Code da 4A, com todas as regras do Orkio.
+- **Orquestrador (8B):** agentes embutidos (catálogo `builtin:`) e um orquestrador por projeto que
+  puxa tarefas da fila para os agentes e passa cada uma para a próxima etapa quando o fluxo termina.
 - Ainda não existem: login no app (tela inicial), webhooks.
 
 ## Comandos
@@ -89,6 +91,8 @@ src/
   shared/overview.ts       # 6D: tipos e agregações puras da Visão geral (esperando, PRs, semana...)
   shared/task-history.ts   # texto/links de um evento do histórico (painel da tarefa e atividade)
   shared/agent.ts          # 8A: perfil do agente (parse/serialize do .md, validação, prompt, checkAgentFlow)
+  shared/agent-presets.ts  # 8B: agentes embutidos (catálogo `builtin:<id>`, só leitura)
+  shared/orchestrator.ts   # 8B: config, validação, sugestão, prioridade e `planTick` (motor puro)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, wiring de dependências e IPC
@@ -113,6 +117,7 @@ src/
     delivery/              # 5C: delivery.service.ts (alvo, prévia, push), delivery-actions.ts (ações)
     updates/               # 6C: update.service.ts (electron-updater injetado), busy.ts, mac-signature.ts
     agents/                # 8A: agents.service.ts (perfis, confiança, atribuição, regras, uso do dia)
+    orchestrator/          # 8B: orchestrator.service.ts (rodada: atribuir + mover, passar adiante)
     flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
                            # policy (+ delivery-policy, 5C), redact, run.service, claude.service;
@@ -699,6 +704,42 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 - **UI:** tela Agentes (lista, editor com prévia do prompt, revisar/aprovar, regras), avatar
   (`Token` com iniciais, `card-agent`) no card, seção "Agente" no painel, "Rodar como X" no Claude
   Code. Eventos `agents:changed`.
+
+## Orquestrador (Etapa 8B)
+
+- **Agentes embutidos** (`shared/agent-presets.ts`, escopo `builtin`, chave `builtin:<id>`):
+  Implementador, Revisor, QA, Triagem, Documentador, Corretor de PR. Valem em todos os projetos,
+  passam pelo mesmo `parseAgentFile`/`toView` (texto = `serializeAgent`), são `ready` sem aprovação
+  (o texto é do app) e não podem ser salvos (`AgentError('builtin')`); "Duplicar" grava uma cópia
+  em `repo`/`local`. Só Implementador e Corretor de PR entregam (`delivery: true`).
+- **Config** (`orkio-config` v11 → `orchestrator[projectId]`): `enabled`, `enabledSince` (o main
+  preenche ao ligar), `queueStageId`, `maxActive` (1–10, só limita o puxar) e `lanes`
+  (`{ stageId, agents, next }`). `validateOrchestrator` (mesma no editor e no main): erros bloqueiam
+  só com ele ligado; avisos = etapa sem fluxo `on_enter`, perfil a revisar, `checkAgentFlow` negado,
+  ciclo, próxima etapa = fila. `suggestOrchestrator` monta o caminho pelo nome das etapas.
+- **Rodada** (`OrchestratorService.tick`, uma por projeto por vez): depois de cada ciclo das
+  automações (wrapper do `run` do agendador) e `runSoon` (500 ms) quando um fluxo termina
+  (`FlowRunner` `onFinished`) ou a config muda. `planTick` (puro) decide:
+  - `handoff`: último fluxo da tarefa terminou `done` na etapa atual, começou depois da entrada
+    (`task_events` moved/reconciled/added) e terminou depois de `enabledSince` → `next` (com agente
+    da etapa seguinte, sem esperar vaga: o `FlowRunner` enfileira como `waiting_agent`).
+  - `start`: a tarefa entrou na etapa enquanto o fluxo anterior rodava (entrega movendo para
+    "Revisando") → atribui um agente da etapa e `startManual`.
+  - `pull`: fila por `priorityRank` (Urgente/P0… nomes pt/en) e depois a mais antiga, até
+    `maxActive`, só para agente com vaga (`limits.parallel` e limite do dia).
+  - Nunca toca em tarefa bloqueada, pausada ou com fluxo ativo; atribuição à mão é respeitada.
+- **Aplicar:** atribuição (`assignByOrchestrator`, `assigned_by='rule'` na tabela, `by:
+'orchestrator'` no evento) + `applyAutomationMove` (detalhe `orchestrator: pull|handoff`) na MESMA
+  transação, antes do gatilho do fluxo da coluna. Carga = fluxos ativos por `agent_key` (todos os
+  projetos) + tarefas recém-movidas sem fluxo ainda (memória, até 2 min).
+- **Entrada por outro caminho** (`onStageChanged`, chamado antes da regra da coluna da 8A): você ou
+  uma automação move para uma etapa de trabalho → agente da etapa (menos ocupado), a não ser que o
+  atual seja dela ou tenha sido escolhido à mão.
+- **UI:** seção "Orquestrador" na tela Agentes (`OrchestratorSection`): frase do caminho, última
+  rodada, carga de cada agente, o que ficou esperando, "Rodar agora" e o editor ("Configurar
+  orquestrador", com a sugestão). IPC `agents.orchestrator|saveOrchestrator|runOrchestrator`.
+- E2E `e2e/orchestrator.spec.ts`: só agentes embutidos, liga pela tela e a ORK-2 anda sozinha de
+  Prioridades até Revisado (Implementador e depois Revisor no `--append-system-prompt`).
 
 ## Site (Etapa 6A)
 

@@ -57,6 +57,15 @@ function by(e: HistoryEvent): string {
 
 export function describeEvent(e: HistoryEvent, stageName: (id: string | null) => string): string {
   const rule = typeof e.detail?.['ruleName'] === 'string' ? `“${e.detail['ruleName']}”` : null
+  if (
+    e.kind === 'moved' &&
+    e.source === 'automation' &&
+    typeof e.detail?.['orchestrator'] === 'string'
+  ) {
+    const reason =
+      e.detail['orchestrator'] === 'pull' ? 'puxada da fila' : 'fluxo da etapa concluído'
+    return `Orquestrador (${reason}): ${stageName(e.fromStage)} → ${stageName(e.toStage)}${by(e)}`
+  }
   if (e.kind === 'moved' && e.source === 'automation') {
     return `${automationEvent(e)} → regra ${rule ?? ''}: ${stageName(e.fromStage)} → ${stageName(e.toStage)}`
   }
@@ -102,7 +111,9 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     case 'agent_assigned':
       return e.detail?.['by'] === 'rule'
         ? `Atribuída a ${String(e.detail?.['agent'] ?? '')} pela regra da coluna`
-        : `Atribuída a ${String(e.detail?.['agent'] ?? '')}`
+        : e.detail?.['by'] === 'orchestrator'
+          ? `Atribuída a ${String(e.detail?.['agent'] ?? '')} pelo orquestrador`
+          : `Atribuída a ${String(e.detail?.['agent'] ?? '')}`
     case 'agent_unassigned':
       return 'Atribuição de agente removida'
     case 'step_started':

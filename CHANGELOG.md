@@ -6,6 +6,16 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Agentes embutidos: Implementador, Revisor, QA, Triagem, Documentador e Corretor de PR já vêm
+  prontos em todo projeto, sem criar arquivo nem aprovar. Para ajustar um, use "Duplicar".
+- Orquestrador de tarefas (tela Agentes): puxa tarefas da coluna de fila para os agentes, por
+  prioridade do Notion, e passa cada uma para a etapa seguinte quando o fluxo da etapa termina bem
+  (ex.: Prioridades → Em andamento com o Implementador → Revisando com o Revisor → Revisado).
+  Respeita o limite de tarefas ao mesmo tempo e a capacidade de cada agente; gates, push e falhas
+  continuam parando em você. "Configurar orquestrador" sugere o caminho a partir do quadro.
+
 ### Corrigido
 
 - Login com Notion: os erros do serviço de login dizem a causa (site fora do alcance, intermediário

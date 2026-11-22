@@ -84,6 +84,8 @@ import { WorktreeService } from './claude/worktree.service'
 import { registerClaudeIpc } from './ipc/claude.ipc'
 import { registerAgentsIpc } from './ipc/agents.ipc'
 import { AgentError, AgentsService } from './agents/agents.service'
+import { OrchestratorService } from './orchestrator/orchestrator.service'
+import { registerOrchestratorIpc } from './ipc/orchestrator.ipc'
 import { buildAgentPrompt, commandAllowed } from '../shared/agent'
 import { registerUpdatesIpc } from './ipc/updates.ipc'
 import { UpdateService, type UpdaterLike } from './updates/update.service'
@@ -283,9 +285,11 @@ function registerIpc(): void {
       },
       onSync: broadcast,
       actor: () => userInfo().username,
+      // 8B: etapa de trabalho do orquestrador dá um agente dela (antes da regra da coluna).
       // 8A: a regra da coluna atribui o agente (na mesma transação) antes de o fluxo começar.
       // 5A: entrada/saída de etapa vai para os fluxos (o runner adia o trabalho).
       onStageChanged: (change) => {
+        orchestrator?.onStageChanged(change)
         agents.onStageChanged(change)
         flowRunner?.onStageChanged(change)
       }
@@ -353,7 +357,12 @@ function registerIpc(): void {
       return c.projects.filter((p) => p.notionProject && c.boards[p.id]).map((p) => p.id)
     }
     scheduler = new AutomationScheduler({
-      run: (projectId, options) => automation.run(projectId, options),
+      // 8B: depois de cada ciclo das automações, uma rodada do orquestrador (se ligado).
+      run: async (projectId, options) => {
+        const result = await automation.run(projectId, options)
+        await orchestrator?.tick(projectId).catch(() => undefined)
+        return result
+      },
       projects: automationProjects,
       localBranches: async (projectId) => {
         const project = configStore.get().projects.find((p) => p.id === projectId)
@@ -465,9 +474,28 @@ function registerIpc(): void {
         runAutomation: (projectId) => void scheduler?.runNow(projectId).catch(() => undefined)
       }),
       send,
+      onFlowFinished: (projectId) => orchestrator?.runSoon(projectId),
       isTrustedSender,
       ready: projectsReady
     })
+    const runner = flowRunner
+    orchestrator = new OrchestratorService({
+      config: configStore,
+      db: boardStore.db,
+      store: boardStore,
+      board,
+      agents,
+      flows: {
+        hasActive: (taskId) => runner.hasActive(taskId),
+        startManual: (projectId, taskId) => runner.startManual(projectId, taskId)
+      },
+      actor: () => userInfo().username,
+      emit: (projectId) => {
+        send(IPC_CHANNELS.agents.changed, { projectId })
+        send(IPC_CHANNELS.board.changed, { projectId })
+      }
+    })
+    registerOrchestratorIpc(ipcMain, orchestrator, isTrustedSender, projectsReady)
 
     // Visão geral (6D): agrega o que já está no app; nunca chama APIs sozinha.
     overview = new OverviewService({
@@ -644,6 +672,8 @@ let writeQueue: NotionWriteQueue | null = null
 let scheduler: AutomationScheduler | null = null
 let claudeRuns: RunService | null = null
 let flowRunner: FlowRunner | null = null
+/** Orquestrador (8B): puxa tarefas da fila para os agentes e passa adiante. */
+let orchestrator: OrchestratorService | null = null
 let updates: UpdateService | null = null
 let overview: OverviewService | null = null
 
@@ -667,6 +697,7 @@ function createFlowRunner(deps: {
   listTasks: ClaudeServiceDeps['listTasks']
   deliveryActions: OrkioAction[]
   send: (channel: string, payload: unknown) => void
+  onFlowFinished: (projectId: string) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
 }): FlowRunner {
@@ -768,7 +799,8 @@ function createFlowRunner(deps: {
     concurrencyLimit: (projectId, flow) => alvaFlows.concurrencyLimit(projectId, flow),
     notify: (title, body, ref) =>
       showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, deps.send),
-    emit: (ref) => deps.send(IPC_CHANNELS.taskFlows.changed, ref)
+    emit: (ref) => deps.send(IPC_CHANNELS.taskFlows.changed, ref),
+    onFinished: (ref) => deps.onFlowFinished(ref.projectId)
   })
   deps.runs.onFinished((info) => runner.onRunFinished(info))
   runner.init()
