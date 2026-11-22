@@ -373,6 +373,7 @@ export function TaskFlowSection({
           busy={busy}
           onResume={() => void act(() => window.orkio.taskFlows.resume(run.id))}
           onRerun={(stepId) => void act(() => window.orkio.taskFlows.rerunFrom(run.id, stepId))}
+          onReply={(text) => void act(() => window.orkio.taskFlows.resumeWithReply(run.id, text))}
           onSkip={() => void act(() => window.orkio.taskFlows.skip(run.id))}
           onCancel={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
           {...(onOpenRun ? { onOpenRun } : {})}

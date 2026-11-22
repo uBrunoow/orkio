@@ -60,6 +60,7 @@ let started: {
   includeBriefing?: boolean
   delivery?: boolean
   agent?: { key: string; name: string; prompt: string; model: string | null } | null
+  reply?: string
 }[]
 let cancelled: string[]
 let notifications: string[]
@@ -84,7 +85,8 @@ function makeRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
         briefing: input.briefing,
         includeBriefing: input.includeBriefing,
         delivery: input.delivery,
-        agent: input.agent
+        agent: input.agent,
+        ...(input.reply !== undefined ? { reply: input.reply } : {})
       })
       return runId
     },
@@ -208,6 +210,52 @@ describe('FlowRunner', () => {
     v = runner.view(id)
     expect(v.status).toBe('waiting_gate')
     expect(v.history.map((h) => h.status)).toEqual(['failed', 'skipped', 'waiting'])
+  })
+
+  it('"Responder e continuar": o passo parado segue na mesma sessão com a sua resposta (uma vez só)', async () => {
+    const runner = makeRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    finish(runner, 'run-1', 'failed')
+    await flush()
+    await expect(runner.resumeWithReply(id, '   ')).rejects.toThrow(/Escreva a resposta/)
+    expect(started).toHaveLength(1)
+
+    await runner.resumeWithReply(id, ' Formato: CSV; só admins ')
+    expect(started).toHaveLength(2)
+    expect(started[1]).toMatchObject({ command: 'revisar', reply: 'Formato: CSV; só admins' })
+    expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'revisar' })
+
+    // Falhou de novo: "Retomar" roda o comando de verdade, sem reenviar a resposta.
+    finish(runner, 'run-2', 'failed')
+    await flush()
+    await runner.resume(id)
+    expect(started[2]!.reply).toBeUndefined()
+
+    // A resposta bem-sucedida segue o fluxo para o próximo passo.
+    finish(runner, 'run-3', 'failed')
+    await flush()
+    await runner.resumeWithReply(id, 'agora sim')
+    finish(runner, 'run-4', 'succeeded', 'ok')
+    await flush()
+    expect(runner.view(id).status).toBe('waiting_gate')
+  })
+
+  it('isBusy: passo rodando bloqueia a mensagem da sessão; pausa por falha e gate liberam', async () => {
+    const runner = makeRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    expect(runner.isBusy('t1')).toBe(true)
+    finish(runner, 'run-1', 'failed')
+    await flush()
+    expect(runner.view(id).status).toBe('paused')
+    expect(runner.isBusy('t1')).toBe(false) // dá para responder ao Claude pelo campo da sessão
+  })
+
+  it('"Responder e continuar" só com o fluxo pausado num comando do Claude Code', async () => {
+    const runner = makeRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    // Rodando: não pode.
+    await expect(runner.resumeWithReply(id, 'oi')).rejects.toThrow()
+    expect(started).toHaveLength(1)
   })
 
   it('comando com variável do alva-flow sem valor não roda: pausa explicando, sem gastar uma execução', async () => {

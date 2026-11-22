@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Text } from '@astryxdesign/core/Text'
+import { TextArea } from '@astryxdesign/core/TextArea'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { ClaudeDiff } from '../../../../shared/agent-run'
 import type { FlowProblem } from '../../../../shared/flow-problem'
@@ -19,6 +20,7 @@ export function FlowProblemCard({
   busy,
   onResume,
   onRerun,
+  onReply,
   onSkip,
   onCancel,
   onOpenRun
@@ -29,11 +31,14 @@ export function FlowProblemCard({
   busy: boolean
   onResume(): void
   onRerun(stepId: string): void
+  /** Responde ao Claude e continua na mesma sessão do passo (só com a execução do passo). */
+  onReply(text: string): void
   onSkip(): void
   onCancel(): void
   /** Abre a sessão (log) da execução do passo parado. */
   onOpenRun?: (runId: string) => void
 }): React.JSX.Element {
+  const [reply, setReply] = useState('')
   const [showChanges, setShowChanges] = useState(false)
   const [changes, setChanges] = useState<ClaudeDiff | { error: string } | null>(null)
 
@@ -58,6 +63,30 @@ export function FlowProblemCard({
         </VStack>
       )}
       <Text>{problem.hint}</Text>
+      {problem.runId && (
+        <VStack gap={2}>
+          <TextArea
+            label="Responder ao Claude"
+            description="Vai na mesma sessão do passo, sem rodar o comando do zero. Ex.: as respostas das perguntas que ficaram em aberto."
+            value={reply}
+            onChange={setReply}
+            rows={3}
+          />
+          <HStack>
+            <Button
+              size="sm"
+              variant="primary"
+              label="Responder e continuar"
+              isLoading={busy}
+              isDisabled={!reply.trim()}
+              onClick={() => {
+                onReply(reply.trim())
+                setReply('')
+              }}
+            />
+          </HStack>
+        </VStack>
+      )}
       <HStack gap={2} wrap="wrap">
         {problem.rerun && (
           <Button

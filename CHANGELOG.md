@@ -8,6 +8,10 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Adicionado
 
+- Responder ao Claude quando o fluxo para: o cartão de problema tem "Responder e continuar", que
+  manda a sua resposta na mesma sessão do passo (por exemplo, as respostas das perguntas do
+  `/spec` que ficaram sem resposta) e o fluxo segue dali, sem rodar o comando do zero.
+
 - Agentes embutidos: Implementador, Revisor, QA, Triagem, Documentador e Corretor de PR já vêm
   prontos em todo projeto, sem criar arquivo nem aprovar. Para ajustar um, use "Duplicar".
 - Orquestrador de tarefas (tela Agentes): puxa tarefas da coluna de fila para os agentes, por
@@ -36,6 +40,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Corrigido
 
+- A pergunta do Claude Code não é mais negada depois de 10 minutos: ela espera a sua resposta por
+  até 24 horas, em "Esperando você". Pedidos de permissão continuam expirando em 10 minutos.
 - Login com Notion: os erros do serviço de login dizem a causa (site fora do alcance, intermediário
   local parado em dev ou endereço de retorno não liberado no intermediário) em vez de sempre pedir
   para verificar a internet. Um build com a URL do intermediário trocada pelo endereço de retorno

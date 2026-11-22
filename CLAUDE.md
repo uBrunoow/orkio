@@ -492,6 +492,14 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   sessão, começa uma com o briefing do Notion. `/comando args` = modo comando. Com um passo de
   fluxo rodando (`FlowRunner.isBusy`: `running` ou fila `waiting_slot`/`waiting_agent`) é
   recusado; com o fluxo esperando você, aceito. Permissões, política e redação são as de sempre.
+- **Responder ao Claude:** pergunta do Claude (`AskUserQuestion`) espera 24 h
+  (`questionTimeoutMs`); permissão continua em 10 min. Com o fluxo parado num comando do Claude
+  Code, o cartão de problema tem "Responder e continuar" (`FlowRunner.resumeWithReply`, IPC
+  `taskFlows.resumeWithReply`): guarda a resposta em `pendingReply`, refaz o passo e
+  `startForFlow({ reply })` manda só o texto na sessão mais recente da tarefa (`--resume`), sem
+  rodar o comando do zero; a resposta é consumida uma vez ("Retomar" depois roda o comando de
+  verdade). Sem sessão guardada: erro `no_session`. Perguntas já expiradas também se respondem
+  pelo campo da sessão (o fluxo parado por falha aceita mensagem).
 - "Nova sessão…" abre o formulário completo da 4A (`claude/session-parts.tsx`: briefing editável,
   modo, catálogo, rodar como agente); "Rodar de novo" em cada execução terminada o abre preenchido.
 - E2E: `expectTaskHistory(scope, ...textos)` e `taskTab(panel, nome)` (fixtures). O Claude simulado

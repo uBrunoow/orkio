@@ -59,6 +59,7 @@ export const CLAUDE_MESSAGES = {
   emptyPrompt: 'Escreva o que o Claude Code deve fazer.',
   flowActive:
     'Esta tarefa tem um fluxo em andamento. Use o fluxo (ou cancele-o) para rodar o Claude Code.',
+  noSession: 'Esta tarefa não tem uma sessão do Claude Code para continuar. Rode o passo de novo.',
   flowRunning:
     'O fluxo está rodando um passo agora. Espere ele parar ou pedir algo para mandar a mensagem.',
   pageUnavailable: 'Não deu para ler a página da tarefa no Notion; o briefing usa só os campos.',
@@ -291,7 +292,32 @@ export class ClaudeService {
     delivery?: boolean
     /** Agente (8A) do fluxo (cópia do perfil feita no início do fluxo). */
     agent?: RunAgent | null
+    /** "Responder e continuar": manda este texto na sessão mais recente da tarefa (`--resume`). */
+    reply?: string
   }): Promise<ClaudeResult<string>> {
+    if (input.reply !== undefined) {
+      const session = this.deps.runs.lastSession(input.taskId)
+      if (!session) {
+        return Promise.resolve(fail('no_session', CLAUDE_MESSAGES.noSession))
+      }
+      return this.wrap(() =>
+        this.startRun(
+          {
+            projectId: input.projectId,
+            taskId: input.taskId,
+            mode: 'prompt',
+            command: null,
+            text: input.reply!,
+            briefing: ''
+          },
+          input.timeoutMin,
+          true,
+          input.delivery === true,
+          input.agent ?? null,
+          session
+        )
+      )
+    }
     return this.wrap(() =>
       this.startRun(
         {
