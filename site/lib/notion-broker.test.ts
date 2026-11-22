@@ -100,7 +100,11 @@ describe('broker — POST /notion/token', () => {
       ENV,
       upstream
     )
-    expect((await read(res)).status).toBe(400)
+    // Código próprio: o app diz que falta o redirect URI em ALLOWED_REDIRECT_URIS.
+    expect(await read(res)).toMatchObject({
+      status: 400,
+      body: { error: 'redirect_uri_not_allowed' }
+    })
     expect(upstream).not.toHaveBeenCalled()
   })
 
