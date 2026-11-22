@@ -48,7 +48,18 @@ criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo int
    ```
    Em dev, com o site rodando local (`pnpm --dir site dev`), use `http://127.0.0.1:3000`.
    Nenhum desses valores é segredo. Sem eles, o app esconde o login com Notion e mostra só
-   a opção de token.
+   a opção de token. `MAIN_VITE_NOTION_OAUTH_BROKER_URL` é a **origem do site**, sem caminho; não
+   é o Redirect URI (`http://localhost:47821/...`). Se apontar para a porta `47821`, o app trata
+   como config errada e esconde o login com Notion.
+
+### Problemas comuns no login com Notion
+
+| Mensagem no card                                              | Causa e correção                                                                                                                                                                                      |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Não foi possível falar com o intermediário de login local…"  | Build de dev com o intermediário em loopback e o site parado. Rode `pnpm --dir site dev` ou use a URL do site publicado.                                                                              |
+| "Não foi possível falar com o serviço de login do Orkio (…)." | Sem rede até o site, domínio errado no build ou site fora do ar. Abra `https://<domínio>/` no navegador.                                                                                              |
+| "…recusou o endereço de retorno deste app…"                   | `ALLOWED_REDIRECT_URIS` na Vercel não tem `http://localhost:47821/oauth/notion/callback`. Corrija em Settings → Environment Variables e faça **Redeploy** (variável nova só vale no deploy seguinte). |
+| "O login com Notion está mal configurado…"                    | `NOTION_CLIENT_ID`/`NOTION_CLIENT_SECRET` da Vercel não batem com a conexão do Notion, ou o Redirect URI não está cadastrado nela.                                                                    |
 
 A porta `47821` precisa estar livre no computador durante o login; se estiver ocupada, o
 Orkio avisa. Para desconectar de vez, além de **Desconectar** no Orkio, a pessoa pode

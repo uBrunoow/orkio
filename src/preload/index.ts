@@ -181,6 +181,14 @@ const api: OrkioApi = {
         rules.map((r) => ({ stageId: String(r.stageId), agentKey: String(r.agentKey) }))
       ),
     badges: (projectId) => ipcRenderer.invoke(agents.badges, projectId),
+    orchestrator: (projectId) => ipcRenderer.invoke(agents.orchestrator, projectId),
+    saveOrchestrator: (projectId, config) =>
+      ipcRenderer.invoke(
+        agents.saveOrchestrator,
+        projectId,
+        JSON.parse(JSON.stringify(config)) as unknown
+      ),
+    runOrchestrator: (projectId) => ipcRenderer.invoke(agents.runOrchestrator, projectId),
     onChanged: (listener) => {
       const handler = (_event: unknown, payload: unknown): void => {
         if (isRecord(payload) && typeof payload['projectId'] === 'string') {

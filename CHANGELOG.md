@@ -6,6 +6,16 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Agentes embutidos: Implementador, Revisor, QA, Triagem, Documentador e Corretor de PR já vêm
+  prontos em todo projeto, sem criar arquivo nem aprovar. Para ajustar um, use "Duplicar".
+- Orquestrador de tarefas (tela Agentes): puxa tarefas da coluna de fila para os agentes, por
+  prioridade do Notion, e passa cada uma para a etapa seguinte quando o fluxo da etapa termina bem
+  (ex.: Prioridades → Em andamento com o Implementador → Revisando com o Revisor → Revisado).
+  Respeita o limite de tarefas ao mesmo tempo e a capacidade de cada agente; gates, push e falhas
+  continuam parando em você. "Configurar orquestrador" sugere o caminho a partir do quadro.
+
 ### Mudado
 
 - A tarefa virou uma sessão: uma conversa só com os eventos do Notion e do GitHub, os passos do
@@ -26,6 +36,10 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Corrigido
 
+- Login com Notion: os erros do serviço de login dizem a causa (site fora do alcance, intermediário
+  local parado em dev ou endereço de retorno não liberado no intermediário) em vez de sempre pedir
+  para verificar a internet. Um build com a URL do intermediário trocada pelo endereço de retorno
+  do app esconde o login com Notion em vez de falhar a cada tentativa.
 - "Rodar como <agente>" desmarcado no formulário do Claude Code agora vale (a escolha não chegava
   ao app).
 

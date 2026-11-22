@@ -4,6 +4,7 @@
  */
 import type { DeliverySettings } from '../../shared/delivery'
 import { parseProjectAgents, type ProjectAgents } from '../../shared/agent'
+import { parseOrchestrator, type OrchestratorConfig } from '../../shared/orchestrator'
 import {
   EVENT_KINDS,
   defaultRules,
@@ -31,7 +32,7 @@ import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-ru
 import type { Condition, Flow, ProjectFlows, StageFlow, Step } from '../../shared/task-flow'
 import type { UpdateChannel } from '../../shared/updates'
 
-export const ORKIO_CONFIG_VERSION = 10
+export const ORKIO_CONFIG_VERSION = 11
 
 export interface StoredProject {
   id: string
@@ -59,6 +60,8 @@ export interface OrkioConfig {
   delivery: Record<string, DeliverySettings>
   /** Agentes (8A): regras de atribuição por coluna. Os perfis ficam em arquivos, não aqui. */
   agents: Record<string, ProjectAgents>
+  /** Orquestrador (8B): fila, etapas de trabalho e agentes de cada uma, por projeto. */
+  orchestrator: Record<string, OrchestratorConfig>
   /** Atualizações (6C): canal, última versão vista ("O que há de novo") e última verificação. */
   updates: UpdatesConfig
 }
@@ -80,6 +83,7 @@ export function emptyConfig(): OrkioConfig {
     flows: {},
     delivery: {},
     agents: {},
+    orchestrator: {},
     updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
   }
 }
@@ -130,7 +134,9 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
         updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
       }),
       // v9 → v10 (8A): nenhuma regra de atribuição de agentes ainda.
-      9: (data) => ({ ...data, agents: {} })
+      9: (data) => ({ ...data, agents: {} }),
+      // v10 → v11 (8B): orquestrador desligado em todos os projetos.
+      10: (data) => ({ ...data, orchestrator: {} })
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -204,6 +210,13 @@ export function validateConfig(
       if (parsed) agents[projectId] = parsed
     }
   }
+  const orchestrator: Record<string, OrchestratorConfig> = {}
+  if (isRecord(data['orchestrator'])) {
+    for (const [projectId, raw] of Object.entries(data['orchestrator'])) {
+      const parsed = parseOrchestrator(raw)
+      if (parsed) orchestrator[projectId] = parsed
+    }
+  }
   const value: OrkioConfig = {
     projects,
     notion,
@@ -213,6 +226,7 @@ export function validateConfig(
     flows,
     delivery,
     agents,
+    orchestrator,
     updates: parseUpdates(data['updates'])
   }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }

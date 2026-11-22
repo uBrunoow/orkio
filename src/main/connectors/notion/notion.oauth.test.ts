@@ -56,6 +56,21 @@ describe('readNotionOAuthConfig', () => {
     ).toEqual({ clientId: 'c', brokerUrl: 'http://127.0.0.1:8787' })
   })
 
+  it('URL do intermediário igual ao servidor de retorno do app → null (config trocada)', () => {
+    for (const url of [
+      NOTION_OAUTH_REDIRECT_URI,
+      'http://localhost:47821',
+      'http://127.0.0.1:47821/notion'
+    ]) {
+      expect(
+        readNotionOAuthConfig({
+          MAIN_VITE_NOTION_OAUTH_CLIENT_ID: 'c',
+          MAIN_VITE_NOTION_OAUTH_BROKER_URL: url
+        })
+      ).toBeNull()
+    }
+  })
+
   it('sem config ou com URL insegura → null (OAuth indisponível)', () => {
     expect(readNotionOAuthConfig({})).toBeNull()
     expect(readNotionOAuthConfig({ MAIN_VITE_NOTION_OAUTH_CLIENT_ID: 'c' })).toBeNull()
@@ -145,6 +160,7 @@ describe('createNotionOAuthBroker', () => {
   it.each([
     [400, { error: 'invalid_grant' }, 'invalid_grant', /Conecte o Notion de novo/],
     [401, { error: 'invalid_client' }, 'oauth_config', /mal configurado/],
+    [400, { error: 'redirect_uri_not_allowed' }, 'oauth_config', /endereço de retorno/],
     [429, {}, 'rate_limited', /Muitas tentativas/],
     [502, {}, 'server', /502/],
     [400, { error: 'invalid_request' }, 'unexpected', /HTTP 400/]
@@ -169,7 +185,21 @@ describe('createNotionOAuthBroker', () => {
     })
     const networkError = await offline.refresh(REFRESH).catch((e: unknown) => e)
     expect(networkError).toMatchObject({ code: 'network' })
+    expect((networkError as Error).message).toMatch(/broker\.example.*internet/)
     expectNoLeak(networkError)
+
+    const localSite = createNotionOAuthBroker(
+      { clientId: 'c', brokerUrl: 'http://127.0.0.1:3000' },
+      {
+        fetch: async () => {
+          throw new TypeError('fetch failed')
+        }
+      }
+    )
+    const localError = await localSite.refresh(REFRESH).catch((e: unknown) => e)
+    expect(localError).toMatchObject({ code: 'network' })
+    expect((localError as Error).message).toMatch(/127\.0\.0\.1:3000.*pnpm --dir site dev/)
+    expect((localError as Error).message).not.toMatch(/internet/)
 
     const slow = createNotionOAuthBroker(CONFIG, {
       timeoutMs: 10,

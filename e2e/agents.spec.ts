@@ -165,7 +165,7 @@ test('prepara o quadro e os fluxos (coluna e preferido da Ana)', async () => {
     boards: Record<string, { stages: { id: string; name: string }[] }>
     flows: Record<string, unknown>
   }
-  expect(config.schemaVersion).toBe(10)
+  expect(config.schemaVersion).toBe(11)
   const emAndamento = config.boards[PROJECT]!.stages.find((st) => st.name === 'Em andamento')!
   config.flows[PROJECT] = {
     flows: [

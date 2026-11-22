@@ -174,6 +174,8 @@ export interface FlowRunnerDeps {
   notify(title: string, body: string, ref: { projectId: string; taskId: string }): void
   /** Algo mudou no fluxo da tarefa (a tela recarrega). */
   emit(ref: { projectId: string; taskId: string }): void
+  /** 8B: um fluxo terminou (o orquestrador decide se a tarefa segue). */
+  onFinished?: (ref: { projectId: string; taskId: string; result: RunRow['result'] }) => void
   now?: () => Date
   newId?: () => string
 }
@@ -1221,6 +1223,7 @@ export class FlowRunner {
     this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
     this.briefings.delete(row.id)
     this.promoteWaiting()
+    this.deps.onFinished?.({ projectId: row.project_id, taskId: row.task_page_id, result })
   }
 
   private closeStep(
