@@ -16,12 +16,32 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   Respeita o limite de tarefas ao mesmo tempo e a capacidade de cada agente; gates, push e falhas
   continuam parando em você. "Configurar orquestrador" sugere o caminho a partir do quadro.
 
+### Mudado
+
+- A tarefa virou uma sessão: uma conversa só com os eventos do Notion e do GitHub, os passos do
+  fluxo, as respostas inteiras do Claude Code em cada execução e as suas decisões. Logo depois de
+  cada execução aparece o que ela produziu: a spec ou o plano do Backlog.md (/spec, /plan) e os
+  arquivos, commits e o diff da implementação.
+- Campo de mensagem no fim da sessão: o que você escreve continua a última conversa do Claude Code
+  na tarefa, no mesmo ambiente e sem repetir o briefing. `/` sugere os comandos instalados e
+  Ctrl/Cmd+Enter envia. "Nova sessão…" abre o formulário completo (briefing editável, modo,
+  comando, rodar como agente).
+- "Em que pé está" no topo da tarefa: Spec, Plano, Código, PR, Revisão e Merge, lidos do
+  Backlog.md, das execuções e do GitHub.
+- O pedido que espera você aparece no fim da conversa, logo acima do campo; o aviso do topo leva
+  até ele.
+- No painel do Quadro, abas Sessão, Mudanças e Detalhes; na tela cheia, o estado (etapa,
+  mudanças, GitHub, documentos, agente, opções) fica numa coluna à direita e o histórico completo
+  fica recolhido.
+
 ### Corrigido
 
 - Login com Notion: os erros do serviço de login dizem a causa (site fora do alcance, intermediário
   local parado em dev ou endereço de retorno não liberado no intermediário) em vez de sempre pedir
   para verificar a internet. Um build com a URL do intermediário trocada pelo endereço de retorno
   do app esconde o login com Notion em vez de falhar a cada tentativa.
+- "Rodar como <agente>" desmarcado no formulário do Claude Code agora vale (a escolha não chegava
+  ao app).
 
 ## [0.2.1] - 2026-11-21
 

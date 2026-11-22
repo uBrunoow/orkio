@@ -6,6 +6,7 @@ import type {
   EditorId,
   PermissionAnswer,
   RunLogEvent,
+  SendMessageRequest,
   StartRunRequest
 } from '../../shared/agent-run'
 import { IPC_CHANNELS } from '../../shared/ipc-contract'
@@ -90,6 +91,19 @@ export function isStartRunRequest(value: unknown): value is StartRunRequest {
   )
 }
 
+export function isSendMessageRequest(value: unknown): value is SendMessageRequest {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as Record<string, unknown>
+  return (
+    isId(v['projectId']) &&
+    isId(v['taskId']) &&
+    typeof v['text'] === 'string' &&
+    v['text'].length <= MAX_TEXT &&
+    (v['fresh'] === undefined || typeof v['fresh'] === 'boolean') &&
+    (v['asAgent'] === undefined || typeof v['asAgent'] === 'boolean')
+  )
+}
+
 function isAnswers(value: unknown): value is Record<string, string> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const entries = Object.entries(value)
@@ -137,6 +151,9 @@ export function registerClaudeIpc(
   )
   guarded(ch.start, GENERIC, async (request) =>
     isStartRunRequest(request) ? service.start(request) : INVALID
+  )
+  guarded(ch.send, GENERIC, async (request) =>
+    isSendMessageRequest(request) ? service.send(request) : INVALID
   )
   guarded(ch.cancel, undefined, async (runId) => {
     if (isId(runId)) service.cancel(runId)

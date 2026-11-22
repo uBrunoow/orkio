@@ -15,7 +15,8 @@ import {
   setNotionStatus,
   type FakePull,
   type FakeServices,
-  type OrkioApp
+  type OrkioApp,
+  taskTab
 } from './fixtures'
 
 const NOTION_TOKEN = 'ntn_E2E_AUTOMATION_TOKEN_abcdef123456'
@@ -81,7 +82,10 @@ async function close(): Promise<void> {
 async function historyText(page: Page): Promise<string> {
   await card(page).click()
   const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
-  const list = panel.getByRole('list', { name: 'Histórico da tarefa' })
+  // Histórico completo (aba Detalhes): todos os eventos, mesmo os que a sessão resume.
+  const details = await taskTab(panel, 'Detalhes')
+  const list = details.getByRole('list', { name: 'Histórico da tarefa' })
+  if (!(await list.isVisible())) await details.getByText('Histórico completo').click()
   await expect(list).toBeVisible()
   // Evento por evento, com quem fez; sem o horário relativo ("há 13 segundos"), que muda sozinho.
   const text = await list.evaluate((el) =>

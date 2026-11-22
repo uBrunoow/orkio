@@ -1094,3 +1094,27 @@ export async function navTo(page: Page, name: string): Promise<void> {
     .getByRole('button', { name, exact: true })
     .click()
 }
+
+/**
+ * Histórico completo da tarefa (todos os eventos): fica recolhido em Detalhes (aba no painel do
+ * Quadro, coluna à direita na tela cheia). Abre, confere os textos e volta para a Sessão.
+ */
+export async function expectTaskHistory(scope: Locator, ...texts: string[]): Promise<Locator> {
+  const detailsTab = scope.getByRole('tab', { name: 'Detalhes' })
+  const hasTabs = (await detailsTab.count()) > 0
+  if (hasTabs) await detailsTab.click()
+  const list = scope.getByRole('list', { name: 'Histórico da tarefa' })
+  if (!(await list.isVisible())) await scope.getByText('Histórico completo').click()
+  for (const t of texts) await expect(list).toContainText(t)
+  if (hasTabs) await scope.getByRole('tab', { name: 'Sessão' }).click()
+  return list
+}
+
+/** Aba do painel da tarefa no Quadro (Sessão, Mudanças, Detalhes). */
+export async function taskTab(
+  panel: Locator,
+  name: 'Sessão' | 'Mudanças' | 'Detalhes'
+): Promise<Locator> {
+  await panel.getByRole('tab', { name }).click()
+  return panel.getByRole('tabpanel', { name })
+}

@@ -6,6 +6,7 @@ import {
   NOTION_FAKE,
   createUserDataDir,
   cspViolations,
+  expectTaskHistory,
   launchOrkio,
   removeDir,
   type OrkioApp
@@ -232,11 +233,11 @@ test('liga o orquestrador com a sugestão: a tarefa sai da fila e chega a Revisa
 
   await card(page).click()
   const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
-  const history = panel.getByRole('list', { name: 'Histórico da tarefa' })
-  await expect(history).toContainText('Atribuída a Implementador pelo orquestrador')
-  await expect(history).toContainText('Orquestrador (puxada da fila): Prioridades → Em andamento')
-  await expect(history).toContainText('Atribuída a Revisor pelo orquestrador')
-  await expect(history).toContainText(
+  await expectTaskHistory(
+    panel,
+    'Atribuída a Implementador pelo orquestrador',
+    'Orquestrador (puxada da fila): Prioridades → Em andamento',
+    'Atribuída a Revisor pelo orquestrador',
     'Orquestrador (fluxo da etapa concluído): Em andamento → Revisando'
   )
   expect(git(origin(), 'branch', '--list').trim()).toBe('* main')

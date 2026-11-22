@@ -14,7 +14,8 @@ import {
   setFakes,
   setNotionStatus,
   type FakeServices,
-  type OrkioApp
+  type OrkioApp,
+  expectTaskHistory
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_BOARD_TOKEN_abcdef123456'
@@ -149,9 +150,7 @@ test('critério 2: mover para Revisando grava a etapa fina e mantém "Em andamen
   // Painel lateral com o histórico.
   await card(page).click()
   const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
-  await expect(panel.getByRole('list', { name: 'Histórico da tarefa' })).toContainText(
-    'Movida de Em andamento para Revisando'
-  )
+  await expectTaskHistory(panel, 'Movida de Em andamento para Revisando')
   await panel.getByRole('button', { name: 'Fechar' }).click()
 })
 
@@ -194,11 +193,10 @@ test('critério 4: mudar o status direto no Notion reposiciona o card ao atualiz
   await page.getByRole('button', { name: 'Atualizar' }).click()
   await expect(column(page, 'Em andamento').getByRole('listitem', { name: ORK2 })).toBeVisible()
   await card(page).click()
-  await expect(
-    page
-      .getByRole('complementary', { name: 'Detalhes de ORK-2' })
-      .getByRole('list', { name: 'Histórico da tarefa' })
-  ).toContainText('Reposicionada pelo Notion: Finalizada → Em andamento')
+  await expectTaskHistory(
+    page.getByRole('complementary', { name: 'Detalhes de ORK-2' }),
+    'Reposicionada pelo Notion: Finalizada → Em andamento'
+  )
   await page.getByRole('button', { name: 'Fechar' }).click()
 })
 

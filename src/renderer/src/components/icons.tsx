@@ -4,6 +4,10 @@
  */
 import type { FunctionComponent, SVGProps } from 'react'
 import {
+  IconAlertCircle,
+  IconCircleCheck,
+  IconCircleDashed,
+  IconSend,
   IconBrandGithub,
   IconBrandNotion,
   IconDatabase,
@@ -135,6 +139,10 @@ export const ClaudeLogo: SvgIcon = (props) => (
 )
 ClaudeLogo.displayName = 'ClaudeLogo'
 export const SearchIcon = adapt(IconSearch)
+export const SendIcon = adapt(IconSend)
+export const DoneIcon = adapt(IconCircleCheck)
+export const TodoIcon = adapt(IconCircleDashed)
+export const ProblemIcon = adapt(IconAlertCircle)
 export const CopyIcon = adapt(IconCopy)
 
 /** Visão geral com um ponto de atenção (há algo esperando você); a coluna de ícones não mostra contador. */

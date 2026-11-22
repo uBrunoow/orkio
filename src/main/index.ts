@@ -939,6 +939,7 @@ function createClaude(deps: {
     ...(deps.agentFor ? { agentFor: deps.agentFor } : {}),
     ...(deps.agentInfo ? { agentInfo: deps.agentInfo } : {}),
     flowActive: (taskId) => flowRunner?.hasActive(taskId) ?? false,
+    flowBusy: (taskId) => flowRunner?.isBusy(taskId) ?? false,
     artifacts: new ArtifactsService({
       db: deps.boardStore.db,
       store: deps.boardStore,

@@ -64,6 +64,10 @@ export interface AgentRunView {
   branch: string | null
   worktreePath: string | null
   summary: RunSummary | null
+  /** A execução guardou a sessão do Claude Code (dá para continuar a conversa). */
+  hasSession: boolean
+  /** Agente (8A) que rodou, ou `null`. */
+  agentKey: string | null
 }
 
 /** Evento main → renderer (`onRunEvent`). */
@@ -132,6 +136,18 @@ export interface StartRunRequest {
   command: string | null
   text: string
   briefing: string
+  /** 8A: rodar com as instruções do agente da tarefa (padrão: sim, se houver agente). */
+  asAgent?: boolean
+}
+
+/** Mensagem do campo da sessão: continua a última sessão da tarefa (ou começa uma). */
+export interface SendMessageRequest {
+  projectId: string
+  taskId: string
+  /** Texto livre, ou `/comando argumentos`. */
+  text: string
+  /** Começa uma sessão nova (com o briefing do Notion) em vez de continuar a última. */
+  fresh?: boolean
   /** 8A: rodar com as instruções do agente da tarefa (padrão: sim, se houver agente). */
   asAgent?: boolean
 }

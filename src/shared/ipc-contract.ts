@@ -51,6 +51,7 @@ import type {
   RunEventMessage,
   RunLogEvent,
   RunPreparation,
+  SendMessageRequest,
   StartRunRequest,
   TaskRunsState
 } from './agent-run'
@@ -137,6 +138,7 @@ export const IPC_CHANNELS = {
     state: 'claude:state',
     prepare: 'claude:prepare',
     start: 'claude:start',
+    send: 'claude:send',
     cancel: 'claude:cancel',
     answerPermission: 'claude:answer-permission',
     answerQuestion: 'claude:answer-question',
@@ -854,6 +856,8 @@ export interface OrkioApi {
     prepare(projectId: string, taskId: string): Promise<ClaudeResult<RunPreparation>>
     /** Cria/reutiliza o worktree e inicia (ou enfileira) a execução. */
     start(request: StartRunRequest): Promise<ClaudeResult<TaskRunsState>>
+    /** Mensagem do campo da sessão: continua a última sessão da tarefa ou começa uma. */
+    send(request: SendMessageRequest): Promise<ClaudeResult<TaskRunsState>>
     cancel(runId: string): Promise<void>
     answerPermission(runId: string, requestId: string, answer: PermissionAnswer): Promise<void>
     answerQuestion(runId: string, requestId: string, answers: Record<string, string>): Promise<void>

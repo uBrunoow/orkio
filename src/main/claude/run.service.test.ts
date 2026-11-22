@@ -155,6 +155,31 @@ describe('RunService', () => {
     expect(store.events('task-1').map((e) => e.kind)).toEqual(['run_finished', 'run_started'])
   })
 
+  it('guarda a sessão; continuar usa --resume com o mesmo id e manda só o texto', async () => {
+    const first = await start(1)
+    await spawned(1)
+    const sessionId = runs[0]!.opts.sessionId
+    expect(runs[0]!.opts.resume).toBe(false)
+    expect(runs[0]!.opts.prompt).toContain('Briefing da tarefa')
+    expect(service.view(first.id)?.hasSession).toBe(true)
+    expect(service.lastSession('task-1')).toBe(sessionId)
+    runs[0]!.exit(0)
+    await finished(first.id)
+
+    const second = await start(1, { text: 'Agora rode os testes', resumeSessionId: sessionId })
+    await spawned(2)
+    expect(runs[1]!.opts).toMatchObject({
+      sessionId,
+      resume: true,
+      prompt: 'Agora rode os testes'
+    })
+    expect(store.events('task-1')[0]?.detail).toMatchObject({ resumed: true })
+    runs[1]!.exit(0)
+    await finished(second.id)
+    expect(service.lastSession('task-1')).toBe(sessionId)
+    expect(service.lastSession('task-2')).toBeNull()
+  })
+
   it('agente (8A): instruções e modelo vão para o CLI; execução fica com o agente; política igual', async () => {
     const view = await start(1, {
       agent: { key: 'repo:ana', name: 'Ana', prompt: 'Você é Ana.', model: 'sonnet' }
