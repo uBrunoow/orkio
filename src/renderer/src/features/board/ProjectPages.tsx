@@ -7,7 +7,6 @@ import { PageState } from '../../components/PageState'
 /** Abas de Fluxos (até a Tarefa 9 juntar tudo em Quadro e automações). */
 type FlowsTab = 'flows' | 'alva'
 import { AlvaPage } from '../alva/AlvaPage'
-import { ProjectContextPage } from '../claude/ProjectContextPage'
 import { TaskFlowsPage } from '../task-flows/TaskFlowsPage'
 import { BoardSettings } from './BoardSettings'
 import { FlowPage } from './FlowPage'
@@ -185,29 +184,6 @@ export function FlowsPage({
             </WithBoard>
           )}
         </>
-      )}
-    </VStack>
-  )
-}
-
-export function ContextPage({
-  project,
-  onOpenProjects
-}: {
-  project: ProjectView | null
-  onOpenProjects(): void
-}): React.JSX.Element {
-  return (
-    <VStack gap={5}>
-      <PageHeader
-        title="Contexto do Claude"
-        {...(project ? { context: project.name } : {})}
-        subtitle="Vai no resumo da tarefa de toda execução deste projeto, antes da descrição."
-      />
-      {!project ? (
-        <NoProject onOpenProjects={onOpenProjects} />
-      ) : (
-        <ProjectContextPage key={project.id} projectId={project.id} />
       )}
     </VStack>
   )

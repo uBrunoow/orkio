@@ -127,8 +127,6 @@ export interface RunPreparation extends TaskRunsState {
   branchIsNew: boolean
   /** Comandos vistos na última sessão do Claude Code (system/init). */
   commands: string[]
-  /** Avisos do contexto do projeto (página ilegível, contexto cortado pelo limite). */
-  contextWarnings: string[]
   /** Agente da tarefa (8A): "Rodar como <nome>"; `problem` = não pode rodar agora (e por quê). */
   agent: { name: string; problem: string | null } | null
 }

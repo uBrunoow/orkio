@@ -1,6 +1,5 @@
 import type { IpcMain } from 'electron'
 import type {
-  ProjectClaudeContext,
   ClaudeCodeStatus,
   ClaudeResult,
   EditorId,
@@ -54,25 +53,6 @@ export function isRepoPath(value: unknown): value is string {
     !/^[A-Za-z]:/.test(value) &&
     !value.split(/[\\/]/).includes('..') &&
     ![...value].some((c) => c.charCodeAt(0) < 0x20)
-  )
-}
-
-export function isContext(value: unknown): value is ProjectClaudeContext {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as Record<string, unknown>
-  return (
-    typeof v['instructions'] === 'string' &&
-    v['instructions'].length <= 20_000 &&
-    Array.isArray(v['notionPages']) &&
-    v['notionPages'].length <= 20 &&
-    v['notionPages'].every(
-      (p) =>
-        typeof p === 'object' &&
-        p !== null &&
-        isId((p as { id?: unknown }).id) &&
-        typeof (p as { name?: unknown }).name === 'string' &&
-        (p as { name: string }).name.length <= 500
-    )
   )
 }
 
@@ -180,15 +160,6 @@ export function registerClaudeIpc(
     isId(projectId) && isId(taskId) && EDITORS.includes(editor as EditorId)
       ? service.openEditor(projectId, taskId, editor as EditorId)
       : INVALID
-  )
-  guarded(ch.getContext, GENERIC, async (projectId) =>
-    isId(projectId) ? service.getContext(projectId) : INVALID
-  )
-  guarded(ch.saveContext, GENERIC, async (projectId, context) =>
-    isId(projectId) && isContext(context) ? service.saveContext(projectId, context) : INVALID
-  )
-  guarded(ch.searchPages, GENERIC, async (query) =>
-    typeof query === 'string' && query.length <= 200 ? service.searchPages(query) : INVALID
   )
   guarded(ch.artifacts, GENERIC, async (projectId, taskId) =>
     isId(projectId) && isId(taskId) ? service.artifacts(projectId, taskId) : INVALID

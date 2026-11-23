@@ -38,7 +38,6 @@ export interface AlvaStatusView {
   maxParallel: number
 }
 import type {
-  ProjectClaudeContext,
   ArtifactCandidate,
   ArtifactPublishMode,
   ArtifactView,
@@ -153,9 +152,6 @@ export const IPC_CHANNELS = {
     unlinkBranch: 'claude:unlink-branch',
     catalog: 'claude:catalog',
     artifacts: 'claude:artifacts',
-    getContext: 'claude:get-context',
-    saveContext: 'claude:save-context',
-    searchPages: 'claude:search-pages',
     attachArtifact: 'claude:attach-artifact',
     publishArtifact: 'claude:publish-artifact',
     /** Evento main → renderer: evento normalizado de uma execução. */
@@ -892,14 +888,6 @@ export interface OrkioApi {
     ): Promise<ClaudeResult<TaskBranchesView>>
     /** Comandos/skills instalados (usuário, projeto, plugins). Só metadados; recarrega a cada chamada. */
     catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>>
-    /** Contexto do projeto: instruções + páginas de referência do Notion (ids e nomes). */
-    getContext(projectId: string): Promise<ClaudeResult<ProjectClaudeContext>>
-    saveContext(
-      projectId: string,
-      context: ProjectClaudeContext
-    ): Promise<ClaudeResult<ProjectClaudeContext>>
-    /** Busca páginas do Notion por título (para escolher referências). */
-    searchPages(query: string): Promise<ClaudeResult<{ id: string; name: string }[]>>
     /** Documentos alterados no ambiente (candidatos) e artefatos anexados à tarefa. */
     artifacts(
       projectId: string,
