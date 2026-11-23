@@ -109,7 +109,9 @@ export function builderConfig(env: Env): Configuration {
     // Linux: AppImage (roda em qualquer distro e se atualiza sozinho pelo electron-updater, que lê o
     // latest-linux.yml) e .deb (instala no Ubuntu/Debian; atualização à mão). Só x64 por enquanto.
     linux: {
-      icon: 'build/icon.png',
+      // Pasta com um PNG por tamanho (gerada por `pnpm icons`): o tema hicolor do GNOME só procura
+      // até 512×512, então só o 1024 deixava o atalho sem ícone.
+      icon: 'build/icons',
       category: 'Development',
       executableName: 'orkio',
       synopsis: 'Orquestração de desenvolvimento com IA (Notion, GitHub, Claude Code)',
