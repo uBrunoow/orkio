@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.4] - 2026-11-23
+
 ### Corrigido
 
 - Linux: o atalho do Orkio aparece com o ícone na busca e no dock (o pacote só trazia o ícone
