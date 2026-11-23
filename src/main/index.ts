@@ -728,6 +728,23 @@ function createUpdates(deps: {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.updates.statusChanged, status)
       }
+    },
+    askRestart: async (next) => {
+      const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+      const options: Electron.MessageBoxOptions = {
+        type: 'info',
+        title: 'Atualização pronta',
+        message: `O Orkio ${next} foi baixado.`,
+        detail: 'Reiniciar agora para atualizar? O Orkio fecha e abre de novo na versão nova.',
+        buttons: ['Reiniciar agora', 'Depois'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      }
+      const { response } = win
+        ? await dialog.showMessageBox(win, options)
+        : await dialog.showMessageBox(options)
+      return response === 0
     }
   })
 }

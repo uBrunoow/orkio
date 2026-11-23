@@ -1008,48 +1008,67 @@ export async function openedUrls(app: ElectronApplication): Promise<string[]> {
  */
 export async function simulateUpdate(
   app: ElectronApplication,
-  update: { version: string } | null
+  update: { version: string } | null,
+  /** Resposta ao diálogo "Reiniciar agora?" (padrão "Depois"). */
+  restart = false
 ): Promise<void> {
-  await app.evaluate((_electron, next) => {
-    type FakeUpdater = {
-      forceDevUpdateConfig: boolean
-      autoDownload: boolean
-      checkForUpdates(): Promise<unknown>
-      quitAndInstall(): void
-      emit(event: string, arg?: unknown): boolean
-    }
-    const g = globalThis as unknown as { __updateInstalls?: number }
-    // O módulo já carregado pelo main (cache do require do Node): o mesmo singleton do app.
-    const Module = (process as unknown as { mainModule: { constructor: unknown } }).mainModule
-      .constructor as { _cache: Record<string, { exports: unknown }> }
-    const key = Object.keys(Module._cache).find((k) =>
-      /[\\/]electron-updater[\\/]out[\\/]main\.js$/.test(k)
-    )
-    if (!key) throw new Error('electron-updater não carregado')
-    const u = (Module._cache[key]!.exports as { autoUpdater: FakeUpdater }).autoUpdater
-    g.__updateInstalls ??= 0
-    u.forceDevUpdateConfig = true
-    u.checkForUpdates = async () => {
-      u.emit('checking-for-update')
-      if (!next) {
-        u.emit('update-not-available', { version: '0.0.0' })
-        return null
+  await app.evaluate(
+    ({ dialog }, [next, answer]) => {
+      type FakeUpdater = {
+        forceDevUpdateConfig: boolean
+        autoDownload: boolean
+        checkForUpdates(): Promise<unknown>
+        quitAndInstall(): void
+        emit(event: string, arg?: unknown): boolean
       }
-      const info = {
-        version: next.version,
-        files: [{ url: `Orkio-${next.version}-win-x64-setup.exe` }]
+      const g = globalThis as unknown as { __updateInstalls?: number; __restartPrompts?: string[] }
+      // Diálogo nativo "Reiniciar agora?": responde sem abrir janela e registra a pergunta.
+      g.__restartPrompts ??= []
+      dialog.showMessageBox = (async (...args: unknown[]) => {
+        const opts = args.at(-1) as { message?: string }
+        g.__restartPrompts!.push(opts.message ?? '')
+        return { response: answer ? 0 : 1, checkboxChecked: false }
+      }) as typeof dialog.showMessageBox
+      // O módulo já carregado pelo main (cache do require do Node): o mesmo singleton do app.
+      const Module = (process as unknown as { mainModule: { constructor: unknown } }).mainModule
+        .constructor as { _cache: Record<string, { exports: unknown }> }
+      const key = Object.keys(Module._cache).find((k) =>
+        /[\\/]electron-updater[\\/]out[\\/]main\.js$/.test(k)
+      )
+      if (!key) throw new Error('electron-updater não carregado')
+      const u = (Module._cache[key]!.exports as { autoUpdater: FakeUpdater }).autoUpdater
+      g.__updateInstalls ??= 0
+      u.forceDevUpdateConfig = true
+      u.checkForUpdates = async () => {
+        u.emit('checking-for-update')
+        if (!next) {
+          u.emit('update-not-available', { version: '0.0.0' })
+          return null
+        }
+        const info = {
+          version: next.version,
+          files: [{ url: `Orkio-${next.version}-win-x64-setup.exe` }]
+        }
+        u.emit('update-available', info)
+        if (u.autoDownload) {
+          u.emit('download-progress', { percent: 50 })
+          u.emit('update-downloaded', info)
+        }
+        return { updateInfo: info }
       }
-      u.emit('update-available', info)
-      if (u.autoDownload) {
-        u.emit('download-progress', { percent: 50 })
-        u.emit('update-downloaded', info)
+      u.quitAndInstall = () => {
+        g.__updateInstalls = (g.__updateInstalls ?? 0) + 1
       }
-      return { updateInfo: info }
-    }
-    u.quitAndInstall = () => {
-      g.__updateInstalls = (g.__updateInstalls ?? 0) + 1
-    }
-  }, update)
+    },
+    [update, restart] as const
+  )
+}
+
+/** Mensagens do diálogo "Reiniciar agora?" mostradas até aqui. */
+export async function restartPrompts(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(
+    () => (globalThis as unknown as { __restartPrompts?: string[] }).__restartPrompts ?? []
+  )
 }
 
 export async function updateInstalls(app: ElectronApplication): Promise<number> {

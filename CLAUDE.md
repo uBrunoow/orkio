@@ -852,8 +852,10 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   com o electron-builder da 6B). O feed é público: nada de token.
 - `UpdateService` (`main/updates/`) recebe o `autoUpdater` como `UpdaterLike`. Ligado só com
   `app.isPackaged`; no Linux, só no AppImage (`APPIMAGE` no ambiente, `isAppImage`; o .deb não se
-  atualiza) (ou `forceDevUpdateConfig`, flag oficial, usada no E2E). Checa 10 s
-  depois de abrir e a cada 4 h (±10%) e em "Procurar atualizações".
+  atualiza) (ou `forceDevUpdateConfig`, flag oficial, usada no E2E). Checa 5 s
+  depois de abrir e a cada 4 h (±10%) e em "Procurar atualizações". Baixou com o app parado
+  (nada rodando): diálogo nativo "Reiniciar agora?" uma vez por versão (como o ilumi); "Reiniciar
+  agora" = `install('if_idle')`; "Depois" ou trabalho rodando → banner e instala ao sair.
 - **Modos:** Windows e macOS assinado = `auto` (`autoDownload`, `autoInstallOnAppQuit`; instala ao
   sair ou em "Reiniciar e atualizar"). macOS sem Developer ID (`codesign -dv` no bundle: ad-hoc ou
   sem TeamIdentifier; sem `codesign`, vale `MAIN_VITE_MAC_SIGNED=1` do build) = `manual`: não baixa;

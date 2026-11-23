@@ -1,8 +1,10 @@
 /**
  * Atualizações automáticas (Etapa 6C) com electron-updater, lendo o repo público de releases.
  *
- * - Só no app empacotado (macOS/Windows). Checa 10 s depois de abrir e a cada ~4 h, e no botão.
- * - Windows e macOS assinado: baixa em segundo plano; instala ao sair ou em "Reiniciar e atualizar".
+ * - Só no app empacotado (macOS/Windows/AppImage). Checa 5 s depois de abrir e a cada ~4 h, e no botão.
+ * - Windows, macOS assinado e AppImage: baixa em segundo plano e, ao terminar, pergunta uma vez
+ *   "Reiniciar agora?" (como o ilumi) se nada estiver rodando; senão fica o banner. "Depois" instala
+ *   ao sair ou em "Reiniciar e atualizar".
  * - macOS sem assinatura: não baixa (o Squirrel.Mac recusaria); avisa e abre o DMG certo.
  * - Nunca reinicia por cima de execução do Claude, fluxo rodando ou escrita pendente no Notion sem
  *   a pessoa escolher: "Atualizar quando terminar" (espera ficar ocioso) ou "agora mesmo assim"
@@ -27,7 +29,7 @@ import {
   type UpdateStatus
 } from '../../shared/updates'
 
-export const FIRST_CHECK_DELAY_MS = 10_000
+export const FIRST_CHECK_DELAY_MS = 5_000
 export const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 /** Intervalo do teste de "ocioso" enquanto espera para instalar. */
 export const IDLE_POLL_MS = 2_000
@@ -81,6 +83,11 @@ export interface UpdateServiceDeps {
   /** Notas da versão atual (CHANGELOG embutido no build). */
   releaseNotes(): ReleaseNotes | null
   emit(status: UpdateStatus): void
+  /**
+   * Atualização baixada com o app ocioso: pergunta se reinicia agora (diálogo nativo). `true` =
+   * reiniciar. Sem isso, a atualização espera o banner/fechamento.
+   */
+  askRestart?(version: string): Promise<boolean>
   now?: () => Date
   random?: () => number
   schedule?: (fn: () => void, ms: number) => { cancel(): void }
@@ -109,6 +116,8 @@ export class UpdateService {
   private macSigned: boolean | null = null
   private started = false
   private sessionNotes: ReleaseNotes | null | undefined = undefined
+  /** Versões para as quais já perguntamos "Reiniciar agora?" nesta sessão (não insiste). */
+  private readonly asked = new Set<string>()
 
   constructor(private readonly deps: UpdateServiceDeps) {
     this.now = deps.now ?? (() => new Date())
@@ -276,6 +285,21 @@ export class UpdateService {
     return 'auto'
   }
 
+  /**
+   * Baixou: se o app está parado, pergunta uma vez por versão se reinicia agora. Com trabalho
+   * rodando não pergunta (o banner oferece "Atualizar quando terminar").
+   */
+  private async offerRestart(): Promise<void> {
+    const version = this.found?.version
+    if (!version || !this.deps.askRestart || this.mode() !== 'auto') return
+    if (this.asked.has(version) || this.installing) return
+    if (this.deps.busyCount() > 0) return
+    this.asked.add(version)
+    const restart = await this.deps.askRestart(version).catch(() => false)
+    // Algo pode ter começado enquanto o diálogo estava aberto: só instala se continuar parado.
+    if (restart) await this.install('if_idle')
+  }
+
   private async resolveMacSignature(): Promise<void> {
     if (this.deps.platform !== 'darwin' || this.macSigned !== null) return
     try {
@@ -354,6 +378,7 @@ export class UpdateService {
       this.progress = null
       this.error = null
       this.emit()
+      void this.offerRestart()
     })
     u.on('error', (error: unknown) => this.fail(error))
   }

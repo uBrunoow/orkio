@@ -6,6 +6,11 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Mudado
+
+- Atualizações: o Orkio procura a versão nova logo ao abrir e, quando termina de baixar com nada
+  rodando, pergunta "Reiniciar agora?" para já abrir na versão nova (antes só instalava ao fechar).
+
 ## [0.2.8] - 2026-11-23
 
 ### Mudado
