@@ -153,3 +153,22 @@ export const OverviewAttentionIcon: SvgIcon = (props) => (
   </svg>
 )
 OverviewAttentionIcon.displayName = 'OverviewAttentionIcon'
+
+/** Ponto de estado colorido pelo tema (itens da lista lateral, onde o ícone não recebe cor). */
+function toneDot(color: string, name: string): SvgIcon {
+  const Dot: SvgIcon = (props) => (
+    <svg viewBox="0 0 24 24" aria-hidden="true" {...props}>
+      <circle cx="12" cy="12" r="4" fill={color} />
+    </svg>
+  )
+  Dot.displayName = name
+  return Dot
+}
+
+export const TONE_DOT_ICONS = {
+  success: toneDot('var(--color-success)', 'SuccessDot'),
+  warning: toneDot('var(--color-warning)', 'WarningDot'),
+  danger: toneDot('var(--color-error)', 'DangerDot'),
+  running: toneDot('var(--color-accent)', 'RunningDot'),
+  neutral: toneDot('var(--color-text-secondary)', 'NeutralDot')
+} as const

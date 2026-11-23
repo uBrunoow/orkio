@@ -1,49 +1,35 @@
-import { Fragment, useCallback, useEffect, useMemo, useReducer, useState } from 'react'
-import { Badge } from '@astryxdesign/core/Badge'
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { AppShell } from '@astryxdesign/core/AppShell'
+import { Button } from '@astryxdesign/core/Button'
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
 import { HStack } from '@astryxdesign/core/HStack'
-import { IconButton } from '@astryxdesign/core/IconButton'
 import { Icon } from '@astryxdesign/core/Icon'
+import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
-import { TopNav } from '@astryxdesign/core/TopNav'
-import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { VStack } from '@astryxdesign/core/VStack'
-import type { ProjectView } from '../../shared/ipc-contract'
-import {
-  AgentsIcon,
-  BellIcon,
-  BoardIcon,
-  ClaudeLogo,
-  FlowsIcon,
-  IntegrationsIcon,
-  OverviewAttentionIcon,
-  OverviewIcon,
-  ProjectsIcon,
-  SearchIcon,
-  SettingsIcon,
-  StagesIcon,
-  type SvgIcon
-} from './components/icons'
+import type { BoardTaskRef, ProjectView } from '../../shared/ipc-contract'
+import { AgentsIcon, BoardIcon, SearchIcon, SettingsIcon, TONE_DOT_ICONS } from './components/icons'
 import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
 import {
   ROUTE_TITLES,
+  SETTINGS_TITLES,
   initialRouter,
-  isProjectRoute,
+  routeForTaskRef,
   routerReducer,
-  type ProjectRouteName,
   type Route
 } from './app/routes'
 import { CommandMenu, type CommandData } from './app/CommandMenu'
 import { SHORTCUTS, globalShortcut, isTextField } from './app/shortcuts'
+import { initialRoute } from './app/initial-route'
+import type { SidebarTask } from './app/task-groups'
+import { useSidebarData } from './app/useSidebarData'
+import { WaitingBell } from './app/WaitingBell'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
-import { AutomationsPage, ContextPage, FlowsPage } from './features/board/ProjectPages'
+import { AutomationsPage, FlowsPage } from './features/board/ProjectPages'
 import { TaskPage } from './features/board/TaskPage'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
-import { OverviewPage } from './features/overview/OverviewPage'
-import { useWaitingCount } from './features/overview/useOverview'
 import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
 import { SettingsPage } from './features/settings/SettingsPage'
@@ -52,22 +38,15 @@ import { UpdateBanner } from './features/settings/UpdateBanner'
 /** Preferência de interface (não secreta): último projeto escolhido no menu. */
 const CURRENT_PROJECT_KEY = 'orkio.currentProject'
 
-const PROJECT_ITEMS: { name: ProjectRouteName; icon: SvgIcon }[] = [
-  { name: 'board', icon: BoardIcon },
-  { name: 'automations', icon: StagesIcon },
-  { name: 'flows', icon: FlowsIcon },
-  { name: 'context', icon: ClaudeLogo }
-]
-
-/** Projetos vinculados ao Notion (os que têm quadro). Relido a cada navegação: é local e barato. */
-function useLinkedProjects(trigger: number): ProjectView[] | null {
+/** Projetos (todos; o quadro só existe nos vinculados ao Notion). Relido a cada navegação. */
+function useProjects(trigger: number): ProjectView[] | null {
   const [projects, setProjects] = useState<ProjectView[] | null>(null)
   useEffect(() => {
     let active = true
     void window.orkio.projects
       .list()
       .then((result) => {
-        if (active) setProjects(result.projects.filter((p) => p.notionProject))
+        if (active) setProjects(result.projects)
       })
       .catch(() => {
         if (active) setProjects([])
@@ -85,69 +64,75 @@ function keyshortcut(route: Route['name']): string | undefined {
   return keys?.replace('mod', navigator.userAgent.includes('Mac') ? 'Meta' : 'Control')
 }
 
+function routeProjectId(route: Route): string | undefined {
+  return 'projectId' in route ? route.projectId : undefined
+}
+
 export function App(): React.JSX.Element | null {
-  const [router, dispatch] = useReducer(routerReducer, initialRouter({ name: 'welcome' }))
+  const [router, dispatch] = useReducer(routerReducer, initialRouter({ name: 'board' }))
   const { route } = router
   const navigate = useCallback((next: Route) => dispatch({ type: 'navigate', route: next }), [])
-  const projects = useLinkedProjects(router.key)
-  // Quem já tem projeto abre na Visão geral (6D); sem projeto, "Vamos começar".
-  const [ready, setReady] = useState(false)
-  useEffect(() => {
-    let active = true
-    void window.orkio.projects
-      .list()
-      .then((r) => {
-        if (!active) return
-        if (r.projects.length > 0) dispatch({ type: 'reset', route: { name: 'overview' } })
-        setReady(true)
-      })
-      .catch(() => {
-        if (active) setReady(true)
-      })
-    return () => {
-      active = false
-    }
-  }, [])
-  const waiting = useWaitingCount(ready && route.name !== 'welcome')
+  const projects = useProjects(router.key)
   const [chosenProject, setChosenProject] = useState<string | null>(() =>
     window.localStorage.getItem(CURRENT_PROJECT_KEY)
   )
 
-  // Projeto atual: o da rota (ex.: notificação) → o escolhido no menu → o primeiro vinculado.
-  const routeProjectId = isProjectRoute(route) ? route.projectId : undefined
+  // Projeto atual: o da rota (ex.: notificação) → o escolhido no menu → o primeiro.
+  const fromRoute = routeProjectId(route)
   const project = useMemo(() => {
     if (!projects) return null
     return (
-      projects.find((p) => p.id === routeProjectId) ??
+      projects.find((p) => p.id === fromRoute) ??
       projects.find((p) => p.id === chosenProject) ??
       projects[0] ??
       null
     )
-  }, [projects, routeProjectId, chosenProject])
+  }, [projects, fromRoute, chosenProject])
+  const linkedProject = project?.notionProject ? project : null
 
   const chooseProject = useCallback((id: string) => {
     setChosenProject(id)
     window.localStorage.setItem(CURRENT_PROJECT_KEY, id)
   }, [])
 
-  // Clique numa notificação de automação: abre a tarefa no quadro do projeto dela.
-  useEffect(
-    () =>
-      window.orkio.board.onOpenTask((ref) => {
-        chooseProject(ref.projectId)
-        navigate({
-          name: 'board',
-          projectId: ref.projectId,
-          taskId: ref.taskId,
-          ...(ref.section ? { section: ref.section } : {})
-        })
-      }),
+  const sidebar = useSidebarData(linkedProject?.id ?? null)
+
+  // Primeira tela: sem projeto, Primeiros passos; com algo esperando, essa tarefa; senão o Quadro.
+  const decided = useRef(false)
+  useEffect(() => {
+    if (decided.current || projects === null) return
+    if (projects.length === 0) {
+      decided.current = true
+      dispatch({ type: 'reset', route: { name: 'setup' } })
+      return
+    }
+    // Espera a Visão geral responder para saber se há algo esperando você (só dados locais).
+    if (linkedProject && sidebar.snapshot === null) return
+    decided.current = true
+    dispatch({
+      type: 'reset',
+      route: initialRoute({
+        projectCount: projects.length,
+        currentProjectId: linkedProject?.id ?? null,
+        groups: sidebar.groups
+      })
+    })
+  }, [projects, linkedProject, sidebar.snapshot, sidebar.groups])
+
+  const openTask = useCallback(
+    (ref: BoardTaskRef) => {
+      chooseProject(ref.projectId)
+      navigate(routeForTaskRef(ref))
+    },
     [chooseProject, navigate]
   )
 
-  // Atalhos globais e Command Palette (fora da tela inicial).
+  // Clique numa notificação: abre a tarefa (troca o projeto quando é de outro).
+  useEffect(() => window.orkio.board.onOpenTask(openTask), [openTask])
+
+  // Atalhos globais e Command Palette (fora dos Primeiros passos).
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const inShell = route.name !== 'welcome'
+  const inShell = route.name !== 'setup'
   useEffect(() => {
     if (!inShell) return
     const isMac = navigator.userAgent.includes('Mac')
@@ -177,78 +162,44 @@ export function App(): React.JSX.Element | null {
   const runCommand = (command: CommandData): void => {
     if (command.projectId) {
       chooseProject(command.projectId)
-      navigate(isProjectRoute(route) ? { name: route.name } : { name: 'board' })
+      navigate(route.name === 'task' || route.name === 'setup' ? { name: 'board' } : route)
       return
     }
     if (!command.route) return
-    if (isProjectRoute(command.route) && command.route.projectId) {
-      chooseProject(command.route.projectId)
-    }
+    const target = routeProjectId(command.route)
+    if (target) chooseProject(target)
     navigate(command.route)
   }
 
-  if (!ready) return null
+  // A primeira tela é decidida por um `reset` (chave nova); até lá, nada na tela.
+  if (router.key === 0) return null
 
-  // Tela inicial em tela cheia, sem a navegação.
-  if (route.name === 'welcome') {
+  const toSettings = (section: 'integrations' | 'projects'): void =>
+    navigate({ name: 'settings', section })
+  const toBoard = (): void => navigate({ name: 'board' })
+
+  // Primeiros passos em tela cheia, sem a navegação.
+  if (route.name === 'setup') {
     return (
       <WelcomePage
-        onStart={() => navigate({ name: 'projects' })}
-        onOpenIntegrations={() => navigate({ name: 'integrations' })}
+        onStart={() => toSettings('projects')}
+        onOpenIntegrations={() => toSettings('integrations')}
       />
     )
   }
 
-  const toProjects = (): void => navigate({ name: 'projects' })
-  const toIntegrations = (): void => navigate({ name: 'integrations' })
-  const toBoard = (): void => navigate({ name: 'board' })
-
   let page: React.ReactNode
+  let title: string = ROUTE_TITLES[route.name]
   switch (route.name) {
-    case 'overview':
-      page = (
-        <OverviewPage
-          onOpenTask={(ref) => {
-            chooseProject(ref.projectId)
-            navigate({
-              name: 'board',
-              projectId: ref.projectId,
-              taskId: ref.taskId,
-              ...(ref.section ? { section: ref.section } : {})
-            })
-          }}
-          onOpenProject={(projectId) => {
-            chooseProject(projectId)
-            navigate({ name: 'board', projectId })
-          }}
-          onOpenProjects={toProjects}
-        />
-      )
-      break
-    case 'projects':
-      page = (
-        <ProjectsPage
-          onOpenIntegrations={toIntegrations}
-          onOpenBoard={(projectId) => {
-            chooseProject(projectId)
-            navigate({ name: 'board', projectId })
-          }}
-        />
-      )
-      break
-    case 'integrations':
-      page = <IntegrationsPage />
-      break
     case 'board':
       page = (
         <BoardPage
-          project={projects === null ? null : project}
-          openTaskId={route.taskId ?? null}
-          focusSection={route.section ?? null}
-          onOpenIntegrations={toIntegrations}
-          onOpenProjects={toProjects}
+          project={projects === null ? null : linkedProject}
+          openTaskId={null}
+          onOpenIntegrations={() => toSettings('integrations')}
+          onOpenProjects={() => toSettings('projects')}
           onExpandTask={(taskId) =>
-            project && navigate({ name: 'task', projectId: project.id, taskId })
+            linkedProject && navigate({ name: 'task', projectId: linkedProject.id, taskId })
           }
         />
       )
@@ -256,48 +207,61 @@ export function App(): React.JSX.Element | null {
     case 'task':
       page = (
         <TaskPage
-          project={projects === null ? null : project}
+          project={projects === null ? null : linkedProject}
           taskId={route.taskId}
-          onBackToBoard={(taskId) =>
-            navigate({ name: 'board', projectId: route.projectId, ...(taskId ? { taskId } : {}) })
-          }
+          onBackToBoard={() => navigate({ name: 'board', projectId: route.projectId })}
         />
       )
-      break
-    case 'automations':
-      page = (
-        <AutomationsPage
-          project={project}
-          onOpenBoard={toBoard}
-          onOpenFlows={() => navigate({ name: 'flows' })}
-          onOpenProjects={toProjects}
-        />
-      )
-      break
-    case 'flows':
-      page = (
-        <FlowsPage
-          project={project}
-          tab={route.tab ?? 'flows'}
-          onTabChange={(tab) => navigate({ name: 'flows', tab })}
-          onOpenBoard={toBoard}
-          onOpenProjects={toProjects}
-        />
-      )
-      break
-    case 'context':
-      page = <ContextPage project={project} onOpenProjects={toProjects} />
       break
     case 'agents':
       page = <AgentsPage />
       break
-    case 'settings':
-      page = <SettingsPage />
+    case 'settings': {
+      const section = route.section ?? 'integrations'
+      title = `${ROUTE_TITLES.settings} › ${SETTINGS_TITLES[section]}`
+      switch (section) {
+        case 'integrations':
+          page = <IntegrationsPage />
+          break
+        case 'projects':
+          page = (
+            <ProjectsPage
+              onOpenIntegrations={() => toSettings('integrations')}
+              onOpenBoard={(projectId) => {
+                chooseProject(projectId)
+                navigate({ name: 'board', projectId })
+              }}
+            />
+          )
+          break
+        case 'board':
+          page =
+            route.tab === 'flows' ? (
+              <FlowsPage
+                project={linkedProject}
+                tab="flows"
+                onTabChange={() => undefined}
+                onOpenBoard={toBoard}
+                onOpenProjects={() => toSettings('projects')}
+              />
+            ) : (
+              <AutomationsPage
+                project={linkedProject}
+                onOpenBoard={toBoard}
+                onOpenFlows={() => navigate({ name: 'settings', section: 'board', tab: 'flows' })}
+                onOpenProjects={() => toSettings('projects')}
+              />
+            )
+          break
+        case 'agents':
+          page = <AgentsPage />
+          break
+        default:
+          page = <SettingsPage />
+      }
       break
+    }
   }
-
-  const goOverview = (): void => navigate({ name: 'overview' })
-  const waitingLabel = waiting > 0 ? `${waiting} esperando você` : 'Nada esperando você'
 
   const projectPicker =
     projects && projects.length > 1 ? (
@@ -305,14 +269,20 @@ export function App(): React.JSX.Element | null {
         button={{
           label: project ? project.name : 'Projetos',
           size: 'sm',
-          variant: 'ghost',
+          variant: 'secondary',
           'aria-label': `Projeto atual: ${project ? project.name : 'nenhum'}. Trocar projeto`
         }}
         items={projects.map((p) => ({
           label: p.name,
           onClick: () => {
             chooseProject(p.id)
-            navigate(isProjectRoute(route) ? { name: route.name } : { name: 'board' })
+            navigate(
+              route.name === 'board' || route.name === 'settings'
+                ? { ...route, projectId: p.id }
+                : route.name === 'agents'
+                  ? route
+                  : { name: 'board' }
+            )
           }
         }))}
       />
@@ -322,117 +292,135 @@ export function App(): React.JSX.Element | null {
       </Text>
     )
 
+  const taskItems = (
+    title: string,
+    items: SidebarTask[],
+    extra?: React.ReactNode
+  ): React.ReactNode =>
+    items.length === 0 && !extra ? null : (
+      <SideNavSection title={title} endContent={<Text type="supporting">{items.length}</Text>}>
+        {items.map((t) => (
+          <SideNavItem
+            key={t.taskId}
+            size="sm"
+            icon={TONE_DOT_ICONS[t.tone]}
+            label={`${t.displayId ? `${t.displayId} · ` : ''}${t.title}`}
+            isSelected={route.name === 'task' && route.taskId === t.taskId}
+            onClick={() =>
+              linkedProject &&
+              openTask({
+                projectId: linkedProject.id,
+                taskId: t.taskId,
+                ...(t.section ? { section: t.section } : {})
+              })
+            }
+          />
+        ))}
+        {extra}
+      </SideNavSection>
+    )
+
+  const groups = sidebar.groups
   return (
     <AppShell
       height="fill"
-      contentPadding={6}
+      contentPadding={0}
       // Sem gaveta mobile: as camadas deslizantes da Astryx injetam <style> (bloqueado pela CSP).
       mobileNav={false}
-      topNav={
-        <TopNav
-          label="Barra superior"
-          heading={<OrkioLogo variant="simple" withWordmark size={18} />}
-          startContent={projectPicker}
-          endContent={
-            <HStack gap={1} vAlign="center">
-              <IconButton
-                size="sm"
-                variant="ghost"
-                icon={<Icon icon={SearchIcon} />}
-                label="Buscar (Ctrl K)"
-                aria-keyshortcuts={navigator.userAgent.includes('Mac') ? 'Meta+K' : 'Control+K'}
-                onClick={() => setPaletteOpen(true)}
-              />
-              <IconButton
-                size="sm"
-                variant="ghost"
-                icon={<Icon icon={BellIcon} />}
-                label={waitingLabel}
-                onClick={goOverview}
-              />
-              {waiting > 0 && <Badge label={String(waiting)} variant="orange" aria-hidden="true" />}
-            </HStack>
-          }
-        />
-      }
       sideNav={
         <SideNav
           aria-label="Navegação principal"
-          collapsible={{ isCollapsed: true, hasButton: false }}
-        >
-          <SideNavSection title="Orkio" isHeaderHidden>
-            <SideNavItem
-              label={ROUTE_TITLES.overview}
-              icon={waiting > 0 ? OverviewAttentionIcon : OverviewIcon}
-              isSelected={route.name === 'overview'}
-              aria-keyshortcuts={keyshortcut('overview')}
-              onClick={goOverview}
-            />
-          </SideNavSection>
-          <SideNavSection title={project ? project.name : 'Projeto'} isHeaderHidden>
-            {PROJECT_ITEMS.map((item) => (
-              <SideNavItem
-                key={item.name}
-                label={ROUTE_TITLES[item.name]}
-                icon={item.icon}
-                isSelected={
-                  route.name === item.name || (item.name === 'board' && route.name === 'task')
-                }
-                aria-keyshortcuts={keyshortcut(item.name)}
-                onClick={() => navigate({ name: item.name })}
+          header={<OrkioLogo variant="simple" withWordmark size={18} />}
+          topContent={
+            <VStack gap={2}>
+              {projectPicker}
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={<Icon icon={SearchIcon} />}
+                label="Buscar tarefa"
+                aria-keyshortcuts={navigator.userAgent.includes('Mac') ? 'Meta+K' : 'Control+K'}
+                onClick={() => setPaletteOpen(true)}
               />
-            ))}
-          </SideNavSection>
-          <SideNavSection title="Geral" isHeaderHidden>
-            <SideNavItem
-              label={ROUTE_TITLES.projects}
-              icon={ProjectsIcon}
-              isSelected={route.name === 'projects'}
-              aria-keyshortcuts={keyshortcut('projects')}
-              onClick={toProjects}
-            />
-            <SideNavItem
-              label={ROUTE_TITLES.agents}
-              icon={AgentsIcon}
-              isSelected={route.name === 'agents'}
-              aria-keyshortcuts={keyshortcut('agents')}
-              onClick={() => navigate({ name: 'agents' })}
-            />
-            <SideNavItem
-              label={ROUTE_TITLES.integrations}
-              icon={IntegrationsIcon}
-              isSelected={route.name === 'integrations'}
-              aria-keyshortcuts={keyshortcut('integrations')}
-              onClick={toIntegrations}
-            />
-            <SideNavItem
-              label={ROUTE_TITLES.settings}
-              icon={SettingsIcon}
-              isSelected={route.name === 'settings'}
-              aria-keyshortcuts={keyshortcut('settings')}
-              onClick={() => navigate({ name: 'settings' })}
-            />
-          </SideNavSection>
+            </VStack>
+          }
+          footer={
+            <SideNavSection title="Telas" isHeaderHidden>
+              <SideNavItem
+                label={ROUTE_TITLES.board}
+                icon={BoardIcon}
+                isSelected={route.name === 'board' || route.name === 'task'}
+                aria-keyshortcuts={keyshortcut('board')}
+                onClick={toBoard}
+              />
+              <SideNavItem
+                label={ROUTE_TITLES.agents}
+                icon={AgentsIcon}
+                isSelected={route.name === 'agents'}
+                aria-keyshortcuts={keyshortcut('agents')}
+                onClick={() => navigate({ name: 'agents' })}
+              />
+              <SideNavItem
+                label={ROUTE_TITLES.settings}
+                icon={SettingsIcon}
+                isSelected={route.name === 'settings'}
+                aria-keyshortcuts={keyshortcut('settings')}
+                onClick={() => navigate({ name: 'settings' })}
+              />
+            </SideNavSection>
+          }
+        >
+          {groups && (
+            <>
+              {taskItems('Esperando você', groups.waiting)}
+              {taskItems('Rodando', groups.running)}
+              {taskItems(
+                'A fazer',
+                groups.todo,
+                groups.todoTotal > groups.todo.length ? (
+                  <SideNavItem size="sm" label="Ver todas" onClick={toBoard} />
+                ) : undefined
+              )}
+            </>
+          )}
         </SideNav>
       }
     >
-      {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
-      {/* Só o Quadro usa a altura toda (colunas com rolagem própria); as outras telas rolam o painel. */}
-      <VStack gap={4} {...(route.name === 'board' ? { height: '100%' as const } : {})}>
-        {/* Atualização pronta (6C) e "O que há de novo": no topo de qualquer página. */}
-        <UpdateBanner
-          {...(route.name === 'settings'
-            ? {}
-            : { onOpenSettings: () => navigate({ name: 'settings' }) })}
-        />
+      <VStack height="100%">
+        <HStack gap={2} vAlign="center" padding={3} data-testid="top-bar">
+          <StackItem size="fill">
+            <Text type="supporting" color="secondary">
+              {project ? `${project.name} › ` : ''}
+              <Text type="supporting">{title}</Text>
+            </Text>
+          </StackItem>
+          <WaitingBell snapshot={sidebar.snapshot} onOpen={openTask} />
+        </HStack>
         <StackItem size="fill">
-          <Fragment key={router.key}>{page}</Fragment>
+          {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
+          <VStack
+            gap={4}
+            padding={6}
+            {...(route.name === 'board' || route.name === 'task'
+              ? { height: '100%' as const }
+              : {})}
+          >
+            {/* Atualização pronta (6C) e "O que há de novo": no topo de qualquer página. */}
+            <UpdateBanner
+              {...(route.name === 'settings'
+                ? {}
+                : { onOpenSettings: () => navigate({ name: 'settings', section: 'updates' }) })}
+            />
+            <StackItem size="fill">
+              <Fragment key={router.key}>{page}</Fragment>
+            </StackItem>
+          </VStack>
         </StackItem>
       </VStack>
       <CommandMenu
         isOpen={paletteOpen}
         onOpenChange={setPaletteOpen}
-        projects={projects ?? []}
+        projects={(projects ?? []).filter((p) => p.notionProject)}
         currentProjectId={project?.id ?? null}
         onRun={runCommand}
       />

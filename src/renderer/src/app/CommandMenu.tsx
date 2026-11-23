@@ -7,7 +7,7 @@ import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import type { SearchableItem, SearchSource } from '@astryxdesign/core/Typeahead'
 import type { BoardCard, ProjectView } from '../../../shared/ipc-contract'
-import type { Route } from './routes'
+import { SETTINGS_TITLES, type Route, type SettingsSection } from './routes'
 import { SHORTCUTS } from './shortcuts'
 
 export interface CommandData {
@@ -23,24 +23,31 @@ export interface CommandData {
 
 export type CommandItem = SearchableItem<CommandData>
 
-/** Comandos fixos de navegação, com o atalho de cada um. */
+/** Comandos fixos de navegação, com o atalho de cada um, e as seções de Configurações. */
 function navigationItems(hasProject: boolean): CommandItem[] {
   const group = 'Ir para'
-  const id = (route: Route): string =>
-    `go:${route.name}${route.name === 'flows' && route.tab ? `:${route.tab}` : ''}`
   const items: CommandItem[] = SHORTCUTS.filter((s) => hasProject || !s.isProjectScreen).map(
     (s) => ({
-      id: id(s.route),
+      id: `go:${s.route.name}`,
       label: s.label,
       auxiliaryData: { group, route: s.route, keys: s.keys }
     })
   )
-  if (hasProject) {
-    const alva: Route = { name: 'flows', tab: 'alva' }
+  const sections = (Object.keys(SETTINGS_TITLES) as SettingsSection[]).filter(
+    (section) => hasProject || (section !== 'board' && section !== 'agents')
+  )
+  for (const section of sections) {
     items.push({
-      id: id(alva),
+      id: `go:settings:${section}`,
+      label: SETTINGS_TITLES[section],
+      auxiliaryData: { group, route: { name: 'settings', section } }
+    })
+  }
+  if (hasProject) {
+    items.push({
+      id: 'go:settings:board:flows',
       label: 'Modelos do alva-flow',
-      auxiliaryData: { group, route: alva }
+      auxiliaryData: { group, route: { name: 'settings', section: 'board', tab: 'flows' } }
     })
   }
   return items
@@ -65,7 +72,7 @@ async function loadTasks(projects: readonly ProjectView[]): Promise<CommandItem[
       label: `${card.displayId ?? ''} ${card.title}`.trim(),
       auxiliaryData: {
         group: 'Tarefas',
-        route: { name: 'board', projectId: view.projectId, taskId: card.taskId },
+        route: { name: 'task', projectId: view.projectId, taskId: card.taskId },
         taskRef: {
           displayId: card.displayId,
           where: `${view.projectName} · ${stageName(card)}`

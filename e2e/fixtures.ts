@@ -910,10 +910,7 @@ export async function launchOrkio(
   // Os specs de integrações começam em Integrações.
   await enterApp(page)
   if ((options.startPage ?? 'integrations') === 'integrations') {
-    await page
-      .getByRole('navigation', { name: 'Navegação principal' })
-      .getByRole('button', { name: 'Integrações' })
-      .click()
+    await openSettings(page, 'Integrações')
   }
   return { app, page, logs }
 }
@@ -933,7 +930,19 @@ export async function enterApp(page: Page): Promise<void> {
     await expect(start).toBeVisible()
   }
   if (await start.isVisible()) await start.click()
-  else await nav.getByRole('button', { name: 'Projetos' }).click()
+  else await openSettings(page, 'Projetos')
+}
+
+/** Configurações › seção (Integrações, Projetos, Quadro e automações, ...). */
+export async function openSettings(page: Page, section: string): Promise<void> {
+  await page
+    .getByRole('navigation', { name: 'Navegação principal' })
+    .getByRole('button', { name: 'Configurações', exact: true })
+    .click()
+  const item = page
+    .getByRole('navigation', { name: 'Configurações' })
+    .getByRole('button', { name: section, exact: true })
+  if ((await item.count()) > 0) await item.click()
 }
 
 export async function setFakes(
