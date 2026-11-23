@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.7] - 2026-11-23
+
+### Mudado
+
+- fix(notion): abre links das páginas em notion.com.
+
 ## [0.2.6] - 2026-11-23
 
 ### Mudado
