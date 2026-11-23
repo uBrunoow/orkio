@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.3] - 2026-11-23
+
 ### Adicionado
 
 - Linux (x64): AppImage, que roda em qualquer distro e se atualiza sozinho, e .deb para
