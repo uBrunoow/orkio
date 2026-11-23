@@ -59,11 +59,11 @@ dela estão sempre visíveis, um painel muda conforme a fase) e com Quadro/Agent
 
 ## 4. Abordagens consideradas
 
-| Abordagem | Troca | Decisão |
-| --- | --- | --- |
-| A. Em fases, uma PR por fase (moldura → tarefa → quadro/agentes → primeiros passos) | Sempre entregável; telas velhas convivem com a moldura nova por um tempo | Recomendada por mim, **não escolhida** |
-| **B. Tudo de uma vez, uma branch** | Coerente do primeiro dia; PR grande, muitos E2E mudando juntos, mais demora até ver algo | **Escolhida pelo usuário** |
-| C. UI nova ao lado da velha com chave | Comparar lado a lado; manutenção em dobro (telas, testes, atalhos) | Descartada |
+| Abordagem                                                                           | Troca                                                                                    | Decisão                                |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------- |
+| A. Em fases, uma PR por fase (moldura → tarefa → quadro/agentes → primeiros passos) | Sempre entregável; telas velhas convivem com a moldura nova por um tempo                 | Recomendada por mim, **não escolhida** |
+| **B. Tudo de uma vez, uma branch**                                                  | Coerente do primeiro dia; PR grande, muitos E2E mudando juntos, mais demora até ver algo | **Escolhida pelo usuário**             |
+| C. UI nova ao lado da velha com chave                                               | Comparar lado a lado; manutenção em dobro (telas, testes, atalhos)                       | Descartada                             |
 
 Mitigação da B: a branch é única, mas o trabalho interno segue a ordem do plano (moldura → tarefa →
 configurações → quadro/agentes → primeiros passos → E2E), com typecheck/lint/unit verdes a cada
@@ -71,19 +71,19 @@ etapa do plano; só a PR final é uma.
 
 ## 5. Arquitetura de informação (o que fica, o que sai, para onde vai)
 
-| Hoje | Depois |
-| --- | --- |
-| Visão geral (6D) | **Sai do menu.** "Esperando você" e "Rodando" viram a lista lateral (do projeto atual) e o sino da barra superior (todos os projetos). `OverviewService` continua (alimenta lista, sino, badge do ícone). Semana/atividade deixam de ter tela. |
-| Quadro | Fica (menu, Ctrl/Cmd+1). Visual Compozy. Clicar num card abre a **tela da tarefa**. Kanban/Lista mantidos. |
-| Painel lateral da tarefa no Quadro + TaskPage | Viram **uma** tela da tarefa (seção 6.2). Sem painel lateral no Quadro. |
-| Etapas e automações (3C) + Fluxos (5A) + Entrega (5C) | **Configurações › projeto › Quadro e automações**, abas Colunas · Automações · Fluxos · Entrega. |
-| alva-flow (5B: pré-checagem e modelos) | Pré-checagem vira linhas de checagem em Projetos e Integrações; "Modelos do alva-flow" vira seção da aba Fluxos. |
-| Contexto do Claude (4B) | **Sai.** (ver decisão D5) |
-| Agentes (8A/8B) | Fica no menu (Ctrl/Cmd+2), visual Compozy. Regras por coluna (`assignOnEnter`) e orquestrador vão para **Configurações › projeto › Agentes do projeto**; a tela Agentes mostra perfis, estado, carga e um atalho "Orquestrador: ligado/desligado" que leva às configurações. |
-| Projetos | **Configurações › Projetos**, com linha de checagens e "Continuar configuração". |
-| Integrações | **Configurações › Integrações**: Notion (+ sublinha Bancos e campos), GitHub, Claude Code (+ sublinha Plugins e comandos), gh CLI (opcional). |
-| Configurações (Atualizações, Sobre/diagnóstico) | Ficam em Configurações › App. |
-| "Vamos começar" + login | Viram o começo dos **Primeiros passos**. A abertura animada continua. |
+| Hoje                                                  | Depois                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Visão geral (6D)                                      | **Sai do menu.** "Esperando você" e "Rodando" viram a lista lateral (do projeto atual) e o sino da barra superior (todos os projetos). `OverviewService` continua (alimenta lista, sino, badge do ícone). Semana/atividade deixam de ter tela.                               |
+| Quadro                                                | Fica (menu, Ctrl/Cmd+1). Visual Compozy. Clicar num card abre a **tela da tarefa**. Kanban/Lista mantidos.                                                                                                                                                                   |
+| Painel lateral da tarefa no Quadro + TaskPage         | Viram **uma** tela da tarefa (seção 6.2). Sem painel lateral no Quadro.                                                                                                                                                                                                      |
+| Etapas e automações (3C) + Fluxos (5A) + Entrega (5C) | **Configurações › projeto › Quadro e automações**, abas Colunas · Automações · Fluxos · Entrega.                                                                                                                                                                             |
+| alva-flow (5B: pré-checagem e modelos)                | Pré-checagem vira linhas de checagem em Projetos e Integrações; "Modelos do alva-flow" vira seção da aba Fluxos.                                                                                                                                                             |
+| Contexto do Claude (4B)                               | **Sai.** (ver decisão D5)                                                                                                                                                                                                                                                    |
+| Agentes (8A/8B)                                       | Fica no menu (Ctrl/Cmd+2), visual Compozy. Regras por coluna (`assignOnEnter`) e orquestrador vão para **Configurações › projeto › Agentes do projeto**; a tela Agentes mostra perfis, estado, carga e um atalho "Orquestrador: ligado/desligado" que leva às configurações. |
+| Projetos                                              | **Configurações › Projetos**, com linha de checagens e "Continuar configuração".                                                                                                                                                                                             |
+| Integrações                                           | **Configurações › Integrações**: Notion (+ sublinha Bancos e campos), GitHub, Claude Code (+ sublinha Plugins e comandos), gh CLI (opcional).                                                                                                                                |
+| Configurações (Atualizações, Sobre/diagnóstico)       | Ficam em Configurações › App.                                                                                                                                                                                                                                                |
+| "Vamos começar" + login                               | Viram o começo dos **Primeiros passos**. A abertura animada continua.                                                                                                                                                                                                        |
 
 Menu (coluna da esquerda): logo · seletor de projeto · "Buscar tarefa ⌘K" · grupos Esperando você /
 Rodando / A fazer · (rodapé) Quadro, Agentes, Configurações. Atalhos Ctrl/Cmd+1…3 nessa ordem.
@@ -167,7 +167,8 @@ projeto) · App (Atualizações, Sobre e diagnóstico).
 Tela cheia (sem menu), passos à esquerda com estado real, conteúdo do passo à direita, "Por que
 isso?" em uma linha, "Voltar" e "Fazer depois":
 
-1. Entrar com GitHub (Device Flow atual; "Usar token"; "Continuar sem GitHub").
+1. Entrar com GitHub (Device Flow atual; "Usar token"). Obrigatório: o projeto é verificado no
+   GitHub (decidido na implementação; antes era "Continuar sem GitHub").
 2. Conectar o Notion (OAuth; "Usar token").
 3. Claude Code (detecção/login; diz o comando a rodar se faltar).
 4. Escolher a pasta do projeto (seletor no main; mostra repo detectado; confirmações de alias/GHE).
@@ -183,19 +184,19 @@ passos · continuar").
 
 ## 7. Decisões tomadas
 
-| # | Decisão | De quem |
-| --- | --- | --- |
-| D1 | Modelo de telas = mockup aprovado (abas 1–7) | Usuário |
-| D2 | Abordagem B, tudo numa branch | Usuário |
-| D3 | Agentes: só visual agora; colaboração multiagente é outro projeto | Usuário |
-| D4 | Automações continuam, mas fora do menu (dentro de Quadro e automações) | Proposta aceita |
-| D5 | Contexto do Claude sai por inteiro: a tela e a seção "Contexto do projeto" do briefing (`buildProjectContext`). O contexto vem só da tarefa do Notion. O campo `claudeContexts` da config fica sem uso (sem migração). | Usuário |
-| D6 | Visão geral sai; o sino na barra superior a substitui (todos os projetos) | Proposta aceita |
-| D7 | Tarefa abre em tela própria (sem painel lateral no Quadro) | Minha escolha, segue o mockup |
-| D8 | Lista lateral = projeto atual; sino = todos os projetos | Minha escolha |
-| D9 | Fases da tarefa = passos do fluxo; sem fluxo, colunas do quadro | Minha escolha |
+| #   | Decisão                                                                                                                                                                                                                | De quem                       |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| D1  | Modelo de telas = mockup aprovado (abas 1–7)                                                                                                                                                                           | Usuário                       |
+| D2  | Abordagem B, tudo numa branch                                                                                                                                                                                          | Usuário                       |
+| D3  | Agentes: só visual agora; colaboração multiagente é outro projeto                                                                                                                                                      | Usuário                       |
+| D4  | Automações continuam, mas fora do menu (dentro de Quadro e automações)                                                                                                                                                 | Proposta aceita               |
+| D5  | Contexto do Claude sai por inteiro: a tela e a seção "Contexto do projeto" do briefing (`buildProjectContext`). O contexto vem só da tarefa do Notion. O campo `claudeContexts` da config fica sem uso (sem migração). | Usuário                       |
+| D6  | Visão geral sai; o sino na barra superior a substitui (todos os projetos)                                                                                                                                              | Proposta aceita               |
+| D7  | Tarefa abre em tela própria (sem painel lateral no Quadro)                                                                                                                                                             | Minha escolha, segue o mockup |
+| D8  | Lista lateral = projeto atual; sino = todos os projetos                                                                                                                                                                | Minha escolha                 |
+| D9  | Fases da tarefa = passos do fluxo; sem fluxo, colunas do quadro                                                                                                                                                        | Minha escolha                 |
 
-| D10 | Primeiros passos abrem sozinhos só quando **não há projeto** (como hoje). Com projeto, o que faltar aparece como aviso no topo da lista lateral ("Falta N passos · continuar") e em Projetos. Nada novo é gravado. GitHub é opcional; o passo 7 não conta para "completo". "Completo" = passos 2–6 feitos para o projeto atual. | Minha escolha (revisão) |
+| D10 | Primeiros passos abrem sozinhos só quando **não há projeto** (como hoje). Com projeto, o que faltar aparece como aviso no topo da lista lateral ("Falta N passos · continuar") e em Projetos. Nada novo é gravado. GitHub é obrigatório (revisto na implementação: adicionar projeto exige o GitHub para verificar o repositório); o passo 7 não conta para "completo". "Completo" = passos 1–6 feitos para o projeto atual. | Minha escolha (revisão) |
 | D11 | Da Visão geral: "PRs com atenção" vira seção do popover do sino; os cartões de projeto já estão em Configurações › Projetos. | Minha escolha (revisão) |
 | D12 | Chips de resposta rápida são fixos por tipo de cartão: as ações do próprio gate/pergunta (mesmo efeito do botão) e "Pedir ajuste…", que só preenche o campo de mensagem. Nada gerado. | Minha escolha (revisão) |
 | D13 | Agentes: a tela usa o projeto atual (a API `agents.list` é por projeto); agentes embutidos e "só neste computador" aparecem em todos. A atividade por hora soma todos os projetos (por `agent_key`). | Minha escolha (revisão; ajustada no plano) |

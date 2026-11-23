@@ -37,8 +37,7 @@ import '../welcome/welcome.css'
 import { setupPending, setupSteps, type SetupStep, type SetupStepId } from './setup-steps'
 
 const WHY: Record<SetupStepId, string> = {
-  github:
-    'O Orkio acompanha branches, PRs e CI das tarefas. Opcional: dá para seguir sem e conectar depois.',
+  github: 'O Orkio confere o repositório do projeto e acompanha branches, PRs e CI das tarefas.',
   notion: 'As tarefas vêm do Notion. O Orkio só escreve o status quando você move um card.',
   claude:
     'Quem trabalha nas tarefas é o seu Claude Code, com o seu login. O Orkio não guarda chave da Anthropic.',
@@ -140,7 +139,6 @@ export function SetupPage({
   const claude = useClaude()
   const projects = useProjects()
   const [createdId, setCreatedId] = useState<string | null>(null)
-  const [githubSkipped, setGithubSkipped] = useState(false)
   const [selected, setSelected] = useState<SetupStepId | null>(null)
   const [selection, setSelection] = useState<ProjectSelection | null>(null)
   const [pickError, setPickError] = useState<string | null>(null)
@@ -157,7 +155,6 @@ export function SetupPage({
 
   const steps = setupSteps({
     github: githubStatus,
-    githubSkipped,
     notion: notion.status,
     claude,
     project,
@@ -186,10 +183,6 @@ export function SetupPage({
           <LoginPanel
             oauth={github.authOptions?.oauth ?? false}
             onConnected={(s) => setGithubOverride(s)}
-            onSkip={() => {
-              setGithubSkipped(true)
-              setSelected(null)
-            }}
             onUseToken={onOpenIntegrations}
           />
         )
@@ -402,13 +395,7 @@ function StepItem({
   onSelect(): void
 }): React.JSX.Element {
   const stateLabel =
-    step.state === 'done'
-      ? 'feito'
-      : step.state === 'skipped'
-        ? 'pulado'
-        : step.state === 'current'
-          ? 'agora'
-          : 'a fazer'
+    step.state === 'done' ? 'feito' : step.state === 'current' ? 'agora' : 'a fazer'
   return (
     <Item
       as="li"

@@ -16,18 +16,16 @@ import { DeviceFlowView } from '../integrations/GitHubConnectionCard'
 /**
  * Entrada do app: login com a conta do GitHub pelo Device Flow que Integrações já usa (o token
  * fica no main, cifrado). Conectar aqui já liga a integração do GitHub; depois o checklist pede o
- * Notion e o projeto. "Continuar sem GitHub" não trava quem quer usar só o quadro local.
+ * Notion e o projeto. O GitHub é obrigatório: o projeto é verificado nele.
  */
 export function LoginPanel({
   oauth,
   onConnected,
-  onSkip,
   onUseToken
 }: {
   /** false quando o build não tem o login do GitHub configurado. */
   oauth: boolean
   onConnected(status: ConnectionStatus): void
-  onSkip(): void
   onUseToken(): void
 }): React.JSX.Element {
   const [authorizing, setAuthorizing] = useState(false)
@@ -85,8 +83,7 @@ export function LoginPanel({
             />
           ) : (
             <Text type="supporting" color="secondary" style={{ textAlign: 'center' }}>
-              Este build não tem o login do GitHub configurado. Conecte com um token em Integrações
-              ou continue sem GitHub.
+              Este build não tem o login do GitHub configurado. Conecte com um token em Integrações.
             </Text>
           )}
 
@@ -95,7 +92,6 @@ export function LoginPanel({
               <Divider label="ou" />
               <HStack gap={2} hAlign="center" wrap="wrap">
                 <Button variant="ghost" label="Usar um token" onClick={onUseToken} />
-                <Button variant="ghost" label="Continuar sem GitHub" onClick={onSkip} />
               </HStack>
             </>
           )}

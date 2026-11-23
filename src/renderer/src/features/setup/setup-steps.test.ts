@@ -35,7 +35,6 @@ const workspace = {
 
 const empty: SetupInput = {
   github: { state: 'disconnected' },
-  githubSkipped: false,
   notion: { state: 'disconnected' },
   claude: null,
   project: null,
@@ -58,11 +57,13 @@ describe('setupSteps', () => {
     ])
   })
 
-  it('GitHub pulado não trava: Notion vira o atual', () => {
-    expect(states({ ...empty, githubSkipped: true }).slice(0, 2)).toEqual([
-      'github:skipped',
-      'notion:current'
+  it('GitHub é obrigatório: sem ele continua o atual e conta como pendente', () => {
+    const steps = setupSteps({ ...empty, notion: connected('Ana'), claude: claudeOk, project })
+    expect(steps.map((s) => `${s.id}:${s.state}`).slice(0, 2)).toEqual([
+      'github:current',
+      'notion:done'
     ])
+    expect(setupPending(steps)).toBe(3)
   })
 
   it('Notion com erro no meio volta a ser o atual', () => {
@@ -83,10 +84,9 @@ describe('setupSteps', () => {
     expect(steps[2]?.summary).toBe('v2.4.1 · logado')
   })
 
-  it('pendentes contam só os passos 2 a 6', () => {
+  it('pendentes contam os passos 1 a 6', () => {
     const almost: SetupInput = {
-      github: { state: 'disconnected' },
-      githubSkipped: true,
+      github: connected('u'),
       notion: connected('Ana'),
       claude: claudeOk,
       project,
@@ -95,12 +95,12 @@ describe('setupSteps', () => {
     }
     expect(setupPending(setupSteps(almost))).toBe(1)
     expect(setupPending(setupSteps({ ...almost, boardConfigured: true }))).toBe(0)
+    expect(setupPending(setupSteps({ ...almost, github: { state: 'disconnected' } }))).toBe(2)
   })
 
   it('primeira tarefa nunca fica feita', () => {
     const all = setupSteps({
       github: connected('u'),
-      githubSkipped: false,
       notion: connected('Ana'),
       claude: claudeOk,
       project,

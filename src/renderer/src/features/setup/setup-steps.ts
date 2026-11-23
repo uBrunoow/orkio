@@ -1,6 +1,6 @@
 /**
  * Primeiros passos: os 7 passos e o estado de cada um, derivados do estado real (nada é guardado).
- * O primeiro não feito (e não pulado) é o atual.
+ * O primeiro não feito é o atual. O GitHub é obrigatório (o projeto é verificado no GitHub).
  */
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import type {
@@ -12,7 +12,7 @@ import type {
 export type SetupStepId =
   'github' | 'notion' | 'claude' | 'folder' | 'notion-data' | 'board' | 'first-task'
 
-export type SetupStepState = 'done' | 'current' | 'todo' | 'skipped'
+export type SetupStepState = 'done' | 'current' | 'todo'
 
 export interface SetupStep {
   id: SetupStepId
@@ -23,8 +23,6 @@ export interface SetupStep {
 
 export interface SetupInput {
   github: ConnectionStatus | null
-  /** "Continuar sem GitHub" nesta sessão (não é guardado). */
-  githubSkipped: boolean
   notion: ConnectionStatus | null
   claude: ClaudeCodeStatus | null
   project: ProjectView | null
@@ -42,8 +40,15 @@ export const SETUP_TITLES: Record<SetupStepId, string> = {
   'first-task': 'Abrir a primeira tarefa'
 }
 
-/** Passos que contam para "Falta N passos" (D10): sem GitHub (opcional) e sem a primeira tarefa. */
-const REQUIRED: readonly SetupStepId[] = ['notion', 'claude', 'folder', 'notion-data', 'board']
+/** Passos que contam para "Falta N passos": todos menos a primeira tarefa (que nunca fica feita). */
+const REQUIRED: readonly SetupStepId[] = [
+  'github',
+  'notion',
+  'claude',
+  'folder',
+  'notion-data',
+  'board'
+]
 
 function account(s: ConnectionStatus | null): string | null {
   return s?.state === 'connected'
@@ -88,7 +93,6 @@ export function setupSteps(input: SetupInput): SetupStep[] {
   return (Object.keys(SETUP_TITLES) as SetupStepId[]).map((id) => {
     let state: SetupStepState
     if (done[id]) state = 'done'
-    else if (id === 'github' && input.githubSkipped) state = 'skipped'
     else if (!currentSet) {
       state = 'current'
       currentSet = true
