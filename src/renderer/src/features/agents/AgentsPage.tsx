@@ -44,7 +44,6 @@ import { PageHeader } from '../../components/PageHeader'
 import { isTextField } from '../../app/shortcuts'
 import { BoardIcon, ListIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { AgentAvatar } from './AgentAvatar'
-import { OrchestratorSection } from './OrchestratorSection'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',
@@ -367,24 +366,6 @@ export function AgentsPage(): React.JSX.Element {
             </Grid>
           )}
         </VStack>
-      )}
-
-      {state && state.stages.length > 0 && (
-        <OrchestratorSection projectId={projectId} agents={state} />
-      )}
-
-      {state && (
-        <AssignRules
-          key={JSON.stringify(state.rules)}
-          state={state}
-          onSave={async (rules) => {
-            const r = await window.orkio.agents.setRules(projectId, rules)
-            if (r.ok) {
-              setState(r.value)
-              setMessage({ tone: 'ok', text: 'Regras de atribuição salvas.' })
-            } else setMessage({ tone: 'error', text: r.error.message })
-          }}
-        />
       )}
     </VStack>
   )
@@ -821,7 +802,7 @@ function AgentEditor({
 }
 
 /** "Tarefas que entram em <etapa> vão para <agente>" (uma por etapa). */
-function AssignRules({
+export function AssignRules({
   state,
   onSave
 }: {

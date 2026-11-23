@@ -27,6 +27,7 @@ import { useSidebarData } from './app/useSidebarData'
 import { WaitingBell } from './app/WaitingBell'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
+import { ProjectAgentsSettings } from './features/agents/ProjectAgentsSettings'
 import { BoardSettingsPage } from './features/board/ProjectPages'
 import { TaskScreen } from './features/task/TaskScreen'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
@@ -253,7 +254,11 @@ export function App(): React.JSX.Element | null {
           )
           break
         case 'agents':
-          page = <AgentsPage />
+          page = linkedProject ? (
+            <ProjectAgentsSettings projectId={linkedProject.id} projectName={linkedProject.name} />
+          ) : (
+            <AgentsPage />
+          )
           break
         case 'updates':
           page = (
