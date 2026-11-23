@@ -13,3 +13,6 @@ test-results/
 playwright-report/
 !.env.example
 !.env.e2e
+
+# Snapshots locais da crítica de UI/UX (impeccable)
+.impeccable/

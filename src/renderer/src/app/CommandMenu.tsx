@@ -37,7 +37,11 @@ function navigationItems(hasProject: boolean): CommandItem[] {
   )
   if (hasProject) {
     const alva: Route = { name: 'flows', tab: 'alva' }
-    items.push({ id: id(alva), label: 'Modelos Alva', auxiliaryData: { group, route: alva } })
+    items.push({
+      id: id(alva),
+      label: 'Modelos do alva-flow',
+      auxiliaryData: { group, route: alva }
+    })
   }
   return items
 }

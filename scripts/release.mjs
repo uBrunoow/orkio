@@ -3,11 +3,12 @@
  * `pnpm release <patch|minor|major|beta> [--beta]` (Etapa 6B).
  * Atualiza a versão do package.json, move "[Não lançado]" do CHANGELOG para a seção da versão,
  * faz o commit `chore(release): vX.Y.Z` e cria a tag anotada `vX.Y.Z`. NÃO faz push.
+ * Com `RELEASE_NOTE` no ambiente e "[Não lançado]" vazio, a nota vira o item da versão.
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { nextVersion, parseReleaseArgs, releaseChangelog } from './release-lib.mjs'
+import { fillUnreleased, nextVersion, parseReleaseArgs, releaseChangelog } from './release-lib.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
 const git = (...args) =>
@@ -47,7 +48,9 @@ try {
   const now = new Date()
   const pad = (n) => String(n).padStart(2, '0')
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-  changelog = releaseChangelog(readFileSync(changelogPath, 'utf8'), version, today)
+  // RELEASE_NOTE (título da PR, no release ao mergear) preenche um "[Não lançado]" vazio.
+  const current = fillUnreleased(readFileSync(changelogPath, 'utf8'), process.env['RELEASE_NOTE'])
+  changelog = releaseChangelog(current, version, today)
 } catch (e) {
   fail(e instanceof Error ? e.message : String(e))
 }

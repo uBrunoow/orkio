@@ -39,17 +39,19 @@ Sem elas o release falha (o teste manual só avisa). Também são aceitas como _
 
 Na Vercel, `RELEASES_REPO=uBrunoow/orkio`. O site ignora pre-releases (beta).
 
-## Lançar ao mergear (rótulo na PR)
+## Lançar ao mergear (todo merge na main)
 
-O caminho do dia a dia: a PR decide se sai uma versão e de que tipo, e o merge faz o resto.
+O caminho do dia a dia: **todo merge na `main` lança uma versão**. O rótulo da PR só muda o tipo.
 
-1. Escreva as mudanças visíveis em `## [Não lançado]` do `CHANGELOG.md` (dentro da própria PR).
-2. Ponha **um** rótulo na PR: `release:patch`, `release:minor`, `release:major` ou `release:beta`.
+1. Escreva as mudanças visíveis em `## [Não lançado]` do `CHANGELOG.md` (dentro da própria PR). Se
+   ficar vazio, o título da PR vira o item da versão (em "### Mudado").
+2. Tipo da versão pelo rótulo da PR: **sem rótulo = `patch`**; `release:minor`, `release:major` ou
+   `release:beta` escolhem outro; **`release:none`** não lança (PR só de CI, testes, refatoração).
    O check **Release (rótulo da PR)** mostra na hora a versão que vai sair (ex.: "Ao mergear, sai a
-   versão v0.2.0") e falha se o CHANGELOG não tiver o que lançar ou se houver mais de um rótulo.
-   Sem rótulo, o merge não lança nada.
+   versão v0.2.2") e falha se houver rótulos em conflito.
+   Mudanças só em `site/`, `docs/`, `broker/` ou no `README.md` não disparam o workflow.
 3. Mergeie. O workflow **Release ao mergear** (`release-on-merge.yml`), na `main`:
-   1. acha a PR do commit e lê o rótulo;
+   1. acha a PR do commit e lê o rótulo e o título (num push direto, a 1ª linha do commit);
    2. roda `node scripts/release.mjs <tipo>`: sobe o `package.json`, move "Não lançado" para
       `## [X.Y.Z] - AAAA-MM-DD`, faz o commit `chore(release): vX.Y.Z` e cria a tag;
    3. empurra o commit e a tag para a `main` (`git push --atomic`);
@@ -60,9 +62,12 @@ O caminho do dia a dia: a PR decide se sai uma versão e de que tipo, e o merge 
 
 Cuidados:
 
-- O commit de versão vai direto para a `main` (o repositório não tem proteção de branch). Se um dia
-  houver, o `release-on-merge.yml` precisa de um token que possa empurrar nela.
-- Duas PRs com rótulo mergeadas em seguida lançam duas versões, uma de cada vez (`concurrency`).
+- O commit de versão vai direto para a `main`. Com proteção de branch (recomendada: PR + CI
+  obrigatórios), libere o bot do GitHub Actions como exceção no ruleset ("Bypass list") para o
+  `release-on-merge.yml` conseguir empurrar; sem isso o push é recusado e nenhuma versão sai.
+- Secret de assinatura vazio não quebra o pacote: o passo "Empacotar" remove as variáveis vazias
+  (`CSC_LINK=""` fazia o electron-builder procurar um certificado na pasta do projeto e falhar no mac).
+- Duas PRs mergeadas em seguida lançam duas versões, uma de cada vez (`concurrency`).
 - Duas PRs mergeadas quase juntas não derrubam a versão: o workflow usa a `main` de agora e, se o
   push for recusado porque ela andou, refaz o commit de versão em cima da nova (até 3 tentativas,
   `scripts/release-bump-push.sh`). A versão pode levar junto o que entrou na `main` nesse intervalo.

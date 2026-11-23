@@ -28,7 +28,9 @@ export function registerUpdatesIpc(
   ipc: Pick<IpcMain, 'handle'>,
   service: UpdatesIpcService,
   about: () => AboutInfo,
-  isTrustedSender: SenderGuard
+  isTrustedSender: SenderGuard,
+  /** Diagnóstico (Sobre > "Copiar diagnóstico"): texto sem segredos. */
+  diagnostics: () => Promise<string> = async () => ''
 ): void {
   const ch = IPC_CHANNELS.updates
   function guarded<T>(
@@ -81,4 +83,9 @@ export function registerUpdatesIpc(
     () => service.releaseNotes()
   )
   guarded(ch.about, about, about)
+  guarded(
+    ch.diagnostics,
+    () => 'Não foi possível montar o diagnóstico agora.',
+    () => diagnostics()
+  )
 }

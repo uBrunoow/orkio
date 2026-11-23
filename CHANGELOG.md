@@ -8,6 +8,13 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Adicionado
 
+- Piloto automático na sessão da tarefa: cada passo de um fluxo aparece na conversa como um turno
+  do piloto (o fluxo, "passo 2 de 6" e o comando que ele mandou ao Claude Code), seguido da
+  resposta do Claude. No fim da sessão, o plano do fluxo como uma lista de tarefas: feito, agora,
+  esperando você e a seguir.
+- "Copiar diagnóstico" em Configurações > Sobre: versões, banco local, filas e conexões, sem
+  tokens, contas, títulos ou caminhos, para colar ao pedir ajuda.
+
 - Responder ao Claude quando o fluxo para: o cartão de problema tem "Responder e continuar", que
   manda a sua resposta na mesma sessão do passo (por exemplo, as respostas das perguntas do
   `/spec` que ficaram sem resposta) e o fluxo segue dali, sem rodar o comando do zero.
@@ -21,6 +28,25 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   continuam parando em você. "Configurar orquestrador" sugere o caminho a partir do quadro.
 
 ### Mudado
+
+- Todo merge na `main` lança uma versão (patch por padrão); o rótulo da PR só escolhe outro tipo,
+  e `release:none` não lança.
+- Fluxos de tarefa: a barra de salvar fica fixa no rodapé, com quantas alterações não salvas há e
+  "Descartar alterações".
+- Quadro: quando a verificação do GitHub falha, a linha das automações diz quando tenta de novo.
+- Quadro: com a tarefa aberta ao lado, dá para rolar as últimas colunas para fora de baixo dela; o
+  ponto de cada coluna usa a cor escolhida para a etapa; a branch longa no card termina em "…".
+- Aprovação no fluxo: o cartão diz o que acontece ao aprovar e ao recusar; a tarefa em tela cheia
+  abre no fim da conversa, onde está a decisão.
+- Termos mais simples: "Pasta de trabalho" (antes "Ambiente"), "Documentos para o Notion" (antes
+  "Artefatos"), "Modelos do alva-flow" e "resumo da tarefa" (antes "briefing").
+- Mesma largura nas telas de formulário e nas de lista; a barra de salvar não tem mais sombra e
+  "Salvar fluxo" fica desligado sem alterações.
+
+### Corrigido
+
+- O pacote do macOS não quebra mais quando o certificado de assinatura não está configurado (o
+  release ficava parado em rascunho).
 
 - A tarefa virou uma sessão: uma conversa só com os eventos do Notion e do GitHub, os passos do
   fluxo, as respostas inteiras do Claude Code em cada execução e as suas decisões. Logo depois de

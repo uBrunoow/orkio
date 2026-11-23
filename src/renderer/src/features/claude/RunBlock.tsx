@@ -15,7 +15,8 @@ import type { AgentRunView, RunLogEvent, RunSummary } from '../../../../shared/a
 import { StatusToken, toneOf } from '../../components/StatusToken'
 import { Alert } from '../../components/Alert'
 import { DiffView } from '../../components/DiffView'
-import { ClaudeLogo, DiffIcon, ReadIcon, UserIcon } from '../../components/icons'
+import { AutomationIcon, ClaudeLogo, DiffIcon, ReadIcon, UserIcon } from '../../components/icons'
+import type { FlowStepOrigin } from '../task-flows/flow-plan'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
 import { formatUsd, plural } from '../../lib/format'
 import { AgentAvatar } from '../agents/AgentAvatar'
@@ -47,9 +48,15 @@ export function RunBlock({
   focused = false,
   projectId,
   showDocument = false,
-  changesOpen = false
+  changesOpen = false,
+  origin = null
 }: {
   run: AgentRunView
+  /**
+   * Passo de fluxo que disparou esta execução: em vez de "Você", o turno é do piloto automático
+   * (fluxo, passo N de M e o comando que ele mandou), como numa sessão dirigida pelo Orkio.
+   */
+  origin?: FlowStepOrigin | null
   /** Agente da tarefa: se foi ele que rodou, mostra o avatar e o nome. */
   agent: AgentBadge | null
   /** Log ao vivo (só para a execução mais recente, vindo do `useTaskRuns`). */
@@ -96,7 +103,11 @@ export function RunBlock({
   ]
     .filter(Boolean)
     .join(' · ')
-  const youSaid = run.mode === 'prompt' && run.text ? run.text : null
+  const youSaid = !origin && run.mode === 'prompt' && run.text ? run.text : null
+  // O que o piloto mandou: o comando e os argumentos (ou o texto, num passo em modo prompt).
+  const autopilotSaid = origin
+    ? [run.command ? `/${run.command}` : null, run.text].filter(Boolean).join(' ')
+    : null
 
   return (
     <VStack
@@ -123,6 +134,30 @@ export function RunBlock({
           </StackItem>
         </HStack>
       )}
+      {origin && (
+        <HStack gap={2} vAlign="start" data-testid="autopilot-turn">
+          <Icon icon={AutomationIcon} color="secondary" />
+          <StackItem size="fill">
+            <VStack gap={0}>
+              <HStack gap={1} vAlign="center" wrap="wrap">
+                <Text type="supporting" weight="medium">
+                  Piloto automático ·
+                </Text>
+                <Text type="supporting" color="secondary">
+                  {origin.flowName} · passo {origin.position} de {origin.total}: {origin.stepName}
+                  {origin.visit > 1 ? ` (${origin.visit}ª vez)` : ''} ·
+                </Text>
+                <Timestamp value={run.startedAt} format="auto" />
+              </HStack>
+              {autopilotSaid && (
+                <Text maxLines={3}>
+                  <Code>{autopilotSaid}</Code>
+                </Text>
+              )}
+            </VStack>
+          </StackItem>
+        </HStack>
+      )}
       <HStack gap={2} vAlign="center" wrap="wrap">
         {byAgent ? (
           <AgentAvatar name={agent.name} color={agent.color} seed={agent.key} />
@@ -130,8 +165,8 @@ export function RunBlock({
           <Icon icon={ClaudeLogo} color="secondary" />
         )}
         <Text weight="semibold">{who}</Text>
-        {run.command && <Code>/{run.command}</Code>}
-        {!youSaid && <Timestamp value={run.startedAt} format="auto" />}
+        {run.command && !origin && <Code>/{run.command}</Code>}
+        {!youSaid && !origin && <Timestamp value={run.startedAt} format="auto" />}
         <StackItem size="fill" />
         <StatusToken
           tone={toneOf(STATUS_COLOR[run.status])}

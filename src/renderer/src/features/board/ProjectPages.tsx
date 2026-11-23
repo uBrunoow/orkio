@@ -168,7 +168,7 @@ export function FlowsPage({
             aria-label="Seções de Fluxos"
           >
             <Tab value="flows" label="Fluxos do projeto" />
-            <Tab value="alva" label="Modelos Alva" />
+            <Tab value="alva" label="Modelos do alva-flow" />
           </TabList>
           {tab === 'flows' ? (
             <TaskFlowsPage key={project.id} projectId={project.id} />
@@ -201,7 +201,7 @@ export function ContextPage({
       <PageHeader
         title="Contexto do Claude"
         {...(project ? { context: project.name } : {})}
-        subtitle="Vai no briefing de toda execução deste projeto, antes da descrição da tarefa."
+        subtitle="Vai no resumo da tarefa de toda execução deste projeto, antes da descrição."
       />
       {!project ? (
         <NoProject onOpenProjects={onOpenProjects} />

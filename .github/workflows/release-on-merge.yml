@@ -1,6 +1,7 @@
-# Release ao mergear: a PR mergeada na main com o rótulo `release:patch|minor|major|beta` sobe a
-# versão, move o CHANGELOG, cria o commit `chore(release): vX.Y.Z` e a tag, e dispara o Release.
-# Sem o rótulo, nada acontece. Passo a passo em docs/releases.md.
+# Release ao mergear: todo merge na main sobe a versão (patch por padrão; `release:minor|major|beta`
+# escolhe outro tipo e `release:none` não lança), move o CHANGELOG (vazio → o título da PR vira o
+# item), cria o commit `chore(release): vX.Y.Z` e a tag, e dispara o Release.
+# Mudanças só no site, na documentação ou no broker não lançam o app. Ver docs/releases.md.
 #
 # Por que dispara o Release à mão: tags empurradas com o GITHUB_TOKEN não disparam workflows
 # (regra do GitHub, para evitar laços); `workflow_dispatch` é a exceção.
@@ -9,6 +10,12 @@ name: Release ao mergear
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'site/**'
+      - 'docs/**'
+      - 'broker/**'
+      - 'README.md'
+      - '.github/ISSUE_TEMPLATE/**'
 
 permissions:
   contents: read
@@ -28,15 +35,27 @@ jobs:
       pull-requests: read # achar a PR do commit
       actions: write # disparar o release.yml
     steps:
-      - name: Rótulos da PR mergeada
+      - name: Rótulos e título da PR mergeada
         id: labels
         env:
           GH_TOKEN: ${{ github.token }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          labels=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
-            --jq '[.[] | select(.merged_at != null) | .labels[].name] | tojson')
+          pulls=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+            --jq '[.[] | select(.merged_at != null)]')
+          labels=$(jq -c '[.[].labels[].name]' <<<"$pulls")
+          # Título da PR (ou a 1ª linha do commit, num push direto): vira o item do CHANGELOG
+          # quando "[Não lançado]" estiver vazio.
+          note=$(jq -r '.[0].title // empty' <<<"$pulls")
+          if [ -z "$note" ]; then note=$(printf '%s' "$HEAD_MESSAGE" | head -n1); fi
           echo "labels=$labels" >> "$GITHUB_OUTPUT"
+          {
+            echo "note<<ORKIO_EOF"
+            printf '%s\n' "$note"
+            echo "ORKIO_EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "Rótulos: $labels"
+          echo "Nota: $note"
 
       - uses: actions/checkout@v4
         with:
@@ -52,6 +71,7 @@ jobs:
         id: plan
         env:
           LABELS: ${{ steps.labels.outputs.labels }}
+          RELEASE_NOTE: ${{ steps.labels.outputs.note }}
         run: node scripts/release-plan.mjs
 
       - name: Versão, CHANGELOG, commit e tag, e enviar
@@ -59,6 +79,7 @@ jobs:
         env:
           KIND: ${{ steps.plan.outputs.kind }}
           VERSION: ${{ steps.plan.outputs.version }}
+          RELEASE_NOTE: ${{ steps.labels.outputs.note }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

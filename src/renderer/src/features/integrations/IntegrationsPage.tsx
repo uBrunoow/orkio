@@ -27,6 +27,7 @@ import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
 import { useGitHubConnection } from './useGitHubConnection'
 import { useNotionConnection } from './useNotionConnection'
+import { PAGE_WIDTH } from '../../components/page-width'
 
 export function IntegrationsPage(): React.JSX.Element {
   const notion = useNotionConnection()
@@ -79,7 +80,7 @@ export function IntegrationsPage(): React.JSX.Element {
   ]
 
   return (
-    <VStack gap={6} maxWidth={1080}>
+    <VStack gap={6} maxWidth={PAGE_WIDTH.list}>
       <PageHeader
         title="Integrações"
         subtitle="Conecte as ferramentas que o Orkio usa para planejar e executar o desenvolvimento."

@@ -4,6 +4,7 @@ import { HStack } from '@astryxdesign/core/HStack'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Heading } from '@astryxdesign/core/Heading'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
+import { tokenColor } from '../notion-workspace/notion-colors'
 import { Icon } from '@astryxdesign/core/Icon'
 import { IconButton } from '@astryxdesign/core/IconButton'
 import { Text } from '@astryxdesign/core/Text'
@@ -39,13 +40,19 @@ export function BoardColumns({
   cards,
   signals,
   selectedTaskId,
-  actions
+  actions,
+  endInset = null
 }: {
   stages: readonly BoardStage[]
   cards: readonly BoardCard[]
   signals: Record<string, TaskSignals>
   selectedTaskId: string | null
   actions: CardActions
+  /**
+   * Largura da folha da tarefa aberta sobre as colunas: um espaço no fim do quadro, para dar para
+   * rolar as últimas colunas (e a "Sem etapa") para fora de baixo da folha.
+   */
+  endInset?: string | null
 }): React.JSX.Element {
   const [drag, setDrag] = useState<DragState | null>(null)
   // Colunas recolhidas (só nesta sessão da tela): viram uma faixa estreita com nome e contagem.
@@ -246,7 +253,11 @@ export function BoardColumns({
               <Card variant={isTarget ? 'default' : 'muted'} padding={0} height="100%">
                 <VStack ref={setColumnEl} height="100%">
                   <HStack gap={2} vAlign="center" padding={3} paddingBlockEnd={1}>
-                    <Icon icon={DotIcon} size="sm" color={column.stage ? 'tertiary' : 'warning'} />
+                    <Icon
+                      icon={DotIcon}
+                      size="sm"
+                      color={column.stage ? stageDotColor(column.stage) : 'warning'}
+                    />
                     <Tooltip
                       content={
                         column.stage
@@ -309,6 +320,7 @@ export function BoardColumns({
             </VStack>
           )
         })}
+        {endInset && <VStack aria-hidden width={endInset} style={{ flexShrink: 0 }} />}
       </HStack>
       {drag && dragged && (
         <Card
@@ -336,4 +348,12 @@ export function BoardColumns({
       )}
     </>
   )
+}
+
+/** Ponto da coluna com a cor escolhida para a etapa (Etapas e automações); sem cor, neutro. */
+function stageDotColor(
+  stage: BoardStage
+): 'tertiary' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'gray' {
+  const c = stage.color ? tokenColor(stage.color) : 'default'
+  return c === 'default' ? 'tertiary' : c
 }

@@ -129,6 +129,29 @@ describe('ClaudeService', () => {
       { path: 'docs/novo.md', status: 'untracked' },
       { path: 'novo.ts', status: 'renamed' }
     ]) // o que é interno do Orkio (.orkio/) não conta
+    expect(r.value.secrets).toEqual([])
+  })
+
+  it('diff: esconde o valor do segredo e diz em que arquivo ele está', async () => {
+    const { service, deps, worktrees } = setup()
+    worktrees.get.mockReturnValue({ path: '/wt', branch: 'ORK-7/x', baseRef: 'origin/main' })
+    ;(deps.git.diffText as ReturnType<typeof vi.fn>).mockResolvedValue(
+      [
+        'diff --git a/docs/x.md b/docs/x.md',
+        '--- /dev/null',
+        '+++ b/docs/x.md',
+        '@@ -0,0 +1,2 @@',
+        '+# Doc',
+        '+TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789'
+      ].join('\n')
+    )
+    ;(deps.git.statusPorcelain as ReturnType<typeof vi.fn>).mockResolvedValue([])
+    const r = await service.diff('p1', 'task-1')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.diff).not.toContain('ghp_abcdef')
+    expect(r.value.diff).toContain('TOKEN=[omitido]')
+    expect(r.value.secrets).toEqual(['docs/x.md'])
   })
 
   it('página ilegível: briefing só com os campos, com aviso', async () => {

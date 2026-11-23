@@ -279,7 +279,8 @@ export function DiffView({
 
       {truncated && (
         <Text type="supporting">
-          O diff passou do limite e foi cortado. Abra o ambiente no editor para ver o resto.
+          O diff passou do limite e foi cortado. Abra a pasta de trabalho no editor para ver o
+          resto.
         </Text>
       )}
       {!uncommitted && untracked.length > 0 && (

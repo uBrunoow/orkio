@@ -95,8 +95,8 @@ export function TaskArtifacts({
   }
 
   return (
-    <VStack gap={2} role="region" aria-label="Artefatos da tarefa">
-      <Text weight="semibold">Artefatos</Text>
+    <VStack gap={2} role="region" aria-label="Documentos para o Notion">
+      <Text weight="semibold">Documentos para o Notion</Text>
       {pending.length > 0 && (
         <List hasDividers density="compact" aria-label="Documentos alterados">
           {pending.map((c) => (
@@ -123,7 +123,7 @@ export function TaskArtifacts({
         </List>
       )}
       {data.attached.length > 0 && (
-        <List hasDividers density="compact" aria-label="Artefatos anexados">
+        <List hasDividers density="compact" aria-label="Documentos anexados">
           {data.attached.map((a) => (
             <Item
               as="li"

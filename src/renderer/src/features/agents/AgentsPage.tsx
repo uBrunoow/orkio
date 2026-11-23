@@ -790,7 +790,7 @@ function AgentEditor({
         )}
         <TextArea
           label="Prévia: o que vai no início da conversa"
-          description="Entra com --append-system-prompt. O briefing da tarefa continua igual."
+          description="Entra com --append-system-prompt. O resumo da tarefa continua igual."
           value={buildAgentPrompt(d)}
           isReadOnly
           rows={6}

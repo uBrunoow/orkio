@@ -7,7 +7,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 
 /**
  * Barra de salvar fixa no rodapé da página (6E): quantas alterações há, Descartar e a ação
- * primária. Use como último filho da página (o `position: sticky` depende disso). Avisos e erros
+ * primária. Borda, sem sombra (system.md). Use como último filho da página (o `position: sticky` depende disso). Avisos e erros
  * que bloqueiam o salvar entram em `children`, acima dos botões.
  */
 export function SaveBar({
@@ -38,8 +38,7 @@ export function SaveBar({
       style={{
         position: 'sticky',
         insetBlockEnd: 0,
-        zIndex: 1,
-        boxShadow: 'var(--shadow-high)'
+        zIndex: 1
       }}
     >
       <VStack gap={2}>

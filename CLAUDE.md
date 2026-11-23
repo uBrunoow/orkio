@@ -35,6 +35,10 @@ Claude Code. Hoje existem:
   real ser confirmado).
 - **Atualizações (6C):** electron-updater lendo o repo público de releases; banner, Configurações
   (Atualizações + Sobre), "O que há de novo"; nunca reinicia por cima de trabalho em andamento.
+- **Diagnóstico:** Configurações > Sobre > "Copiar diagnóstico" (`main/diagnostics/diagnostics.ts`,
+  `shared/diagnostics.ts`, IPC `updates.diagnostics`): versões, banco (`quick_check`, contagens),
+  filas, conexões só pelo estado e versões de git/gh/claude. Nada de conta, token, título ou caminho
+  (teste prova). Ver também `docs/adr/` (decisões de segurança).
 - **Interface (6E):** menu com Visão geral, o projeto atual (Quadro, Etapas e automações, Fluxos,
   Contexto do Claude), Projetos, Agentes, Integrações e Configurações (Ctrl/Cmd+1…9 nessa ordem), numa coluna só de ícones (tooltip e nome acessível) sob uma barra superior com o seletor de projeto, buscar e o sino de "esperando você", rotas tipadas, tarefa em
   painel ou tela cheia, Command Palette (Ctrl/Cmd+K), card do quadro com um estado só (`cardStatus`).
@@ -500,6 +504,13 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   rodar o comando do zero; a resposta é consumida uma vez ("Retomar" depois roda o comando de
   verdade). Sem sessão guardada: erro `no_session`. Perguntas já expiradas também se respondem
   pelo campo da sessão (o fluxo parado por falha aceita mensagem).
+- **Piloto automático** (`task-flows/flow-plan.ts` puro + `AutopilotPlan.tsx`): `flowStepIndex`
+  liga cada execução ao passo do fluxo que a disparou (`FlowRunView.history[].runId`); o `RunBlock`
+  mostra então "Piloto automático · <fluxo> · passo N de M" com o comando mandado no lugar de "Você"
+  (sem "Rodar de novo": o fluxo tem as próprias saídas). `flowPlan` vira o plano do fluxo (saltos
+  escondidos; feito / agora / esperando você / parou aqui / pulado / a seguir / não precisou) no
+  bloco "Fluxo da tarefa", acima de "Histórico do fluxo" (lista "Linha do tempo do fluxo", que o
+  E2E usa). O `TaskFlowSection` repassa as execuções (`onRunsChange`) ao `TaskPanel`.
 - "Nova sessão…" abre o formulário completo da 4A (`claude/session-parts.tsx`: briefing editável,
   modo, catálogo, rodar como agente); "Rodar de novo" em cada execução terminada o abre preenchido.
 - E2E: `expectTaskHistory(scope, ...textos)` e `taskTab(panel, nome)` (fixtures). O Claude simulado
@@ -530,7 +541,7 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 
 ## Fluxos de tarefa (Etapa 5A)
 
-- **Nome:** na UI (6E), "Etapas e automações" (3C) e "Fluxos" (5A, com a aba "Modelos Alva" da 5B).
+- **Nome:** na UI (6E), "Etapas e automações" (3C) e "Fluxos" (5A, com a aba "Modelos do alva-flow" da 5B).
   No código continuam `FlowPage`/`flow` (3C) e `TaskFlowsPage`/`taskFlows` (5A): sequências de
   passos que rodam numa tarefa (`shared/task-flow.ts`, tipos `Flow`/`Step`/`StageFlow`).
 - **Config** (`orkio-config` v6): `flows[projectId] = { flows, bindings }`; a ligação etapa → fluxo
@@ -858,17 +869,18 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   `ci.yml` → rascunho do release (notas do CHANGELOG, `GITHUB_TOKEN` com `contents: write` só nos
   jobs que publicam) → `package.yml` com
   `--publish always` → confere arquivos e publica. Segredos só no `env` do passo; sem `set -x`.
-- **Release ao mergear:** PR com **um** rótulo `release:patch|minor|major|beta` + merge na `main` =
-  versão. `release-label.yml` (na PR) mostra a versão que sairá e falha cedo (CHANGELOG vazio, mais
-  de um rótulo); `release-on-merge.yml` (push na main) acha a PR do commit, roda
-  `scripts/release.mjs <tipo>`, empurra o commit `chore(release): vX.Y.Z` e a tag (`--atomic`) e
-  dispara o `release.yml` com `--ref vX.Y.Z` (tags empurradas com o `GITHUB_TOKEN` não disparam
-  workflows; `workflow_dispatch` é a exceção). A lógica é pura e testada
-  (`releaseKindFromLabels`/`planRelease` em `scripts/release-lib.mjs`, `scripts/release-plan.mjs`).
-  Sem rótulo, nada é lançado. Nunca empurre a tag com um token pessoal (dispararia duas vezes). O
-  workflow faz checkout da `main` de agora (não do SHA que disparou) e `scripts/release-bump-push.sh`
-  refaz o commit de versão em cima dela se o push for recusado (outra PR no meio; até 3 tentativas,
-  testado em `test/release-bump-push.test.ts` com uma origem local).
+- **Release ao mergear:** todo merge na `main` = versão (sem rótulo = `patch`; `release:minor|
+  major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`, `README.md` não
+  disparam). "[Não lançado]" vazio → o título da PR vira o item (`fillUnreleased`, `RELEASE_NOTE`).
+  `release-label.yml` (na PR) mostra a versão que sairá; `release-on-merge.yml` (push na main) acha a
+  PR do commit, roda `scripts/release.mjs <tipo>`, empurra o commit `chore(release): vX.Y.Z` e a tag
+  (`--atomic`) e dispara o `release.yml` com `--ref vX.Y.Z` (tags empurradas com o `GITHUB_TOKEN` não
+  disparam workflows; `workflow_dispatch` é a exceção). A lógica é pura e testada
+  (`releaseKindFromLabels`/`planRelease`/`fillUnreleased` em `scripts/release-lib.mjs`). Nunca empurre a
+  tag com um token pessoal (dispararia duas vezes). O workflow faz checkout da `main` de agora e
+  `scripts/release-bump-push.sh` refaz o commit de versão se o push for recusado (até 3 tentativas,
+  testado em `test/release-bump-push.test.ts`). O "Empacotar" do `package.yml` remove variáveis de
+  assinatura vazias (`CSC_LINK=""` derrubava o pacote do mac).
 - Passo a passo (repo, token, Apple, Microsoft, custos): `docs/releases.md`.
 
 ## Testes

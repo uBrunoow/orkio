@@ -119,6 +119,14 @@ jobs:
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           GH_TOKEN: ${{ inputs.publish && github.token || '' }}
         run: |
+          # Secret ausente chega como texto vazio, e o electron-builder trata `CSC_LINK=""` como
+          # "há certificado" (tenta abrir a pasta atual: "... not a file"). Vazio = não definido.
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID \
+            APPLE_API_KEY_ID APPLE_API_ISSUER WIN_SIGNING WIN_PUBLISHER_NAME AZURE_SIGNING_ENDPOINT \
+            AZURE_SIGNING_ACCOUNT AZURE_SIGNING_PROFILE AZURE_TENANT_ID AZURE_CLIENT_ID \
+            AZURE_CLIENT_SECRET GH_TOKEN; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
           if [ -n "${APPLE_API_KEY_PATH:-}" ]; then export APPLE_API_KEY="$APPLE_API_KEY_PATH"; fi
           if [ "$RUNNER_OS" = "macOS" ]; then platform="--mac"; else platform="--win"; fi
           pnpm exec electron-builder "$platform" --publish "$PUBLISH"

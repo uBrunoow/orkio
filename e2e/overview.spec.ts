@@ -130,7 +130,7 @@ test('gate pendente aparece em "Esperando você", abre a tarefa no fluxo e some 
   await expect(
     projectCard.getByRole('progressbar', { name: /^Prioridades: \d+ de 2$/ })
   ).toBeVisible()
-  await expect(projectCard).toContainText('2 tarefa(s)')
+  await expect(projectCard).toContainText('2 tarefas')
 
   // Um fluxo só com um gate, iniciado à mão na ORK-2.
   const started = await page.evaluate(async (projectId) => {

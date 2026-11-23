@@ -91,7 +91,7 @@ export function TaskChanges({
         <Skeleton height={40} aria-label="Carregando mudanças" />
       ) : !state.workspace && !summary ? (
         <Text type="supporting" color="secondary">
-          Nada mudou no código ainda. O ambiente da tarefa é criado quando o Claude começa.
+          Nada mudou no código ainda. A pasta de trabalho da tarefa é criada quando o Claude começa.
         </Text>
       ) : (
         <VStack gap={2}>
@@ -203,7 +203,7 @@ export function TaskDetails({
           <Text type="supporting" data-testid="alva-task">
             {backlog.task
               ? `Backlog: ${backlog.task.id} · ${backlog.task.status} · critérios ${backlog.task.criteria.done}/${backlog.task.criteria.total}${backlog.task.openQuestions > 0 ? ` · ${plural(backlog.task.openQuestions, 'pergunta em aberto', 'perguntas em aberto')}` : ''}`
-              : `Backlog: ${backlog.linked} (arquivo não encontrado no ambiente)`}
+              : `Backlog: ${backlog.linked} (arquivo não encontrado na pasta de trabalho)`}
           </Text>
           {backlog.task && (
             <Collapsible
@@ -304,7 +304,8 @@ export function StageSelector({
           )}
           {card.priority && (
             <Text type="supporting" color="secondary" data-testid="task-priority">
-              · {card.priority.name}
+              {card.status ? '· ' : ''}
+              {card.priority.name}
             </Text>
           )}
           {card.sync.state === 'pending' && <StatusToken tone="warning" label="Sincronizando" />}

@@ -14,6 +14,7 @@ import { VStack } from '@astryxdesign/core/VStack'
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import { NotionLogo, TrashIcon } from '../../components/icons'
+import { PAGE_WIDTH } from '../../components/page-width'
 
 /**
  * Contexto do Claude Code do projeto (4B): instruções fixas + páginas de referência do Notion.
@@ -60,7 +61,7 @@ export function ProjectContextPage({ projectId }: { projectId: string }): React.
   const chosen = new Set(ctx.notionPages.map((p) => p.id))
 
   return (
-    <VStack gap={5} maxWidth={880} role="region" aria-label="Contexto do Claude Code">
+    <VStack gap={5} maxWidth={PAGE_WIDTH.form} role="region" aria-label="Contexto do Claude Code">
       <TextArea
         label="Instruções"
         description="Convenções, comandos de teste, o que evitar. Fica só no seu computador."
