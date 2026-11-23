@@ -16,6 +16,10 @@ export interface ExternalUrlRule {
 export const EXTERNAL_URL_RULES: readonly ExternalUrlRule[] = [
   { host: 'notion.so' },
   { host: 'www.notion.so' },
+  // O Notion passou a gerar links das páginas em notion.com (ex.: app.notion.com/p/<id>).
+  { host: 'notion.com' },
+  { host: 'www.notion.com' },
+  { host: 'app.notion.com' },
   { host: 'developers.notion.com' },
   { host: 'docs.github.com' },
   // Instalação/login do Claude Code (Etapa 4A).

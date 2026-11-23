@@ -366,6 +366,11 @@ describe('shell.openExternal', () => {
   it('allowlist: só https nos domínios do Notion', () => {
     expect(isAllowedExternalUrl('https://developers.notion.com/guides/x')).toBe(true)
     expect(isAllowedExternalUrl('https://www.notion.so/profile/integrations')).toBe(true)
+    expect(isAllowedExternalUrl('https://app.notion.com/p/344a411ece3b805bab4ce80f6553a9e4')).toBe(
+      true
+    )
+    expect(isAllowedExternalUrl('https://www.notion.com/acme/Tarefa-abc')).toBe(true)
+    expect(isAllowedExternalUrl('https://app.notion.com.evil.com/p/x')).toBe(false)
     expect(isAllowedExternalUrl('http://developers.notion.com/')).toBe(false)
     expect(isAllowedExternalUrl('https://notion.so.evil.com/')).toBe(false)
     expect(isAllowedExternalUrl('https://evil.com/?u=https://notion.so')).toBe(false)

@@ -44,6 +44,7 @@ describe('notionPageIdsIn', () => {
     expect(
       notionPageIdsIn('(https://acme.notion.site/1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9)')
     ).toEqual([id])
+    expect(notionPageIdsIn(`Notion: https://app.notion.com/p/${id}?pvs=204`)).toEqual([id])
   })
 
   it('ignora textos sem link do Notion e não repete', () => {
