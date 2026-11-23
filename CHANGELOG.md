@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.6] - 2026-11-23
+
 ### Mudado
 
 - O quadro mostra só as tarefas em que você é responsável no Notion, não as de todo o projeto.
