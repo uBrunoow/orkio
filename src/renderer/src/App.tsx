@@ -24,6 +24,7 @@ import { SHORTCUTS, globalShortcut, isTextField } from './app/shortcuts'
 import { initialRoute } from './app/initial-route'
 import type { SidebarTask } from './app/task-groups'
 import { useSidebarData } from './app/useSidebarData'
+import { useSetupPending } from './app/useSetupPending'
 import { WaitingBell } from './app/WaitingBell'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
@@ -31,7 +32,7 @@ import { ProjectAgentsSettings } from './features/agents/ProjectAgentsSettings'
 import { BoardSettingsPage } from './features/board/ProjectPages'
 import { TaskScreen } from './features/task/TaskScreen'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
-import { WelcomePage } from './features/welcome/WelcomePage'
+import { SetupPage } from './features/setup/SetupPage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
 import { AboutSection, UpdatesSection } from './features/settings/SettingsPage'
 import { SettingsLayout } from './features/settings/SettingsNav'
@@ -100,6 +101,7 @@ export function App(): React.JSX.Element | null {
   }, [])
 
   const sidebar = useSidebarData(linkedProject?.id ?? null)
+  const setupMissing = useSetupPending(project, sidebar.board)
 
   // Primeira tela: sem projeto, Primeiros passos; com algo esperando, essa tarefa; senão o Quadro.
   const decided = useRef(false)
@@ -185,9 +187,10 @@ export function App(): React.JSX.Element | null {
   // Primeiros passos em tela cheia, sem a navegação.
   if (route.name === 'setup') {
     return (
-      <WelcomePage
-        onStart={() => toSettings('projects')}
-        onOpenIntegrations={() => toSettings('integrations')}
+      <SetupPage
+        projectId={route.projectId ?? null}
+        onExit={() => navigate({ name: 'board' })}
+        onOpenTask={openTask}
       />
     )
   }
@@ -402,6 +405,16 @@ export function App(): React.JSX.Element | null {
             </SideNavSection>
           }
         >
+          {project && setupMissing > 0 && (
+            <SideNavSection title="Configuração" isHeaderHidden>
+              <SideNavItem
+                size="sm"
+                icon={TONE_DOT_ICONS.warning}
+                label={`Falta ${setupMissing} ${setupMissing === 1 ? 'passo' : 'passos'} · continuar`}
+                onClick={() => navigate({ name: 'setup', projectId: project.id })}
+              />
+            </SideNavSection>
+          )}
           {groups && (
             <>
               {taskItems('Esperando você', groups.waiting)}

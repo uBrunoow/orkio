@@ -55,6 +55,12 @@
     animation: orkio-scan 2.4s cubic-bezier(0.4, 0, 0.2, 1) 2.9s 1 both;
   }
 
+  /* Primeiros passos: o conteúdo fica acima da vinheta (::before). */
+  .orkio-intro__content {
+    position: relative;
+    height: 100%;
+  }
+
   .orkio-intro__stage {
     position: relative;
     height: 100%;

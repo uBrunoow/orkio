@@ -916,21 +916,18 @@ export async function launchOrkio(
 }
 
 /**
- * Entra no app depois de abrir/recarregar e vai para Projetos: sem projetos, passa pelo login
- * ("Continuar sem GitHub", quando o GitHub não está conectado) e clica em "Começar"; com projetos
- * o app abre na Visão geral e vai pelo menu.
+ * Entra no app depois de abrir/recarregar e vai para Configurações › Projetos: sem projetos, sai
+ * dos Primeiros passos por "Fazer depois"; com projetos, vai pelo menu.
  */
 export async function enterApp(page: Page): Promise<void> {
-  const start = page.getByRole('button', { name: 'Começar', exact: true })
-  const skipLogin = page.getByRole('button', { name: 'Continuar sem GitHub' })
+  const setup = page.getByRole('list', { name: 'Primeiros passos' })
   const nav = page.getByRole('navigation', { name: 'Navegação principal' })
-  await expect(start.or(nav).or(skipLogin)).toBeVisible()
-  if (await skipLogin.isVisible()) {
-    await skipLogin.click()
-    await expect(start).toBeVisible()
+  await expect(setup.or(nav)).toBeVisible()
+  // Sem projeto: o app abre nos Primeiros passos; "Fazer depois" leva ao app.
+  if (await setup.isVisible()) {
+    await page.getByRole('button', { name: 'Fazer depois' }).click()
   }
-  if (await start.isVisible()) await start.click()
-  else await openSettings(page, 'Projetos')
+  await openSettings(page, 'Projetos')
 }
 
 /** Configurações › seção (Integrações, Projetos, Quadro e automações, ...). */
