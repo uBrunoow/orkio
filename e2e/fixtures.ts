@@ -198,7 +198,8 @@ export async function launchOrkio(
   userDataDir: string,
   fakes: Partial<FakeServices> = {},
   options: {
-    startPage?: 'projects' | 'integrations'
+    /** `setup`: fica nos Primeiros passos (sem projeto, o app abre neles). */
+    startPage?: 'projects' | 'integrations' | 'setup'
     /** Claude Code simulado: `installed: false` tira o CLI do PATH. */
     claude?: { loggedIn?: boolean; installed?: boolean }
     /**
@@ -215,6 +216,8 @@ export async function launchOrkio(
   } = {}
 ): Promise<OrkioApp> {
   const env = { ...process.env } as Record<string, string>
+  delete env['WAYLAND_DISPLAY']
+  env['ELECTRON_OZONE_PLATFORM_HINT'] = 'x11'
   // Opções do Node que o Electron rejeita (ex.: --use-openssl-ca) poluem o log.
   delete env['NODE_OPTIONS']
   // Claude Code SIMULADO sempre primeiro no PATH: o E2E nunca chama o CLI real (4A).
@@ -236,6 +239,9 @@ export async function launchOrkio(
   env['ANTHROPIC_API_KEY'] = 'sk-ant-api03-E2E-NAO-PODE-VAZAR'
 
   const args = ['.', `--user-data-dir=${userDataDir}`]
+  // Sempre X11 (o display virtual do xvfb-run): no Wayland o Electron abriria a janela na tela de
+  // quem roda o teste, mesmo sem WAYLAND_DISPLAY (usa o socket padrão wayland-0).
+  if (process.platform === 'linux') args.push('--ozone-platform=x11')
   // Chromium não roda como root sem --no-sandbox (containers de CI).
   if (process.getuid?.() === 0) args.push('--no-sandbox')
 
@@ -906,11 +912,13 @@ export async function launchOrkio(
   await page.setViewportSize({ width: 1100, height: 720 })
   // Recarrega para que o status inicial já passe pelos simuladores acima.
   await page.reload()
-  // Sem projeto: "Vamos começar" → Projetos. Com projeto (reaberturas): Visão geral → Projetos.
-  // Os specs de integrações começam em Integrações.
+  // Sem projeto: Primeiros passos → "Fazer depois" → Projetos. Com projeto: menu → Projetos.
+  // Os specs de integrações começam em Integrações; o de setup fica nos Primeiros passos.
+  if (options.startPage === 'setup') return { app, page, logs }
   await enterApp(page)
   if ((options.startPage ?? 'integrations') === 'integrations') {
     await openSettings(page, 'Integrações')
+    await expandIntegrations(page)
   }
   return { app, page, logs }
 }
@@ -928,6 +936,20 @@ export async function enterApp(page: Page): Promise<void> {
     await page.getByRole('button', { name: 'Fazer depois' }).click()
   }
   await openSettings(page, 'Projetos')
+}
+
+/**
+ * Integrações: espera os estados carregarem e abre as linhas já prontas ("Gerenciar"), para os
+ * cards de conexão ficarem visíveis como antes da lista.
+ */
+export async function expandIntegrations(page: Page): Promise<void> {
+  const list = page.getByRole('list', { name: 'Catálogo de integrações' })
+  for (const name of ['Notion', 'GitHub', 'Claude Code']) {
+    const row = list.getByRole('listitem', { name, exact: true })
+    await expect(row.getByTestId('integration-status').first()).not.toContainText('Verificando')
+  }
+  const manage = list.getByRole('button', { name: /^Gerenciar / })
+  for (let n = await manage.count(); n > 0; n = await manage.count()) await manage.first().click()
 }
 
 /** Configurações › seção (Integrações, Projetos, Quadro e automações, ...). */
@@ -1124,34 +1146,59 @@ export function ghCalls(userDataDir: string): string[] {
   return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean) : []
 }
 
-/** 6E: item do menu lateral (Quadro, Etapas e automações, Fluxos, Contexto do Claude, ...). */
+/** Telas do menu (Quadro, Agentes, Configurações) e seções de Configurações pelo nome antigo. */
 export async function navTo(page: Page, name: string): Promise<void> {
-  await page
-    .getByRole('navigation', { name: 'Navegação principal' })
-    .getByRole('button', { name, exact: true })
-    .click()
+  if (name === 'Quadro' || name === 'Agentes' || name === 'Configurações') {
+    await page
+      .getByRole('navigation', { name: 'Navegação principal' })
+      .getByRole('group', { name: 'Telas' })
+      .getByRole('button', { name, exact: true })
+      .click()
+    return
+  }
+  if (name === 'Fluxos') {
+    await openSettings(page, 'Quadro e automações')
+    await page.getByRole('tab', { name: 'Fluxos', exact: true }).click()
+    return
+  }
+  const section = name === 'Etapas e automações' ? 'Quadro e automações' : name
+  await openSettings(page, section)
+}
+
+/** Aba de Quadro e automações (Colunas, Automações N, Fluxos, Entrega). */
+export async function boardSettingsTab(page: Page, name: string): Promise<void> {
+  await page.getByRole('tab', { name: new RegExp(`^${name}`) }).click()
+}
+
+/** Tela da tarefa (fases, conversa e o painel da fase). */
+export function taskScreen(page: Page, id: string): Locator {
+  return page.getByRole('region', { name: `Tarefa ${id}`, exact: true })
 }
 
 /**
- * Histórico completo da tarefa (todos os eventos): fica recolhido em Detalhes (aba no painel do
- * Quadro, coluna à direita na tela cheia). Abre, confere os textos e volta para a Sessão.
+ * Histórico completo da tarefa (todos os eventos): fica recolhido na aba Detalhes do painel da
+ * fase. Abre e confere os textos.
  */
 export async function expectTaskHistory(scope: Locator, ...texts: string[]): Promise<Locator> {
-  const detailsTab = scope.getByRole('tab', { name: 'Detalhes' })
-  const hasTabs = (await detailsTab.count()) > 0
-  if (hasTabs) await detailsTab.click()
-  const list = scope.getByRole('list', { name: 'Histórico da tarefa' })
-  if (!(await list.isVisible())) await scope.getByText('Histórico completo').click()
+  // A tela da tarefa sempre tem a aba (espera ela aparecer: a tela pode estar abrindo).
+  await scope.getByRole('tab', { name: 'Detalhes', exact: true }).click()
+  // Outras abas (PR & CI) também montam o miolo dos detalhes, escondido: procura só na visível.
+  const area = scope.getByRole('tabpanel', { name: 'Detalhes', exact: true })
+  const list = area.getByRole('list', { name: 'Histórico da tarefa' })
+  if (!(await list.isVisible())) await area.getByText('Histórico completo').click()
   for (const t of texts) await expect(list).toContainText(t)
-  if (hasTabs) await scope.getByRole('tab', { name: 'Sessão' }).click()
   return list
 }
 
-/** Aba do painel da tarefa no Quadro (Sessão, Mudanças, Detalhes). */
+/**
+ * Aba do painel da fase na tela da tarefa (Spec, Plano, Mudanças, PR & CI, Detalhes). "Sessão" é
+ * a conversa, sempre visível: devolve a própria tela.
+ */
 export async function taskTab(
-  panel: Locator,
-  name: 'Sessão' | 'Mudanças' | 'Detalhes'
+  screen: Locator,
+  name: 'Sessão' | 'Spec' | 'Plano' | 'Mudanças' | 'PR & CI' | 'Detalhes'
 ): Promise<Locator> {
-  await panel.getByRole('tab', { name }).click()
-  return panel.getByRole('tabpanel', { name })
+  if (name === 'Sessão') return screen
+  await screen.getByRole('tab', { name, exact: true }).click()
+  return screen.getByRole('tabpanel', { name, exact: true })
 }

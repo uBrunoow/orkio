@@ -13,7 +13,9 @@ import {
   removeDir,
   setFakes,
   type FakeServices,
-  type OrkioApp
+  type OrkioApp,
+  navTo,
+  expandIntegrations
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_WORKSPACE_TOKEN_abcdef123456'
@@ -62,10 +64,8 @@ async function choose(page: Page, scope: Locator, label: string, option: string)
 }
 
 async function goTo(page: Page, name: 'Projetos' | 'Integrações'): Promise<void> {
-  await page
-    .getByRole('navigation', { name: 'Navegação principal' })
-    .getByRole('button', { name })
-    .click()
+  await navTo(page, name)
+  if (name === 'Integrações') await expandIntegrations(page)
 }
 
 test.beforeAll(() => {
@@ -96,7 +96,10 @@ test.afterAll(async () => {
 
 test('sem Notion conectado, o card dos bancos só orienta', async () => {
   const { page } = await open({ notionTasks: 'no_unique_id' })
-  await expect(workspaceCard(page)).toContainText('Conecte o Notion acima')
+  // Sem Notion, a linha dos bancos só orienta (o card abre quando o Notion conecta).
+  await expect(page.getByRole('listitem', { name: 'Bancos e campos', exact: true })).toContainText(
+    'Conecte o Notion antes'
+  )
   // Migração v1 → … → v4 gravada no disco.
   const saved = JSON.parse(readFileSync(configFile(), 'utf8')) as Record<string, unknown>
   expect(saved['schemaVersion']).toBe(11)
@@ -202,15 +205,17 @@ test('vincula o projeto local (com sugestão pelo nome) e lista as tarefas certa
     }
   })
 
-  // Cache: "Ver tarefas" de novo não chama a API; "Atualizar" chama.
+  // Cache: "Ver tarefas" de novo não chama a API; "Atualizar" chama. (Conta a partir de agora: a
+  // lista lateral também lê o quadro ao vincular.)
+  const count = async (): Promise<number> =>
+    (await externalCalls(app)).filter((c) => c.url.endsWith(`${NOTION_FAKE.tasksDs}/query`)).length
+  const before = await count()
   await row.getByRole('button', { name: 'Ocultar tarefas' }).click()
   await row.getByRole('button', { name: 'Ver tarefas' }).click()
   await expect(tasks.getByRole('listitem')).toHaveCount(2)
-  const count = async (): Promise<number> =>
-    (await externalCalls(app)).filter((c) => c.url.endsWith(`${NOTION_FAKE.tasksDs}/query`)).length
-  expect(await count()).toBe(query.length)
+  expect(await count()).toBe(before)
   await row.getByRole('button', { name: 'Atualizar' }).click()
-  await expect.poll(count).toBe(query.length + 1)
+  await expect.poll(count).toBe(before + 1)
 
   await tasks.getByRole('button', { name: 'Abrir ORK-2 no Notion' }).click()
   await expect.poll(() => openedUrls(app)).toContain('https://www.notion.so/ORK-2-bbbb2')

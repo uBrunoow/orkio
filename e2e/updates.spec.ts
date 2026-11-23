@@ -7,6 +7,9 @@ import {
   createUserDataDir,
   cspViolations,
   launchOrkio,
+  taskScreen,
+  navTo,
+  openSettings,
   removeDir,
   simulateUpdate,
   updateInstalls,
@@ -48,11 +51,8 @@ async function close(): Promise<void> {
   await orkio.app.close()
   orkio = null
 }
-async function goTo(page: Page, name: 'Quadro' | 'Configurações'): Promise<void> {
-  await page
-    .getByRole('navigation', { name: 'Navegação principal' })
-    .getByRole('button', { name })
-    .click()
+async function goTo(page: Page, name: 'Quadro' | 'Atualizações'): Promise<void> {
+  await navTo(page, name)
 }
 function banner(page: Page): Locator {
   return page.getByTestId('update-banner')
@@ -134,14 +134,16 @@ test('Configurações: versão, canal e "Procurar atualizações"; banner com a 
   await expect(page.getByRole('listitem', { name: ORK2, exact: true })).toBeVisible()
 
   // Sem empacotar, as atualizações ficam desligadas (e nenhum banner aparece).
-  await goTo(page, 'Configurações')
+  await goTo(page, 'Atualizações')
   const updates = page.getByRole('region', { name: 'Atualizações' })
   await expect(updates.getByTestId('current-version')).toHaveText(APP_VERSION)
   await expect(updates.getByTestId('update-status')).toContainText('só no app instalado')
   await expect(updates.getByRole('button', { name: 'Procurar atualizações' })).toBeDisabled()
   await expect(banner(page)).toHaveCount(0)
   // Sobre: versão; o build do E2E não tem site https de verdade, mas o intermediário é https.
+  await openSettings(page, 'Sobre e diagnóstico')
   await expect(page.getByRole('region', { name: 'Sobre' })).toContainText(APP_VERSION)
+  await openSettings(page, 'Atualizações')
 
   await simulateUpdate(app, { version: '9.9.9' })
   await updates.getByRole('button', { name: 'Procurar atualizações' }).click()
@@ -170,7 +172,7 @@ test('"Atualizar quando terminar" espera a execução do Claude acabar', async (
   await close()
   const { app, page } = await open()
   await simulateUpdate(app, { version: '9.9.9' })
-  await goTo(page, 'Configurações')
+  await goTo(page, 'Atualizações')
   await page
     .getByRole('region', { name: 'Atualizações' })
     .getByRole('button', { name: 'Procurar atualizações' })
@@ -180,9 +182,7 @@ test('"Atualizar quando terminar" espera a execução do Claude acabar', async (
   // Uma execução longa do Claude Code.
   await goTo(page, 'Quadro')
   await page.getByRole('listitem', { name: ORK2, exact: true }).click()
-  const section = page
-    .getByRole('complementary', { name: 'Detalhes de ORK-2' })
-    .getByRole('region', { name: 'Sessão da tarefa' })
+  const section = taskScreen(page, 'ORK-2').getByRole('region', { name: 'Sessão da tarefa' })
   await section.getByRole('textbox', { name: 'Mensagem para o Claude Code' }).fill('demorar')
   await section.getByRole('button', { name: 'Enviar' }).click()
   const run = section.getByTestId('session-run').last()

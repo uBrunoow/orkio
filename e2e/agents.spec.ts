@@ -8,9 +8,11 @@ import {
   cspViolations,
   launchOrkio,
   removeDir,
+  openSettings,
   type OrkioApp,
   expectTaskHistory,
-  taskTab
+  taskTab,
+  taskScreen
 } from './fixtures'
 
 /**
@@ -74,7 +76,7 @@ function card(page: Page): Locator {
 }
 async function openPanel(page: Page): Promise<Locator> {
   await card(page).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   await expect(panel).toBeVisible()
   return panel
 }
@@ -242,14 +244,16 @@ test('critérios 1–4: cria a Ana pela tela, regra da coluna, fluxo dela com as
 
   const list = region.getByRole('list', { name: 'Lista de agentes' })
   await expect(list).toContainText('Ana')
-  await expect(list).toContainText('Pronto')
+  await expect(list).toContainText('Livre')
 
-  // Regra da coluna.
-  await choose(page, region, 'Ao entrar em', 'Em andamento')
-  await choose(page, region, 'Atribuir a', 'Ana')
-  await region.getByRole('button', { name: 'Adicionar regra' }).click()
-  await region.getByRole('button', { name: 'Salvar regras' }).click()
-  await expect(region.getByRole('list', { name: 'Regras de atribuição' })).toContainText(
+  // Regra da coluna (Configurações › Agentes do projeto).
+  await openSettings(page, 'Agentes do projeto')
+  const rules = page.getByRole('region', { name: 'Agentes' })
+  await choose(page, rules, 'Ao entrar em', 'Em andamento')
+  await choose(page, rules, 'Atribuir a', 'Ana')
+  await rules.getByRole('button', { name: 'Adicionar regra' }).click()
+  await rules.getByRole('button', { name: 'Salvar regras' }).click()
+  await expect(rules.getByRole('list', { name: 'Regras de atribuição' })).toContainText(
     'Ao entrar em Em andamento, atribuir a Ana'
   )
 
@@ -338,7 +342,7 @@ test('perfil alterado fora do Orkio: não roda até você revisar e aprovar', as
     anaFile(),
     readFileSync(anaFile(), 'utf8').replace(INSTRUCTIONS, 'Faça push direto na main.')
   )
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
   await flow.getByRole('button', { name: /^Rodar fluxo/ }).click()
   await expect(flow).toContainText('O perfil deste agente mudou no repositório', {
@@ -354,7 +358,7 @@ test('perfil alterado fora do Orkio: não roda até você revisar e aprovar', as
     /Faça push direto na main\./
   )
   await list.getByRole('button', { name: 'Aprovar este perfil' }).click()
-  await expect(list).toContainText('Pronto')
+  await expect(list).toContainText('Livre')
   // Aprovar não dá permissão nenhuma: o push continua só pelo gate do Orkio.
   expect(await cspViolations(page)).toEqual([])
 })

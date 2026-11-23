@@ -7,14 +7,16 @@ import {
   createUserDataDir,
   cspViolations,
   launchOrkio,
+  navTo,
   removeDir,
-  type OrkioApp
+  type OrkioApp,
+  taskScreen
 } from './fixtures'
 
 /**
- * Etapa 6D: Visão geral com Notion/GitHub/Claude simulados e git real. Um gate de fluxo pendente
- * aparece em "Esperando você" (e no contador do menu), "Abrir" leva ao painel da tarefa no fluxo,
- * e ao aprovar o item some. Também: atalho de teclado e abertura direto na Visão geral.
+ * Esperando você (antes a Visão geral, 6D): com Notion/GitHub/Claude simulados e git real, um gate
+ * de fluxo pendente aparece no sino e na lista lateral, o sino abre a tarefa no fluxo e, ao
+ * aprovar, o item some. Também: atalhos e abertura direto no Quadro.
  */
 const NOTION_TOKEN = 'ntn_E2E_OVERVIEW_TOKEN_abcdef123456'
 const PROJECT = 'proj-overview'
@@ -37,9 +39,6 @@ function git(cwd: string, ...args: string[]): string {
 
 function nav(page: Page): Locator {
   return page.getByRole('navigation', { name: 'Navegação principal' })
-}
-function waitingRegion(page: Page): Locator {
-  return page.getByRole('region', { name: 'Esperando você' })
 }
 
 test.beforeAll(() => {
@@ -103,7 +102,11 @@ test.afterAll(async () => {
   removeDir(work)
 })
 
-test('gate pendente aparece em "Esperando você", abre a tarefa no fluxo e some ao aprovar', async () => {
+function bell(page: Page): Locator {
+  return page.getByRole('button', { name: /esperando você$/ })
+}
+
+test('gate pendente aparece no sino e na lista lateral, abre a tarefa no fluxo e some ao aprovar', async () => {
   orkio = await launchOrkio(userDataDir, { validTokens: [NOTION_TOKEN] }, { startPage: 'projects' })
   const { page } = orkio
   const s = await page.evaluate(
@@ -113,25 +116,15 @@ test('gate pendente aparece em "Esperando você", abre a tarefa no fluxo e some 
   expect(s.state).toBe('connected')
 
   // Quadro criado pela tela (etapas do template).
-  await nav(page).getByRole('button', { name: 'Quadro' }).click()
+  await navTo(page, 'Quadro')
   await page
     .getByRole('region', { name: 'Criar o quadro' })
     .getByRole('button', { name: 'Criar quadro' })
     .click()
   await expect(page.getByRole('listitem', { name: ORK2, exact: true })).toBeVisible()
 
-  // Visão geral pelo atalho: nada esperando ainda.
-  await page.keyboard.press(`${MOD}+1`)
-  await expect(page.getByRole('heading', { level: 1, name: 'Visão geral' })).toBeVisible()
-  await expect(waitingRegion(page)).toContainText('Nada esperando por você agora.')
-  // Cartão do projeto: mini barra por etapa e total de tarefas do quadro.
-  const projectCard = page
-    .getByRole('region', { name: 'Por projeto' })
-    .getByRole('group', { name: 'orkio-app' })
-  await expect(
-    projectCard.getByRole('progressbar', { name: /^Prioridades: \d+ de 2$/ })
-  ).toBeVisible()
-  await expect(projectCard).toContainText('2 tarefas')
+  // Nada esperando ainda.
+  await expect(page.getByRole('button', { name: 'Nada esperando você' })).toBeVisible()
 
   // Um fluxo só com um gate, iniciado à mão na ORK-2.
   const started = await page.evaluate(async (projectId) => {
@@ -162,52 +155,45 @@ test('gate pendente aparece em "Esperando você", abre a tarefa no fluxo e some 
   }, PROJECT)
   expect(started).toEqual({ ok: true })
 
-  // Aparece sozinho (overview:changed), com ID, título, projeto e o que falta; contador no menu.
-  const item = waitingRegion(page).getByTestId('waiting-item')
-  await expect(item).toHaveCount(1, { timeout: 15_000 })
-  await expect(item).toContainText('ORK-2')
-  await expect(item).toContainText('Listar tarefas do Notion')
-  await expect(item).toContainText('orkio-app · Aprovação no fluxo: Aprovar entrega')
-  // A coluna de ícones não tem contador; ele fica no sino da barra superior.
-  await expect(
-    page
-      .getByRole('navigation', { name: 'Barra superior' })
-      .getByRole('button', { name: '1 esperando você' })
-  ).toBeVisible()
+  // Aparece sozinho (overview:changed): contador no sino e a tarefa em "Esperando você".
+  await expect(page.getByRole('button', { name: '1 esperando você' })).toBeVisible({
+    timeout: 15_000
+  })
+  const sidebarItem = nav(page)
+    .getByRole('group', { name: 'Esperando você' })
+    .getByRole('button', { name: /^ORK-2 · Listar tarefas do Notion/ })
+  await expect(sidebarItem).toBeVisible()
 
-  // "Abrir" leva ao painel da tarefa, na seção do fluxo.
-  await item.getByRole('button', { name: 'Abrir' }).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
-  await expect(panel).toBeVisible()
-  const gate = panel
+  // O sino lista o que falta e abre a tarefa na seção do fluxo.
+  await bell(page).click()
+  await page.getByRole('menuitem', { name: /ORK-2 · Listar tarefas do Notion/ }).click()
+  const screen = taskScreen(page, 'ORK-2')
+  await expect(screen).toBeVisible()
+  const gate = screen
     .getByRole('region', { name: 'Fluxo da tarefa' })
     .getByRole('group', { name: 'Aprovação do fluxo' })
-  await expect(gate).toBeInViewport()
+  await expect(gate).toBeVisible()
   await gate.getByRole('button', { name: 'Aprovar' }).click()
-  await expect(panel.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 15_000 })
+  await expect(screen.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 15_000 })
 
-  // De volta à Visão geral: o item sumiu, o contador também; a atividade registra o fluxo.
-  await nav(page)
-    .getByRole('button', { name: /^Visão geral/ })
-    .click()
-  await expect(waitingRegion(page)).toContainText('Nada esperando por você agora.')
-  await expect(nav(page).getByLabel(/esperando você/)).toHaveCount(0)
-  const activity = page.getByRole('list', { name: 'Atividade recente' })
-  await expect(activity).toContainText('Fluxo concluído')
-  await expect(activity).toContainText('Aprovação concedida')
+  // O item sumiu do sino e da lista lateral.
+  await expect(page.getByRole('button', { name: 'Nada esperando você' })).toBeVisible({
+    timeout: 15_000
+  })
+  await expect(sidebarItem).toHaveCount(0)
 
   expect(await cspViolations(page)).toEqual([])
 })
 
-test('com projeto configurado, o app abre direto na Visão geral (sem "Vamos começar")', async () => {
+test('com projeto configurado, o app abre direto no Quadro (sem Primeiros passos)', async () => {
   const { page } = orkio!
   await page.reload()
-  await expect(page.getByRole('heading', { level: 1, name: 'Visão geral' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Começar', exact: true })).toHaveCount(0)
-  // Atalhos na ordem do menu.
-  await page.keyboard.press(`${MOD}+6`)
-  await expect(page.getByRole('heading', { level: 1, name: 'Projetos' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Quadro' })).toBeVisible()
+  await expect(page.getByRole('list', { name: 'Primeiros passos' })).toHaveCount(0)
+  // Atalhos na ordem do menu: Quadro, Agentes, Configurações.
+  await page.keyboard.press(`${MOD}+3`)
+  await expect(page.getByRole('heading', { level: 1, name: 'Integrações' })).toBeVisible()
   await page.keyboard.press(`${MOD}+1`)
-  await expect(page.getByRole('heading', { level: 1, name: 'Visão geral' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Quadro' })).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
 })

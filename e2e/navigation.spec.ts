@@ -10,7 +10,9 @@ import {
   navTo,
   removeDir,
   type OrkioApp,
-  expectTaskHistory
+  expectTaskHistory,
+  taskScreen,
+  boardSettingsTab
 } from './fixtures'
 
 /**
@@ -91,13 +93,22 @@ test.afterAll(async () => {
   removeDir(work)
 })
 
-test('menu do projeto: cada tela tem o próprio título e o menu sempre sai das subtelas', async () => {
+function telas(page: Page) {
+  return page
+    .getByRole('navigation', { name: 'Navegação principal' })
+    .getByRole('group', { name: 'Telas' })
+}
+
+test('menu com três telas; Configurações reúne as telas do projeto e sai das subtelas', async () => {
   orkio = await launchOrkio(userDataDir, { validTokens: [TOKEN] }, { startPage: 'projects' })
   const { page } = orkio
   await page.evaluate((t) => window.orkio.notion.connect({ kind: 'token', token: t }), TOKEN)
 
-  // Sem quadro: as outras telas do projeto pedem para criá-lo.
-  await navTo(page, 'Etapas e automações')
+  // O menu principal tem só Quadro, Agentes e Configurações.
+  await expect(telas(page).getByRole('button')).toHaveText(['Quadro', 'Agentes', 'Configurações'])
+
+  // Sem quadro: Quadro e automações pede para criá-lo.
+  await navTo(page, 'Quadro e automações')
   await expect(page.getByRole('heading', { name: 'Crie o quadro primeiro' })).toBeVisible()
   await page.getByRole('button', { name: 'Ir para o Quadro' }).click()
   await page
@@ -105,84 +116,90 @@ test('menu do projeto: cada tela tem o próprio título e o menu sempre sai das 
     .getByRole('button', { name: 'Criar quadro' })
     .click()
   await expect(page.getByRole('listitem', { name: ORK2, exact: true })).toBeVisible()
-  await expect(page.getByTestId('page-context')).toHaveText('orkio-app')
 
-  // Subtela de Etapas e automações; clicar no mesmo item volta ao começo da tela (G1).
-  await navTo(page, 'Etapas e automações')
-  await expect(h1(page, 'Etapas e automações')).toBeVisible()
+  // Subtela; clicar no mesmo item volta ao começo da tela.
+  await navTo(page, 'Quadro e automações')
+  await expect(h1(page, 'Quadro e automações')).toBeVisible()
   await page.getByRole('button', { name: 'Mais ações do fluxo' }).click()
   await page.getByRole('menuitem', { name: 'Etapa Orkio e Bloqueada…' }).click()
   await expect(page.getByRole('heading', { name: 'Ajustar quadro' })).toBeVisible()
-  await navTo(page, 'Etapas e automações')
+  await navTo(page, 'Quadro e automações')
   await expect(page.getByRole('button', { name: 'Mais ações do fluxo' })).toBeVisible()
-  // Entrega (5C) é regra do projeto: fica aqui, não em Fluxos.
+
+  // Entrega é uma aba de Quadro e automações; grava na hora.
+  await boardSettingsTab(page, 'Entrega')
   const approval = page
     .getByRole('region', { name: 'Entrega' })
     .getByRole('checkbox', { name: 'Exigir minha aprovação para push' })
   await expect(approval).toBeChecked()
-  // Grava na hora (o estado vem do main depois do clique).
   await approval.click()
   await expect(approval).not.toBeChecked()
-  await navTo(page, 'Etapas e automações')
+  await navTo(page, 'Quadro e automações')
+  await boardSettingsTab(page, 'Entrega')
   await expect(approval).not.toBeChecked()
   await approval.click()
   await expect(approval).toBeChecked()
 
-  // Fluxos com a aba Modelos Alva; Contexto do Claude; e o Quadro de volta.
-  await navTo(page, 'Fluxos')
-  await expect(h1(page, 'Fluxos')).toBeVisible()
+  // Fluxos (com os modelos do alva-flow) também é uma aba.
+  await boardSettingsTab(page, 'Fluxos')
   await expect(page.getByRole('region', { name: 'Fluxos do projeto' })).toBeVisible()
-  await page.getByRole('tab', { name: 'Modelos do alva-flow' }).click()
-  await expect(page.getByRole('region', { name: 'alva-flow', exact: true })).toBeVisible()
-  await navTo(page, 'Contexto do Claude')
-  await expect(h1(page, 'Contexto do Claude')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Modelos do alva-flow' })).toBeVisible()
+  // Contexto do Claude não existe mais.
+  await expect(page.getByRole('button', { name: 'Contexto do Claude' })).toHaveCount(0)
   await navTo(page, 'Quadro')
   await expect(h1(page, 'Quadro')).toBeVisible()
-  // Um único h1 por tela.
   await expect(page.getByRole('heading', { level: 1 })).toHaveCount(1)
   expect(await cspViolations(page)).toEqual([])
 })
 
-test('tarefa: painel com rolagem própria, tela cheia e volta ao quadro com o painel aberto', async () => {
-  const { page } = orkio!
+test('tarefa: tela com fases, conversa e painel; janela estreita; tarefa que sumiu', async () => {
+  const { app, page } = orkio!
   await page.getByRole('listitem', { name: ORK2, exact: true }).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
-  await expect(panel).toBeVisible()
-  await panel.getByRole('button', { name: 'Abrir tarefa' }).click()
-
+  const task = taskScreen(page, 'ORK-2')
+  await expect(task).toBeVisible()
   await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()
-  await expect(page.getByTestId('page-context')).toHaveText('ORK-2 · orkio-app')
-  const task = page.getByRole('region', { name: 'Tarefa ORK-2' })
-  // Tela cheia: em que pé está, a sessão (conversa + campo) e o estado ao lado.
-  await expect(task.getByRole('list', { name: 'Andamento da tarefa' })).toBeVisible()
+  await expect(task.getByRole('list', { name: 'Fases da tarefa' })).toBeVisible()
   const session = task.getByRole('region', { name: 'Sessão da tarefa' })
   await expect(session.getByRole('list', { name: 'Conversa da tarefa' })).toContainText(
     'Entrou no quadro'
   )
   await expect(session.getByRole('textbox', { name: /^Mensagem para/ })).toBeVisible()
-  await expect(task.getByRole('region', { name: 'Mudanças' })).toBeVisible()
+  const panel = task.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  await expect(panel.getByRole('tab')).toHaveCount(3)
+  for (const name of ['Mudanças', 'PR & CI', 'Detalhes']) {
+    await expect(panel.getByRole('tab', { name, exact: true })).toBeVisible()
+  }
   await expectTaskHistory(task, 'Entrou no quadro')
-  // O menu marca o Quadro enquanto a tarefa está aberta.
-  await expect(
-    page
-      .getByRole('navigation', { name: 'Navegação principal' })
-      .getByRole('button', { name: 'Quadro', exact: true })
-  ).toHaveAttribute('aria-current', 'page')
+  await expect(telas(page).getByRole('button', { name: 'Quadro' })).toHaveAttribute(
+    'aria-current',
+    'page'
+  )
 
+  // Janela estreita: o painel vai para cima da conversa.
+  await page.setViewportSize({ width: 1000, height: 700 })
+  await expect(async () => {
+    const p = await panel.boundingBox()
+    const s = await session.boundingBox()
+    expect(p && s && p.y < s.y).toBe(true)
+  }).toPass()
+  await page.setViewportSize({ width: 1280, height: 800 })
+
+  // Notificação de uma tarefa que não está mais no quadro.
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]!.webContents.send('board:open-task', {
+      projectId: 'proj-nav',
+      taskId: 'tarefa-que-sumiu'
+    })
+  })
+  await expect(page.getByRole('heading', { name: 'Tarefa não encontrada' })).toBeVisible()
   await page.getByRole('button', { name: 'Voltar ao quadro' }).click()
   await expect(h1(page, 'Quadro')).toBeVisible()
-  await expect(page.getByRole('complementary', { name: 'Detalhes de ORK-2' })).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
 })
 
 test('Command Palette e atalhos: Ctrl+K acha a tarefa, Ctrl+número troca de tela, teclado no quadro', async () => {
   const { page } = orkio!
-  // Esc fecha o painel.
-  await page.getByRole('heading', { level: 1, name: 'Quadro' }).click()
-  await page.keyboard.press('Escape')
-  await expect(page.getByRole('complementary', { name: 'Detalhes de ORK-2' })).toBeHidden()
-
-  // Paleta pelo teclado: busca sem acento, Enter abre a tarefa no painel.
+  // Paleta pelo teclado: busca sem acento, Enter abre a tela da tarefa.
   await page.keyboard.press('Control+k')
   const palette = page.getByRole('dialog', { name: 'Buscar tarefas e comandos' })
   await expect(palette).toBeVisible()
@@ -194,7 +211,7 @@ test('Command Palette e atalhos: Ctrl+K acha a tarefa, Ctrl+número troca de tel
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
   await expect(palette).toBeHidden()
-  await expect(page.getByRole('complementary', { name: 'Detalhes de ORK-2' })).toBeVisible()
+  await expect(taskScreen(page, 'ORK-2')).toBeVisible()
 
   // Telas pela paleta e pelos atalhos; Alt+← volta.
   await page.keyboard.press('Control+k')
@@ -203,17 +220,17 @@ test('Command Palette e atalhos: Ctrl+K acha a tarefa, Ctrl+número troca de tel
   await expect(palette.getByRole('option', { name: 'Modelos do alva-flow' })).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
-  await expect(
-    page.getByRole('tab', { name: 'Modelos do alva-flow', selected: true })
-  ).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'Fluxos', selected: true })).toBeVisible()
   await page.keyboard.press('Control+3')
-  await expect(h1(page, 'Etapas e automações')).toBeVisible()
+  await expect(h1(page, 'Integrações')).toBeVisible()
   await page.keyboard.press('Alt+ArrowLeft')
-  await expect(h1(page, 'Fluxos')).toBeVisible()
-  await page.keyboard.press('Control+2')
+  await expect(h1(page, 'Quadro e automações')).toBeVisible()
+  await page.keyboard.press('Control+1')
+  await expect(h1(page, 'Quadro')).toBeVisible()
+  await page.keyboard.press('Control+4')
   await expect(h1(page, 'Quadro')).toBeVisible()
 
-  // Quadro pelo teclado: foco no card, Ctrl+Enter abre em tela cheia.
+  // Quadro pelo teclado: menu do card e Ctrl+Enter abre a tela da tarefa.
   const card = page.getByRole('listitem', { name: ORK2, exact: true })
   await card.focus()
   await page.keyboard.press('m')

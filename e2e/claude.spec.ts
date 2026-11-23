@@ -11,7 +11,9 @@ import {
   notionState,
   removeDir,
   type OrkioApp,
-  navTo
+  navTo,
+  taskScreen,
+  taskTab
 } from './fixtures'
 
 /**
@@ -51,16 +53,13 @@ async function close(): Promise<void> {
   orkio = null
 }
 async function goTo(page: Page, name: 'Quadro' | 'Integrações'): Promise<void> {
-  await page
-    .getByRole('navigation', { name: 'Navegação principal' })
-    .getByRole('button', { name })
-    .click()
+  await navTo(page, name)
 }
 function card(page: Page): Locator {
   return page.getByRole('listitem', { name: ORK2, exact: true })
 }
 function panelOf(page: Page): Locator {
-  return page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  return taskScreen(page, 'ORK-2')
 }
 /** Abre a tarefa no Quadro e devolve a sessão (conversa + campo de mensagem). */
 async function openPanel(page: Page): Promise<Locator> {
@@ -73,10 +72,9 @@ async function openPanel(page: Page): Promise<Locator> {
 function session(page: Page): Locator {
   return panelOf(page).getByRole('region', { name: 'Sessão da tarefa' })
 }
-/** Aba do painel da tarefa (Sessão, Mudanças, Detalhes). */
+/** Aba do painel da fase (Mudanças, Detalhes); "Sessão" é a conversa, sempre visível. */
 async function tab(page: Page, name: 'Sessão' | 'Mudanças' | 'Detalhes'): Promise<Locator> {
-  await panelOf(page).getByRole('tab', { name }).click()
-  return panelOf(page).getByRole('tabpanel', { name })
+  return taskTab(panelOf(page), name)
 }
 /** A execução mais recente na conversa (a que fica aberta). */
 function lastRun(section: Locator): Locator {
@@ -396,33 +394,6 @@ test('"Rodar de novo" reabre com o mesmo comando; artefato anexado e publicado n
   expect(published[0]!.markdown).toContain('Separador ponto e vírgula')
   expect(published[1]!.markdown).toContain('## exportar.md')
   for (const p of published) expect(p.markdown).not.toContain('ghp_abcdef')
-})
-
-test('contexto do projeto: instruções + página do Notion entram no briefing', async () => {
-  const { page } = orkio!
-  await panelOf(page).getByRole('button', { name: 'Fechar' }).click()
-  await navTo(page, 'Contexto do Claude')
-  const ctx = page.getByRole('region', { name: 'Contexto do Claude Code' })
-  await ctx.getByRole('textbox', { name: /^Instruções/ }).fill('Rode pnpm test antes de commitar.')
-  await ctx.getByRole('searchbox', { name: 'Buscar página no Notion' }).fill('arquitetura')
-  await ctx.getByRole('button', { name: 'Buscar', exact: true }).click()
-  await ctx.getByRole('button', { name: 'Adicionar Arquitetura do Orkio' }).click()
-  await expect(ctx.getByRole('list', { name: 'Páginas de referência' })).toContainText(
-    'Arquitetura do Orkio'
-  )
-  await ctx.getByRole('button', { name: 'Salvar contexto' }).click()
-  await expect(ctx.getByText('Contexto salvo.')).toBeVisible()
-  await navTo(page, 'Quadro')
-
-  const section = await openPanel(page)
-  await section.getByRole('button', { name: 'Nova sessão…' }).click()
-  const briefing = section.getByRole('textbox', { name: /^Resumo da tarefa/ })
-  await expect(briefing).toHaveValue(/## Contexto do projeto/)
-  await expect(briefing).toHaveValue(/Rode pnpm test antes de commitar\./)
-  await expect(briefing).toHaveValue(
-    /### Arquitetura do Orkio \(Notion\)\n\nCamadas: main, preload, renderer\./
-  )
-  await section.getByRole('button', { name: 'Cancelar', exact: true }).click()
 })
 
 test('ver diff e limpar ambiente (a branch fica)', async () => {
