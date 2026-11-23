@@ -238,68 +238,155 @@ function ProjectRow({
   return (
     <li
       aria-label={project.name}
-      className="flex items-start gap-3.5 border-b border-border-soft px-4 py-3 last:border-b-0"
+      className="flex flex-col gap-2.5 border-b border-border-soft px-4 py-3 last:border-b-0"
     >
-      <span
-        aria-hidden="true"
-        className={cn(
-          'grid size-8 shrink-0 place-items-center rounded-lg text-sm font-semibold',
-          projectTint(project.id)
-        )}
-      >
-        {project.name.slice(0, 1).toUpperCase()}
-      </span>
-
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="font-medium text-foreground">{project.name}</span>
-          <span className="font-mono text-[11.5px] break-all text-subtle-foreground">
-            <span>{project.localPath}</span>
-            {project.repo && (
-              <>
-                <span aria-hidden="true"> · </span>
-                <span>
-                  {project.repo.owner}/{project.repo.name}
-                </span>
-              </>
-            )}
-            {project.local && (
-              <>
-                <span aria-hidden="true"> · </span>
-                <code data-testid="project-branch">
-                  {project.local.branch ?? '(detached HEAD)'}
-                </code>
-              </>
-            )}
-          </span>
-        </div>
-        {project.local?.dirty && <StatusToken label="alterações não commitadas" tone="warning" />}
-        <div
-          className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs"
-          data-testid="project-checks"
+      <div className="flex items-start gap-3.5">
+        <span
+          aria-hidden="true"
+          className={cn(
+            'grid size-8 shrink-0 place-items-center rounded-lg text-sm font-semibold',
+            projectTint(project.id)
+          )}
         >
-          {checks.map((c) => (
-            <span
-              key={c.id}
-              className={cn(
-                'inline-flex items-center gap-1',
-                c.state === 'ok' ? 'text-muted-foreground' : 'text-foreground',
-                c.state === 'problem' && 'text-danger'
+          {project.name.slice(0, 1).toUpperCase()}
+        </span>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="font-medium text-foreground">{project.name}</span>
+            <span className="font-mono text-[11.5px] break-all text-subtle-foreground">
+              <span>{project.localPath}</span>
+              {project.repo && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <span>
+                    {project.repo.owner}/{project.repo.name}
+                  </span>
+                </>
               )}
-            >
+              {project.local && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <code data-testid="project-branch">
+                    {project.local.branch ?? '(detached HEAD)'}
+                  </code>
+                </>
+              )}
+            </span>
+          </div>
+          {project.local?.dirty && <StatusToken label="alterações não commitadas" tone="warning" />}
+          <div
+            className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs"
+            data-testid="project-checks"
+          >
+            {checks.map((c) => (
               <span
-                aria-hidden="true"
+                key={c.id}
                 className={cn(
-                  'font-medium',
-                  c.state === 'ok' ? 'text-ok' : c.state === 'warning' ? 'text-warn' : 'text-danger'
+                  'inline-flex items-center gap-1',
+                  c.state === 'ok' ? 'text-muted-foreground' : 'text-foreground',
+                  c.state === 'problem' && 'text-danger'
                 )}
               >
-                {c.state === 'ok' ? '✓' : '!'}
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    'font-medium',
+                    c.state === 'ok'
+                      ? 'text-ok'
+                      : c.state === 'warning'
+                        ? 'text-warn'
+                        : 'text-danger'
+                  )}
+                >
+                  {c.state === 'ok' ? '✓' : '!'}
+                </span>
+                {c.label}
               </span>
-              {c.label}
-            </span>
-          ))}
+            ))}
+          </div>
         </div>
+
+        {confirmingRemove ? (
+          <div
+            role="group"
+            aria-label={`Confirmar remoção de ${project.name}`}
+            className="flex shrink-0 flex-wrap items-center gap-2 self-center"
+          >
+            <span className="text-xs text-muted-foreground">
+              Remover do Orkio? Nenhum arquivo será apagado.
+            </span>
+            <Button variant="outline" size="sm" onClick={() => setConfirmingRemove(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={busy === 'remove'}
+              onClick={() => {
+                setBusy('remove')
+                void onRemove().finally(() => {
+                  setBusy(null)
+                  setConfirmingRemove(false)
+                })
+              }}
+            >
+              {busy === 'remove' && <Spinner />}
+              Remover
+            </Button>
+          </div>
+        ) : (
+          <>
+            <span className={cn(STATE_COL, 'self-center')}>
+              <StatusToken
+                label={health.label}
+                tone={toneOf(health.color)}
+                data-health={project.health.state}
+              />
+            </span>
+            <div className="flex shrink-0 items-center justify-end gap-1.5 self-center">
+              {folderProblem ? (
+                // A pasta sumiu ou mudou: reapontar é a correção, fica à vista.
+                <Button variant="outline" disabled={busy !== null} onClick={() => void relocate()}>
+                  {busy === 'relocate' ? <Spinner /> : <FolderSearchIcon />}
+                  {busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
+                </Button>
+              ) : missingSteps(checks) > 0 ? (
+                <Button onClick={onContinueSetup}>Continuar configuração</Button>
+              ) : (
+                <Button variant="outline" onClick={onOpenBoard}>
+                  <BoardIcon />
+                  Abrir quadro
+                </Button>
+              )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`Mais ações de ${project.name}`}
+                    disabled={busy !== null}
+                  >
+                    <MoreIcon />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {!folderProblem && (
+                    <DropdownMenuItem onSelect={() => void relocate()}>
+                      Reapontar pasta
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onSelect={() => setConfirmingRemove(true)}>
+                    Remover do Orkio
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </>
+        )}
+      </div>
+      {/* Detalhes (aviso, Notion e tarefas) em largura cheia, alinhados ao nome do projeto. */}
+      <div className="flex min-w-0 flex-col gap-2 pl-[46px] empty:hidden">
         {project.health.message && project.health.state !== 'ok' && (
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <span>{project.health.message}</span>
@@ -323,84 +410,6 @@ function ProjectRow({
           </Alert>
         )}
       </div>
-
-      {confirmingRemove ? (
-        <div
-          role="group"
-          aria-label={`Confirmar remoção de ${project.name}`}
-          className="flex shrink-0 flex-wrap items-center gap-2 self-center"
-        >
-          <span className="text-xs text-muted-foreground">
-            Remover do Orkio? Nenhum arquivo será apagado.
-          </span>
-          <Button variant="outline" size="sm" onClick={() => setConfirmingRemove(false)}>
-            Cancelar
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            disabled={busy === 'remove'}
-            onClick={() => {
-              setBusy('remove')
-              void onRemove().finally(() => {
-                setBusy(null)
-                setConfirmingRemove(false)
-              })
-            }}
-          >
-            {busy === 'remove' && <Spinner />}
-            Remover
-          </Button>
-        </div>
-      ) : (
-        <>
-          <span className={cn(STATE_COL, 'self-center')}>
-            <StatusToken
-              label={health.label}
-              tone={toneOf(health.color)}
-              data-health={project.health.state}
-            />
-          </span>
-          <div className="flex shrink-0 items-center justify-end gap-1.5 self-center">
-            {folderProblem ? (
-              // A pasta sumiu ou mudou: reapontar é a correção, fica à vista.
-              <Button variant="outline" disabled={busy !== null} onClick={() => void relocate()}>
-                {busy === 'relocate' ? <Spinner /> : <FolderSearchIcon />}
-                {busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
-              </Button>
-            ) : missingSteps(checks) > 0 ? (
-              <Button onClick={onContinueSetup}>Continuar configuração</Button>
-            ) : (
-              <Button variant="outline" onClick={onOpenBoard}>
-                <BoardIcon />
-                Abrir quadro
-              </Button>
-            )}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Mais ações de ${project.name}`}
-                  disabled={busy !== null}
-                >
-                  <MoreIcon />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {!folderProblem && (
-                  <DropdownMenuItem onSelect={() => void relocate()}>
-                    Reapontar pasta
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onSelect={() => setConfirmingRemove(true)}>
-                  Remover do Orkio
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </>
-      )}
     </li>
   )
 }

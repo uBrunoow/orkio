@@ -338,7 +338,7 @@ export function StageSelector({
   return (
     <div className={cn('flex gap-1.5', compact ? 'items-center' : 'flex-col')}>
       <SelectField
-        className={compact ? 'w-44' : undefined}
+        className={compact ? 'w-36' : undefined}
         label="Mover para"
         labelHidden={compact}
         {...(compact ? { size: 'sm' as const } : {})}

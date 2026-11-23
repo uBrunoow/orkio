@@ -280,7 +280,6 @@ function useClaudeStatus(): ClaudeCodeStatus | null {
   return status
 }
 
-
 function connectionKey(status: ConnectionStatus | null): string | null {
   if (status === null || status.state === 'connecting') return null
   return status.state === 'connected' ? `connected:${status.connectedAt}` : status.state

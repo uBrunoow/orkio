@@ -162,7 +162,10 @@ test('tarefa: tela com fases, conversa e painel; janela estreita; tarefa que sum
   const task = taskScreen(page, 'ORK-2')
   await expect(task).toBeVisible()
   await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()
-  await expect(task.getByRole('list', { name: 'Fases da tarefa' })).toBeVisible()
+  // Fases na barra do topo (fora da região da tela).
+  await expect(
+    page.getByTestId('top-bar').getByRole('list', { name: 'Fases da tarefa' })
+  ).toBeVisible()
   const session = task.getByRole('region', { name: 'Sessão da tarefa' })
   await expect(session.getByRole('list', { name: 'Conversa da tarefa' })).toContainText(
     'Entrou no quadro'

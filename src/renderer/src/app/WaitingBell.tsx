@@ -99,9 +99,7 @@ export function WaitingBell({
               >
                 <span className="flex w-full min-w-0 items-center gap-2">
                   <span className="font-mono text-xs text-subtle-foreground">#{pr.number}</span>
-                  <span className="truncate">
-                    {pr.task.title ?? pr.task.displayId ?? 'Tarefa'}
-                  </span>
+                  <span className="truncate">{pr.task.title ?? pr.task.displayId ?? 'Tarefa'}</span>
                 </span>
                 <span className="text-xs text-muted-foreground">
                   {pr.reasons.map((r) => PR_REASON_LABEL[r]).join(' · ')}

@@ -161,7 +161,11 @@ export function Sidebar({
 }): React.JSX.Element {
   const version = useAppVersion()
 
-  const section = (title: string, items: SidebarTask[], extra?: React.ReactNode): React.ReactNode =>
+  const section = (
+    title: string,
+    items: SidebarTask[],
+    extra?: React.ReactNode
+  ): React.ReactNode =>
     items.length === 0 ? null : (
       <Section title={title} count={items.length}>
         {items.map((t) => (
@@ -176,7 +180,10 @@ export function Sidebar({
       </Section>
     )
 
-  const navItem = (name: 'board' | 'agents' | 'settings', Icon: typeof BoardIcon): React.ReactNode => {
+  const navItem = (
+    name: 'board' | 'agents' | 'settings',
+    Icon: typeof BoardIcon
+  ): React.ReactNode => {
     const sc = shortcutOf(name)
     const selected = route.name === name || (name === 'board' && route.name === 'task')
     return (
@@ -228,7 +235,9 @@ export function Sidebar({
           {(projects ?? []).map((p) => (
             <DropdownMenuItem key={p.id} onSelect={() => onChooseProject(p.id)}>
               <ProjectSquare project={p} />
-              <span className="truncate">{p.id === project?.id ? `${p.name} (atual)` : p.name}</span>
+              <span className="truncate">
+                {p.id === project?.id ? `${p.name} (atual)` : p.name}
+              </span>
             </DropdownMenuItem>
           ))}
           {(projects ?? []).length > 0 && <DropdownMenuSeparator />}

@@ -209,7 +209,14 @@ test('vincula o projeto local (com sugestão pelo nome) e lista as tarefas certa
   // lista lateral também lê o quadro ao vincular.)
   const count = async (): Promise<number> =>
     (await externalCalls(app)).filter((c) => c.url.endsWith(`${NOTION_FAKE.tasksDs}/query`)).length
-  const before = await count()
+  // Espera o ciclo das automações que o vínculo dispara no main (também lê as tarefas) acalmar.
+  let before = await count()
+  for (let settled = 0; settled < 3;) {
+    await new Promise((r) => setTimeout(r, 500))
+    const now = await count()
+    settled = now === before ? settled + 1 : 0
+    before = now
+  }
   await row.getByRole('button', { name: 'Ocultar tarefas' }).click()
   await row.getByRole('button', { name: 'Ver tarefas' }).click()
   await expect(tasks.getByRole('listitem')).toHaveCount(2)

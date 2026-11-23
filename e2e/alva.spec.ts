@@ -77,9 +77,10 @@ async function goToBoard(page: Page): Promise<void> {
     .click()
 }
 const card = (page: Page): Locator => page.getByRole('listitem', { name: ORK2, exact: true })
-/** Etapa da tarefa na tela dela (seletor "Mover para" no topo). */
+/** Etapa da tarefa na tela dela (seletor "Mover para" na barra do topo, fora da região da tela). */
 async function expectStage(screen: Locator, stage: string): Promise<void> {
-  await expect(screen.getByRole('combobox', { name: /^Mover para/ })).toContainText(stage, {
+  const bar = screen.page().getByTestId('top-bar')
+  await expect(bar.getByRole('combobox', { name: /^Mover para/ })).toContainText(stage, {
     timeout: 30_000
   })
 }

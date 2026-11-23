@@ -63,7 +63,13 @@ function initials(name: string): string {
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : '')).toUpperCase()
 }
 
-function AccountAvatar({ account, small }: { account: Account; small?: boolean }): React.JSX.Element {
+function AccountAvatar({
+  account,
+  small
+}: {
+  account: Account
+  small?: boolean
+}): React.JSX.Element {
   return (
     <Avatar className={cn('rounded-md', small ? 'size-6' : 'size-7')}>
       {account.avatarUrl && <AvatarImage src={account.avatarUrl} alt="" />}

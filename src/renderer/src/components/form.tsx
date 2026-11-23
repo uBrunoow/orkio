@@ -303,7 +303,9 @@ export function RadioListField({
   const id = React.useId()
   return (
     <fieldset className={cn('flex min-w-0 flex-col gap-2', className)}>
-      <legend className={cn('mb-1.5 text-sm font-medium', labelHidden && 'sr-only')}>{label}</legend>
+      <legend className={cn('mb-1.5 text-sm font-medium', labelHidden && 'sr-only')}>
+        {label}
+      </legend>
       {description && <p className="-mt-1 text-xs text-muted-foreground">{description}</p>}
       <RadioGroup value={value ?? ''} onValueChange={onChange} aria-label={label}>
         {options.map((o) => (
@@ -318,9 +320,7 @@ export function RadioListField({
               <Label htmlFor={`${id}-${o.value}`} className="font-normal">
                 {o.label}
               </Label>
-              {o.description && (
-                <p className="text-xs text-muted-foreground">{o.description}</p>
-              )}
+              {o.description && <p className="text-xs text-muted-foreground">{o.description}</p>}
             </div>
           </div>
         ))}

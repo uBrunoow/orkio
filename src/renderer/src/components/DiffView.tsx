@@ -58,7 +58,9 @@ function FileBody({
   onMore(): void
 }): React.JSX.Element {
   if (file.binary)
-    return <p className="text-xs text-muted-foreground">Arquivo binário: o conteúdo não aparece aqui.</p>
+    return (
+      <p className="text-xs text-muted-foreground">Arquivo binário: o conteúdo não aparece aqui.</p>
+    )
   if (file.hunks.length === 0) {
     return (
       <p className="text-xs text-muted-foreground">
@@ -96,7 +98,11 @@ function FileBody({
   const shown = ROWS_FIRST + extra
   return (
     <div className="flex flex-col gap-2">
-      <div className="orkio-diff flex flex-col" role="group" aria-label={`Mudanças em ${file.path}`}>
+      <div
+        className="orkio-diff flex flex-col"
+        role="group"
+        aria-label={`Mudanças em ${file.path}`}
+      >
         {hunks}
       </div>
       {total > shown && (
@@ -214,7 +220,10 @@ export function DiffView({
             <CollapsibleTrigger className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/40">
               <IconChevronRight
                 aria-hidden="true"
-                className={cn('size-3.5 text-subtle-foreground transition-transform', opened && 'rotate-90')}
+                className={cn(
+                  'size-3.5 text-subtle-foreground transition-transform',
+                  opened && 'rotate-90'
+                )}
               />
               <span className="min-w-0 flex-1 truncate font-mono">
                 {file.oldPath ? `${file.oldPath} → ` : ''}

@@ -11,7 +11,9 @@ const COMPONENTS: Components = {
   h1: ({ children }) => <h4 className="mt-3 mb-1 text-sm font-semibold">{children}</h4>,
   h2: ({ children }) => <h4 className="mt-3 mb-1 text-sm font-semibold">{children}</h4>,
   h3: ({ children }) => <h5 className="mt-3 mb-1 text-sm font-medium">{children}</h5>,
-  h4: ({ children }) => <h5 className="mt-2 mb-1 text-[12.5px] font-medium text-muted-foreground">{children}</h5>,
+  h4: ({ children }) => (
+    <h5 className="mt-2 mb-1 text-[12.5px] font-medium text-muted-foreground">{children}</h5>
+  ),
   h5: ({ children }) => <h6 className="mt-2 mb-1 text-xs font-medium">{children}</h6>,
   h6: ({ children }) => <h6 className="mt-2 mb-1 text-xs font-medium">{children}</h6>,
   p: ({ children }) => <p className="my-1.5 leading-relaxed">{children}</p>,

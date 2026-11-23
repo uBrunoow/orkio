@@ -219,9 +219,7 @@ export function CommandMenu({
     const delay = mode === 'tasks' && query.trim() ? 250 : 0
     const timer = window.setTimeout(() => {
       const run = query.trim() ? source.search(query) : source.bootstrap()
-      void run
-        .then((list) => alive && setItems(list))
-        .catch(() => alive && setItems([]))
+      void run.then((list) => alive && setItems(list)).catch(() => alive && setItems([]))
     }, delay)
     return () => {
       alive = false
@@ -255,7 +253,9 @@ export function CommandMenu({
       <CommandInput
         value={query}
         onValueChange={setQuery}
-        placeholder={mode === 'tasks' ? 'Título ou ID (ex.: ORK-142)…' : 'Buscar tarefa, tela ou projeto…'}
+        placeholder={
+          mode === 'tasks' ? 'Título ou ID (ex.: ORK-142)…' : 'Buscar tarefa, tela ou projeto…'
+        }
         aria-label={label}
       />
       <CommandList className="max-h-[60vh]">

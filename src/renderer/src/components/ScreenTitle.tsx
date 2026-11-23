@@ -20,7 +20,7 @@ export function ScreenTitle({
       className={cn(
         'min-w-0 font-medium text-foreground',
         look === 3 ? 'text-lg leading-tight' : 'text-sm',
-        maxLines === 1 && 'truncate',
+        maxLines === 1 && 'min-w-24 truncate',
         className
       )}
     >

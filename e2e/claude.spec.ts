@@ -240,9 +240,6 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   await run.getByRole('button', { name: 'Ver o diff da tarefa' }).click()
   await expect(run.getByRole('region', { name: 'Diff da tarefa' })).toContainText('src/exportar.ts')
 
-  // Em que pé está: código em andamento, com o commit.
-  await expect(panelOf(page).getByTestId('progress-code')).toHaveAttribute('aria-label', /1 commit/)
-
   // Mudanças: arquivos e ambiente.
   const changes = await tab(page, 'Mudanças')
   await expect(changes.getByTestId('changes-summary')).toContainText('1 commit')

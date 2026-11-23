@@ -167,7 +167,10 @@ export function BoardColumns({
       }
     } else if (key === 'm') {
       e.preventDefault()
-      el.querySelector<HTMLButtonElement>('button[aria-label^="Ações de"]')?.click()
+      // O gatilho do Radix abre no pointerdown ou no teclado (não no .click()): manda um Enter.
+      const trigger = el.querySelector<HTMLButtonElement>('button[aria-label^="Ações de"]')
+      trigger?.focus()
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
       return
     } else return
     e.preventDefault()

@@ -37,7 +37,9 @@ describe('renderer sem estilos injetados em runtime', () => {
   })
 
   it('nunca liga o modo modal (react-remove-scroll injeta <style>)', () => {
-    const bad = sources.filter(({ text }) => /\bmodal(=\{true\}|\s*=\s*true|\s*:\s*true)/.test(text))
+    const bad = sources.filter(({ text }) =>
+      /\bmodal(=\{true\}|\s*=\s*true|\s*:\s*true)/.test(text)
+    )
     expect(bad.map((s) => s.file)).toEqual([])
   })
 

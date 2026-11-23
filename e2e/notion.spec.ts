@@ -127,7 +127,8 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'listProjectChoices',
       'link',
       'unlink',
-      'listTasks'
+      'listTasks',
+      'searchTasks'
     ],
     signals: ['get'],
     board: [

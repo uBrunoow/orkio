@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from '@/components/ui/table'
 import type { ActivityGroup, ActivityItem } from '../../../shared/overview'
 import type { Execution } from './executions'
 import { EditIcon } from './icons'
@@ -114,8 +121,7 @@ export function ExecutionsTable({
   executions: readonly Execution[] | null
   empty: string
 }): React.JSX.Element {
-  if (executions === null)
-    return <Skeleton className="h-16" aria-label="Carregando execuções" />
+  if (executions === null) return <Skeleton className="h-16" aria-label="Carregando execuções" />
   if (executions.length === 0)
     return (
       <p className="text-xs text-muted-foreground" data-testid="executions-empty">
