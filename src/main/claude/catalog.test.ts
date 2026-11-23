@@ -51,6 +51,28 @@ describe('catálogo de comandos', () => {
     expect(groups[0]!.commands[1]!.description).toBe('Revisa o diff')
   })
 
+  it('installed_plugins.json maior que 8 KB (muitos plugins) ainda é lido inteiro', async () => {
+    const claude = join(home, '.claude')
+    const plugin = join(claude, 'plugins', 'cache', 'alva-flow')
+    await mkdir(join(plugin, 'commands'), { recursive: true })
+    await writeFile(join(plugin, 'commands', 'spec.md'), md('spec', 'Spec'))
+    const plugins: Record<string, unknown> = {}
+    for (let i = 0; i < 60; i++) {
+      plugins[`outro-${i}@mkt`] = [
+        { scope: 'user', installPath: join(home, 'nao-existe', `outro-${i}`), version: '1.0.0' }
+      ]
+    }
+    plugins['alva-flow@alva-flow-marketplace'] = [{ installPath: plugin, version: '1.0.25' }]
+    const json = JSON.stringify({ version: 2, plugins }, null, 2)
+    expect(json.length).toBeGreaterThan(8 * 1024)
+    await writeFile(join(claude, 'plugins', 'installed_plugins.json'), json)
+
+    const groups = await buildCatalog({ home })
+    expect(groups.map((g) => [g.title, g.commands.map((c) => c.name)])).toEqual([
+      ['alva-flow', ['alva-flow:spec']]
+    ])
+  })
+
   it('pastas ausentes e JSON inválido não quebram', async () => {
     expect(await buildCatalog({ home })).toEqual([])
     expect(parseInstalledPlugins('{{')).toEqual([])

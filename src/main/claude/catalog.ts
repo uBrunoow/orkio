@@ -14,6 +14,8 @@ export type { CatalogCommand, CatalogGroup }
 
 const MAX_FILES_PER_DIR = 300
 const MAX_HEAD_BYTES = 8 * 1024
+/** `installed_plugins.json` cresce com cada plugin (~170 bytes cada): lido inteiro, até 1 MB. */
+const MAX_INDEX_BYTES = 1024 * 1024
 const NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
 
 /** Frontmatter simples (`chave: valor`), só as duas chaves que interessam. */
@@ -38,6 +40,8 @@ export interface CatalogFs {
   readdir(path: string): Promise<string[]>
   /** Só o começo do arquivo (frontmatter). */
   readHead(path: string): Promise<string | null>
+  /** Arquivo inteiro (índices JSON); `null` se não existir ou passar do limite. */
+  readText(path: string): Promise<string | null>
   isDir(path: string): Promise<boolean>
 }
 
@@ -48,6 +52,15 @@ export const realCatalogFs: CatalogFs = {
       const s = await stat(p)
       if (!s.isFile()) return null
       return (await readFile(p, 'utf8')).slice(0, MAX_HEAD_BYTES)
+    } catch {
+      return null
+    }
+  },
+  async readText(p) {
+    try {
+      const s = await stat(p)
+      if (!s.isFile() || s.size > MAX_INDEX_BYTES) return null
+      return await readFile(p, 'utf8')
     } catch {
       return null
     }
@@ -145,7 +158,8 @@ export async function buildCatalog(options: {
     })
   }
 
-  const installed = await fs.readHead(join(claude, 'plugins', 'installed_plugins.json'))
+  // Inteiro: cortado em 8 KB, o JSON (com muitos plugins) não fecha e o catálogo perdia todos.
+  const installed = await fs.readText(join(claude, 'plugins', 'installed_plugins.json'))
   for (const plugin of installed ? parseInstalledPlugins(installed) : []) {
     if (!(await fs.isDir(plugin.path))) continue
     add({
