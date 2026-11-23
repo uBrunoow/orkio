@@ -3,6 +3,7 @@
  * fetch nativo (mesmo motivo do Notion): poucos endpoints, controle de timeout e rate limit.
  */
 import { httpsUrlOrNull, isRecord, parseRetryAfterMs, stringOrNull } from '../../net/parse'
+import { notionPageIdsIn } from '../../../shared/slug'
 
 export const GITHUB_API_BASE_URL = 'https://api.github.com'
 /** Versão da API REST (header X-GitHub-Api-Version). Atualize só aqui. */
@@ -517,6 +518,8 @@ export interface GitHubPullItem {
   /** Quando a PR foi aberta (REST `created_at`). */
   createdAt: string | null
   closedAt: string | null
+  /** Páginas do Notion citadas no corpo (só os ids; o texto do corpo não é guardado). */
+  notionPageIds: string[]
 }
 
 /** Item de GET /repos/{o}/{r}/pulls. URL só se for uma PR em github.com. */
@@ -558,7 +561,8 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
     headSha: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : null,
     updatedAt,
     createdAt: stringOrNull(value['created_at']),
-    closedAt: stringOrNull(value['closed_at'])
+    closedAt: stringOrNull(value['closed_at']),
+    notionPageIds: notionPageIdsIn(typeof value['body'] === 'string' ? value['body'] : null)
   }
 }
 

@@ -10,6 +10,7 @@ import type {
   StartRunRequest
 } from '../../shared/agent-run'
 import { IPC_CHANNELS } from '../../shared/ipc-contract'
+import { isBranchKind } from '../../shared/slug'
 import type { ClaudeService } from '../claude/claude.service'
 import { CLAUDE_MIN_VERSION } from '../claude/detect'
 import { errorName } from './payload'
@@ -87,7 +88,8 @@ export function isStartRunRequest(value: unknown): value is StartRunRequest {
     v['text'].length <= MAX_TEXT &&
     typeof v['briefing'] === 'string' &&
     v['briefing'].length <= MAX_TEXT &&
-    (v['asAgent'] === undefined || typeof v['asAgent'] === 'boolean')
+    (v['asAgent'] === undefined || typeof v['asAgent'] === 'boolean') &&
+    (v['branchKind'] === undefined || isBranchKind(v['branchKind']))
   )
 }
 
@@ -206,5 +208,19 @@ export function registerClaudeIpc(
   )
   guarded(ch.diff, GENERIC, async (projectId, taskId) =>
     isId(projectId) && isId(taskId) ? service.diff(projectId, taskId) : INVALID
+  )
+  guarded(ch.branches, GENERIC, async (projectId, taskId) =>
+    isId(projectId) && isId(taskId) ? service.branches(projectId, taskId) : INVALID
+  )
+  const branchArg = (b: unknown): b is string => typeof b === 'string' && b.length <= 250
+  guarded(ch.linkBranch, GENERIC, async (projectId, taskId, branch) =>
+    isId(projectId) && isId(taskId) && branchArg(branch)
+      ? service.linkBranch(projectId, taskId, branch)
+      : INVALID
+  )
+  guarded(ch.unlinkBranch, GENERIC, async (projectId, taskId, branch) =>
+    isId(projectId) && isId(taskId) && branchArg(branch)
+      ? service.unlinkBranch(projectId, taskId, branch)
+      : INVALID
   )
 }

@@ -273,8 +273,9 @@ export function parseNotionConfig(value: unknown): NotionWorkspaceConfig | null 
   const status = propertyRef(mappingRaw['status'])
   const uniqueId = propertyRef(mappingRaw['uniqueId'])
   const project = propertyRef(mappingRaw['project'])
-  if (!title || !status || !uniqueId || !project) return null
-  const mapping: NotionMapping = { title, status, uniqueId, project }
+  if (!title || !status || !project) return null
+  const mapping: NotionMapping = { title, status, project }
+  if (uniqueId) mapping.uniqueId = uniqueId
   const priority = propertyRef(mappingRaw['priority'])
   const assignee = propertyRef(mappingRaw['assignee'])
   if (priority) mapping.priority = priority

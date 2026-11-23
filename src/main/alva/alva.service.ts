@@ -40,7 +40,7 @@ export interface AlvaServiceDeps {
   taskInfo(
     projectId: string,
     taskId: string
-  ): Promise<{ displayId: string; title: string; url: string | null } | null>
+  ): Promise<{ displayId: string | null; title: string; url: string | null } | null>
   now?: () => Date
 }
 
@@ -190,7 +190,7 @@ export class AlvaService {
     const info = await this.deps.taskInfo(projectId, taskId)
     const parts = info
       ? [
-          `${info.displayId} — ${info.title}.`,
+          info.displayId ? `${info.displayId} — ${info.title}.` : `${info.title}.`,
           info.url ? `Tarefa no Notion: ${info.url}` : '',
           'Briefing completo em .orkio/briefing.md.'
         ]

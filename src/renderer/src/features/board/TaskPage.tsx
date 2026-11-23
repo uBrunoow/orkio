@@ -88,6 +88,7 @@ export function TaskPage({
           onMove={(stageId) => void board.move(card.taskId, stageId)}
           onToggleBlocked={(blocked) => void board.setBlocked(card.taskId, blocked)}
           onToggleAutomation={(paused) => void board.setAutomationPaused(card.taskId, paused)}
+          onBranchesChanged={() => void refreshSignals(true)}
           onClose={() => onBackToBoard(card.taskId)}
         />
       )}

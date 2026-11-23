@@ -14,12 +14,7 @@ export const FIELD_TYPES: Record<NotionMappingField, readonly string[]> = {
   assignee: ['people']
 }
 
-export const REQUIRED_FIELDS: readonly NotionMappingField[] = [
-  'title',
-  'status',
-  'uniqueId',
-  'project'
-]
+export const REQUIRED_FIELDS: readonly NotionMappingField[] = ['title', 'status', 'project']
 
 /** Ordem de exibição no assistente. */
 export const MAPPING_FIELDS: readonly NotionMappingField[] = [

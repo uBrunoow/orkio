@@ -2,6 +2,7 @@
  * Execuções do Claude Code numa tarefa (Etapa 4A): tipos compartilhados main ↔ renderer.
  * O log é normalizado a partir do `stream-json` do CLI (ver main/claude/stream.ts).
  */
+import type { BranchKind } from './slug'
 
 export type RunMode = 'prompt' | 'command'
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
@@ -114,13 +115,16 @@ export interface TaskRunsState {
 /** Antes de rodar: briefing montado do Notion (editável) e a branch que será usada. */
 export interface RunPreparation extends TaskRunsState {
   taskId: string
-  displayId: string
+  /** ID do Notion (ORK-142); `null` em bancos sem a propriedade de ID. */
+  displayId: string | null
   title: string
   briefing: string
   /** Tipos de bloco do Notion não convertidos. */
   unsupported: string[]
-  /** Branch existente da tarefa ou a que será criada. */
+  /** Branch existente da tarefa ou a que será criada (com o tipo padrão, `feat/`). */
   branch: string
+  /** A branch ainda não existe: o formulário deixa escolher o tipo (feat/fix/hotfix). */
+  branchIsNew: boolean
   /** Comandos vistos na última sessão do Claude Code (system/init). */
   commands: string[]
   /** Avisos do contexto do projeto (página ilegível, contexto cortado pelo limite). */
@@ -138,6 +142,16 @@ export interface StartRunRequest {
   briefing: string
   /** 8A: rodar com as instruções do agente da tarefa (padrão: sim, se houver agente). */
   asAgent?: boolean
+  /** Tipo da branch nova, se ela ainda não existe (padrão `feat`). */
+  branchKind?: BranchKind
+}
+
+/** Branches da tarefa (Detalhes > GitHub > "Vincular branch"). */
+export interface TaskBranchesView {
+  /** Ligadas à tarefa: criada pelo Orkio (`orkio`) ou vinculada à mão (`manual`). */
+  linked: { branch: string; source: 'orkio' | 'manual' }[]
+  /** Branches locais e remotas do projeto, para escolher (sem as já ligadas). */
+  available: string[]
 }
 
 /** Mensagem do campo da sessão: continua a última sessão da tarefa (ou começa uma). */

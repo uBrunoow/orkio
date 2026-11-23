@@ -201,6 +201,19 @@ export const MIGRATIONS: readonly string[] = [
   // v9: sessão do Claude Code de cada execução (só o id), para continuar a conversa (--resume).
   `
   ALTER TABLE agent_runs ADD COLUMN session_id TEXT;
+  `,
+  // v10: branches ligadas a cada tarefa (bancos sem a propriedade de ID no Notion). Só nomes de
+  // branch e ids: a branch criada pelo Orkio (`orkio`) ou vinculada à mão (`manual`).
+  `
+  CREATE TABLE task_branches (
+    project_id TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    task_page_id TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('orkio', 'manual')),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, branch)
+  );
+  CREATE INDEX task_branches_task ON task_branches (task_page_id);
   `
 ]
 

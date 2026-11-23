@@ -53,6 +53,7 @@ export function TaskPanel({
   onMove,
   onToggleBlocked,
   onToggleAutomation,
+  onBranchesChanged,
   onClose,
   onExpand,
   variant = 'panel',
@@ -67,6 +68,8 @@ export function TaskPanel({
   onMove(stageId: string): void
   onToggleBlocked(blocked: boolean): void
   onToggleAutomation(paused: boolean): void
+  /** Vinculou/desvinculou uma branch (Detalhes > GitHub): relê os sinais. */
+  onBranchesChanged?: () => void
   onClose(): void
   /** Abre a tarefa em tela cheia (só no painel). */
   onExpand?: () => void
@@ -269,6 +272,7 @@ export function TaskPanel({
       onMove={onMove}
       onToggleBlocked={onToggleBlocked}
       onToggleAutomation={onToggleAutomation}
+      {...(onBranchesChanged ? { onBranchesChanged } : {})}
       showStage={showStage}
     />
   )

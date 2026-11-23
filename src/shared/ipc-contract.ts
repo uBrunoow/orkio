@@ -45,6 +45,7 @@ import type {
   CatalogGroup,
   ClaudeCodeStatus,
   ClaudeDiff,
+  TaskBranchesView,
   ClaudeResult,
   EditorId,
   PermissionAnswer,
@@ -147,6 +148,9 @@ export const IPC_CHANNELS = {
     cleanup: 'claude:cleanup',
     openEditor: 'claude:open-editor',
     diff: 'claude:diff',
+    branches: 'claude:branches',
+    linkBranch: 'claude:link-branch',
+    unlinkBranch: 'claude:unlink-branch',
     catalog: 'claude:catalog',
     artifacts: 'claude:artifacts',
     getContext: 'claude:get-context',
@@ -323,7 +327,11 @@ export type NotionMappingField =
 export interface NotionMapping {
   title: NotionPropertyRef
   status: NotionPropertyRef
-  uniqueId: NotionPropertyRef
+  /**
+   * Propriedade ID do Notion (ORK-142), opcional: sem ela, a tarefa é identificada pela página e a
+   * branch/PR se liga pelo registro local, pelo link do Notion na PR ou pelo "Vincular branch".
+   */
+  uniqueId?: NotionPropertyRef
   /** Relação das Tarefas com o banco de Projetos. */
   project: NotionPropertyRef
   priority?: NotionPropertyRef
@@ -870,6 +878,18 @@ export interface OrkioApi {
     cleanup(projectId: string, taskId: string, force: boolean): Promise<ClaudeResult<TaskRunsState>>
     openEditor(projectId: string, taskId: string, editor: EditorId): Promise<ClaudeResult<null>>
     diff(projectId: string, taskId: string): Promise<ClaudeResult<ClaudeDiff>>
+    /** Branches ligadas à tarefa e as do projeto ("Vincular branch"). */
+    branches(projectId: string, taskId: string): Promise<ClaudeResult<TaskBranchesView>>
+    linkBranch(
+      projectId: string,
+      taskId: string,
+      branch: string
+    ): Promise<ClaudeResult<TaskBranchesView>>
+    unlinkBranch(
+      projectId: string,
+      taskId: string,
+      branch: string
+    ): Promise<ClaudeResult<TaskBranchesView>>
     /** Comandos/skills instalados (usuário, projeto, plugins). Só metadados; recarrega a cada chamada. */
     catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>>
     /** Contexto do projeto: instruções + páginas de referência do Notion (ids e nomes). */

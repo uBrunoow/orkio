@@ -6,7 +6,13 @@
 import { mkdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
-import { taskBranchName } from '../../shared/slug'
+import {
+  normalizePageId,
+  taskBranchName,
+  uniqueBranchName,
+  type BranchKind
+} from '../../shared/slug'
+import { TaskBranchesStore } from '../branches/task-branches.store'
 import type { Db } from '../db/database'
 import type { Git } from '../git/git'
 
@@ -41,20 +47,14 @@ export interface WorktreeProject {
 
 export interface WorktreeTask {
   id: string
-  displayId: string
+  /** ID do Notion (ORK-142); `null` em bancos sem a propriedade de ID. */
+  displayId: string | null
   title: string
 }
 
 export class WorktreeError extends Error {
   constructor(
-    readonly code:
-      | 'no_task_id'
-      | 'branch_checked_out'
-      | 'no_base'
-      | 'path_in_use'
-      | 'dirty'
-      | 'git'
-      | 'not_found',
+    readonly code: 'branch_checked_out' | 'no_base' | 'path_in_use' | 'dirty' | 'git' | 'not_found',
     message: string,
     readonly files: string[] = []
   ) {
@@ -64,6 +64,8 @@ export class WorktreeError extends Error {
 }
 
 export class WorktreeService {
+  private readonly branches: TaskBranchesStore
+
   constructor(
     private readonly deps: {
       git: WorktreeGit
@@ -73,7 +75,9 @@ export class WorktreeService {
       now?: () => Date
       exists?: (path: string) => Promise<boolean>
     }
-  ) {}
+  ) {
+    this.branches = new TaskBranchesStore(deps.db, () => this.now())
+  }
 
   private now(): Date {
     return this.deps.now?.() ?? new Date()
@@ -87,6 +91,25 @@ export class WorktreeService {
     } catch {
       return false
     }
+  }
+
+  /** Branches registradas para a tarefa (criadas pelo Orkio ou vinculadas à mão). */
+  linkedBranches(projectId: string, taskId: string): ReturnType<TaskBranchesStore['forTask']> {
+    return this.branches.forTask(projectId, taskId)
+  }
+
+  /** Registro do projeto inteiro (para os sinais). */
+  linkedBranchesByTask(projectId: string): Map<string, string[]> {
+    return this.branches.forProject(projectId)
+  }
+
+  /** "Vincular branch": liga uma branch existente à tarefa (troca a tarefa se já era de outra). */
+  linkBranch(projectId: string, taskId: string, branch: string): void {
+    this.branches.link(projectId, taskId, branch, 'manual')
+  }
+
+  unlinkBranch(projectId: string, taskId: string, branch: string): boolean {
+    return this.branches.unlink(projectId, taskId, branch)
   }
 
   get(taskPageId: string): WorktreeRecord | null {
@@ -112,19 +135,16 @@ export class WorktreeService {
 
   /**
    * Garante o worktree da tarefa. Reutiliza: worktree já registrado → branch local da tarefa →
-   * branch remota da tarefa; senão cria `<ID>/<slug>` a partir de `<remote>/<default>` (fetch antes).
+   * branch remota da tarefa; senão cria `<tipo>/<ID>-<slug>` (ou `<tipo>/<slug>` sem ID do Notion) a
+   * partir de `<remote>/<default>` (fetch antes). "Da tarefa" = registrada para ela em
+   * `task_branches` ou com o ID do Notion no nome. A branch usada fica registrada para a tarefa.
    */
   async ensure(
     project: WorktreeProject,
-    task: WorktreeTask
+    task: WorktreeTask,
+    options: { kind?: BranchKind } = {}
   ): Promise<WorktreeRecord & { reused: 'worktree' | 'local_branch' | 'remote_branch' | 'new' }> {
     const parsed = parseDisplayId(task.displayId)
-    if (!parsed) {
-      throw new WorktreeError(
-        'no_task_id',
-        'A tarefa não tem ID com prefixo (ex.: ORK-142). Defina um prefixo na propriedade ID do Notion.'
-      )
-    }
     const { git } = this.deps
     const root = project.localPath
     const registered = this.get(task.id)
@@ -135,11 +155,13 @@ export class WorktreeService {
       }
     }
 
-    const path = join(this.deps.root, project.id, task.displayId)
+    // Pasta: o ID do Notion quando há; senão um pedaço do id da página (estável e sem espaços).
+    const folder = parsed && task.displayId ? task.displayId : normalizePageId(task.id).slice(0, 12)
+    const path = join(this.deps.root, project.id, folder)
     if (await this.exists(path)) {
       throw new WorktreeError(
         'path_in_use',
-        `A pasta do ambiente desta tarefa já existe e não é um worktree do projeto. Remova ${task.displayId} da pasta de worktrees do Orkio.`
+        `A pasta de trabalho desta tarefa já existe e não é um worktree do projeto. Remova ${folder} da pasta de worktrees do Orkio.`
       )
     }
     await mkdir(join(this.deps.root, project.id), { recursive: true })
@@ -149,8 +171,12 @@ export class WorktreeService {
     const base = `${remote}/${project.defaultBranch}`
     await git.fetch(root, remote, project.defaultBranch).catch(() => undefined)
 
-    const matches = (name: string): boolean => mentionsTask(name, parsed.prefix, parsed.number)
-    const local = (await git.localBranches(root)).find(matches)
+    const linked = this.branches.forTask(project.id, task.id).map((l) => l.branch)
+    const matches = (name: string): boolean =>
+      linked.includes(name) || (!!parsed && mentionsTask(name, parsed.prefix, parsed.number))
+    const localBranches = await git.localBranches(root)
+    // Registrada primeiro (a escolha explícita vence o casamento pelo ID).
+    const local = linked.find((b) => localBranches.includes(b)) ?? localBranches.find(matches)
     // Branch já aberta em outro worktree (inclusive a pasta principal do usuário): o git recusaria.
     const inUse = local
       ? (await git.worktreeList(root).catch(() => [])).find((w) => w.branch === local)
@@ -171,7 +197,9 @@ export class WorktreeService {
         reused = 'local_branch'
         await git.worktreeAdd(root, path, local, { newBranch: false })
       } else {
-        const remoteBranch = (await git.remoteBranches(root, remote)).find(matches)
+        const remoteBranches = await git.remoteBranches(root, remote)
+        const remoteBranch =
+          linked.find((b) => remoteBranches.includes(b)) ?? remoteBranches.find(matches)
         if (remoteBranch) {
           branch = remoteBranch
           reused = 'remote_branch'
@@ -186,7 +214,10 @@ export class WorktreeService {
               `Não encontrei ${base}. Verifique a conexão e o remote do projeto e tente de novo.`
             )
           }
-          branch = taskBranchName(task.displayId, task.title)
+          branch = uniqueBranchName(
+            taskBranchName(parsed ? task.displayId : null, task.title, options.kind),
+            new Set([...localBranches, ...remoteBranches])
+          )
           reused = 'new'
           await git.worktreeAdd(root, path, branch, { newBranch: true, base })
         }
@@ -195,9 +226,11 @@ export class WorktreeService {
       if (e instanceof WorktreeError) throw e
       throw new WorktreeError(
         'git',
-        'O git não conseguiu criar o ambiente da tarefa. Tente de novo.'
+        'O git não conseguiu criar a pasta de trabalho da tarefa. Tente de novo.'
       )
     }
+    // A branch usada fica ligada à tarefa (sinais, PR e automações sem o ID no nome).
+    if (!linked.includes(branch)) this.branches.link(project.id, task.id, branch, 'orkio')
 
     const record: WorktreeRecord = {
       taskPageId: task.id,

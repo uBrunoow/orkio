@@ -5,7 +5,6 @@
  * Regra de ouro: só a branch da tarefa (a do worktree, com o ID) vai para o GitHub. Branch
  * padrão, main/master/develop/production/release*, força e remoção nunca.
  */
-import { mentionsTask, parseDisplayId } from './task-id-match'
 
 /** Destino de uma entrega: o repositório do projeto e a branch da tarefa. */
 export interface DeliveryTarget {
@@ -51,7 +50,9 @@ export function isProtectedBranch(name: string, defaultBranch: string | null): b
   if (!n) return true
   if (defaultBranch && n === defaultBranch.toLowerCase()) return true
   if ((PROTECTED_BRANCH_NAMES as readonly string[]).includes(n)) return true
-  return /^(release|releases|hotfix)([/_-]|$)/.test(n)
+  // release* sempre; hotfix sozinho, hotfix-x e hotfix_x também. `hotfix/<nome>` é a branch de uma
+  // tarefa (tipo escolhido no formulário) e pode ir, como feat/ e fix/.
+  return /^(release|releases)([/_-]|$)/.test(n) || /^hotfix([_-]|$)/.test(n)
 }
 
 export const DELIVERY_MESSAGES = {
@@ -59,8 +60,6 @@ export const DELIVERY_MESSAGES = {
     `A branch “${b}” é protegida pelo Orkio (padrão/main/develop/production/release): push nunca é permitido.`,
   notTaskBranch: (b: string, task: string) =>
     `Só a branch da tarefa (“${task}”) pode ir para o GitHub; “${b}” não é ela.`,
-  noTaskId: (b: string, id: string) =>
-    `A branch “${b}” não contém o ID da tarefa (${id}). O Orkio só envia branches da tarefa.`,
   invalid: 'Nome de branch inválido para o push.',
   dirty:
     'Há mudanças não commitadas no ambiente da tarefa. Faça o commit (ou descarte) antes do push.',
@@ -74,11 +73,9 @@ export function checkPushBranch(branch: string, target: DeliveryTarget): string 
   const b = branch.replace(/^refs\/heads\//, '')
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(b) || b.includes('..')) return DELIVERY_MESSAGES.invalid
   if (isProtectedBranch(b, target.defaultBranch)) return DELIVERY_MESSAGES.protected(b)
+  // Só a branch da pasta de trabalho da tarefa. O nome não precisa ter o ID do Notion: a branch
+  // pode ter sido vinculada à mão (`feat/listar-pedidos`) ou o banco pode não ter ID.
   if (b !== target.branch) return DELIVERY_MESSAGES.notTaskBranch(b, target.branch)
-  const parsed = parseDisplayId(target.displayId)
-  if (parsed && !mentionsTask(b, parsed.prefix, parsed.number)) {
-    return DELIVERY_MESSAGES.noTaskId(b, target.displayId ?? '')
-  }
   return null
 }
 

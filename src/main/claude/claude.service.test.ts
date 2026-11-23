@@ -40,7 +40,8 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
   const worktrees = {
     get: vi.fn(() => null as null | { path: string; branch: string; baseRef: string }),
     ensure: vi.fn(async () => ({})),
-    remove: vi.fn(async () => undefined)
+    remove: vi.fn(async () => undefined),
+    linkedBranches: vi.fn(() => [] as { branch: string }[])
   }
   const deps: ClaudeServiceDeps = {
     searchPages: vi.fn(async () => ({ results: [], nextCursor: null })),
@@ -187,8 +188,14 @@ describe('ClaudeService', () => {
     expect((await ok.service.start(req)).ok).toBe(true)
     expect(ok.worktrees.ensure).toHaveBeenCalledWith(
       { id: 'p1', localPath: '/repo', remoteName: 'origin', defaultBranch: 'main' },
-      { id: 'task-1', displayId: 'ORK-7', title: 'Exportar CSV' }
+      { id: 'task-1', displayId: 'ORK-7', title: 'Exportar CSV' },
+      {}
     )
+    // Tipo da branch nova escolhido no formulário vai junto.
+    await ok.service.start({ ...req, branchKind: 'hotfix' })
+    expect(ok.worktrees.ensure).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), {
+      kind: 'hotfix'
+    })
     expect(
       await ok.service.start({ ...req, mode: 'command', command: '../../x; rm' })
     ).toMatchObject({ ok: false, error: { code: 'invalid' } })
