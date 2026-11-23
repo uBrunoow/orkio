@@ -13,7 +13,8 @@ import { useTaskFlowState } from '../task-flows/active-flows'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { StatusToken } from '../../components/StatusToken'
-import { cardStatus } from './card-status'
+import { cardDetail, cardStatus } from './card-status'
+import { useTaskActivity } from './task-activity'
 
 export interface CardActions {
   onOpen(taskId: string): void
@@ -70,6 +71,8 @@ export function BoardCardBody({
     ? [...new Set([...signals.localBranches, ...signals.remoteBranches])]
     : []
   const pr = signals?.pr ?? null
+  const activity = useTaskActivity(card.taskId)
+  const detail = cardDetail({ ...activity, pr: null })
   return (
     <VStack gap={2}>
       <HStack gap={2} vAlign="center">
@@ -99,6 +102,11 @@ export function BoardCardBody({
       <Text weight="semibold" maxLines={2}>
         {card.title}
       </Text>
+      {detail && (
+        <Text type="supporting" color="secondary" maxLines={1} data-testid="card-detail">
+          {detail}
+        </Text>
+      )}
       <HStack gap={2} vAlign="center" wrap="wrap">
         {card.blocked && (
           <HStack vAlign="center" role="img" aria-label="Bloqueada" data-testid="card-blocked">
@@ -135,7 +143,7 @@ export function BoardCardBody({
             size="sm"
             variant="ghost"
             icon={<Icon icon={PullRequestIcon} />}
-            label={`#${pr.number}`}
+            label={cardDetail({ waiting: null, running: null, pr }) ?? `#${pr.number}`}
             aria-label={`Abrir a PR #${pr.number} no GitHub`}
             onClick={() => void window.orkio.openExternal(pr.url)}
           />

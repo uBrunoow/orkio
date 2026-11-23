@@ -32,6 +32,8 @@ import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
+import { TaskActivityProvider, type TaskActivityMap } from './task-activity'
+import { useOverview } from '../overview/useOverview'
 import { useBoard, type BoardError } from './useBoard'
 
 /**
@@ -91,6 +93,21 @@ function Board({
   const refreshSignals = signals.refresh
   const activeFlows = useActiveFlows(projectId)
   const agentBadges = useAgentBadges(projectId)
+  const { snapshot } = useOverview()
+  const taskActivity = useMemo(() => {
+    const map: TaskActivityMap = {}
+    for (const w of snapshot?.waiting ?? []) {
+      if (w.task.projectId !== projectId) continue
+      const cur = map[w.task.taskId] ?? { waiting: null, running: null }
+      map[w.task.taskId] = { ...cur, waiting: cur.waiting ?? w.what }
+    }
+    for (const r of snapshot?.running ?? []) {
+      if (r.task.projectId !== projectId) continue
+      const cur = map[r.task.taskId] ?? { waiting: null, running: null }
+      map[r.task.taskId] = { ...cur, running: cur.running ?? r.label }
+    }
+    return map
+  }, [snapshot, projectId])
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
   const [onlyBlocked, setOnlyBlocked] = useState(false)
@@ -286,28 +303,30 @@ function Board({
               headingLevel={2}
             />
           ) : (
-            <ActiveFlowsProvider value={activeFlows}>
-              <AgentBadgesProvider value={agentBadges}>
-                {layout === 'list' ? (
-                  <BoardList
-                    stages={view.config.stages}
-                    cards={cards}
-                    signals={signals.result?.signals ?? {}}
-                    selectedTaskId={null}
-                    actions={actions}
-                  />
-                ) : (
-                  <BoardColumns
-                    stages={view.config.stages}
-                    cards={cards}
-                    signals={signals.result?.signals ?? {}}
-                    selectedTaskId={null}
-                    actions={actions}
-                    endInset={null}
-                  />
-                )}
-              </AgentBadgesProvider>
-            </ActiveFlowsProvider>
+            <TaskActivityProvider value={taskActivity}>
+              <ActiveFlowsProvider value={activeFlows}>
+                <AgentBadgesProvider value={agentBadges}>
+                  {layout === 'list' ? (
+                    <BoardList
+                      stages={view.config.stages}
+                      cards={cards}
+                      signals={signals.result?.signals ?? {}}
+                      selectedTaskId={null}
+                      actions={actions}
+                    />
+                  ) : (
+                    <BoardColumns
+                      stages={view.config.stages}
+                      cards={cards}
+                      signals={signals.result?.signals ?? {}}
+                      selectedTaskId={null}
+                      actions={actions}
+                      endInset={null}
+                    />
+                  )}
+                </AgentBadgesProvider>
+              </ActiveFlowsProvider>
+            </TaskActivityProvider>
           )}
         </VStack>
       </StackItem>
