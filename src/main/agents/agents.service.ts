@@ -17,6 +17,7 @@ import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/
 import { join, relative, resolve, sep } from 'node:path'
 import {
   AGENT_ID,
+  ACTIVITY_HOURS,
   AGENT_LIMITS,
   agentInitials,
   agentKey,
@@ -199,6 +200,22 @@ export class AgentsService {
       since
     )
     return { runs: r?.n ?? 0, costUsd: r?.cost ?? 0 }
+  }
+
+  /** Execuções por hora nas últimas `ACTIVITY_HOURS` horas (índice 0 = a mais antiga). */
+  activity(key: AgentKey): number[] {
+    const hour = 3_600_000
+    const nowMs = this.now().getTime()
+    const out = new Array<number>(ACTIVITY_HOURS).fill(0)
+    for (const r of this.deps.db.all<{ started_at: string }>(
+      'SELECT started_at FROM agent_runs WHERE agent_key = ? AND started_at >= ?',
+      key,
+      new Date(nowMs - ACTIVITY_HOURS * hour).toISOString()
+    )) {
+      const age = Math.floor((nowMs - Date.parse(r.started_at)) / hour)
+      if (age >= 0 && age < ACTIVITY_HOURS) out[ACTIVITY_HOURS - 1 - age]! += 1
+    }
+    return out
   }
 
   assignedKey(taskId: string): AgentKey | null {
@@ -496,7 +513,8 @@ export class AgentsService {
           : 'Embutido no Orkio'
     const hash = e.text === null ? '' : hashOf(e.text)
     const usageToday = this.usage(key)
-    const base = { key, scope: e.scope, id: e.id, file, hash, assigned, usageToday }
+    const activity = this.activity(key)
+    const base = { key, scope: e.scope, id: e.id, file, hash, assigned, usageToday, activity }
     if (e.text === null) {
       return { ...base, status: 'invalid', profile: null, errors: [e.error ?? ''], warnings: [] }
     }

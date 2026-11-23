@@ -218,7 +218,12 @@ export function App(): React.JSX.Element | null {
       )
       break
     case 'agents':
-      page = <AgentsPage />
+      page = (
+        <AgentsPage
+          projectId={linkedProject?.id ?? null}
+          onOpenOrchestrator={() => navigate({ name: 'settings', section: 'agents' })}
+        />
+      )
       break
     case 'settings': {
       const section = route.section ?? 'integrations'

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
+import { Code } from '@astryxdesign/core/Code'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
@@ -44,6 +45,12 @@ import { PageHeader } from '../../components/PageHeader'
 import { isTextField } from '../../app/shortcuts'
 import { BoardIcon, ListIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { AgentAvatar } from './AgentAvatar'
+import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
+import { useAgentBadges } from './agent-badges'
+import { Sparkline } from './Sparkline'
+import { useOverview } from '../overview/useOverview'
+import { formatUsd } from '../../lib/format'
+import type { OrchestratorAgentLoad, OrchestratorState } from '../../../../shared/orchestrator'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',
@@ -68,7 +75,15 @@ const STATUS_TOKEN: Record<
 type Editing = { mode: 'new' | 'edit'; scope: AgentScope; draft: AgentProfile; key: string | null }
 
 /** Tela "Agentes" (8A): perfis, aprovação dos perfis do repositório e regras por coluna. */
-export function AgentsPage(): React.JSX.Element {
+export function AgentsPage({
+  projectId: currentProjectId = null,
+  onOpenOrchestrator
+}: {
+  /** Projeto atual (as tarefas e a carga dos agentes são deste projeto). */
+  projectId?: string | null
+  /** "Orquestrador: ligado/desligado" leva a Configurações › Agentes do projeto. */
+  onOpenOrchestrator?: () => void
+} = {}): React.JSX.Element {
   const [projects, setProjects] = useState<ProjectView[] | null>(null)
   const [projectId, setProjectId] = useState<string | null>(null)
   const [state, setState] = useState<AgentsState | null>(null)
@@ -78,7 +93,7 @@ export function AgentsPage(): React.JSX.Element {
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<AgentFilter>('all')
+  const [filter, setFilter] = useState<Filter>('all')
   const [layout, setLayout] = useState<'cards' | 'rows'>('cards')
   const searchBox = useRef<HTMLDivElement | null>(null)
 
@@ -102,7 +117,13 @@ export function AgentsPage(): React.JSX.Element {
       .then((r) => {
         if (!active) return
         setProjects(r.projects)
-        setProjectId((cur) => cur ?? r.projects[0]?.id ?? null)
+        setProjectId(
+          (cur) =>
+            cur ??
+            (currentProjectId && r.projects.some((p) => p.id === currentProjectId)
+              ? currentProjectId
+              : (r.projects[0]?.id ?? null))
+        )
       })
       .catch(() => {
         if (active) setProjects([])
@@ -110,7 +131,7 @@ export function AgentsPage(): React.JSX.Element {
     return () => {
       active = false
     }
-  }, [])
+  }, [currentProjectId])
 
   useEffect(() => {
     if (!projectId) return
@@ -137,6 +158,10 @@ export function AgentsPage(): React.JSX.Element {
     }
   }, [projectId])
 
+  const badges = useAgentBadges(projectId ?? '')
+  const { snapshot } = useOverview()
+  const orchestrator = useOrchestrator(projectId)
+
   if (projects === null) return <Skeleton height={240} aria-label="Carregando agentes" />
 
   const header = (
@@ -157,6 +182,13 @@ export function AgentsPage(): React.JSX.Element {
                 setEditing(null)
                 setProjectId(value)
               }}
+            />
+          )}
+          {projectId && onOpenOrchestrator && (
+            <Button
+              variant="secondary"
+              label={`Orquestrador: ${orchestrator?.config.enabled ? 'ligado' : 'desligado'}`}
+              onClick={onOpenOrchestrator}
             />
           )}
           {projectId && (
@@ -224,16 +256,22 @@ export function AgentsPage(): React.JSX.Element {
   }
 
   const q = query.trim().toLowerCase()
-  const visibleAgents = (state?.agents ?? []).filter(
-    (a) =>
-      matchesFilter(a, filter) &&
-      (!q ||
-        (a.profile?.name ?? a.id).toLowerCase().includes(q) ||
-        (a.profile ? AGENT_ROLE_LABELS[a.profile.role].toLowerCase().includes(q) : false))
-  )
+  const nowOf = (a: AgentView): AgentNow => agentNow({ agent: a, badges, snapshot, projectId })
+  const allNow = new Map((state?.agents ?? []).map((a) => [a.key, nowOf(a)]))
+  const visibleAgents = (state?.agents ?? [])
+    .filter(
+      (a) =>
+        matchesFilter(a, allNow.get(a.key)!, filter) &&
+        (!q ||
+          (a.profile?.name ?? a.id).toLowerCase().includes(q) ||
+          (a.profile ? AGENT_ROLE_LABELS[a.profile.role].toLowerCase().includes(q) : false))
+    )
+    .sort((a, b) => ORDER[allNow.get(a.key)!.filter] - ORDER[allNow.get(b.key)!.filter])
   const handlersFor = (a: AgentView): AgentHandlers => ({
     isReviewing: reviewing === a.key,
     busy,
+    now: allNow.get(a.key)!,
+    load: orchestrator?.agents.find((l) => l.key === a.key) ?? null,
     onEdit: () => {
       if (!a.profile) return
       setMessage(null)
@@ -327,13 +365,15 @@ export function AgentsPage(): React.JSX.Element {
               label="Filtrar por estado"
               size="sm"
               value={filter}
-              onChange={(v) => setFilter(v as AgentFilter)}
+              onChange={(v) => setFilter(FILTERS.find((f) => f.value === v)?.value ?? 'all')}
             >
               {FILTERS.map((f) => (
                 <SegmentedControlItem
                   key={f.value}
                   value={f.value}
-                  label={`${f.label} ${countFor(state.agents, f.value)}`}
+                  label={`${f.label} ${
+                    state.agents.filter((a) => matchesFilter(a, allNow.get(a.key)!, f.value)).length
+                  }`}
                 />
               ))}
             </SegmentedControl>
@@ -378,27 +418,30 @@ function roleLine(view: AgentView): string {
   return view.scope === 'builtin' ? `${role} · Embutido` : role
 }
 
-type AgentFilter = 'all' | AgentView['status']
+type Filter = AgentFilter | 'archived'
 
-const FILTERS: readonly { value: AgentFilter; label: string }[] = [
+const FILTERS: readonly { value: Filter; label: string }[] = [
   { value: 'all', label: 'Todos' },
-  { value: 'ready', label: 'Prontos' },
-  { value: 'needs_review', label: 'Revisar' },
-  { value: 'invalid', label: 'Com erro' },
+  { value: 'waiting', label: 'Esperando você' },
+  { value: 'working', label: 'Trabalhando' },
+  { value: 'stopped', label: 'Parados' },
   { value: 'archived', label: 'Arquivados' }
 ]
 
-function matchesFilter(a: AgentView, f: AgentFilter): boolean {
-  return f === 'all' ? a.status !== 'archived' : a.status === f
+function matchesFilter(a: AgentView, now: AgentNow, f: Filter): boolean {
+  if (f === 'archived') return a.status === 'archived'
+  if (a.status === 'archived') return false
+  return f === 'all' || now.filter === f
 }
 
-function countFor(agents: readonly AgentView[], f: AgentFilter): number {
-  return agents.filter((a) => matchesFilter(a, f)).length
-}
+/** Ordem da grade: esperando você, trabalhando, depois os parados. */
+const ORDER: Record<AgentNow['filter'], number> = { waiting: 0, working: 1, stopped: 2 }
 
 interface AgentHandlers {
   isReviewing: boolean
   busy: boolean
+  now: AgentNow
+  load: OrchestratorAgentLoad | null
   onEdit(): void
   onDuplicate(): void
   onArchive(): void
@@ -535,35 +578,64 @@ function AgentRow(
   )
 }
 
-/** Card do agente na grade: avatar, nome, papel e estado no topo; metadados; ações no rodapé. */
+/**
+ * Card do agente (estilo das referências): avatar, nome e papel; o que está fazendo agora e a
+ * atividade das últimas horas; as tarefas dele; vagas e custo do dia; ações no rodapé.
+ */
 function AgentCard(
   props: { view: AgentView; state: AgentsState } & AgentHandlers
 ): React.JSX.Element {
-  const { view } = props
+  const { view, now, load } = props
   const p = view.profile
   const name = p?.name ?? view.id
   const status = STATUS_TOKEN[view.status]
+  const capacity = load
+    ? `${load.active}/${load.capacity} ${load.capacity === 1 ? 'vaga' : 'vagas'}`
+    : null
+  const cost = view.usageToday.costUsd > 0 ? `${formatUsd(view.usageToday.costUsd)} hoje` : null
   return (
-    <Card padding={3} role="listitem" aria-label={name} data-testid="agent-card">
+    <Card padding={4} role="listitem" aria-label={name} data-testid="agent-card">
       <VStack gap={3} height="100%">
-        <HStack gap={2} vAlign="center">
-          <AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} size="md" />
+        <HStack gap={3} vAlign="center">
+          <AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} size="lg" />
           <StackItem size="fill">
             <VStack gap={0.5}>
               <Text weight="semibold" maxLines={1}>
                 {name}
               </Text>
               <Text type="supporting" color="secondary" maxLines={1}>
-                {p ? roleLine(view) : view.file}
+                {p
+                  ? (p.instructions.split('\n').find((l) => l.trim()) ?? roleLine(view))
+                  : view.file}
               </Text>
             </VStack>
           </StackItem>
-          <StatusToken tone={toneOf(status.color)} label={status.label} />
+          {view.status !== 'ready' && (
+            <StatusToken tone={toneOf(status.color)} label={status.label} />
+          )}
+        </HStack>
+        <HStack gap={2} vAlign="center">
+          <StackItem size="fill">
+            <StatusToken tone={now.tone} label={now.text} data-testid="agent-now" />
+          </StackItem>
+          <Sparkline
+            values={view.activity}
+            label={`${view.activity.reduce((x, y) => x + y, 0)} execuções nas últimas 12 horas`}
+          />
         </HStack>
         <StackItem size="fill">
           <AgentDetails {...props} />
         </StackItem>
-        <HStack hAlign="end">
+        <HStack gap={2} vAlign="center" wrap="wrap">
+          {now.tasks.slice(0, 3).map((t) => (
+            <Code key={t.taskId}>{`${t.hot ? '● ' : ''}${t.displayId ?? 'tarefa'}`}</Code>
+          ))}
+          <StackItem size="fill" />
+          {(capacity || cost) && (
+            <Text type="supporting" color="secondary">
+              {[capacity, cost].filter(Boolean).join(' · ')}
+            </Text>
+          )}
           <AgentActions {...props} />
         </HStack>
       </VStack>
@@ -894,4 +966,30 @@ export function AssignRules({
       )}
     </VStack>
   )
+}
+
+/** Carga dos agentes (vagas usadas) pelo estado do orquestrador do projeto. */
+function useOrchestrator(projectId: string | null): OrchestratorState | null {
+  const [state, setState] = useState<{ projectId: string; value: OrchestratorState } | null>(null)
+  useEffect(() => {
+    if (!projectId) return
+    let alive = true
+    const load = (): void => {
+      void window.orkio.agents
+        .orchestrator(projectId)
+        .then((r) => {
+          if (alive && r.ok) setState({ projectId, value: r.value })
+        })
+        .catch(() => undefined)
+    }
+    load()
+    const off = window.orkio.agents.onChanged((e) => {
+      if (e.projectId === projectId) load()
+    })
+    return () => {
+      alive = false
+      off()
+    }
+  }, [projectId])
+  return state && state.projectId === projectId ? state.value : null
 }
