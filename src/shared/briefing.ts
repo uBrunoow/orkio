@@ -224,7 +224,8 @@ export function extractAcceptanceCriteria(markdown: string): string | null {
 }
 
 export interface BriefingInput {
-  displayId: string
+  /** ID do Notion (ORK-142); `null` em bancos sem a propriedade de ID. */
+  displayId: string | null
   title: string
   url: string | null
   properties: { name: string; value: string }[]
@@ -279,7 +280,7 @@ export function buildBriefing(input: BriefingInput): string {
   const criteria = extractAcceptanceCriteria(input.pageMarkdown)
   const props = input.properties.filter((p) => p.value.trim())
   const parts = [
-    `# ${input.displayId} — ${input.title}`,
+    input.displayId ? `# ${input.displayId} — ${input.title}` : `# ${input.title}`,
     props.length ? props.map((p) => `- **${p.name}:** ${p.value}`).join('\n') : '',
     input.url ? `Página no Notion: ${input.url}` : '',
     '## Contexto',

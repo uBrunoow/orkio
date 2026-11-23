@@ -257,7 +257,8 @@ const api: OrkioApi = {
         command: request.command,
         text: request.text,
         briefing: request.briefing,
-        ...(request.asAgent !== undefined ? { asAgent: request.asAgent } : {})
+        ...(request.asAgent !== undefined ? { asAgent: request.asAgent } : {}),
+        ...(request.branchKind !== undefined ? { branchKind: request.branchKind } : {})
       }),
     send: (request) =>
       ipcRenderer.invoke(claude.send, {
@@ -278,6 +279,11 @@ const api: OrkioApi = {
     openEditor: (projectId, taskId, editor) =>
       ipcRenderer.invoke(claude.openEditor, projectId, taskId, editor),
     diff: (projectId, taskId) => ipcRenderer.invoke(claude.diff, projectId, taskId),
+    branches: (projectId, taskId) => ipcRenderer.invoke(claude.branches, projectId, taskId),
+    linkBranch: (projectId, taskId, branch) =>
+      ipcRenderer.invoke(claude.linkBranch, projectId, taskId, String(branch)),
+    unlinkBranch: (projectId, taskId, branch) =>
+      ipcRenderer.invoke(claude.unlinkBranch, projectId, taskId, String(branch)),
     catalog: (projectId, taskId) => ipcRenderer.invoke(claude.catalog, projectId, taskId),
     artifacts: (projectId, taskId) => ipcRenderer.invoke(claude.artifacts, projectId, taskId),
     getContext: (projectId) => ipcRenderer.invoke(claude.getContext, projectId),

@@ -18,6 +18,7 @@ import { Alert } from '../../components/Alert'
 import { DiffView } from '../../components/DiffView'
 import { CleanIcon, DiffIcon, EditorIcon, PlayIcon, RefreshIcon } from '../../components/icons'
 import { plural } from '../../lib/format'
+import { isBranchKind, type BranchKind } from '../../../../shared/slug'
 import type { PendingPermission, useTaskRuns } from './useTaskRuns'
 
 export interface RunInitial {
@@ -49,6 +50,9 @@ export function Composer({
   const [error, setError] = useState<string | null>(null)
   // 8A: com agente na tarefa, roda como ele (instruções e modelo) a menos que você desmarque.
   const [asAgent, setAsAgent] = useState(prep.agent !== null)
+  // Branch nova: o tipo (feat/fix/hotfix) troca só o começo do nome sugerido.
+  const [kind, setKind] = useState<BranchKind>('feat')
+  const branch = prep.branchIsNew ? prep.branch.replace(/^[a-z]+\//, `${kind}/`) : prep.branch
 
   const start = async (): Promise<void> => {
     setStarting(true)
@@ -60,7 +64,8 @@ export function Composer({
       command: mode === 'command' ? command.replace(/^\//, '').trim() : null,
       text,
       briefing,
-      asAgent
+      asAgent,
+      ...(prep.branchIsNew ? { branchKind: kind } : {})
     })
     setStarting(false)
     if (r.ok) onStarted(r.value)
@@ -72,13 +77,26 @@ export function Composer({
       <VStack gap={3}>
         <HStack gap={2} vAlign="center" wrap="wrap">
           <Text type="supporting">Branch</Text>
-          <Code data-testid="run-branch">{prep.branch}</Code>
+          <Code data-testid="run-branch">{branch}</Code>
           <Text type="supporting">
             {prep.workspace
               ? 'pasta de trabalho existente'
               : 'pasta de trabalho isolada, criada ao rodar'}
           </Text>
         </HStack>
+        {prep.branchIsNew && (
+          <SegmentedControl
+            label="Tipo da branch"
+            value={kind}
+            onChange={(v) => {
+              if (isBranchKind(v)) setKind(v)
+            }}
+          >
+            <SegmentedControlItem value="feat" label="feat/" />
+            <SegmentedControlItem value="fix" label="fix/" />
+            <SegmentedControlItem value="hotfix" label="hotfix/" />
+          </SegmentedControl>
+        )}
         <SegmentedControl
           label="Modo"
           value={mode}

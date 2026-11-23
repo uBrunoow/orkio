@@ -284,7 +284,7 @@ export function parseTaskPage(body: unknown, mapping: NotionMapping): NotionTask
   const titleValue = propertyValue(body, mapping.title.id)
   const title = (titleValue ? plainText(titleValue['title']) : '') || titleOf(body) || 'Sem título'
 
-  const uid = propertyValue(body, mapping.uniqueId.id)?.['unique_id']
+  const uid = mapping.uniqueId ? propertyValue(body, mapping.uniqueId.id)?.['unique_id'] : null
   let displayId: string | null = null
   if (isRecord(uid) && typeof uid['number'] === 'number') {
     const prefix = stringOrNull(uid['prefix'])

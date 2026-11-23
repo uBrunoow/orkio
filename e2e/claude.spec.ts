@@ -189,7 +189,7 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   )
   await section.getByRole('button', { name: 'Nova sessão…' }).click()
 
-  await expect(section.getByTestId('run-branch')).toHaveText('ORK-2/listar-tarefas-do-notion')
+  await expect(section.getByTestId('run-branch')).toHaveText('feat/ORK-2-listar-tarefas-do-notion')
   const briefing = section.getByRole('textbox', { name: /^Resumo da tarefa/ })
   await expect(briefing).toHaveValue(
     /## Critérios de aceite\n\n- Gera um arquivo \.csv\n {2}Detalhe aninhado/
@@ -246,7 +246,7 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   const changes = await tab(page, 'Mudanças')
   await expect(changes.getByTestId('changes-summary')).toContainText('1 commit')
   await expect(changes).toContainText('src/exportar.ts')
-  await expect(changes.getByTestId('workspace-branch')).toHaveText('ORK-2/listar-tarefas-do-notion')
+  await expect(changes.getByTestId('workspace-branch')).toHaveText('feat/ORK-2-listar-tarefas-do-notion')
   await tab(page, 'Sessão')
 
   // Pasta principal intocada: mesma branch, mesma mudança não commitada, nenhum arquivo novo.
@@ -432,8 +432,8 @@ test('ver diff e limpar ambiente (a branch fica)', async () => {
   await expect(diff).toContainText('+')
   await changes.getByRole('button', { name: 'Limpar pasta de trabalho' }).click()
   await expect(changes.getByTestId('workspace-branch')).toHaveCount(0)
-  expect(git(repoDir(), 'branch', '--list', 'ORK-2/*').trim()).toBe(
-    'ORK-2/listar-tarefas-do-notion'
+  expect(git(repoDir(), 'branch', '--list', 'feat/ORK-2-*').trim()).toBe(
+    'feat/ORK-2-listar-tarefas-do-notion'
   )
   expect(git(repoDir(), 'status', '--porcelain').trim()).toBe('M README.md')
   expect(await cspViolations(page)).toEqual([])

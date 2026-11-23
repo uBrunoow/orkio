@@ -27,6 +27,7 @@ import { TaskArtifacts } from '../claude/TaskArtifacts'
 import { Workspace } from '../claude/session-parts'
 import type { useTaskRuns } from '../claude/useTaskRuns'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
+import { TaskBranchLinks } from './TaskBranchLinks'
 import { TaskTimeline } from './TaskTimeline'
 
 export type BacklogSummary = { linked: string | null; task: BacklogTaskInfo | null }
@@ -156,6 +157,7 @@ export function TaskDetails({
   onMove,
   onToggleBlocked,
   onToggleAutomation,
+  onBranchesChanged,
   showStage = true,
   changes = null
 }: {
@@ -170,6 +172,8 @@ export function TaskDetails({
   onMove(stageId: string): void
   onToggleBlocked(blocked: boolean): void
   onToggleAutomation(paused: boolean): void
+  /** Vinculou/desvinculou uma branch: relê os sinais da tarefa. */
+  onBranchesChanged?: () => void
   /** O seletor de etapa (no painel do Quadro ele já aparece no topo). */
   showStage?: boolean
   /** Mudanças (página inteira): logo depois da etapa, antes do GitHub. */
@@ -196,6 +200,11 @@ export function TaskDetails({
             Sem branch nem PR ainda.
           </Text>
         )}
+        <TaskBranchLinks
+          projectId={projectId}
+          taskId={card.taskId}
+          {...(onBranchesChanged ? { onChanged: onBranchesChanged } : {})}
+        />
       </Section>
 
       {backlog?.linked && (

@@ -203,7 +203,7 @@ describe('orkio-config v2/v3', () => {
   })
 
   it('configuração do Notion quebrada vira "não configurado" com aviso, sem perder projetos', () => {
-    const broken = { ...NOTION, mapping: { ...NOTION.mapping, uniqueId: { id: 'uid' } } }
+    const broken = { ...NOTION, mapping: { ...NOTION.mapping, status: { id: 'st' } } }
     const result = validateConfig({ projects: [PROJECT], notion: broken })
     expect(result?.value.notion).toBeNull()
     expect(result?.value.projects).toHaveLength(1)

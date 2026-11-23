@@ -70,10 +70,12 @@ describe('entrega: branches protegidas', () => {
     expect(checkPushBranch('ORK-7/outra', target)).toMatch(/Só a branch da tarefa/)
     expect(checkPushBranch('main', target)).toMatch(/protegida/)
     expect(checkPushBranch('-f', target)).toMatch(/inválido/)
-    // Branch da tarefa sem o ID (worktree reaproveitado de outra branch) também não vai.
-    expect(checkPushBranch('feature/x', { ...target, branch: 'feature/x' })).toMatch(
-      /não contém o ID/
-    )
+    // A branch da tarefa vai mesmo sem o ID no nome (vinculada à mão, banco sem ID).
+    expect(checkPushBranch('feature/x', { ...target, branch: 'feature/x' })).toBeNull()
+    // hotfix/<nome> é tipo de branch de tarefa; hotfix sozinho, hotfix-x e release* não.
+    expect(checkPushBranch('hotfix/login', { ...target, branch: 'hotfix/login' })).toBeNull()
+    for (const b of ['hotfix', 'hotfix-1.2', 'hotfix_x', 'release/2.0'])
+      expect(checkPushBranch(b, { ...target, branch: b }), b).toMatch(/protegida/)
   })
 })
 

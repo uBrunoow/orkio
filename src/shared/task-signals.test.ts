@@ -181,3 +181,52 @@ describe('diffSignals', () => {
     ).toEqual([{ kind: 'pr_merged', taskId: 't', number: 2 }])
   })
 })
+
+describe('buildTaskSignals: tarefa sem ID no nome da branch', () => {
+  const PAGE = '1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9'
+  const none = { localBranches: [], remoteBranches: [], pulls: [], details: new Map() }
+
+  it('branch registrada para a tarefa casa pelo nome exato, e a PR dela também', () => {
+    const r = buildTaskSignals([{ id: PAGE, displayId: null, branches: ['feat/listar-pedidos'] }], {
+      ...none,
+      localBranches: ['feat/listar-pedidos', 'feat/listar-pedidos-2', 'main'],
+      remoteBranches: ['feat/listar-pedidos'],
+      pulls: [pr(9, { headRef: 'feat/listar-pedidos', title: 'Listar pedidos' })]
+    })
+    expect(r[PAGE]).toMatchObject({
+      displayId: null,
+      localBranches: ['feat/listar-pedidos'],
+      remoteBranches: ['feat/listar-pedidos'],
+      pr: { number: 9 }
+    })
+  })
+
+  it('PR com o link da página do Notion no corpo casa mesmo sem branch registrada', () => {
+    const r = buildTaskSignals([{ id: PAGE, displayId: null }], {
+      ...none,
+      pulls: [
+        pr(12, { headRef: 'qualquer-coisa', notionPageIds: ['1a2b3c4d5e6f40718293a4b5c6d7e8f9'] })
+      ]
+    })
+    expect(r[PAGE]?.pr?.number).toBe(12)
+  })
+
+  it('sem ID, sem branch registrada e sem link: nada (não adivinha)', () => {
+    const r = buildTaskSignals([{ id: PAGE, displayId: null }], {
+      ...none,
+      localBranches: ['feat/listar-pedidos'],
+      pulls: [pr(3, { headRef: 'feat/listar-pedidos' })]
+    })
+    expect(r[PAGE]).toBeUndefined()
+  })
+
+  it('com ID, os três caminhos somam sem repetir a PR', () => {
+    const r = buildTaskSignals([{ id: 'p1', displayId: 'ORK-7', branches: ['feat/sem-id'] }], {
+      ...none,
+      localBranches: ['feat/ORK-7-x', 'feat/sem-id'],
+      pulls: [pr(4, { headRef: 'feat/sem-id', title: 'ORK-7 x' })]
+    })
+    expect(r['p1']?.localBranches).toEqual(['feat/ORK-7-x', 'feat/sem-id'])
+    expect(r['p1']?.otherPrs).toBe(0)
+  })
+})

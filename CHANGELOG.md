@@ -6,6 +6,17 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Mudado
+
+- O banco de Tarefas do Notion não precisa mais de uma propriedade de ID: sem ela, a tarefa é a
+  página do Notion. A branch e a PR se ligam à tarefa pela branch que o Orkio cria, pelo link da
+  tarefa do Notion no corpo da PR ou por "Vincular branch" em Detalhes > GitHub.
+- Branches novas seguem a convenção `feat/`, `fix/` ou `hotfix/` (com o ID do Notion quando há:
+  `feat/ORK-142-listar-pedidos`). O tipo padrão é `feat/`; em "Nova sessão…" dá para trocar.
+  Branches antigas (`ORK-142/...`) continuam funcionando.
+- Push: `hotfix/<nome>` de uma tarefa pode ir para o GitHub; `hotfix` sozinho, `hotfix-x` e
+  `release*` continuam protegidos.
+
 ## [0.2.3] - 2026-11-23
 
 ### Adicionado

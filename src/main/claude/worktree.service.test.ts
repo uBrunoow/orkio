@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { slugify, taskBranchName } from '../../shared/slug'
+import { TaskBranchesStore } from '../branches/task-branches.store'
 import { openDatabase, type Db } from '../db/database'
 import { createGit } from '../git/git'
 import { WorktreeService, type WorktreeProject } from './worktree.service'
@@ -20,7 +21,7 @@ describe('slug', () => {
     expect(slugify('Ação: corrigir “bug” — urgente')).toBe('acao-corrigir-bug-urgente')
     expect(slugify('???')).toBe('tarefa')
     expect(slugify('a'.repeat(80)).length).toBe(40)
-    expect(taskBranchName('ORK-142', 'Sync Notion')).toBe('ORK-142/sync-notion')
+    expect(taskBranchName('ORK-142', 'Sync Notion')).toBe('feat/ORK-142-sync-notion')
   })
 })
 
@@ -74,7 +75,7 @@ describe('WorktreeService (git real)', () => {
     expect(sh(main, 'status', '--porcelain')).toBe('M README.md')
   }
 
-  it('cria <ID>/<slug> a partir de origin/main, fora da pasta principal', async () => {
+  it('cria feat/<ID>-<slug> a partir de origin/main, fora da pasta principal', async () => {
     const wt = await service.ensure(project, {
       id: 't7',
       displayId: 'ORK-7',
@@ -82,11 +83,11 @@ describe('WorktreeService (git real)', () => {
     })
     expect(wt).toMatchObject({
       reused: 'new',
-      branch: 'ORK-7/listar-tarefas',
+      branch: 'feat/ORK-7-listar-tarefas',
       baseRef: 'origin/main',
       path: join(tmp, 'worktrees', 'p1', 'ORK-7')
     })
-    expect(sh(wt.path, 'branch', '--show-current')).toBe('ORK-7/listar-tarefas')
+    expect(sh(wt.path, 'branch', '--show-current')).toBe('feat/ORK-7-listar-tarefas')
     expect(readFileSync(join(wt.path, 'README.md'), 'utf8')).toBe('# app\n')
     mainUntouched()
     // De novo: reaproveita o mesmo worktree.
@@ -108,7 +109,7 @@ describe('WorktreeService (git real)', () => {
       displayId: 'ORK-90',
       title: 'Noventa'
     })
-    expect(ninety).toMatchObject({ reused: 'new', branch: 'ORK-90/noventa' })
+    expect(ninety).toMatchObject({ reused: 'new', branch: 'feat/ORK-90-noventa' })
     mainUntouched()
   })
 
@@ -123,11 +124,11 @@ describe('WorktreeService (git real)', () => {
     await service.remove(project, 't7', true)
     expect(existsSync(wt.path)).toBe(false)
     expect(service.get('t7')).toBeNull()
-    expect(sh(main, 'branch', '--list', 'ORK-7/listar')).toContain('ORK-7/listar')
+    expect(sh(main, 'branch', '--list', 'feat/ORK-7-listar')).toContain('feat/ORK-7-listar')
     mainUntouched()
   })
 
-  it('branch da tarefa aberta na pasta principal → mensagem clara; sem prefixo no ID → recusa', async () => {
+  it('branch da tarefa aberta na pasta principal → mensagem clara', async () => {
     sh(main, 'stash', '-q')
     sh(main, 'checkout', '-q', 'feat/ORK-8-local')
     await expect(
@@ -135,10 +136,38 @@ describe('WorktreeService (git real)', () => {
     ).rejects.toMatchObject({
       code: 'branch_checked_out'
     })
-    await expect(
-      service.ensure(project, { id: 'tx', displayId: '42', title: 'x' })
-    ).rejects.toMatchObject({
-      code: 'no_task_id'
+  })
+
+  it('sem ID do Notion: cria <tipo>/<slug>, registra a branch e reaproveita depois', async () => {
+    const page = '1a2b3c4d-5e6f-4071-8293-a4b5c6d7e8f9'
+    const wt = await service.ensure(
+      project,
+      { id: page, displayId: null, title: 'Corrigir login' },
+      { kind: 'fix' }
+    )
+    expect(wt).toMatchObject({
+      reused: 'new',
+      branch: 'fix/corrigir-login',
+      path: join(tmp, 'worktrees', 'p1', '1a2b3c4d5e6f')
     })
+    expect(new TaskBranchesStore(db).forTask('p1', page).map((l) => l.branch)).toEqual([
+      'fix/corrigir-login'
+    ])
+    // Limpou a pasta de trabalho: a branch registrada volta a ser usada (não cria outra).
+    await service.remove(project, page, true)
+    const again = await service.ensure(project, {
+      id: page,
+      displayId: null,
+      title: 'Corrigir login'
+    })
+    expect(again).toMatchObject({ reused: 'local_branch', branch: 'fix/corrigir-login' })
+    // Outra tarefa com o mesmo título: nome com sufixo, sem tomar a branch da primeira.
+    const other = await service.ensure(
+      project,
+      { id: 'p2', displayId: '42', title: 'Corrigir login' },
+      { kind: 'fix' }
+    )
+    expect(other.branch).toBe('fix/corrigir-login-2')
+    mainUntouched()
   })
 })

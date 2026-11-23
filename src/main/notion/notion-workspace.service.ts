@@ -75,9 +75,6 @@ export const WORKSPACE_MESSAGES = {
   broken:
     'O mapeamento das Tarefas do Notion precisa ser revisto em Integrações antes de ler tarefas.',
   sameDataSource: 'Escolha bancos diferentes para Projetos e Tarefas.',
-  missingUniqueId:
-    'O banco de Tarefas precisa de uma propriedade do tipo ID (unique_id). Crie-a no Notion ' +
-    '(+ Nova propriedade → ID) e tente de novo.',
   projectNotFound: 'Projeto não encontrado. Atualize a lista.',
   pageNotFound: 'Esse projeto do Notion não está mais no banco de Projetos. Atualize a lista.',
   alreadyLinked: (name: string) => `Esse projeto do Notion já está vinculado a “${name}”.`,
@@ -256,13 +253,6 @@ export class NotionWorkspaceService {
       }
       const projectsSchema = await this.loadSchema(input.projectsDataSourceId)
       const tasksSchema = await this.loadSchema(input.tasksDataSourceId)
-
-      if (!tasksSchema.properties.some((p) => p.type === 'unique_id')) {
-        throw new WorkspaceError({
-          code: 'missing_unique_id',
-          message: WORKSPACE_MESSAGES.missingUniqueId
-        })
-      }
 
       const partial: Partial<NotionMapping> = {}
       for (const [field, propertyId] of Object.entries(input.mapping) as [

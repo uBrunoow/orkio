@@ -3,6 +3,7 @@
  * Base das automações da Etapa 3: aqui só calculamos (`buildTaskSignals`) e comparamos
  * (`diffSignals`). Funções puras, sem Node/DOM.
  */
+import { normalizePageId } from './slug'
 import { extractTaskNumbers, parseDisplayId } from './task-id-match'
 
 export type PullRequestState = 'draft' | 'open' | 'merged' | 'closed'
@@ -23,6 +24,8 @@ export interface PullRequestSummary {
   createdAt?: string | null
   /** Quando foi fechada/mergeada (REST `closed_at`); `null` se aberta. */
   closedAt?: string | null
+  /** Páginas do Notion citadas no corpo da PR (ids normalizados): ligam a PR à tarefa sem ID. */
+  notionPageIds?: string[]
 }
 
 /** Detalhes que vêm do GraphQL (podem faltar: sem permissão, falha, ainda não carregados). */
@@ -49,7 +52,8 @@ export interface TaskPullRequest extends PullRequestSummary, PullRequestDetails 
 
 export interface TaskSignals {
   taskId: string
-  displayId: string
+  /** ID do Notion (ORK-142); `null` em bancos sem a propriedade de ID. */
+  displayId: string | null
   localBranches: string[]
   remoteBranches: string[]
   pr: TaskPullRequest | null
@@ -90,12 +94,26 @@ function indexBy<T>(items: readonly T[], texts: (item: T) => string[], prefix: s
   return map
 }
 
+/** Tarefa para os sinais: id da página, ID do Notion (opcional) e branches ligadas a ela. */
+export interface SignalTask {
+  id: string
+  displayId: string | null
+  /**
+   * Branches registradas para a tarefa (criadas pelo Orkio ou vinculadas à mão, `task_branches`):
+   * casam pelo nome exato, mesmo sem o ID no nome (`feat/listar-pedidos`).
+   */
+  branches?: readonly string[]
+}
+
 /**
- * Sinais de cada tarefa. Tarefas sem prefixo no ID (só número) não recebem sinais: casar um
- * número solto em nomes de branch seria arriscado.
+ * Sinais de cada tarefa. Três caminhos, somados:
+ * 1. o ID com prefixo no nome da branch ou no título/branch da PR (ORK-142). Tarefas sem prefixo
+ *    no ID (só número) não casam por aqui: um número solto em nomes de branch seria arriscado;
+ * 2. as branches registradas para a tarefa (nome exato) e as PRs dessas branches;
+ * 3. as PRs com o link da página da tarefa no corpo (o `/alva-flow:pr` põe o link do Notion).
  */
 export function buildTaskSignals(
-  tasks: readonly { id: string; displayId: string | null }[],
+  tasks: readonly SignalTask[],
   sources: SignalSources
 ): Record<string, TaskSignals> {
   const result: Record<string, TaskSignals> = {}
@@ -107,28 +125,59 @@ export function buildTaskSignals(
       pulls: Map<number, PullRequestSummary[]>
     }
   >()
+  const pullsByPage = new Map<string, PullRequestSummary[]>()
+  for (const p of sources.pulls ?? []) {
+    for (const id of p.notionPageIds ?? []) {
+      const list = pullsByPage.get(id) ?? []
+      list.push(p)
+      pullsByPage.set(id, list)
+    }
+  }
+  const localSet = new Set(sources.localBranches)
+  const remoteSet = new Set(sources.remoteBranches ?? [])
 
   for (const task of tasks) {
     const parsed = parseDisplayId(task.displayId)
-    if (!parsed || !task.displayId) continue
-    const key = parsed.prefix.toLowerCase()
-    let index = byPrefix.get(key)
-    if (!index) {
-      index = {
-        local: indexBy(sources.localBranches, (b) => [b], parsed.prefix),
-        remote: indexBy(sources.remoteBranches ?? [], (b) => [b], parsed.prefix),
-        pulls: indexBy(sources.pulls ?? [], (p) => [p.title, p.headRef], parsed.prefix)
-      }
-      byPrefix.set(key, index)
+    let byId: { local: string[]; remote: string[]; pulls: PullRequestSummary[] } = {
+      local: [],
+      remote: [],
+      pulls: []
     }
-    const pulls = [...(index.pulls.get(parsed.number) ?? [])].sort(comparePulls)
+    if (parsed) {
+      const key = parsed.prefix.toLowerCase()
+      let index = byPrefix.get(key)
+      if (!index) {
+        index = {
+          local: indexBy(sources.localBranches, (b) => [b], parsed.prefix),
+          remote: indexBy(sources.remoteBranches ?? [], (b) => [b], parsed.prefix),
+          pulls: indexBy(sources.pulls ?? [], (p) => [p.title, p.headRef], parsed.prefix)
+        }
+        byPrefix.set(key, index)
+      }
+      byId = {
+        local: index.local.get(parsed.number) ?? [],
+        remote: index.remote.get(parsed.number) ?? [],
+        pulls: index.pulls.get(parsed.number) ?? []
+      }
+    }
+    const linked = new Set(task.branches ?? [])
+    const local = new Set([...byId.local, ...[...linked].filter((b) => localSet.has(b))])
+    const remote = new Set([...byId.remote, ...[...linked].filter((b) => remoteSet.has(b))])
+    const pullSet = new Set<PullRequestSummary>([
+      ...byId.pulls,
+      ...(sources.pulls ?? []).filter((p) => linked.has(p.headRef)),
+      ...(pullsByPage.get(normalizePageId(task.id)) ?? [])
+    ])
+    // Sem nenhum caminho que ligue algo à tarefa: sem sinais (igual a antes para tarefa sem ID).
+    if (!parsed && linked.size === 0 && pullSet.size === 0) continue
+    const pulls = [...pullSet].sort(comparePulls)
     const main = pulls[0]
     const details = main ? sources.details.get(main.number) : undefined
     result[task.id] = {
       taskId: task.id,
       displayId: task.displayId,
-      localBranches: [...(index.local.get(parsed.number) ?? [])].sort(),
-      remoteBranches: [...(index.remote.get(parsed.number) ?? [])].sort(),
+      localBranches: [...local].sort(),
+      remoteBranches: [...remote].sort(),
       pr: main
         ? {
             ...main,

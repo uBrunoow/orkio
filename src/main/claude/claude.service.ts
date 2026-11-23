@@ -5,7 +5,8 @@
  * O renderer só manda ids (projeto, tarefa, execução); caminhos e nomes de branch são resolvidos
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
-import type { DeliveryTarget } from '../../shared/delivery'
+import { isProtectedBranch, type DeliveryTarget } from '../../shared/delivery'
+import { isValidBranchName } from '../branches/task-branches.store'
 import { CONTEXT_LIMITS, parsePorcelainLine } from '../../shared/agent-run'
 import type {
   ProjectClaudeContext,
@@ -15,6 +16,7 @@ import type {
   CatalogGroup,
   ClaudeCodeStatus,
   ClaudeDiff,
+  TaskBranchesView,
   ClaudeResult,
   EditorId,
   PermissionAnswer,
@@ -50,11 +52,13 @@ export const CLAUDE_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista de projetos.',
   noRepo: 'Este projeto não tem repositório do GitHub detectado.',
   taskNotFound: 'Tarefa não encontrada no Notion. Atualize o quadro.',
-  noTaskId: 'A tarefa não tem ID com prefixo (ex.: ORK-142). Defina um prefixo no Notion.',
   notInstalled: 'Claude Code não encontrado. Instale o CLI e faça login para rodar tarefas.',
   notLoggedIn: 'O Claude Code não está logado. Rode `claude` no terminal e faça login.',
   tooOld: 'Atualize o Claude Code para rodar tarefas pelo Orkio.',
-  noWorkspace: 'Esta tarefa ainda não tem ambiente. Rode o Claude Code primeiro.',
+  noWorkspace: 'Esta tarefa ainda não tem pasta de trabalho. Rode o Claude Code primeiro.',
+  invalidBranch: 'Nome de branch inválido. Use letras, números, "-", "_", "." e "/".',
+  protectedBranch: (b: string) =>
+    `“${b}” é uma branch protegida (padrão, release, hotfix…): não dá para ligá-la a uma tarefa.`,
   editor: 'Não foi possível abrir o editor. Confira se o comando está instalado no PATH.',
   invalidCommand: 'Nome de comando inválido.',
   emptyPrompt: 'Escreva o que o Claude Code deve fazer.',
@@ -148,14 +152,10 @@ export class ClaudeService {
     return this.wrap(async () => {
       const project = this.project(projectId)
       const task = await this.task(projectId, taskId)
-      const parsed = task.displayId ? parseDisplayId(task.displayId) : null
-      if (!task.displayId || !parsed) return fail('no_task_id', CLAUDE_MESSAGES.noTaskId)
-
+      const parsed = parseDisplayId(task.displayId)
       const state = await this.taskState(taskId)
-      const branch =
-        state.workspace?.branch ??
-        (await this.existingBranch(project, task.displayId)) ??
-        taskBranchName(task.displayId, task.title)
+      const existing = state.workspace?.branch ?? (await this.existingBranch(project, task))
+      const branch = existing ?? taskBranchName(parsed ? task.displayId : null, task.title)
 
       let pageMarkdown = ''
       let unsupported: string[] = []
@@ -209,6 +209,7 @@ export class ClaudeService {
         briefing,
         unsupported: [...new Set(unsupported)],
         branch,
+        branchIsNew: existing === null,
         commands: this.commands,
         contextWarnings: context.warnings
       })
@@ -343,6 +344,7 @@ export class ClaudeService {
     taskId: string
   ): Promise<
     ClaudeResult<{ briefing: string; displayId: string; title: string; notionUrl: string | null }>
+    // displayId '' = tarefa sem ID do Notion (as variáveis do fluxo ficam vazias).
   > {
     return this.wrap(async () => {
       const prep = await this.prepare(projectId, taskId)
@@ -350,7 +352,7 @@ export class ClaudeService {
       const task = await this.task(projectId, taskId)
       return ok({
         briefing: prep.value.briefing,
-        displayId: prep.value.displayId,
+        displayId: prep.value.displayId ?? '',
         title: task.title,
         notionUrl: task.url
       })
@@ -377,10 +379,13 @@ export class ClaudeService {
       return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
     }
     const task = await this.task(req.projectId, req.taskId)
-    if (!task.displayId) return fail('no_task_id', CLAUDE_MESSAGES.noTaskId)
     const wtProject = this.worktreeProject(project)
     const taskRef = { id: task.id, displayId: task.displayId, title: task.title }
-    await this.deps.worktrees.ensure(wtProject, taskRef)
+    await this.deps.worktrees.ensure(
+      wtProject,
+      taskRef,
+      req.branchKind ? { kind: req.branchKind } : {}
+    )
     let deliveryInput: { target: DeliveryTarget; requirePushApproval: boolean } | null = null
     if (delivery) {
       if (!this.deps.deliveryTarget) return fail('no_repo', CLAUDE_MESSAGES.noRepo)
@@ -546,6 +551,56 @@ export class ClaudeService {
     })
   }
 
+  /** Branches ligadas à tarefa e as do projeto para escolher ("Vincular branch"). */
+  branches(projectId: string, taskId: string): Promise<ClaudeResult<TaskBranchesView>> {
+    return this.wrap(async () => {
+      const project = this.project(projectId)
+      const linked = this.deps.worktrees
+        .linkedBranches(projectId, taskId)
+        .map((l) => ({ branch: l.branch, source: l.source }))
+      const remote = project.repo?.remoteName ?? 'origin'
+      const [local, remotes] = await Promise.all([
+        this.deps.git.localBranches(project.localPath).catch(() => [] as string[]),
+        this.deps.git.remoteBranches(project.localPath, remote).catch(() => [] as string[])
+      ])
+      const taken = new Set(linked.map((l) => l.branch))
+      const available = [...new Set([...local, ...remotes])]
+        .filter((b) => !taken.has(b) && !isProtectedBranch(b, project.repo?.defaultBranch ?? null))
+        .sort()
+      return ok({ linked, available })
+    })
+  }
+
+  /** Liga uma branch existente à tarefa (sinais, PR, automações e a próxima pasta de trabalho). */
+  linkBranch(
+    projectId: string,
+    taskId: string,
+    branch: string
+  ): Promise<ClaudeResult<TaskBranchesView>> {
+    return this.wrap(async () => {
+      const project = this.project(projectId)
+      const b = branch.trim()
+      if (!isValidBranchName(b)) return fail('invalid', CLAUDE_MESSAGES.invalidBranch)
+      if (isProtectedBranch(b, project.repo?.defaultBranch ?? null)) {
+        return fail('protected', CLAUDE_MESSAGES.protectedBranch(b))
+      }
+      this.deps.worktrees.linkBranch(projectId, taskId, b)
+      return this.branches(projectId, taskId)
+    })
+  }
+
+  unlinkBranch(
+    projectId: string,
+    taskId: string,
+    branch: string
+  ): Promise<ClaudeResult<TaskBranchesView>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      this.deps.worktrees.unlinkBranch(projectId, taskId, branch)
+      return this.branches(projectId, taskId)
+    })
+  }
+
   diff(projectId: string, taskId: string): Promise<ClaudeResult<ClaudeDiff>> {
     return this.wrap(async () => {
       this.project(projectId)
@@ -613,19 +668,25 @@ export class ClaudeService {
     return { runs, activeRunId: active?.id ?? null, workspace }
   }
 
-  /** Branch local/remota já existente para a tarefa (só para exibir antes de rodar). */
-  private async existingBranch(project: StoredProject, displayId: string): Promise<string | null> {
-    const parsed = parseDisplayId(displayId)
-    if (!parsed) return null
-    const matches = (b: string): boolean => mentionsTask(b, parsed.prefix, parsed.number)
+  /**
+   * Branch local/remota já existente para a tarefa (só para exibir antes de rodar): a registrada
+   * para ela (`task_branches`) ou, com ID do Notion, a que tem o ID no nome. O worktree usa a mesma
+   * ordem ao criar.
+   */
+  private async existingBranch(project: StoredProject, task: NotionTask): Promise<string | null> {
+    const parsed = parseDisplayId(task.displayId)
+    const linked = this.deps.worktrees.linkedBranches(project.id, task.id).map((l) => l.branch)
+    if (!parsed && linked.length === 0) return null
+    const matches = (b: string): boolean =>
+      linked.includes(b) || (!!parsed && mentionsTask(b, parsed.prefix, parsed.number))
     try {
       const local = await this.deps.git.localBranches(project.localPath)
-      const hit = local.find(matches)
+      const hit = linked.find((b) => local.includes(b)) ?? local.find(matches)
       if (hit) return hit
       const remote = project.repo?.remoteName ?? 'origin'
+      // Os nomes já vêm sem o "<remote>/" (git.remoteBranches).
       const remotes = await this.deps.git.remoteBranches(project.localPath, remote)
-      const r = remotes.find(matches)
-      return r ? r.slice(remote.length + 1) : null
+      return linked.find((b) => remotes.includes(b)) ?? remotes.find(matches) ?? null
     } catch {
       return null
     }

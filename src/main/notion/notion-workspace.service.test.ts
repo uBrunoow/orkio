@@ -183,7 +183,8 @@ describe('NotionWorkspaceService', () => {
 
       schema = tasksSchema({}, ['ID'])
       const missing = await service.getTasksSchema(TASKS_DS, PROJECTS_DS)
-      expect(missing).toMatchObject({ ok: true, value: { missing: ['uniqueId'] } })
+      // Sem a propriedade de ID nada falta: ela é opcional.
+      expect(missing).toMatchObject({ ok: true, value: { missing: [] } })
     })
 
     it('mesmo banco para Projetos e Tarefas é recusado', async () => {
@@ -194,18 +195,16 @@ describe('NotionWorkspaceService', () => {
       })
     })
 
-    it('salvar sem propriedade unique_id é bloqueado com explicação', async () => {
+    it('salvar sem propriedade de ID funciona: a tarefa é identificada pela página', async () => {
       schema = tasksSchema({}, ['ID'])
       const service = await makeService()
       const result = await service.saveConfig({
         ...MAPPING_INPUT,
         mapping: { ...MAPPING_INPUT.mapping, uniqueId: null }
       })
-      expect(result).toEqual({
-        ok: false,
-        error: { code: 'missing_unique_id', message: WORKSPACE_MESSAGES.missingUniqueId }
-      })
-      expect(store.get().notion).toBeNull()
+      expect(result.ok).toBe(true)
+      expect(store.get().notion?.mapping.uniqueId).toBeUndefined()
+      expect(store.get().notion?.mapping.title).toBeDefined()
     })
 
     it('salvar valida tipos, campos obrigatórios e propriedades repetidas', async () => {
@@ -255,12 +254,12 @@ describe('NotionWorkspaceService', () => {
     it('propriedade obrigatória apagada → broken e tarefas bloqueadas', async () => {
       await configured()
       await (await makeService()).link('local-1', 'page-orkio')
-      schema = tasksSchema({}, ['ID'])
+      schema = tasksSchema({}, ['Status'])
       const service = await makeService()
       const status = await service.getStatus()
       expect(status.health).toBe('broken')
       expect(status.messages).toEqual([
-        'A propriedade ID (“ID”) não existe mais nas Tarefas do Notion.'
+        'A propriedade Status (“Status”) não existe mais nas Tarefas do Notion.'
       ])
       const tasks = await service.listTasks('local-1')
       expect(tasks).toMatchObject({ ok: false, error: { code: 'broken' } })

@@ -103,7 +103,7 @@ test('sem Notion conectado, o card dos bancos só orienta', async () => {
   expect(saved['notion']).toBeNull()
 })
 
-test('assistente: escolhe os bancos e bloqueia sem propriedade de ID', async () => {
+test('assistente: escolhe os bancos e, sem propriedade de ID, só orienta', async () => {
   const { page } = orkio!
   await notionCard(page).getByRole('button', { name: 'Usar token' }).click()
   await notionCard(page).getByLabel('Token do Notion').fill(TOKEN)
@@ -116,9 +116,10 @@ test('assistente: escolhe os bancos e bloqueia sem propriedade de ID', async () 
   await choose(page, card, 'Banco de Tarefas', 'Tarefas')
   await card.getByRole('button', { name: 'Continuar' }).click()
 
-  await expect(alerts(card)).toContainText('precisa de uma propriedade de ID')
-  await expect(alerts(card)).toContainText('escolha o tipo “ID”')
-  await expect(card.getByRole('button', { name: 'Salvar' })).toBeDisabled()
+  // Sem ID não bloqueia: a tarefa é a página do Notion; só explica como ter IDs.
+  await expect(card.getByTestId('no-unique-id')).toContainText('não tem propriedade de ID')
+  await expect(alerts(card)).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'Salvar' })).toBeEnabled()
 })
 
 test('com a propriedade criada no Notion, sugere o mapeamento e salva só ids e nomes', async () => {

@@ -89,7 +89,7 @@ src/
   shared/automation.ts     # snapshot, deriveEvents, regras padrão, evaluate (motor puro)
   shared/agent-run.ts      # tipos das execuções do Claude Code (log normalizado, resumo, status)
   shared/briefing.ts       # blocos do Notion → markdown e montagem do briefing (puro)
-  shared/slug.ts           # slug e nome da branch da tarefa (<ID>/<slug>)
+  shared/slug.ts           # slug, nome da branch (<tipo>/<ID>-<slug> ou <tipo>/<slug>), links do Notion
   shared/task-flow.ts      # 5A: fluxos de tarefa (tipos, motor puro, condições, template, validação)
   shared/alva.ts           # 5B: tipos da pré-checagem, parse da task do Backlog.md (puro)
   shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
@@ -239,9 +239,10 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   `projectsDataSource`/`tasksDataSource` (`{ id, name }`) e `mapping` por **id de propriedade**
   (`{ id, name, type }`); em cada projeto, `notionProject: { id, name } | null`. **Só ids e
   nomes**; nunca conteúdo de páginas.
-- Campos: `title`, `status` (status/select), `uniqueId` (unique_id), `project` (relation que
-  aponta para o banco de Projetos) obrigatórios; `priority`, `assignee` opcionais
-  (`shared/notion-mapping.ts`). Sem `unique_id` o salvar é bloqueado com explicação.
+- Campos: `title`, `status` (status/select), `project` (relation que aponta para o banco de
+  Projetos) obrigatórios; `uniqueId` (unique_id), `priority`, `assignee` opcionais
+  (`shared/notion-mapping.ts`). Sem `unique_id` a tarefa é a página do Notion (`displayId: null`)
+  e a branch/PR se liga pelo registro local (ver "Branches da tarefa"); o assistente só explica.
 - Sugestão automática (`suggestMapping`): tipo + nomes usuais pt/en; opcionais só com nome
   reconhecido. `checkMapping` revalida: renomeada → aviso e nome atualizado; apagada/tipo
   mudou → erro (`broken`, tarefas bloqueadas) nos obrigatórios, aviso e campo ignorado nos opcionais.
@@ -344,7 +345,13 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 - Convenção: o ID aparece no nome da branch ou no título/branch da PR. `extractTaskNumbers`
   (`shared/task-id-match.ts`): `<PREFIXO>-<n>`, sem diferenciar maiúsculas, sem letra/dígito
   colado dos dois lados (ORK-14 ≠ ORK-142; ORK-0142 não casa). Tarefas sem prefixo no ID não
-  recebem sinais.
+  casam por aqui.
+- **Branches da tarefa** (SQLite v10 `task_branches`, `main/branches/task-branches.store.ts`):
+  `buildTaskSignals` soma três caminhos: o ID no nome (acima), as branches registradas para a
+  tarefa (a que o worktree cria/usa, `orkio`, e as do "Vincular branch" em Detalhes > GitHub,
+  `manual`; nome exato, e a PR dessas branches) e as PRs com o link da página do Notion no corpo
+  (`notionPageIdsIn` no `parsePullItem`; só os ids, o corpo não é guardado). Sem nenhum dos três,
+  a tarefa sem ID fica sem sinais (não adivinha). Branch protegida não se vincula.
 - Fontes: `git for-each-ref refs/heads` (`Git.localBranches`); GitHub REST
   `/branches` (até 10 páginas), `/pulls?state=open` (até 5) e `/pulls?state=closed&sort=updated`
   (para ao passar de 30 dias), com **ETag/If-None-Match por página** (cache em memória por
@@ -446,9 +453,12 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   abertos pelo Finder não herdam o PATH do terminal.
 - Detecção (`detect.ts`): `claude --version` (mínimo `CLAUDE_MIN_VERSION`) e `claude auth status`
   (JSON; só `loggedIn`/`authMethod` são lidos; e-mail nunca).
-- **Worktree** (`worktree.service.ts`): `<userData>/worktrees/<projectId>/<ID>`; reutiliza worktree
-  registrado → branch local da tarefa → branch remota → cria `<ID>/<slug>` a partir de
-  `<remote>/<default>` (fetch antes). Branch já em checkout na pasta principal → erro claro.
+- **Worktree** (`worktree.service.ts`): `<userData>/worktrees/<projectId>/<ID>` (sem ID: 12
+  caracteres do id da página); reutiliza worktree registrado → branch local da tarefa → branch
+  remota ("da tarefa" = registrada em `task_branches` ou com o ID no nome) → cria
+  `<tipo>/<ID>-<slug>` (sem ID, `<tipo>/<slug>`; `-2` se o nome já existe) a partir de
+  `<remote>/<default>` (fetch antes) e registra a branch. Tipo `feat` por padrão; "Nova sessão…"
+  deixa trocar para `fix`/`hotfix` quando a branch ainda não existe (`branchKind`). Branch já em checkout na pasta principal → erro claro.
   A pasta principal do usuário nunca é tocada. "Limpar ambiente" remove só o worktree (a branch
   fica); com mudanças pendentes exige confirmação (`force`).
 - **Permissões em camadas:** `--permission-mode acceptEdits`, `--settings` (bloqueio de escrita fora
@@ -642,9 +652,10 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 
 ## Entrega (Etapa 5C)
 
-- **Regra de ouro:** só a branch da tarefa (a do worktree, com o ID) vai para o GitHub.
-  `shared/delivery.ts` (`checkPushBranch`): branch padrão, `main/master/develop/production/staging/
-trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
+- **Regra de ouro:** só a branch da tarefa (a do worktree; o nome não precisa ter o ID) vai para
+  o GitHub. `shared/delivery.ts` (`checkPushBranch`): branch padrão, `main/master/develop/
+  production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` nunca
+  (`hotfix/<nome>` é tipo de branch de tarefa e vai); sem força, sem remoção.
 - **Push pelo Orkio** (`orkio_action "push"`, `DeliveryService`): `Git.push` =
   `git push --porcelain -u <remote> refs/heads/<b>:refs/heads/<b>` via `execFile`, com
   `GIT_TERMINAL_PROMPT=0`, `ssh -o BatchMode=yes`, `GCM_INTERACTIVE=never` (credenciais do próprio
@@ -702,7 +713,7 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   em memória das tarefas do Notion (`NotionWorkspaceService.cachedTasks`, mesmo vencido;
   `cachedHealth`). "Atualizar" = `scheduler.runNow` de cada projeto com quadro e vínculo.
 - **Títulos:** cache do Notion → último visto (memória) → ID pela branch do worktree
-  (`<ID>/<slug>`) → "Tarefa do Notion". Nada de título no disco.
+  (`ORK-2/<slug>` ou `feat/ORK-2-<slug>`) → "Tarefa do Notion". Nada de título no disco.
 - **Esperando você:** gate (ação com confirmação = "Aprovar: …", ex. push), escolha, saída da etapa,
   fluxo pausado (menos `waiting_slot`), pergunta e permissão do Claude Code, recusa do Notion
   (`rolled_back` nas últimas 24 h sem `moved`/`reconciled`/`sync_ok` depois) e escrita pendente com

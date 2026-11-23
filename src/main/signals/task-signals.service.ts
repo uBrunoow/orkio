@@ -31,6 +31,8 @@ export interface TaskSignalsDeps {
   github: SignalsGitHub
   /** Tarefas do projeto (NotionWorkspaceService.listTasks, com o cache da 2C). */
   listTasks(projectId: string): Promise<NotionResult<NotionTasksResult>>
+  /** Branches registradas para cada tarefa do projeto (`task_branches`): ligam sem o ID no nome. */
+  linkedBranches?: (projectId: string) => ReadonlyMap<string, readonly string[]>
   now?: () => Date
   /** Sem `force`, reaproveita o resultado remoto mais recente se tiver menos que isto. */
   minRemoteIntervalMs?: number
@@ -74,7 +76,12 @@ export class TaskSignalsService {
     }
     const tasksResult = await this.deps.listTasks(projectId)
     if (!tasksResult.ok) return tasksResult
-    const tasks = tasksResult.value.tasks
+    const linked = this.deps.linkedBranches?.(projectId) ?? new Map<string, readonly string[]>()
+    const tasks = tasksResult.value.tasks.map((t) => ({
+      id: t.id,
+      displayId: t.displayId,
+      branches: linked.get(t.id) ?? []
+    }))
     const messages: string[] = []
     let action: ProjectAction | undefined
 
@@ -152,7 +159,8 @@ export class TaskSignalsService {
       github,
       local,
       messages,
-      tasksWithoutPrefix: tasks.filter((t) => !parseDisplayId(t.displayId)).length,
+      // Só IDs numéricos sem prefixo; banco sem a propriedade de ID liga pelas branches registradas.
+      tasksWithoutPrefix: tasks.filter((t) => t.displayId && !parseDisplayId(t.displayId)).length,
       fetchedAt: this.now().toISOString()
     }
     if (action) result.action = action

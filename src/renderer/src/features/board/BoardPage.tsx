@@ -367,6 +367,7 @@ function Board({
                 onToggleAutomation={(paused) =>
                   actions.onToggleAutomation(selectedCard.taskId, paused)
                 }
+                onBranchesChanged={() => void refreshSignals(true)}
                 onClose={() => setPicked(null)}
                 focusSection={selectedCard.taskId === openTaskId ? focusSection : null}
                 onExpand={() => onExpandTask(selectedCard.taskId)}

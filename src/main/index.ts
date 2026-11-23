@@ -247,7 +247,9 @@ function registerIpc(): void {
       getConditional: (path, etag) => github.getConditional(path, etag),
       graphql: (query, variables) => github.graphql(query, variables)
     },
-    listTasks: (projectId) => notionWorkspace.listTasks(projectId)
+    listTasks: (projectId) => notionWorkspace.listTasks(projectId),
+    // Branches registradas para cada tarefa (banco sem ID no Notion); o worktree nasce depois.
+    linkedBranches: (projectId) => worktreesForSignals?.linkedBranchesByTask(projectId) ?? new Map()
   })
   registerSignalsIpc(ipcMain, signals, isTrustedSender, projectsReady)
 
@@ -455,6 +457,7 @@ function registerIpc(): void {
       ready: projectsReady
     })
     claudeRuns = claude.runs
+    worktreesForSignals = claude.worktrees
 
     // Fluxos de tarefa (5A): passos ligados às colunas, sobre as execuções da 4A.
     flowRunner = createFlowRunner({
@@ -733,6 +736,8 @@ let projects: ProjectsService | null = null
 let writeQueue: NotionWriteQueue | null = null
 let scheduler: AutomationScheduler | null = null
 let claudeRuns: RunService | null = null
+/** Registro de branches por tarefa (lido pelos sinais; criado junto com o Claude Code). */
+let worktreesForSignals: WorktreeService | null = null
 let flowRunner: FlowRunner | null = null
 /** Orquestrador (8B): puxa tarefas da fila para os agentes e passa adiante. */
 let orchestrator: OrchestratorService | null = null

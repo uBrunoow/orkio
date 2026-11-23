@@ -141,7 +141,7 @@ describe('suggestMapping', () => {
     expect(suggestMapping(schema, PROJECTS_DS).mapping.status?.id).toBe('sta')
   })
 
-  it('sem propriedade unique_id → campo obrigatório faltando', () => {
+  it('sem propriedade unique_id → nada faltando (o ID é opcional)', () => {
     const schema = parseDataSource(
       dataSource({
         Nome: { id: 't', name: 'Nome', type: 'title' },
@@ -155,7 +155,7 @@ describe('suggestMapping', () => {
       })
     )!
     const { mapping, missing } = suggestMapping(schema, PROJECTS_DS)
-    expect(missing).toEqual(['uniqueId'])
+    expect(missing).toEqual([])
     expect(mapping.uniqueId).toBeUndefined()
   })
 
@@ -209,10 +209,12 @@ describe('checkMapping', () => {
     expect(check.mapping.status.name).toBe('Etapa')
   })
 
-  it('obrigatória apagada → erro', () => {
+  it('ID apagado → aviso e campo ignorado (o ID é opcional), não erro', () => {
     const without = { ...schema, properties: schema.properties.filter((p) => p.id !== 'uid') }
-    expect(checkMapping(mapping, without, PROJECTS_DS).errors).toEqual([
-      'A propriedade ID (“ID”) não existe mais nas Tarefas do Notion.'
+    const r = checkMapping(mapping, without, PROJECTS_DS)
+    expect(r.errors).toEqual([])
+    expect(r.warnings).toEqual([
+      'A propriedade ID (“ID”) não existe mais nas Tarefas do Notion. O campo opcional foi ignorado.'
     ])
   })
 

@@ -77,7 +77,7 @@ interface EventRow {
   detail_json: string | null
 }
 
-const DISPLAY_ID = /^[A-Za-z][A-Za-z0-9]*-\d+$/
+const DISPLAY_ID_IN_BRANCH = /(?:^|\/)([A-Za-z][A-Za-z0-9]*-\d+)(?=\/|-|$)/
 
 export class OverviewService {
   /** Último ID/título conhecido de cada tarefa (só memória; sobrevive a invalidações do cache). */
@@ -342,8 +342,9 @@ export class OverviewService {
           'SELECT branch FROM worktrees WHERE task_page_id = ?',
           taskId
         )?.branch
-        const id = branch?.split('/')[0]
-        info = { displayId: id && DISPLAY_ID.test(id) ? id.toUpperCase() : null, title: null }
+        // `ORK-2/slug` (antigo) ou `feat/ORK-2-slug` (novo); sem ID no nome, fica sem ID.
+        const id = branch ? DISPLAY_ID_IN_BRANCH.exec(branch)?.[1] : undefined
+        info = { displayId: id ? id.toUpperCase() : null, title: null }
       }
       return {
         projectId,

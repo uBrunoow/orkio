@@ -57,7 +57,8 @@ const TYPE_LABELS: Record<string, string> = {
 }
 
 const FIELD_HINTS: Partial<Record<NotionMappingField, string>> = {
-  uniqueId: 'Propriedade do tipo ID (unique_id), ex.: ORK-142.',
+  uniqueId:
+    'Propriedade do tipo ID (ex.: ORK-142). Opcional: sem ela, a tarefa é a página do Notion.',
   project: 'Relação com o banco de Projetos escolhido.',
   priority: 'Seleção, status ou número.',
   assignee: 'Pessoas.'
@@ -400,26 +401,24 @@ function Wizard({
           </Text>
 
           {lacksUniqueId && (
-            <Alert
-              tone="danger"
-              action={
+            <VStack gap={2} role="status" data-testid="no-unique-id">
+              <Text type="supporting">
+                Este banco não tem propriedade de ID, e tudo bem: o Orkio identifica cada tarefa
+                pela página do Notion e liga a branch e a PR pela branch que ele cria (feat/…), pelo
+                link do Notion no corpo da PR ou por “Vincular branch” na tarefa. Quer IDs como
+                TI-42 nos cards e nas branches? Crie no Notion uma propriedade do tipo “ID” com um
+                prefixo e recarregue.
+              </Text>
+              <HStack>
                 <Button
                   size="sm"
+                  variant="ghost"
                   label="Recarregar banco"
                   isLoading={loadingSchema}
                   onClick={() => void loadSchema()}
                 />
-              }
-            >
-              <VStack gap={1}>
-                <Text weight="semibold">O banco de Tarefas precisa de uma propriedade de ID.</Text>
-                <Text>
-                  O Orkio identifica cada tarefa por um ID estável (ex.: ORK-142). No Notion, abra o
-                  banco de Tarefas, clique em “+” no cabeçalho da tabela, escolha o tipo “ID” e, se
-                  quiser, defina um prefixo. Depois clique em “Recarregar banco”.
-                </Text>
-              </VStack>
-            </Alert>
+              </HStack>
+            </VStack>
           )}
 
           {MAPPING_FIELDS.map((field) => {
@@ -482,12 +481,12 @@ function Wizard({
               variant="primary"
               label="Salvar"
               isLoading={saving}
-              isDisabled={missingRequired.length > 0 || lacksUniqueId}
+              isDisabled={missingRequired.length > 0}
               onClick={() => void save()}
             />
             <Button variant="ghost" label="Voltar" onClick={() => setStep(1)} />
           </HStack>
-          {(missingRequired.length > 0 || lacksUniqueId) && (
+          {missingRequired.length > 0 && (
             <Text type="supporting">
               Para salvar, escolha: {missingRequired.map(fieldLabel).join(', ')}.
             </Text>
