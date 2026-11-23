@@ -127,12 +127,16 @@ export const ptBR = {
     all: 'Ver todos os arquivos',
     soon: 'O primeiro release público sai em breve.',
     unavailable: 'Não conseguimos ler o último release agora.',
-    linux: 'Ainda não há versão para Linux.',
+    linux: 'Este release não tem versão para Linux.',
+    linuxNote:
+      'No Ubuntu ou Debian, o .deb instala direto. O AppImage roda em qualquer distro e se atualiza sozinho. Precisa de um chaveiro do sistema (GNOME Keyring ou KWallet) para guardar os tokens.',
     macNote: 'Não sabe qual Mac? Menu Apple → Sobre este Mac: “Apple M…” é Apple Silicon.',
     labels: {
       'mac-arm64': 'macOS (Apple Silicon)',
       'mac-x64': 'macOS (Intel)',
-      windows: 'Windows'
+      windows: 'Windows',
+      'linux-appimage': 'Linux (AppImage)',
+      'linux-deb': 'Linux (.deb)'
     }
   },
   faq: {
@@ -140,7 +144,7 @@ export const ptBR = {
     items: [
       {
         q: 'O Orkio guarda meus tokens em algum servidor?',
-        a: 'Não. Os tokens do Notion e do GitHub ficam só no seu computador, cifrados pelo sistema (Keychain no macOS, DPAPI no Windows). O site do Orkio só repassa a troca do login OAuth do Notion, porque o Notion exige um segredo que um app de desktop não pode guardar, e não grava nada.'
+        a: 'Não. Os tokens do Notion e do GitHub ficam só no seu computador, cifrados pelo sistema (Keychain no macOS, DPAPI no Windows, chaveiro do sistema no Linux). O site do Orkio só repassa a troca do login OAuth do Notion, porque o Notion exige um segredo que um app de desktop não pode guardar, e não grava nada.'
       },
       {
         q: 'Preciso de chave de API da Anthropic?',
@@ -160,7 +164,7 @@ export const ptBR = {
       },
       {
         q: 'E no Linux?',
-        a: 'Ainda não há instalador para Linux.'
+        a: 'Sim, x64: AppImage (qualquer distro, com atualização automática) e .deb (Ubuntu/Debian). Os tokens ficam no chaveiro do sistema (GNOME Keyring ou KWallet); sem ele, o Orkio não salva a conexão.'
       }
     ]
   },

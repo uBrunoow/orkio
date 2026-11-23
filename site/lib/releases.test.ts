@@ -85,7 +85,18 @@ describe('download', () => {
     const win = detectPlatform({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })
     expect(suggestDownload(win, files)?.name).toBe('Orkio-Setup-1.2.0.exe')
     const linux = detectPlatform({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })
-    expect(suggestDownload(linux, files)).toBeNull()
+    expect(suggestDownload(linux, files)).toBeNull() // release sem build de Linux
+    const withLinux = classifyAssets([
+      asset('Orkio-1.2.0-linux-x86_64.AppImage'),
+      asset('Orkio-1.2.0-linux-amd64.deb'),
+      asset('latest-linux.yml')
+    ])
+    expect(withLinux['linux-appimage']?.name).toBe('Orkio-1.2.0-linux-x86_64.AppImage')
+    expect(withLinux['linux-deb']?.name).toBe('Orkio-1.2.0-linux-amd64.deb')
+    expect(suggestDownload(linux, withLinux)?.name).toBe('Orkio-1.2.0-linux-x86_64.AppImage')
+    expect(suggestDownload(linux, { 'linux-deb': withLinux['linux-deb']! })?.name).toBe(
+      'Orkio-1.2.0-linux-amd64.deb'
+    )
     const iphone = detectPlatform({
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)'
     })

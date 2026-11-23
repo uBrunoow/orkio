@@ -680,6 +680,7 @@ function createUpdates(deps: {
     isPackaged: () => app.isPackaged,
     platform: process.platform,
     arch: process.arch,
+    isAppImage: process.platform === 'linux' && !!process.env['APPIMAGE'],
     macSigned: () =>
       isMacAppSigned(
         (command, args) =>

@@ -62,7 +62,7 @@ export function builderConfig(env: Env): Configuration {
       provider: 'github',
       owner: RELEASES_OWNER,
       repo: RELEASES_REPO,
-      // Os jobs (mac e Windows) sobem para o mesmo rascunho; o release.yml publica no fim.
+      // Os jobs (mac, Windows e Linux) sobem para o mesmo rascunho; o release.yml publica no fim.
       releaseType: 'draft'
     },
     mac: {
@@ -105,10 +105,23 @@ export function builderConfig(env: Env): Configuration {
       createStartMenuShortcut: true,
       createDesktopShortcut: true,
       deleteAppDataOnUninstall: false
-    }
-    // Linux fora por enquanto:
-    // linux: { icon: 'build/icon.png', category: 'Development', target: 'AppImage', executableName: 'orkio' },
-    // appImage: { artifactName: '${productName}-${version}-linux-${arch}.${ext}' },
+    },
+    // Linux: AppImage (roda em qualquer distro e se atualiza sozinho pelo electron-updater, que lê o
+    // latest-linux.yml) e .deb (instala no Ubuntu/Debian; atualização à mão). Só x64 por enquanto.
+    linux: {
+      icon: 'build/icon.png',
+      category: 'Development',
+      executableName: 'orkio',
+      synopsis: 'Orquestração de desenvolvimento com IA (Notion, GitHub, Claude Code)',
+      maintainer: 'uBrunoow <uBrunoow@users.noreply.github.com>',
+      target: [
+        { target: 'AppImage', arch: ['x64'] },
+        { target: 'deb', arch: ['x64'] }
+      ]
+    },
+    // ${arch} vira x86_64 no AppImage e amd64 no .deb (nomes de cada formato).
+    appImage: { artifactName: '${productName}-${version}-linux-${arch}.${ext}' },
+    deb: { artifactName: '${productName}-${version}-linux-${arch}.${ext}' }
   }
 }
 

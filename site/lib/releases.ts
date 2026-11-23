@@ -3,7 +3,7 @@
  * ISR. A sugestão do arquivo certo (SO/arquitetura) acontece no cliente (`suggestDownload`).
  */
 
-export type DownloadKind = 'mac-arm64' | 'mac-x64' | 'windows'
+export type DownloadKind = 'mac-arm64' | 'mac-x64' | 'windows' | 'linux-appimage' | 'linux-deb'
 
 export interface DownloadFile {
   kind: DownloadKind
@@ -55,6 +55,9 @@ export function classifyAssets(
       else set('mac-x64', a, false) // sem arquitetura no nome: o padrão do electron-builder é x64
     } else if (name.endsWith('.exe') && !/uninstall/.test(name)) set('windows', a, true)
     else if (name.endsWith('.msi')) set('windows', a, false)
+    else if (name.endsWith('.appimage') && !/arm64|aarch64/.test(name))
+      set('linux-appimage', a, true)
+    else if (name.endsWith('.deb') && !/arm64|aarch64/.test(name)) set('linux-deb', a, true)
   }
   return out
 }
@@ -138,7 +141,8 @@ export function detectPlatform(input: {
 
 /**
  * Arquivo sugerido. Mac sem arquitetura conhecida (Safari/Firefox não informam): Apple Silicon,
- * com o Intel oferecido ao lado. Linux/outros: sem sugestão (não há build).
+ * com o Intel oferecido ao lado. Linux: o AppImage (qualquer distro, atualiza sozinho), senão o .deb.
+ * Outros: sem sugestão.
  */
 export function suggestDownload(
   platform: ClientPlatform,
@@ -148,6 +152,10 @@ export function suggestDownload(
   if (platform.os === 'mac') {
     if (platform.arch === 'x86') return files['mac-x64'] ?? files['mac-arm64'] ?? null
     return files['mac-arm64'] ?? files['mac-x64'] ?? null
+  }
+  if (platform.os === 'linux') {
+    if (platform.arch === 'arm') return null // só há build x64
+    return files['linux-appimage'] ?? files['linux-deb'] ?? null
   }
   return null
 }

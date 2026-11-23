@@ -89,9 +89,10 @@ Cuidados:
    1. confere tag = versão do `package.json` e a seção no CHANGELOG;
    2. roda o CI inteiro (lint, typecheck, test, e2e, smoke do pacote Linux);
    3. cria o **rascunho** do release com as notas do CHANGELOG;
-   4. empacota no macOS e no Windows (`electron-builder --publish always`) e roda o smoke test do
-      app empacotado em cada um;
-   5. confere que todos os arquivos (dmg/zip/exe e os `.yml` do canal) estão lá e publica.
+   4. empacota no macOS, no Windows e no Linux (`electron-builder --publish always`) e roda o smoke
+      test do app empacotado em cada um (no Linux, com `xvfb-run`);
+   5. confere que todos os arquivos (dmg/zip/exe/AppImage/deb e os `.yml` do canal) estão lá e
+      publica. No Linux, só o AppImage se atualiza sozinho; o .deb é atualizado baixando o novo.
       Tag `-beta.N` → **pre-release** (canal beta, não vira "Latest").
 
 Se algum passo falhar, o rascunho fica lá sem ser publicado (rascunho só aparece para quem tem
