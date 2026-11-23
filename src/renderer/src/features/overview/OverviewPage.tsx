@@ -1,3 +1,4 @@
+import { plural } from '../../lib/format'
 import { useEffect, useState } from 'react'
 import { Badge } from '@astryxdesign/core/Badge'
 import { Button } from '@astryxdesign/core/Button'
@@ -38,9 +39,9 @@ import { tokenColor, type TokenColor } from '../notion-workspace/notion-colors'
 import { useActivity, useOverview } from './useOverview'
 
 const WAITING_LABEL: Record<WaitingKind, { label: string; color: TokenColor }> = {
-  gate: { label: 'Gate', color: 'orange' },
-  action: { label: 'Aprovação', color: 'orange' },
-  choice: { label: 'Escolha', color: 'orange' },
+  gate: { label: 'Aprovação', color: 'yellow' },
+  action: { label: 'Confirmar ação', color: 'yellow' },
+  choice: { label: 'Escolha', color: 'yellow' },
   decision: { label: 'Decisão', color: 'yellow' },
   flow_paused: { label: 'Fluxo pausado', color: 'red' },
   question: { label: 'Pergunta', color: 'orange' },
@@ -292,7 +293,7 @@ function PrSection({
               description={`${p.task.projectName} · ${p.reasons
                 .map((r) =>
                   r === 'unresolved_comments' && p.unresolved
-                    ? `${p.unresolved} comentário(s) não resolvido(s)`
+                    ? plural(p.unresolved, 'comentário não resolvido', 'comentários não resolvidos')
                     : r === 'stale_review' && p.openDays !== null
                       ? `Sem review há ${p.openDays} d`
                       : PR_REASON_LABEL[r]
@@ -415,9 +416,9 @@ function ProjectCard({
               </VStack>
             ))}
             <Text type="supporting">
-              {p.total} tarefa(s)
+              {plural(p.total, 'tarefa', 'tarefas')}
               {p.noStage > 0 ? ` · ${p.noStage} sem etapa` : ''}
-              {p.blocked > 0 ? ` · ${p.blocked} bloqueada(s)` : ''}
+              {p.blocked > 0 ? ` · ${plural(p.blocked, 'bloqueada', 'bloqueadas')}` : ''}
               {p.pausedTasks > 0 ? ` · ${p.pausedTasks} com automação pausada` : ''}
             </Text>
           </VStack>

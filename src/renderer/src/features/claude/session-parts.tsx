@@ -74,7 +74,9 @@ export function Composer({
           <Text type="supporting">Branch</Text>
           <Code data-testid="run-branch">{prep.branch}</Code>
           <Text type="supporting">
-            {prep.workspace ? 'ambiente existente' : 'ambiente isolado criado ao rodar'}
+            {prep.workspace
+              ? 'pasta de trabalho existente'
+              : 'pasta de trabalho isolada, criada ao rodar'}
           </Text>
         </HStack>
         <SegmentedControl
@@ -101,7 +103,7 @@ export function Composer({
           rows={3}
         />
         <TextArea
-          label="Briefing da tarefa"
+          label="Resumo da tarefa (vai para o Claude)"
           description="Montado da página do Notion. Edite à vontade; não é salvo no Notion."
           value={briefing}
           onChange={setBriefing}
@@ -129,8 +131,8 @@ export function Composer({
           </VStack>
         )}
         <Text type="supporting">
-          Edições no ambiente da tarefa são liberadas; comandos de terminal pedem sua aprovação;
-          push, PRs e qualquer coisa fora do ambiente são bloqueados.
+          Edições na pasta de trabalho da tarefa são liberadas; comandos de terminal pedem sua
+          aprovação; push, PRs e qualquer coisa fora dela são bloqueados.
         </Text>
         {error && <Alert tone="danger">{error}</Alert>}
         <HStack gap={2}>
@@ -254,7 +256,7 @@ export function Workspace({
   return (
     <VStack gap={2}>
       <HStack gap={2} vAlign="center" wrap="wrap">
-        <Text type="supporting">Ambiente</Text>
+        <Text type="supporting">Pasta de trabalho</Text>
         <Code data-testid="workspace-branch">{workspace.branch}</Code>
         {workspace.changes !== null && workspace.changes > 0 && (
           <StatusToken
@@ -289,7 +291,7 @@ export function Workspace({
           <Button
             size="sm"
             variant={suggestCleanup ? 'primary' : 'ghost'}
-            label="Limpar ambiente"
+            label="Limpar pasta de trabalho"
             icon={<Icon icon={CleanIcon} />}
             onClick={() => void cleanup(false)}
           />
@@ -297,7 +299,7 @@ export function Workspace({
       </HStack>
       {suggestCleanup && !isBusy && (
         <Text type="supporting">
-          Tarefa finalizada: o ambiente pode ser removido (a branch fica).
+          Tarefa finalizada: a pasta de trabalho pode ser removida (a branch fica).
         </Text>
       )}
       {error && <Alert tone="danger">{error}</Alert>}
@@ -305,7 +307,7 @@ export function Workspace({
         <Card role="alertdialog" aria-label="Confirmar limpeza">
           <VStack gap={2}>
             <Text>
-              O ambiente tem mudanças não commitadas que serão perdidas:{' '}
+              A pasta de trabalho tem mudanças não commitadas que serão perdidas:{' '}
               {confirmFiles.slice(0, 10).join(', ')}
               {confirmFiles.length > 10 ? '…' : ''}
             </Text>
@@ -328,7 +330,7 @@ export function Workspace({
       )}
       {diff !== null && (
         <DiffView
-          label="Diff do ambiente"
+          label="Diff da pasta de trabalho"
           diff={diff.diff}
           truncated={diff.truncated}
           untracked={diff.untracked}

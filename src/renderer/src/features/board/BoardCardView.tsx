@@ -116,11 +116,18 @@ export function BoardCardBody({
           </HStack>
         )}
         {branches[0] && (
-          <HStack gap={1} vAlign="center" data-testid="card-branch">
+          <HStack
+            gap={1}
+            vAlign="center"
+            data-testid="card-branch"
+            style={{ minWidth: 0, maxWidth: '100%' }}
+          >
             <Icon icon={GitBranchIcon} size="sm" color="secondary" />
-            <Text type="supporting" color="secondary" maxLines={1}>
-              <Code>{branches[0]}</Code>
-            </Text>
+            <StackItem size="fill" style={{ minWidth: 0 }}>
+              <Text type="code" color="secondary" maxLines={1} wordBreak="break-all">
+                {branches[0]}
+              </Text>
+            </StackItem>
           </HStack>
         )}
         {pr && (

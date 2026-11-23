@@ -17,11 +17,13 @@ import type {
   TaskSignals
 } from '../../../../shared/ipc-contract'
 import type { TaskSection } from '../../../../shared/overview'
+import type { FlowRunView } from '../../../../shared/task-flow'
 import type { AgentBadge } from '../../../../shared/agent'
 import { Alert } from '../../components/Alert'
 import { CloseIcon, ExpandIcon } from '../../components/icons'
 import { pendingRequests, useTaskRuns } from '../claude/useTaskRuns'
 import { TaskFlowSection, type TaskActivity } from '../task-flows/TaskFlowSection'
+import { flowStepIndex } from '../task-flows/flow-plan'
 import { StageSelector, TaskChanges, TaskDetails, useBacklogSummary } from './TaskDetails'
 import { TaskProgressStrip } from './TaskProgressStrip'
 import { TaskSession } from './TaskSession'
@@ -89,6 +91,9 @@ export function TaskPanel({
   const [history, setHistory] = useState<BoardHistoryEntry[] | null>(null)
   const [flowLive, setFlowLive] = useState(false)
   const [focusRun, setFocusRun] = useState<{ runId: string; nonce: number } | null>(null)
+  // Execuções do fluxo: cada turno do Claude Code disparado por um passo mostra de onde veio.
+  const [flowRuns, setFlowRuns] = useState<readonly FlowRunView[]>([])
+  const flowOrigins = useMemo(() => flowStepIndex(flowRuns), [flowRuns])
   // Execuções e fluxos também escrevem no histórico (início, fim, bloqueios, passos).
   const [tick, setTick] = useState(0)
   useEffect(
@@ -218,6 +223,7 @@ export function TaskPanel({
           setFocusRun({ runId, nonce: Date.now() })
         }}
         onLiveChange={setFlowLive}
+        onRunsChange={setFlowRuns}
       />
     </VStack>
   )
@@ -234,9 +240,10 @@ export function TaskPanel({
         flowSlot={flowSlot}
         flowRunning={flowLive && flowActivity !== null}
         activity={activity}
-        scrollToEnd={variant === 'panel' && !focusSection}
+        scrollToEnd={!focusSection}
         focusRun={focusRun}
         backlogLinked={!!backlog?.linked}
+        flowOrigins={flowOrigins}
       />
     </VStack>
   )

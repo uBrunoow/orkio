@@ -11,13 +11,13 @@ import { Selector } from '@astryxdesign/core/Selector'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
 import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AlvaCheckItem, AlvaPrecheck } from '../../../../shared/alva'
 import type { AlvaStatusView, BoardView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { CopyIcon, RefreshIcon } from '../../components/icons'
+import { PAGE_WIDTH } from '../../components/page-width'
 
 const STATE: Record<AlvaCheckItem['state'], { label: string; color: 'green' | 'red' | 'yellow' }> =
   {
@@ -108,7 +108,7 @@ export function AlvaPage({
   }
 
   return (
-    <VStack gap={5} maxWidth={920} role="region" aria-label="alva-flow">
+    <VStack gap={5} maxWidth={PAGE_WIDTH.form} role="region" aria-label="alva-flow">
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Heading level={2}>alva-flow</Heading>
         {precheck?.pluginVersion && <Code>v{precheck.pluginVersion}</Code>}
@@ -122,9 +122,8 @@ export function AlvaPage({
         <HStack gap={2} vAlign="center">
           <Heading level={3}>Pronto para o alva-flow?</Heading>
           {precheck && (
-            <Token
-              size="sm"
-              color={precheck.ready ? 'green' : 'yellow'}
+            <StatusToken
+              tone={precheck.ready ? 'success' : 'warning'}
               label={precheck.ready ? 'Pronto' : 'Falta configurar'}
               data-testid="alva-ready"
             />

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * `LABELS='["release:minor"]' node scripts/release-plan.mjs` (usado pelos workflows de release).
+ * `LABELS='["release:minor"]' RELEASE_NOTE='Título da PR' node scripts/release-plan.mjs`
+ * (usado pelos workflows de release). Sem rótulo = patch; `release:none` = não lança.
  * Lê os rótulos da PR (JSON ou texto, um por linha), decide se há release, qual versão sai e
  * confere o CHANGELOG, sem escrever nada. No GitHub Actions grava `release`, `kind` e `version`
  * em $GITHUB_OUTPUT e um resumo em $GITHUB_STEP_SUMMARY. Erro → `::error::` e saída 1.
@@ -38,7 +39,8 @@ try {
     labels: parseLabels(process.env['LABELS']),
     currentVersion: version,
     changelog: readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'),
-    today: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    today: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    note: process.env['RELEASE_NOTE'] ?? null
   })
 } catch (e) {
   fail(e instanceof Error ? e.message : String(e))
@@ -46,7 +48,7 @@ try {
 
 const plain = plan.release
   ? `Ao mergear, sai a versão v${plan.version} (${plan.prerelease ? 'beta, pre-release' : 'estável'}, release:${plan.kind}).`
-  : 'Sem rótulo release:* na PR: ao mergear, nenhuma versão é lançada.'
+  : 'PR com release:none: ao mergear, nenhuma versão é lançada.'
 console.log(plain)
 const summary = plain.replace(/(v\d[^ ]*)/, '**$1**')
 if (process.env['GITHUB_OUTPUT']) {

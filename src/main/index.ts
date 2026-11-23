@@ -1,6 +1,6 @@
 import { execFile as execFileCb, spawn } from 'node:child_process'
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
-import { homedir, userInfo } from 'node:os'
+import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
+import { homedir, release as osRelease, userInfo } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -28,7 +28,11 @@ import {
   createNotionOAuthBroker,
   readNotionOAuthConfig
 } from './connectors/notion/notion.oauth'
-import { ORKIO_CONFIG_FILE, createOrkioConfigStore } from './config/orkio-config'
+import {
+  ORKIO_CONFIG_FILE,
+  ORKIO_CONFIG_VERSION,
+  createOrkioConfigStore
+} from './config/orkio-config'
 import { createGit } from './git/git'
 import { registerNotionWorkspaceIpc } from './ipc/notion-workspace.ipc'
 import { registerProjectsIpc } from './ipc/projects.ipc'
@@ -88,6 +92,7 @@ import { OrchestratorService } from './orchestrator/orchestrator.service'
 import { registerOrchestratorIpc } from './ipc/orchestrator.ipc'
 import { buildAgentPrompt, commandAllowed } from '../shared/agent'
 import { registerUpdatesIpc } from './ipc/updates.ipc'
+import { collectDiagnostics } from './diagnostics/diagnostics'
 import { UpdateService, type UpdaterLike } from './updates/update.service'
 import { busyCount, describeBusy } from './updates/busy'
 import { isMacAppSigned } from './updates/mac-signature'
@@ -561,11 +566,67 @@ function registerIpc(): void {
       return r.ok ? (r.value.tasks.find((t) => t.id === taskId)?.displayId ?? null) : null
     }
   })
+  // Diagnóstico (Sobre): só versões, contagens e estados, sem rede e sem segredos.
+  const diagnostics = (): Promise<string> =>
+    collectDiagnostics({
+      app: { version: app.getVersion(), packaged: app.isPackaged },
+      runtime: {
+        electron: process.versions.electron ?? '—',
+        node: process.versions.node,
+        chrome: process.versions.chrome ?? '—'
+      },
+      os: { platform: process.platform, arch: process.arch, release: osRelease() },
+      config: { schemaVersion: ORKIO_CONFIG_VERSION, readOnly: configStore.readOnly },
+      db: boardStore?.db ?? null,
+      connections: async () => [
+        { name: 'Notion', status: await notion.getStatus() },
+        { name: 'GitHub', status: await github.getStatus() }
+      ],
+      toolVersion: (cmd) =>
+        new Promise((resolve) => {
+          execFileCb(
+            cmd,
+            ['--version'],
+            { env: sanitizeEnv(toolEnv()), timeout: 5_000, windowsHide: true },
+            (error, stdout) =>
+              resolve(error ? null : (String(stdout).split('\n')[0]?.trim() ?? null) || null)
+          )
+        }),
+      countEntries: async (what) => {
+        const root = join(app.getPath('userData'), what)
+        try {
+          if (what === 'runs') return (await readdir(root)).length
+          let n = 0
+          for (const project of await readdir(root)) {
+            n += (await readdir(join(root, project)).catch(() => [])).length
+          }
+          return n
+        } catch {
+          return 0
+        }
+      },
+      projects: () => {
+        const c = configStore.get()
+        return {
+          total: c.projects.length,
+          withBoard: c.projects.filter((p) => c.boards[p.id]).length
+        }
+      },
+      automation: () => {
+        const c = configStore.get()
+        const ids = c.projects.filter((p) => p.notionProject && c.boards[p.id]).map((p) => p.id)
+        return {
+          polling: scheduler ? ids.length : 0,
+          failing: scheduler ? ids.filter((id) => scheduler!.getStatus(id).failures > 0).length : 0
+        }
+      }
+    })
   registerUpdatesIpc(
     ipcMain,
     updates,
     () => ({ version: app.getVersion(), links: siteLinks(siteUrl) }),
-    isTrustedSender
+    isTrustedSender,
+    diagnostics
   )
   void projectsReady.then(() => updates?.start())
 }

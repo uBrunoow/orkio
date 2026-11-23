@@ -342,6 +342,7 @@ const api: OrkioApi = {
     markWhatsNewSeen: () => ipcRenderer.invoke(updates.markWhatsNewSeen),
     releaseNotes: () => ipcRenderer.invoke(updates.releaseNotes),
     about: () => ipcRenderer.invoke(updates.about),
+    diagnostics: () => ipcRenderer.invoke(updates.diagnostics),
     onStatus: (listener) => {
       const handler = (_event: unknown, payload: unknown): void => {
         if (

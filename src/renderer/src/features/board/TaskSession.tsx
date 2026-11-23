@@ -23,6 +23,7 @@ import { SessionComposer } from '../claude/SessionComposer'
 import { Composer, EMPTY_INITIAL, PermissionCard, type RunInitial } from '../claude/session-parts'
 import { pendingRequests, type useTaskRuns } from '../claude/useTaskRuns'
 import type { TaskActivity } from '../task-flows/TaskFlowSection'
+import type { FlowStepOrigin } from '../task-flows/flow-plan'
 import { eventActor } from './TaskTimeline'
 import { buildSession, tailSession, type SessionItem } from './task-session'
 
@@ -54,7 +55,8 @@ export function TaskSession({
   activity,
   scrollToEnd = false,
   focusRun = null,
-  backlogLinked = false
+  backlogLinked = false,
+  flowOrigins
 }: {
   projectId: string
   taskId: string
@@ -73,6 +75,8 @@ export function TaskSession({
   focusRun?: { runId: string; nonce: number } | null
   /** Tarefa com task do Backlog.md vinculada: /spec e /plan mostram o documento na conversa. */
   backlogLinked?: boolean
+  /** Execução → passo do fluxo que a disparou (turnos do piloto automático). */
+  flowOrigins?: ReadonlyMap<string, FlowStepOrigin>
 }): React.JSX.Element {
   const [showAll, setShowAll] = useState(false)
   const [newSession, setNewSession] = useState<Awaited<
@@ -161,6 +165,7 @@ export function TaskSession({
                   : false
               }
               changesOpen={item.kind === 'run' && item.run.id === changesOpenId}
+              origin={item.kind === 'run' ? (flowOrigins?.get(item.run.id) ?? null) : null}
               item={item}
               agent={agent}
               stageName={stageName}
@@ -242,6 +247,7 @@ export function TaskSession({
           agent={agent}
           state={state}
           flowRunning={flowRunning}
+          autopilotStep={flowRunning ? (activity?.what ?? null) : null}
           onSent={(s) => {
             runs.setState(s)
             void runs.select(s.activeRunId)
@@ -263,9 +269,11 @@ function SessionRow({
   focused,
   projectId,
   showDocument,
-  changesOpen
+  changesOpen,
+  origin
 }: {
   item: SessionItem
+  origin: FlowStepOrigin | null
   focused: boolean
   projectId: string
   showDocument: boolean | 'open'
@@ -293,7 +301,8 @@ function SessionRow({
           projectId={projectId}
           showDocument={showDocument}
           changesOpen={changesOpen}
-          {...(onRerun ? { onRerun: () => onRerun(item.run) } : {})}
+          origin={origin}
+          {...(onRerun && !origin ? { onRerun: () => onRerun(item.run) } : {})}
         />
       </VStack>
     )

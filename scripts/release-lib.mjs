@@ -152,22 +152,34 @@ export function parseReleaseArgs(argv) {
 }
 
 export const RELEASE_LABEL_PREFIX = 'release:'
+/** Rótulo que impede o release de uma PR (docs, CI, ajustes que não vão para o app). */
+export const NO_RELEASE_LABEL = 'release:none'
+/** Tipo usado quando a PR não tem rótulo `release:*`: todo merge na main vira versão. */
+export const DEFAULT_RELEASE_KIND = 'patch'
 
 /**
  * Rótulos de uma PR → tipo de release (`release:patch|minor|major|beta`).
- * Sem rótulo de release: `null` (a PR não lança versão). Mais de um, ou um desconhecido: erro.
+ * Sem rótulo de release: `DEFAULT_RELEASE_KIND` (patch). `release:none`: `null` (não lança).
+ * Mais de um tipo, um desconhecido, ou `release:none` junto de um tipo: erro.
  * @param {readonly string[]} labels
  * @returns {'patch'|'minor'|'major'|'beta' | null}
  */
 export function releaseKindFromLabels(labels) {
+  const none = labels.includes(NO_RELEASE_LABEL)
   const kinds = [
     ...new Set(
       labels
-        .filter((l) => l.startsWith(RELEASE_LABEL_PREFIX))
+        .filter((l) => l.startsWith(RELEASE_LABEL_PREFIX) && l !== NO_RELEASE_LABEL)
         .map((l) => l.slice(RELEASE_LABEL_PREFIX.length))
     )
   ]
-  if (kinds.length === 0) return null
+  if (none && kinds.length > 0) {
+    throw new Error(
+      `A PR tem ${NO_RELEASE_LABEL} e ${kinds.map((k) => RELEASE_LABEL_PREFIX + k).join(', ')} ao mesmo tempo. Deixe só um.`
+    )
+  }
+  if (none) return null
+  if (kinds.length === 0) return /** @type {'patch'} */ (DEFAULT_RELEASE_KIND)
   if (kinds.length > 1) {
     throw new Error(
       `A PR tem mais de um rótulo de release (${kinds.map((k) => RELEASE_LABEL_PREFIX + k).join(', ')}). Deixe só um.`
@@ -176,21 +188,51 @@ export function releaseKindFromLabels(labels) {
   const kind = kinds[0]
   if (!BUMP_KINDS.includes(kind)) {
     throw new Error(
-      `Rótulo desconhecido: ${RELEASE_LABEL_PREFIX}${kind}. Use ${BUMP_KINDS.map((k) => RELEASE_LABEL_PREFIX + k).join(', ')}.`
+      `Rótulo desconhecido: ${RELEASE_LABEL_PREFIX}${kind}. Use ${BUMP_KINDS.map((k) => RELEASE_LABEL_PREFIX + k).join(', ')} ou ${NO_RELEASE_LABEL}.`
     )
   }
   return /** @type {'patch'|'minor'|'major'|'beta'} */ (kind)
 }
 
 /**
- * O que a PR pede: sem rótulo de release → `{ release: false }`; com rótulo → o tipo, a versão que
- * vai sair e a conferência do CHANGELOG (erro em pt-BR se não houver o que lançar). Não escreve nada.
- * @param {{ labels: readonly string[], currentVersion: string, changelog: string, today: string }} input
+ * "[Não lançado]" vazio + nota (título da PR) → a nota vira o item da seção, em "### Mudado".
+ * Com itens, ou sem nota, devolve o CHANGELOG como está. Assim um merge sem CHANGELOG escrito
+ * ainda lança uma versão com uma linha que diz o que entrou.
+ * @param {string} changelog
+ * @param {string | undefined | null} note
  */
-export function planRelease({ labels, currentVersion, changelog, today }) {
+export function fillUnreleased(changelog, note) {
+  const text = (note ?? '').replace(/\s+/g, ' ').trim()
+  if (text === '') return changelog
+  const lines = changelog.replace(/\r\n/g, '\n').split('\n')
+  const range = sectionRange(lines, UNRELEASED)
+  if (!range) return changelog
+  const body = lines.slice(range.start + 1, range.end).join('\n')
+  if (hasEntries(body)) return changelog
+  const item = /[.!?]$/.test(text) ? text : `${text}.`
+  const next = [
+    ...lines.slice(0, range.start),
+    `## [${UNRELEASED}]`,
+    '',
+    '### Mudado',
+    '',
+    `- ${item}`,
+    '',
+    ...lines.slice(range.end)
+  ]
+  return next.join('\n').replace(/\n{3,}/g, '\n\n')
+}
+
+/**
+ * O que a PR pede: `release:none` → `{ release: false }`; senão o tipo (patch por padrão), a versão
+ * que vai sair e a conferência do CHANGELOG (com `note` preenchendo um "[Não lançado]" vazio).
+ * Erro em pt-BR se não houver o que lançar. Não escreve nada.
+ * @param {{ labels: readonly string[], currentVersion: string, changelog: string, today: string, note?: string | null }} input
+ */
+export function planRelease({ labels, currentVersion, changelog, today, note }) {
   const kind = releaseKindFromLabels(labels)
   if (kind === null) return { release: false }
   const version = nextVersion(currentVersion, kind)
-  releaseChangelog(changelog, version, today)
+  releaseChangelog(fillUnreleased(changelog, note), version, today)
   return { release: true, kind, version, prerelease: isPrerelease(version) }
 }

@@ -42,6 +42,7 @@ import { errorName } from '../ipc/payload'
 import { NotionApiError } from '../connectors/notion/notion.client'
 import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
+import { redactSecrets } from './redact'
 import { RUN_MESSAGES, type RunAgent, type RunService } from './run.service'
 import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
 
@@ -556,11 +557,15 @@ export class ClaudeService {
       const uncommitted = status
         .map(parsePorcelainLine)
         .filter((f): f is UncommittedFile => f !== null && !f.path.startsWith('.orkio/'))
+      const cut = text.slice(0, MAX_DIFF_CHARS)
       return ok({
-        diff: text.slice(0, MAX_DIFF_CHARS),
+        // O diff aparece na tela (gate, "Ver diff"): segredos saem com o valor escondido, e a
+        // lista de arquivos com segredo vira aviso antes de aprovar.
+        diff: redactSecrets(cut),
         truncated: text.length > MAX_DIFF_CHARS,
         untracked,
-        uncommitted
+        uncommitted,
+        secrets: filesWithSecrets(cut)
       })
     })
   }
@@ -744,4 +749,25 @@ function pageRef(value: unknown): { id: string; name: string }[] {
     }
   }
   return [{ id: v.id, name: name.trim() || 'Sem título' }]
+}
+
+/** Arquivos do diff com linha adicionada que parece segredo (token, chave, senha). */
+export function filesWithSecrets(diff: string): string[] {
+  const files = new Set<string>()
+  let current: string | null = null
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ ')) {
+      current = line.slice(4).replace(/^b\//, '')
+      continue
+    }
+    if (
+      current &&
+      current !== '/dev/null' &&
+      line.startsWith('+') &&
+      redactSecrets(line) !== line
+    ) {
+      files.add(current)
+    }
+  }
+  return [...files]
 }

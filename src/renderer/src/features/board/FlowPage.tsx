@@ -743,7 +743,9 @@ export function FlowPage({
         changes={changeCount}
         saveLabel="Salvar fluxo"
         isSaving={saving}
-        isDisabled={errors.length > 0 || (warnings.length > 0 && !acceptWarnings)}
+        isDisabled={
+          changeCount === 0 || errors.length > 0 || (warnings.length > 0 && !acceptWarnings)
+        }
         onSave={() => void save()}
         onDiscard={discard}
       >

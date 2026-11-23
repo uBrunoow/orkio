@@ -334,6 +334,7 @@ function Board({
                     signals={signals.result?.signals ?? {}}
                     selectedTaskId={selected}
                     actions={actions}
+                    endInset={selectedCard ? TASK_SHEET_WIDTH : null}
                   />
                 )}
               </AgentBadgesProvider>
@@ -350,7 +351,7 @@ function Board({
                 position: 'absolute',
                 insetBlock: 0,
                 insetInlineEnd: 0,
-                width: 'min(calc(var(--spacing-12) * 10), 62%)',
+                width: TASK_SHEET_WIDTH,
                 boxShadow: 'var(--shadow-high)',
                 zIndex: 10
               }}
@@ -456,6 +457,9 @@ function useAutomationStatus(projectId: string): {
   }
 }
 
+/** Largura da folha da tarefa sobre o quadro (o quadro reserva o mesmo espaço no fim). */
+const TASK_SHEET_WIDTH = 'min(calc(var(--spacing-12) * 10), 62%)'
+
 /** Estado das automações, curto, no cabeçalho do quadro. */
 function AutomationLine({
   status,
@@ -475,9 +479,11 @@ function AutomationLine({
         ? `Limite do GitHub: próxima verificação às ${time(status.nextRunAt)}`
         : status.github === 'ok'
           ? `GitHub verificado às ${time(status.lastRunAt)}`
-          : status.lastRunAt
-            ? `Verificado às ${time(status.lastRunAt)}${status.error ? ` (${status.error})` : ''}`
-            : 'Aguardando a primeira verificação'
+          : status.github === 'unverified' || status.error
+            ? `Falhou às ${time(status.lastRunAt)}${status.error ? ` (${status.error})` : ' (sem conexão com o GitHub)'}; nova tentativa às ${time(status.nextRunAt)}`
+            : status.lastRunAt
+              ? `Verificado às ${time(status.lastRunAt)}`
+              : 'Aguardando a primeira verificação'
   const detail = status.paused
     ? 'Os eventos são registrados no histórico, sem mover tarefas.'
     : 'As automações movem as tarefas pelos eventos do git e do GitHub.'

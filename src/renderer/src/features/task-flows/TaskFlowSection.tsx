@@ -31,6 +31,9 @@ import { DiffView } from '../../components/DiffView'
 import { describeFlowProblem } from '../../../../shared/flow-problem'
 import { FlowProblemCard } from './FlowProblemCard'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
+import { AutopilotPlan } from './AutopilotPlan'
+import { gateOutcomes } from './flow-plan'
+import { formatUsd, plural } from '../../lib/format'
 
 type TokenColor = 'gray' | 'green' | 'red' | 'yellow' | 'orange' | 'blue'
 
@@ -46,7 +49,7 @@ const RUN_STATUS: Record<FlowRunStatus, { label: string; color: TokenColor }> = 
 const STEP_STATUS: Record<FlowStepStatus, string> = {
   running: 'rodando',
   waiting: 'esperando aprovação',
-  ok: 'ok',
+  ok: 'concluído',
   failed: 'falhou',
   cancelled: 'cancelado',
   skipped: 'pulado',
@@ -91,7 +94,8 @@ export function TaskFlowSection({
   onActivityChange,
   onWaitingChange,
   onOpenRun,
-  onLiveChange
+  onLiveChange,
+  onRunsChange
 }: {
   projectId: string
   taskId: string
@@ -106,6 +110,8 @@ export function TaskFlowSection({
   onOpenRun?: (runId: string) => void
   /** O fluxo da tarefa está em andamento (o Claude Code manual fica bloqueado). */
   onLiveChange?: (live: boolean) => void
+  /** Execuções do fluxo da tarefa (mais nova primeiro): a sessão mostra de que passo veio cada turno. */
+  onRunsChange?: (runs: readonly FlowRunView[]) => void
 }): React.JSX.Element | null {
   // Passos recolhidos enquanto o fluxo roda ou espera você (a decisão vem primeiro); abertos no
   // fim. Clicar no resumo vale até a tarefa mudar.
@@ -187,6 +193,9 @@ export function TaskFlowSection({
     onLiveChange?.(liveNow)
   }, [liveNow, onLiveChange])
   useEffect(() => () => onLiveChange?.(false), [onLiveChange])
+  useEffect(() => {
+    if (runs) onRunsChange?.(runs)
+  }, [runs, onRunsChange])
 
   const openPr = pr && (pr.state === 'open' || pr.state === 'draft') ? pr : null
   if (!run && !binding && !openPr?.checks) return null
@@ -219,6 +228,16 @@ export function TaskFlowSection({
           />
         )}
       </HStack>
+
+      {run?.status === 'running' && (
+        <Text type="supporting" color="secondary" data-testid="autopilot-hint">
+          Piloto automático: o Orkio manda cada passo para o Claude Code e segue sozinho. Ele para
+          quando precisar de você.
+        </Text>
+      )}
+
+      {/* Encerrado, o histórico abaixo já conta o que rodou: o plano só vale enquanto há caminho. */}
+      {run && live && <AutopilotPlan run={run} />}
 
       {!live && binding && (
         <Button
@@ -256,7 +275,7 @@ export function TaskFlowSection({
         <Collapsible
           trigger={
             <Text type="supporting" color="secondary" data-testid="flow-steps-summary">
-              {stepSummary(run.history)}
+              Histórico do fluxo: {stepSummary(run.history)}
             </Text>
           }
           isOpen={stepsOpen ?? !(live && run.status !== 'paused')}
@@ -271,7 +290,7 @@ export function TaskFlowSection({
                 description={[
                   STEP_STATUS[h.status],
                   duration(h.startedAt, h.endedAt),
-                  h.costUsd !== null ? `US$ ${h.costUsd.toFixed(2)}` : '',
+                  h.costUsd !== null ? formatUsd(h.costUsd) : '',
                   h.message ?? ''
                 ]
                   .filter(Boolean)
@@ -286,7 +305,7 @@ export function TaskFlowSection({
         <Text type="supporting" data-testid="flow-running-step">
           {/:pr$/.test(current.command) && !/--comments/.test(current.args)
             ? 'Aguardando CI do GitHub: o /pr acompanha os checks até terminar (pode levar vários minutos).'
-            : `Rodando /${current.command}. A conversa ao vivo está logo acima.`}
+            : `Rodando /${current.command}. A conversa deste passo está logo acima.`}
         </Text>
       )}
 
@@ -342,6 +361,7 @@ export function TaskFlowSection({
           taskId={taskId}
           message={current.message}
           show={current.show}
+          outcomes={gateOutcomes(run)}
           busy={busy}
           onApprove={() => void act(() => window.orkio.taskFlows.approve(run.id))}
           onReject={() => void act(() => window.orkio.taskFlows.reject(run.id))}
@@ -551,6 +571,7 @@ function GateCard({
   taskId,
   message,
   show,
+  outcomes,
   busy,
   onApprove,
   onReject
@@ -559,13 +580,17 @@ function GateCard({
   taskId: string
   message: string
   show: 'diff' | 'summary' | 'backlog' | 'none'
+  /** O que acontece ao aprovar e ao recusar (frase curta, junto dos botões). */
+  outcomes: { approve: string; reject: string } | null
   busy: boolean
   onApprove(): void
   onReject(): void
 }): React.JSX.Element {
   const [detail, setDetail] = useState<string | null>(null)
   const [diffData, setDiffData] = useState<
-    { diff: string; truncated: boolean; untracked: string[] } | { error: string } | null
+    | { diff: string; truncated: boolean; untracked: string[]; secrets: string[] }
+    | { error: string }
+    | null
   >(null)
 
   useEffect(() => {
@@ -596,12 +621,19 @@ function GateCard({
           ('error' in diffData ? (
             <Alert tone="danger">{diffData.error}</Alert>
           ) : (
-            <DiffView
-              label="Diff para aprovar"
-              diff={diffData.diff}
-              truncated={diffData.truncated}
-              untracked={diffData.untracked}
-            />
+            <>
+              {diffData.secrets.length > 0 && (
+                <Alert tone="danger">
+                  {`Parece haver um segredo (token, chave ou senha) em ${diffData.secrets.join(', ')}. O valor está escondido abaixo, mas aprovar segue com ele no código. Recuse e peça para remover, se não for de propósito.`}
+                </Alert>
+              )}
+              <DiffView
+                label="Diff para aprovar"
+                diff={diffData.diff}
+                truncated={diffData.truncated}
+                untracked={diffData.untracked}
+              />
+            </>
           ))}
         {show === 'summary' && detail !== null && (
           <TextArea
@@ -620,8 +652,13 @@ function GateCard({
             isLoading={busy}
             onClick={onApprove}
           />
-          <Button size="sm" variant="destructive" label="Recusar" onClick={onReject} />
+          <Button size="sm" variant="secondary" label="Recusar" onClick={onReject} />
         </HStack>
+        {outcomes && (
+          <Text type="supporting" color="secondary" data-testid="gate-outcomes">
+            {outcomes.approve} {outcomes.reject}
+          </Text>
+        )}
       </VStack>
     </Card>
   )
@@ -629,7 +666,7 @@ function GateCard({
 
 function describeSummary(s: RunSummary): string {
   return [
-    `${s.files.length} arquivo(s), ${s.commits.length} commit(s)`,
+    `${plural(s.files.length, 'arquivo', 'arquivos')}, ${plural(s.commits.length, 'commit', 'commits')}`,
     s.diffStat,
     ...s.commits.map((c) => `${c.hash} ${c.subject}`),
     s.tests.length ? `Testes: ${s.tests.join('; ')}` : 'Nenhum teste rodado'

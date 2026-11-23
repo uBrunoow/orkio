@@ -1415,6 +1415,17 @@ export class FlowRunner {
   }
 
   private event(row: RunRow, kind: TaskEventKind, detail: Record<string, unknown>): void {
+    // O histórico mostra o nome do passo (o id é chave interna, ex.: "ok").
+    if (typeof detail['step'] === 'string' && detail['stepName'] === undefined) {
+      try {
+        const name = (JSON.parse(row.flow_json) as Flow).steps.find(
+          (s) => s.id === detail['step']
+        )?.name
+        if (name) detail = { ...detail, stepName: name }
+      } catch {
+        // flow_json ilegível: fica só o id.
+      }
+    }
     this.deps.store.addEvent({
       taskPageId: row.task_page_id,
       projectId: row.project_id,

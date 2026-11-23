@@ -171,6 +171,8 @@ export interface ClaudeDiff {
   untracked: string[]
   /** Tudo que ainda não foi commitado (modificado, novo, removido, renomeado). */
   uncommitted: UncommittedFile[]
+  /** Arquivos com linha adicionada que parece segredo (o valor já vem escondido em `diff`). */
+  secrets: string[]
 }
 
 /**

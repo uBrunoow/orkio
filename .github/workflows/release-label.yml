@@ -1,5 +1,5 @@
-# Mostra, na PR, o que o rótulo `release:*` vai fazer ao mergear (versão que sai) e falha cedo se o
-# CHANGELOG não tiver o que lançar. Sem o rótulo, a PR não lança versão. Ver docs/releases.md.
+# Mostra, na PR, a versão que sai ao mergear (patch sem rótulo; `release:minor|major|beta` escolhe;
+# `release:none` não lança) e falha cedo se houver rótulos em conflito. Ver docs/releases.md.
 name: Release (rótulo da PR)
 
 on:
@@ -24,4 +24,5 @@ jobs:
       - name: O que este rótulo lança
         env:
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          RELEASE_NOTE: ${{ github.event.pull_request.title }}
         run: node scripts/release-plan.mjs

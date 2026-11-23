@@ -31,6 +31,8 @@ import {
   type StepType
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
+import { PageState } from '../../components/PageState'
+import { SaveBar } from '../../components/SaveBar'
 import { plural } from '../../lib/format'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
 
@@ -82,6 +84,8 @@ function emptyStep(flow: Flow, type: StepType): Step {
 export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.Element {
   const [project, setProject] = useState<TaskFlowsProject | null>(null)
   const [flows, setFlows] = useState<Flow[]>([])
+  // Última versão salva: base do contador de alterações e do "Descartar".
+  const [saved, setSaved] = useState<Flow[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [catalog, setCatalog] = useState<CatalogGroup[] | null>(null)
   const [saving, setSaving] = useState(false)
@@ -98,6 +102,7 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
       if (r.ok) {
         setProject(r.value)
         setFlows(r.value.flows)
+        setSaved(r.value.flows)
         setSelected(r.value.flows[0]?.id ?? null)
       } else setMessage({ tone: 'error', text: r.error.message })
     })
@@ -149,9 +154,23 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
     setSaving(true)
     const r = await window.orkio.taskFlows.saveFlows(projectId, flows)
     setSaving(false)
+    if (r.ok) setSaved(flows)
     setMessage(
       r.ok ? { tone: 'ok', text: 'Fluxos salvos.' } : { tone: 'error', text: r.error.message }
     )
+  }
+  const changes = countFlowChanges(saved, flows)
+  const createFlow = (): void => {
+    const f: Flow = { id: newFlowId(), name: 'Novo fluxo', steps: [] }
+    setFlows((all) => [...all, f])
+    setSelected(f.id)
+    setEditingId(f.id)
+  }
+  const discard = (): void => {
+    setFlows(saved)
+    setSelected((id) => (saved.some((f) => f.id === id) ? id : (saved[0]?.id ?? null)))
+    setEditingId(null)
+    setMessage(null)
   }
 
   return (
@@ -161,93 +180,113 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
           Ligue um fluxo a uma coluna em Etapas e automações (“Fluxo desta coluna”). O ajuste de
           push fica lá também, em Entrega.
         </Text>
-        <StackItem size="fill" />
-        <Button
-          variant="primary"
-          label="Salvar fluxos"
-          isLoading={saving}
-          isDisabled={hasErrors}
-          {...(hasErrors ? { disabledMessage: 'Corrija os erros antes de salvar.' } : {})}
-          onClick={() => void save()}
+      </HStack>
+
+      {flows.length === 0 ? (
+        <PageState
+          kind="empty"
+          title="Nenhum fluxo ainda"
+          description="Um fluxo roda sozinho numa tarefa: comandos do Claude Code, suas aprovações e ações do Orkio, em ordem. Comece do zero ou use um modelo na aba Modelos do alva-flow."
+          action={{ label: 'Novo fluxo', onClick: createFlow }}
         />
-      </HStack>
-      {message &&
-        (message.tone === 'error' ? (
-          <Alert tone="danger">{message.text}</Alert>
-        ) : (
-          <Text role="status">{message.text}</Text>
-        ))}
-
-      <HStack gap={5} vAlign="start">
-        <VStack gap={2} width="calc(var(--spacing-12) * 5)" style={{ flexShrink: 0 }}>
-          <List hasDividers density="compact" aria-label="Fluxos do projeto">
-            {flows.map((f) => {
-              const errors = issuesByFlow.get(f.id)?.filter((i) => i.level === 'error').length ?? 0
-              return (
-                <Item
-                  as="li"
-                  key={f.id}
-                  label={f.name || 'Sem nome'}
-                  description={plural(f.steps.length, 'passo', 'passos')}
-                  isSelected={f.id === selected}
-                  onClick={() => {
-                    setSelected(f.id)
-                    setEditingId(null)
-                  }}
-                  {...(errors > 0
-                    ? {
-                        endContent: (
-                          <Token size="sm" color="red" label={plural(errors, 'erro', 'erros')} />
-                        )
-                      }
-                    : {})}
-                />
-              )
-            })}
-          </List>
-          <Button
-            variant="secondary"
-            label="Novo fluxo"
-            icon={<Icon icon={PlusIcon} />}
-            onClick={() => {
-              const f: Flow = { id: newFlowId(), name: 'Novo fluxo', steps: [] }
-              setFlows((all) => [...all, f])
-              setSelected(f.id)
-              setEditingId(f.id)
-            }}
-          />
-        </VStack>
-
-        <StackItem size="fill">
-          {flow && editingId !== flow.id ? (
-            <FlowDetail
-              flow={flow}
-              bindings={project.bindings.filter((b) => b.flowId === flow.id && b.enabled)}
-              stageName={(id) => stageNames[id] ?? 'coluna removida'}
-              actionLabel={(id) => project.actions.find((a) => a.id === id)?.label ?? id}
-              activity={flowActivity}
-              onEdit={() => setEditingId(flow.id)}
+      ) : (
+        <HStack gap={5} vAlign="start">
+          <VStack gap={2} width="calc(var(--spacing-12) * 5)" style={{ flexShrink: 0 }}>
+            <List hasDividers density="compact" aria-label="Fluxos do projeto">
+              {flows.map((f) => {
+                const errors =
+                  issuesByFlow.get(f.id)?.filter((i) => i.level === 'error').length ?? 0
+                return (
+                  <Item
+                    as="li"
+                    key={f.id}
+                    label={f.name || 'Sem nome'}
+                    description={plural(f.steps.length, 'passo', 'passos')}
+                    isSelected={f.id === selected}
+                    onClick={() => {
+                      setSelected(f.id)
+                      setEditingId(null)
+                    }}
+                    {...(errors > 0
+                      ? {
+                          endContent: (
+                            <Token size="sm" color="red" label={plural(errors, 'erro', 'erros')} />
+                          )
+                        }
+                      : {})}
+                  />
+                )
+              })}
+            </List>
+            <Button
+              variant="secondary"
+              label="Novo fluxo"
+              icon={<Icon icon={PlusIcon} />}
+              onClick={createFlow}
             />
-          ) : flow ? (
-            <FlowEditor
-              flow={flow}
-              catalog={catalog}
-              project={project}
-              issues={issuesByFlow.get(flow.id) ?? []}
-              onChange={updateFlow}
-              onRemove={() => {
-                setFlows((all) => all.filter((f) => f.id !== flow.id))
-                setSelected(null)
-              }}
-              onDone={() => setEditingId(null)}
-            />
-          ) : (
-            <Text type="supporting">Crie ou escolha um fluxo.</Text>
-          )}
-        </StackItem>
-      </HStack>
+          </VStack>
+
+          <StackItem size="fill">
+            {flow && editingId !== flow.id ? (
+              <FlowDetail
+                flow={flow}
+                bindings={project.bindings.filter((b) => b.flowId === flow.id && b.enabled)}
+                stageName={(id) => stageNames[id] ?? 'coluna removida'}
+                actionLabel={(id) => project.actions.find((a) => a.id === id)?.label ?? id}
+                activity={flowActivity}
+                onEdit={() => setEditingId(flow.id)}
+              />
+            ) : flow ? (
+              <FlowEditor
+                flow={flow}
+                catalog={catalog}
+                project={project}
+                issues={issuesByFlow.get(flow.id) ?? []}
+                onChange={updateFlow}
+                onRemove={() => {
+                  setFlows((all) => all.filter((f) => f.id !== flow.id))
+                  setSelected(null)
+                }}
+                onDone={() => setEditingId(null)}
+              />
+            ) : (
+              <Text type="supporting">Crie ou escolha um fluxo.</Text>
+            )}
+          </StackItem>
+        </HStack>
+      )}
+
+      {(changes > 0 || message) && (
+        <SaveBar
+          label="Salvar fluxos de tarefa"
+          changes={changes}
+          saveLabel="Salvar fluxos"
+          isSaving={saving}
+          isDisabled={hasErrors || changes === 0}
+          onSave={() => void save()}
+          onDiscard={discard}
+        >
+          {hasErrors && <Alert tone="danger">Corrija os erros antes de salvar.</Alert>}
+          {message &&
+            (message.tone === 'error' ? (
+              <Alert tone="danger">{message.text}</Alert>
+            ) : (
+              <Text role="status">{message.text}</Text>
+            ))}
+        </SaveBar>
+      )}
     </VStack>
   )
+}
+
+/** Quantos fluxos mudaram desde o último salvar (novos, removidos ou editados). */
+function countFlowChanges(saved: readonly Flow[], current: readonly Flow[]): number {
+  const before = new Map(saved.map((f) => [f.id, JSON.stringify(f)]))
+  const now = new Set(current.map((f) => f.id))
+  let n = 0
+  for (const f of current) if (before.get(f.id) !== JSON.stringify(f)) n++
+  for (const id of before.keys()) if (!now.has(id)) n++
+  return n
 }
 
 /** Uma linha que resume o passo (lista de passos). */
@@ -554,7 +593,7 @@ function StepForm({
             <Selector
               label="Mostrar ao aprovar"
               options={[
-                { value: 'diff', label: 'Diff do ambiente' },
+                { value: 'diff', label: 'Diff da pasta de trabalho' },
                 { value: 'summary', label: 'Resumo da última execução' },
                 { value: 'backlog', label: 'Spec e plano (task do Backlog)' },
                 { value: 'none', label: 'Nada' }

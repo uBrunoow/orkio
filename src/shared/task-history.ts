@@ -55,6 +55,24 @@ function by(e: HistoryEvent): string {
     : ''
 }
 
+/** Nome do passo (eventos novos) ou o id (eventos gravados antes do nome). */
+function stepLabel(e: HistoryEvent): string {
+  return String(e.detail?.['stepName'] ?? e.detail?.['step'] ?? '')
+}
+
+/** Motivos de pausa do fluxo em português (o código fica no `detail`). */
+const PAUSE_REASON: Record<string, string> = {
+  step_failed: 'o passo falhou',
+  interrupted: 'o Orkio foi fechado no meio do passo',
+  loop_guard: 'passos demais (trava de segurança)',
+  gate_timeout: 'a aprovação expirou',
+  left_stage: 'a tarefa saiu da etapa do fluxo',
+  needs_choice: 'falta você escolher',
+  waiting_slot: 'esperando outro fluxo terminar',
+  waiting_agent: 'esperando o agente ficar livre',
+  agent_daily_limit: 'o agente chegou ao limite do dia'
+}
+
 export function describeEvent(e: HistoryEvent, stageName: (id: string | null) => string): string {
   const rule = typeof e.detail?.['ruleName'] === 'string' ? `“${e.detail['ruleName']}”` : null
   if (
@@ -117,21 +135,21 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     case 'agent_unassigned':
       return 'Atribuição de agente removida'
     case 'step_started':
-      return `Passo do fluxo começou (${String(e.detail?.['step'] ?? '')})`
+      return `Passo começou: ${stepLabel(e)}`
     case 'step_finished':
-      return `Passo do fluxo concluído (${String(e.detail?.['step'] ?? '')})`
+      return `Passo concluído: ${stepLabel(e)}`
     case 'step_failed':
-      return `Passo do fluxo falhou (${String(e.detail?.['step'] ?? '')})`
+      return `Passo falhou: ${stepLabel(e)}`
     case 'step_skipped':
-      return `Passo do fluxo pulado (${String(e.detail?.['step'] ?? '')})`
+      return `Passo pulado: ${stepLabel(e)}`
     case 'gate_waiting':
-      return `Fluxo esperando aprovação (${String(e.detail?.['step'] ?? '')})`
+      return `Esperando sua aprovação: ${stepLabel(e)}`
     case 'gate_approved':
-      return `Aprovação concedida (${String(e.detail?.['step'] ?? '')})`
+      return `Aprovação concedida: ${stepLabel(e)}`
     case 'gate_rejected':
-      return `Aprovação recusada (${String(e.detail?.['step'] ?? '')})`
+      return `Aprovação recusada: ${stepLabel(e)}`
     case 'flow_paused':
-      return `Fluxo pausado (${String(e.detail?.['reason'] ?? '')})`
+      return `Fluxo parado: ${PAUSE_REASON[String(e.detail?.['reason'] ?? '')] ?? 'motivo desconhecido'}`
     case 'flow_finished':
       return e.detail?.['result'] === 'cancelled'
         ? 'Fluxo cancelado'
@@ -139,9 +157,9 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
           ? 'Fluxo encerrado (recusado)'
           : 'Fluxo concluído'
     case 'artifact_attached':
-      return `Artefato anexado: ${String(e.detail?.['path'] ?? '')}`
+      return `Documento anexado: ${String(e.detail?.['path'] ?? '')}`
     case 'artifact_published':
-      return `Artefato publicado no Notion: ${String(e.detail?.['path'] ?? '')}`
+      return `Documento publicado no Notion: ${String(e.detail?.['path'] ?? '')}`
     case 'delivery': {
       const by = e.detail?.['by'] === 'claude' ? 'Claude Code (modo entrega)' : 'Orkio'
       const branch = typeof e.detail?.['branch'] === 'string' ? e.detail['branch'] : ''

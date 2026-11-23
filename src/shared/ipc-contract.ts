@@ -218,6 +218,7 @@ export const IPC_CHANNELS = {
     markWhatsNewSeen: 'updates:mark-whats-new-seen',
     releaseNotes: 'updates:release-notes',
     about: 'updates:about',
+    diagnostics: 'updates:diagnostics',
     /** Evento main → renderer: o status das atualizações mudou. */
     statusChanged: 'updates:status-changed'
   },
@@ -959,6 +960,8 @@ export interface OrkioApi {
     /** Notas da versão atual (botão "Ver novidades desta versão"). */
     releaseNotes(): Promise<ReleaseNotes | null>
     about(): Promise<AboutInfo>
+    /** Diagnóstico sem segredos (versões, banco, filas, conexões) para copiar e pedir ajuda. */
+    diagnostics(): Promise<string>
     onStatus(listener: (status: UpdateStatus) => void): () => void
   }
   /** Visão geral (6D): tudo de todos os projetos, sem chamar APIs ao abrir. */

@@ -30,6 +30,7 @@ import { DatabaseIcon, RefreshIcon } from '../../components/icons'
 import { CardHeader } from '../integrations/connection-ui'
 import { tokenColor } from './notion-colors'
 import type { UseNotionWorkspace } from './useNotionWorkspace'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 
 type NotionError = Extract<NotionResult<never>, { ok: false }>['error']
 type MappingDraft = Partial<Record<NotionMappingField, string | null>>
@@ -83,14 +84,13 @@ export function NotionWorkspaceCard({
         <CardHeader
           titleId="notion-workspace-title"
           title="Bancos do Notion"
-          description="Onde ficam seus Projetos e Tarefas. O Orkio só lê; nada é alterado no Notion."
+          description="Onde ficam seus Projetos e Tarefas. O Orkio lê as tarefas e só escreve o status quando você (ou uma automação) move um card."
           icon={<Icon icon={DatabaseIcon} color="primary" size="lg" />}
           badge={
             health && !editing ? (
-              <Token
+              <StatusToken
                 label={health.label}
-                color={health.color}
-                size="sm"
+                tone={toneOf(health.color)}
                 data-testid="workspace-health"
               />
             ) : null

@@ -4,6 +4,7 @@ import {
   isPrerelease,
   nextVersion,
   parseReleaseArgs,
+  fillUnreleased,
   planRelease,
   releaseChangelog,
   releaseKindFromLabels
@@ -114,9 +115,14 @@ describe('parseReleaseArgs', () => {
 })
 
 describe('releaseKindFromLabels', () => {
-  it('sem rótulo de release, a PR não lança versão', () => {
-    expect(releaseKindFromLabels([])).toBeNull()
-    expect(releaseKindFromLabels(['bug', 'enhancement'])).toBeNull()
+  it('sem rótulo de release, todo merge lança um patch', () => {
+    expect(releaseKindFromLabels([])).toBe('patch')
+    expect(releaseKindFromLabels(['bug', 'enhancement'])).toBe('patch')
+  })
+
+  it('release:none não lança; junto de um tipo é erro', () => {
+    expect(releaseKindFromLabels(['release:none'])).toBeNull()
+    expect(() => releaseKindFromLabels(['release:none', 'release:minor'])).toThrow(/ao mesmo tempo/)
   })
 
   it('um rótulo release:<tipo> escolhe o tipo (repetido conta uma vez)', () => {
@@ -135,8 +141,25 @@ describe('planRelease', () => {
   const changelog = '# Changelog\n\n## [Não lançado]\n\n### Adicionado\n\n- Algo novo.\n'
   const base = { currentVersion: '0.1.0', changelog, today: '2026-11-21' }
 
-  it('sem rótulo: não há release', () => {
-    expect(planRelease({ ...base, labels: ['bug'] })).toEqual({ release: false })
+  it('sem rótulo: patch; com release:none: não há release', () => {
+    expect(planRelease({ ...base, labels: ['bug'] })).toEqual({
+      release: true,
+      kind: 'patch',
+      version: '0.1.1',
+      prerelease: false
+    })
+    expect(planRelease({ ...base, labels: ['release:none'] })).toEqual({ release: false })
+  })
+
+  it('CHANGELOG vazio com o título da PR: a nota vira o item', () => {
+    const empty = '# Changelog\n\n## [Não lançado]\n\n## [0.1.0] - 2026-11-01\n\n- Antigo.\n'
+    expect(
+      planRelease({ ...base, labels: [], changelog: empty, note: 'Corrige o quadro' })
+    ).toMatchObject({ release: true, version: '0.1.1' })
+    const filled = fillUnreleased(empty, '  Corrige   o quadro ')
+    expect(filled).toContain('## [Não lançado]\n\n### Mudado\n\n- Corrige o quadro.\n\n## [0.1.0]')
+    // Com itens, a nota é ignorada.
+    expect(fillUnreleased(changelog, 'Outra coisa')).toBe(changelog)
   })
 
   it('com rótulo: tipo, versão e se é pre-release', () => {

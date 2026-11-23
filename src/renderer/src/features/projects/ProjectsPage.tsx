@@ -26,6 +26,7 @@ import { useNotionWorkspace } from '../notion-workspace/useNotionWorkspace'
 import { ActionLink } from './ActionLink'
 import { AddProjectPanel } from './AddProjectPanel'
 import { useProjects } from './useProjects'
+import { PAGE_WIDTH } from '../../components/page-width'
 
 type TokenColor = 'default' | 'green' | 'yellow' | 'red'
 
@@ -70,7 +71,7 @@ export function ProjectsPage({
   const list = projects.projects
 
   return (
-    <VStack gap={5} maxWidth={1080}>
+    <VStack gap={5} maxWidth={PAGE_WIDTH.list}>
       <PageHeader
         title="Projetos"
         subtitle="Pastas locais ligadas a repositórios do GitHub. O Orkio acompanha a branch atual."

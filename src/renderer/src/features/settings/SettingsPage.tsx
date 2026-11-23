@@ -7,7 +7,7 @@ import { HStack } from '@astryxdesign/core/HStack'
 import { Link } from '@astryxdesign/core/Link'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
+import { TextArea } from '@astryxdesign/core/TextArea'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AboutInfo } from '../../../../shared/ipc-contract'
 import type { ReleaseNotes, UpdateStatus } from '../../../../shared/updates'
@@ -15,11 +15,13 @@ import { PageHeader } from '../../components/PageHeader'
 import { InstallControls } from './InstallControls'
 import { formatDateTime, useUpdates } from './useUpdates'
 import { WhatsNewPanel } from './WhatsNewPanel'
+import { StatusToken } from '../../components/StatusToken'
+import { PAGE_WIDTH } from '../../components/page-width'
 
 /** Configurações (6C): Atualizações e Sobre. Outras seções entram aqui depois. */
 export function SettingsPage(): React.JSX.Element {
   return (
-    <VStack gap={6} maxWidth={880}>
+    <VStack gap={6} maxWidth={PAGE_WIDTH.form}>
       <PageHeader title="Configurações" subtitle="Atualizações do app e informações do Orkio." />
       <UpdatesSection />
       <AboutSection />
@@ -115,10 +117,10 @@ export function UpdatesSection(): React.JSX.Element {
 }
 
 function PhaseToken({ status }: { status: UpdateStatus }): React.JSX.Element | null {
-  if (status.mode === 'disabled') return <Token size="sm" label="Desligadas" />
+  if (status.mode === 'disabled') return <StatusToken label="Desligadas" />
   if (status.phase === 'downloaded' || status.phase === 'available')
-    return <Token size="sm" color="orange" label="Nova versão" />
-  if (status.phase === 'downloading') return <Token size="sm" label="Baixando" />
+    return <StatusToken tone="warning" label="Nova versão" />
+  if (status.phase === 'downloading') return <StatusToken tone="running" label="Baixando" />
   return null
 }
 
@@ -178,8 +180,67 @@ export function AboutSection(): React.JSX.Element {
             Site, privacidade e termos aparecem aqui nas versões publicadas.
           </Text>
         )}
+        <DiagnosticsBlock />
       </VStack>
     </Card>
+  )
+}
+
+/**
+ * "Copiar diagnóstico": versões, banco local, filas e conexões (só o estado), para colar ao pedir
+ * ajuda. Sem tokens, contas, títulos, prompts ou caminhos (montado e conferido no main).
+ */
+function DiagnosticsBlock(): React.JSX.Element {
+  const [text, setText] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const load = async (): Promise<string> => {
+    setLoading(true)
+    const t = await window.orkio.updates.diagnostics()
+    setLoading(false)
+    setText(t)
+    return t
+  }
+  const copy = async (): Promise<void> => {
+    const t = text ?? (await load())
+    await navigator.clipboard.writeText(t).then(
+      () => setCopied(true),
+      () => setCopied(false)
+    )
+  }
+  return (
+    <VStack gap={2} role="group" aria-label="Diagnóstico">
+      <Text type="supporting" color="secondary">
+        Para pedir ajuda: versões, banco local, filas e conexões, sem tokens, contas, títulos de
+        tarefas ou caminhos.
+      </Text>
+      <HStack gap={2} vAlign="center">
+        <Button
+          variant="secondary"
+          size="sm"
+          label="Copiar diagnóstico"
+          isLoading={loading}
+          onClick={() => void copy()}
+        />
+        {!text && (
+          <Button size="sm" variant="ghost" label="Ver antes" onClick={() => void load()} />
+        )}
+        {copied && (
+          <Text type="supporting" role="status">
+            Copiado.
+          </Text>
+        )}
+      </HStack>
+      {text && (
+        <TextArea
+          label="Diagnóstico"
+          value={text}
+          isReadOnly
+          rows={10}
+          controlClassName="orkio-mono-input"
+        />
+      )}
+    </VStack>
   )
 }
 

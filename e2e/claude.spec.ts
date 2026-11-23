@@ -185,12 +185,12 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   const { page } = orkio!
   const section = await openPanel(page)
   await expect(section.getByTestId('session-context')).toContainText(
-    'Começa uma sessão nova com o briefing do Notion.'
+    'Começa uma sessão nova com o resumo da tarefa no Notion.'
   )
   await section.getByRole('button', { name: 'Nova sessão…' }).click()
 
   await expect(section.getByTestId('run-branch')).toHaveText('ORK-2/listar-tarefas-do-notion')
-  const briefing = section.getByRole('textbox', { name: /^Briefing da tarefa/ })
+  const briefing = section.getByRole('textbox', { name: /^Resumo da tarefa/ })
   await expect(briefing).toHaveValue(
     /## Critérios de aceite\n\n- Gera um arquivo \.csv\n {2}Detalhe aninhado/
   )
@@ -277,7 +277,7 @@ test('mensagem no campo continua a mesma sessão (--resume), sem repetir o brief
   const { page } = orkio!
   const section = session(page)
   await expect(section.getByTestId('session-context')).toContainText(
-    'Continua a sessão no ambiente da tarefa.'
+    'Continua a sessão na pasta de trabalho da tarefa.'
   )
   const first = argsLog().at(-1)!
   await section
@@ -363,9 +363,9 @@ test('"Rodar de novo" reabre com o mesmo comando; artefato anexado e publicado n
   })
 
   const changes = await tab(page, 'Mudanças')
-  const artifacts = changes.getByRole('region', { name: 'Artefatos da tarefa' })
+  const artifacts = changes.getByRole('region', { name: 'Documentos para o Notion' })
   await artifacts.getByRole('button', { name: 'Anexar docs/exportar.md' }).click()
-  const attached = artifacts.getByRole('list', { name: 'Artefatos anexados' })
+  const attached = artifacts.getByRole('list', { name: 'Documentos anexados' })
   await expect(attached).toContainText('docs/exportar.md')
 
   // Subpágina: confirmação antes de publicar.
@@ -413,7 +413,7 @@ test('contexto do projeto: instruções + página do Notion entram no briefing',
 
   const section = await openPanel(page)
   await section.getByRole('button', { name: 'Nova sessão…' }).click()
-  const briefing = section.getByRole('textbox', { name: /^Briefing da tarefa/ })
+  const briefing = section.getByRole('textbox', { name: /^Resumo da tarefa/ })
   await expect(briefing).toHaveValue(/## Contexto do projeto/)
   await expect(briefing).toHaveValue(/Rode pnpm test antes de commitar\./)
   await expect(briefing).toHaveValue(
@@ -426,11 +426,11 @@ test('ver diff e limpar ambiente (a branch fica)', async () => {
   const { page } = orkio!
   const changes = await tab(page, 'Mudanças')
   await changes.getByRole('button', { name: 'Ver diff' }).click()
-  const diff = changes.getByRole('region', { name: 'Diff do ambiente' })
+  const diff = changes.getByRole('region', { name: 'Diff da pasta de trabalho' })
   await expect(diff).toContainText('src/exportar.ts')
   await expect(diff).toContainText('arquivo')
   await expect(diff).toContainText('+')
-  await changes.getByRole('button', { name: 'Limpar ambiente' }).click()
+  await changes.getByRole('button', { name: 'Limpar pasta de trabalho' }).click()
   await expect(changes.getByTestId('workspace-branch')).toHaveCount(0)
   expect(git(repoDir(), 'branch', '--list', 'ORK-2/*').trim()).toBe(
     'ORK-2/listar-tarefas-do-notion'

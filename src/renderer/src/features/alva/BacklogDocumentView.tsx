@@ -55,7 +55,7 @@ export function BacklogDocumentView({
     return (
       <Text type="supporting">
         {state.linked
-          ? `Não achei o arquivo da task ${state.linked} no ambiente desta tarefa.`
+          ? `Não achei o arquivo da task ${state.linked} na pasta de trabalho desta tarefa.`
           : 'Esta tarefa ainda não tem task no Backlog. O /spec cria.'}
       </Text>
     )

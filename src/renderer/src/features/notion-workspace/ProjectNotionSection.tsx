@@ -1,3 +1,4 @@
+import { plural } from '../../lib/format'
 import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Code } from '@astryxdesign/core/Code'
@@ -317,7 +318,8 @@ function TasksPanel({
         />
         {result && (
           <Text type="supporting">
-            {result.tasks.length} tarefa(s) · atualizado às {formatTime(result.fetchedAt)}
+            {plural(result.tasks.length, 'tarefa', 'tarefas')} · atualizado às{' '}
+            {formatTime(result.fetchedAt)}
           </Text>
         )}
       </HStack>
@@ -339,8 +341,9 @@ function TasksPanel({
       {signals.error && !error && <Alert tone="warning">{signals.error.message}</Alert>}
       {signals.result && signals.result.tasksWithoutPrefix > 0 && (
         <Text type="supporting">
-          {signals.result.tasksWithoutPrefix} tarefa(s) sem prefixo no ID não podem ser ligadas a
-          branches e PRs. Defina um prefixo na propriedade ID do Notion (ex.: ORK).
+          {plural(signals.result.tasksWithoutPrefix, 'tarefa', 'tarefas')} sem prefixo no ID não
+          podem ser ligadas a branches e PRs. Defina um prefixo na propriedade ID do Notion (ex.:
+          ORK).
         </Text>
       )}
 

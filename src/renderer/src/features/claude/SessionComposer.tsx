@@ -42,6 +42,7 @@ export function SessionComposer({
   agent,
   state,
   flowRunning,
+  autopilotStep = null,
   onSent,
   onNewSession
 }: {
@@ -51,6 +52,8 @@ export function SessionComposer({
   state: TaskRunsState | null
   /** Um passo de fluxo está rodando (ou vai começar sozinho): não dá para mandar mensagem. */
   flowRunning: boolean
+  /** Passo que o piloto automático (fluxo) está rodando agora. */
+  autopilotStep?: string | null
   onSent(state: TaskRunsState): void
   /** Abre o formulário completo (briefing editável, modo, comando, rodar como). */
   onNewSession(): void
@@ -84,7 +87,7 @@ export function SessionComposer({
   )
 
   const blocked = flowRunning
-    ? 'O fluxo está rodando um passo. Espere ele terminar ou pedir algo.'
+    ? `O piloto automático está rodando${autopilotStep ? ` “${autopilotStep}”` : ' um passo'}. Ele para quando precisar de você; aí você responde aqui.`
     : activeRunId
       ? 'Espere o Claude terminar o turno ou pare a execução.'
       : null
@@ -153,11 +156,13 @@ export function SessionComposer({
       <HStack gap={2} vAlign="center" wrap="wrap">
         <StackItem size="fill">
           <Text type="supporting" color="secondary" data-testid="session-context">
-            {activeRunId
-              ? 'O Claude está trabalhando. A próxima mensagem continua desta sessão.'
-              : resumes
-                ? `Continua a sessão${latest?.command ? ` de /${latest.command}` : ''} no ambiente da tarefa.`
-                : 'Começa uma sessão nova com o briefing do Notion.'}
+            {flowRunning
+              ? `Piloto automático${autopilotStep ? `: ${autopilotStep}` : ''}. Quando ele parar ou pedir algo, responda aqui.`
+              : activeRunId
+                ? 'O Claude está trabalhando. A próxima mensagem continua desta sessão.'
+                : resumes
+                  ? `Continua a sessão${latest?.command ? ` de /${latest.command}` : ''} na pasta de trabalho da tarefa.`
+                  : 'Começa uma sessão nova com o resumo da tarefa no Notion.'}
             {!activeRunId && !blocked ? ` ${SEND_HINT}` : ''}
           </Text>
         </StackItem>
