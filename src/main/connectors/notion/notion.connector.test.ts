@@ -257,7 +257,8 @@ describe('toAccount', () => {
         avatarUrl: null,
         ownerName: 'Grace',
         ownerAvatarUrl: 'https://x/g.png',
-        workspaceName: 'Acme'
+        workspaceName: 'Acme',
+        personId: 'user-grace'
       })
     ).toEqual({ userName: 'Grace', workspaceName: 'Acme', avatarUrl: 'https://x/g.png' })
   })
@@ -271,7 +272,8 @@ describe('toAccount', () => {
         avatarUrl: null,
         ownerName: null,
         ownerAvatarUrl: null,
-        workspaceName: 'Acme'
+        workspaceName: 'Acme',
+        personId: null
       })
     ).toEqual({ userName: 'Integração Orkio', workspaceName: 'Acme' })
   })

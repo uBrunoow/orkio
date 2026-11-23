@@ -64,6 +64,11 @@ export interface NotionSelf {
   ownerName: string | null
   ownerAvatarUrl: string | null
   workspaceName: string | null
+  /**
+   * Pessoa do Notion dona da conexão (id de usuário `person`): o próprio usuário num PAT, ou o
+   * dono do bot (OAuth/integração de usuário). `null` quando o bot é do workspace.
+   */
+  personId: string | null
 }
 
 export interface NotionClientDeps {
@@ -483,6 +488,7 @@ export function parseSelf(body: unknown): NotionSelf | null {
   let ownerName: string | null = null
   let ownerAvatarUrl: string | null = null
   let workspaceName: string | null = null
+  let personId: string | null = type === 'person' ? id : null
 
   const bot = body['bot']
   if (type === 'bot' && isRecord(bot)) {
@@ -491,6 +497,7 @@ export function parseSelf(body: unknown): NotionSelf | null {
     if (isRecord(owner) && owner['type'] === 'user' && isRecord(owner['user'])) {
       ownerName = stringOrNull(owner['user']['name'])
       ownerAvatarUrl = httpsUrlOrNull(owner['user']['avatar_url'])
+      personId = stringOrNull(owner['user']['id'])
     }
   }
 
@@ -501,6 +508,7 @@ export function parseSelf(body: unknown): NotionSelf | null {
     avatarUrl: httpsUrlOrNull(body['avatar_url']),
     ownerName,
     ownerAvatarUrl,
-    workspaceName
+    workspaceName,
+    personId
   }
 }

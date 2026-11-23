@@ -240,7 +240,7 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   (`{ id, name, type }`); em cada projeto, `notionProject: { id, name } | null`. **Só ids e
   nomes**; nunca conteúdo de páginas.
 - Campos: `title`, `status` (status/select), `project` (relation que aponta para o banco de
-  Projetos) obrigatórios; `uniqueId` (unique_id), `priority`, `assignee` opcionais
+  Projetos) e `assignee` (people) obrigatórios; `uniqueId` (unique_id) e `priority` opcionais
   (`shared/notion-mapping.ts`). Sem `unique_id` a tarefa é a página do Notion (`displayId: null`)
   e a branch/PR se liga pelo registro local (ver "Branches da tarefa"); o assistente só explica.
 - Sugestão automática (`suggestMapping`): tipo + nomes usuais pt/en; opcionais só com nome
@@ -250,7 +250,10 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   `unverified` (nada é apagado). Trocar o banco de Projetos desfaz os vínculos.
 - Vínculo 1 ↔ 1 (página de Projetos ↔ projeto local); a lista vem ordenada por semelhança de
   nome (Dice em bigramas) com o projeto/repositório.
-- Tarefas: `relation.contains` com a página vinculada, `created_time` desc, até 500 (5 páginas),
+- Tarefas: **só as da pessoa logada no Notion**: `and` de `relation.contains` (página vinculada)
+  e `people.contains` (Responsável = `NotionConnector.currentPersonId()`: o `person` do PAT ou o
+  dono do bot em `/users/me`, só em memória). Conexão de bot do workspace (sem pessoa) → erro
+  `no_person` com "Reconectar"; nunca lista as de todos. `created_time` desc, até 500 (5 páginas),
   cache em memória de 60 s (`force` ignora). Não usamos `filter_properties` (ids de
   propriedade vêm codificados; sem como validar sem a API real).
 - OAuth só enxerga o que foi escolhido na autorização: 404/403 em conexão OAuth vira

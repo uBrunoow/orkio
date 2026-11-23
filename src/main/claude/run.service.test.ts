@@ -427,6 +427,7 @@ describe('RunService', () => {
     await expect(start(1)).rejects.toThrow(RUN_MESSAGES.busy)
     await start(2)
     const third = await start(3)
+    await spawned(2)
     await tick()
     expect(runs).toHaveLength(2)
     expect(statusOf(third.id)).toBe('queued')
@@ -439,14 +440,13 @@ describe('RunService', () => {
     const first = runs.find((r) => r.opts.cwd.endsWith('ORK-1'))!
     first.emit({ kind: 'result', ok: true, durationMs: 1, costUsd: 0, turns: 1, text: '' })
     first.exit(0)
-    await tick()
-    expect(runs).toHaveLength(3)
-    expect(statusOf(third.id)).toBe('running')
+    // Prazo, não intervalo fixo: no CI a fila pode levar mais que alguns ms para andar.
+    await spawned(3)
+    await vi.waitFor(() => expect(statusOf(third.id)).toBe('running'), { timeout: 3000 })
     // Cancelar na fila também registra.
     const queued = await start(1)
     service.cancel(queued.id)
-    await tick()
-    expect(statusOf(queued.id)).toBe('cancelled')
+    await vi.waitFor(() => expect(statusOf(queued.id)).toBe('cancelled'), { timeout: 3000 })
   })
 
   it('falha sem result → failed; mantém só os N logs mais recentes por tarefa', async () => {

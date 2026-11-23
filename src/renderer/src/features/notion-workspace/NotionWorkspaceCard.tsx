@@ -61,7 +61,7 @@ const FIELD_HINTS: Partial<Record<NotionMappingField, string>> = {
     'Propriedade do tipo ID (ex.: ORK-142). Opcional: sem ela, a tarefa é a página do Notion.',
   project: 'Relação com o banco de Projetos escolhido.',
   priority: 'Seleção, status ou número.',
-  assignee: 'Pessoas.'
+  assignee: 'Pessoas. O Orkio mostra só as tarefas em que você é responsável.'
 }
 
 export function NotionWorkspaceCard({
