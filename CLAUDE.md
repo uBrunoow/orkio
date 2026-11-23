@@ -20,16 +20,17 @@ Claude Code. Hoje existem:
 - **Claude Code (4A):** roda a tarefa com o CLI `claude` do usuário (login/assinatura dele) num
   worktree isolado por tarefa, com briefing do Notion, permissões pelo Orkio e log ao vivo.
 - **Claude Code (4B):** catálogo de comandos (usuário/projeto/plugins), "Rodar de novo", artefatos
-  (anexar caminho + commit, publicar no Notion) e contexto do projeto (instruções + páginas).
+  (anexar caminho + commit, publicar no Notion). O contexto vem só da tarefa (briefing do Notion).
 - **Fluxos de tarefa (5A):** sequências de passos (comandos do Claude Code, gates, ações do
   Orkio, saltos condicionais) ligadas às colunas, disparadas ao entrar ou à mão.
 - **alva-flow (5B):** pré-checagem do projeto, vínculo tarefa do Notion ↔ task do Backlog.md,
   extratores e templates "Fluxo Alva" sobre os fluxos da 5A.
 - **Entrega (5C):** push da branch da tarefa pelo Orkio (com gate), "modo entrega" por passo para
   `/alva-flow:pr` (gh/push só da branch da tarefa), pedir review pelo conector, CI no painel.
-- **Visão geral (6D):** primeira tela de quem já tem projeto: o que espera você (gates, perguntas,
-  permissões, pushes, escritas no Notion com erro), execuções, PRs com atenção, projetos, semana e
-  atividade, de todos os projetos; contador no menu e no ícone do app. Só dados locais e caches.
+- **Visão geral (6D) → lista lateral e sino:** o que espera você (gates, perguntas, permissões,
+  pushes, escritas no Notion com erro), o que está rodando e o que fazer, por projeto na lista
+  lateral; de todos os projetos (com PRs com atenção) no sino; contador no ícone do app. Só dados
+  locais e caches.
 - **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos e o intermediário OAuth
   do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
   real ser confirmado).
@@ -39,10 +40,17 @@ Claude Code. Hoje existem:
   `shared/diagnostics.ts`, IPC `updates.diagnostics`): versões, banco (`quick_check`, contagens),
   filas, conexões só pelo estado e versões de git/gh/claude. Nada de conta, token, título ou caminho
   (teste prova). Ver também `docs/adr/` (decisões de segurança).
-- **Interface (6E):** menu com Visão geral, o projeto atual (Quadro, Etapas e automações, Fluxos,
-  Contexto do Claude), Projetos, Agentes, Integrações e Configurações (Ctrl/Cmd+1…9 nessa ordem), numa coluna só de ícones (tooltip e nome acessível) sob uma barra superior com o seletor de projeto, buscar e o sino de "esperando você", rotas tipadas, tarefa em
-  painel ou tela cheia, Command Palette (Ctrl/Cmd+K), card do quadro com um estado só (`cardStatus`).
-  Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`. Redesign em fases (densidade pelo tema, estado em ponto + texto, moldura, quadro com tarefa em folha sobre as colunas e Kanban/Lista, agentes com avatar geométrico) em `docs/ui-redesign.md`.
+- **Interface (reestruturação, fase 9):** menu com só Quadro, Agentes e Configurações
+  (Ctrl/Cmd+1…3), numa coluna larga com seletor de projeto, "Buscar tarefa" (Command Palette,
+  Ctrl/Cmd+K), "Falta N passos · continuar" e as listas "Esperando você", "Rodando" e "A fazer"
+  (`app/task-groups.ts`); barra superior com o caminho, as fases da tarefa e o sino. A tarefa abre
+  numa tela própria (`features/task/TaskScreen.tsx`: fases no topo, conversa no centro, painel da
+  fase ao lado; abaixo de 1200 px o painel vai para cima da conversa). Configurações com navegação
+  interna: Integrações, Projetos, Quadro e automações (abas Colunas · Automações · Fluxos ·
+  Entrega), Agentes do projeto (regras + orquestrador), Atualizações, Sobre e diagnóstico.
+  Primeiros passos (`features/setup/`) em sete passos com o estado real. O Orkio não cria tarefas.
+  Spec: `docs/superpowers/specs/2026-11-23-orkio-ui-reestruturacao-design.md`; linguagem visual na
+  skill `orkio-design`; histórico das fases em `docs/ui-redesign.md`.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
   Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -95,7 +103,7 @@ src/
   shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
   shared/delivery.ts       # 5C: branches protegidas, checkPushBranch, DeliveryTarget/Settings (puro)
   shared/updates.ts        # 6C: status das atualizações, versões, recorte do CHANGELOG, URL do DMG
-  shared/overview.ts       # 6D: tipos e agregações puras da Visão geral (esperando, PRs, semana...)
+  shared/overview.ts       # 6D: tipos e agregações puras (esperando, rodando, PRs, semana...)
   shared/task-history.ts   # texto/links de um evento do histórico (painel da tarefa e atividade)
   shared/agent.ts          # 8A: perfil do agente (parse/serialize do .md, validação, prompt, checkAgentFlow)
   shared/agent-presets.ts  # 8B: agentes embutidos (catálogo `builtin:<id>`, só leitura)
@@ -135,15 +143,21 @@ src/
     app/routes.ts          # 6E: rotas tipadas + routerReducer (chave nova a cada navegação)
     app/shortcuts.ts       # 6E: atalhos globais (puro) e isTextField
     app/CommandMenu.tsx    # 6E: Command Palette (tarefas, telas, trocar projeto)
+    app/task-groups.ts     # 9: grupos da lista lateral (esperando, rodando, a fazer), puro
+    app/initial-route.ts   # 9: tela ao abrir (Primeiros passos, tarefa esperando ou Quadro), puro
+    app/WaitingBell.tsx    # 9: sino (esperando você de todos os projetos + PRs com atenção)
     lib/format.ts          # plural, formatUsd (pt-BR)
     features/<feature>/    # componentes + hooks por funcionalidade
       integrations/connection-ui.tsx  # peças comuns dos cards (conectado, erro, token, desconectar)
       projects/            # tela Projetos (useProjects, AddProjectPanel, ActionLink)
       notion-workspace/    # card "Bancos do Notion" (assistente) e seção Notion de cada projeto
-      board/               # Quadro, tarefa como sessão (TaskPanel/TaskPage, TaskSession, TaskDetails,
-                           # TaskProgressStrip, task-session.ts, task-progress.ts), ProjectPages
-                           # (Etapas e automações, Fluxos, Contexto), FlowPage (etapas + automações)
-      settings/            # 6C: Configurações (Atualizações, Sobre), UpdateBanner, WhatsNewPanel
+      board/               # Quadro, miolo da tarefa (TaskPanel, TaskSession, TaskDetails,
+                           # task-session.ts, task-progress.ts), ProjectPages (Quadro e automações),
+                           # FlowPage (abas Colunas/Automações/Fluxos/Entrega)
+      task/                # 9: TaskScreen (fases + conversa + painel), task-phases, panel-tab,
+                           # reply-chips, task-layout (puros)
+      setup/               # 9: Primeiros passos (SetupPage, setup-steps puro)
+      settings/            # Configurações (SettingsNav, seções), UpdateBanner, WhatsNewPanel
     components/Alert.tsx   # mensagens (Banner da Astryx)
     components/PageHeader.tsx  # o único h1 da tela, contexto (projeto) acima e ações à direita
     components/StatusToken.tsx # estado único: ponto + texto (success/warning/danger/running/neutral)
@@ -336,7 +350,7 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   Mensagens: `components/Alert.tsx` (Banner; erro = `role="alert"`, aviso = `role="status"`).
 - CSS próprio só na camada `orkio-brand` (`styles/brand.css`, `OrkioLogo.css`), apenas para a
   marca e com tokens do tema. Nada de CSS de layout. Exceção: `features/welcome/welcome.css`
-  (abertura laranja + tela "Vamos começar" em tela cheia, sem sidebar: posição fixa, grade de
+  (abertura laranja + Primeiros passos em tela cheia, sem sidebar: posição fixa, grade de
   fundo e animações; respeita `prefers-reduced-motion`).
 - Ganchos de teste: papéis/nomes acessíveis primeiro; `data-testid` quando não houver (ex.:
   `device-code`, `project-branch`, `empty-hero`). Nunca classes da Astryx (`astryx-*`, `x…`).
@@ -431,7 +445,7 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 
 ## Fluxo do projeto (Etapa 3C)
 
-- Tela `FlowPage` (menu "Etapas e automações"; antes "Fluxo do projeto"): lista de etapas + editor
+- Tela `FlowPage` (Configurações › "Quadro e automações"; antes "Etapas e automações"): lista de etapas + editor
   da etapa escolhida, `SaveBar` no rodapé; rascunho local; nada vale até "Salvar fluxo". O main valida de novo (`validateFlow`, a mesma função) e grava `boards[id].stages/rules`
   (formato da config inalterado, v4).
 - `validateFlow`: **erros** (bloqueiam) = etapa sem status válido, nome vazio/repetido, regra para
@@ -495,14 +509,15 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 
 ## Sessão da tarefa (fase 8)
 
-- **Tela** (`board/TaskPanel.tsx`): "em que pé está" (`TaskProgressStrip`, puro em
-  `task-progress.ts`), "Esperando você" no topo, a conversa (`TaskSession`, puro em
+- **Tela** (`task/TaskScreen.tsx` com o miolo em `board/TaskPanel.tsx`): fases no topo
+  (`TaskPhaseBar`, puro em `task/task-phases.ts`), "Esperando você" no topo, a conversa (`TaskSession`, puro em
   `task-session.ts`: `task_events` + execuções em ordem, sem `run_*`/`step_started|finished`/
   `sync_ok`, que a execução já conta) e, no fim, o fluxo, os pedidos de permissão/pergunta,
   "Trabalhando há…" e o campo (`claude/SessionComposer.tsx`). Estado em `TaskDetails.tsx`
-  (etapa, Mudanças, GitHub, Documentos, Agente, Opções, "Histórico completo" recolhido). Painel do
-  Quadro em abas Sessão · Mudanças · Detalhes (todas montadas; a inativa com `display: none`);
-  tela cheia em duas colunas. Execução na conversa: `claude/RunBlock.tsx` (conversa inteira;
+  (etapa, Mudanças, GitHub, Documentos, Agente, Opções, "Histórico completo" recolhido). Painel da
+  fase (`complementary "Detalhes de <ID>"`) em abas Spec · Plano · Mudanças · PR & CI · Detalhes
+  (Spec/Plano só com task do Backlog.md; aba inicial pela fase atual, `task/panel-tab.ts`); abaixo
+  de 1200 px vai para cima da conversa (`task/task-layout.ts`). Execução na conversa: `claude/RunBlock.tsx` (conversa inteira;
   depois dela a spec/plano do Backlog.md em /spec e /plan e os arquivos/commits/diff).
 - **Continuar a conversa** (`ClaudeService.send`, IPC `claude:send`): sem `fresh`, usa a sessão
   mais recente da tarefa (`agent_runs.session_id`, SQLite v9; `RunService.lastSession`) com
@@ -548,14 +563,13 @@ markdown_version: 'v2' }`;
 position: { type: 'end' } } }` (documentado como legado, ainda suportado).
     Ambos exigem a capacidade **Insert content** (403 → mensagem própria). Eventos
     `artifact_attached`/`artifact_published` no histórico.
-- **Contexto do projeto** (`orkio-config` v5 → `claudeContexts[projectId]`): instruções (até
-  8.000) + até 5 páginas do Notion (só id/nome; conteúdo lido na hora). No briefing, seção
-  "Contexto do projeto" limitada a 30.000 caracteres (`buildProjectContext`): o que passar é cortado
-  e vira aviso no formulário; página ilegível também. Tela "Contexto do Claude" no quadro.
+- **Contexto do projeto:** saiu na reestruturação (o contexto vem só da tarefa). O
+  `claudeContexts[projectId]` do `orkio-config` v5 fica no arquivo sem uso (sem migração).
 
 ## Fluxos de tarefa (Etapa 5A)
 
-- **Nome:** na UI (6E), "Etapas e automações" (3C) e "Fluxos" (5A, com a aba "Modelos do alva-flow" da 5B).
+- **Nome:** na UI, Configurações › "Quadro e automações", abas Colunas/Automações (3C) e Fluxos
+  (5A, com os "Modelos do alva-flow" da 5B).
   No código continuam `FlowPage`/`flow` (3C) e `TaskFlowsPage`/`taskFlows` (5A): sequências de
   passos que rodam numa tarefa (`shared/task-flow.ts`, tipos `Flow`/`Step`/`StageFlow`).
 - **Config** (`orkio-config` v6): `flows[projectId] = { flows, bindings }`; a ligação etapa → fluxo
@@ -658,7 +672,7 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 
 - **Regra de ouro:** só a branch da tarefa (a do worktree; o nome não precisa ter o ID) vai para
   o GitHub. `shared/delivery.ts` (`checkPushBranch`): branch padrão, `main/master/develop/
-  production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` nunca
+production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` nunca
   (`hotfix/<nome>` é tipo de branch de tarefa e vai); sem força, sem remoção.
 - **Push pelo Orkio** (`orkio_action "push"`, `DeliveryService`): `Git.push` =
   `git push --porcelain -u <remote> refs/heads/<b>:refs/heads/<b>` via `execFile`, com
@@ -699,16 +713,20 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   thread_reply, thread_resolve, review_request; `by`: orkio/claude) com owner/repo/branch e PR;
   link para a PR ou `github.com/<o>/<r>/tree/<branch>` (allowlist).
 - **Ajuste por projeto:** `orkio-config` v8 → `delivery[projectId].requirePushApproval` (padrão
-  sim), na seção "Entrega" de Etapas e automações (`DeliverySection`), com histórico de configuração.
+  sim), na aba "Entrega" de Quadro e automações (`DeliverySection`), com histórico de configuração.
 - **CI:** token do CI da PR no painel (sinais 2D) e "Rodar fluxo CI vermelho" (`startById`) quando
   os checks falham e o template existe.
 - **Segurança:** nenhum token do Orkio no ambiente do Claude (o `gh` usa o `gh auth` do usuário);
   o único POST do conector do GitHub é `requested_reviewers` (caminho validado).
 
-## Visão geral (Etapa 6D)
+## Visão geral (Etapa 6D) → lista lateral e sino (fase 9)
 
-- **Abertura:** com ao menos um projeto, o app abre na Visão geral; sem projeto, "Vamos começar".
-  Menu: Visão geral · telas do projeto atual · Projetos · Agentes · Integrações · Configurações. Atalhos Ctrl/Cmd+1…9 na ordem do menu
+- **Tela:** a Visão geral saiu na reestruturação. O mesmo `OverviewSnapshot` alimenta a lista
+  lateral do projeto atual (`app/task-groups.ts`: esperando, rodando e a fazer da etapa de fila) e o
+  sino (`app/WaitingBell.tsx`: esperando você de todos os projetos + PRs com atenção). Semana e
+  atividade continuam calculadas no serviço, sem tela por enquanto.
+- **Abertura** (`app/initial-route.ts`): sem projeto, Primeiros passos; com uma tarefa esperando
+  você, a tela dela; senão o Quadro. Menu: Quadro · Agentes · Configurações, atalhos Ctrl/Cmd+1…3
   (`keydown` no renderer, `aria-keyshortcuts` no item).
 - **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs**:
   `flow_runs` (via `FlowRunner.activeViews`), perguntas/permissões em memória
@@ -733,8 +751,9 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   300 ms) em `taskFlows.changed`, `board.changed`, `board:sync-changed` e `claude:run-event` de
   status/permissão/pergunta. O mesmo total vai para o ícone: `app.setBadgeCount` (Dock/launcher do
   Linux) e, no Windows, `setOverlayIcon` com um ponto laranja (`overlayDotBitmap`) e descrição.
-- **Clique:** `BoardTaskRef.section` (`flow`/`claude`/`history`) → `TaskPanel focusSection` rola até
-  a seção (`data-panel-section`). Cartão do projeto abre o quadro dele (`openProjectId`).
+- **Clique:** `routeForTaskRef(ref)` abre a tela da tarefa (troca o projeto atual se preciso);
+  `BoardTaskRef.section` (`flow`/`claude`/`history`) → `TaskPanel focusSection` rola até a seção
+  (`data-panel-section`).
 
 ## Agentes (Etapa 8A)
 
@@ -887,7 +906,7 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   jobs que publicam) → `package.yml` com
   `--publish always` → confere arquivos e publica. Segredos só no `env` do passo; sem `set -x`.
 - **Release ao mergear:** todo merge na `main` = versão (sem rótulo = `patch`; `release:minor|
-  major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`, `README.md` não
+major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`, `README.md` não
   disparam). "[Não lançado]" vazio → o título da PR vira o item (`fillUnreleased`, `RELEASE_NOTE`).
   `release-label.yml` (na PR) mostra a versão que sairá; `release-on-merge.yml` (push na main) acha a
   PR do commit, roda `scripts/release.mjs <tipo>`, empurra o commit `chore(release): vX.Y.Z` e a tag
@@ -927,10 +946,12 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   simulado tem `FakePull.sha`, autores/revisores, POST `requested_reviewers` (registra em
   `notionState(app).reviewRequests` e muda `updated_at`) e colaboradores. O push vai para um
   `origin.git` local (git real).
-- 6D: `e2e/overview.spec.ts` cria o quadro pela tela, salva um fluxo só com gate e o inicia com
-  `startById` (via `window.orkio` no teste); confere "Esperando você", contador do menu, "Abrir" no
-  painel e o sumiço ao aprovar. Com projeto no `orkio-config.json`, o app abre na Visão geral:
-  `enterApp(page)` (fixtures) clica em "Começar" ou no menu "Projetos".
+- 6D/9: `e2e/overview.spec.ts` cria o quadro pela tela, salva um fluxo só com gate e o inicia com
+  `startById` (via `window.orkio` no teste); confere o sino ("1 esperando você"), a lista lateral,
+  "Abrir" na tela da tarefa e o sumiço ao aprovar. `enterApp(page)` (fixtures) sai dos Primeiros
+  passos por "Fazer depois" (sem projeto) e vai a Configurações › Projetos; `navTo` aceita as telas
+  do menu e as seções de Configurações; `taskScreen`/`taskTab` acham a tela da tarefa e as abas do
+  painel. `e2e/setup.spec.ts` (`startPage: 'setup'`) percorre os Primeiros passos do zero.
 - 8A: o Claude simulado grava em `.orkio/agent-args.log` (JSON por execução) o
   `--append-system-prompt`, `--model`, a ferramenta/modo de permissão e se o briefing veio no prompt.
   `e2e/agents.spec.ts` cria a Ana pela tela e checa o arquivo, a regra, os gates e a revisão.
@@ -978,7 +999,7 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 | Projetos: seletor de pasta no main + `selectionId`                                                          | O renderer nunca escolhe caminhos arbitrários para o main operar (git, fs).                                                                                                                                                                                 |
 | `ConfigStore` JSON (sem SQLite ainda) com backup de arquivo corrompido e modo só leitura para versão futura | Dados pequenos; escrita atômica e migrações bastam. Corrupção não derruba o app; downgrade não destrói dados de uma versão mais nova.                                                                                                                       |
 | GitHub Enterprise salvo como "não verificado"                                                               | A conta conectada é do github.com; não há como validar acesso/push no GHE ainda.                                                                                                                                                                            |
-| App abre na tela inicial (abertura + "Vamos começar", sem sidebar); "Começar" leva a **Projetos**           | Marca na abertura; a tela inicial vai virar o login com GitHub/Notion. O E2E clica em "Começar" no fixture (a abertura não bloqueia cliques: `pointer-events: none`).                                                                                       |
+| Sem projeto, o app abre nos Primeiros passos (abertura + passos, sem sidebar)                               | Um caminho só do zero à primeira tarefa; o estado de cada passo vem do real. O E2E sai por "Fazer depois" no fixture (a abertura não bloqueia cliques: `pointer-events: none`).                                                                             |
 | Watcher no diretório do git (não no arquivo HEAD)                                                           | O git troca o HEAD via rename (HEAD.lock → HEAD), o que quebra watchers de arquivo.                                                                                                                                                                         |
 | UI em Astryx com tema Orkio compilado                                                                       | Pedido do produto. Tema estático (`astryx theme build`) mantém a CSP estrita.                                                                                                                                                                               |
 | CSS das camadas da Astryx como arquivo estático                                                             | `ensureSlideRules` só injeta `<style>` se não achar o id; o arquivo estático (gerado e testado contra a versão instalada) evita relaxar a CSP.                                                                                                              |
@@ -1015,8 +1036,11 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 | Polling local de 5 s além do HeadWatcher                                                                    | `git branch X` sem checkout não muda o HEAD; `for-each-ref` é local e barato.                                                                                                                                                                               |
 | Rotas tipadas no renderer, sem roteador (6E)                                                                | Poucas telas e nenhuma URL externa; o `routerReducer` dá uma chave nova a cada navegação, e clicar no item atual do menu sai de qualquer subtela.                                                                                                           |
 | Tarefa: painel no Quadro + tela cheia (6E)                                                                  | O painel é a prévia sem perder o quadro; a tela cheia dá espaço para log, diff e histórico. O que espera a pessoa sobe para o topo do painel.                                                                                                               |
+| Menu com só Quadro, Agentes e Configurações; lista lateral por "o que fazer" (fase 9)                       | O trabalho do dia é a tarefa: o que espera você e o que roda ficam sempre à vista; telas de configuração saem do menu e vão para Configurações.                                                                                                             |
+| Tarefa em tela própria com fases e painel da fase (fase 9)                                                  | A conversa com o agente é o centro; o painel mostra o que importa na fase (spec, plano, diff, PR) sem trocar de tela.                                                                                                                                       |
+| O Orkio não cria tarefas; contexto só da tarefa (fase 9)                                                    | O Notion é a fonte das tarefas; o contexto do projeto duplicava o briefing e o CLAUDE.md do repositório.                                                                                                                                                    |
 | Command Palette da Astryx (6E)                                                                              | Monta um `Dialog`; o E2E confirmou que não viola a CSP. Só navega: nada nela escreve no Notion ou roda agente.                                                                                                                                              |
-| Entrega em Etapas e automações (6E)                                                                         | "Exigir aprovação para push" é regra do projeto, não de um fluxo.                                                                                                                                                                                           |
+| Entrega em Quadro e automações (6E)                                                                         | "Exigir aprovação para push" é regra do projeto, não de um fluxo.                                                                                                                                                                                           |
 | Releases no próprio repo, que é público (`GITHUB_TOKEN`, sem token pessoal)                                 | Release de repo privado exigiria um token embutido no app (que leria o código). Antes era um repo só de binários (`orkio-releases`); com o código público, um repo só basta.                                                                                |
 | Release como rascunho criado antes da matriz, publicado num job final                                       | Os jobs do mac e do Windows sobem para o mesmo release sem duplicar; nada é publicado se um pacote ou smoke falhar.                                                                                                                                         |
 | mac sem Developer ID = ad-hoc sem hardened runtime                                                          | Apple Silicon exige assinatura; hardened runtime com ad-hoc recusa o Electron Framework (validação de bibliotecas).                                                                                                                                         |

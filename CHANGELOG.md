@@ -6,6 +6,26 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Mudado
+
+- Interface nova: o menu tem só Quadro, Agentes e Configurações. A lista lateral mostra o que
+  espera você, o que está rodando e o que fazer a seguir no projeto; o sino reúne o que espera
+  você em todos os projetos e as PRs com atenção (a Visão geral saiu).
+- A tarefa abre numa tela própria: as fases no topo (Spec, Plano, Implementar, Revisão, PR), a
+  conversa com o Claude Code no centro e, ao lado, o painel da fase (spec, plano, mudanças, PR e
+  CI, detalhes). Em janelas estreitas o painel vai para cima da conversa.
+- Configurações reúnem Integrações (em lista, com o estado de cada uma), Projetos (com as
+  checagens e "Continuar configuração"), Quadro e automações (abas Colunas, Automações com
+  quantas vezes cada regra disparou na semana, Fluxos e Entrega) e Agentes do projeto (regras e
+  orquestrador).
+- Agentes em cards com o que cada um está fazendo, atividade das últimas 12 horas e vagas.
+- Primeiros passos: do zero à primeira tarefa em sete passos, com o estado real de cada um; dá
+  para parar e continuar depois pela lista lateral.
+
+### Removido
+
+- Contexto do Claude: o contexto vem só da tarefa (briefing do Notion).
+
 ## [0.2.7] - 2026-11-23
 
 ### Mudado

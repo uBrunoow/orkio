@@ -8,16 +8,17 @@ plano a substitui onde houver diferença.
 
 ## Fases
 
-| Fase                      | Escopo                                                                                                                        | Estado             |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| 1. Base visual            | Densidade pelo tema, `StatusToken` (ponto + texto), `PageHeader` compacto com metadados `·`, prioridade e "Rodando" sem bloco | feita              |
-| 2. Moldura                | Coluna de ícones, barra superior com seletor de projeto, conteúdo em painel                                                   | feita              |
-| 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                     | feita              |
-| 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                   | feita              |
-| 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                               | feita              |
-| 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                            | feita              |
-| 7. Integrações e catálogo | Grade de linhas com logo, categoria e ação                                                                                    | feita (aguarda ok) |
-| 8. Tarefa como sessão     | Conversa única, campo de mensagem (`--resume`), "em que pé está", estado em abas/coluna                                       | feita              |
+| Fase                      | Escopo                                                                                                                                                                                             | Estado             |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| 1. Base visual            | Densidade pelo tema, `StatusToken` (ponto + texto), `PageHeader` compacto com metadados `·`, prioridade e "Rodando" sem bloco                                                                      | feita              |
+| 2. Moldura                | Coluna de ícones, barra superior com seletor de projeto, conteúdo em painel                                                                                                                        | feita              |
+| 3. Quadro                 | Card de três linhas, colunas com contador e recolher, avatares de agentes                                                                                                                          | feita              |
+| 4. Agentes                | Grade de cards, filtros em pílulas, Linhas/Cards, busca `/`                                                                                                                                        | feita              |
+| 5. Tarefa como conversa   | Linha do tempo de mensagens, cartões de decisão                                                                                                                                                    | feita              |
+| 6. Detalhes em frase      | Regras e Fluxos: título-frase, "Começa / Faz", execuções, detalhes                                                                                                                                 | feita              |
+| 7. Integrações e catálogo | Grade de linhas com logo, categoria e ação                                                                                                                                                         | feita (aguarda ok) |
+| 8. Tarefa como sessão     | Conversa única, campo de mensagem (`--resume`), "em que pé está", estado em abas/coluna                                                                                                            | feita              |
+| 9. Reestruturação         | Menu com Quadro, Agentes e Configurações; lista lateral por "o que fazer"; tarefa com fases e painel; Primeiros passos. Ver [spec](superpowers/specs/2026-11-23-orkio-ui-reestruturacao-design.md) | feita              |
 
 ## Fase 1
 
