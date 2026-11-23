@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.5] - 2026-11-23
+
 ### Mudado
 
 - O banco de Tarefas do Notion não precisa mais de uma propriedade de ID: sem ela, a tarefa é a
