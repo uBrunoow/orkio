@@ -32,7 +32,10 @@ import { TaskScreen } from './features/task/TaskScreen'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
-import { SettingsPage } from './features/settings/SettingsPage'
+import { AboutSection, UpdatesSection } from './features/settings/SettingsPage'
+import { SettingsLayout } from './features/settings/SettingsNav'
+import { PageHeader } from './components/PageHeader'
+import { PAGE_WIDTH } from './components/page-width'
 import { UpdateBanner } from './features/settings/UpdateBanner'
 
 /** Preferência de interface (não secreta): último projeto escolhido no menu. */
@@ -256,9 +259,32 @@ export function App(): React.JSX.Element | null {
         case 'agents':
           page = <AgentsPage />
           break
-        default:
-          page = <SettingsPage />
+        case 'updates':
+          page = (
+            <VStack gap={6} maxWidth={PAGE_WIDTH.form}>
+              <PageHeader title={SETTINGS_TITLES.updates} />
+              <UpdatesSection />
+            </VStack>
+          )
+          break
+        case 'about':
+          page = (
+            <VStack gap={6} maxWidth={PAGE_WIDTH.form}>
+              <PageHeader title={SETTINGS_TITLES.about} />
+              <AboutSection />
+            </VStack>
+          )
+          break
       }
+      page = (
+        <SettingsLayout
+          section={section}
+          projectName={linkedProject?.name ?? null}
+          onSection={(next) => navigate({ name: 'settings', section: next })}
+        >
+          {page}
+        </SettingsLayout>
+      )
       break
     }
   }

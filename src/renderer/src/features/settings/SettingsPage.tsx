@@ -11,23 +11,10 @@ import { TextArea } from '@astryxdesign/core/TextArea'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AboutInfo } from '../../../../shared/ipc-contract'
 import type { ReleaseNotes, UpdateStatus } from '../../../../shared/updates'
-import { PageHeader } from '../../components/PageHeader'
 import { InstallControls } from './InstallControls'
 import { formatDateTime, useUpdates } from './useUpdates'
 import { WhatsNewPanel } from './WhatsNewPanel'
 import { StatusToken } from '../../components/StatusToken'
-import { PAGE_WIDTH } from '../../components/page-width'
-
-/** Configurações (6C): Atualizações e Sobre. Outras seções entram aqui depois. */
-export function SettingsPage(): React.JSX.Element {
-  return (
-    <VStack gap={6} maxWidth={PAGE_WIDTH.form}>
-      <PageHeader title="Configurações" subtitle="Atualizações do app e informações do Orkio." />
-      <UpdatesSection />
-      <AboutSection />
-    </VStack>
-  )
-}
 
 export function UpdatesSection(): React.JSX.Element {
   const { status, checking, check, setChannel } = useUpdates()
