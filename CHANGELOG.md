@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.8] - 2026-11-23
+
 ### Mudado
 
 - Interface nova: o menu tem só Quadro, Agentes e Configurações. A lista lateral mostra o que
