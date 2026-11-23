@@ -29,7 +29,7 @@ export function SaveBar({
     <section
       role="region"
       aria-label={label}
-      className="sticky bottom-0 z-10 flex flex-col gap-2 border-t border-border-soft bg-background/95 py-2.5"
+      className="sticky -bottom-6 z-10 -mb-6 flex flex-col gap-2 border-t border-border-soft bg-background pt-2.5 pb-6"
     >
       {children}
       <div className="flex flex-wrap items-center gap-2">
