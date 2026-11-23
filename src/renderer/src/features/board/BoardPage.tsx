@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { Card } from '@astryxdesign/core/Card'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
@@ -14,8 +13,6 @@ import { ToggleButton } from '@astryxdesign/core/ToggleButton'
 import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
-import type { TaskSection } from '../../../../shared/overview'
-import { isTextField } from '../../app/shortcuts'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
@@ -35,7 +32,6 @@ import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
-import { TaskPanel } from './TaskPanel'
 import { useBoard, type BoardError } from './useBoard'
 
 /**
@@ -44,22 +40,16 @@ import { useBoard, type BoardError } from './useBoard'
  */
 export function BoardPage({
   project,
-  openTaskId,
-  focusSection = null,
   onOpenIntegrations,
   onOpenProjects,
-  onExpandTask
+  onOpenTask
 }: {
   /** Projeto atual vinculado ao Notion (null = nenhum). */
   project: ProjectView | null
-  /** Tarefa a abrir (notificação, Visão geral, Command Palette). */
-  openTaskId: string | null
-  /** Seção do painel a mostrar ao abrir a tarefa (Visão geral, 6D). */
-  focusSection?: TaskSection | null
   onOpenIntegrations(): void
   onOpenProjects(): void
-  /** Abre a tarefa em tela cheia. */
-  onExpandTask(taskId: string): void
+  /** Abre a tela da tarefa. */
+  onOpenTask(taskId: string): void
 }): React.JSX.Element {
   if (!project) {
     return (
@@ -78,10 +68,8 @@ export function BoardPage({
     <Board
       projectId={project.id}
       projectName={project.name}
-      openTaskId={openTaskId}
-      focusSection={focusSection}
       onOpenIntegrations={onOpenIntegrations}
-      onExpandTask={onExpandTask}
+      onOpenTask={onOpenTask}
     />
   )
 }
@@ -89,17 +77,13 @@ export function BoardPage({
 function Board({
   projectId,
   projectName,
-  openTaskId,
-  focusSection,
   onOpenIntegrations,
-  onExpandTask
+  onOpenTask
 }: {
   projectId: string
   projectName: string
-  openTaskId: string | null
-  focusSection: TaskSection | null
   onOpenIntegrations(): void
-  onExpandTask(taskId: string): void
+  onOpenTask(taskId: string): void
 }): React.JSX.Element {
   const board = useBoard(projectId)
   const automation = useAutomationStatus(projectId)
@@ -107,26 +91,12 @@ function Board({
   const refreshSignals = signals.refresh
   const activeFlows = useActiveFlows(projectId)
   const agentBadges = useAgentBadges(projectId)
-  const [selected, setPicked] = useState<string | null>(openTaskId)
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
   const [onlyBlocked, setOnlyBlocked] = useState(false)
   const [agentKey, setAgentKey] = useState<string | null>(null)
   const [layout, setLayout] = useState<'kanban' | 'list'>('kanban')
   const { view } = board
-
-  // Esc fecha o painel (fora de campos de texto e de diálogos, que tratam o próprio Esc).
-  useEffect(() => {
-    if (!selected) return
-    const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape' || e.defaultPrevented || isTextField(e.target)) return
-      if (e.target instanceof Element && e.target.closest('dialog, [role="dialog"], [role="menu"]'))
-        return
-      setPicked(null)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selected])
 
   // Branches/PRs depois de carregar o quadro.
   const fetchedAt = view?.fetchedAt
@@ -177,14 +147,13 @@ function Board({
     )
   }
 
-  const selectedCard = view.cards.find((c) => c.taskId === selected) ?? null
   const actions = {
-    onOpen: (taskId: string) => setPicked(taskId),
+    onOpen: onOpenTask,
     onMove: (taskId: string, stageId: string) => void board.move(taskId, stageId),
     onToggleBlocked: (taskId: string, blocked: boolean) => void board.setBlocked(taskId, blocked),
     onToggleAutomation: (taskId: string, paused: boolean) =>
       void board.setAutomationPaused(taskId, paused),
-    onExpand: onExpandTask
+    onExpand: onOpenTask
   }
 
   return (
@@ -324,7 +293,7 @@ function Board({
                     stages={view.config.stages}
                     cards={cards}
                     signals={signals.result?.signals ?? {}}
-                    selectedTaskId={selected}
+                    selectedTaskId={null}
                     actions={actions}
                   />
                 ) : (
@@ -332,47 +301,13 @@ function Board({
                     stages={view.config.stages}
                     cards={cards}
                     signals={signals.result?.signals ?? {}}
-                    selectedTaskId={selected}
+                    selectedTaskId={null}
                     actions={actions}
-                    endInset={selectedCard ? TASK_SHEET_WIDTH : null}
+                    endInset={null}
                   />
                 )}
               </AgentBadgesProvider>
             </ActiveFlowsProvider>
-          )}
-          {/* Tarefa aberta numa folha sobre as colunas (como o "side peek" do Notion); "Abrir
-              tarefa" expande para a página inteira. Cabeçalho e filtros continuam ao alcance. */}
-          {selectedCard && (
-            <Card
-              padding={0}
-              height="100%"
-              data-testid="task-sheet"
-              style={{
-                position: 'absolute',
-                insetBlock: 0,
-                insetInlineEnd: 0,
-                width: TASK_SHEET_WIDTH,
-                boxShadow: 'var(--shadow-high)',
-                zIndex: 10
-              }}
-            >
-              <TaskPanel
-                projectId={projectId}
-                agent={agentBadges[selectedCard.taskId] ?? null}
-                card={selectedCard}
-                stages={view.config.stages}
-                signals={signals.result?.signals[selectedCard.taskId]}
-                onMove={(stageId) => actions.onMove(selectedCard.taskId, stageId)}
-                onToggleBlocked={(blocked) => actions.onToggleBlocked(selectedCard.taskId, blocked)}
-                onToggleAutomation={(paused) =>
-                  actions.onToggleAutomation(selectedCard.taskId, paused)
-                }
-                onBranchesChanged={() => void refreshSignals(true)}
-                onClose={() => setPicked(null)}
-                focusSection={selectedCard.taskId === openTaskId ? focusSection : null}
-                onExpand={() => onExpandTask(selectedCard.taskId)}
-              />
-            </Card>
           )}
         </VStack>
       </StackItem>
@@ -458,8 +393,6 @@ function useAutomationStatus(projectId: string): {
   }
 }
 
-/** Largura da folha da tarefa sobre o quadro (o quadro reserva o mesmo espaço no fim). */
-const TASK_SHEET_WIDTH = 'min(calc(var(--spacing-12) * 10), 62%)'
 
 /** Estado das automações, curto, no cabeçalho do quadro. */
 function AutomationLine({

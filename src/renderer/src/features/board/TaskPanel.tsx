@@ -1,11 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
 import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Heading } from '@astryxdesign/core/Heading'
-import { Icon } from '@astryxdesign/core/Icon'
-import { IconButton } from '@astryxdesign/core/IconButton'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Tab, TabList } from '@astryxdesign/core/TabList'
@@ -20,16 +17,19 @@ import type { TaskSection } from '../../../../shared/overview'
 import type { FlowRunView } from '../../../../shared/task-flow'
 import type { AgentBadge } from '../../../../shared/agent'
 import { Alert } from '../../components/Alert'
-import { CloseIcon, ExpandIcon } from '../../components/icons'
 import { pendingRequests, useTaskRuns } from '../claude/useTaskRuns'
 import { TaskFlowSection, type TaskActivity } from '../task-flows/TaskFlowSection'
-import { flowStepIndex } from '../task-flows/flow-plan'
+import { flowPlan, flowStepIndex } from '../task-flows/flow-plan'
+import { BacklogDocumentView } from '../alva/BacklogDocumentView'
+import { availableTabs, defaultPanelTab, PANEL_TAB_LABEL, type PanelTab } from '../task/panel-tab'
+import { taskLayout } from '../task/task-layout'
+import { taskPhases } from '../task/task-phases'
+import { TaskPhaseBar } from '../task/TaskPhaseBar'
+import { useWindowWidth } from '../task/useWindowWidth'
 import { StageSelector, TaskChanges, TaskDetails, useBacklogSummary } from './TaskDetails'
 import { TaskProgressStrip } from './TaskProgressStrip'
 import { TaskSession } from './TaskSession'
 import { taskProgress } from './task-progress'
-
-type PanelTab = 'session' | 'changes' | 'details'
 
 /**
  * Aba inativa: fica montada (o fluxo e os pedidos continuam vivos fora da aba), mas escondida.
@@ -54,9 +54,6 @@ export function TaskPanel({
   onToggleBlocked,
   onToggleAutomation,
   onBranchesChanged,
-  onClose,
-  onExpand,
-  variant = 'panel',
   focusSection = null
 }: {
   projectId: string
@@ -70,19 +67,19 @@ export function TaskPanel({
   onToggleAutomation(paused: boolean): void
   /** Vinculou/desvinculou uma branch (Detalhes > GitHub): relê os sinais. */
   onBranchesChanged?: () => void
-  onClose(): void
-  /** Abre a tarefa em tela cheia (só no painel). */
-  onExpand?: () => void
-  variant?: 'panel' | 'page'
   /** Seção a mostrar ao abrir (Visão geral, 6D): Fluxo, Claude Code ou Histórico. */
   focusSection?: TaskSection | null
 }): React.JSX.Element {
-  const [tab, setTab] = useState<PanelTab>(focusSection === 'history' ? 'details' : 'session')
-  // Vindo da Visão geral: rola até a seção certa quando a tarefa abre.
+  // Aba escolhida pela pessoa; até lá, a aba da fase atual (`defaultPanelTab`).
+  const [chosenTab, setTab] = useState<PanelTab | null>(
+    focusSection === 'history' ? 'details' : null
+  )
+  const layout = taskLayout(useWindowWidth())
+  // Vindo do sino ou de uma notificação: rola até a seção certa quando a tarefa abre.
   useEffect(() => {
     if (!focusSection) return
     const timer = setTimeout(() => {
-      setTab(focusSection === 'history' ? 'details' : 'session')
+      if (focusSection === 'history') setTab('details')
       document
         .querySelector(`[data-panel-section="${focusSection}"]`)
         ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
@@ -182,7 +179,6 @@ export function TaskPanel({
   const label = card.displayId ?? card.title
   // "Esperando você" sempre no topo: o pedido em si fica no fim da sessão, perto do campo.
   const goToWaiting = (): void => {
-    setTab('session')
     setTimeout(() => {
       const target =
         waitingFlow > 0
@@ -221,10 +217,7 @@ export function TaskPanel({
         pr={signals?.pr ?? null}
         onActivityChange={setFlowActivity}
         onWaitingChange={setWaitingFlow}
-        onOpenRun={(runId) => {
-          setTab('session')
-          setFocusRun({ runId, nonce: Date.now() })
-        }}
+        onOpenRun={(runId) => setFocusRun({ runId, nonce: Date.now() })}
         onLiveChange={setFlowLive}
         onRunsChange={setFlowRuns}
       />
@@ -258,8 +251,13 @@ export function TaskPanel({
       runs={runs}
     />
   )
-  const details = (showStage: boolean, changesSlot: React.ReactNode = null) => (
+  const details = (
+    showStage: boolean,
+    changesSlot: React.ReactNode = null,
+    part: 'all' | 'pr' | 'details' = 'all'
+  ) => (
     <TaskDetails
+      part={part}
       changes={changesSlot}
       projectId={projectId}
       card={card}
@@ -277,100 +275,122 @@ export function TaskPanel({
     />
   )
 
-  if (variant === 'page') {
-    return (
-      <VStack gap={4} role="region" aria-label={`Tarefa ${label}`}>
-        {waitingBanner}
-        <Card>
-          <TaskProgressStrip milestones={milestones} />
-        </Card>
-        <HStack gap={6} vAlign="start">
-          <StackItem size="fill">{session}</StackItem>
-          <VStack gap={5} width="calc(var(--spacing-12) * 7)">
-            {details(true, changes)}
-          </VStack>
-        </HStack>
-      </VStack>
-    )
+  const hasBacklogDoc = !!backlog?.task
+  const tabs = availableTabs(hasBacklogDoc)
+  const phases = taskPhases({
+    plan: flowRuns[0] ? flowPlan(flowRuns[0]) : null,
+    stages,
+    stageId: card.stageId
+  })
+  const currentPhase =
+    phases.find((p) => p.state === 'waiting' || p.state === 'current' || p.state === 'failed')
+      ?.label ?? null
+  const suggested = defaultPanelTab({
+    currentPhase,
+    hasBacklogDoc,
+    hasDiff: (state?.workspace?.changes ?? 0) > 0 || (state?.runs.length ?? 0) > 0,
+    hasPr: !!signals?.pr
+  })
+  const tab = chosenTab && tabs.includes(chosenTab) ? chosenTab : suggested
+  const tabContent: Record<PanelTab, React.ReactNode> = {
+    spec: (
+      <BacklogDocumentView
+        projectId={projectId}
+        taskId={card.taskId}
+        refreshKey={tick}
+        part="spec"
+      />
+    ),
+    plan: (
+      <BacklogDocumentView
+        projectId={projectId}
+        taskId={card.taskId}
+        refreshKey={tick}
+        part="plan"
+      />
+    ),
+    changes,
+    pr: details(false, null, 'pr'),
+    details: details(false, null, 'details')
   }
 
-  return (
-    <VStack role="complementary" aria-label={`Detalhes de ${label}`} height="100%">
-      <VStack gap={3} padding={4}>
-        <HStack gap={1} vAlign="start">
-          <StackItem size="fill">
-            <VStack gap={1}>
-              <HStack>
-                <Code>{card.displayId ?? '—'}</Code>
-              </HStack>
-              <Heading level={2}>{card.title}</Heading>
-            </VStack>
-          </StackItem>
-          {onExpand && (
-            <IconButton
-              size="sm"
-              variant="ghost"
-              label="Abrir tarefa"
-              icon={<Icon icon={ExpandIcon} />}
-              onClick={onExpand}
-            />
-          )}
-          <IconButton
-            size="sm"
-            variant="ghost"
-            label="Fechar"
-            icon={<Icon icon={CloseIcon} />}
-            onClick={onClose}
-          />
-        </HStack>
-        <TaskProgressStrip milestones={milestones} compact />
-        <StageSelector card={card} stages={stages} onMove={onMove} compact />
-        {waitingBanner}
-      </VStack>
+  const sidePanel = (
+    <VStack
+      role="complementary"
+      aria-label={`Detalhes de ${label}`}
+      height={layout === 'columns' ? '100%' : 'auto'}
+    >
       <TabList
         value={tab}
-        onChange={(v) =>
-          setTab(v === 'changes' ? 'changes' : v === 'details' ? 'details' : 'session')
-        }
+        onChange={(v) => setTab(tabs.find((t) => t === v) ?? suggested)}
         role="tablist"
         size="sm"
         hasDivider
-        isFullBleed
       >
-        <Tab value="session" label="Sessão" panelId={`task-tab-session-${card.taskId}`} />
-        <Tab value="changes" label="Mudanças" panelId={`task-tab-changes-${card.taskId}`} />
-        <Tab value="details" label="Detalhes" panelId={`task-tab-details-${card.taskId}`} />
+        {tabs.map((t) => (
+          <Tab
+            key={t}
+            value={t}
+            label={PANEL_TAB_LABEL[t]}
+            panelId={`task-tab-${t}-${card.taskId}`}
+          />
+        ))}
       </TabList>
       <StackItem size="fill">
         <ScrollableArea label={`Detalhes de ${label} (rolagem)`} height="100%" padding={4}>
-          <VStack
-            role="tabpanel"
-            id={`task-tab-session-${card.taskId}`}
-            aria-label="Sessão"
-            hidden={tab !== 'session'}
-            {...(tab !== 'session' ? { style: HIDDEN } : {})}
-          >
-            {session}
-          </VStack>
-          <VStack
-            role="tabpanel"
-            id={`task-tab-changes-${card.taskId}`}
-            aria-label="Mudanças"
-            hidden={tab !== 'changes'}
-            {...(tab !== 'changes' ? { style: HIDDEN } : {})}
-          >
-            {changes}
-          </VStack>
-          <VStack
-            role="tabpanel"
-            id={`task-tab-details-${card.taskId}`}
-            aria-label="Detalhes"
-            hidden={tab !== 'details'}
-            {...(tab !== 'details' ? { style: HIDDEN } : {})}
-          >
-            {details(false)}
-          </VStack>
+          {tabs.map((t) => (
+            <VStack
+              key={t}
+              role="tabpanel"
+              id={`task-tab-${t}-${card.taskId}`}
+              aria-label={PANEL_TAB_LABEL[t]}
+              hidden={tab !== t}
+              {...(tab !== t ? { style: HIDDEN } : {})}
+            >
+              {tabContent[t]}
+            </VStack>
+          ))}
         </ScrollableArea>
+      </StackItem>
+    </VStack>
+  )
+
+  const conversation = (
+    <ScrollableArea label={`Sessão de ${label} (rolagem)`} height="100%" padding={1}>
+      {session}
+    </ScrollableArea>
+  )
+
+  return (
+    <VStack gap={3} role="region" aria-label={`Tarefa ${label}`} height="100%">
+      <HStack gap={3} vAlign="center" wrap="wrap">
+        <Code>{card.displayId ?? '—'}</Code>
+        <StackItem size="fill">
+          <Heading level={1}>{card.title}</Heading>
+        </StackItem>
+        <StageSelector card={card} stages={stages} onMove={onMove} compact />
+      </HStack>
+      <HStack gap={4} vAlign="center" wrap="wrap">
+        <TaskPhaseBar phases={phases} />
+        <StackItem size="fill">
+          <TaskProgressStrip milestones={milestones} compact />
+        </StackItem>
+      </HStack>
+      {waitingBanner}
+      <StackItem size="fill">
+        {layout === 'columns' ? (
+          <HStack gap={4} vAlign="stretch" height="100%">
+            <StackItem size="fill">{conversation}</StackItem>
+            <VStack width="calc(var(--spacing-12) * 8)" height="100%">
+              {sidePanel}
+            </VStack>
+          </HStack>
+        ) : (
+          <VStack gap={4} height="100%">
+            <VStack height="calc(var(--spacing-12) * 5)">{sidePanel}</VStack>
+            <StackItem size="fill">{conversation}</StackItem>
+          </VStack>
+        )}
       </StackItem>
     </VStack>
   )

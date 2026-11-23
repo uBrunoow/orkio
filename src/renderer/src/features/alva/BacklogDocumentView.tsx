@@ -9,6 +9,7 @@ import { Alert } from '../../components/Alert'
 import { MarkdownText } from '../../components/MarkdownText'
 import { StatusToken } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
+import { splitBacklogBody } from '../task/backlog-sections'
 
 type State =
   | { phase: 'loading' }
@@ -23,11 +24,14 @@ type State =
 export function BacklogDocumentView({
   projectId,
   taskId,
-  refreshKey = 0
+  refreshKey = 0,
+  part = 'all'
 }: {
   projectId: string
   taskId: string
   refreshKey?: number
+  /** Só a spec ou só o plano (abas da tela da tarefa); `all` = o texto inteiro. */
+  part?: 'all' | 'spec' | 'plan'
 }): React.JSX.Element {
   const [state, setState] = useState<State>({ phase: 'loading' })
 
@@ -60,9 +64,12 @@ export function BacklogDocumentView({
       </Text>
     )
   }
-  const { info, body, truncated } = state.doc
+  const { info, truncated } = state.doc
+  const sections = splitBacklogBody(state.doc.body)
+  const body = part === 'spec' ? sections.spec : part === 'plan' ? sections.plan : state.doc.body
+  const regionLabel = part === 'spec' ? 'Spec' : part === 'plan' ? 'Plano' : 'Spec e plano'
   return (
-    <VStack gap={3} role="region" aria-label="Spec e plano">
+    <VStack gap={3} role="region" aria-label={regionLabel}>
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Code>{info.id}</Code>
         <Text weight="semibold">{info.title}</Text>
@@ -80,7 +87,11 @@ export function BacklogDocumentView({
       {body ? (
         <MarkdownText text={body} />
       ) : (
-        <Text type="supporting">A task ainda não tem texto.</Text>
+        <Text type="supporting">
+          {part === 'plan'
+            ? 'O plano ainda não foi escrito. O /plan escreve.'
+            : 'A task ainda não tem texto.'}
+        </Text>
       )}
       {truncated && (
         <Text type="supporting">

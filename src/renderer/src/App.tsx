@@ -28,7 +28,7 @@ import { WaitingBell } from './app/WaitingBell'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
 import { AutomationsPage, FlowsPage } from './features/board/ProjectPages'
-import { TaskPage } from './features/board/TaskPage'
+import { TaskScreen } from './features/task/TaskScreen'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 import { WelcomePage } from './features/welcome/WelcomePage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
@@ -195,10 +195,9 @@ export function App(): React.JSX.Element | null {
       page = (
         <BoardPage
           project={projects === null ? null : linkedProject}
-          openTaskId={null}
           onOpenIntegrations={() => toSettings('integrations')}
           onOpenProjects={() => toSettings('projects')}
-          onExpandTask={(taskId) =>
+          onOpenTask={(taskId) =>
             linkedProject && navigate({ name: 'task', projectId: linkedProject.id, taskId })
           }
         />
@@ -206,9 +205,10 @@ export function App(): React.JSX.Element | null {
       break
     case 'task':
       page = (
-        <TaskPage
+        <TaskScreen
           project={projects === null ? null : linkedProject}
           taskId={route.taskId}
+          section={route.section ?? null}
           onBackToBoard={() => navigate({ name: 'board', projectId: route.projectId })}
         />
       )

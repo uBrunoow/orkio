@@ -159,7 +159,8 @@ export function TaskDetails({
   onToggleAutomation,
   onBranchesChanged,
   showStage = true,
-  changes = null
+  changes = null,
+  part = 'all'
 }: {
   projectId: string
   card: BoardCard
@@ -178,12 +179,14 @@ export function TaskDetails({
   showStage?: boolean
   /** Mudanças (página inteira): logo depois da etapa, antes do GitHub. */
   changes?: React.ReactNode
+  /** Aba do painel da tarefa: `pr` = só GitHub; `details` = tudo menos GitHub. */
+  part?: 'all' | 'pr' | 'details'
 }): React.JSX.Element {
   const [specOpen, setSpecOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   return (
     <VStack gap={5}>
-      {showStage && (
+      {showStage && part !== 'pr' && (
         <Section title="Etapa">
           <StageSelector card={card} stages={stages} onMove={onMove} />
         </Section>
@@ -191,91 +194,96 @@ export function TaskDetails({
 
       {changes}
 
-      <Section title="GitHub">
-        {signals &&
-        (signals.localBranches.length > 0 || signals.remoteBranches.length > 0 || signals.pr) ? (
-          <TaskSignalsLine signals={signals} />
-        ) : (
-          <Text type="supporting" color="secondary">
-            Sem branch nem PR ainda.
-          </Text>
-        )}
-        <TaskBranchLinks
-          projectId={projectId}
-          taskId={card.taskId}
-          {...(onBranchesChanged ? { onChanged: onBranchesChanged } : {})}
-        />
-      </Section>
-
-      {backlog?.linked && (
-        <Section title="Documentos">
-          <Text type="supporting" data-testid="alva-task">
-            {backlog.task
-              ? `Backlog: ${backlog.task.id} · ${backlog.task.status} · critérios ${backlog.task.criteria.done}/${backlog.task.criteria.total}${backlog.task.openQuestions > 0 ? ` · ${plural(backlog.task.openQuestions, 'pergunta em aberto', 'perguntas em aberto')}` : ''}`
-              : `Backlog: ${backlog.linked} (arquivo não encontrado na pasta de trabalho)`}
-          </Text>
-          {backlog.task && (
-            <Collapsible
-              chevronPosition="start"
-              isOpen={specOpen}
-              onOpenChange={setSpecOpen}
-              trigger={
-                <Text type="supporting" color="primary">
-                  Spec e plano
-                </Text>
-              }
-            >
-              {specOpen && <BacklogDocumentView projectId={projectId} taskId={card.taskId} />}
-            </Collapsible>
+      {part !== 'details' && (
+        <Section title="GitHub">
+          {signals &&
+          (signals.localBranches.length > 0 || signals.remoteBranches.length > 0 || signals.pr) ? (
+            <TaskSignalsLine signals={signals} />
+          ) : (
+            <Text type="supporting" color="secondary">
+              Sem branch nem PR ainda.
+            </Text>
           )}
+          <TaskBranchLinks
+            projectId={projectId}
+            taskId={card.taskId}
+            {...(onBranchesChanged ? { onChanged: onBranchesChanged } : {})}
+          />
         </Section>
       )}
-
-      <TaskAgentSection projectId={projectId} taskId={card.taskId} agent={agent} />
-
-      <Section title="Opções">
-        <CheckboxInput
-          label="Bloqueada"
-          value={card.blocked}
-          onChange={(checked) => onToggleBlocked(checked)}
-        />
-        <CheckboxInput
-          label="Pausar automações desta tarefa"
-          value={card.automationPaused}
-          onChange={(checked) => onToggleAutomation(checked)}
-        />
-        {card.assignees.length > 0 && (
-          <Text type="supporting">Responsável no Notion: {card.assignees.join(', ')}</Text>
-        )}
-        {card.url && (
-          <HStack>
-            <Button
-              variant="ghost"
-              size="sm"
-              label="Abrir no Notion"
-              icon={<Icon icon={ExternalLinkIcon} />}
-              onClick={() => void window.orkio.openExternal(card.url!)}
-            />
-          </HStack>
-        )}
-      </Section>
-
-      <VStack data-panel-section="history">
-        <Collapsible
-          chevronPosition="start"
-          isOpen={historyOpen}
-          onOpenChange={setHistoryOpen}
-          trigger={<Text weight="semibold">Histórico completo</Text>}
-        >
-          {history === null ? (
-            <Skeleton height={40} aria-label="Carregando histórico" />
-          ) : history.length === 0 ? (
-            <Text type="supporting">Sem eventos ainda.</Text>
-          ) : (
-            <TaskTimeline history={history} agent={agent} stageName={stageName} />
+      {part !== 'pr' && (
+        <>
+          {backlog?.linked && (
+            <Section title="Documentos">
+              <Text type="supporting" data-testid="alva-task">
+                {backlog.task
+                  ? `Backlog: ${backlog.task.id} · ${backlog.task.status} · critérios ${backlog.task.criteria.done}/${backlog.task.criteria.total}${backlog.task.openQuestions > 0 ? ` · ${plural(backlog.task.openQuestions, 'pergunta em aberto', 'perguntas em aberto')}` : ''}`
+                  : `Backlog: ${backlog.linked} (arquivo não encontrado na pasta de trabalho)`}
+              </Text>
+              {backlog.task && (
+                <Collapsible
+                  chevronPosition="start"
+                  isOpen={specOpen}
+                  onOpenChange={setSpecOpen}
+                  trigger={
+                    <Text type="supporting" color="primary">
+                      Spec e plano
+                    </Text>
+                  }
+                >
+                  {specOpen && <BacklogDocumentView projectId={projectId} taskId={card.taskId} />}
+                </Collapsible>
+              )}
+            </Section>
           )}
-        </Collapsible>
-      </VStack>
+
+          <TaskAgentSection projectId={projectId} taskId={card.taskId} agent={agent} />
+
+          <Section title="Opções">
+            <CheckboxInput
+              label="Bloqueada"
+              value={card.blocked}
+              onChange={(checked) => onToggleBlocked(checked)}
+            />
+            <CheckboxInput
+              label="Pausar automações desta tarefa"
+              value={card.automationPaused}
+              onChange={(checked) => onToggleAutomation(checked)}
+            />
+            {card.assignees.length > 0 && (
+              <Text type="supporting">Responsável no Notion: {card.assignees.join(', ')}</Text>
+            )}
+            {card.url && (
+              <HStack>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  label="Abrir no Notion"
+                  icon={<Icon icon={ExternalLinkIcon} />}
+                  onClick={() => void window.orkio.openExternal(card.url!)}
+                />
+              </HStack>
+            )}
+          </Section>
+
+          <VStack data-panel-section="history">
+            <Collapsible
+              chevronPosition="start"
+              isOpen={historyOpen}
+              onOpenChange={setHistoryOpen}
+              trigger={<Text weight="semibold">Histórico completo</Text>}
+            >
+              {history === null ? (
+                <Skeleton height={40} aria-label="Carregando histórico" />
+              ) : history.length === 0 ? (
+                <Text type="supporting">Sem eventos ainda.</Text>
+              ) : (
+                <TaskTimeline history={history} agent={agent} stageName={stageName} />
+              )}
+            </Collapsible>
+          </VStack>
+        </>
+      )}
     </VStack>
   )
 }

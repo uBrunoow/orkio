@@ -31,6 +31,7 @@ import { DiffView } from '../../components/DiffView'
 import { describeFlowProblem } from '../../../../shared/flow-problem'
 import { FlowProblemCard } from './FlowProblemCard'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
+import { replyChips } from '../task/reply-chips'
 import { AutopilotPlan } from './AutopilotPlan'
 import { gateOutcomes } from './flow-plan'
 import { formatUsd, plural } from '../../lib/format'
@@ -645,13 +646,26 @@ function GateCard({
           />
         )}
         <HStack gap={2}>
-          <Button
-            size="sm"
-            variant="primary"
-            label="Aprovar"
-            isLoading={busy}
-            onClick={onApprove}
-          />
+          {replyChips('gate').map((chip) =>
+            chip.action === 'approve' ? (
+              <Button
+                key={chip.label}
+                size="sm"
+                variant="primary"
+                label={chip.label}
+                isLoading={busy}
+                onClick={onApprove}
+              />
+            ) : (
+              <Button
+                key={chip.label}
+                size="sm"
+                variant="ghost"
+                label={chip.label}
+                onClick={focusComposer}
+              />
+            )
+          )}
           <Button size="sm" variant="secondary" label="Recusar" onClick={onReject} />
         </HStack>
         {outcomes && (
@@ -681,4 +695,13 @@ function duration(start: string, end: string | null): string {
   if (!Number.isFinite(ms) || ms < 0) return ''
   if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))} s`
   return `${Math.round(ms / 60_000)} min`
+}
+
+/** "Pedir ajuste…": leva ao campo de mensagem da sessão (o texto vai para o Claude). */
+function focusComposer(): void {
+  const field = document.querySelector<HTMLTextAreaElement>(
+    '[aria-label="Mensagem para a sessão"] textarea'
+  )
+  field?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  field?.focus()
 }
