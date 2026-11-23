@@ -121,13 +121,16 @@ function useProjectBoard(projectId: string | null): {
 export function SetupPage({
   projectId = null,
   onExit,
-  onOpenTask
+  onOpenTask,
+  onOpenIntegrations
 }: {
   /** Com projeto: só os passos que faltam para ele ("Continuar configuração"). */
   projectId?: string | null
   /** "Fazer depois" e o fim do caminho sem abrir tarefa. */
   onExit(): void
   onOpenTask(ref: BoardTaskRef): void
+  /** "Usar um token": a conexão por token fica em Configurações › Integrações. */
+  onOpenIntegrations(): void
 }): React.JSX.Element {
   const notion = useNotionConnection()
   const github = useGitHubConnection()
@@ -187,7 +190,7 @@ export function SetupPage({
               setGithubSkipped(true)
               setSelected(null)
             }}
-            onUseToken={() => undefined}
+            onUseToken={onOpenIntegrations}
           />
         )
       break
@@ -245,7 +248,7 @@ export function SetupPage({
               project={project}
               workspace={workspace.status}
               onChanged={projects.refresh}
-              onOpenIntegrations={() => undefined}
+              onOpenIntegrations={onOpenIntegrations}
             />
           )}
           {!project && <Text type="supporting">Escolha a pasta do projeto antes.</Text>}

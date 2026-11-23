@@ -191,6 +191,7 @@ export function App(): React.JSX.Element | null {
         projectId={route.projectId ?? null}
         onExit={() => navigate({ name: 'board' })}
         onOpenTask={openTask}
+        onOpenIntegrations={() => navigate({ name: 'settings', section: 'integrations' })}
       />
     )
   }
