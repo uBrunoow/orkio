@@ -186,7 +186,7 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
         <PageState
           kind="empty"
           title="Nenhum fluxo ainda"
-          description="Um fluxo roda sozinho numa tarefa: comandos do Claude Code, suas aprovações e ações do Orkio, em ordem. Comece do zero ou use um modelo na aba Modelos do alva-flow."
+          description="Um fluxo roda sozinho numa tarefa: comandos do Claude Code, suas aprovações e ações do Orkio, em ordem. Comece do zero ou use um dos Modelos do alva-flow, mais abaixo."
           action={{ label: 'Novo fluxo', onClick: createFlow }}
         />
       ) : (

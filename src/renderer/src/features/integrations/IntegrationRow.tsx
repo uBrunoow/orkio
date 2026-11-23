@@ -44,7 +44,7 @@ export function IntegrationRow({
         {...(logo ? { startContent: <Icon icon={logo} size="lg" /> } : {})}
         endContent={
           <HStack gap={4} vAlign="center">
-            <StatusToken label={status.label} tone={status.tone} />
+            <StatusToken label={status.label} tone={status.tone} data-testid="integration-status" />
             <Button
               size="sm"
               variant={isOpen ? 'ghost' : 'secondary'}

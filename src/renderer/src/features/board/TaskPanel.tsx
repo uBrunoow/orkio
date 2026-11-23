@@ -318,7 +318,7 @@ export function TaskPanel({
     <VStack
       role="complementary"
       aria-label={`Detalhes de ${label}`}
-      height={layout === 'columns' ? '100%' : 'auto'}
+      height="100%"
     >
       <TabList
         value={tab}

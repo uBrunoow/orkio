@@ -275,6 +275,13 @@ export function FlowPage({
       return
     }
     setEventsKey((n) => n + 1)
+    // A tela continua aberta depois de salvar: o salvo vira o novo rascunho (e as ligações salvas
+    // são as do rascunho), senão "Descartar" e o contador comparariam com o estado anterior.
+    const bindings = draft.bindings
+    if (bindings) setTaskFlows((tf) => (tf ? { ...tf, bindings } : tf))
+    setDraft({ ...initialDraft(result.value), ...(bindings ? { bindings } : {}) })
+    setEditing(null)
+    setAcceptWarnings(false)
     onSaved(result.value)
   }
 

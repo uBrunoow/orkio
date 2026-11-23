@@ -43,6 +43,31 @@ export function IntegrationsPage({
 
   // Abertas: as que você abriu; sem escolha, as que ainda não estão prontas.
   const [open, setOpen] = useState<Record<string, boolean>>({})
+  // Uma linha que estava pendente e ficou pronta nesta visita continua aberta (a confirmação de
+  // "conectado" não some na hora). Padrão do React para reagir a uma mudança durante o render.
+  const pendingNow: Record<string, boolean> = {
+    notion: notion.status !== null && !notionReady,
+    github: github.status !== null && !githubReady,
+    claude: claude !== null && !claudeReady,
+    'notion-workspace': notionReady && workspace.status !== null && !workspaceReady
+  }
+  const readyNow: Record<string, boolean> = {
+    notion: notionReady,
+    github: githubReady,
+    claude: claudeReady,
+    'notion-workspace': workspaceReady
+  }
+  const [wasPending, setWasPending] = useState<Record<string, boolean>>({})
+  const newlyPending = Object.keys(pendingNow).filter((k) => pendingNow[k] && !wasPending[k])
+  if (newlyPending.length > 0) {
+    setWasPending((w) => ({ ...w, ...Object.fromEntries(newlyPending.map((k) => [k, true])) }))
+  }
+  const justReady = Object.keys(readyNow).filter(
+    (k) => readyNow[k] && wasPending[k] && open[k] === undefined
+  )
+  if (justReady.length > 0) {
+    setOpen((o) => ({ ...o, ...Object.fromEntries(justReady.map((k) => [k, true])) }))
+  }
   const isOpen = (id: string, ready: boolean): boolean => open[id] ?? !ready
   const toggle = (id: string, ready: boolean): void =>
     setOpen((o) => ({ ...o, [id]: !(o[id] ?? !ready) }))

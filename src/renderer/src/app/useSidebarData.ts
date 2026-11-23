@@ -8,7 +8,11 @@ import { taskGroups, type TaskGroups } from './task-groups'
  * Dados da lista lateral: a Visão geral (todos os projetos, só dados locais) e o quadro do projeto
  * atual (tarefas a fazer). Relê o quadro quando uma automação ou movimento o muda.
  */
-export function useSidebarData(projectId: string | null): {
+export function useSidebarData(
+  projectId: string | null,
+  /** Muda para reler o quadro (a chave do roteador: cada navegação). */
+  refreshKey = 0
+): {
   groups: TaskGroups | null
   snapshot: OverviewSnapshot | null
   board: BoardView | null
@@ -47,7 +51,7 @@ export function useSidebarData(projectId: string | null): {
       offBoard()
       offSync()
     }
-  }, [projectId])
+  }, [projectId, refreshKey])
 
   const groups = useMemo(
     () => (projectId ? taskGroups({ projectId, snapshot, board, queueStageId }) : null),

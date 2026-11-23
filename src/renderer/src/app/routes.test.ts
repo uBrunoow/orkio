@@ -18,6 +18,20 @@ describe('routerReducer', () => {
     expect(b.key).toBeGreaterThan(a.key)
   })
 
+  it('replace troca a rota sem remontar a tela nem entrar no histórico (abas)', () => {
+    const start = routerReducer(initialRouter({ name: 'agents' }), {
+      type: 'navigate',
+      route: { name: 'settings', section: 'board', tab: 'columns' }
+    })
+    const next = routerReducer(start, {
+      type: 'replace',
+      route: { name: 'settings', section: 'board', tab: 'rules' }
+    })
+    expect(next.route).toEqual({ name: 'settings', section: 'board', tab: 'rules' })
+    expect(next.key).toBe(start.key)
+    expect(next.history).toEqual(start.history)
+  })
+
   it('voltar retorna à rota anterior e não faz nada sem histórico', () => {
     const start = initialRouter({ name: 'agents' })
     expect(routerReducer(start, { type: 'back' })).toBe(start)

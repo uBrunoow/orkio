@@ -63,11 +63,14 @@ export type RouterAction =
   | { type: 'back' }
   /** Troca a tela sem entrar na pilha do "Voltar" (tela inicial decidida ao abrir). */
   | { type: 'reset'; route: Route }
+  /** Troca a rota sem remontar a tela nem entrar no "Voltar" (abas: o rascunho não se perde). */
+  | { type: 'replace'; route: Route }
 
 const MAX_HISTORY = 30
 
 export function routerReducer(state: RouterState, action: RouterAction): RouterState {
   if (action.type === 'reset') return initialRouter(action.route, state.key + 1)
+  if (action.type === 'replace') return { ...state, route: action.route }
   if (action.type === 'back') {
     const previous = state.history.at(-1)
     if (!previous) return state

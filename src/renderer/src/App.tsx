@@ -100,7 +100,8 @@ export function App(): React.JSX.Element | null {
     window.localStorage.setItem(CURRENT_PROJECT_KEY, id)
   }, [])
 
-  const sidebar = useSidebarData(linkedProject?.id ?? null)
+  // Relê o quadro a cada navegação (ex.: quadro criado nos Primeiros passos).
+  const sidebar = useSidebarData(linkedProject?.id ?? null, router.key)
   const setupMissing = useSetupPending(project, sidebar.board)
 
   // Primeira tela: sem projeto, Primeiros passos; com algo esperando, essa tarefa; senão o Quadro.
@@ -256,7 +257,7 @@ export function App(): React.JSX.Element | null {
             <BoardSettingsPage
               project={linkedProject}
               tab={route.tab ?? 'columns'}
-              onTabChange={(tab) => navigate({ name: 'settings', section: 'board', tab })}
+              onTabChange={(tab) => dispatch({ type: 'replace', route: { ...route, tab } })}
               onOpenBoard={toBoard}
               onOpenProjects={() => toSettings('projects')}
             />
