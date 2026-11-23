@@ -191,8 +191,15 @@ test('vincula o projeto local (com sugestão pelo nome) e lista as tarefas certa
   const query = (await externalCalls(app)).filter((c) =>
     c.url.endsWith(`/data_sources/${NOTION_FAKE.tasksDs}/query`)
   )
+  // Projeto vinculado E responsável = pessoa logada (Ada, `u1`): a tarefa de outra pessoa
+  // do mesmo projeto (ORK-9 no simulado) nunca aparece.
   expect(JSON.parse(query.at(-1)!.body!)).toMatchObject({
-    filter: { property: 'rel', relation: { contains: NOTION_FAKE.orkioPage } }
+    filter: {
+      and: [
+        { property: 'rel', relation: { contains: NOTION_FAKE.orkioPage } },
+        { property: 'ppl', people: { contains: 'u1' } }
+      ]
+    }
   })
 
   // Cache: "Ver tarefas" de novo não chama a API; "Atualizar" chama.

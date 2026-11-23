@@ -6,6 +6,17 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Mudado
+
+- O quadro mostra só as tarefas em que você é responsável no Notion, não as de todo o projeto.
+  O campo Responsável passa a ser obrigatório no mapeamento das Tarefas (Integrações); a conexão
+  precisa ser da sua conta ("Entrar com Notion" ou token pessoal).
+
+### Corrigido
+
+- Com muitos plugins do Claude Code instalados, o catálogo de comandos ficava sem os comandos dos
+  plugins e a tela alva-flow dizia que faltava o plugin, mesmo instalado e atualizado.
+
 ## [0.2.5] - 2026-11-23
 
 ### Mudado

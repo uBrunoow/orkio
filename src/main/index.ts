@@ -219,7 +219,8 @@ function registerIpc(): void {
       connectionMethod: () => notion.connectionMethod(),
       searchDataSources: (options) => notion.searchDataSources(options),
       getDataSource: (id) => notion.getDataSource(id),
-      queryDataSource: (id, options) => notion.queryDataSource(id, options)
+      queryDataSource: (id, options) => notion.queryDataSource(id, options),
+      currentPersonId: () => notion.currentPersonId()
     }
   })
 

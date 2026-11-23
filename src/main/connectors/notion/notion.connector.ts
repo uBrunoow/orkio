@@ -77,6 +77,8 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
   private flow: AbortController | null = null
   /** Renovação em andamento: o Notion gira o refresh token, então nunca renovamos em paralelo. */
   private refreshing: Promise<StoredOAuth> | null = null
+  /** Pessoa dona da conexão (GET /users/me), só em memória; zera ao conectar/desconectar. */
+  private person: Promise<string | null> | null = null
 
   constructor(private readonly deps: NotionConnectorDeps) {
     this.now = deps.now ?? (() => new Date())
@@ -132,6 +134,7 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
 
   async disconnect(): Promise<void> {
     this.cancelOAuth()
+    this.person = null
     await this.deps.store.delete(SECRET_KEY)
   }
 
@@ -188,6 +191,23 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
   }
 
   // ---------- Leituras usadas pelos serviços (o token nunca sai do conector) ----------
+
+  /**
+   * Id da pessoa do Notion dona da conexão (para filtrar as tarefas dela), ou `null` se a conexão
+   * é de um bot do workspace. Lido uma vez por conexão; falha não fica em cache.
+   */
+  currentPersonId(): Promise<string | null> {
+    if (!this.person) {
+      const pending = this.callApi((token) => this.deps.client.getSelf(token)).then(
+        (self) => self.personId
+      )
+      this.person = pending
+      pending.catch(() => {
+        if (this.person === pending) this.person = null
+      })
+    }
+    return this.person
+  }
 
   searchDataSources(options: { query?: string; startCursor?: string | null } = {}) {
     return this.callApi((token) => this.deps.client.searchDataSources(token, options))
@@ -353,6 +373,7 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
   }
 
   private async saveAndReport(record: StoredNotionConnection): Promise<ConnectionStatus> {
+    this.person = null
     try {
       await this.save(record)
     } catch (e) {

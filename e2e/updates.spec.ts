@@ -83,7 +83,8 @@ test.beforeAll(() => {
           title: { id: 'title', name: 'Nome', type: 'title' },
           status: { id: 'st%3A', name: 'Status', type: 'status' },
           uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
-          project: { id: 'rel', name: 'Projeto', type: 'relation' }
+          project: { id: 'rel', name: 'Projeto', type: 'relation' },
+          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
         },
         updatedAt: '2026-11-19T00:00:00.000Z'
       },

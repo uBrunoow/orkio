@@ -55,6 +55,8 @@ export interface NotionWorkspaceApi {
   }): Promise<NotionListPage>
   getDataSource(id: string): Promise<unknown>
   queryDataSource(id: string, options?: NotionQueryOptions): Promise<NotionListPage>
+  /** Pessoa do Notion dona da conexão; `null` se a conexão é de um bot do workspace. */
+  currentPersonId(): Promise<string | null>
 }
 
 export interface NotionWorkspaceDeps {
@@ -82,7 +84,13 @@ export const WORKSPACE_MESSAGES = {
   storage: 'Não foi possível salvar a configuração. Tente novamente.',
   unknown: 'Algo deu errado ao falar com o Notion. Tente novamente.',
   invalidSchema: 'O Notion devolveu um banco em formato inesperado. Tente novamente.',
-  notConnected: 'Conecte o Notion em Integrações para usar os bancos de Projetos e Tarefas.'
+  notConnected: 'Conecte o Notion em Integrações para usar os bancos de Projetos e Tarefas.',
+  noAssignee:
+    'Mapeie o campo Responsável (Pessoas) das Tarefas em Integrações: o Orkio mostra só as ' +
+    'tarefas em que você é responsável.',
+  noPerson:
+    'Não deu para saber quem é você no Notion: esta conexão é de uma integração do workspace. ' +
+    'Conecte com “Entrar com Notion” em Integrações para ver as suas tarefas.'
 } as const
 
 type Err = Extract<NotionResult<never>, { ok: false }>['error']
@@ -507,8 +515,21 @@ export class NotionWorkspaceService {
       })
     }
     const mapping = status.config?.mapping ?? config.mapping
+    const assignee = mapping.assignee
+    if (!assignee) {
+      throw new WorkspaceError({ code: 'broken', message: WORKSPACE_MESSAGES.noAssignee })
+    }
+    // Sempre só as tarefas da pessoa logada no Notion (nunca as de todo o projeto).
+    const personId = await this.deps.notion.currentPersonId()
+    if (!personId) {
+      throw new WorkspaceError({
+        code: 'no_person',
+        message: WORKSPACE_MESSAGES.noPerson,
+        canReconnect: true
+      })
+    }
 
-    const key = `${projectId}:${project.notionProject.id}:${this.configVersion}`
+    const key = `${projectId}:${project.notionProject.id}:${personId}:${this.configVersion}`
     const cached = this.tasksCache.get(key)
     if (!force && cached && cached.expiresAt > this.now().getTime()) {
       return { value: cached.value, fromCache: true }
@@ -517,7 +538,12 @@ export class NotionWorkspaceService {
     const pageId = project.notionProject.id
     const { items, truncated } = await this.paginate((cursor) =>
       this.deps.notion.queryDataSource(config.tasksDataSource.id, {
-        filter: { property: mapping.project.id, relation: { contains: pageId } },
+        filter: {
+          and: [
+            { property: mapping.project.id, relation: { contains: pageId } },
+            { property: assignee.id, people: { contains: personId } }
+          ]
+        },
         sorts: [{ timestamp: 'created_time', direction: 'descending' }],
         startCursor: cursor
       })

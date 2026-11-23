@@ -151,12 +151,31 @@ describe('suggestMapping', () => {
           name: 'Projeto',
           type: 'relation',
           relation: { data_source_id: PROJECTS_DS }
-        }
+        },
+        Pessoa: { id: 'p', name: 'Pessoa', type: 'people', people: {} }
       })
     )!
     const { mapping, missing } = suggestMapping(schema, PROJECTS_DS)
     expect(missing).toEqual([])
     expect(mapping.uniqueId).toBeUndefined()
+    // Responsável é obrigatório: qualquer propriedade de pessoas serve na sugestão.
+    expect(mapping.assignee?.id).toBe('p')
+  })
+
+  it('sem propriedade de pessoas → falta o Responsável', () => {
+    const schema = parseDataSource(
+      dataSource({
+        Nome: { id: 't', name: 'Nome', type: 'title' },
+        Status: { id: 's', name: 'Status', type: 'status', status: { options: [] } },
+        Projeto: {
+          id: 'r',
+          name: 'Projeto',
+          type: 'relation',
+          relation: { data_source_id: PROJECTS_DS }
+        }
+      })
+    )!
+    expect(suggestMapping(schema, PROJECTS_DS).missing).toEqual(['assignee'])
   })
 
   it('relação para outro banco não serve como "Projeto"', () => {

@@ -33,6 +33,7 @@ function tasksSchema(overrides: Record<string, unknown> = {}, remove: string[] =
       relation: { data_source_id: PROJECTS_DS }
     },
     Prioridade: { id: 'pri', name: 'Prioridade', type: 'select', select: { options: [] } },
+    Responsável: { id: 'ppl', name: 'Responsável', type: 'people', people: {} },
     ...overrides
   }
   for (const key of remove) delete properties[key]
@@ -89,7 +90,14 @@ const OTHER = { ...PROJECT, id: 'local-2', name: 'site', repo: null, localPath: 
 const MAPPING_INPUT = {
   projectsDataSourceId: PROJECTS_DS,
   tasksDataSourceId: TASKS_DS,
-  mapping: { title: 'title', status: 'st', uniqueId: 'uid', project: 'rel', priority: 'pri' }
+  mapping: {
+    title: 'title',
+    status: 'st',
+    uniqueId: 'uid',
+    project: 'rel',
+    priority: 'pri',
+    assignee: 'ppl'
+  }
 }
 
 describe('NotionWorkspaceService', () => {
@@ -135,6 +143,7 @@ describe('NotionWorkspaceService', () => {
       getDataSource: vi.fn<NotionWorkspaceApi['getDataSource']>(async (id) =>
         id === PROJECTS_DS ? projectsSchema : schema
       ),
+      currentPersonId: vi.fn<NotionWorkspaceApi['currentPersonId']>(async () => 'me'),
       queryDataSource: vi.fn<NotionWorkspaceApi['queryDataSource']>(async (id, options) => {
         if (id === PROJECTS_DS) {
           return {
@@ -146,8 +155,15 @@ describe('NotionWorkspaceService', () => {
             nextCursor: null
           }
         }
-        const filter = options?.filter as { relation: { contains: string } }
-        return { results: tasksByProject.get(filter.relation.contains) ?? [], nextCursor: null }
+        const filter = options?.filter as {
+          and: [{ relation: { contains: string } }, { people: { contains: string } }]
+        }
+        const [byProject, byPerson] = filter.and
+        if (byPerson.people.contains !== 'me') return { results: [], nextCursor: null }
+        return {
+          results: tasksByProject.get(byProject.relation.contains) ?? [],
+          nextCursor: null
+        }
       })
     }
   })
@@ -234,7 +250,8 @@ describe('NotionWorkspaceService', () => {
           status: { id: 'st', name: 'Status', type: 'status' },
           uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
           project: { id: 'rel', name: 'Projeto', type: 'relation' },
-          priority: { id: 'pri', name: 'Prioridade', type: 'select' }
+          priority: { id: 'pri', name: 'Prioridade', type: 'select' },
+          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
         },
         updatedAt: '2026-11-19T12:00:00.000Z'
       })
@@ -382,7 +399,28 @@ describe('NotionWorkspaceService', () => {
   })
 
   describe('tarefas', () => {
-    it('filtra pela relação com a página vinculada e usa o mapeamento', async () => {
+    it('conexão de bot do workspace (sem pessoa): não lista as tarefas de todos', async () => {
+      const service = await configured()
+      await service.link('local-1', 'page-orkio')
+      tasksByProject.set('page-orkio', [taskPage(1, 'page-orkio')])
+      api.currentPersonId.mockResolvedValue(null)
+      api.queryDataSource.mockClear()
+
+      const result = await service.listTasks('local-1')
+
+      expect(result).toMatchObject({ ok: false, error: { code: 'no_person', canReconnect: true } })
+      expect(api.queryDataSource).not.toHaveBeenCalled()
+    })
+
+    it('Responsável é obrigatório no mapeamento', async () => {
+      const service = await makeService()
+      const mapping: Partial<typeof MAPPING_INPUT.mapping> = { ...MAPPING_INPUT.mapping }
+      delete mapping.assignee
+      const saved = await service.saveConfig({ ...MAPPING_INPUT, mapping })
+      expect(saved).toMatchObject({ ok: false })
+    })
+
+    it('filtra pela página vinculada e pela pessoa logada, e usa o mapeamento', async () => {
       const service = await configured()
       await service.link('local-1', 'page-orkio')
       tasksByProject.set('page-orkio', [taskPage(2, 'page-orkio'), taskPage(1, 'page-orkio')])
@@ -391,7 +429,12 @@ describe('NotionWorkspaceService', () => {
       const result = await service.listTasks('local-1')
 
       expect(api.queryDataSource).toHaveBeenLastCalledWith(TASKS_DS, {
-        filter: { property: 'rel', relation: { contains: 'page-orkio' } },
+        filter: {
+          and: [
+            { property: 'rel', relation: { contains: 'page-orkio' } },
+            { property: 'ppl', people: { contains: 'me' } }
+          ]
+        },
         sorts: [{ timestamp: 'created_time', direction: 'descending' }],
         startCursor: null
       })

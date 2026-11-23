@@ -86,7 +86,8 @@ describe('createNotionClient().getSelf', () => {
       avatarUrl: 'https://s3.example.com/ada.png',
       ownerName: null,
       ownerAvatarUrl: null,
-      workspaceName: null
+      workspaceName: null,
+      personId: PERSON_RESPONSE.id
     })
   })
 
@@ -97,7 +98,9 @@ describe('createNotionClient().getSelf', () => {
       name: 'Orkio Integration',
       ownerName: 'Grace Hopper',
       ownerAvatarUrl: 'https://s3.example.com/grace.png',
-      workspaceName: 'Acme Labs'
+      workspaceName: 'Acme Labs',
+      // Dono do bot = a pessoa cujas tarefas o quadro mostra.
+      personId: 'aaaa'
     })
   })
 
@@ -254,7 +257,7 @@ describe('parseSelf', () => {
       ...BOT_RESPONSE,
       bot: { owner: { type: 'workspace', workspace: true }, workspace_name: 'Acme' }
     })
-    expect(parsed).toMatchObject({ ownerName: null, workspaceName: 'Acme' })
+    expect(parsed).toMatchObject({ ownerName: null, workspaceName: 'Acme', personId: null })
   })
 })
 

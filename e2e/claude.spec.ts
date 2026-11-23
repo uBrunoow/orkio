@@ -125,7 +125,8 @@ test.beforeAll(() => {
           status: { id: 'st%3A', name: 'Status', type: 'status' },
           uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
           project: { id: 'rel', name: 'Projeto', type: 'relation' },
-          priority: { id: 'pri', name: 'Prioridade', type: 'select' }
+          priority: { id: 'pri', name: 'Prioridade', type: 'select' },
+          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
         },
         updatedAt: '2026-11-19T00:00:00.000Z'
       },
@@ -246,7 +247,9 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   const changes = await tab(page, 'Mudanças')
   await expect(changes.getByTestId('changes-summary')).toContainText('1 commit')
   await expect(changes).toContainText('src/exportar.ts')
-  await expect(changes.getByTestId('workspace-branch')).toHaveText('feat/ORK-2-listar-tarefas-do-notion')
+  await expect(changes.getByTestId('workspace-branch')).toHaveText(
+    'feat/ORK-2-listar-tarefas-do-notion'
+  )
   await tab(page, 'Sessão')
 
   // Pasta principal intocada: mesma branch, mesma mudança não commitada, nenhum arquivo novo.

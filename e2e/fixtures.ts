@@ -536,7 +536,10 @@ export async function launchOrkio(
               name: 'Orkio',
               avatar_url: null,
               bot: {
-                owner: { type: 'user', user: { name: 'Grace Hopper', avatar_url: null } },
+                owner: {
+                  type: 'user',
+                  user: { id: 'user-grace', name: 'Grace Hopper', avatar_url: null }
+                },
                 workspace_name: 'Acme Labs'
               }
             })
@@ -776,15 +779,23 @@ export async function launchOrkio(
           }
 
           if (path === `/data_sources/${ids.tasksDs}/query`) {
-            const filter = body['filter'] as
-              { property?: string; relation?: { contains?: string } } | undefined
-            const target = filter?.relation?.contains
+            // O Orkio filtra por projeto E responsável (a pessoa logada): `{ and: [...] }`.
+            type Clause = {
+              property?: string
+              relation?: { contains?: string }
+              people?: { contains?: string }
+            }
+            const raw = body['filter'] as (Clause & { and?: Clause[] }) | undefined
+            const clauses = raw?.and ?? (raw ? [raw] : [])
+            const target = clauses.find((c) => c.property === 'rel')?.relation?.contains
+            const person = clauses.find((c) => c.property === 'ppl')?.people?.contains
             const task = (
               n: number,
               title: string,
               project: string,
               _initial: { name: string; color: string },
-              priority: boolean
+              priority: boolean,
+              owners: string[] = ['u1', 'user-grace']
             ): unknown => {
               const id = `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`
               const name = g.__notion.status[id] ?? _initial.name
@@ -817,6 +828,12 @@ export async function launchOrkio(
                     type: 'select',
                     select: priority ? { name: 'Alta', color: 'red' } : null
                   },
+                  Responsável: {
+                    id: 'ppl',
+                    type: 'people',
+                    // Sem nome: o card não ganha texto novo nos testes antigos.
+                    people: owners.map((o) => ({ object: 'user', id: o }))
+                  },
                   Bloqueada: { id: 'blk', type: 'checkbox', checkbox: false },
                   ...extras
                 }
@@ -837,18 +854,32 @@ export async function launchOrkio(
                 { name: 'Concluída', color: 'green' },
                 false
               ),
-              task(3, 'Nova home do site', ids.sitePage, { name: 'A fazer', color: 'gray' }, false)
+              task(3, 'Nova home do site', ids.sitePage, { name: 'A fazer', color: 'gray' }, false),
+              // De outra pessoa: nunca aparece para quem está logado.
+              task(
+                9,
+                'Tarefa de outra pessoa',
+                ids.orkioPage,
+                { name: 'Em andamento', color: 'blue' },
+                false,
+                ['someone-else']
+              )
             ]
             return json({
               object: 'list',
-              results:
-                filter?.property === 'rel' && target
-                  ? all.filter(
-                      (t) =>
-                        (t as { properties: { Projeto: { relation: { id: string }[] } } })
-                          .properties.Projeto.relation[0]?.id === target
-                    )
-                  : all,
+              results: all.filter((t) => {
+                const props = (
+                  t as {
+                    properties: {
+                      Projeto: { relation: { id: string }[] }
+                      Responsável: { people: { id: string }[] }
+                    }
+                  }
+                ).properties
+                if (target && props.Projeto.relation[0]?.id !== target) return false
+                if (person && !props.Responsável.people.some((p) => p.id === person)) return false
+                return true
+              }),
               has_more: false,
               next_cursor: null
             })

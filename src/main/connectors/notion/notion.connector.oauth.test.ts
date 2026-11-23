@@ -31,7 +31,8 @@ const BOT_SELF: NotionSelf = {
   avatarUrl: null,
   ownerName: 'Ada Lovelace',
   ownerAvatarUrl: 'https://x/ada.png',
-  workspaceName: 'Acme'
+  workspaceName: 'Acme',
+  personId: 'user-ada'
 }
 
 function safeStorage(available = true): SafeStorageLike {

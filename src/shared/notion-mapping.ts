@@ -14,7 +14,13 @@ export const FIELD_TYPES: Record<NotionMappingField, readonly string[]> = {
   assignee: ['people']
 }
 
-export const REQUIRED_FIELDS: readonly NotionMappingField[] = ['title', 'status', 'project']
+export const REQUIRED_FIELDS: readonly NotionMappingField[] = [
+  'title',
+  'status',
+  'project',
+  // O quadro mostra só as tarefas da pessoa logada no Notion (filtro por este campo).
+  'assignee'
+]
 
 /** Ordem de exibição no assistente. */
 export const MAPPING_FIELDS: readonly NotionMappingField[] = [
