@@ -319,7 +319,8 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 - Ícones de interface: **Tabler** (`@tabler/icons-react`), sempre via `components/icons.tsx`
   (adaptador para o `Icon` da Astryx; inclui os logos `GitHubLogo` e `NotionLogo`). Use
   `<Icon icon={X} />` ou a prop `icon` dos componentes. Novo ícone? Exporte-o de `icons.tsx`.
-- Ícones do app: não edite `build/` à mão; troque `brand/orkio-app-icon-1024.png` e rode `pnpm icons`.
+- Ícones do app: não edite `build/` à mão; troque `brand/orkio-app-icon-1024.png` e rode `pnpm icons`
+  (gera também `build/icons/NxN.png`, 16 a 512, para o Linux: o tema hicolor não procura 1024).
 
 ## Estilo
 

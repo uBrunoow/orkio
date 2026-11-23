@@ -1,6 +1,10 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { MacConfiguration, NsisOptions, WindowsConfiguration } from 'electron-builder'
 import { builderConfig, isMacSigned } from '../electron-builder'
+
+const ROOT = join(import.meta.dirname, '..')
 
 describe('electron-builder.ts', () => {
   it('publica nos releases do próprio repositório (público), como rascunho', () => {
@@ -75,6 +79,11 @@ describe('Linux', () => {
       { target: 'deb', arch: ['x64'] }
     ])
     expect(c.linux?.executableName).toBe('orkio')
+    // Um PNG por tamanho: o tema hicolor só procura até 512×512 (só o 1024 = atalho sem ícone).
+    expect(c.linux?.icon).toBe('build/icons')
+    for (const size of [16, 32, 48, 128, 256, 512]) {
+      expect(existsSync(join(ROOT, 'build/icons', `${size}x${size}.png`))).toBe(true)
+    }
     expect(c.appImage?.artifactName).toBe('${productName}-${version}-linux-${arch}.${ext}')
     expect(c.deb?.artifactName).toBe('${productName}-${version}-linux-${arch}.${ext}')
   })

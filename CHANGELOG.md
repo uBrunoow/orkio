@@ -6,6 +6,11 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Corrigido
+
+- Linux: o atalho do Orkio aparece com o ícone na busca e no dock (o pacote só trazia o ícone
+  em 1024×1024, tamanho que o GNOME não procura).
+
 ## [0.2.3] - 2026-11-23
 
 ### Adicionado
