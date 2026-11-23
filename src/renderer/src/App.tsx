@@ -224,7 +224,7 @@ export function App(): React.JSX.Element | null {
       title = `${ROUTE_TITLES.settings} › ${SETTINGS_TITLES[section]}`
       switch (section) {
         case 'integrations':
-          page = <IntegrationsPage />
+          page = <IntegrationsPage projectId={project?.id ?? null} />
           break
         case 'projects':
           page = (

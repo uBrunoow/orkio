@@ -1,23 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
-import { Grid } from '@astryxdesign/core/Grid'
+import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
-import { Icon } from '@astryxdesign/core/Icon'
-import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
+import type { AlvaPrecheck } from '../../../../shared/alva'
 import type { ConnectionStatus, NotionWorkspaceStatus } from '../../../../shared/ipc-contract'
-import { StatusToken, type StatusTone } from '../../components/StatusToken'
-import {
-  ClaudeLogo,
-  DatabaseIcon,
-  GitHubLogo,
-  NotionLogo,
-  type SvgIcon
-} from '../../components/icons'
+import type { StatusTone } from '../../components/StatusToken'
+import { ClaudeLogo, GitHubLogo, NotionLogo, TerminalIcon } from '../../components/icons'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
 import { PageHeader } from '../../components/PageHeader'
 import { ClaudeCodeCard } from '../claude/ClaudeCodeCard'
@@ -27,63 +18,47 @@ import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
 import { useGitHubConnection } from './useGitHubConnection'
 import { useNotionConnection } from './useNotionConnection'
+import { IntegrationRow } from './IntegrationRow'
 import { PAGE_WIDTH } from '../../components/page-width'
 
-export function IntegrationsPage(): React.JSX.Element {
+export function IntegrationsPage({
+  projectId = null
+}: {
+  /** Projeto atual (para a checagem do GitHub CLI e do alva-flow). */
+  projectId?: string | null
+}): React.JSX.Element {
   const notion = useNotionConnection()
   const github = useGitHubConnection()
   // Revalida os bancos quando a conexão do Notion muda (conectou, desconectou, reconectou).
   const workspace = useNotionWorkspace(connectionKey(notion.status))
   const nothingConnected = [notion.status, github.status].every(isEmpty)
   const claude = useClaudeStatus()
+  const precheck = usePrecheck(projectId)
 
-  const entries: CatalogEntry[] = [
-    {
-      id: 'notion',
-      icon: NotionLogo,
-      name: 'Notion',
-      category: 'Planejamento',
-      text: 'Projetos e tarefas do quadro.',
-      status: connectionStatus(notion.status),
-      ready: notion.status?.state === 'connected'
-    },
-    {
-      id: 'notion-workspace',
-      icon: DatabaseIcon,
-      name: 'Bancos do Notion',
-      category: 'Planejamento',
-      text: 'Quais bancos são Projetos e Tarefas.',
-      status: workspaceStatus(workspace.status, notion.status),
-      ready:
-        notion.status?.state === 'connected' &&
-        workspace.status?.config != null &&
-        workspace.status.health === 'ok'
-    },
-    {
-      id: 'github',
-      icon: GitHubLogo,
-      name: 'GitHub',
-      category: 'Código',
-      text: 'Repositórios, branches e PRs.',
-      status: connectionStatus(github.status),
-      ready: github.status?.state === 'connected'
-    },
-    {
-      id: 'claude',
-      icon: ClaudeLogo,
-      name: 'Claude Code',
-      category: 'Execução',
-      text: 'Roda as tarefas no seu computador.',
-      status: claudeStatus(claude),
-      ready: claudeStatus(claude).tone === 'success'
-    }
-  ]
+  const notionReady = notion.status?.state === 'connected'
+  const workspaceReady =
+    notionReady && workspace.status?.config != null && workspace.status.health === 'ok'
+  const githubReady = github.status?.state === 'connected'
+  const claudeReady = claudeStatus(claude).tone === 'success'
+
+  // Abertas: as que você abriu; sem escolha, as que ainda não estão prontas.
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  const isOpen = (id: string, ready: boolean): boolean => open[id] ?? !ready
+  const toggle = (id: string, ready: boolean): void =>
+    setOpen((o) => ({ ...o, [id]: !(o[id] ?? !ready) }))
+
+  const gh = precheck?.items.find((i) => i.id === 'gh') ?? null
+  const ghStatus: { label: string; tone: StatusTone } = !gh
+    ? { label: projectId ? 'Verificando' : 'Escolha um projeto', tone: 'neutral' }
+    : gh.state === 'ok'
+      ? { label: 'Pronto', tone: 'success' }
+      : { label: gh.detail, tone: 'warning' }
 
   return (
     <VStack gap={6} maxWidth={PAGE_WIDTH.list}>
       <PageHeader
         title="Integrações"
-        subtitle="Conecte as ferramentas que o Orkio usa para planejar e executar o desenvolvimento."
+        subtitle="Contas que o Orkio usa. Os tokens ficam cifrados neste computador e nunca saem dele."
       />
 
       {nothingConnected && (
@@ -111,98 +86,133 @@ export function IntegrationsPage(): React.JSX.Element {
         </Card>
       )}
 
-      <Grid
-        columns={{ minWidth: 360, max: 2 }}
-        gap={3}
-        role="list"
-        aria-label="Catálogo de integrações"
-      >
-        {entries.map((entry) => (
-          <CatalogRow key={entry.id} entry={entry} />
-        ))}
-      </Grid>
-
-      <VStack gap={4}>
-        <Heading level={2}>Configuração</Heading>
-        <VStack data-integration="notion">
-          <NotionConnectionCard notion={notion} />
+      <Card padding={0}>
+        <VStack role="list" aria-label="Catálogo de integrações">
+          <IntegrationRow
+            id="notion"
+            logo={NotionLogo}
+            name="Notion"
+            purpose="Lê suas tarefas e move o status quando você move o card."
+            status={connectionStatus(notion.status)}
+            action={notionReady ? 'Gerenciar' : 'Conectar'}
+            isOpen={isOpen('notion', notionReady)}
+            onToggle={() => toggle('notion', notionReady)}
+            sub={
+              <IntegrationRow
+                id="notion-workspace"
+                logo={null}
+                name="Bancos e campos"
+                purpose={workspaceSummary(workspace.status)}
+                status={workspaceStatus(workspace.status, notion.status)}
+                action={workspaceReady ? 'Revisar campos' : 'Configurar'}
+                isOpen={isOpen('notion-workspace', workspaceReady || !notionReady)}
+                onToggle={() => toggle('notion-workspace', workspaceReady || !notionReady)}
+              >
+                <NotionWorkspaceCard
+                  workspace={workspace}
+                  notionStatus={notion.status}
+                  {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
+                />
+              </IntegrationRow>
+            }
+          >
+            <NotionConnectionCard notion={notion} />
+          </IntegrationRow>
+          <IntegrationRow
+            id="github"
+            logo={GitHubLogo}
+            name="GitHub"
+            purpose="Branches, PRs, revisões e CI das tarefas; pedir review."
+            status={connectionStatus(github.status)}
+            action={githubReady ? 'Gerenciar' : 'Conectar'}
+            isOpen={isOpen('github', githubReady)}
+            onToggle={() => toggle('github', githubReady)}
+          >
+            <GitHubConnectionCard github={github} />
+          </IntegrationRow>
+          <IntegrationRow
+            id="claude"
+            logo={ClaudeLogo}
+            name="Claude Code"
+            purpose="Roda as tarefas com o seu login do claude. O Orkio não guarda chave."
+            status={claudeStatus(claude)}
+            action={claudeReady ? 'Gerenciar' : 'Configurar'}
+            isOpen={isOpen('claude', claudeReady)}
+            onToggle={() => toggle('claude', claudeReady)}
+            sub={
+              <IntegrationRow
+                id="plugins"
+                logo={null}
+                name="Plugins e comandos"
+                purpose={
+                  precheck?.pluginVersion
+                    ? `alva-flow ${precheck.pluginVersion}`
+                    : 'alva-flow não encontrado (opcional)'
+                }
+                status={
+                  precheck?.pluginVersion
+                    ? { label: 'Encontrado', tone: 'success' }
+                    : { label: precheck ? 'Opcional' : 'Verificando', tone: 'neutral' }
+                }
+                action="Ver no Claude Code"
+                isOpen={false}
+                onToggle={() => toggle('claude', false)}
+              />
+            }
+          >
+            <ClaudeCodeCard />
+          </IntegrationRow>
+          <IntegrationRow
+            id="gh"
+            logo={TerminalIcon}
+            name="GitHub CLI (opcional)"
+            purpose="Usado pelo /alva-flow:pr para abrir a PR."
+            status={ghStatus}
+            action="Como resolver"
+            isOpen={open['gh'] ?? false}
+            onToggle={() => toggle('gh', true)}
+          >
+            {gh?.fix ? (
+              <Text type="supporting">
+                Rode no terminal: <Code>{gh.fix}</Code>
+              </Text>
+            ) : (
+              <Text type="supporting">Nada a fazer: o gh está pronto.</Text>
+            )}
+          </IntegrationRow>
         </VStack>
-        {/* Bancos do Notion logo depois da conexão: é o passo seguinte do Notion. */}
-        <VStack data-integration="notion-workspace">
-          <NotionWorkspaceCard
-            workspace={workspace}
-            notionStatus={notion.status}
-            {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
-          />
-        </VStack>
-        <VStack data-integration="github">
-          <GitHubConnectionCard github={github} />
-        </VStack>
-        <VStack data-integration="claude">
-          <ClaudeCodeCard />
-        </VStack>
-      </VStack>
+      </Card>
     </VStack>
   )
 }
 
-interface CatalogEntry {
-  id: string
-  icon: SvgIcon
-  name: string
-  category: string
-  text: string
-  status: { label: string; tone: StatusTone }
-  /** Pronto: a ação vira "Gerenciar"; senão, "Conectar"/"Configurar". */
-  ready: boolean
+function workspaceSummary(s: NotionWorkspaceStatus | null): string {
+  const c = s?.config
+  if (!c) return 'Quais bancos são Projetos e Tarefas, e quais campos o Orkio lê.'
+  const fields = Object.values(c.mapping).filter(Boolean).length
+  return `Projetos → ${c.projectsDataSource.name} · Tarefas → ${c.tasksDataSource.name} · ${fields} de 6 campos ligados`
 }
 
-/**
- * Linha do catálogo (fase 7): logo, nome, categoria, estado e a ação, que leva ao card de
- * configuração logo abaixo (o fluxo de conexão continua lá).
- */
-function CatalogRow({ entry }: { entry: CatalogEntry }): React.JSX.Element {
-  const action = entry.ready
-    ? 'Gerenciar'
-    : entry.id === 'notion-workspace' || entry.id === 'claude'
-      ? 'Configurar'
-      : 'Conectar'
-  const goTo = (): void => {
-    const card = document.querySelector<HTMLElement>(`[data-integration="${entry.id}"]`)
-    card?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    card?.querySelector<HTMLElement>('button, input, a[href]')?.focus({ preventScroll: true })
-  }
-  return (
-    <Card padding={3} role="listitem" aria-label={entry.name} data-testid={`catalog-${entry.id}`}>
-      <HStack gap={3} vAlign="center">
-        <Icon icon={entry.icon} size="lg" />
-        <StackItem size="fill">
-          <VStack gap={0.5}>
-            <HStack gap={2} vAlign="center">
-              <Text weight="semibold">{entry.name}</Text>
-              <Text type="supporting" color="secondary">
-                {entry.category}
-              </Text>
-            </HStack>
-            <Text type="supporting" color="secondary" maxLines={1}>
-              {entry.text}
-            </Text>
-            <StatusToken label={entry.status.label} tone={entry.status.tone} />
-          </VStack>
-        </StackItem>
-        <Button
-          size="sm"
-          variant="secondary"
-          label={action}
-          aria-label={`${action} ${entry.name}`}
-          onClick={goTo}
-        />
-      </HStack>
-    </Card>
-  )
+/** Pré-checagem do alva-flow do projeto atual (gh, plugin); só leitura. */
+function usePrecheck(projectId: string | null): AlvaPrecheck | null {
+  const [state, setState] = useState<{ projectId: string; value: AlvaPrecheck } | null>(null)
+  useEffect(() => {
+    if (!projectId) return
+    let alive = true
+    void window.orkio.alva
+      .precheck(projectId)
+      .then((r) => {
+        if (alive && r.ok) setState({ projectId, value: r.value })
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [projectId])
+  return state && state.projectId === projectId ? state.value : null
 }
 
-function connectionStatus(s: ConnectionStatus | null): CatalogEntry['status'] {
+function connectionStatus(s: ConnectionStatus | null): { label: string; tone: StatusTone } {
   if (!s) return { label: 'Verificando', tone: 'neutral' }
   switch (s.state) {
     case 'connected':
@@ -221,7 +231,7 @@ function connectionStatus(s: ConnectionStatus | null): CatalogEntry['status'] {
 function workspaceStatus(
   s: NotionWorkspaceStatus | null,
   notion: ConnectionStatus | null
-): CatalogEntry['status'] {
+): { label: string; tone: StatusTone } {
   if (notion?.state !== 'connected') return { label: 'Conecte o Notion antes', tone: 'neutral' }
   if (!s) return { label: 'Verificando', tone: 'neutral' }
   if (!s.config) return { label: 'Falta escolher os bancos', tone: 'warning' }
@@ -239,7 +249,7 @@ function workspaceStatus(
   }
 }
 
-function claudeStatus(s: ClaudeCodeStatus | null): CatalogEntry['status'] {
+function claudeStatus(s: ClaudeCodeStatus | null): { label: string; tone: StatusTone } {
   if (!s) return { label: 'Verificando', tone: 'neutral' }
   if (!s.installed) return { label: 'Não encontrado', tone: 'warning' }
   if (!s.meetsMinimum) return { label: `Atualize para ${s.minimumVersion}`, tone: 'warning' }

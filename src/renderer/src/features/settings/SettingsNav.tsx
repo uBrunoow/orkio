@@ -56,7 +56,7 @@ export function SettingsLayout({
 }): React.JSX.Element {
   return (
     <HStack gap={6} vAlign="start" height="100%">
-      <VStack width="calc(var(--spacing-12) * 5)">
+      <VStack>
         <SideNav aria-label="Configurações">
           {GROUPS.filter((g) => !g.project || projectName).map((g) => (
             <SideNavSection
