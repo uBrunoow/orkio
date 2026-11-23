@@ -24,6 +24,7 @@ import { PageHeader } from '../../components/PageHeader'
 import { ProjectNotionSection } from '../notion-workspace/ProjectNotionSection'
 import { useNotionWorkspace } from '../notion-workspace/useNotionWorkspace'
 import { ActionLink } from './ActionLink'
+import { missingSteps, projectChecks, type ProjectCheck } from './project-checks'
 import { AddProjectPanel } from './AddProjectPanel'
 import { useProjects } from './useProjects'
 import { PAGE_WIDTH } from '../../components/page-width'
@@ -44,13 +45,17 @@ const HEALTH: Record<ProjectHealthState, { label: string; color: TokenColor }> =
 
 export function ProjectsPage({
   onOpenIntegrations,
-  onOpenBoard
+  onOpenBoard,
+  onContinueSetup
 }: {
   onOpenIntegrations(): void
   /** Abre o Quadro do projeto (e o torna o projeto atual). */
   onOpenBoard(projectId: string): void
+  /** Primeiros passos só com o que falta para este projeto. */
+  onContinueSetup(projectId: string): void
 }): React.JSX.Element {
   const projects = useProjects()
+  const boardStages = useBoardStages(projects.projects)
   const [picking, setPicking] = useState(false)
   const [selection, setSelection] = useState<ProjectSelection | null>(null)
   const [pickError, setPickError] = useState<ProjectError | null>(null)
@@ -155,6 +160,12 @@ export function ProjectsPage({
               onRelocate={() => projects.relocate(project.id)}
               onRemove={() => projects.remove(project.id)}
               onOpenBoard={() => onOpenBoard(project.id)}
+              onContinueSetup={() => onContinueSetup(project.id)}
+              checks={projectChecks({
+                project,
+                boardStages: boardStages[project.id] ?? null,
+                precheck: null
+              })}
               notion={
                 notionWorkspace?.config ? (
                   <ProjectNotionSection
@@ -178,12 +189,16 @@ function ProjectRow({
   onRelocate,
   onRemove,
   onOpenBoard,
+  onContinueSetup,
+  checks,
   notion
 }: {
   project: ProjectView
   onRelocate(): Promise<ProjectMutationResult>
   onRemove(): Promise<boolean>
   onOpenBoard(): void
+  onContinueSetup(): void
+  checks: ProjectCheck[]
   /** Vínculo com o Notion e tarefas (quando os bancos estão configurados). */
   notion: React.ReactNode
 }): React.JSX.Element {
@@ -243,6 +258,15 @@ function ProjectRow({
           <Text type="supporting" color="secondary">
             {project.localPath}
           </Text>
+          <HStack gap={3} vAlign="center" wrap="wrap" data-testid="project-checks">
+            {checks.map((c) => (
+              <StatusToken
+                key={c.id}
+                label={c.label}
+                tone={c.state === 'ok' ? 'success' : c.state === 'warning' ? 'warning' : 'danger'}
+              />
+            ))}
+          </HStack>
           {project.health.message && project.health.state !== 'ok' && (
             <HStack gap={2} vAlign="center" wrap="wrap">
               <Text type="supporting">{project.health.message}</Text>
@@ -302,15 +326,15 @@ function ProjectRow({
                 isDisabled={busy !== null && busy !== 'relocate'}
                 onClick={() => void relocate()}
               />
+            ) : missingSteps(checks) > 0 ? (
+              <Button variant="primary" label="Continuar configuração" onClick={onContinueSetup} />
             ) : (
-              project.notionProject && (
-                <Button
-                  variant="secondary"
-                  label="Abrir quadro"
-                  icon={<Icon icon={BoardIcon} />}
-                  onClick={onOpenBoard}
-                />
-              )
+              <Button
+                variant="secondary"
+                label="Abrir quadro"
+                icon={<Icon icon={BoardIcon} />}
+                onClick={onOpenBoard}
+              />
             )}
             <MoreMenu
               label={`Mais ações de ${project.name}`}
@@ -353,4 +377,30 @@ function useGitHubConnected(refreshKey: number): boolean | null {
     }
   }, [refreshKey])
   return connected
+}
+
+/** Colunas do quadro de cada projeto vinculado (`null` = sem quadro). Lê do main (cache). */
+function useBoardStages(projects: ProjectView[] | null): Record<string, number | null> {
+  const [stages, setStages] = useState<Record<string, number | null>>({})
+  const ids = (projects ?? [])
+    .filter((p) => p.notionProject)
+    .map((p) => p.id)
+    .join(',')
+  useEffect(() => {
+    let active = true
+    for (const id of ids ? ids.split(',') : []) {
+      void window.orkio.board
+        .get(id)
+        .then((r) => {
+          if (active && r.ok) {
+            setStages((s) => ({ ...s, [id]: r.value.config?.stages.length ?? null }))
+          }
+        })
+        .catch(() => undefined)
+    }
+    return () => {
+      active = false
+    }
+  }, [ids])
+  return stages
 }

@@ -234,6 +234,10 @@ export function App(): React.JSX.Element | null {
                 chooseProject(projectId)
                 navigate({ name: 'board', projectId })
               }}
+              onContinueSetup={(projectId) => {
+                chooseProject(projectId)
+                navigate({ name: 'setup', projectId })
+              }}
             />
           )
           break
