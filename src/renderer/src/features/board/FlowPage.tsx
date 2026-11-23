@@ -1,3 +1,4 @@
+import { Divider } from '@astryxdesign/core/Divider'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
@@ -48,7 +49,15 @@ import { Alert } from '../../components/Alert'
 import { SaveBar } from '../../components/SaveBar'
 import { plural } from '../../lib/format'
 import { DeliverySection } from '../task-flows/DeliverySection'
-import { ArrowDownIcon, ArrowUpIcon, BackIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  BackIcon,
+  DotIcon,
+  PlusIcon,
+  TrashIcon
+} from '../../components/icons'
+import { stageDotColor } from './BoardColumns'
 import { useProjectActivity } from '../../components/SentenceDetail'
 import { RuleDetail } from './RuleDetail'
 import { Tab, TabList } from '@astryxdesign/core/TabList'
@@ -443,6 +452,13 @@ export function FlowPage({
     ? draft.rules.filter((r) => r.action.type === 'move_to_stage' && r.action.stageId === stage.id)
     : []
   const shownRule = viewingRule ? (draft.rules.find((r) => r.id === viewingRule) ?? null) : null
+  /** Fluxo que a coluna dispara ao entrar (para a tabela das colunas). */
+  const onEnterFlow = (stageId: string): string | null => {
+    const b = (draft.bindings ?? []).find(
+      (x) => x.stageId === stageId && x.enabled && x.mode === 'on_enter'
+    )
+    return b ? (taskFlows?.flows.find((f) => f.id === b.flowId)?.name ?? null) : null
+  }
   const stageErrors = (id: string): number => errors.filter((i) => i.stageId === id).length
 
   return (
@@ -480,18 +496,34 @@ export function FlowPage({
       </TabList>
 
       {tab === 'columns' && (
-        <HStack gap={4} vAlign="start">
-          <Card
-            role="region"
-            aria-label="Etapas"
-            padding={3}
-            width="calc(var(--spacing-12) * 5)"
-            // Não encolhe quando o detalhe da automação ocupa a coluna ao lado.
-            style={{ flexShrink: 0 }}
-          >
-            <VStack gap={2}>
-              <Heading level={2}>Etapas</Heading>
-              <List density="compact" aria-label="Etapas do fluxo">
+        <VStack gap={4}>
+          {/* Tabela das colunas (mockup): escolher uma linha abre o editor dela embaixo. */}
+          <Card role="region" aria-label="Etapas" padding={0}>
+            <VStack>
+              <HStack gap={4} paddingInline={4} paddingBlock={2} aria-hidden="true">
+                <StackItem size="fill">
+                  <Text type="supporting" color="secondary">
+                    Coluna
+                  </Text>
+                </StackItem>
+                <HStack width="calc(var(--spacing-12) * 3)">
+                  <Text type="supporting" color="secondary">
+                    Status no Notion
+                  </Text>
+                </HStack>
+                <HStack width="calc(var(--spacing-12) * 3)">
+                  <Text type="supporting" color="secondary">
+                    Ao entrar, roda
+                  </Text>
+                </HStack>
+                <HStack width="var(--spacing-12)" hAlign="end">
+                  <Text type="supporting" color="secondary">
+                    Tarefas
+                  </Text>
+                </HStack>
+              </HStack>
+              <Divider />
+              <List density="compact" hasDividers aria-label="Etapas do fluxo">
                 {draft.stages.map((st, index) => {
                   const label = st.name || `etapa ${index + 1}`
                   const count = taskCounts[st.id] ?? 0
@@ -502,29 +534,48 @@ export function FlowPage({
                       as="li"
                       key={st.id}
                       aria-label={`Etapa ${label}`}
+                      startContent={<Icon icon={DotIcon} size="sm" color={stageDotColor(st)} />}
                       label={label}
-                      description={`${status ? `Notion: ${status}` : 'Sem status'} · ${plural(count, 'tarefa', 'tarefas')}`}
+                      endContent={
+                        <HStack gap={4} vAlign="center">
+                          {problems > 0 && (
+                            <StatusToken tone="danger" label={plural(problems, 'erro', 'erros')} />
+                          )}
+                          <HStack width="calc(var(--spacing-12) * 3)">
+                            <Text className="orkio-mono" color="secondary" maxLines={1}>
+                              {status ?? 'Sem status'}
+                            </Text>
+                          </HStack>
+                          <HStack width="calc(var(--spacing-12) * 3)">
+                            {onEnterFlow(st.id) ? (
+                              <Token
+                                size="sm"
+                                color="orange"
+                                label={onEnterFlow(st.id)!}
+                                className="orkio-mono"
+                              />
+                            ) : (
+                              <Text color="secondary">—</Text>
+                            )}
+                          </HStack>
+                          <HStack width="var(--spacing-12)" hAlign="end">
+                            <Text color="secondary" hasTabularNumbers>
+                              {count}
+                            </Text>
+                          </HStack>
+                        </HStack>
+                      }
                       isSelected={stage?.id === st.id}
                       onClick={() => {
                         setSelectedStage(st.id)
                         setEditing(null)
                         setViewingRule(null)
                       }}
-                      {...(problems > 0
-                        ? {
-                            endContent: (
-                              <StatusToken
-                                tone="danger"
-                                label={plural(problems, 'erro', 'erros')}
-                              />
-                            )
-                          }
-                        : {})}
                     />
                   )
                 })}
               </List>
-              <HStack>
+              <HStack padding={2}>
                 <Button
                   size="sm"
                   variant="ghost"
@@ -536,7 +587,7 @@ export function FlowPage({
             </VStack>
           </Card>
 
-          <StackItem size="fill">
+          <VStack>
             <VStack data-testid="rule-detail-anchor" />
             {shownRule ? (
               <VStack gap={2}>
@@ -693,8 +744,8 @@ export function FlowPage({
                 </Card>
               )
             )}
-          </StackItem>
-        </HStack>
+          </VStack>
+        </VStack>
       )}
 
       {tab === 'rules' && (

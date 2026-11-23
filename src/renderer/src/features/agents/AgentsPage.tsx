@@ -1,7 +1,9 @@
+import { ScreenTitle } from '../../components/ScreenTitle'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Card } from '@astryxdesign/core/Card'
-import { Code } from '@astryxdesign/core/Code'
+import { Divider } from '@astryxdesign/core/Divider'
+import { IconButton } from '@astryxdesign/core/IconButton'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
@@ -42,9 +44,9 @@ import {
 } from '../../../../shared/agent'
 import type { ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
-import { PageHeader } from '../../components/PageHeader'
+import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
 import { isTextField } from '../../app/shortcuts'
-import { BoardIcon, ListIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { CopyIcon, EditIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { AgentAvatar } from './AgentAvatar'
 import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
 import { useAgentBadges } from './agent-badges'
@@ -165,17 +167,27 @@ export function AgentsPage({
 
   if (projects === null) return <Skeleton height={240} aria-label="Carregando agentes" />
 
+  const active = (state?.agents ?? []).filter((a) => a.status !== 'archived').length
   const header = (
-    <PageHeader
-      title="Agentes"
-      subtitle="Colegas de IA com nome, papel e instruções que pegam tarefas do quadro, dentro das regras do Orkio."
-      action={
+    <>
+      <ScreenBarStart>
+        <HStack gap={2} vAlign="center">
+          <ScreenTitle look={5}>Agentes</ScreenTitle>
+          {state && (
+            <Text type="supporting" color="secondary" hasTabularNumbers>
+              {active}
+            </Text>
+          )}
+        </HStack>
+      </ScreenBarStart>
+      <ScreenBarEnd>
         <HStack gap={2} vAlign="center">
           {projects.length > 1 && (
             <Selector
               label="Projeto"
               isLabelHidden
-              width={240}
+              size="sm"
+              width={200}
               options={projects.map((p) => ({ value: p.id, label: p.name }))}
               {...(projectId ? { value: projectId } : {})}
               onChange={(value: string) => {
@@ -187,6 +199,7 @@ export function AgentsPage({
           )}
           {projectId && onOpenOrchestrator && (
             <Button
+              size="sm"
               variant="secondary"
               label={`Orquestrador: ${orchestrator?.config.enabled ? 'ligado' : 'desligado'}`}
               onClick={onOpenOrchestrator}
@@ -194,6 +207,7 @@ export function AgentsPage({
           )}
           {projectId && (
             <Button
+              size="sm"
               variant="primary"
               label="Novo agente"
               icon={<Icon icon={PlusIcon} />}
@@ -204,8 +218,8 @@ export function AgentsPage({
             />
           )}
         </HStack>
-      }
-    />
+      </ScreenBarEnd>
+    </>
   )
 
   if (!projectId) {
@@ -310,12 +324,6 @@ export function AgentsPage({
   return (
     <VStack gap={5} role="region" aria-label="Agentes">
       {header}
-      <Text type="supporting">
-        O Orkio roda o Claude Code instalado por você, sem modificação e com o seu login. Um agente
-        é um conjunto de instruções, modelo, fluxo preferido e limites por cima disso: ele nunca
-        ganha permissões. Push, PR e gates continuam pelas regras do Orkio. O Orkio não usa o Agent
-        SDK nem guarda credenciais da Anthropic.
-      </Text>
       {message &&
         (message.tone === 'error' ? (
           <Alert tone="danger">{message.text}</Alert>
@@ -362,6 +370,7 @@ export function AgentsPage({
                 onChange={setQuery}
               />
             </HStack>
+            <StackItem size="fill" />
             <SegmentedControl
               label="Filtrar por estado"
               size="sm"
@@ -378,15 +387,14 @@ export function AgentsPage({
                 />
               ))}
             </SegmentedControl>
-            <StackItem size="fill" />
             <SegmentedControl
               label="Visualização dos agentes"
               size="sm"
               value={layout}
               onChange={(v) => setLayout(v === 'rows' ? 'rows' : 'cards')}
             >
-              <SegmentedControlItem value="cards" label="Cards" icon={<Icon icon={BoardIcon} />} />
-              <SegmentedControlItem value="rows" label="Linhas" icon={<Icon icon={ListIcon} />} />
+              <SegmentedControlItem value="rows" label="Linhas" />
+              <SegmentedControlItem value="cards" label="Cards" />
             </SegmentedControl>
           </HStack>
           {visibleAgents.length === 0 ? (
@@ -400,16 +408,46 @@ export function AgentsPage({
               ))}
             </List>
           ) : (
-            <Grid columns={{ minWidth: 280 }} gap={3} role="list" aria-label="Lista de agentes">
-              {visibleAgents.map((a) => (
-                <AgentCard key={a.key} view={a} state={state} {...handlersFor(a)} />
-              ))}
-            </Grid>
+            <VStack gap={5} role="list" aria-label="Lista de agentes">
+              {[
+                {
+                  title: 'Trabalhando agora',
+                  agents: visibleAgents.filter((a) => allNow.get(a.key)!.filter !== 'stopped')
+                },
+                {
+                  title: filter === 'archived' ? 'Arquivados' : 'Disponíveis',
+                  agents: visibleAgents.filter((a) => allNow.get(a.key)!.filter === 'stopped')
+                }
+              ]
+                .filter((g) => g.agents.length > 0)
+                .map((g) => (
+                  <VStack key={g.title} gap={3} role="presentation">
+                    <HStack gap={2} vAlign="center" role="presentation">
+                      <Text weight="medium">{g.title}</Text>
+                      <Text type="supporting" color="secondary" hasTabularNumbers>
+                        {g.agents.length}
+                      </Text>
+                    </HStack>
+                    <Grid columns={{ minWidth: 280 }} gap={3} role="presentation">
+                      {g.agents.map((a) => (
+                        <AgentCard key={a.key} view={a} state={state} {...handlersFor(a)} />
+                      ))}
+                    </Grid>
+                  </VStack>
+                ))}
+            </VStack>
           )}
         </VStack>
       )}
     </VStack>
   )
+}
+
+/** Onde o perfil mora (etiqueta do card quando o agente está livre). */
+const SCOPE_TAG: Record<AgentView['scope'], string> = {
+  builtin: 'Embutido',
+  repo: '.orkio/agents',
+  local: 'Este computador'
 }
 
 /** "Revisor(a) · Embutido": o catálogo do Orkio se distingue dos perfis do time. */
@@ -457,8 +495,9 @@ function AgentDetails({
   isReviewing,
   busy,
   onReview,
-  onApprove
-}: { view: AgentView; state: AgentsState } & AgentHandlers): React.JSX.Element {
+  onApprove,
+  compact = false
+}: { view: AgentView; state: AgentsState; compact?: boolean } & AgentHandlers): React.JSX.Element {
   const p = view.profile
   const name = p?.name ?? view.id
   const flowName = p?.flow ? (state.flows.find((f) => f.id === p.flow)?.name ?? p.flow) : null
@@ -469,9 +508,11 @@ function AgentDetails({
   ].filter(Boolean)
   return (
     <VStack gap={2}>
-      <Text type="supporting" color="secondary">
-        {details.join(' · ')}
-      </Text>
+      {!compact && (
+        <Text type="supporting" color="secondary">
+          {details.join(' · ')}
+        </Text>
+      )}
       {view.errors.map((e) => (
         <Alert key={e} tone="danger">
           {e}
@@ -531,11 +572,23 @@ function AgentActions({
         <Button size="sm" variant="secondary" label={`Revisar ${name}`} onClick={onReview} />
       )}
       {p && view.scope === 'builtin' && (
-        <Button size="sm" variant="ghost" label={`Duplicar ${name}`} onClick={onDuplicate} />
+        <IconButton
+          size="sm"
+          variant="ghost"
+          label={`Duplicar ${name}`}
+          icon={<Icon icon={CopyIcon} />}
+          onClick={onDuplicate}
+        />
       )}
       {p && view.scope !== 'builtin' && (
         <>
-          <Button size="sm" variant="ghost" label={`Editar ${name}`} onClick={onEdit} />
+          <IconButton
+            size="sm"
+            variant="ghost"
+            label={`Editar ${name}`}
+            icon={<Icon icon={EditIcon} />}
+            onClick={onEdit}
+          />
           <MoreMenu
             label={`Ações de ${name}`}
             size="sm"
@@ -611,7 +664,6 @@ function AgentCard(
               </Text>
             </VStack>
           </StackItem>
-          {view.scope === 'builtin' && <Token label="Embutido" size="sm" />}
           {view.status !== 'ready' && (
             <StatusToken tone={toneOf(status.color)} label={status.label} />
           )}
@@ -626,12 +678,22 @@ function AgentCard(
           />
         </HStack>
         <StackItem size="fill">
-          <AgentDetails {...props} />
+          <AgentDetails {...props} compact />
         </StackItem>
+        <Divider />
         <HStack gap={2} vAlign="center" wrap="wrap">
           {now.tasks.slice(0, 3).map((t) => (
-            <Code key={t.taskId}>{`${t.hot ? '● ' : ''}${t.displayId ?? 'tarefa'}`}</Code>
+            <Token
+              key={t.taskId}
+              size="sm"
+              color={t.hot ? 'orange' : 'default'}
+              label={t.displayId ?? 'tarefa'}
+              className="orkio-mono"
+            />
           ))}
+          {now.tasks.length === 0 && (
+            <Token size="sm" label={SCOPE_TAG[view.scope]} className="orkio-mono" />
+          )}
           <StackItem size="fill" />
           {(capacity || cost) && (
             <Text type="supporting" color="secondary">

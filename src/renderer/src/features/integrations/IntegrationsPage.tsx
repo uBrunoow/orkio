@@ -1,3 +1,5 @@
+import { StackItem } from '@astryxdesign/core/Stack'
+import { Divider } from '@astryxdesign/core/Divider'
 import { useEffect, useState } from 'react'
 import { Card } from '@astryxdesign/core/Card'
 import { Code } from '@astryxdesign/core/Code'
@@ -112,6 +114,18 @@ export function IntegrationsPage({
       )}
 
       <Card padding={0}>
+        {/* Cabeçalho das colunas (só visual: cada linha já diz o serviço e o estado). */}
+        <HStack gap={4} paddingInline={4} paddingBlock={2} aria-hidden="true">
+          <StackItem size="fill">
+            <Text type="supporting" color="secondary">
+              Serviço
+            </Text>
+          </StackItem>
+          <Text type="supporting" color="secondary">
+            Estado
+          </Text>
+        </HStack>
+        <Divider />
         <VStack role="list" aria-label="Catálogo de integrações">
           <IntegrationRow
             id="notion"

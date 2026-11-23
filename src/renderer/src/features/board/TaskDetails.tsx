@@ -312,7 +312,7 @@ export function StageSelector({
           if (value !== card.stageId) onMove(value)
         }}
       />
-      {
+      {!compact && (
         <HStack gap={2} wrap="wrap" vAlign="center">
           {card.status && (
             <Text type="supporting" color="secondary">
@@ -327,7 +327,10 @@ export function StageSelector({
           )}
           {card.sync.state === 'pending' && <StatusToken tone="warning" label="Sincronizando" />}
         </HStack>
-      }
+      )}
+      {compact && card.sync.state === 'pending' && (
+        <StatusToken tone="warning" label="Sincronizando" />
+      )}
       {card.sync.state === 'pending' && card.sync.message && (
         <Text type="supporting">{card.sync.message}</Text>
       )}

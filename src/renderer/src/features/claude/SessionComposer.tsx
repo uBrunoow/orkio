@@ -142,33 +142,20 @@ export function SessionComposer({
           ))}
         </List>
       )}
-      <TextArea
-        ref={ref}
-        label={`Mensagem para ${who}`}
-        isLabelHidden
-        placeholder={`Escreva para ${who}… ( / para comandos)`}
-        value={text}
-        onChange={setText}
-        rows={2}
-        isDisabled={!!blocked && !activeRunId}
-        {...(blocked && !activeRunId ? { disabledMessage: blocked } : {})}
-      />
-      <HStack gap={2} vAlign="center" wrap="wrap">
+      <HStack gap={2} vAlign="end">
         <StackItem size="fill">
-          <Text type="supporting" color="secondary" data-testid="session-context">
-            {flowRunning
-              ? `Piloto automático${autopilotStep ? `: ${autopilotStep}` : ''}. Quando ele parar ou pedir algo, responda aqui.`
-              : activeRunId
-                ? 'O Claude está trabalhando. A próxima mensagem continua desta sessão.'
-                : resumes
-                  ? `Continua a sessão${latest?.command ? ` de /${latest.command}` : ''} na pasta de trabalho da tarefa.`
-                  : 'Começa uma sessão nova com o resumo da tarefa no Notion.'}
-            {!activeRunId && !blocked ? ` ${SEND_HINT}` : ''}
-          </Text>
+          <TextArea
+            ref={ref}
+            label={`Mensagem para ${who}`}
+            isLabelHidden
+            placeholder={`Escreva para ${who}… ( / para comandos)`}
+            value={text}
+            onChange={setText}
+            rows={1}
+            isDisabled={!!blocked && !activeRunId}
+            {...(blocked && !activeRunId ? { disabledMessage: blocked } : {})}
+          />
         </StackItem>
-        {!activeRunId && !flowRunning && (
-          <Button size="sm" variant="ghost" label="Nova sessão…" onClick={onNewSession} />
-        )}
         {activeRunId ? (
           <Button
             size="sm"
@@ -187,6 +174,23 @@ export function SessionComposer({
             isDisabled={!text.trim() || !!blocked}
             onClick={() => void send()}
           />
+        )}
+      </HStack>
+      <HStack gap={2} vAlign="center" wrap="wrap">
+        <StackItem size="fill">
+          <Text type="supporting" color="secondary" data-testid="session-context">
+            {flowRunning
+              ? `Piloto automático${autopilotStep ? `: ${autopilotStep}` : ''}. Quando ele parar ou pedir algo, responda aqui.`
+              : activeRunId
+                ? 'O Claude está trabalhando. A próxima mensagem continua desta sessão.'
+                : resumes
+                  ? `Continua a sessão${latest?.command ? ` de /${latest.command}` : ''} na pasta de trabalho da tarefa.`
+                  : 'Começa uma sessão nova com o resumo da tarefa no Notion.'}
+            {!activeRunId && !blocked ? ` ${SEND_HINT}` : ''}
+          </Text>
+        </StackItem>
+        {!activeRunId && !flowRunning && (
+          <Button size="sm" variant="ghost" label="Nova sessão…" onClick={onNewSession} />
         )}
       </HStack>
       {error && <Alert tone="danger">{error}</Alert>}

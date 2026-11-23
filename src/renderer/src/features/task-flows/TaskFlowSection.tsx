@@ -210,7 +210,7 @@ export function TaskFlowSection({
     <VStack gap={3} role="region" aria-label="Fluxo da tarefa">
       <HStack gap={2} vAlign="center" wrap="wrap">
         <Icon icon={AutomationIcon} />
-        <Heading level={3}>
+        <Heading level={5} accessibilityLevel={3}>
           {run ? `Fluxo: ${run.flowName}${run.agent ? ` · ${run.agent.name}` : ''}` : 'Fluxo'}
         </Heading>
         {run && (
@@ -324,7 +324,7 @@ export function TaskFlowSection({
       )}
 
       {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && !run.confirm && (
-        <Card role="group" aria-label="Ação pendente do fluxo">
+        <Card variant="yellow" role="group" aria-label="Ação pendente do fluxo">
           <VStack gap={2}>
             <Text weight="semibold">{current.name}</Text>
             <Text>{pending[current.action] ?? 'Esta ação ainda não existe no Orkio.'}</Text>
@@ -545,7 +545,7 @@ function ChoiceCard({
 }): React.JSX.Element {
   const [value, setValue] = useState('')
   return (
-    <Card role="group" aria-label="Escolha do fluxo">
+    <Card variant="yellow" role="group" aria-label="Escolha do fluxo">
       <VStack gap={2}>
         <RadioList label={prompt} value={value} onChange={setValue}>
           {options.map((o) => (
@@ -613,7 +613,7 @@ function GateCard({
   }, [projectId, taskId, show])
 
   return (
-    <Card role="group" aria-label="Aprovação do fluxo">
+    <Card variant="yellow" role="group" aria-label="Aprovação do fluxo">
       <VStack gap={2}>
         <Text weight="semibold">{message}</Text>
         {show === 'backlog' && <BacklogDocumentView projectId={projectId} taskId={taskId} />}

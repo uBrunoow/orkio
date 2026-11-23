@@ -137,7 +137,6 @@ export const TodoIcon = adapt(IconCircleDashed)
 export const ProblemIcon = adapt(IconAlertCircle)
 export const CopyIcon = adapt(IconCopy)
 
-
 /** Ponto de estado colorido pelo tema (itens da lista lateral, onde o ícone não recebe cor). */
 function toneDot(color: string, name: string): SvgIcon {
   const Dot: SvgIcon = (props) => (

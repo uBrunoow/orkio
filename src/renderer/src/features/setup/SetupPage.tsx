@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Code } from '@astryxdesign/core/Code'
+import { Divider } from '@astryxdesign/core/Divider'
 import { Heading } from '@astryxdesign/core/Heading'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
@@ -326,6 +327,7 @@ export function SetupPage({
             ))}
           </List>
         </VStack>
+        <Divider orientation="vertical" />
         <StackItem size="fill">
           <ScrollableArea label="Passo atual" height="100%" padding={8}>
             <VStack

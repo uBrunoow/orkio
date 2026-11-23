@@ -193,7 +193,8 @@ export const IPC_CHANNELS = {
     listProjectChoices: 'notion-workspace:list-project-choices',
     link: 'notion-workspace:link',
     unlink: 'notion-workspace:unlink',
-    listTasks: 'notion-workspace:list-tasks'
+    listTasks: 'notion-workspace:list-tasks',
+    searchTasks: 'notion-workspace:search-tasks'
   },
   projects: {
     list: 'projects:list',
@@ -397,6 +398,17 @@ export interface NotionTask {
   priority: { name: string; color: NotionColor } | null
   /** Nomes dos responsáveis (se mapeado). */
   assignees: string[]
+}
+
+/** Tarefa achada na busca (banco de Tarefas inteiro): com o projeto local, se vinculado. */
+export interface NotionTaskHit extends NotionTask {
+  /** Projeto do Orkio vinculado à página de Projetos da tarefa; `null` se nenhum. */
+  projectId: string | null
+  projectName: string | null
+}
+
+export interface NotionTaskSearchResult {
+  tasks: NotionTaskHit[]
 }
 
 export interface NotionTasksResult {
@@ -938,6 +950,11 @@ export interface OrkioApi {
       projectId: string,
       options?: { force?: boolean }
     ): Promise<NotionResult<NotionTasksResult>>
+    /**
+     * Busca no banco de Tarefas inteiro (qualquer responsável, qualquer projeto) por título ou ID.
+     * Texto vazio = as editadas mais recentemente.
+     */
+    searchTasks(query: string): Promise<NotionResult<NotionTaskSearchResult>>
   }
   projects: {
     /** Lista rápida (só checagens locais). */

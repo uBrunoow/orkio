@@ -4,6 +4,7 @@ import { Divider } from '@astryxdesign/core/Divider'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
 import { IconButton } from '@astryxdesign/core/IconButton'
+import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Text } from '@astryxdesign/core/Text'
@@ -128,134 +129,146 @@ export function TaskSession({
   }
 
   return (
-    <VStack gap={4} role="region" aria-label="Sessão da tarefa">
-      {!visible ? (
-        <Skeleton height={60} aria-label="Carregando a sessão" />
-      ) : (
-        <VStack gap={3} role="list" aria-label="Conversa da tarefa">
-          {visible.hidden > 0 && (
-            <HStack hAlign="center">
-              <Button
-                size="sm"
-                variant="ghost"
-                label={`Mostrar ${visible.hidden} ${visible.hidden === 1 ? 'item anterior' : 'itens anteriores'}`}
-                onClick={() => setShowAll(true)}
-              />
-            </HStack>
-          )}
-          {visible.items.length === 0 && (
-            <Text type="supporting" color="secondary">
-              Nada aconteceu nesta tarefa ainda. Escreva abaixo para o Claude começar.
-            </Text>
-          )}
-          {visible.items.map((item) => (
-            <SessionRow
-              key={
-                item.kind === 'run' && focusRun?.runId === item.run.id
-                  ? `${item.key}:${focusRun.nonce}`
-                  : item.key
-              }
-              focused={item.kind === 'run' && focusRun?.runId === item.run.id}
-              projectId={projectId}
-              showDocument={
-                item.kind === 'run' && docRuns.has(item.run.id)
-                  ? item.run.id === docOpenId
-                    ? 'open'
-                    : true
-                  : false
-              }
-              changesOpen={item.kind === 'run' && item.run.id === changesOpenId}
-              origin={item.kind === 'run' ? (flowOrigins?.get(item.run.id) ?? null) : null}
-              item={item}
-              agent={agent}
-              stageName={stageName}
-              liveLog={item.kind === 'run' && item.run.id === latestId ? liveLog : null}
-              {...(canRerun ? { onRerun: (run: AgentRunView) => void openNewSession(run) } : {})}
-            />
-          ))}
-        </VStack>
-      )}
-
-      {flowSlot}
-
-      {active && pending.length > 0 && (
-        <VStack gap={3} id={`claude-waiting-${taskId}`}>
-          {pending.map((p) =>
-            p.kind === 'permission' ? (
-              <PermissionCard key={p.requestId} runId={active.id} request={p} />
+    <VStack role="region" aria-label="Sessão da tarefa" height="100%">
+      <StackItem size="fill">
+        <ScrollableArea label="Conversa da tarefa (rolagem)" height="100%">
+          <VStack gap={4} paddingInline={6} paddingBlock={5}>
+            {!visible ? (
+              <Skeleton height={60} aria-label="Carregando a sessão" />
             ) : (
-              <QuestionCard
-                key={p.requestId}
-                questions={p.questions}
-                onAnswer={(answers) =>
-                  void window.orkio.claude.answerQuestion(active.id, p.requestId, answers)
-                }
-              />
-            )
-          )}
-        </VStack>
-      )}
+              <VStack gap={3} role="list" aria-label="Conversa da tarefa">
+                {visible.hidden > 0 && (
+                  <HStack hAlign="center">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      label={`Mostrar ${visible.hidden} ${visible.hidden === 1 ? 'item anterior' : 'itens anteriores'}`}
+                      onClick={() => setShowAll(true)}
+                    />
+                  </HStack>
+                )}
+                {visible.items.length === 0 && (
+                  <Text type="supporting" color="secondary">
+                    Nada aconteceu nesta tarefa ainda. Escreva abaixo para o Claude começar.
+                  </Text>
+                )}
+                {visible.items.map((item) => (
+                  <SessionRow
+                    key={
+                      item.kind === 'run' && focusRun?.runId === item.run.id
+                        ? `${item.key}:${focusRun.nonce}`
+                        : item.key
+                    }
+                    focused={item.kind === 'run' && focusRun?.runId === item.run.id}
+                    projectId={projectId}
+                    showDocument={
+                      item.kind === 'run' && docRuns.has(item.run.id)
+                        ? item.run.id === docOpenId
+                          ? 'open'
+                          : true
+                        : false
+                    }
+                    changesOpen={item.kind === 'run' && item.run.id === changesOpenId}
+                    origin={item.kind === 'run' ? (flowOrigins?.get(item.run.id) ?? null) : null}
+                    item={item}
+                    agent={agent}
+                    stageName={stageName}
+                    liveLog={item.kind === 'run' && item.run.id === latestId ? liveLog : null}
+                    {...(canRerun
+                      ? { onRerun: (run: AgentRunView) => void openNewSession(run) }
+                      : {})}
+                  />
+                ))}
+              </VStack>
+            )}
 
-      {activity && (
-        <HStack
-          gap={2}
-          vAlign="center"
-          role="status"
-          aria-label="Trabalhando agora"
-          data-testid="task-working"
-        >
-          <StatusToken tone="running" label={`${activity.who} trabalhando há`} />
-          <Timer startTime={Date.parse(activity.since)} />
-          {activity.what && (
-            <Text type="supporting" color="secondary" maxLines={1}>
-              · {activity.what}
-            </Text>
-          )}
-        </HStack>
-      )}
+            {flowSlot}
 
-      {newSession ? (
-        newSession.ok ? (
-          <Composer
-            prep={newSession.value}
-            initial={initial}
+            {active && pending.length > 0 && (
+              <VStack gap={3} id={`claude-waiting-${taskId}`}>
+                {pending.map((p) =>
+                  p.kind === 'permission' ? (
+                    <PermissionCard key={p.requestId} runId={active.id} request={p} />
+                  ) : (
+                    <QuestionCard
+                      key={p.requestId}
+                      questions={p.questions}
+                      onAnswer={(answers) =>
+                        void window.orkio.claude.answerQuestion(active.id, p.requestId, answers)
+                      }
+                    />
+                  )
+                )}
+              </VStack>
+            )}
+
+            {activity && (
+              <HStack
+                gap={2}
+                vAlign="center"
+                role="status"
+                aria-label="Trabalhando agora"
+                data-testid="task-working"
+              >
+                <StatusToken tone="running" label={`${activity.who} trabalhando há`} />
+                <Timer startTime={Date.parse(activity.since)} />
+                {activity.what && (
+                  <Text type="supporting" color="secondary" maxLines={1}>
+                    · {activity.what}
+                  </Text>
+                )}
+              </HStack>
+            )}
+
+            <VStack id={endId} />
+          </VStack>
+        </ScrollableArea>
+      </StackItem>
+      <Divider />
+      {/* O campo fica preso embaixo, fora da rolagem: é onde o olho está. */}
+      <VStack paddingInline={6} paddingBlock={3}>
+        {newSession ? (
+          newSession.ok ? (
+            <Composer
+              prep={newSession.value}
+              initial={initial}
+              projectId={projectId}
+              onCancel={() => setNewSession(null)}
+              onStarted={(s) => {
+                setNewSession(null)
+                runs.setState(s)
+                void runs.select(s.activeRunId)
+              }}
+            />
+          ) : (
+            <VStack gap={2}>
+              <Text type="supporting">{newSession.error.message}</Text>
+              <HStack>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  label="Fechar"
+                  onClick={() => setNewSession(null)}
+                />
+              </HStack>
+            </VStack>
+          )
+        ) : (
+          <SessionComposer
             projectId={projectId}
-            onCancel={() => setNewSession(null)}
-            onStarted={(s) => {
-              setNewSession(null)
+            taskId={taskId}
+            agent={agent}
+            state={state}
+            flowRunning={flowRunning}
+            autopilotStep={flowRunning ? (activity?.what ?? null) : null}
+            onSent={(s) => {
               runs.setState(s)
               void runs.select(s.activeRunId)
             }}
+            onNewSession={() => void openNewSession()}
           />
-        ) : (
-          <VStack gap={2}>
-            <Text type="supporting">{newSession.error.message}</Text>
-            <HStack>
-              <Button
-                size="sm"
-                variant="ghost"
-                label="Fechar"
-                onClick={() => setNewSession(null)}
-              />
-            </HStack>
-          </VStack>
-        )
-      ) : (
-        <SessionComposer
-          projectId={projectId}
-          taskId={taskId}
-          agent={agent}
-          state={state}
-          flowRunning={flowRunning}
-          autopilotStep={flowRunning ? (activity?.what ?? null) : null}
-          onSent={(s) => {
-            runs.setState(s)
-            void runs.select(s.activeRunId)
-          }}
-          onNewSession={() => void openNewSession()}
-        />
-      )}
-      <VStack id={endId} />
+        )}
+      </VStack>
     </VStack>
   )
 }

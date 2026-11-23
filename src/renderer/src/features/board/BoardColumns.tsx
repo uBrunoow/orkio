@@ -250,9 +250,10 @@ export function BoardColumns({
               // Colunas não encolhem: o quadro rola na horizontal.
               style={{ flexShrink: 0 }}
             >
-              <Card variant={isTarget ? 'default' : 'muted'} padding={0} height="100%">
+              {/* Coluna sem fundo (mockup): só ganha superfície quando é alvo do arrasto. */}
+              <Card variant={isTarget ? 'muted' : 'transparent'} padding={0} height="100%">
                 <VStack ref={setColumnEl} height="100%">
-                  <HStack gap={2} vAlign="center" padding={3} paddingBlockEnd={1}>
+                  <HStack gap={2} vAlign="center" paddingInline={2} paddingBlock={2}>
                     <Icon
                       icon={DotIcon}
                       size="sm"
@@ -267,12 +268,32 @@ export function BoardColumns({
                       placement="below"
                       alignment="start"
                     >
-                      <Heading level={3}>{column.name}</Heading>
+                      {/* O nome da coluna não quebra nem encolhe; o status do Notion encolhe. */}
+                      <HStack style={{ flexShrink: 0 }}>
+                        <Heading level={5} accessibilityLevel={3}>
+                          {column.name}
+                        </Heading>
+                      </HStack>
                     </Tooltip>
-                    <StackItem size="fill" />
-                    <Text type="supporting" hasTabularNumbers data-testid="column-count">
+                    <Text
+                      type="supporting"
+                      color="secondary"
+                      hasTabularNumbers
+                      data-testid="column-count"
+                    >
                       {items.length}
                     </Text>
+                    <StackItem size="fill">
+                      <Text
+                        type="supporting"
+                        color="secondary"
+                        className="orkio-mono"
+                        maxLines={1}
+                        justify="end"
+                      >
+                        {column.stage ? `Notion: ${column.stage.notionStatus.name}` : 'Sem etapa'}
+                      </Text>
+                    </StackItem>
                     <IconButton
                       size="sm"
                       variant="ghost"
@@ -285,8 +306,8 @@ export function BoardColumns({
                     <ScrollableArea
                       label={`Tarefas em ${column.name} (rolagem)`}
                       height="100%"
-                      padding={3}
-                      paddingBlockStart={2}
+                      paddingInline={1}
+                      paddingBlock={1}
                     >
                       <VStack gap={2} role="list" aria-label={`Tarefas em ${column.name}`}>
                         {visible.map((card) => (
@@ -351,8 +372,8 @@ export function BoardColumns({
 }
 
 /** Ponto da coluna com a cor escolhida para a etapa (Etapas e automações); sem cor, neutro. */
-function stageDotColor(
-  stage: BoardStage
+export function stageDotColor(
+  stage: Pick<BoardStage, 'color'>
 ): 'tertiary' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'gray' {
   const c = stage.color ? tokenColor(stage.color) : 'default'
   return c === 'default' ? 'tertiary' : c

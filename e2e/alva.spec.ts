@@ -259,12 +259,10 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
     { timeout: 30_000 }
   )
   await expect(flow.getByTestId('flow-status')).toHaveText('Esperando aprovação')
-  // Em que pé está: spec e plano feitos (lidos do Backlog.md); o código é o próximo.
-  await expect(panel.getByTestId('progress-spec')).toHaveAttribute('data-state', 'done')
-  await expect(panel.getByTestId('progress-plan')).toHaveAttribute(
-    'aria-label',
-    'Plano: feito (critérios 0/2)'
-  )
+  // Fases na barra: spec feita; o plano espera a sua aprovação.
+  const phases = page.getByRole('list', { name: 'Fases da tarefa' })
+  await expect(phases.getByRole('listitem', { name: 'Spec: feita' })).toBeVisible()
+  await expect(phases.getByRole('listitem', { name: 'Plano: esperando você' })).toBeVisible()
   // A spec e o plano aparecem na conversa, logo depois do /spec e do /plan que os escreveram.
   await expect(panel.getByTestId('run-document')).toHaveCount(2)
   await expect(panel.getByTestId('run-document').last()).toContainText('Plano no Backlog.md')

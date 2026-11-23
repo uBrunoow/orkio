@@ -1,16 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { AppShell } from '@astryxdesign/core/AppShell'
-import { Button } from '@astryxdesign/core/Button'
-import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardTaskRef, ProjectView } from '../../shared/ipc-contract'
-import { AgentsIcon, BoardIcon, SearchIcon, SettingsIcon, TONE_DOT_ICONS } from './components/icons'
-import { OrkioLogo } from './components/OrkioLogo/OrkioLogo'
 import {
   ROUTE_TITLES,
   SETTINGS_TITLES,
@@ -20,12 +11,15 @@ import {
   type Route
 } from './app/routes'
 import { CommandMenu, type CommandData } from './app/CommandMenu'
-import { SHORTCUTS, globalShortcut, isTextField } from './app/shortcuts'
+import { globalShortcut, isTextField } from './app/shortcuts'
 import { initialRoute } from './app/initial-route'
-import type { SidebarTask } from './app/task-groups'
 import { useSidebarData } from './app/useSidebarData'
 import { useSetupPending } from './app/useSetupPending'
 import { WaitingBell } from './app/WaitingBell'
+import { Sidebar } from './app/Sidebar'
+import { AccountMenu, useAccount } from './app/AccountMenu'
+import { HStack } from '@astryxdesign/core/HStack'
+import { ScreenFrame } from './app/ScreenBar'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
 import { ProjectAgentsSettings } from './features/agents/ProjectAgentsSettings'
@@ -63,12 +57,6 @@ function useProjects(trigger: number): ProjectView[] | null {
   return projects
 }
 
-/** `aria-keyshortcuts` do item do menu (mesmo atalho da paleta). */
-function keyshortcut(route: Route['name']): string | undefined {
-  const keys = SHORTCUTS.find((s) => s.route.name === route)?.keys
-  return keys?.replace('mod', navigator.userAgent.includes('Mac') ? 'Meta' : 'Control')
-}
-
 function routeProjectId(route: Route): string | undefined {
   return 'projectId' in route ? route.projectId : undefined
 }
@@ -103,6 +91,15 @@ export function App(): React.JSX.Element | null {
   // Relê o quadro a cada navegação (ex.: quadro criado nos Primeiros passos).
   const sidebar = useSidebarData(linkedProject?.id ?? null, router.key)
   const setupMissing = useSetupPending(project, sidebar.board)
+  const account = useAccount(router.key)
+  // "Sair": o Orkio não tem login próprio; sair = desconectar GitHub e Notion deste computador.
+  const signOut = async (): Promise<void> => {
+    await Promise.all([
+      window.orkio.github.disconnect().catch(() => undefined),
+      window.orkio.notion.disconnect().catch(() => undefined)
+    ])
+    navigate({ name: 'setup', ...(project ? { projectId: project.id } : {}) })
+  }
 
   // Primeira tela: sem projeto, Primeiros passos; com algo esperando, essa tarefa; senão o Quadro.
   const decided = useRef(false)
@@ -138,7 +135,8 @@ export function App(): React.JSX.Element | null {
   useEffect(() => window.orkio.board.onOpenTask(openTask), [openTask])
 
   // Atalhos globais e Command Palette (fora dos Primeiros passos).
-  const [paletteOpen, setPaletteOpen] = useState(false)
+  // Paleta: `all` (Ctrl/Cmd+K: telas e tarefas) ou `tasks` ("Buscar tarefa": só tarefas, no Notion).
+  const [palette, setPalette] = useState<'all' | 'tasks' | null>(null)
   const inShell = route.name !== 'setup'
   useEffect(() => {
     if (!inShell) return
@@ -158,7 +156,7 @@ export function App(): React.JSX.Element | null {
       )
       if (!action) return
       e.preventDefault()
-      if (action.type === 'palette') setPaletteOpen((open) => !open)
+      if (action.type === 'palette') setPalette((open) => (open ? null : 'all'))
       else if (action.type === 'back') dispatch({ type: 'back' })
       else navigate(action.route)
     }
@@ -167,6 +165,11 @@ export function App(): React.JSX.Element | null {
   }, [inShell, navigate])
 
   const runCommand = (command: CommandData): void => {
+    if (command.url) {
+      // Tarefa de fora do quadro (outra pessoa ou projeto sem vínculo): abre no Notion.
+      void window.orkio.openExternal(command.url)
+      return
+    }
     if (command.projectId) {
       chooseProject(command.projectId)
       navigate(route.name === 'task' || route.name === 'setup' ? { name: 'board' } : route)
@@ -198,7 +201,6 @@ export function App(): React.JSX.Element | null {
   }
 
   let page: React.ReactNode
-  let title: string = ROUTE_TITLES[route.name]
   switch (route.name) {
     case 'board':
       page = (
@@ -232,7 +234,6 @@ export function App(): React.JSX.Element | null {
       break
     case 'settings': {
       const section = route.section ?? 'integrations'
-      title = `${ROUTE_TITLES.settings} › ${SETTINGS_TITLES[section]}`
       switch (section) {
         case 'integrations':
           page = <IntegrationsPage projectId={project?.id ?? null} />
@@ -265,7 +266,7 @@ export function App(): React.JSX.Element | null {
           break
         case 'agents':
           page = linkedProject ? (
-            <ProjectAgentsSettings projectId={linkedProject.id} projectName={linkedProject.name} />
+            <ProjectAgentsSettings projectId={linkedProject.id} />
           ) : (
             <AgentsPage />
           )
@@ -300,173 +301,110 @@ export function App(): React.JSX.Element | null {
     }
   }
 
-  const projectPicker =
-    projects && projects.length > 1 ? (
-      <DropdownMenu
-        button={{
-          label: project ? project.name : 'Projetos',
-          size: 'sm',
-          variant: 'secondary',
-          'aria-label': `Projeto atual: ${project ? project.name : 'nenhum'}. Trocar projeto`
-        }}
-        items={projects.map((p) => ({
-          label: p.name,
-          onClick: () => {
-            chooseProject(p.id)
+  const crumbs =
+    route.name === 'settings'
+      ? [
+          ROUTE_TITLES.settings,
+          ...(route.section === 'board' || route.section === 'agents'
+            ? [linkedProject?.name ?? 'Projeto']
+            : []),
+          SETTINGS_TITLES[route.section ?? 'integrations']
+        ]
+      : null
+  // Quadro e tarefa ocupam a altura toda (rolagem própria); o resto rola com margem.
+  const fullHeight = route.name === 'board' || route.name === 'task'
+  return (
+    <AppShell
+      height="fill"
+      variant="section"
+      contentPadding={0}
+      // Sem gaveta mobile: as camadas deslizantes da Astryx injetam <style> (bloqueado pela CSP).
+      mobileNav={false}
+      // Atualização pronta (6C) e "O que há de novo": acima de tudo.
+      banner={
+        <UpdateBanner
+          {...(route.name === 'settings'
+            ? {}
+            : { onOpenSettings: () => navigate({ name: 'settings', section: 'updates' }) })}
+        />
+      }
+      sideNav={
+        <Sidebar
+          route={route}
+          project={project}
+          projects={projects}
+          groups={sidebar.groups}
+          setupMissing={setupMissing}
+          onChooseProject={(id) => {
+            chooseProject(id)
             navigate(
               route.name === 'board' || route.name === 'settings'
-                ? { ...route, projectId: p.id }
+                ? { ...route, projectId: id }
                 : route.name === 'agents'
                   ? route
                   : { name: 'board' }
             )
+          }}
+          onManageProjects={() => toSettings('projects')}
+          onSearch={() => setPalette('tasks')}
+          onOpenTask={(t) =>
+            linkedProject &&
+            openTask({
+              projectId: linkedProject.id,
+              taskId: t.taskId,
+              ...(t.section ? { section: t.section } : {})
+            })
           }
-        }))}
-      />
-    ) : (
-      <Text type="supporting" data-testid="current-project">
-        {project ? project.name : 'Nenhum projeto'}
-      </Text>
-    )
-
-  const taskItems = (
-    title: string,
-    items: SidebarTask[],
-    extra?: React.ReactNode
-  ): React.ReactNode =>
-    items.length === 0 && !extra ? null : (
-      <SideNavSection title={title} endContent={<Text type="supporting">{items.length}</Text>}>
-        {items.map((t) => (
-          <SideNavItem
-            key={t.taskId}
-            size="sm"
-            icon={TONE_DOT_ICONS[t.tone]}
-            label={`${t.displayId ? `${t.displayId} · ` : ''}${t.title}`}
-            isSelected={route.name === 'task' && route.taskId === t.taskId}
-            onClick={() =>
-              linkedProject &&
-              openTask({
-                projectId: linkedProject.id,
-                taskId: t.taskId,
-                ...(t.section ? { section: t.section } : {})
-              })
-            }
-          />
-        ))}
-        {extra}
-      </SideNavSection>
-    )
-
-  const groups = sidebar.groups
-  return (
-    <AppShell
-      height="fill"
-      contentPadding={0}
-      // Sem gaveta mobile: as camadas deslizantes da Astryx injetam <style> (bloqueado pela CSP).
-      mobileNav={false}
-      sideNav={
-        <SideNav
-          aria-label="Navegação principal"
-          header={<OrkioLogo variant="simple" withWordmark size={18} />}
-          topContent={
-            <VStack gap={2}>
-              {projectPicker}
-              <Button
-                size="sm"
-                variant="ghost"
-                icon={<Icon icon={SearchIcon} />}
-                label="Buscar tarefa"
-                aria-keyshortcuts={navigator.userAgent.includes('Mac') ? 'Meta+K' : 'Control+K'}
-                onClick={() => setPaletteOpen(true)}
-              />
-            </VStack>
+          onNavigate={navigate}
+          onContinueSetup={() => project && navigate({ name: 'setup', projectId: project.id })}
+          account={
+            <AccountMenu
+              account={account}
+              variant="row"
+              onOpenIntegrations={() => toSettings('integrations')}
+              onOpenSettings={() => navigate({ name: 'settings' })}
+              onSignOut={signOut}
+            />
           }
-          footer={
-            <SideNavSection title="Telas" isHeaderHidden>
-              <SideNavItem
-                label={ROUTE_TITLES.board}
-                icon={BoardIcon}
-                isSelected={route.name === 'board' || route.name === 'task'}
-                aria-keyshortcuts={keyshortcut('board')}
-                onClick={toBoard}
-              />
-              <SideNavItem
-                label={ROUTE_TITLES.agents}
-                icon={AgentsIcon}
-                isSelected={route.name === 'agents'}
-                aria-keyshortcuts={keyshortcut('agents')}
-                onClick={() => navigate({ name: 'agents' })}
-              />
-              <SideNavItem
-                label={ROUTE_TITLES.settings}
-                icon={SettingsIcon}
-                isSelected={route.name === 'settings'}
-                aria-keyshortcuts={keyshortcut('settings')}
-                onClick={() => navigate({ name: 'settings' })}
-              />
-            </SideNavSection>
-          }
-        >
-          {project && setupMissing > 0 && (
-            <SideNavSection title="Configuração" isHeaderHidden>
-              <SideNavItem
-                size="sm"
-                icon={TONE_DOT_ICONS.warning}
-                label={`Falta ${setupMissing} ${setupMissing === 1 ? 'passo' : 'passos'} · continuar`}
-                onClick={() => navigate({ name: 'setup', projectId: project.id })}
-              />
-            </SideNavSection>
-          )}
-          {groups && (
-            <>
-              {taskItems('Esperando você', groups.waiting)}
-              {taskItems('Rodando', groups.running)}
-              {taskItems(
-                'A fazer',
-                groups.todo,
-                groups.todoTotal > groups.todo.length ? (
-                  <SideNavItem size="sm" label="Ver todas" onClick={toBoard} />
-                ) : undefined
-              )}
-            </>
-          )}
-        </SideNav>
+        />
       }
     >
-      <VStack height="100%">
-        <HStack gap={2} vAlign="center" padding={3} data-testid="top-bar">
-          <StackItem size="fill">
-            <Text type="supporting" color="secondary">
-              {project ? `${project.name} › ` : ''}
-              <Text type="supporting">{title}</Text>
-            </Text>
-          </StackItem>
-          <WaitingBell snapshot={sidebar.snapshot} onOpen={openTask} />
-        </HStack>
-        <StackItem size="fill">
-          {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
-          <VStack
-            gap={4}
-            padding={6}
-            {...(route.name === 'board' || route.name === 'task'
-              ? { height: '100%' as const }
-              : {})}
-          >
-            {/* Atualização pronta (6C) e "O que há de novo": no topo de qualquer página. */}
-            <UpdateBanner
-              {...(route.name === 'settings'
-                ? {}
-                : { onOpenSettings: () => navigate({ name: 'settings', section: 'updates' }) })}
+      <ScreenFrame
+        crumbs={crumbs}
+        bell={
+          <HStack gap={2} vAlign="center">
+            <WaitingBell snapshot={sidebar.snapshot} onOpen={openTask} />
+            <AccountMenu
+              account={account}
+              variant="avatar"
+              onOpenIntegrations={() => toSettings('integrations')}
+              onOpenSettings={() => navigate({ name: 'settings' })}
+              onSignOut={signOut}
             />
-            <StackItem size="fill">
-              <Fragment key={router.key}>{page}</Fragment>
-            </StackItem>
+          </HStack>
+        }
+      >
+        {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
+        {route.name === 'board' ? (
+          <VStack height="100%" padding={4}>
+            <Fragment key={router.key}>{page}</Fragment>
           </VStack>
-        </StackItem>
-      </VStack>
+        ) : fullHeight ? (
+          <VStack height="100%">
+            <Fragment key={router.key}>{page}</Fragment>
+          </VStack>
+        ) : route.name === 'agents' ? (
+          <VStack height="100%" isScrollable paddingInline={6} paddingBlock={5}>
+            <Fragment key={router.key}>{page}</Fragment>
+          </VStack>
+        ) : (
+          <Fragment key={router.key}>{page}</Fragment>
+        )}
+      </ScreenFrame>
       <CommandMenu
-        isOpen={paletteOpen}
-        onOpenChange={setPaletteOpen}
+        isOpen={palette !== null}
+        onOpenChange={(open) => setPalette(open ? (palette ?? 'all') : null)}
+        mode={palette ?? 'all'}
         projects={(projects ?? []).filter((p) => p.notionProject)}
         currentProjectId={project?.id ?? null}
         onRun={runCommand}

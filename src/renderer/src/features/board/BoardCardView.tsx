@@ -1,5 +1,4 @@
 import { Card } from '@astryxdesign/core/Card'
-import { Code } from '@astryxdesign/core/Code'
 import { HStack } from '@astryxdesign/core/HStack'
 import { StackItem } from '@astryxdesign/core/Stack'
 import { Icon } from '@astryxdesign/core/Icon'
@@ -74,9 +73,11 @@ export function BoardCardBody({
   const activity = useTaskActivity(card.taskId)
   const detail = cardDetail({ ...activity, pr: null })
   return (
-    <VStack gap={2}>
+    <VStack gap={1.5}>
       <HStack gap={2} vAlign="center">
-        <Code data-testid="card-id">{card.displayId ?? '—'}</Code>
+        <Text type="supporting" color="secondary" className="orkio-mono" data-testid="card-id">
+          {card.displayId ?? '—'}
+        </Text>
         {agent && (
           <AgentAvatar name={agent.name} color={agent.color} seed={agent.key} testId="card-agent" />
         )}
@@ -99,15 +100,17 @@ export function BoardCardBody({
           </HStack>
         </StackItem>
       </HStack>
-      <Text weight="semibold" maxLines={2}>
+      <Text weight="medium" maxLines={2}>
         {card.title}
       </Text>
-      {detail && (
-        <Text type="supporting" color="secondary" maxLines={1} data-testid="card-detail">
-          {detail}
-        </Text>
-      )}
       <HStack gap={2} vAlign="center" wrap="wrap">
+        {detail && (
+          <StackItem size="fill">
+            <Text type="supporting" color="secondary" maxLines={1} data-testid="card-detail">
+              {detail}
+            </Text>
+          </StackItem>
+        )}
         {card.blocked && (
           <HStack vAlign="center" role="img" aria-label="Bloqueada" data-testid="card-blocked">
             <Icon icon={LockIcon} size="sm" color="secondary" />

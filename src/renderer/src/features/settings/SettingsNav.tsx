@@ -1,3 +1,4 @@
+import { Divider } from '@astryxdesign/core/Divider'
 import { HStack } from '@astryxdesign/core/HStack'
 import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
 import { StackItem } from '@astryxdesign/core/Stack'
@@ -55,8 +56,8 @@ export function SettingsLayout({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <HStack gap={6} vAlign="start" height="100%">
-      <VStack>
+    <HStack vAlign="stretch" height="100%">
+      <VStack padding={2}>
         <SideNav aria-label="Configurações">
           {GROUPS.filter((g) => !g.project || projectName).map((g) => (
             <SideNavSection
@@ -76,7 +77,13 @@ export function SettingsLayout({
           ))}
         </SideNav>
       </VStack>
-      <StackItem size="fill">{children}</StackItem>
+      <Divider orientation="vertical" />
+      <StackItem size="fill">
+        {/* A seção rola sozinha; a coluna interna fica parada. */}
+        <VStack height="100%" isScrollable paddingInline={8} paddingBlock={6}>
+          {children}
+        </VStack>
+      </StackItem>
     </HStack>
   )
 }

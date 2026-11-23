@@ -19,6 +19,8 @@ export interface CommandData {
   /** ID da tarefa (mono) e onde ela está. */
   taskRef?: { displayId: string | null; where: string }
   keys?: string
+  /** Tarefa fora do quadro: abre a página no Notion. */
+  url?: string
 }
 
 export type CommandItem = SearchableItem<CommandData>
@@ -83,7 +85,45 @@ async function loadTasks(projects: readonly ProjectView[]): Promise<CommandItem[
 }
 
 /**
- * Command Palette (Ctrl/Cmd+K): tarefas, telas e troca de projeto. Só navega; nada aqui escreve
+ * Busca no banco de Tarefas do Notion inteiro (`searchTasks`: título ou ID, qualquer pessoa e
+ * projeto). Tarefa que está no quadro de um projeto vinculado abre no Orkio; as outras abrem a
+ * página no Notion.
+ */
+async function searchNotionTasks(
+  query: string,
+  onBoard: ReadonlySet<string>
+): Promise<CommandItem[]> {
+  const r = await window.orkio.notionWorkspace.searchTasks(query).catch(() => null)
+  if (!r?.ok) return []
+  return r.value.tasks.map((t) => {
+    const inOrkio = !!t.projectId && onBoard.has(`${t.projectId}:${t.id}`)
+    const where = [
+      t.projectName ?? 'Sem projeto no Orkio',
+      t.status?.name,
+      t.assignees.length > 0 ? t.assignees.join(', ') : null,
+      inOrkio ? null : 'abre no Notion'
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    return {
+      id: `notion:${t.id}`,
+      label: `${t.displayId ?? ''} ${t.title}`.trim(),
+      auxiliaryData: {
+        group: 'Tarefas',
+        ...(inOrkio
+          ? { route: { name: 'task' as const, projectId: t.projectId!, taskId: t.id } }
+          : t.url
+            ? { url: t.url }
+            : {}),
+        taskRef: { displayId: t.displayId, where }
+      }
+    }
+  })
+}
+
+/**
+ * Command Palette (Ctrl/Cmd+K): tarefas, telas e troca de projeto. `mode="tasks"` (botão "Buscar
+ * tarefa" da lateral) busca só tarefas, direto no Notion. Só navega; nada aqui escreve
  * no Notion nem roda agentes.
  */
 export function CommandMenu({
@@ -91,8 +131,10 @@ export function CommandMenu({
   onOpenChange,
   projects,
   currentProjectId,
-  onRun
+  onRun,
+  mode = 'all'
 }: {
+  mode?: 'all' | 'tasks'
   isOpen: boolean
   onOpenChange(isOpen: boolean): void
   projects: readonly ProjectView[]
@@ -117,6 +159,27 @@ export function CommandMenu({
         if (item.auxiliaryData) index.current.set(item.id, item.auxiliaryData)
       return items
     }
+    // Modo tarefas: tarefas do quadro (para saber o que abre no Orkio) + busca no Notion.
+    let board: Promise<Set<string>> | null = null
+    const notion = async (query: string): Promise<CommandItem[]> => {
+      board ??= loadTasks(projects).then(
+        (items) =>
+          new Set(
+            items.flatMap((i) =>
+              i.auxiliaryData?.route?.name === 'task'
+                ? [`${i.auxiliaryData.route.projectId}:${i.auxiliaryData.route.taskId}`]
+                : []
+            )
+          )
+      )
+      const items = await searchNotionTasks(query, await board)
+      for (const item of items)
+        if (item.auxiliaryData) index.current.set(item.id, item.auxiliaryData)
+      return items
+    }
+    if (mode === 'tasks') {
+      return { bootstrap: () => notion(''), search: (query) => notion(query) }
+    }
     return {
       bootstrap: async () => {
         const items = await all()
@@ -132,21 +195,25 @@ export function CommandMenu({
     }
     // Recria a fonte (e relê as tarefas) a cada abertura.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects, currentProjectId, isOpen])
+  }, [projects, currentProjectId, isOpen, mode])
 
   return (
     <CommandPalette<CommandItem>
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      label="Buscar tarefas e comandos"
+      label={mode === 'tasks' ? 'Buscar tarefas no Notion' : 'Buscar tarefas e comandos'}
       searchSource={source}
       value=""
       onValueChange={(id) => {
         const data = index.current.get(id)
         if (data) onRun(data)
       }}
-      emptySearchText="Nada encontrado"
-      emptyBootstrapText="Digite para buscar"
+      emptySearchText={
+        mode === 'tasks' ? 'Nenhuma tarefa sua com esse ID ou título' : 'Nada encontrado'
+      }
+      emptyBootstrapText={
+        mode === 'tasks' ? 'Nenhuma tarefa sua nos projetos vinculados' : 'Digite para buscar'
+      }
       renderItem={(item) => <CommandRow item={item} />}
     />
   )

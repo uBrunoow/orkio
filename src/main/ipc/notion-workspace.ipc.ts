@@ -48,6 +48,7 @@ export function registerNotionWorkspaceIpc(
     | 'link'
     | 'unlink'
     | 'listTasks'
+    | 'searchTasks'
   >,
   isTrustedSender: SenderGuard,
   ready: Promise<void> = Promise.resolve()
@@ -98,6 +99,9 @@ export function registerNotionWorkspaceIpc(
   )
   guarded(ch.listTasks, GENERIC, async (projectId, options) =>
     isId(projectId) ? service.listTasks(projectId, { force: isForce(options) }) : INVALID
+  )
+  guarded(ch.searchTasks, GENERIC, async (query) =>
+    isQuery(query) ? service.searchTasks(query) : INVALID
   )
 }
 

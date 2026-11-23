@@ -13,13 +13,7 @@ import { OrchestratorSection } from './OrchestratorSection'
  * Configurações › Agentes do projeto: o orquestrador (quem puxa tarefas da fila e passa adiante) e
  * as regras de atribuição por coluna. Os perfis ficam na tela Agentes.
  */
-export function ProjectAgentsSettings({
-  projectId,
-  projectName
-}: {
-  projectId: string
-  projectName: string
-}): React.JSX.Element {
+export function ProjectAgentsSettings({ projectId }: { projectId: string }): React.JSX.Element {
   const [state, setState] = useState<AgentsState | null>(null)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
 
@@ -46,7 +40,6 @@ export function ProjectAgentsSettings({
     <VStack gap={5} maxWidth={PAGE_WIDTH.list} role="region" aria-label="Agentes">
       <PageHeader
         title="Agentes do projeto"
-        context={projectName}
         subtitle="Quem pega as tarefas do quadro e para quem elas vão a cada coluna."
       />
       {message &&

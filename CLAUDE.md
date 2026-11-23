@@ -49,8 +49,12 @@ Claude Code. Hoje existem:
   interna: Integrações, Projetos, Quadro e automações (abas Colunas · Automações · Fluxos ·
   Entrega), Agentes do projeto (regras + orquestrador), Atualizações, Sobre e diagnóstico.
   Primeiros passos (`features/setup/`) em sete passos com o estado real. O Orkio não cria tarefas.
-  Spec: `docs/superpowers/specs/2026-11-23-orkio-ui-reestruturacao-design.md`; linguagem visual na
-  skill `orkio-design`; histórico das fases em `docs/ui-redesign.md`.
+  Spec: `docs/superpowers/specs/2026-11-23-orkio-ui-reestruturacao-design.md`. Referência visual
+  obrigatória: o mockup (`docs/superpowers/specs/2026-11-23-orkio-ui-mockup.html`) e o protótipo
+  Alva Tasks (ver `PRODUCT.md`): barra fina por tela (`app/ScreenBar.tsx`, encaixes
+  `ScreenBarStart`/`ScreenBarEnd`), linhas divisórias entre lateral, conteúdo e painel, tabelas
+  com borda e cabeçalho de coluna, IDs em mono. Trabalho de design com as skills `impeccable` e
+  `frontend-design`; histórico das fases em `docs/ui-redesign.md`.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
   Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.

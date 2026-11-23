@@ -1,9 +1,11 @@
+import { ScreenTitle } from '../../components/ScreenTitle'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
 import { Icon } from '@astryxdesign/core/Icon'
+import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
 import { Selector } from '@astryxdesign/core/Selector'
 import { StackItem } from '@astryxdesign/core/Stack'
@@ -14,16 +16,9 @@ import { Tooltip } from '@astryxdesign/core/Tooltip'
 import { VStack } from '@astryxdesign/core/VStack'
 import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
-import { PageHeader } from '../../components/PageHeader'
+import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
 import { PageState } from '../../components/PageState'
-import {
-  AutomationIcon,
-  BoardIcon,
-  DotIcon,
-  ListIcon,
-  PauseIcon,
-  RefreshIcon
-} from '../../components/icons'
+import { AutomationIcon, PauseIcon, RefreshIcon } from '../../components/icons'
 import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
 import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
@@ -56,7 +51,9 @@ export function BoardPage({
   if (!project) {
     return (
       <VStack gap={5}>
-        <PageHeader title="Quadro" />
+        <ScreenBarStart>
+          <ScreenTitle look={5}>Quadro</ScreenTitle>
+        </ScreenBarStart>
         <PageState
           kind="empty"
           title="Nenhum projeto vinculado ao Notion"
@@ -67,23 +64,16 @@ export function BoardPage({
     )
   }
   return (
-    <Board
-      projectId={project.id}
-      projectName={project.name}
-      onOpenIntegrations={onOpenIntegrations}
-      onOpenTask={onOpenTask}
-    />
+    <Board projectId={project.id} onOpenIntegrations={onOpenIntegrations} onOpenTask={onOpenTask} />
   )
 }
 
 function Board({
   projectId,
-  projectName,
   onOpenIntegrations,
   onOpenTask
 }: {
   projectId: string
-  projectName: string
   onOpenIntegrations(): void
   onOpenTask(taskId: string): void
 }): React.JSX.Element {
@@ -138,8 +128,10 @@ function Board({
     )
   }, [view?.cards, query, priority, onlyBlocked, agentKey, agentBadges])
 
-  const header = (action?: React.ReactNode): React.JSX.Element => (
-    <PageHeader title="Quadro" context={projectName} action={action} />
+  const header = (): React.JSX.Element => (
+    <ScreenBarStart>
+      <ScreenTitle look={5}>Quadro</ScreenTitle>
+    </ScreenBarStart>
   )
 
   if (!view) {
@@ -176,41 +168,65 @@ function Board({
   return (
     // Ocupa a altura útil da janela: as colunas e o painel rolam por dentro.
     <VStack gap={4} height="100%">
-      {header(
-        <HStack gap={2} vAlign="center" wrap="wrap" hAlign="end">
-          <AutomationLine status={automation.status} onOpenIntegrations={onOpenIntegrations} />
-          <Button
-            variant="ghost"
-            label="Atualizar"
-            icon={<Icon icon={RefreshIcon} />}
-            isLoading={board.loading || automation.running}
-            onClick={() => {
-              // Verifica git/GitHub agora (automações) e relê o Notion.
-              void automation.runNow().then(() => board.load(true))
-            }}
-          />
-          <Button
-            variant="ghost"
-            label={automation.status?.paused ? 'Retomar automações' : 'Pausar todas'}
-            icon={<Icon icon={automation.status?.paused ? AutomationIcon : PauseIcon} />}
-            onClick={() => void automation.setPaused(!automation.status?.paused)}
-          />
-        </HStack>
-      )}
-      <HStack gap={3} vAlign="center" wrap="wrap" role="toolbar" aria-label="Filtros do quadro">
+      <ScreenBarStart>
+        <ScreenTitle look={5}>Quadro</ScreenTitle>
+        <SegmentedControl
+          label="Visualização do quadro"
+          size="sm"
+          value={layout}
+          onChange={(v) => setLayout(v === 'list' ? 'list' : 'kanban')}
+        >
+          <SegmentedControlItem value="kanban" label="Kanban" />
+          <SegmentedControlItem value="list" label="Lista" />
+        </SegmentedControl>
+        <AgentRow
+          cards={view.cards}
+          badges={agentBadges}
+          flows={activeFlows}
+          selected={agentKey}
+          onSelect={setAgentKey}
+        />
+      </ScreenBarStart>
+      <ScreenBarEnd>
         <TextInput
           type="search"
+          size="sm"
           label="Buscar tarefas"
           isLabelHidden
-          placeholder="Buscar por ID ou título"
+          placeholder="Filtrar por ID ou título"
           hasClear
           value={query}
           onChange={setQuery}
         />
+        <Button
+          size="sm"
+          label="Atualizar"
+          icon={<Icon icon={RefreshIcon} />}
+          isLoading={board.loading || automation.running}
+          onClick={() => {
+            // Verifica git/GitHub agora (automações) e relê o Notion.
+            void automation.runNow().then(() => board.load(true))
+          }}
+        />
+        <MoreMenu
+          label="Mais ações do quadro"
+          size="sm"
+          alignment="end"
+          items={[
+            {
+              label: automation.status?.paused ? 'Retomar automações' : 'Pausar todas',
+              onClick: () => void automation.setPaused(!automation.status?.paused)
+            }
+          ]}
+        />
+      </ScreenBarEnd>
+      {/* Filtros finos e o estado das automações, numa linha só acima das colunas. */}
+      <HStack gap={4} vAlign="center" wrap="wrap" role="toolbar" aria-label="Filtros do quadro">
         {priorities.length > 0 && (
           <Selector
             label="Prioridade"
             isLabelHidden
+            size="sm"
             placeholder="Todas as prioridades"
             hasClear
             options={priorities.map((p) => ({ value: p, label: p }))}
@@ -220,24 +236,8 @@ function Board({
         )}
         <CheckboxInput label="Só bloqueadas" value={onlyBlocked} onChange={setOnlyBlocked} />
         <StackItem size="fill" />
-        <SegmentedControl
-          label="Visualização do quadro"
-          size="sm"
-          value={layout}
-          onChange={(v) => setLayout(v === 'list' ? 'list' : 'kanban')}
-        >
-          <SegmentedControlItem value="kanban" label="Kanban" icon={<Icon icon={BoardIcon} />} />
-          <SegmentedControlItem value="list" label="Lista" icon={<Icon icon={ListIcon} />} />
-        </SegmentedControl>
+        <AutomationLine status={automation.status} onOpenIntegrations={onOpenIntegrations} />
       </HStack>
-      <AgentRow
-        cards={view.cards}
-        badges={agentBadges}
-        flows={activeFlows}
-        selected={agentKey}
-        onSelect={setAgentKey}
-      />
-
       {view.pendingCount > 0 && (
         <Alert
           tone="warning"
@@ -491,10 +491,7 @@ function AgentRow({
   if (agents.size === 0) return null
   const list = [...agents.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'pt-BR'))
   return (
-    <HStack gap={2} vAlign="center" wrap="wrap" role="group" aria-label="Agentes do quadro">
-      <Text type="supporting" color="secondary">
-        Agentes
-      </Text>
+    <HStack gap={1} vAlign="center" role="group" aria-label="Agentes do quadro">
       {list.map(([key, a]) => (
         <ToggleButton
           key={key}
@@ -503,15 +500,7 @@ function AgentRow({
           isPressed={selected === key}
           onPressedChange={(pressed) => onSelect(pressed ? key : null)}
           icon={<AgentAvatar name={a.name} color={a.color} seed={key} />}
-        >
-          <HStack gap={1} vAlign="center">
-            <Text>{a.name}</Text>
-            <Text type="supporting" color="secondary" hasTabularNumbers>
-              {a.count}
-            </Text>
-            {a.running && <Icon icon={DotIcon} size="sm" color="accent" />}
-          </HStack>
-        </ToggleButton>
+        />
       ))}
     </HStack>
   )

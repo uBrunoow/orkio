@@ -1,10 +1,10 @@
+import { ScreenTitle } from '../../components/ScreenTitle'
 import { useEffect, useMemo, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Code } from '@astryxdesign/core/Code'
+import { Divider } from '@astryxdesign/core/Divider'
 import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
 import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
 import { StackItem } from '@astryxdesign/core/Stack'
+import { Text } from '@astryxdesign/core/Text'
 import { Tab, TabList } from '@astryxdesign/core/TabList'
 import { VStack } from '@astryxdesign/core/VStack'
 import type {
@@ -16,8 +16,7 @@ import type {
 import type { TaskSection } from '../../../../shared/overview'
 import type { FlowRunView } from '../../../../shared/task-flow'
 import type { AgentBadge } from '../../../../shared/agent'
-import { Alert } from '../../components/Alert'
-import { pendingRequests, useTaskRuns } from '../claude/useTaskRuns'
+import { useTaskRuns } from '../claude/useTaskRuns'
 import { TaskFlowSection, type TaskActivity } from '../task-flows/TaskFlowSection'
 import { flowPlan, flowStepIndex } from '../task-flows/flow-plan'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
@@ -25,11 +24,10 @@ import { availableTabs, defaultPanelTab, PANEL_TAB_LABEL, type PanelTab } from '
 import { taskLayout } from '../task/task-layout'
 import { taskPhases } from '../task/task-phases'
 import { TaskPhaseBar } from '../task/TaskPhaseBar'
+import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
 import { useWindowWidth } from '../task/useWindowWidth'
 import { StageSelector, TaskChanges, TaskDetails, useBacklogSummary } from './TaskDetails'
-import { TaskProgressStrip } from './TaskProgressStrip'
 import { TaskSession } from './TaskSession'
-import { taskProgress } from './task-progress'
 
 /**
  * Aba inativa: fica montada (o fluxo e os pedidos continuam vivos fora da aba), mas escondida.
@@ -54,7 +52,8 @@ export function TaskPanel({
   onToggleBlocked,
   onToggleAutomation,
   onBranchesChanged,
-  focusSection = null
+  focusSection = null,
+  projectName = null
 }: {
   projectId: string
   /** Agente da tarefa (8A). */
@@ -69,6 +68,8 @@ export function TaskPanel({
   onBranchesChanged?: () => void
   /** Seção a mostrar ao abrir (Visão geral, 6D): Fluxo, Claude Code ou Histórico. */
   focusSection?: TaskSection | null
+  /** Projeto no caminho da barra ("orkio › ORK-142 · título"). */
+  projectName?: string | null
 }): React.JSX.Element {
   // Aba escolhida pela pessoa; até lá, a aba da fase atual (`defaultPanelTab`).
   const [chosenTab, setTab] = useState<PanelTab | null>(
@@ -147,7 +148,6 @@ export function TaskPanel({
 
   // Quem está trabalhando agora: o passo do fluxo; senão a execução avulsa do Claude Code.
   const [flowActivity, setFlowActivity] = useState<TaskActivity | null>(null)
-  const [waitingFlow, setWaitingFlow] = useState(0)
   const state = runs.state
   const activeRun = state?.runs.find((r) => r.id === state.activeRunId) ?? null
   const runActivity: TaskActivity | null =
@@ -159,54 +159,8 @@ export function TaskPanel({
         }
       : null
   const activity = flowActivity ?? runActivity
-  const waitingClaude =
-    activeRun && runs.selectedRunId === activeRun.id ? pendingRequests(runs.log).length : 0
-  const waiting = waitingClaude + waitingFlow
-
-  const milestones = useMemo(
-    () =>
-      taskProgress({
-        backlog,
-        signals,
-        runs: state?.runs ?? [],
-        uncommitted: state?.workspace?.changes ?? null,
-        running: activity !== null,
-        waiting
-      }),
-    [backlog, signals, state, activity, waiting]
-  )
 
   const label = card.displayId ?? card.title
-  // "Esperando você" sempre no topo: o pedido em si fica no fim da sessão, perto do campo.
-  const goToWaiting = (): void => {
-    setTimeout(() => {
-      const target =
-        waitingFlow > 0
-          ? document.querySelector('[data-panel-section="flow"]')
-          : document.getElementById(`claude-waiting-${card.taskId}`)
-      target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    }, 50)
-  }
-  const waitingBanner =
-    waiting > 0 ? (
-      <Alert
-        tone="warning"
-        action={
-          <Button
-            size="sm"
-            variant="secondary"
-            label={waiting === 1 ? 'Ver pedido' : 'Ver pedidos'}
-            onClick={goToWaiting}
-          />
-        }
-      >
-        {waitingFlow > 0 && waitingClaude === 0
-          ? 'O fluxo está esperando a sua decisão.'
-          : waiting === 1
-            ? `${runActivity?.who ?? 'O Claude Code'} está esperando você.`
-            : `Esperando você (${waiting} pedidos).`}
-      </Alert>
-    ) : null
 
   const flowSlot = (
     <VStack data-panel-section="flow">
@@ -216,7 +170,7 @@ export function TaskPanel({
         stageId={card.stageId}
         pr={signals?.pr ?? null}
         onActivityChange={setFlowActivity}
-        onWaitingChange={setWaitingFlow}
+        onWaitingChange={() => undefined}
         onOpenRun={(runId) => setFocusRun({ runId, nonce: Date.now() })}
         onLiveChange={setFlowLive}
         onRunsChange={setFlowRuns}
@@ -225,7 +179,7 @@ export function TaskPanel({
   )
 
   const session = (
-    <VStack data-panel-section="claude">
+    <VStack data-panel-section="claude" height="100%">
       <TaskSession
         projectId={projectId}
         taskId={card.taskId}
@@ -315,11 +269,7 @@ export function TaskPanel({
   }
 
   const sidePanel = (
-    <VStack
-      role="complementary"
-      aria-label={`Detalhes de ${label}`}
-      height="100%"
-    >
+    <VStack role="complementary" aria-label={`Detalhes de ${label}`} height="100%">
       <TabList
         value={tab}
         onChange={(v) => setTab(tabs.find((t) => t === v) ?? suggested)}
@@ -355,43 +305,51 @@ export function TaskPanel({
     </VStack>
   )
 
-  const conversation = (
-    <ScrollableArea label={`Sessão de ${label} (rolagem)`} height="100%" padding={1}>
-      {session}
-    </ScrollableArea>
-  )
+  const branch = signals?.localBranches[0] ?? signals?.remoteBranches[0] ?? null
 
   return (
-    <VStack gap={3} role="region" aria-label={`Tarefa ${label}`} height="100%">
-      <HStack gap={3} vAlign="center" wrap="wrap">
-        <Code>{card.displayId ?? '—'}</Code>
-        <StackItem size="fill">
-          <Heading level={1}>{card.title}</Heading>
-        </StackItem>
-        <StageSelector card={card} stages={stages} onMove={onMove} compact />
-      </HStack>
-      <HStack gap={4} vAlign="center" wrap="wrap">
+    <VStack role="region" aria-label={`Tarefa ${label}`} height="100%">
+      <ScreenBarStart>
+        <HStack gap={2} vAlign="center">
+          {projectName && (
+            <Text type="supporting" color="secondary">
+              {`${projectName} ›`}
+            </Text>
+          )}
+          {card.displayId && (
+            <Text type="supporting" color="secondary" className="orkio-mono">
+              {`${card.displayId} ·`}
+            </Text>
+          )}
+          <ScreenTitle look={5} maxLines={1}>
+            {card.title}
+          </ScreenTitle>
+          {branch && (
+            <Text type="supporting" color="secondary" className="orkio-mono" maxLines={1}>
+              {branch}
+            </Text>
+          )}
+        </HStack>
+      </ScreenBarStart>
+      <ScreenBarEnd>
         <TaskPhaseBar phases={phases} />
-        <StackItem size="fill">
-          <TaskProgressStrip milestones={milestones} compact />
-        </StackItem>
-      </HStack>
-      {waitingBanner}
-      <StackItem size="fill">
-        {layout === 'columns' ? (
-          <HStack gap={4} vAlign="stretch" height="100%">
-            <StackItem size="fill">{conversation}</StackItem>
-            <VStack width="calc(var(--spacing-12) * 8)" height="100%">
-              {sidePanel}
-            </VStack>
-          </HStack>
-        ) : (
-          <VStack gap={4} height="100%">
-            <VStack height="calc(var(--spacing-12) * 5)">{sidePanel}</VStack>
-            <StackItem size="fill">{conversation}</StackItem>
+        <StageSelector card={card} stages={stages} onMove={onMove} compact />
+      </ScreenBarEnd>
+      {layout === 'columns' ? (
+        <HStack vAlign="stretch" height="100%">
+          <StackItem size="fill">{session}</StackItem>
+          <Divider orientation="vertical" />
+          <VStack width="calc(var(--spacing-12) * 9)" height="100%">
+            {sidePanel}
           </VStack>
-        )}
-      </StackItem>
+        </HStack>
+      ) : (
+        <VStack height="100%">
+          <VStack height="calc(var(--spacing-12) * 5)">{sidePanel}</VStack>
+          <Divider />
+          <StackItem size="fill">{session}</StackItem>
+        </VStack>
+      )}
     </VStack>
   )
 }

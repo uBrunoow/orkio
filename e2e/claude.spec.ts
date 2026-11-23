@@ -201,10 +201,12 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
     .fill('Implemente: pedir-shell perguntar tentar-push ler-env')
   await section.getByRole('button', { name: 'Rodar', exact: true }).click()
 
-  // Shell pede aprovação (no fim da sessão, e o topo avisa): "sempre neste projeto".
+  // Shell pede aprovação (no fim da sessão; a lista lateral avisa): "sempre neste projeto".
   await expect(
-    panelOf(page).getByRole('status').filter({ hasText: 'esperando você' })
-  ).toBeVisible()
+    page
+      .getByRole('navigation', { name: 'Navegação principal' })
+      .getByRole('group', { name: 'Esperando você' })
+  ).toContainText('ORK-2')
   const approval = section.getByRole('group', { name: 'Pedido de aprovação' })
   await expect(approval).toContainText('npm test')
   await approval.getByRole('button', { name: 'Sempre neste projeto: npm test' }).click()

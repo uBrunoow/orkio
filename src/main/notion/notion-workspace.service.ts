@@ -15,6 +15,8 @@ import type {
   NotionPropertySummary,
   NotionResult,
   NotionTask,
+  NotionTaskHit,
+  NotionTaskSearchResult,
   NotionTasksResult,
   NotionTasksSchemaInfo,
   NotionWorkspaceConfig,
@@ -37,6 +39,7 @@ import {
   parseDataSourceSummary,
   parseProjectPage,
   parseTaskPage,
+  relationIds,
   simplePropertyValues,
   type SimplePropertyValue,
   sameId,
@@ -426,6 +429,49 @@ export class NotionWorkspaceService {
         fetchedAt: value.fetchedAt,
         fromCache
       }
+    })
+  }
+
+  /**
+   * Busca no banco de Tarefas inteiro (qualquer responsável, qualquer projeto), por título ou pelo
+   * número do ID (ORK-142 / 142). Texto vazio = as 20 editadas mais recentemente. Sem cache: é
+   * uma consulta só (20 itens) a cada busca, que passa pela fila de rate limit do conector.
+   */
+  async searchTasks(query: string): Promise<NotionResult<NotionTaskSearchResult>> {
+    return this.wrap(async () => {
+      const config = this.requireConfig()
+      const status = await this.getStatus()
+      const mapping = status.config?.mapping ?? config.mapping
+      const text = query.trim()
+      const number = /^(?:[A-Za-z]+-)?(\d{1,9})$/.exec(text)?.[1]
+      const byTitle = { property: mapping.title.id, title: { contains: text } }
+      const filter = !text
+        ? null
+        : number && mapping.uniqueId
+          ? {
+              or: [
+                byTitle,
+                { property: mapping.uniqueId.id, unique_id: { equals: Number(number) } }
+              ]
+            }
+          : byTitle
+      const page = await this.deps.notion.queryDataSource(config.tasksDataSource.id, {
+        ...(filter ? { filter } : {}),
+        sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
+        pageSize: 20
+      })
+      const projects = this.config().projects
+      const tasks: NotionTaskHit[] = []
+      for (const item of page.results) {
+        const task = parseTaskPage(item, mapping)
+        if (!task) continue
+        const rel = relationIds(item, mapping.project.id)
+        const local = projects.find(
+          (p) => p.notionProject && rel.some((id) => sameId(id, p.notionProject!.id))
+        )
+        tasks.push({ ...task, projectId: local?.id ?? null, projectName: local?.name ?? null })
+      }
+      return { tasks }
     })
   }
 

@@ -40,7 +40,7 @@ export function QuestionCard({
   const complete = questions.every((q) => answerOf(q) !== '')
 
   return (
-    <Card role="group" aria-label="Pergunta do Claude Code">
+    <Card variant="yellow" role="group" aria-label="Pergunta do Claude Code">
       <VStack gap={4}>
         {questions.length > 1 && (
           <Text type="supporting">{questions.length} perguntas — responda todas e envie.</Text>

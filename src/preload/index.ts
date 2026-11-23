@@ -71,7 +71,8 @@ const api: OrkioApi = {
     link: (projectId, pageId) => ipcRenderer.invoke(notionWorkspace.link, projectId, pageId),
     unlink: (projectId) => ipcRenderer.invoke(notionWorkspace.unlink, projectId),
     listTasks: (projectId, options) =>
-      ipcRenderer.invoke(notionWorkspace.listTasks, projectId, { force: options?.force === true })
+      ipcRenderer.invoke(notionWorkspace.listTasks, projectId, { force: options?.force === true }),
+    searchTasks: (query) => ipcRenderer.invoke(notionWorkspace.searchTasks, String(query))
   },
   board: {
     get: (projectId, options) =>

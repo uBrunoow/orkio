@@ -9,6 +9,7 @@ import {
   launchOrkio,
   navTo,
   removeDir,
+  openedUrls,
   type OrkioApp,
   expectTaskHistory,
   taskScreen,
@@ -105,7 +106,10 @@ test('menu com três telas; Configurações reúne as telas do projeto e sai das
   await page.evaluate((t) => window.orkio.notion.connect({ kind: 'token', token: t }), TOKEN)
 
   // O menu principal tem só Quadro, Agentes e Configurações.
-  await expect(telas(page).getByRole('button')).toHaveText(['Quadro', 'Agentes', 'Configurações'])
+  await expect(telas(page).getByRole('button')).toHaveCount(3)
+  for (const name of ['Quadro', 'Agentes', 'Configurações']) {
+    await expect(telas(page).getByRole('button', { name, exact: true })).toBeVisible()
+  }
 
   // Sem quadro: Quadro e automações pede para criá-lo.
   await navTo(page, 'Quadro e automações')
@@ -238,6 +242,30 @@ test('Command Palette e atalhos: Ctrl+K acha a tarefa, Ctrl+número troca de tel
   await page.keyboard.press('Escape')
   await card.focus()
   await page.keyboard.press('Control+Enter')
+  await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()
+  expect(await cspViolations(page)).toEqual([])
+})
+
+test('Buscar tarefa: o banco do Notion inteiro; fora do quadro abre no Notion; conta na lateral', async () => {
+  const { app, page } = orkio!
+  const nav = page.getByRole('navigation', { name: 'Navegação principal' })
+  // Sem GitHub, a conta é a do Notion (nome da pessoa, sem e-mail).
+  await expect(nav.getByRole('button', { name: /^Conta: Ada Lovelace/ })).toBeVisible()
+
+  await nav.getByRole('button', { name: /^Buscar tarefa/ }).click()
+  const search = page.getByRole('dialog', { name: 'Buscar tarefas no Notion' })
+  await expect(search).toBeVisible()
+  // Tarefa de outra pessoa (não está no seu quadro) também aparece, marcada para abrir no Notion.
+  await page.keyboard.type('outra pessoa')
+  const other = search.getByRole('option', { name: /Tarefa de outra pessoa/ })
+  await expect(other).toContainText('abre no Notion')
+  await other.click()
+  await expect.poll(() => openedUrls(app)).toContain('https://www.notion.so/ORK-9-bbbb9')
+
+  // Pelo ID: a sua abre a tela da tarefa no Orkio.
+  await nav.getByRole('button', { name: /^Buscar tarefa/ }).click()
+  await page.keyboard.type('ORK-2')
+  await search.getByRole('option', { name: /Listar tarefas do Notion/ }).click()
   await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
 })

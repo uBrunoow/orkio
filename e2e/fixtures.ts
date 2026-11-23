@@ -786,13 +786,17 @@ export async function launchOrkio(
 
           if (path === `/data_sources/${ids.tasksDs}/query`) {
             // O Orkio filtra por projeto E responsável (a pessoa logada): `{ and: [...] }`.
+            // A busca (searchTasks) usa `{ or: [título, ID] }` ou só o título, no banco inteiro.
             type Clause = {
               property?: string
               relation?: { contains?: string }
               people?: { contains?: string }
+              title?: { contains?: string }
+              unique_id?: { equals?: number }
             }
-            const raw = body['filter'] as (Clause & { and?: Clause[] }) | undefined
-            const clauses = raw?.and ?? (raw ? [raw] : [])
+            const raw = body['filter'] as (Clause & { and?: Clause[]; or?: Clause[] }) | undefined
+            const search = raw?.or ?? (raw?.title ? [raw] : null)
+            const clauses = search ? [] : (raw?.and ?? (raw ? [raw] : []))
             const target = clauses.find((c) => c.property === 'rel')?.relation?.contains
             const person = clauses.find((c) => c.property === 'ppl')?.people?.contains
             const task = (
@@ -884,6 +888,20 @@ export async function launchOrkio(
                 ).properties
                 if (target && props.Projeto.relation[0]?.id !== target) return false
                 if (person && !props.Responsável.people.some((p) => p.id === person)) return false
+                if (search) {
+                  const page = t as {
+                    properties: {
+                      Nome: { title: { plain_text: string }[] }
+                      ID: { unique_id: { number: number } }
+                    }
+                  }
+                  const title = page.properties.Nome.title.map((r) => r.plain_text).join('')
+                  return search.some((c) =>
+                    c.title?.contains !== undefined
+                      ? title.toLowerCase().includes(c.title.contains.toLowerCase())
+                      : c.unique_id?.equals === page.properties.ID.unique_id.number
+                  )
+                }
                 return true
               }),
               has_more: false,

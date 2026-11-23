@@ -59,7 +59,7 @@ export function TaskScreen({
   if (!card || !board.view.config) {
     return (
       <VStack gap={5}>
-        <PageHeader title="Tarefa" context={project.name} />
+        <PageHeader title="Tarefa" />
         <PageState
           kind="empty"
           title="Tarefa não encontrada"
@@ -81,6 +81,7 @@ export function TaskScreen({
       onToggleAutomation={(paused) => void board.setAutomationPaused(card.taskId, paused)}
       onBranchesChanged={() => void refreshSignals(true)}
       focusSection={section}
+      projectName={project.name}
     />
   )
 }

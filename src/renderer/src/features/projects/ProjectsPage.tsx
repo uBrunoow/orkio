@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@astryxdesign/core/Button'
 import { Icon } from '@astryxdesign/core/Icon'
-import { BoardIcon, FolderPlusIcon, FolderSearchIcon } from '../../components/icons'
+import {
+  BoardIcon,
+  DoneIcon,
+  FolderPlusIcon,
+  FolderSearchIcon,
+  ProblemIcon
+} from '../../components/icons'
+import { Card } from '@astryxdesign/core/Card'
 import { Code } from '@astryxdesign/core/Code'
 import { EmptyState } from '@astryxdesign/core/EmptyState'
 import { HStack } from '@astryxdesign/core/HStack'
@@ -10,6 +17,7 @@ import { List } from '@astryxdesign/core/List'
 import { MoreMenu } from '@astryxdesign/core/MoreMenu'
 import { Skeleton } from '@astryxdesign/core/Skeleton'
 import { Text } from '@astryxdesign/core/Text'
+import { Token } from '@astryxdesign/core/Token'
 import { StatusToken, toneOf } from '../../components/StatusToken'
 import { VStack } from '@astryxdesign/core/VStack'
 import type {
@@ -147,38 +155,53 @@ export function ProjectsPage({
           />
         )
       ) : (
-        <List
-          hasDividers
-          density="balanced"
-          aria-label="Projetos"
-          aria-busy={projects.revalidating}
-        >
-          {list.map((project) => (
-            <ProjectRow
-              key={project.id}
-              project={project}
-              onRelocate={() => projects.relocate(project.id)}
-              onRemove={() => projects.remove(project.id)}
-              onOpenBoard={() => onOpenBoard(project.id)}
-              onContinueSetup={() => onContinueSetup(project.id)}
-              checks={projectChecks({
-                project,
-                boardStages: boardStages[project.id] ?? null,
-                precheck: null
-              })}
-              notion={
-                notionWorkspace?.config ? (
-                  <ProjectNotionSection
-                    project={project}
-                    workspace={notionWorkspace}
-                    onChanged={projects.refresh}
-                    onOpenIntegrations={onOpenIntegrations}
-                  />
-                ) : null
+        <Card padding={0}>
+          <List
+            hasDividers
+            density="balanced"
+            aria-label="Projetos"
+            aria-busy={projects.revalidating}
+          >
+            <Item
+              label={
+                <Text type="supporting" color="secondary">
+                  Projeto
+                </Text>
               }
+              endContent={
+                <Text type="supporting" color="secondary">
+                  Estado
+                </Text>
+              }
+              aria-hidden="true"
             />
-          ))}
-        </List>
+            {list.map((project) => (
+              <ProjectRow
+                key={project.id}
+                project={project}
+                onRelocate={() => projects.relocate(project.id)}
+                onRemove={() => projects.remove(project.id)}
+                onOpenBoard={() => onOpenBoard(project.id)}
+                onContinueSetup={() => onContinueSetup(project.id)}
+                checks={projectChecks({
+                  project,
+                  boardStages: boardStages[project.id] ?? null,
+                  precheck: null
+                })}
+                notion={
+                  notionWorkspace?.config ? (
+                    <ProjectNotionSection
+                      project={project}
+                      workspace={notionWorkspace}
+                      onChanged={projects.refresh}
+                      onOpenIntegrations={onOpenIntegrations}
+                    />
+                  ) : null
+                }
+              />
+            ))}
+          </List>
+        </Card>
       )}
     </VStack>
   )
@@ -224,47 +247,37 @@ function ProjectRow({
       as="li"
       aria-label={project.name}
       align="start"
+      startContent={
+        <Token label={project.name.slice(0, 1).toUpperCase()} color="orange" aria-hidden />
+      }
       label={
-        <HStack gap={2} vAlign="center">
-          <Text weight="semibold" type="large">
-            {project.name}
+        <HStack gap={2} vAlign="center" wrap="wrap">
+          <Text weight="semibold">{project.name}</Text>
+          <Text type="supporting" color="secondary" className="orkio-mono">
+            {[project.localPath, project.repo ? `${project.repo.owner}/${project.repo.name}` : null]
+              .filter(Boolean)
+              .join(' · ')}
           </Text>
-          <StatusToken
-            label={health.label}
-            tone={toneOf(health.color)}
-            data-health={project.health.state}
-          />
+          {project.local && (
+            <Code data-testid="project-branch">{project.local.branch ?? '(detached HEAD)'}</Code>
+          )}
         </HStack>
       }
       description={
         <VStack gap={1}>
-          <HStack gap={3} vAlign="center" wrap="wrap">
-            {project.repo && (
-              <Text type="supporting">
-                {project.repo.owner}/{project.repo.name}
-              </Text>
-            )}
-            {project.local && (
-              <>
-                <Code data-testid="project-branch">
-                  {project.local.branch ?? '(detached HEAD)'}
-                </Code>
-                {project.local.dirty && (
-                  <StatusToken label="alterações não commitadas" tone="warning" />
-                )}
-              </>
-            )}
-          </HStack>
-          <Text type="supporting" color="secondary">
-            {project.localPath}
-          </Text>
+          {project.local?.dirty && <StatusToken label="alterações não commitadas" tone="warning" />}
           <HStack gap={3} vAlign="center" wrap="wrap" data-testid="project-checks">
             {checks.map((c) => (
-              <StatusToken
-                key={c.id}
-                label={c.label}
-                tone={c.state === 'ok' ? 'success' : c.state === 'warning' ? 'warning' : 'danger'}
-              />
+              <HStack key={c.id} gap={1} vAlign="center">
+                <Icon
+                  icon={c.state === 'ok' ? DoneIcon : ProblemIcon}
+                  size="sm"
+                  color={c.state === 'ok' ? 'success' : c.state === 'warning' ? 'warning' : 'error'}
+                />
+                <Text type="supporting" color={c.state === 'ok' ? 'secondary' : 'primary'}>
+                  {c.label}
+                </Text>
+              </HStack>
             ))}
           </HStack>
           {project.health.message && project.health.state !== 'ok' && (
@@ -316,10 +329,15 @@ function ProjectRow({
           </HStack>
         ) : (
           <HStack gap={2} vAlign="center">
+            <StatusToken
+              label={health.label}
+              tone={toneOf(health.color)}
+              data-health={project.health.state}
+            />
             {folderProblem ? (
               // A pasta sumiu ou mudou: reapontar é a correção, fica à vista.
               <Button
-                variant="primary"
+                variant="secondary"
                 label={busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
                 icon={<Icon icon={FolderSearchIcon} />}
                 isLoading={busy === 'relocate'}

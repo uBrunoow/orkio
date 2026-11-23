@@ -329,10 +329,12 @@ test('critério 5: pausar impede movimentos e registra no histórico', async () 
     'Branch criada (feat/ORK-2-outra): regra “Branch criada inicia a tarefa” ignorada (automações pausadas nesta tarefa)'
   )
 
-  // "Pausar todas" também é visível no topo.
-  await page.getByRole('button', { name: 'Pausar todas' }).click()
+  // "Pausar todas" fica no menu ⋯ da barra do quadro.
+  await page.getByRole('button', { name: 'Mais ações do quadro' }).click()
+  await page.getByRole('menuitem', { name: 'Pausar todas' }).click()
   await expect(page.getByTestId('automation-status')).toContainText('pausadas para todos')
-  await page.getByRole('button', { name: 'Retomar automações' }).click()
+  await page.getByRole('button', { name: 'Mais ações do quadro' }).click()
+  await page.getByRole('menuitem', { name: 'Retomar automações' }).click()
   expect(await cspViolations(page)).toEqual([])
 })
 
