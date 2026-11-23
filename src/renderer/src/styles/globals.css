@@ -1,0 +1,177 @@
+/*
+ * Tema do Orkio (Tailwind v4 + shadcn/ui). Fonte da verdade das cores e medidas: o mockup
+ * (docs/superpowers/specs/2026-11-23-orkio-ui-mockup.html) e o protótipo Alva Tasks.
+ * Só escuro. Hex só aqui; componentes usam as classes (bg-card, text-muted-foreground...).
+ * Compilado para um .css estático no build: nada de <style> em runtime (CSP estrita).
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --radius: 0.5rem;
+
+  /* Superfícies (do fundo para cima) */
+  --background: #0a0a0b;
+  --surface: #111113;
+  --card: #141416;
+  --card-foreground: #f2f2f0;
+  --popover: #141416;
+  --popover-foreground: #f2f2f0;
+  --muted: #1e1e21;
+  --muted-foreground: #8f8f94;
+  --subtle-foreground: #5e5e63;
+  --foreground: #f2f2f0;
+
+  /* Linhas: a forte para controles, a suave para divisórias */
+  --border: #2c2c30;
+  --border-soft: #1f1f23;
+  --input: #2c2c30;
+  --ring: #ff5b1f;
+
+  /* Marca: laranja só em ação principal, agente trabalhando e foco */
+  --brand: #ff5b1f;
+  --brand-hover: #ff7440;
+  --brand-tint: #3a1a0e;
+  --brand-tint-foreground: #ffb08f;
+  --brand-tint-border: #5a2a14;
+  --primary: #ff5b1f;
+  --primary-foreground: #000000;
+
+  /* shadcn: "secondary" e "accent" são fundos neutros de hover/seleção */
+  --secondary: #1e1e21;
+  --secondary-foreground: #f2f2f0;
+  --accent: #1e1e21;
+  --accent-foreground: #f2f2f0;
+
+  /* Estados */
+  --ok: #3dd68c;
+  --ok-tint: #12301f;
+  --ok-tint-border: #1f5a38;
+  --warn: #f5c451;
+  --warn-tint: #1a160b;
+  --warn-tint-border: #4a3a12;
+  --danger: #f2555a;
+  --danger-tint: #2a1214;
+  --danger-tint-border: #5a2226;
+  --destructive: #f2555a;
+  --info: #6ca8ff;
+  /* Cores de categoria (etapas, avatares de agente; mockup .a4/.a6) */
+  --purple: #c9a2ff;
+  --pink: #ff8fa3;
+
+  /* Lateral */
+  --sidebar: #111113;
+  --sidebar-foreground: #8f8f94;
+  --sidebar-accent: #1e1e21;
+  --sidebar-accent-foreground: #f2f2f0;
+  --sidebar-border: #1f1f23;
+}
+
+@theme inline {
+  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-display: 'Jost', 'Inter', system-ui, sans-serif;
+
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-tint-foreground: var(--brand-tint-foreground);
+  --color-brand-tint-border: var(--brand-tint-border);
+  --color-ok: var(--ok);
+  --color-ok-tint: var(--ok-tint);
+  --color-ok-tint-border: var(--ok-tint-border);
+  --color-warn: var(--warn);
+  --color-warn-tint: var(--warn-tint);
+  --color-warn-tint-border: var(--warn-tint-border);
+  --color-danger: var(--danger);
+  --color-danger-tint: var(--danger-tint);
+  --color-danger-tint-border: var(--danger-tint-border);
+  --color-info: var(--info);
+  --color-purple: var(--purple);
+  --color-pink: var(--pink);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: calc(var(--radius) - 1px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-background text-foreground font-sans text-sm antialiased;
+    color-scheme: dark;
+  }
+  ::selection {
+    background: var(--brand-tint);
+    color: var(--brand-tint-foreground);
+  }
+  /* Barras de rolagem discretas (a ScrollArea do Radix injeta <style>; usamos a nativa). */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

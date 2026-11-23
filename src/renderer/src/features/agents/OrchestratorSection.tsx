@@ -1,18 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { MultiSelector } from '@astryxdesign/core/MultiSelector'
-import { Selector } from '@astryxdesign/core/Selector'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { Timestamp } from '@astryxdesign/core/Timestamp'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { CheckboxField, SelectField } from '@/components/form'
+import { Spinner } from '@/components/Spinner'
+import { Timestamp } from '@/components/Timestamp'
+import { MultiSelectField } from './MultiSelectField'
 import type { AgentsState } from '../../../../shared/agent'
 import {
   ORCHESTRATOR_LIMITS,
@@ -62,7 +53,7 @@ export function OrchestratorSection({
     }
   }, [projectId, agents])
 
-  if (!state) return <Text type="supporting">Carregando o orquestrador…</Text>
+  if (!state) return <p className="text-xs text-muted-foreground">Carregando o orquestrador…</p>
 
   const stageName = (id: string | null): string =>
     state.stages.find((s) => s.id === id)?.name ?? 'etapa removida'
@@ -92,118 +83,129 @@ export function OrchestratorSection({
   }
 
   return (
-    <Card role="region" aria-label="Orquestrador">
-      <VStack gap={3}>
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          <Heading level={2}>Orquestrador</Heading>
-          <StatusToken
-            tone={!config.enabled ? 'neutral' : status.working > 0 ? 'running' : 'success'}
-            label={
-              !config.enabled
-                ? 'Desligado'
-                : status.working > 0
-                  ? `${plural(status.working, 'tarefa', 'tarefas')} em andamento`
-                  : 'Ligado'
-            }
-          />
-          <StackItem size="fill" />
-          {config.enabled && !draft && (
-            <Button
-              size="sm"
-              variant="secondary"
-              label="Rodar agora"
-              isLoading={busy}
-              onClick={() => void run()}
-            />
-          )}
-          {!draft && (
-            <Button
-              size="sm"
-              variant="secondary"
-              label="Configurar orquestrador"
-              onClick={() => {
-                setError(null)
-                setDraft(
-                  config.lanes.length === 0 && !config.enabled
-                    ? suggestOrchestrator(state.stages)
-                    : structuredClone(config)
-                )
-              }}
-            />
-          )}
-        </HStack>
-        <Text type="supporting">
-          Puxa tarefas da fila para os agentes, por prioridade do Notion, e passa cada uma para a
-          etapa seguinte quando o fluxo da etapa termina bem. Gates, push e falhas continuam parando
-          em você.
-        </Text>
-        {error && <Alert tone="danger">{error}</Alert>}
-
-        {draft ? (
-          <OrchestratorEditor
-            draft={draft}
-            state={state}
-            agents={agents}
-            busy={busy}
-            onChange={setDraft}
-            onCancel={() => setDraft(null)}
-            onSave={(d) => void save(d)}
-          />
-        ) : config.lanes.length === 0 ? (
-          <Text type="supporting" color="secondary">
-            Ainda não configurado. “Configurar orquestrador” sugere um caminho a partir das etapas
-            do quadro e dos agentes embutidos.
-          </Text>
-        ) : (
-          <VStack gap={3}>
-            <Text data-testid="orchestrator-summary">{summary(config, stageName, agentName)}</Text>
-            {config.enabled && (
-              <Text type="supporting" color="secondary">
-                {status.lastRunAt ? (
-                  <>
-                    Última rodada <Timestamp value={status.lastRunAt} format="auto" />
-                  </>
-                ) : (
-                  'Primeira rodada no próximo ciclo (até 1 min)'
-                )}
-                {` · ${plural(status.queued, 'tarefa', 'tarefas')} na fila · até ${config.maxActive} ao mesmo tempo`}
-              </Text>
-            )}
-            {status.error && <Alert tone="warning">{status.error}</Alert>}
-            {state.validation.warnings.map((w) => (
-              <Alert key={w} tone="warning">
-                {w}
-              </Alert>
-            ))}
-            {config.enabled && state.agents.length > 0 && (
-              <List hasDividers density="compact" aria-label="Carga dos agentes">
-                {state.agents.map((a) => (
-                  <Item
-                    as="li"
-                    key={a.key}
-                    label={a.name}
-                    description={a.limitProblem ?? undefined}
-                    endContent={
-                      <StatusToken
-                        tone={a.limitProblem ? 'warning' : a.active > 0 ? 'running' : 'neutral'}
-                        label={`${a.active} de ${a.capacity} em andamento`}
-                      />
-                    }
-                  />
-                ))}
-              </List>
-            )}
-            {config.enabled && status.waiting.length > 0 && (
-              <List hasDividers density="compact" aria-label="Esperando na última rodada">
-                {status.waiting.map((w) => (
-                  <Item as="li" key={w.taskId} label={w.displayId} description={w.reason} />
-                ))}
-              </List>
-            )}
-          </VStack>
+    <section
+      aria-label="Orquestrador"
+      className="flex flex-col gap-3 rounded-xl border border-border-soft bg-card p-4"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-sm font-medium">Orquestrador</h2>
+        <StatusToken
+          tone={!config.enabled ? 'neutral' : status.working > 0 ? 'running' : 'success'}
+          label={
+            !config.enabled
+              ? 'Desligado'
+              : status.working > 0
+                ? `${plural(status.working, 'tarefa', 'tarefas')} em andamento`
+                : 'Ligado'
+          }
+        />
+        <div className="flex-1" />
+        {config.enabled && !draft && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => void run()}>
+            {busy && <Spinner />}
+            Rodar agora
+          </Button>
         )}
-      </VStack>
-    </Card>
+        {!draft && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setError(null)
+              setDraft(
+                config.lanes.length === 0 && !config.enabled
+                  ? suggestOrchestrator(state.stages)
+                  : structuredClone(config)
+              )
+            }}
+          >
+            Configurar orquestrador
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Puxa tarefas da fila para os agentes, por prioridade do Notion, e passa cada uma para a
+        etapa seguinte quando o fluxo da etapa termina bem. Gates, push e falhas continuam parando
+        em você.
+      </p>
+      {error && <Alert tone="danger">{error}</Alert>}
+
+      {draft ? (
+        <OrchestratorEditor
+          draft={draft}
+          state={state}
+          agents={agents}
+          busy={busy}
+          onChange={setDraft}
+          onCancel={() => setDraft(null)}
+          onSave={(d) => void save(d)}
+        />
+      ) : config.lanes.length === 0 ? (
+        <p className="text-xs text-muted-foreground">
+          Ainda não configurado. “Configurar orquestrador” sugere um caminho a partir das etapas do
+          quadro e dos agentes embutidos.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <p data-testid="orchestrator-summary">{summary(config, stageName, agentName)}</p>
+          {config.enabled && (
+            <p className="text-xs text-muted-foreground">
+              {status.lastRunAt ? (
+                <>
+                  Última rodada <Timestamp value={status.lastRunAt} />
+                </>
+              ) : (
+                'Primeira rodada no próximo ciclo (até 1 min)'
+              )}
+              {` · ${plural(status.queued, 'tarefa', 'tarefas')} na fila · até ${config.maxActive} ao mesmo tempo`}
+            </p>
+          )}
+          {status.error && <Alert tone="warning">{status.error}</Alert>}
+          {state.validation.warnings.map((w) => (
+            <Alert key={w} tone="warning">
+              {w}
+            </Alert>
+          ))}
+          {config.enabled && state.agents.length > 0 && (
+            <ul aria-label="Carga dos agentes" className="rounded-lg border border-border-soft">
+              {state.agents.map((a) => (
+                <li
+                  key={a.key}
+                  className="flex items-center gap-3 border-b border-border-soft px-3 py-2 last:border-b-0"
+                >
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">{a.name}</span>
+                    {a.limitProblem && (
+                      <span className="text-xs text-muted-foreground">{a.limitProblem}</span>
+                    )}
+                  </div>
+                  <StatusToken
+                    tone={a.limitProblem ? 'warning' : a.active > 0 ? 'running' : 'neutral'}
+                    label={`${a.active} de ${a.capacity} em andamento`}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+          {config.enabled && status.waiting.length > 0 && (
+            <ul
+              aria-label="Esperando na última rodada"
+              className="rounded-lg border border-border-soft"
+            >
+              {status.waiting.map((w) => (
+                <li
+                  key={w.taskId}
+                  className="flex flex-col border-b border-border-soft px-3 py-2 last:border-b-0"
+                >
+                  <span className="font-mono text-xs text-subtle-foreground">{w.displayId}</span>
+                  <span className="text-xs text-muted-foreground">{w.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -285,114 +287,109 @@ function OrchestratorEditor({
   )
 
   return (
-    <VStack gap={4} role="form" aria-label="Configurar orquestrador">
-      <CheckboxInput
+    <div role="form" aria-label="Configurar orquestrador" className="flex flex-col gap-4">
+      <CheckboxField
         label="Ligar o orquestrador"
         description="Ligado, ele roda a cada ciclo das automações (cerca de 1 min) e logo depois de cada fluxo terminar."
-        value={draft.enabled}
+        checked={draft.enabled}
         onChange={(enabled) => set({ enabled })}
       />
-      <HStack gap={3} wrap="wrap">
-        <StackItem size="fill">
-          <Selector
-            label="Puxar tarefas de"
-            placeholder="Escolha a coluna de fila"
-            options={stageOptions}
-            {...(draft.queueStageId ? { value: draft.queueStageId } : {})}
-            onChange={(v: string) => set({ queueStageId: v })}
-          />
-        </StackItem>
-        <StackItem size="fill">
-          <Selector
-            label="Tarefas ao mesmo tempo"
-            description="Só limita o puxar da fila; o que já está em andamento segue."
-            options={Array.from({ length: ORCHESTRATOR_LIMITS.maxActive }, (_, i) => ({
-              value: String(i + 1),
-              label: String(i + 1)
-            }))}
-            value={String(draft.maxActive)}
-            onChange={(v: string) => set({ maxActive: Number(v) })}
-          />
-        </StackItem>
-      </HStack>
+      <div className="flex flex-wrap gap-3">
+        <SelectField
+          className="min-w-48 flex-1"
+          label="Puxar tarefas de"
+          placeholder="Escolha a coluna de fila"
+          options={stageOptions}
+          value={draft.queueStageId}
+          onChange={(v) => set({ queueStageId: v })}
+        />
+        <SelectField
+          className="min-w-48 flex-1"
+          label="Tarefas ao mesmo tempo"
+          description="Só limita o puxar da fila; o que já está em andamento segue."
+          options={Array.from({ length: ORCHESTRATOR_LIMITS.maxActive }, (_, i) => ({
+            value: String(i + 1),
+            label: String(i + 1)
+          }))}
+          value={String(draft.maxActive)}
+          onChange={(v) => set({ maxActive: Number(v) })}
+        />
+      </div>
 
-      <VStack gap={2}>
-        <Heading level={3}>Etapas de trabalho</Heading>
-        <Text type="supporting">
+      <div className="flex flex-col gap-2">
+        <h3 className="text-sm font-medium">Etapas de trabalho</h3>
+        <p className="text-xs text-muted-foreground">
           A primeira recebe as tarefas puxadas da fila. Em cada etapa, o menos ocupado dos agentes
           escolhidos pega a tarefa e o fluxo ligado à coluna roda com ele.
-        </Text>
+        </p>
         {draft.lanes.map((lane, i) => (
-          <HStack
+          <div
             key={i}
-            gap={2}
-            vAlign="end"
-            wrap="wrap"
             role="group"
             aria-label={`Etapa de trabalho ${i + 1}`}
+            className="flex flex-wrap items-end gap-2 rounded-lg border border-border-soft p-3"
           >
-            <StackItem size="fill">
-              <Selector
-                label="Etapa"
-                options={stageOptions}
-                value={lane.stageId}
-                onChange={(v: string) => setLane(i, { stageId: v })}
-              />
-            </StackItem>
-            <StackItem size="fill">
-              <MultiSelector
-                label="Agentes"
-                placeholder="Escolha os agentes"
-                options={agentOptions}
-                value={lane.agents}
-                triggerDisplay="labels"
-                onChange={(value: string[]) => setLane(i, { agents: value })}
-              />
-            </StackItem>
-            <StackItem size="fill">
-              <Selector
-                label="Quando o fluxo terminar bem"
-                options={[
-                  { value: '', label: 'Fica na etapa' },
-                  ...state.stages
-                    .filter((s) => s.id !== lane.stageId)
-                    .map((s) => ({ value: s.id, label: `Mover para ${s.name}` }))
-                ]}
-                value={lane.next ?? ''}
-                onChange={(v: string) => setLane(i, { next: v || null })}
-              />
-            </StackItem>
+            <SelectField
+              className="min-w-40 flex-1"
+              label="Etapa"
+              options={stageOptions}
+              value={lane.stageId}
+              onChange={(v) => setLane(i, { stageId: v })}
+            />
+            <MultiSelectField
+              className="min-w-40 flex-1"
+              label="Agentes"
+              placeholder="Escolha os agentes"
+              options={agentOptions}
+              value={lane.agents}
+              onChange={(value) => setLane(i, { agents: value })}
+            />
+            <SelectField
+              className="min-w-40 flex-1"
+              label="Quando o fluxo terminar bem"
+              options={[
+                { value: '', label: 'Fica na etapa' },
+                ...state.stages
+                  .filter((s) => s.id !== lane.stageId)
+                  .map((s) => ({ value: s.id, label: `Mover para ${s.name}` }))
+              ]}
+              value={lane.next ?? ''}
+              onChange={(v) => setLane(i, { next: v || null })}
+            />
             <Button
               variant="ghost"
-              isIconOnly
-              label={`Remover etapa de trabalho ${i + 1}`}
-              icon={<Icon icon={TrashIcon} />}
+              size="icon"
+              aria-label={`Remover etapa de trabalho ${i + 1}`}
               onClick={() => set({ lanes: draft.lanes.filter((_, j) => j !== i) })}
-            />
-          </HStack>
+            >
+              <TrashIcon />
+            </Button>
+          </div>
         ))}
-        <HStack gap={2} wrap="wrap">
+        <div className="flex flex-wrap gap-2">
           {freeStage && draft.lanes.length < ORCHESTRATOR_LIMITS.lanes && (
             <Button
               size="sm"
-              variant="secondary"
-              label="Adicionar etapa de trabalho"
-              icon={<Icon icon={PlusIcon} />}
+              variant="outline"
               onClick={() =>
                 set({ lanes: [...draft.lanes, { stageId: freeStage.id, agents: [], next: null }] })
               }
-            />
+            >
+              <PlusIcon />
+              Adicionar etapa de trabalho
+            </Button>
           )}
           <Button
             size="sm"
             variant="ghost"
-            label="Usar sugestão"
             onClick={() =>
               onChange({ ...suggestOrchestrator(state.stages), enabled: draft.enabled })
             }
-          />
-        </HStack>
-      </VStack>
+          >
+            Usar sugestão
+          </Button>
+        </div>
+      </div>
 
       {validation.errors.map((e) => (
         <Alert key={e} tone="danger">
@@ -404,16 +401,15 @@ function OrchestratorEditor({
           {w}
         </Alert>
       ))}
-      <HStack gap={2}>
-        <Button
-          variant="primary"
-          label="Salvar orquestrador"
-          isLoading={busy}
-          isDisabled={validation.errors.length > 0}
-          onClick={() => onSave(draft)}
-        />
-        <Button variant="ghost" label="Cancelar" onClick={onCancel} />
-      </HStack>
-    </VStack>
+      <div className="flex gap-2">
+        <Button disabled={busy || validation.errors.length > 0} onClick={() => onSave(draft)}>
+          {busy && <Spinner />}
+          Salvar orquestrador
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
   )
 }

@@ -10,7 +10,8 @@ import {
   removeDir,
   type OrkioApp,
   navTo,
-  expectTaskHistory
+  expectTaskHistory,
+  taskScreen
 } from './fixtures'
 
 /**
@@ -70,7 +71,7 @@ function card(page: Page): Locator {
 }
 async function openPanel(page: Page): Promise<Locator> {
   await card(page).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   await expect(panel).toBeVisible()
   return panel
 }
@@ -206,6 +207,8 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
     .getByRole('region', { name: 'Validação do fluxo' })
     .getByRole('button', { name: 'Salvar fluxo' })
     .click()
+  await expect(page.getByTestId('unsaved-changes')).toHaveText('Nenhuma alteração')
+  await navTo(page, 'Quadro')
   await expect(card(page)).toBeVisible()
 
   // Mover para Revisando dispara o fluxo.

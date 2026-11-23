@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { TaskSignals } from '../../../../shared/ipc-contract'
-import { cardStatus } from './card-status'
+import { cardDetail, cardStatus } from './card-status'
 
 type Pr = NonNullable<TaskSignals['pr']>
 const synced = { sync: { state: 'synced' as const } }
@@ -54,5 +54,31 @@ describe('cardStatus', () => {
     )
     expect(cardStatus(synced, null, withPr({}))?.label).toBe('Em revisão')
     expect(cardStatus(synced, null, withPr({ state: 'draft' }))?.label).toBe('PR rascunho')
+  })
+})
+
+describe('cardDetail', () => {
+  it('linha de detalhe do card', () => {
+    expect(cardDetail({ waiting: 'Aprovar plano', running: 'Alva · /implement', pr: null })).toBe(
+      'Aprovar plano'
+    )
+    expect(cardDetail({ waiting: null, running: 'Alva · /implement', pr: null })).toBe(
+      'Alva · /implement'
+    )
+    expect(
+      cardDetail({
+        waiting: null,
+        running: null,
+        pr: { number: 31, unresolvedComments: 2, checks: 'success' } as Pr
+      })
+    ).toBe('#31 · 2 comentários')
+    expect(
+      cardDetail({
+        waiting: null,
+        running: null,
+        pr: { number: 27, unresolvedComments: 0, checks: 'success' } as Pr
+      })
+    ).toBe('#27 · CI ok')
+    expect(cardDetail({ waiting: null, running: null, pr: null })).toBeNull()
   })
 })

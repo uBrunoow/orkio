@@ -1,6 +1,6 @@
 import type { AgentColor } from '../../../../shared/agent'
 
-/** Hash estável (FNV-1a) do id/nome: o mesmo agente tem sempre a mesma forma. */
+/** Hash estável (FNV-1a) do id/nome: o mesmo agente tem sempre o mesmo rosto. */
 function hash(seed: string): number {
   let h = 0x811c9dc5
   for (let i = 0; i < seed.length; i++) {
@@ -10,33 +10,50 @@ function hash(seed: string): number {
   return h >>> 0
 }
 
-/** Formas no quadro 24×24 (unidades do viewBox, não px de tela). */
-const SHAPES: readonly ((fill: string) => React.JSX.Element)[] = [
-  (f) => <circle cx="12" cy="12" r="6" fill={f} />,
-  (f) => <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill={f} />,
-  (f) => <path d="M12 5.5 L18.5 17.5 H5.5 Z" fill={f} />,
-  (f) => <path d="M12 5 L19 12 L12 19 L5 12 Z" fill={f} />,
-  (f) => <path d="M6 15 A6 6 0 0 1 18 15 Z" fill={f} />,
-  (f) => <circle cx="12" cy="12" r="5" fill="none" stroke={f} strokeWidth="2.5" />,
+/**
+ * Cor de fundo pelos tokens do tema (globals.css). Roxo, rosa e verde-azulado não têm token
+ * próprio: saem da mistura de dois tokens de estado.
+ */
+const FILL: Record<AgentColor, string> = {
+  orange: 'var(--brand)',
+  blue: 'var(--info)',
+  green: 'var(--ok)',
+  yellow: 'var(--warn)',
+  purple: 'var(--purple)',
+  pink: 'var(--pink)',
+  teal: 'color-mix(in oklch, var(--ok) 55%, var(--info))'
+}
+
+/** Olhos no quadro 24×24 (unidades do viewBox; o mockup tem 40 px: escala 0,6). */
+const FACES: readonly ((ink: string) => React.JSX.Element)[] = [
+  // dois traços em pé
   (f) => (
     <>
-      <rect x="6" y="6" width="5" height="5" rx="1" fill={f} />
-      <rect x="13" y="13" width="5" height="5" rx="1" fill={f} />
+      <rect x="7.2" y="9" width="3" height="5.4" rx="1" fill={f} />
+      <rect x="13.8" y="9" width="3" height="5.4" rx="1" fill={f} />
     </>
   ),
-  (f) => <path d="M6 18 L6 6 L18 18 Z" fill={f} />
+  // dois traços deitados
+  (f) => (
+    <>
+      <rect x="5.4" y="10.2" width="5.4" height="2.4" rx="1" fill={f} />
+      <rect x="13.2" y="10.2" width="5.4" height="2.4" rx="1" fill={f} />
+    </>
+  ),
+  // dois pontos
+  (f) => (
+    <>
+      <circle cx="8.7" cy="11.1" r="1.6" fill={f} />
+      <circle cx="15.3" cy="11.1" r="1.6" fill={f} />
+    </>
+  ),
+  // um traço só
+  (f) => <rect x="9" y="12" width="6" height="1.8" rx="0.9" fill={f} />
 ]
-const ROTATIONS = [0, 90, 180, 270] as const
-const DOTS = [
-  [5, 5],
-  [19, 5],
-  [19, 19],
-  [5, 19]
-] as const
 
 /**
- * Avatar do agente: quadrado com uma forma geométrica derivada do id (ou do nome), nas cores do
- * tema para a cor do perfil. Sem iniciais: a forma identifica o agente; o nome vai no rótulo.
+ * Avatar do agente (mockup): bloco na cor do perfil com um "rosto" derivado do id (ou do nome).
+ * Sem iniciais: o rosto e a forma identificam o agente; o nome vai no rótulo acessível.
  */
 export function AgentAvatar({
   name,
@@ -53,24 +70,27 @@ export function AgentAvatar({
   testId?: string
 }): React.JSX.Element {
   const h = hash(seed ?? name)
-  const shape = SHAPES[h % SHAPES.length]!
-  const rotation = ROTATIONS[(h >>> 4) % ROTATIONS.length]!
-  const dot = DOTS[(h >>> 8) % DOTS.length]!
-  const ink = `var(--color-icon-${color})`
-  const em = size === 'lg' ? '2.5em' : size === 'md' ? '2em' : '1.5em'
+  const face = FACES[h % FACES.length]!
+  const round = ((h >>> 4) & 3) === 0
+  const fill = FILL[color]
+  const dim = size === 'lg' ? '2.5rem' : size === 'md' ? '2em' : '1.5em'
   return (
     <svg
       viewBox="0 0 24 24"
-      width={em}
-      height={em}
+      width={dim}
+      height={dim}
       role="img"
       aria-label={`Agente: ${name}`}
-      data-agent-shape={(h % SHAPES.length).toString()}
+      data-agent-shape={(h % FACES.length).toString()}
+      className="shrink-0"
       {...(testId ? { 'data-testid': testId } : {})}
     >
-      <rect width="24" height="24" rx="6" fill={`var(--color-background-${color})`} />
-      <g transform={`rotate(${rotation} 12 12)`}>{shape(ink)}</g>
-      <circle cx={dot[0]} cy={dot[1]} r="1.5" fill={ink} opacity="0.7" />
+      {round ? (
+        <circle cx="12" cy="12" r="12" fill={fill} />
+      ) : (
+        <rect width="24" height="24" rx="6.6" fill={fill} />
+      )}
+      {face('var(--background)')}
     </svg>
   )
 }

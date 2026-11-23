@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { Selector } from '@astryxdesign/core/Selector'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
+import { Field } from '@/components/form'
 import type { TaskBranchesView } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
+import { Spinner } from '../../components/Spinner'
 
 const SOURCE_LABEL = { orkio: 'criada pelo Orkio', manual: 'vinculada por você' } as const
 
@@ -61,57 +58,77 @@ export function TaskBranchLinks({
   if (!view) return <>{error && <Alert tone="danger">{error}</Alert>}</>
 
   return (
-    <VStack gap={2} role="group" aria-label="Branches da tarefa" data-testid="task-branches">
+    <div
+      className="flex flex-col gap-2"
+      role="group"
+      aria-label="Branches da tarefa"
+      data-testid="task-branches"
+    >
       {view.linked.length > 0 && (
-        <List density="compact" aria-label="Branches ligadas à tarefa">
+        <ul aria-label="Branches ligadas à tarefa" className="rounded-lg border border-border-soft">
           {view.linked.map((l) => (
-            <Item
-              as="li"
+            <li
               key={l.branch}
-              label={<Code>{l.branch}</Code>}
-              description={SOURCE_LABEL[l.source]}
-              endContent={
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  label="Desvincular"
-                  aria-label={`Desvincular ${l.branch}`}
-                  isDisabled={busy}
-                  onClick={() =>
-                    void apply(() => window.orkio.claude.unlinkBranch(projectId, taskId, l.branch))
-                  }
-                />
-              }
-            />
+              className="flex items-center gap-3 border-b border-border-soft px-3 py-2 last:border-b-0"
+            >
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <code className="truncate font-mono text-xs text-foreground">{l.branch}</code>
+                <span className="text-xs text-muted-foreground">{SOURCE_LABEL[l.source]}</span>
+              </div>
+              <Button
+                size="xs"
+                variant="ghost"
+                aria-label={`Desvincular ${l.branch}`}
+                disabled={busy}
+                onClick={() =>
+                  void apply(() => window.orkio.claude.unlinkBranch(projectId, taskId, l.branch))
+                }
+              >
+                Desvincular
+              </Button>
+            </li>
           ))}
-        </List>
+        </ul>
       )}
-      <HStack gap={2} vAlign="end" wrap="wrap">
-        <Selector
-          label="Vincular branch"
-          description="Uma branch criada fora do Orkio: o Orkio passa a ver ela e a PR dela nesta tarefa."
-          size="sm"
-          hasSearch
-          searchPlaceholder="Buscar branch"
-          emptyText="Nenhuma branch para vincular."
-          emptySearchText="Nenhuma branch com esse nome."
-          placeholder="Escolha uma branch"
-          options={view.available.map((b) => ({ value: b, label: b }))}
-          {...(choice ? { value: choice } : {})}
-          onChange={(v: string) => setChoice(v)}
-        />
-        <Button
-          size="sm"
-          variant="secondary"
-          label="Vincular"
-          isLoading={busy}
-          isDisabled={!choice}
-          onClick={() =>
-            void apply(() => window.orkio.claude.linkBranch(projectId, taskId, choice))
-          }
-        />
-      </HStack>
+      <Field
+        label="Vincular branch"
+        description="Uma branch criada fora do Orkio: o Orkio passa a ver ela e a PR dela nesta tarefa."
+      >
+        {({ id, describedBy }) => (
+          <div className="flex items-center gap-2">
+            <Select
+              id={id}
+              aria-label="Vincular branch"
+              aria-describedby={describedBy}
+              size="sm"
+              hasSearch
+              searchPlaceholder="Buscar branch"
+              emptyText={
+                view.available.length === 0
+                  ? 'Nenhuma branch para vincular.'
+                  : 'Nenhuma branch com esse nome.'
+              }
+              placeholder="Escolha uma branch"
+              options={view.available.map((b) => ({ value: b, label: b }))}
+              value={choice || null}
+              onChange={(v) => setChoice(v)}
+              className="min-w-0 flex-1 font-mono"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || !choice}
+              onClick={() =>
+                void apply(() => window.orkio.claude.linkBranch(projectId, taskId, choice))
+              }
+            >
+              {busy && <Spinner className="size-3.5" />}
+              Vincular
+            </Button>
+          </div>
+        )}
+      </Field>
       {error && <Alert tone="danger">{error}</Alert>}
-    </VStack>
+    </div>
   )
 }

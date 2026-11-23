@@ -38,7 +38,6 @@ export interface AlvaStatusView {
   maxParallel: number
 }
 import type {
-  ProjectClaudeContext,
   ArtifactCandidate,
   ArtifactPublishMode,
   ArtifactView,
@@ -153,9 +152,6 @@ export const IPC_CHANNELS = {
     unlinkBranch: 'claude:unlink-branch',
     catalog: 'claude:catalog',
     artifacts: 'claude:artifacts',
-    getContext: 'claude:get-context',
-    saveContext: 'claude:save-context',
-    searchPages: 'claude:search-pages',
     attachArtifact: 'claude:attach-artifact',
     publishArtifact: 'claude:publish-artifact',
     /** Evento main → renderer: evento normalizado de uma execução. */
@@ -197,7 +193,8 @@ export const IPC_CHANNELS = {
     listProjectChoices: 'notion-workspace:list-project-choices',
     link: 'notion-workspace:link',
     unlink: 'notion-workspace:unlink',
-    listTasks: 'notion-workspace:list-tasks'
+    listTasks: 'notion-workspace:list-tasks',
+    searchTasks: 'notion-workspace:search-tasks'
   },
   projects: {
     list: 'projects:list',
@@ -403,6 +400,17 @@ export interface NotionTask {
   assignees: string[]
 }
 
+/** Tarefa achada na busca (banco de Tarefas inteiro): com o projeto local, se vinculado. */
+export interface NotionTaskHit extends NotionTask {
+  /** Projeto do Orkio vinculado à página de Projetos da tarefa; `null` se nenhum. */
+  projectId: string | null
+  projectName: string | null
+}
+
+export interface NotionTaskSearchResult {
+  tasks: NotionTaskHit[]
+}
+
 export interface NotionTasksResult {
   tasks: NotionTask[]
   truncated: boolean
@@ -489,6 +497,8 @@ export interface BoardView {
   truncated: boolean
   pendingCount: number
   fetchedAt: string
+  /** Movimentos de cada automação (id da regra) nos últimos 7 dias. */
+  ruleCountsWeek: Record<string, number>
 }
 
 export type OrkioStageChoice =
@@ -892,14 +902,6 @@ export interface OrkioApi {
     ): Promise<ClaudeResult<TaskBranchesView>>
     /** Comandos/skills instalados (usuário, projeto, plugins). Só metadados; recarrega a cada chamada. */
     catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>>
-    /** Contexto do projeto: instruções + páginas de referência do Notion (ids e nomes). */
-    getContext(projectId: string): Promise<ClaudeResult<ProjectClaudeContext>>
-    saveContext(
-      projectId: string,
-      context: ProjectClaudeContext
-    ): Promise<ClaudeResult<ProjectClaudeContext>>
-    /** Busca páginas do Notion por título (para escolher referências). */
-    searchPages(query: string): Promise<ClaudeResult<{ id: string; name: string }[]>>
     /** Documentos alterados no ambiente (candidatos) e artefatos anexados à tarefa. */
     artifacts(
       projectId: string,
@@ -948,6 +950,11 @@ export interface OrkioApi {
       projectId: string,
       options?: { force?: boolean }
     ): Promise<NotionResult<NotionTasksResult>>
+    /**
+     * Busca no banco de Tarefas inteiro (qualquer responsável, qualquer projeto) por título ou ID.
+     * Texto vazio = as editadas mais recentemente.
+     */
+    searchTasks(query: string): Promise<NotionResult<NotionTaskSearchResult>>
   }
   projects: {
     /** Lista rápida (só checagens locais). */

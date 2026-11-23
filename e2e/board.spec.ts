@@ -9,13 +9,15 @@ import {
   cspViolations,
   externalCalls,
   launchOrkio,
+  navTo,
   notionState,
   removeDir,
   setFakes,
   setNotionStatus,
   type FakeServices,
   type OrkioApp,
-  expectTaskHistory
+  expectTaskHistory,
+  taskScreen
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_BOARD_TOKEN_abcdef123456'
@@ -106,14 +108,8 @@ test('critério 1: o quadro abre com as 5 etapas mapeadas para os status reais',
     TOKEN
   )
   expect(status.state).toBe('connected')
-  await page
-    .getByRole('navigation', { name: 'Navegação principal' })
-    .getByRole('button', { name: 'Projetos' })
-    .click()
-  await page
-    .getByRole('navigation', { name: 'Navegação principal' })
-    .getByRole('button', { name: 'Quadro' })
-    .click()
+  await navTo(page, 'Projetos')
+  await navTo(page, 'Quadro')
 
   const settings = page.getByRole('region', { name: 'Criar o quadro' })
   const expected = [
@@ -150,9 +146,9 @@ test('critério 2: mover para Revisando grava a etapa fina e mantém "Em andamen
 
   // Painel lateral com o histórico.
   await card(page).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   await expectTaskHistory(panel, 'Movida de Em andamento para Revisando')
-  await panel.getByRole('button', { name: 'Fechar' }).click()
+  await navTo(page, 'Quadro')
 })
 
 test('critério 3: arrastar para Finalizada muda o Notion para "Finalizadas"', async () => {
@@ -195,10 +191,11 @@ test('critério 4: mudar o status direto no Notion reposiciona o card ao atualiz
   await expect(column(page, 'Em andamento').getByRole('listitem', { name: ORK2 })).toBeVisible()
   await card(page).click()
   await expectTaskHistory(
-    page.getByRole('complementary', { name: 'Detalhes de ORK-2' }),
+    taskScreen(page, 'ORK-2'),
     'Reposicionada pelo Notion: Finalizada → Em andamento'
   )
-  await page.getByRole('button', { name: 'Fechar' }).click()
+  await navTo(page, 'Quadro')
+  await expect(card(page)).toBeVisible()
 })
 
 test('critério 5: sem internet fica pendente, sobrevive a fechar o app e sincroniza depois', async () => {

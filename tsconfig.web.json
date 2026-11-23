@@ -4,13 +4,12 @@
     "composite": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": []
+    "types": [],
+    "paths": { "@/*": ["./src/renderer/src/*"] }
   },
   "include": [
     "src/renderer/src/**/*",
     "src/preload/*.d.ts",
-    "src/shared/**/*",
-    "src/astryx-themes.ts",
-    "src/themes/**/*"
+    "src/shared/**/*"
   ]
 }

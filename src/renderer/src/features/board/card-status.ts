@@ -34,3 +34,24 @@ export function cardStatus(
   if (pr?.state === 'merged') return { kind: 'pr', label: 'Mergeada', tone: 'success' }
   return null
 }
+
+/**
+ * Terceira linha do card (quadro no estilo das referências): o que falta de você, senão o que está
+ * rodando, senão a PR (número e comentários ou CI).
+ */
+export function cardDetail(input: {
+  waiting: string | null
+  running: string | null
+  pr: Pick<NonNullable<TaskSignals['pr']>, 'number' | 'unresolvedComments' | 'checks'> | null
+}): string | null {
+  if (input.waiting) return input.waiting
+  if (input.running) return input.running
+  const pr = input.pr
+  if (!pr) return null
+  if (pr.unresolvedComments && pr.unresolvedComments > 0) {
+    return `#${pr.number} · ${pr.unresolvedComments} ${pr.unresolvedComments === 1 ? 'comentário' : 'comentários'}`
+  }
+  if (pr.checks === 'success') return `#${pr.number} · CI ok`
+  if (pr.checks === 'failure') return `#${pr.number} · CI falhou`
+  return `#${pr.number}`
+}

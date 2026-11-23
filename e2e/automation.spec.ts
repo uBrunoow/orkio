@@ -9,6 +9,7 @@ import {
   cspViolations,
   externalCalls,
   launchOrkio,
+  navTo,
   notionState,
   removeDir,
   setFakes,
@@ -16,7 +17,8 @@ import {
   type FakePull,
   type FakeServices,
   type OrkioApp,
-  taskTab
+  taskTab,
+  taskScreen
 } from './fixtures'
 
 const NOTION_TOKEN = 'ntn_E2E_AUTOMATION_TOKEN_abcdef123456'
@@ -81,7 +83,7 @@ async function close(): Promise<void> {
 }
 async function historyText(page: Page): Promise<string> {
   await card(page).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   // Histórico completo (aba Detalhes): todos os eventos, mesmo os que a sessão resume.
   const details = await taskTab(panel, 'Detalhes')
   const list = details.getByRole('list', { name: 'Histórico da tarefa' })
@@ -98,7 +100,7 @@ async function historyText(page: Page): Promise<string> {
       .join('\n')
   )
   expect(text).not.toMatch(/agora|há \d/)
-  await panel.getByRole('button', { name: 'Fechar' }).click()
+  await navTo(page, 'Quadro')
   return text
 }
 
@@ -257,18 +259,15 @@ test('critério 3: merge move para Finalizada e o Notion fica "Finalizadas"', as
     expect(text).toContain(expected)
   }
   await card(page).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   await panel.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).first().click()
-  await panel.getByRole('button', { name: 'Fechar' }).click()
+  await navTo(page, 'Quadro')
   expect(await cspViolations(page)).toEqual([])
 })
 
 test('automação em frase: começa, faz e as execuções vindas da atividade', async () => {
   const { page } = orkio!
-  await page
-    .getByRole('navigation', { name: 'Navegação principal' })
-    .getByRole('button', { name: 'Etapas e automações' })
-    .click()
+  await navTo(page, 'Quadro e automações')
   await page
     .getByRole('list', { name: 'Etapas do fluxo' })
     .getByRole('listitem', { name: 'Etapa Finalizada' })
@@ -330,10 +329,12 @@ test('critério 5: pausar impede movimentos e registra no histórico', async () 
     'Branch criada (feat/ORK-2-outra): regra “Branch criada inicia a tarefa” ignorada (automações pausadas nesta tarefa)'
   )
 
-  // "Pausar todas" também é visível no topo.
-  await page.getByRole('button', { name: 'Pausar todas' }).click()
+  // "Pausar todas" fica no menu ⋯ da barra do quadro.
+  await page.getByRole('button', { name: 'Mais ações do quadro' }).click()
+  await page.getByRole('menuitem', { name: 'Pausar todas' }).click()
   await expect(page.getByTestId('automation-status')).toContainText('pausadas para todos')
-  await page.getByRole('button', { name: 'Retomar automações' }).click()
+  await page.getByRole('button', { name: 'Mais ações do quadro' }).click()
+  await page.getByRole('menuitem', { name: 'Retomar automações' }).click()
   expect(await cspViolations(page)).toEqual([])
 })
 

@@ -413,7 +413,6 @@ function registerIpc(): void {
       signals: (projectId) => signals.get(projectId),
       prFor: (projectId, branch) => signals.prForBranch(projectId, branch)?.number ?? null,
       getBlockChildren: (id, cursor) => notion.getBlockChildren(id, cursor),
-      searchPages: (query) => notion.searchPages(query),
       notionInsert: {
         createChildPage: (parent, title, markdown) =>
           notion.createChildPage(parent, title, markdown),
@@ -910,7 +909,6 @@ function createClaude(deps: {
   signals: ClaudeServiceDeps['signals']
   prFor: (projectId: string, branch: string) => number | null
   getBlockChildren: ClaudeServiceDeps['getBlockChildren']
-  searchPages: ClaudeServiceDeps['searchPages']
   agentFor: ClaudeServiceDeps['agentFor']
   agentInfo: ClaudeServiceDeps['agentInfo']
   /** Escritas no Notion para publicar artefatos (o token fica no conector). */
@@ -1002,7 +1000,6 @@ function createClaude(deps: {
     listTasks: deps.listTasks,
     signals: deps.signals,
     getBlockChildren: deps.getBlockChildren,
-    searchPages: deps.searchPages,
     detect: () => detectClaude({ env }),
     ...(deps.agentFor ? { agentFor: deps.agentFor } : {}),
     ...(deps.agentInfo ? { agentInfo: deps.agentInfo } : {}),

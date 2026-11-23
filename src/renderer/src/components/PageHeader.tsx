@@ -1,48 +1,34 @@
-import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { ScreenTitle } from './ScreenTitle'
 
 /**
- * Título da página (o único h1), contexto acima (ex.: nome do projeto), subtítulo e ações à
- * direita (no máximo uma primária; o resto num menu "Mais").
+ * Cabeçalho da seção (o único h1, 18 px como no mockup): título, uma linha de descrição e ações à
+ * direita (no máximo uma primária). O projeto vai no caminho da barra, não aqui.
  */
 export function PageHeader({
   title,
   subtitle,
-  context,
   meta,
   action
 }: {
   title: string
   subtitle?: string
-  /** Linha curta acima do título, ex.: o projeto atual. */
-  context?: string
-  /** Metadados numa linha cinza separada por "·" (ex.: "Agendada · Projeto x · há 2 sem"). */
+  /** Metadados numa linha cinza separada por "·". */
   meta?: ReadonlyArray<string | null | undefined | false>
   action?: React.ReactNode
 }): React.JSX.Element {
   const metaLine = meta?.filter(Boolean).join(' · ')
   return (
-    <HStack gap={4} vAlign="start" justify="between" wrap="wrap">
-      <StackItem size="fill">
-        <VStack gap={1}>
-          {context && (
-            <Text type="supporting" color="secondary" data-testid="page-context">
-              {context}
-            </Text>
-          )}
-          <Heading level={1}>{title}</Heading>
-          {subtitle && <Text color="secondary">{subtitle}</Text>}
-          {metaLine && (
-            <Text type="supporting" color="secondary" data-testid="page-meta">
-              {metaLine}
-            </Text>
-          )}
-        </VStack>
-      </StackItem>
-      {action}
-    </HStack>
+    <header className="flex flex-wrap items-end gap-3">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <ScreenTitle look={3}>{title}</ScreenTitle>
+        {subtitle && <p className="text-[12.5px] text-muted-foreground">{subtitle}</p>}
+        {metaLine && (
+          <p className="text-xs text-muted-foreground" data-testid="page-meta">
+            {metaLine}
+          </p>
+        )}
+      </div>
+      {action && <div className="flex items-center gap-2">{action}</div>}
+    </header>
   )
 }

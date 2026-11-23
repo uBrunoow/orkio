@@ -127,7 +127,8 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'listProjectChoices',
       'link',
       'unlink',
-      'listTasks'
+      'listTasks',
+      'searchTasks'
     ],
     signals: ['get'],
     board: [
@@ -168,7 +169,6 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       return el ? String(getComputedStyle(el)[prop]) : ''
     }
     const sidebarLogo = document.querySelector<HTMLElement>('nav .orkio-logo')
-    const heroLogo = document.querySelector<HTMLElement>('[data-testid="empty-hero"] .orkio-logo')
     return {
       fonts: [...document.fonts]
         .filter((f) => f.status === 'loaded')
@@ -184,8 +184,7 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       wordmark: [
         css('nav .orkio-logo__wordmark', 'fontFamily'),
         css('nav .orkio-logo__wordmark', 'fontWeight')
-      ],
-      heroVariant: heroLogo?.dataset['variant']
+      ]
     }
   })
   await notionCard(page).getByLabel('Token do Notion').fill('')
@@ -195,12 +194,11 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
   }
   expect(visual.body).toMatch(/^Inter/)
   expect(visual.input).toMatch(/^"JetBrains Mono"/)
-  expect(visual.primary).toEqual(['rgb(255, 91, 31)', 'rgb(10, 10, 11)'])
+  expect(visual.primary).toEqual(['rgb(255, 91, 31)', 'rgb(0, 0, 0)'])
   expect(visual.sidebarVariant).toBe('simple')
   expect(visual.sidebarColor).toBe('rgb(255, 91, 31)')
   expect(visual.wordmark[0]).toMatch(/^Jost/)
   expect(visual.wordmark[1]).toBe('400')
-  expect(visual.heroVariant).toBe('full')
 })
 
 test('build de produção carrega a CSP estrita, sem violações', async () => {
@@ -244,7 +242,6 @@ test('token válido → conectado, salvo criptografado, token fora do renderer',
   await notionCard(page).getByRole('button', { name: 'Tentar novamente' }).click()
 
   await expect(notionCard(page).getByText('Ada Lovelace', { exact: true }).first()).toBeVisible()
-  await expect(page.getByTestId('empty-hero')).toHaveCount(0)
   await expect(notionCard(page).getByLabel('Token do Notion')).toHaveCount(0)
 
   // Depois de conectar, o assistente dos bancos também consulta o Notion (/search).

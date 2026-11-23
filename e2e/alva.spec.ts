@@ -15,7 +15,8 @@ import {
   type OrkioApp,
   navTo,
   expectTaskHistory,
-  taskTab
+  taskTab,
+  taskScreen
 } from './fixtures'
 
 /**
@@ -76,10 +77,10 @@ async function goToBoard(page: Page): Promise<void> {
     .click()
 }
 const card = (page: Page): Locator => page.getByRole('listitem', { name: ORK2, exact: true })
-const column = (page: Page, name: string): Locator =>
-  page.getByRole('list', { name: 'Etapas do quadro' }).getByRole('listitem', { name, exact: true })
-async function expectIn(page: Page, stage: string): Promise<void> {
-  await expect(column(page, stage).getByRole('listitem', { name: ORK2, exact: true })).toBeVisible({
+/** Etapa da tarefa na tela dela (seletor "Mover para" na barra do topo, fora da região da tela). */
+async function expectStage(screen: Locator, stage: string): Promise<void> {
+  const bar = screen.page().getByTestId('top-bar')
+  await expect(bar.getByRole('combobox', { name: /^Mover para/ })).toContainText(stage, {
     timeout: 30_000
   })
 }
@@ -99,7 +100,7 @@ async function moveTo(page: Page, stage: string): Promise<void> {
 }
 async function flowPanel(page: Page): Promise<Locator> {
   await card(page).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   await expect(panel).toBeVisible()
   return panel
 }
@@ -193,7 +194,6 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
   await expect(card(page)).toBeVisible()
 
   await navTo(page, 'Fluxos')
-  await page.getByRole('tab', { name: 'Modelos do alva-flow' }).click()
   const check = page.getByRole('region', { name: 'Pronto para o alva-flow?' })
   await expect(check.getByTestId('alva-ready')).toHaveText('Falta configurar', { timeout: 30_000 })
   const items = check.getByRole('list', { name: 'Itens da pré-checagem' })
@@ -209,7 +209,6 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
   const { page: p2 } = await open({ plugin: true, mcpBacklog: true, gh: 'ok' })
   await goToBoard(p2)
   await navTo(p2, 'Fluxos')
-  await p2.getByRole('tab', { name: 'Modelos do alva-flow' }).click()
   const check2 = p2.getByRole('region', { name: 'Pronto para o alva-flow?' })
   await expect(check2.getByTestId('alva-ready')).toHaveText('Pronto', { timeout: 30_000 })
   await expect(p2.getByRole('region', { name: 'alva-flow', exact: true })).toContainText('v1.0.25')
@@ -261,12 +260,10 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
     { timeout: 30_000 }
   )
   await expect(flow.getByTestId('flow-status')).toHaveText('Esperando aprovação')
-  // Em que pé está: spec e plano feitos (lidos do Backlog.md); o código é o próximo.
-  await expect(panel.getByTestId('progress-spec')).toHaveAttribute('data-state', 'done')
-  await expect(panel.getByTestId('progress-plan')).toHaveAttribute(
-    'aria-label',
-    'Plano: feito (critérios 0/2)'
-  )
+  // Fases na barra: spec feita; o plano espera a sua aprovação.
+  const phases = page.getByRole('list', { name: 'Fases da tarefa' })
+  await expect(phases.getByRole('listitem', { name: 'Spec: feita' })).toBeVisible()
+  await expect(phases.getByRole('listitem', { name: 'Plano: esperando você' })).toBeVisible()
   // A spec e o plano aparecem na conversa, logo depois do /spec e do /plan que os escreveram.
   await expect(panel.getByTestId('run-document')).toHaveCount(2)
   await expect(panel.getByTestId('run-document').last()).toContainText('Plano no Backlog.md')
@@ -305,10 +302,7 @@ test('critérios 2 e 3: /spec cria e vincula a task (com o link do Notion); /pla
 
 test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado → /pr abre a PR → Revisando', async () => {
   const { page, app, logs } = orkio!
-  await page
-    .getByRole('complementary', { name: 'Detalhes de ORK-2' })
-    .getByRole('button', { name: 'Fechar' })
-    .click()
+  await navTo(page, 'Quadro')
   const mainBefore = git(origin(), 'rev-parse', 'main').trim()
   await moveTo(page, 'Em andamento')
   const panel = await flowPanel(page)
@@ -338,7 +332,12 @@ test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado �
   )
   await expect(push.getByTestId('confirm-stat')).toContainText('exportar.ts')
   expect(git(origin(), 'branch', '--list').trim()).toBe('* main')
-  await expect(card(page).getByTestId('card-flow')).toHaveText('Esperando você')
+  // A tarefa aparece em "Esperando você" na lista lateral.
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Navegação principal' })
+      .getByRole('group', { name: 'Esperando você' })
+  ).toContainText('ORK-2')
 
   // Sobrou um arquivo fora de commit: o push é recusado, o cartão explica e oferece rodar o
   // /commit de novo (que leva o arquivo); depois o fluxo volta ao push.
@@ -375,9 +374,10 @@ test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado �
       '7': { reviewDecision: 'REVIEW_REQUIRED', unresolved: 0, checks: 'PENDING' }
     }
   })
-  await page.getByRole('button', { name: 'Atualizar' }).click()
+  // "Atualizar" do quadro = um ciclo das automações agora (a tela da tarefa está aberta).
+  await page.evaluate((id) => window.orkio.automation.runNow(id), PROJECT)
   // Critério 2: a PR aberta move a tarefa para Revisando sozinha (3B), sem parar o fluxo.
-  await expectIn(page, 'Revisando')
+  await expectStage(panel, 'Revisando')
   await expect(flow.getByTestId('flow-status')).toHaveText('Rodando')
   await expect(flow.getByTestId('pr-ci')).toHaveText('CI rodando (PR #7)')
   await q.getByRole('radio', { name: 'Sim, esperar' }).check()
@@ -411,7 +411,7 @@ test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado �
 
 test('5C critério 3: alterações pedidas → Revisado → --comments → push confirmado → novo review → Revisando', async () => {
   const { page, app, logs } = orkio!
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
   const pushedSha = git(origin(), 'rev-parse', taskBranch()).trim()
 
@@ -434,8 +434,8 @@ test('5C critério 3: alterações pedidas → Revisado → --comments → push 
       }
     }
   })
-  await page.getByRole('button', { name: 'Atualizar' }).click()
-  await expectIn(page, 'Revisado')
+  await page.evaluate((id) => window.orkio.automation.runNow(id), PROJECT)
+  await expectStage(panel, 'Revisado')
   await expect(flow).toContainText('Fluxo: Alva: comentários da PR', { timeout: 30_000 })
   // CI vermelho na PR: estado no painel (o botão aparece quando nenhum fluxo está rodando).
   await expect(flow.getByTestId('pr-ci')).toHaveText('CI falhou (PR #7)')
@@ -470,7 +470,7 @@ test('5C critério 3: alterações pedidas → Revisado → --comments → push 
     { pull: 7, reviewers: ['ana'], teams: [] }
   ])
   // O novo pedido de review leva a tarefa de volta para Revisando (3B), sozinho.
-  await expectIn(page, 'Revisando')
+  await expectStage(panel, 'Revisando')
 
   const log = argsLog()
   expect(log.at(-2)).toBe(`deny:git push origin ${taskBranch()}`)

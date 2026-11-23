@@ -11,7 +11,8 @@ import {
   queueSavePaths,
   removeDir,
   type OrkioApp,
-  navTo
+  navTo,
+  boardSettingsTab
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_FLOW_TOKEN_abcdef123456'
@@ -123,7 +124,7 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
   await expect(boardColumn(page, 'Revisando').getByRole('listitem', { name: ORK2 })).toBeVisible()
 
   await navTo(page, 'Etapas e automações')
-  await expect(page.getByRole('heading', { level: 1, name: 'Etapas e automações' })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: 'Quadro e automações' })).toBeVisible()
 
   // Nova etapa depois de Revisado.
   const revisado = await openStage(page, 'Revisado')
@@ -170,7 +171,8 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
   await page.getByRole('menuitem', { name: 'Remover' }).click()
   await expect(validation).not.toContainText('Conflito')
 
-  // Simular (sem executar).
+  // Simular (sem executar): fica na aba Automações.
+  await boardSettingsTab(page, 'Automações')
   const sim = page.getByRole('region', { name: 'Testar automação' })
   await choose(page, sim, 'Tarefa', 'ORK-2 Listar tarefas do Notion')
   await choose(page, sim, 'Evento', 'PR aprovada')
@@ -181,6 +183,8 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
 
   // Salvar e ver o quadro.
   await validation.getByRole('button', { name: 'Salvar fluxo' }).click()
+  await expect(page.getByTestId('unsaved-changes')).toHaveText('Nenhuma alteração')
+  await navTo(page, 'Quadro')
   await expect(boardColumn(page, 'QA')).toBeVisible()
   const names = await page
     .getByRole('list', { name: 'Etapas do quadro' })

@@ -4,7 +4,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--orkio-logo-gap);
-    color: var(--color-accent);
+    color: var(--brand);
     line-height: 1;
   }
 
@@ -19,7 +19,7 @@
     letter-spacing: 0.25em;
     /* Compensa o espaçamento extra depois da última letra. */
     margin-right: -0.25em;
-    color: var(--orkio-wordmark-color, var(--color-text-primary));
+    color: var(--orkio-wordmark-color, var(--foreground));
     white-space: nowrap;
   }
 

@@ -1,12 +1,9 @@
 import { Fragment, useMemo, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Code } from '@astryxdesign/core/Code'
-import { Collapsible } from '@astryxdesign/core/Collapsible'
-import { HStack } from '@astryxdesign/core/HStack'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
-import { VStack } from '@astryxdesign/core/VStack'
+import { IconChevronRight } from '@tabler/icons-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { cn } from '@/lib/utils'
 import type { UncommittedFile, UncommittedStatus } from '../../../shared/agent-run'
 import {
   diffLineCount,
@@ -43,14 +40,10 @@ const UNCOMMITTED_SHOWN = 30
 
 function FileStat({ file }: { file: DiffFile }): React.JSX.Element {
   return (
-    <HStack gap={2} vAlign="center">
-      <Text type="supporting" className="orkio-diff-stat-add" hasTabularNumbers>
-        +{file.additions}
-      </Text>
-      <Text type="supporting" className="orkio-diff-stat-del" hasTabularNumbers>
-        −{file.deletions}
-      </Text>
-    </HStack>
+    <span className="tabular flex items-center gap-2 font-mono text-xs">
+      <span className="text-ok">+{file.additions}</span>
+      <span className="text-danger">−{file.deletions}</span>
+    </span>
   )
 }
 
@@ -65,14 +58,16 @@ function FileBody({
   onMore(): void
 }): React.JSX.Element {
   if (file.binary)
-    return <Text type="supporting">Arquivo binário: o conteúdo não aparece aqui.</Text>
+    return (
+      <p className="text-xs text-muted-foreground">Arquivo binário: o conteúdo não aparece aqui.</p>
+    )
   if (file.hunks.length === 0) {
     return (
-      <Text type="supporting">
+      <p className="text-xs text-muted-foreground">
         {file.status === 'renamed'
           ? 'Só renomeado, sem mudanças no conteúdo.'
           : 'Sem mudanças de conteúdo.'}
-      </Text>
+      </p>
     )
   }
   const total = diffLineCount(file)
@@ -83,51 +78,41 @@ function FileBody({
     const lines = hunk.lines.slice(0, budget)
     budget -= lines.length
     hunks.push(
-      <VStack key={hi}>
-        <Text as="div" type="code" className="orkio-diff-hunk">
-          {hunk.header}
-        </Text>
+      <div key={hi} className="flex flex-col">
+        <div className="orkio-diff-hunk text-xs">{hunk.header}</div>
         {lines.map((line, li) => {
           const no = line.kind === 'del' ? line.oldNo : line.newNo
           return (
-            <Text
-              as="div"
-              type="code"
-              key={li}
-              className={`orkio-diff-line orkio-diff-${line.kind}`}
-            >
-              <Text as="span" type="inherit" className="orkio-diff-no">
-                {no}
-              </Text>
-              <Text as="span" type="inherit" className="orkio-diff-sign">
+            <div key={li} className={`orkio-diff-line orkio-diff-${line.kind} text-xs`}>
+              <span className="orkio-diff-no">{no}</span>
+              <span className="orkio-diff-sign">
                 {line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}
-              </Text>
-              <Text as="span" type="inherit">
-                {line.text === '' ? ' ' : line.text}
-              </Text>
-            </Text>
+              </span>
+              <span>{line.text === '' ? ' ' : line.text}</span>
+            </div>
           )
         })}
-      </VStack>
+      </div>
     )
   }
   const shown = ROWS_FIRST + extra
   return (
-    <VStack gap={2}>
-      <VStack className="orkio-diff" role="group" aria-label={`Mudanças em ${file.path}`}>
+    <div className="flex flex-col gap-2">
+      <div
+        className="orkio-diff flex flex-col"
+        role="group"
+        aria-label={`Mudanças em ${file.path}`}
+      >
         {hunks}
-      </VStack>
+      </div>
       {total > shown && (
-        <HStack>
-          <Button
-            size="sm"
-            variant="ghost"
-            label={`Mostrar mais ${Math.min(ROWS_MORE, total - shown)} linhas (faltam ${total - shown})`}
-            onClick={onMore}
-          />
-        </HStack>
+        <div>
+          <Button size="sm" variant="ghost" onClick={onMore}>
+            {`Mostrar mais ${Math.min(ROWS_MORE, total - shown)} linhas (faltam ${total - shown})`}
+          </Button>
+        </div>
       )}
-    </VStack>
+    </div>
   )
 }
 
@@ -180,120 +165,110 @@ export function DiffView({
     dirty.size === 0 &&
     (onlyUncommitted || diff.trim() === '')
   return (
-    <VStack gap={3} role="region" aria-label={label}>
-      {empty && <Text type="supporting">Sem diferenças em relação à base.</Text>}
+    <section className="flex flex-col gap-3" role="region" aria-label={label}>
+      {empty && <p className="text-xs text-muted-foreground">Sem diferenças em relação à base.</p>}
 
       {files.length > 0 && (
-        <HStack gap={3} vAlign="center" wrap="wrap">
-          <Text type="supporting" color="primary">
-            {plural(totals.files, 'arquivo alterado', 'arquivos alterados')}
-          </Text>
-          <Text type="supporting" className="orkio-diff-stat-add" hasTabularNumbers>
-            +{totals.additions}
-          </Text>
-          <Text type="supporting" className="orkio-diff-stat-del" hasTabularNumbers>
-            −{totals.deletions}
-          </Text>
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <span>{plural(totals.files, 'arquivo alterado', 'arquivos alterados')}</span>
+          <span className="tabular font-mono text-ok">+{totals.additions}</span>
+          <span className="tabular font-mono text-danger">−{totals.deletions}</span>
           {files.length > 1 && (
             <>
-              <Button
-                size="sm"
-                variant="ghost"
-                label="Expandir tudo"
-                onClick={() => setAll(true)}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                label="Recolher tudo"
-                onClick={() => setAll(false)}
-              />
+              <Button size="xs" variant="ghost" onClick={() => setAll(true)}>
+                Expandir tudo
+              </Button>
+              <Button size="xs" variant="ghost" onClick={() => setAll(false)}>
+                Recolher tudo
+              </Button>
             </>
           )}
-        </HStack>
+        </div>
       )}
 
       {files.length === 0 && !onlyUncommitted && diff.trim() !== '' && (
         // Texto que não é diff unificado: mostra como veio.
-        <Text as="div" type="code" className="orkio-codeblock">
-          {diff}
-        </Text>
+        <pre className="orkio-codeblock text-xs">{diff}</pre>
       )}
 
       {uncommitted && uncommitted.length > 0 && (
-        <VStack gap={1} role="group" aria-label="Ainda sem commit">
-          <Text type="supporting" color="primary">
-            Ainda sem commit ({uncommitted.length})
-          </Text>
+        <div className="flex flex-col gap-1" role="group" aria-label="Ainda sem commit">
+          <p className="text-xs">Ainda sem commit ({uncommitted.length})</p>
           {uncommitted.slice(0, UNCOMMITTED_SHOWN).map((f) => (
-            <HStack key={f.path} gap={2} vAlign="center">
-              <Token size="sm" label={UNCOMMITTED_LABEL[f.status]} color="default" />
-              <Code size="inherit">{f.path}</Code>
-            </HStack>
+            <div key={f.path} className="flex items-center gap-2 text-xs">
+              <Badge variant="outline">{UNCOMMITTED_LABEL[f.status]}</Badge>
+              <code className="font-mono">{f.path}</code>
+            </div>
           ))}
           {uncommitted.length > UNCOMMITTED_SHOWN && (
-            <Text type="supporting">+{uncommitted.length - UNCOMMITTED_SHOWN} arquivos</Text>
+            <p className="text-xs text-muted-foreground">
+              +{uncommitted.length - UNCOMMITTED_SHOWN} arquivos
+            </p>
           )}
-        </VStack>
+        </div>
       )}
 
-      {files.map((file, index) => (
-        <Collapsible
-          key={`${file.path}:${index}`}
-          chevronPosition="start"
-          isOpen={isOpen(file, index)}
-          onOpenChange={(value) => setOpen((o) => ({ ...o, [file.path]: value }))}
-          trigger={
-            <HStack gap={2} vAlign="center" wrap="wrap">
-              <StackItem size="fill">
-                <Text type="supporting" color="primary">
-                  {file.oldPath ? (
-                    <>
-                      <Code size="inherit">{file.oldPath}</Code> →{' '}
-                    </>
-                  ) : null}
-                  <Code size="inherit">{file.path}</Code>
-                </Text>
-              </StackItem>
+      {files.map((file, index) => {
+        const opened = isOpen(file, index)
+        return (
+          <Collapsible
+            key={`${file.path}:${index}`}
+            open={opened}
+            onOpenChange={(value) => setOpen((o) => ({ ...o, [file.path]: value }))}
+            className="rounded-lg border border-border-soft bg-surface"
+          >
+            <CollapsibleTrigger className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/40">
+              <IconChevronRight
+                aria-hidden="true"
+                className={cn(
+                  'size-3.5 text-subtle-foreground transition-transform',
+                  opened && 'rotate-90'
+                )}
+              />
+              <span className="min-w-0 flex-1 truncate font-mono">
+                {file.oldPath ? `${file.oldPath} → ` : ''}
+                {file.path}
+              </span>
               {STATUS_LABEL[file.status] && (
-                <Token size="sm" label={STATUS_LABEL[file.status]!} color="default" />
+                <Badge variant="outline">{STATUS_LABEL[file.status]}</Badge>
               )}
               {uncommitted && !onlyUncommitted && dirty.has(file.path) && (
-                <Token size="sm" label="sem commit" color="default" />
+                <Badge variant="outline">sem commit</Badge>
               )}
               <FileStat file={file} />
-            </HStack>
-          }
-        >
-          {isOpen(file, index) && (
-            <FileBody
-              file={file}
-              extra={more[file.path] ?? 0}
-              onMore={() =>
-                setMore((m) => ({ ...m, [file.path]: (m[file.path] ?? 0) + ROWS_MORE }))
-              }
-            />
-          )}
-        </Collapsible>
-      ))}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="border-t border-border-soft p-2">
+              {opened && (
+                <FileBody
+                  file={file}
+                  extra={more[file.path] ?? 0}
+                  onMore={() =>
+                    setMore((m) => ({ ...m, [file.path]: (m[file.path] ?? 0) + ROWS_MORE }))
+                  }
+                />
+              )}
+            </CollapsibleContent>
+          </Collapsible>
+        )
+      })}
 
       {truncated && (
-        <Text type="supporting">
+        <p className="text-xs text-muted-foreground">
           O diff passou do limite e foi cortado. Abra a pasta de trabalho no editor para ver o
           resto.
-        </Text>
+        </p>
       )}
       {!uncommitted && untracked.length > 0 && (
-        <Text type="supporting">
+        <p className="text-xs text-muted-foreground">
           Arquivos novos fora do git (não entram no diff):{' '}
           {untracked.map((f, i) => (
             <Fragment key={f}>
               {i > 0 ? ', ' : ''}
-              <Code size="inherit">{f}</Code>
+              <code className="font-mono text-foreground">{f}</code>
             </Fragment>
           ))}
-        </Text>
+        </p>
       )}
-    </VStack>
+    </section>
   )
 }

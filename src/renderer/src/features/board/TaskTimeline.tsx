@@ -1,10 +1,5 @@
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { IconButton } from '@astryxdesign/core/IconButton'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { Text } from '@astryxdesign/core/Text'
-import { Timestamp } from '@astryxdesign/core/Timestamp'
+import { Button } from '@/components/ui/button'
+import { Timestamp } from '../../components/Timestamp'
 import type { AgentBadge } from '../../../../shared/agent'
 import type { BoardHistoryEntry } from '../../../../shared/ipc-contract'
 import { branchUrl, describeEvent, prNumber, prUrl } from '../../../../shared/task-history'
@@ -18,6 +13,7 @@ import {
   type SvgIcon
 } from '../../components/icons'
 import { AgentAvatar } from '../agents/AgentAvatar'
+import { cn } from '@/lib/utils'
 
 type Actor = { name: string; icon: SvgIcon } | { name: string; agent: true }
 
@@ -57,67 +53,51 @@ export function TaskTimeline({
 }): React.JSX.Element {
   const ordered = [...history].reverse()
   return (
-    <List density="compact" aria-label="Histórico da tarefa">
+    <ul aria-label="Histórico da tarefa" className="flex flex-col">
       {ordered.map((e, i) => {
         const actor = eventActor(e)
         const prev = i > 0 ? eventActor(ordered[i - 1]!) : null
         // Mesmo autor em sequência: só a primeira linha mostra o avatar e o nome.
         const repeated = prev?.name === actor.name
         const link = prUrl(e) ?? branchUrl(e)
+        const ActorIcon = 'agent' in actor ? null : actor.icon
         return (
-          <Item
-            as="li"
-            key={e.id}
-            align="start"
-            startContent={
-              repeated ? (
-                <Icon
-                  icon={UserIcon}
-                  color="tertiary"
-                  aria-hidden
-                  style={{ visibility: 'hidden' }}
-                />
-              ) : 'agent' in actor ? (
+          <li key={e.id} className={cn('flex items-start gap-2.5', repeated ? 'pt-1' : 'pt-3')}>
+            <span className="flex size-6 shrink-0 items-center justify-center text-muted-foreground">
+              {repeated ? null : 'agent' in actor ? (
                 <AgentAvatar
                   name={actor.name}
                   color={agent?.name === actor.name ? agent.color : 'blue'}
                   {...(agent?.name === actor.name ? { seed: agent.key } : {})}
                 />
               ) : (
-                <Icon icon={actor.icon} color="secondary" />
-              )
-            }
-            label={describeEvent(e, stageName)}
-            description={
-              <HStack gap={1} vAlign="center">
-                {!repeated && (
-                  <Text type="supporting" color="secondary" weight="medium">
-                    {actor.name}
-                  </Text>
-                )}
-                <Timestamp value={e.at} format="auto" />
-              </HStack>
-            }
-            {...(link
-              ? {
-                  endContent: (
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      label={
-                        prNumber(e) !== null
-                          ? `Abrir a PR #${prNumber(e)} no GitHub`
-                          : 'Abrir a branch no GitHub'
-                      }
-                      icon={<Icon icon={ExternalLinkIcon} />}
-                      onClick={() => void window.orkio.openExternal(link)}
-                    />
-                  )
+                ActorIcon && <ActorIcon className="size-4" />
+              )}
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              {!repeated && (
+                <span className="text-xs font-medium text-muted-foreground">{actor.name}</span>
+              )}
+              <span className="text-sm text-foreground">{describeEvent(e, stageName)}</span>
+              <Timestamp value={e.at} className="text-2xs text-subtle-foreground" />
+            </div>
+            {link && (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label={
+                  prNumber(e) !== null
+                    ? `Abrir a PR #${prNumber(e)} no GitHub`
+                    : 'Abrir a branch no GitHub'
                 }
-              : {})}
-          />
+                onClick={() => void window.orkio.openExternal(link)}
+              >
+                <ExternalLinkIcon />
+              </Button>
+            )}
+          </li>
         )
       })}
-    </List>
+    </ul>
   )
 }

@@ -44,7 +44,6 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
     linkedBranches: vi.fn(() => [] as { branch: string }[])
   }
   const deps: ClaudeServiceDeps = {
-    searchPages: vi.fn(async () => ({ results: [], nextCursor: null })),
     config: {
       update: vi.fn(async () => undefined),
       get: () =>
@@ -230,14 +229,8 @@ describe('ClaudeService', () => {
     expect(isStartRunRequest({ ...base, briefing: 'x'.repeat(300_000) })).toBe(false)
   })
 
-  it('contexto do projeto entra no briefing; página ilegível vira aviso; limites ao salvar', async () => {
-    const ctx = {
-      instructions: 'Rode pnpm test antes de commitar.',
-      notionPages: [
-        { id: 'ref-ok', name: 'Arquitetura' },
-        { id: 'ref-404', name: 'Apagada' }
-      ]
-    }
+  it('briefing ignora o contexto do projeto salvo na config', async () => {
+    const getBlockChildren = vi.fn(async () => ({ results: [], nextCursor: null }))
     const { service } = setup({
       config: {
         update: vi.fn(async () => undefined),
@@ -252,28 +245,19 @@ describe('ClaudeService', () => {
                 notionProject: null
               }
             ],
-            claudeContexts: { p1: ctx }
+            claudeContexts: {
+              p1: { instructions: 'NAO-DEVE-APARECER', notionPages: [{ id: 'x', name: 'X' }] }
+            }
           }) as never
       },
-      getBlockChildren: vi.fn(async (id: string) => {
-        if (id === 'ref-404') throw new Error('404')
-        if (id === 'ref-ok') return { results: [para('Use hexagonal.')], nextCursor: null }
-        return { results: [], nextCursor: null }
-      })
+      getBlockChildren
     })
     const r = await service.prepare('p1', 'task-1')
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.value.briefing).toContain('## Contexto do projeto')
-    expect(r.value.briefing).toContain('Rode pnpm test antes de commitar.')
-    expect(r.value.briefing).toContain('### Arquitetura (Notion)\n\nUse hexagonal.')
-    expect(r.value.contextWarnings).toEqual([
-      'Não deu para ler a página “Apagada” no Notion; ela ficou de fora.'
-    ])
-
-    expect(
-      await service.saveContext('p1', { instructions: 'x'.repeat(9000), notionPages: [] })
-    ).toMatchObject({ ok: false, error: { code: 'invalid' } })
+    expect(r.value.briefing).not.toContain('NAO-DEVE-APARECER')
+    expect(r.value.briefing).not.toContain('Contexto do projeto')
+    expect(getBlockChildren).not.toHaveBeenCalledWith('x', expect.anything())
   })
 
   it('com fluxo ativo na tarefa, a execução manual é bloqueada (o fluxo roda os comandos)', async () => {

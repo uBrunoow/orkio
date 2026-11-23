@@ -1,13 +1,16 @@
-import { useMemo, useRef } from 'react'
-import { CommandPalette } from '@astryxdesign/core/CommandPalette'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Kbd } from '@astryxdesign/core/Kbd'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import type { SearchableItem, SearchSource } from '@astryxdesign/core/Typeahead'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem as CommandRowItem,
+  CommandList
+} from '@/components/ui/command'
+import { Kbd } from '@/components/ui/kbd'
+import { Spinner } from '@/components/Spinner'
 import type { BoardCard, ProjectView } from '../../../shared/ipc-contract'
-import type { Route } from './routes'
+import { SETTINGS_TITLES, type Route, type SettingsSection } from './routes'
 import { SHORTCUTS } from './shortcuts'
 
 export interface CommandData {
@@ -19,28 +22,46 @@ export interface CommandData {
   /** ID da tarefa (mono) e onde ela está. */
   taskRef?: { displayId: string | null; where: string }
   keys?: string
+  /** Tarefa fora do quadro: abre a página no Notion. */
+  url?: string
 }
 
-export type CommandItem = SearchableItem<CommandData>
+export interface CommandItem {
+  id: string
+  label: string
+  auxiliaryData?: CommandData
+}
 
-/** Comandos fixos de navegação, com o atalho de cada um. */
+interface SearchSource {
+  bootstrap(): Promise<CommandItem[]>
+  search(query: string): Promise<CommandItem[]>
+}
+
+/** Comandos fixos de navegação, com o atalho de cada um, e as seções de Configurações. */
 function navigationItems(hasProject: boolean): CommandItem[] {
   const group = 'Ir para'
-  const id = (route: Route): string =>
-    `go:${route.name}${route.name === 'flows' && route.tab ? `:${route.tab}` : ''}`
   const items: CommandItem[] = SHORTCUTS.filter((s) => hasProject || !s.isProjectScreen).map(
     (s) => ({
-      id: id(s.route),
+      id: `go:${s.route.name}`,
       label: s.label,
       auxiliaryData: { group, route: s.route, keys: s.keys }
     })
   )
-  if (hasProject) {
-    const alva: Route = { name: 'flows', tab: 'alva' }
+  const sections = (Object.keys(SETTINGS_TITLES) as SettingsSection[]).filter(
+    (section) => hasProject || (section !== 'board' && section !== 'agents')
+  )
+  for (const section of sections) {
     items.push({
-      id: id(alva),
+      id: `go:settings:${section}`,
+      label: SETTINGS_TITLES[section],
+      auxiliaryData: { group, route: { name: 'settings', section } }
+    })
+  }
+  if (hasProject) {
+    items.push({
+      id: 'go:settings:board:flows',
       label: 'Modelos do alva-flow',
-      auxiliaryData: { group, route: alva }
+      auxiliaryData: { group, route: { name: 'settings', section: 'board', tab: 'flows' } }
     })
   }
   return items
@@ -65,7 +86,7 @@ async function loadTasks(projects: readonly ProjectView[]): Promise<CommandItem[
       label: `${card.displayId ?? ''} ${card.title}`.trim(),
       auxiliaryData: {
         group: 'Tarefas',
-        route: { name: 'board', projectId: view.projectId, taskId: card.taskId },
+        route: { name: 'task', projectId: view.projectId, taskId: card.taskId },
         taskRef: {
           displayId: card.displayId,
           where: `${view.projectName} · ${stageName(card)}`
@@ -76,7 +97,45 @@ async function loadTasks(projects: readonly ProjectView[]): Promise<CommandItem[
 }
 
 /**
- * Command Palette (Ctrl/Cmd+K): tarefas, telas e troca de projeto. Só navega; nada aqui escreve
+ * Busca no banco de Tarefas do Notion inteiro (`searchTasks`: título ou ID, qualquer pessoa e
+ * projeto). Tarefa que está no quadro de um projeto vinculado abre no Orkio; as outras abrem a
+ * página no Notion.
+ */
+async function searchNotionTasks(
+  query: string,
+  onBoard: ReadonlySet<string>
+): Promise<CommandItem[]> {
+  const r = await window.orkio.notionWorkspace.searchTasks(query).catch(() => null)
+  if (!r?.ok) return []
+  return r.value.tasks.map((t) => {
+    const inOrkio = !!t.projectId && onBoard.has(`${t.projectId}:${t.id}`)
+    const where = [
+      t.projectName ?? 'Sem projeto no Orkio',
+      t.status?.name,
+      t.assignees.length > 0 ? t.assignees.join(', ') : null,
+      inOrkio ? null : 'abre no Notion'
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    return {
+      id: `notion:${t.id}`,
+      label: `${t.displayId ?? ''} ${t.title}`.trim(),
+      auxiliaryData: {
+        group: 'Tarefas',
+        ...(inOrkio
+          ? { route: { name: 'task' as const, projectId: t.projectId!, taskId: t.id } }
+          : t.url
+            ? { url: t.url }
+            : {}),
+        taskRef: { displayId: t.displayId, where }
+      }
+    }
+  })
+}
+
+/**
+ * Command Palette (Ctrl/Cmd+K): tarefas, telas e troca de projeto. `mode="tasks"` (botão "Buscar
+ * tarefa" da lateral) busca só tarefas, direto no Notion. Só navega; nada aqui escreve
  * no Notion nem roda agentes.
  */
 export function CommandMenu({
@@ -84,17 +143,17 @@ export function CommandMenu({
   onOpenChange,
   projects,
   currentProjectId,
-  onRun
+  onRun,
+  mode = 'all'
 }: {
+  mode?: 'all' | 'tasks'
   isOpen: boolean
   onOpenChange(isOpen: boolean): void
   projects: readonly ProjectView[]
   currentProjectId: string | null
   onRun(item: CommandData): void
 }): React.JSX.Element {
-  // id → comando, dos itens já mostrados (a seleção só devolve o id).
-  const index = useRef(new Map<string, CommandData>())
-  const source = useMemo((): SearchSource<CommandItem> => {
+  const source = useMemo((): SearchSource => {
     let tasks: Promise<CommandItem[]> | null = null
     const all = async (): Promise<CommandItem[]> => {
       tasks ??= loadTasks(projects)
@@ -105,10 +164,25 @@ export function CommandMenu({
           label: `Trocar para ${p.name}`,
           auxiliaryData: { group: 'Projetos', projectId: p.id }
         }))
-      const items = [...(await tasks), ...navigationItems(projects.length > 0), ...switchItems]
-      for (const item of items)
-        if (item.auxiliaryData) index.current.set(item.id, item.auxiliaryData)
-      return items
+      return [...(await tasks), ...navigationItems(projects.length > 0), ...switchItems]
+    }
+    // Modo tarefas: tarefas do quadro (para saber o que abre no Orkio) + busca no Notion.
+    let board: Promise<Set<string>> | null = null
+    const notion = async (query: string): Promise<CommandItem[]> => {
+      board ??= loadTasks(projects).then(
+        (items) =>
+          new Set(
+            items.flatMap((i) =>
+              i.auxiliaryData?.route?.name === 'task'
+                ? [`${i.auxiliaryData.route.projectId}:${i.auxiliaryData.route.taskId}`]
+                : []
+            )
+          )
+      )
+      return searchNotionTasks(query, await board)
+    }
+    if (mode === 'tasks') {
+      return { bootstrap: () => notion(''), search: (query) => notion(query) }
     }
     return {
       bootstrap: async () => {
@@ -125,23 +199,99 @@ export function CommandMenu({
     }
     // Recria a fonte (e relê as tarefas) a cada abertura.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects, currentProjectId, isOpen])
+  }, [projects, currentProjectId, isOpen, mode])
 
+  const [query, setQuery] = useState('')
+  const [items, setItems] = useState<CommandItem[] | null>(null)
+  // Ao fechar, limpa a busca (ajuste de estado durante a renderização, sem efeito).
+  const [wasOpen, setWasOpen] = useState(isOpen)
+  if (wasOpen !== isOpen) {
+    setWasOpen(isOpen)
+    if (!isOpen) {
+      setQuery('')
+      setItems(null)
+    }
+  }
+  useEffect(() => {
+    if (!isOpen) return
+    let alive = true
+    // Busca no Notion com um respiro entre teclas; a lista local responde na hora.
+    const delay = mode === 'tasks' && query.trim() ? 250 : 0
+    const timer = window.setTimeout(() => {
+      const run = query.trim() ? source.search(query) : source.bootstrap()
+      void run.then((list) => alive && setItems(list)).catch(() => alive && setItems([]))
+    }, delay)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [isOpen, query, source, mode])
+
+  const groups = useMemo(() => {
+    const map = new Map<string, CommandItem[]>()
+    for (const item of items ?? []) {
+      const g = item.auxiliaryData?.group ?? ''
+      map.set(g, [...(map.get(g) ?? []), item])
+    }
+    return [...map.entries()]
+  }, [items])
+
+  const label = mode === 'tasks' ? 'Buscar tarefas no Notion' : 'Buscar tarefas e comandos'
   return (
-    <CommandPalette<CommandItem>
-      isOpen={isOpen}
+    <CommandDialog
+      open={isOpen}
       onOpenChange={onOpenChange}
-      label="Buscar tarefas e comandos"
-      searchSource={source}
-      value=""
-      onValueChange={(id) => {
-        const data = index.current.get(id)
-        if (data) onRun(data)
-      }}
-      emptySearchText="Nada encontrado"
-      emptyBootstrapText="Digite para buscar"
-      renderItem={(item) => <CommandRow item={item} />}
-    />
+      title={label}
+      description={
+        mode === 'tasks'
+          ? 'Título ou ID de qualquer tarefa do banco de Tarefas do Notion.'
+          : 'Tarefas, telas e projetos.'
+      }
+      showCloseButton={false}
+      shouldFilter={false}
+    >
+      <CommandInput
+        value={query}
+        onValueChange={setQuery}
+        placeholder={
+          mode === 'tasks' ? 'Título ou ID (ex.: ORK-142)…' : 'Buscar tarefa, tela ou projeto…'
+        }
+        aria-label={label}
+      />
+      <CommandList className="max-h-[60vh]">
+        {items === null ? (
+          <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
+            <Spinner /> Buscando…
+          </div>
+        ) : (
+          <CommandEmpty>
+            {query.trim()
+              ? mode === 'tasks'
+                ? 'Nenhuma tarefa com esse ID ou título'
+                : 'Nada encontrado'
+              : mode === 'tasks'
+                ? 'Nenhuma tarefa nos projetos vinculados'
+                : 'Digite para buscar'}
+          </CommandEmpty>
+        )}
+        {groups.map(([group, list]) => (
+          <CommandGroup key={group} heading={group}>
+            {list.map((item) => (
+              <CommandRowItem
+                key={item.id}
+                value={item.id}
+                onSelect={() => {
+                  if (item.auxiliaryData) onRun(item.auxiliaryData)
+                  onOpenChange(false)
+                }}
+              >
+                <CommandRow item={item} />
+              </CommandRowItem>
+            ))}
+          </CommandGroup>
+        ))}
+      </CommandList>
+    </CommandDialog>
   )
 }
 
@@ -152,25 +302,34 @@ function CommandRow({ item }: { item: CommandItem }): React.JSX.Element {
       ? item.label.slice(data.taskRef.displayId.length).trim()
       : item.label
     return (
-      <HStack gap={2} vAlign="center" width="100%">
-        {data.taskRef.displayId && <Code>{data.taskRef.displayId}</Code>}
-        <StackItem size="fill">
-          <Text>{title}</Text>
-        </StackItem>
-        <Text type="supporting" color="secondary">
+      <span className="flex w-full min-w-0 items-center gap-2">
+        {data.taskRef.displayId && (
+          <span className="shrink-0 font-mono text-xs text-subtle-foreground">
+            {data.taskRef.displayId}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className="shrink-0 truncate text-xs text-muted-foreground">
           {data.taskRef.where}
-        </Text>
-      </HStack>
+        </span>
+      </span>
     )
   }
   return (
-    <HStack gap={2} vAlign="center" width="100%">
-      <StackItem size="fill">
-        <Text>{item.label}</Text>
-      </StackItem>
-      {data?.keys && <Kbd keys={data.keys} />}
-    </HStack>
+    <span className="flex w-full items-center gap-2">
+      <span className="flex-1">{item.label}</span>
+      {data?.keys && <Kbd>{formatKeys(data.keys)}</Kbd>}
+    </span>
   )
+}
+
+/** "mod+1" → "Ctrl 1" / "⌘ 1". */
+export function formatKeys(keys: string): string {
+  const mac = navigator.userAgent.includes('Mac')
+  return keys
+    .split('+')
+    .map((k) => (k === 'mod' ? (mac ? '⌘' : 'Ctrl') : k.length === 1 ? k.toUpperCase() : k))
+    .join(' ')
 }
 
 /** Busca sem diferenciar maiúsculas e acentos. */

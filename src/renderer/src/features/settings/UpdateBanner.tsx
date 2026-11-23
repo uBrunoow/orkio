@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Banner } from '@astryxdesign/core/Banner'
-import { Button } from '@astryxdesign/core/Button'
-import { HStack } from '@astryxdesign/core/HStack'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { InfoIcon } from '../../components/icons'
 import type { ReleaseNotes } from '../../../../shared/updates'
 import { InstallControls } from './InstallControls'
 import { useUpdates } from './useUpdates'
@@ -41,41 +39,42 @@ export function UpdateBanner({
 
   if (!show && !whatsNew) return null
   return (
-    <VStack gap={3}>
+    <div className="flex flex-col gap-3 border-b border-border-soft px-4 py-3">
       {show && status && (
-        <VStack role="status" data-testid="update-banner">
-          <Banner
-            status="info"
-            title={
-              status.mode === 'manual'
-                ? `Nova versão ${status.version} disponível`
-                : `Atualização ${status.version} pronta`
-            }
-            description={
-              status.mode === 'manual'
-                ? 'Baixe e instale por cima da versão atual. Seus dados ficam.'
-                : 'Ela também é instalada quando você fechar o Orkio.'
-            }
-            collapsible={false}
-            endContent={
-              status.installWhenIdle ? undefined : (
-                <HStack gap={2} vAlign="center">
-                  {onOpenSettings && (
-                    <Button variant="ghost" size="sm" label="Detalhes" onClick={onOpenSettings} />
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    label="Agora não"
-                    onClick={() => setDismissed(status.version)}
-                  />
-                </HStack>
-              )
-            }
-          >
+        <div
+          role="status"
+          data-testid="update-banner"
+          className="flex items-start gap-2.5 rounded-lg border border-border bg-card px-3 py-2.5"
+        >
+          <InfoIcon className="mt-0.5 text-info" />
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="flex flex-col gap-0.5">
+              <p className="text-sm font-medium text-foreground">
+                {status.mode === 'manual'
+                  ? `Nova versão ${status.version} disponível`
+                  : `Atualização ${status.version} pronta`}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {status.mode === 'manual'
+                  ? 'Baixe e instale por cima da versão atual. Seus dados ficam.'
+                  : 'Ela também é instalada quando você fechar o Orkio.'}
+              </p>
+            </div>
             <InstallControls status={status} />
-          </Banner>
-        </VStack>
+          </div>
+          {!status.installWhenIdle && (
+            <div className="flex shrink-0 items-center gap-1">
+              {onOpenSettings && (
+                <Button variant="ghost" size="sm" onClick={onOpenSettings}>
+                  Detalhes
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" onClick={() => setDismissed(status.version)}>
+                Agora não
+              </Button>
+            </div>
+          )}
+        </div>
       )}
       {whatsNew && (
         <WhatsNewPanel
@@ -86,6 +85,6 @@ export function UpdateBanner({
           }}
         />
       )}
-    </VStack>
+    </div>
   )
 }

@@ -1,18 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { Selector } from '@astryxdesign/core/Selector'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { SelectField } from '@/components/form'
+import { Spinner } from '@/components/Spinner'
+import { cn } from '@/lib/utils'
 import { StatusToken, toneOf } from '../../components/StatusToken'
-import { VStack } from '@astryxdesign/core/VStack'
 import type { AlvaCheckItem, AlvaPrecheck } from '../../../../shared/alva'
 import type { AlvaStatusView, BoardView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
@@ -108,19 +100,30 @@ export function AlvaPage({
   }
 
   return (
-    <VStack gap={5} maxWidth={PAGE_WIDTH.form} role="region" aria-label="alva-flow">
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <Heading level={2}>alva-flow</Heading>
-        {precheck?.pluginVersion && <Code>v{precheck.pluginVersion}</Code>}
-      </HStack>
-      <Text color="secondary">
-        Os fluxos Alva rodam os comandos do plugin alva-flow (/spec, /plan, /implement, /review,
-        /commit, /pr) nas colunas do quadro, ligando cada tarefa do Notion a uma task do Backlog.md.
-      </Text>
+    <section
+      role="region"
+      aria-label="alva-flow"
+      className={cn('flex w-full flex-col gap-[18px]', PAGE_WIDTH.form)}
+    >
+      <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-base font-medium">alva-flow</h2>
+          {precheck?.pluginVersion && (
+            <code className="font-mono text-xs text-subtle-foreground">
+              v{precheck.pluginVersion}
+            </code>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Os fluxos Alva rodam os comandos do plugin alva-flow (/spec, /plan, /implement, /review,
+          /commit, /pr) nas colunas do quadro, ligando cada tarefa do Notion a uma task do
+          Backlog.md.
+        </p>
+      </div>
 
-      <VStack gap={2} role="region" aria-label="Pronto para o alva-flow?">
-        <HStack gap={2} vAlign="center">
-          <Heading level={3}>Pronto para o alva-flow?</Heading>
+      <section role="region" aria-label="Pronto para o alva-flow?" className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-medium">Pronto para o alva-flow?</h3>
           {precheck && (
             <StatusToken
               tone={precheck.ready ? 'success' : 'warning'}
@@ -128,131 +131,136 @@ export function AlvaPage({
               data-testid="alva-ready"
             />
           )}
-          <StackItem size="fill" />
-          <Button
-            size="sm"
-            variant="ghost"
-            label="Verificar de novo"
-            icon={<Icon icon={RefreshIcon} />}
-            isLoading={checking}
-            onClick={() => void recheck()}
-          />
-        </HStack>
+          <div className="flex-1" />
+          <Button size="sm" variant="ghost" disabled={checking} onClick={() => void recheck()}>
+            {checking ? <Spinner /> : <RefreshIcon />}
+            Verificar de novo
+          </Button>
+        </div>
         {precheck === null ? (
-          <Skeleton height={160} aria-label="Verificando o projeto" />
+          <Skeleton className="h-40" aria-label="Verificando o projeto" />
         ) : (
-          <List hasDividers aria-label="Itens da pré-checagem">
+          <ul
+            aria-label="Itens da pré-checagem"
+            className="overflow-hidden rounded-xl border border-border-soft bg-card"
+          >
             {precheck.items.map((i) => (
-              <Item
-                as="li"
+              <li
                 key={i.id}
-                label={i.label}
-                description={
-                  i.fix && i.state !== 'ok' ? (
-                    <VStack gap={1}>
-                      <Text type="supporting">{i.detail}</Text>
-                      <HStack gap={2} vAlign="center" wrap="wrap">
-                        <Code>{i.fix}</Code>
-                        <CopyButton text={i.fix} label={`Copiar comando: ${i.label}`} />
-                      </HStack>
-                    </VStack>
-                  ) : (
-                    i.detail
-                  )
-                }
-                startContent={
-                  <StatusToken tone={toneOf(STATE[i.state].color)} label={STATE[i.state].label} />
-                }
-              />
+                className="flex items-start gap-4 border-b border-border-soft px-4 py-3 last:border-b-0"
+              >
+                <StatusToken
+                  tone={toneOf(STATE[i.state].color)}
+                  label={STATE[i.state].label}
+                  className="mt-0.5 w-20 shrink-0"
+                />
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="text-sm font-medium">{i.label}</span>
+                  <span className="text-xs text-muted-foreground">{i.detail}</span>
+                  {i.fix && i.state !== 'ok' && (
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <code className="rounded-md border border-border-soft bg-surface px-2 py-1 font-mono text-xs break-all">
+                        {i.fix}
+                      </code>
+                      <CopyButton text={i.fix} label={`Copiar comando: ${i.label}`} />
+                    </div>
+                  )}
+                </div>
+              </li>
             ))}
-          </List>
+          </ul>
         )}
         {precheck && !precheck.ready && (
-          <Text type="supporting">
+          <p className="text-xs text-muted-foreground">
             Enquanto faltar algo, os fluxos Alva não começam (o resto do Orkio funciona
             normalmente).
-          </Text>
+          </p>
         )}
-      </VStack>
+      </section>
 
-      <Card role="region" aria-label="Fluxos Alva">
-        <VStack gap={3}>
-          <Heading level={3}>Fluxos Alva</Heading>
-          {status && status.templates.length > 0 && (
-            <List density="compact" aria-label="Fluxos Alva criados">
-              {status.templates.map((t) => (
-                <Item
-                  as="li"
-                  key={t.id}
-                  label={t.name}
-                  description={
-                    t.stageId
-                      ? `Coluna “${view.config?.stages.find((s) => s.id === t.stageId)?.name ?? '?'}”, ${t.mode === 'manual' ? 'manual' : 'ao entrar'}`
-                      : 'Sem coluna (rodar à mão)'
-                  }
-                />
-              ))}
-            </List>
-          )}
+      <section
+        role="region"
+        aria-label="Fluxos Alva"
+        className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-4"
+      >
+        <h3 className="text-sm font-medium">Fluxos Alva</h3>
+        {status && status.templates.length > 0 && (
+          <ul
+            aria-label="Fluxos Alva criados"
+            className="overflow-hidden rounded-lg border border-border-soft"
+          >
+            {status.templates.map((t) => (
+              <li
+                key={t.id}
+                className="flex flex-col gap-0.5 border-b border-border-soft px-3 py-2 last:border-b-0"
+              >
+                <span className="text-sm">{t.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {t.stageId
+                    ? `Coluna “${view.config?.stages.find((s) => s.id === t.stageId)?.name ?? '?'}”, ${t.mode === 'manual' ? 'manual' : 'ao entrar'}`
+                    : 'Sem coluna (rodar à mão)'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
 
-          {!hasPlanning && (
-            <HStack gap={2} vAlign="end" wrap="wrap">
-              <Selector
-                label="Status do Notion da coluna “Planejando”"
-                options={view.statusOptions.map((o) => ({ value: o.id, label: o.name }))}
-                {...(planStatus ? { value: planStatus } : {})}
-                onChange={setPlanStatus}
-              />
-              <Button
-                variant="secondary"
-                label="Criar coluna “Planejando”"
-                isDisabled={!planStatus}
-                isLoading={busy}
-                onClick={() => void addPlanning()}
-              />
-            </HStack>
-          )}
-
-          <HStack gap={2} wrap="wrap">
-            <Selector
-              label="Coluna do “Alva: planejar”"
-              options={stageOptions}
-              value={targets.plan ?? ''}
-              onChange={(v: string) => setTargets((t) => ({ ...t, plan: v || null }))}
+        {!hasPlanning && (
+          <div className="flex flex-wrap items-end gap-2">
+            <SelectField
+              label="Status do Notion da coluna “Planejando”"
+              className="min-w-64 flex-1"
+              options={view.statusOptions.map((o) => ({ value: o.id, label: o.name }))}
+              value={planStatus || null}
+              onChange={setPlanStatus}
             />
-            <Selector
-              label="Coluna do “Alva: implementar e entregar”"
-              options={stageOptions}
-              value={targets.deliver ?? ''}
-              onChange={(v: string) => setTargets((t) => ({ ...t, deliver: v || null }))}
-            />
-            <Selector
-              label="Coluna do “Alva: comentários da PR”"
-              options={stageOptions}
-              value={targets.reviewed ?? ''}
-              onChange={(v: string) => setTargets((t) => ({ ...t, reviewed: v || null }))}
-            />
-          </HStack>
-          <Text type="supporting">
-            O “Alva: CI vermelho” fica sem coluna (rode à mão). Push e pedir review chegam na 5C:
-            até lá, o fluxo para e pede para você fazer à mão.
-          </Text>
-          <HStack gap={2}>
             <Button
-              variant="primary"
-              label={
-                status && status.templates.length > 0 ? 'Recriar fluxos Alva' : 'Criar fluxos Alva'
-              }
-              isLoading={busy}
-              onClick={() => void create()}
-            />
-          </HStack>
-        </VStack>
-      </Card>
+              variant="outline"
+              disabled={!planStatus || busy}
+              onClick={() => void addPlanning()}
+            >
+              {busy && <Spinner />}
+              Criar coluna “Planejando”
+            </Button>
+          </div>
+        )}
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <SelectField
+            label="Coluna do “Alva: planejar”"
+            options={stageOptions}
+            value={targets.plan ?? ''}
+            onChange={(v: string) => setTargets((t) => ({ ...t, plan: v || null }))}
+          />
+          <SelectField
+            label="Coluna do “Alva: implementar e entregar”"
+            options={stageOptions}
+            value={targets.deliver ?? ''}
+            onChange={(v: string) => setTargets((t) => ({ ...t, deliver: v || null }))}
+          />
+          <SelectField
+            label="Coluna do “Alva: comentários da PR”"
+            options={stageOptions}
+            value={targets.reviewed ?? ''}
+            onChange={(v: string) => setTargets((t) => ({ ...t, reviewed: v || null }))}
+          />
+        </div>
+        <p className="text-xs text-muted-foreground">
+          O “Alva: CI vermelho” fica sem coluna (rode à mão). Push e pedir review chegam na 5C: até
+          lá, o fluxo para e pede para você fazer à mão.
+        </p>
+        <div className="flex">
+          <Button disabled={busy} onClick={() => void create()}>
+            {busy && <Spinner />}
+            {status && status.templates.length > 0 ? 'Recriar fluxos Alva' : 'Criar fluxos Alva'}
+          </Button>
+        </div>
+      </section>
 
       {precheck?.hasDocker && status && (
-        <Selector
+        <SelectField
           label="Fluxos Alva ao mesmo tempo neste projeto (Docker e portas)"
+          className="max-w-md"
           options={[1, 2, 3, 4].map((n) => ({ value: String(n), label: String(n) }))}
           value={String(status.maxParallel)}
           onChange={(v: string) =>
@@ -267,9 +275,11 @@ export function AlvaPage({
         (message.tone === 'error' ? (
           <Alert tone="danger">{message.text}</Alert>
         ) : (
-          <Text role="status">{message.text}</Text>
+          <p role="status" className="text-sm text-ok">
+            {message.text}
+          </p>
         ))}
-    </VStack>
+    </section>
   )
 }
 
@@ -278,11 +288,9 @@ function CopyButton({ text, label }: { text: string; label: string }): React.JSX
   const [copied, setCopied] = useState(false)
   return (
     <Button
-      size="sm"
+      size="xs"
       variant="ghost"
-      label={copied ? 'Copiado' : 'Copiar'}
       aria-label={label}
-      icon={<Icon icon={CopyIcon} />}
       onClick={() =>
         void navigator.clipboard.writeText(text).then(
           () => {
@@ -292,6 +300,9 @@ function CopyButton({ text, label }: { text: string; label: string }): React.JSX
           () => {}
         )
       }
-    />
+    >
+      <CopyIcon />
+      {copied ? 'Copiado' : 'Copiar'}
+    </Button>
   )
 }

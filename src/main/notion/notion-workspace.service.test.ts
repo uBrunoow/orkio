@@ -398,6 +398,72 @@ describe('NotionWorkspaceService', () => {
     })
   })
 
+  describe('busca de tarefas', () => {
+    it('busca no banco inteiro por título ou ID, sem filtrar pessoa nem projeto', async () => {
+      const service = await configured()
+      await service.link('local-1', 'page-orkio')
+      api.queryDataSource.mockImplementation(async () => ({
+        results: [taskPage(142, 'page-orkio'), taskPage(7, 'page-outro')],
+        nextCursor: null
+      }))
+
+      const result = await service.searchTasks('ORK-142')
+
+      expect(api.queryDataSource).toHaveBeenLastCalledWith(TASKS_DS, {
+        filter: {
+          or: [
+            { property: 'title', title: { contains: 'ORK-142' } },
+            { property: 'uid', unique_id: { equals: 142 } }
+          ]
+        },
+        sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
+        pageSize: 20
+      })
+      expect(result).toMatchObject({
+        ok: true,
+        value: {
+          tasks: [
+            {
+              id: 'task-142',
+              displayId: 'ORK-142',
+              projectId: 'local-1',
+              projectName: 'orkio-desktop'
+            },
+            { id: 'task-7', projectId: null, projectName: null }
+          ]
+        }
+      })
+    })
+
+    it('texto vazio traz as editadas mais recentemente; texto sem número só pelo título', async () => {
+      const service = await configured()
+      api.queryDataSource.mockImplementation(async () => ({ results: [], nextCursor: null }))
+
+      await service.searchTasks('  ')
+      expect(api.queryDataSource).toHaveBeenLastCalledWith(TASKS_DS, {
+        sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
+        pageSize: 20
+      })
+
+      await service.searchTasks('login')
+      expect(api.queryDataSource).toHaveBeenLastCalledWith(TASKS_DS, {
+        filter: { property: 'title', title: { contains: 'login' } },
+        sorts: [{ timestamp: 'last_edited_time', direction: 'descending' }],
+        pageSize: 20
+      })
+    })
+
+    it('sem bancos configurados: erro claro, sem chamar o Notion', async () => {
+      const service = await makeService()
+      api.queryDataSource.mockClear()
+      expect(await service.searchTasks('x')).toMatchObject({
+        ok: false,
+        error: { code: 'not_configured' }
+      })
+      expect(api.queryDataSource).not.toHaveBeenCalled()
+    })
+  })
+
   describe('tarefas', () => {
     it('conexão de bot do workspace (sem pessoa): não lista as tarefas de todos', async () => {
       const service = await configured()

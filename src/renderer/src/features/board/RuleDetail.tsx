@@ -1,7 +1,5 @@
-import { Button } from '@astryxdesign/core/Button'
-import { Text } from '@astryxdesign/core/Text'
-import { Timestamp } from '@astryxdesign/core/Timestamp'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Timestamp } from '@/components/Timestamp'
 import { EVENT_LABELS, type AutomationRule } from '../../../../shared/automation'
 import { EVENT_PHRASES, describeRule } from '../../../../shared/flow'
 import type { ActivityItem } from '../../../../shared/overview'
@@ -49,28 +47,26 @@ export function RuleDetail({
       label={`Automação ${rule.name}`}
       sentence={describeRule(rule, stages)}
       starts={
-        <VStack gap={1}>
-          <Text>Quando {EVENT_PHRASES[rule.trigger]}.</Text>
+        <div className="flex flex-col gap-1">
+          <p>Quando {EVENT_PHRASES[rule.trigger]}.</p>
           {conditions.map((c) => (
-            <Text key={c} type="supporting" color="secondary">
+            <p key={c} className="text-xs text-muted-foreground">
               {c}
-            </Text>
+            </p>
           ))}
-        </VStack>
+        </div>
       }
       does={
-        <VStack gap={1}>
-          <Text>
+        <div className="flex flex-col gap-1">
+          <p>
             {rule.action.type === 'move_to_stage'
               ? `Move a tarefa para ${name(rule.action.stageId)} (e o status no Notion junto).`
               : `Avisa no desktop: “${rule.action.message}”. A tarefa fica onde está.`}
-          </Text>
+          </p>
           {rule.notify && rule.action.type === 'move_to_stage' && (
-            <Text type="supporting" color="secondary">
-              E avisa no desktop quando mover.
-            </Text>
+            <p className="text-xs text-muted-foreground">E avisa no desktop quando mover.</p>
           )}
-        </VStack>
+        </div>
       }
       executions={
         <ExecutionsTable
@@ -101,7 +97,9 @@ export function RuleDetail({
         }
       ]}
       actions={
-        <Button variant="ghost" label={rule.enabled ? 'Desativar' : 'Ativar'} onClick={onToggle} />
+        <Button variant="ghost" onClick={onToggle}>
+          {rule.enabled ? 'Desativar' : 'Ativar'}
+        </Button>
       }
       onEdit={onEdit}
     />

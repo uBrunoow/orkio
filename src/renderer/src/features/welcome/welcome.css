@@ -1,6 +1,6 @@
 /*
- * Abertura e tela inicial (marca, BRAND.md). Exceção documentada: tela cheia fixa, grade de fundo e
- * animações não existem como props da Astryx. Só tokens do tema; nada de cor fixa.
+ * Abertura e tela inicial (marca, BRAND.md). Exceção documentada: tela cheia fixa, brilho de fundo e
+ * animações. Só tokens do tema; nada de cor fixa.
  *
  * Linha do tempo: 0–1.2 s o símbolo se desenha sobre o laranja; 1.3 s o wordmark aparece;
  * 1.9–2.6 s o laranja se fecha em círculo sobre o símbolo; 2.5 s+ o conteúdo entra em sequência.
@@ -11,61 +11,31 @@
     inset: 0;
     z-index: 10;
     overflow: hidden;
-    background-color: var(--color-background-body);
-    /* Grade técnica sutil, mais visível no centro. */
-    background-image:
-      linear-gradient(
-        color-mix(in srgb, var(--color-border) 55%, transparent) 1px,
-        transparent 1px
-      ),
-      linear-gradient(
-        90deg,
-        color-mix(in srgb, var(--color-border) 55%, transparent) 1px,
-        transparent 1px
-      );
-    background-size: calc(var(--spacing-10, 40px) * 1.5) calc(var(--spacing-10, 40px) * 1.5);
-    background-position: center;
-  }
-
-  /* Vinheta: a grade some nas bordas. */
-  .orkio-intro::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
+    /* Como no mockup: um brilho laranja bem leve no canto de cima, sem grade. */
     background: radial-gradient(
-      ellipse at 30% 55%,
-      transparent 0%,
-      color-mix(in srgb, var(--color-background-body) 70%, transparent) 55%,
-      var(--color-background-body) 90%
+      ellipse at top left,
+      color-mix(in srgb, var(--brand) 9%, var(--background)) 0%,
+      var(--background) 55%
     );
   }
 
-  /* Linha laranja que varre a tela uma vez, depois que o conteúdo entra. */
-  .orkio-intro::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 0;
-    height: 1px;
-    pointer-events: none;
-    background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
-    opacity: 0;
-    animation: orkio-scan 2.4s cubic-bezier(0.4, 0, 0.2, 1) 2.9s 1 both;
+  /* Primeiros passos: o conteúdo ocupa a tela toda. */
+  .orkio-intro__content {
+    position: relative;
+    height: 100%;
   }
 
   .orkio-intro__stage {
     position: relative;
     height: 100%;
-    padding: var(--spacing-10, 40px) calc(var(--spacing-10, 40px) * 1.75);
+    padding: calc(var(--spacing) * 10) calc(calc(var(--spacing) * 10) * 1.75);
   }
 
   .orkio-intro__title {
     font-size: clamp(3rem, 7vw, 5.5rem);
     line-height: 1.02;
     letter-spacing: -0.01em;
-    color: var(--color-text-primary);
+    color: var(--foreground);
   }
 
   /* Entrada em sequência do conteúdo. */
@@ -99,15 +69,15 @@
     z-index: 2;
     /* Não bloqueia cliques: o conteúdo já está no lugar por baixo. */
     pointer-events: none;
-    background-color: var(--color-accent);
-    color: var(--color-on-accent);
+    background-color: var(--brand);
+    color: var(--primary-foreground);
     /* Fecha num círculo sobre o símbolo (centro exato da tela). */
     clip-path: circle(150% at 50% 50%);
     animation: orkio-close 0.75s cubic-bezier(0.7, 0, 0.84, 0) 1.9s 1 forwards;
   }
 
   .orkio-intro__splash-logo {
-    color: var(--color-on-accent);
+    color: var(--primary-foreground);
   }
 
   .orkio-intro__splash-logo path {
@@ -128,13 +98,13 @@
   .orkio-intro__splash-word {
     /* Fora do fluxo: o símbolo fica no centro exato da tela. */
     position: absolute;
-    top: calc(50% + 5rem + var(--spacing-6, 24px));
+    top: calc(50% + 5rem + calc(var(--spacing) * 6));
     font-family: 'Jost', sans-serif;
     font-weight: 300;
     font-size: 1.75rem;
     letter-spacing: 0.25em;
     margin-right: -0.25em;
-    color: var(--color-on-accent);
+    color: var(--primary-foreground);
     animation: orkio-word 0.6s ease-out 1.25s both;
   }
 
@@ -173,29 +143,11 @@
       transform: none;
     }
   }
-  @keyframes orkio-scan {
-    0% {
-      opacity: 0;
-      top: 0;
-    }
-    15% {
-      opacity: 0.8;
-    }
-    85% {
-      opacity: 0.8;
-    }
-    100% {
-      opacity: 0;
-      top: 100%;
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     .orkio-intro__splash {
       display: none;
     }
-    .orkio-intro__reveal,
-    .orkio-intro::after {
+    .orkio-intro__reveal {
       animation: none;
     }
   }

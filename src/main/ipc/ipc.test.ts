@@ -445,7 +445,8 @@ describe('registerNotionWorkspaceIpc', () => {
       unlink: vi.fn(async () => ok(null)),
       listTasks: vi.fn(async () => {
         throw new Error('ntn_SECRET')
-      })
+      }),
+      searchTasks: vi.fn(async () => ok({ tasks: [] }))
     }
     registerNotionWorkspaceIpc(ipc, service, guard)
     return { ipc, service }
@@ -481,6 +482,13 @@ describe('registerNotionWorkspaceIpc', () => {
     expect(service.link).toHaveBeenCalledWith('proj-1', DS_A)
     await ipc.invoke(ch.listTasks, 'proj-1', { force: 'yes' })
     expect(service.listTasks).toHaveBeenCalledWith('proj-1', { force: false })
+
+    // Busca: só texto curto.
+    await ipc.invoke(ch.searchTasks, 'ORK-142')
+    expect(service.searchTasks).toHaveBeenCalledWith('ORK-142')
+    expect(await ipc.invoke(ch.searchTasks, { q: 1 })).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.searchTasks, 'x'.repeat(201))).toMatchObject(invalid)
+    expect(service.searchTasks).toHaveBeenCalledTimes(1)
   })
 
   it('erro inesperado vira mensagem genérica; origem não confiável é recusada', async () => {

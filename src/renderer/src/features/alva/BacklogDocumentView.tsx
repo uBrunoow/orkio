@@ -1,14 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Skeleton } from '@/components/ui/skeleton'
 import type { BacklogTaskDocument } from '../../../../shared/alva'
 import { Alert } from '../../components/Alert'
 import { MarkdownText } from '../../components/MarkdownText'
 import { StatusToken } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
+import { splitBacklogBody } from '../task/backlog-sections'
 
 type State =
   | { phase: 'loading' }
@@ -23,11 +20,14 @@ type State =
 export function BacklogDocumentView({
   projectId,
   taskId,
-  refreshKey = 0
+  refreshKey = 0,
+  part = 'all'
 }: {
   projectId: string
   taskId: string
   refreshKey?: number
+  /** Só a spec ou só o plano (abas da tela da tarefa); `all` = o texto inteiro. */
+  part?: 'all' | 'spec' | 'plan'
 }): React.JSX.Element {
   const [state, setState] = useState<State>({ phase: 'loading' })
 
@@ -49,44 +49,58 @@ export function BacklogDocumentView({
     }
   }, [projectId, taskId, refreshKey])
 
-  if (state.phase === 'loading') return <Skeleton height={80} aria-label="Carregando a task" />
+  if (state.phase === 'loading') {
+    return <Skeleton className="h-20" aria-label="Carregando a task" />
+  }
   if (state.phase === 'error') return <Alert tone="danger">{state.message}</Alert>
   if (!state.doc) {
     return (
-      <Text type="supporting">
+      <p className="text-xs text-muted-foreground">
         {state.linked
           ? `Não achei o arquivo da task ${state.linked} na pasta de trabalho desta tarefa.`
           : 'Esta tarefa ainda não tem task no Backlog. O /spec cria.'}
-      </Text>
+      </p>
     )
   }
-  const { info, body, truncated } = state.doc
+  const { info, truncated } = state.doc
+  const sections = splitBacklogBody(state.doc.body)
+  const body = part === 'spec' ? sections.spec : part === 'plan' ? sections.plan : state.doc.body
+  const regionLabel = part === 'spec' ? 'Spec' : part === 'plan' ? 'Plano' : 'Spec e plano'
   return (
-    <VStack gap={3} role="region" aria-label="Spec e plano">
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <Code>{info.id}</Code>
-        <Text weight="semibold">{info.title}</Text>
-        <StatusToken tone="neutral" label={info.status} />
-        <Text type="supporting">
-          critérios {info.criteria.done}/{info.criteria.total}
-        </Text>
-        {info.openQuestions > 0 && (
-          <StatusToken
-            tone="warning"
-            label={plural(info.openQuestions, 'pergunta em aberto', 'perguntas em aberto')}
-          />
-        )}
-      </HStack>
+    <section aria-label={regionLabel} className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-col gap-1.5">
+        <p className="text-[15px] font-medium">{info.title}</p>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-2xs text-subtle-foreground">
+          <span>{info.id}</span>
+          <span>·</span>
+          <StatusToken tone="neutral" label={info.status} className="font-sans" />
+          <span>·</span>
+          <span>
+            critérios {info.criteria.done}/{info.criteria.total}
+          </span>
+          {info.openQuestions > 0 && (
+            <StatusToken
+              tone="warning"
+              label={plural(info.openQuestions, 'pergunta em aberto', 'perguntas em aberto')}
+              className="font-sans"
+            />
+          )}
+        </div>
+      </div>
       {body ? (
         <MarkdownText text={body} />
       ) : (
-        <Text type="supporting">A task ainda não tem texto.</Text>
+        <p className="text-xs text-muted-foreground">
+          {part === 'plan'
+            ? 'O plano ainda não foi escrito. O /plan escreve.'
+            : 'A task ainda não tem texto.'}
+        </p>
       )}
       {truncated && (
-        <Text type="supporting">
+        <p className="text-xs text-muted-foreground">
           O texto passou do limite e foi cortado. Abra o arquivo da task para ler o resto.
-        </Text>
+        </p>
       )}
-    </VStack>
+    </section>
   )
 }

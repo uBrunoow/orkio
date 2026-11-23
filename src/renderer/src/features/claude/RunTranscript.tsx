@@ -1,12 +1,7 @@
 import { useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Code } from '@astryxdesign/core/Code'
-import { Collapsible } from '@astryxdesign/core/Collapsible'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
+import { cn } from '@/lib/utils'
 import { Alert } from '../../components/Alert'
 import { MarkdownText } from '../../components/MarkdownText'
 import {
@@ -23,6 +18,7 @@ import {
 } from '../../components/icons'
 import { StatusToken } from '../../components/StatusToken'
 import { formatDuration, formatUsd, plural } from '../../lib/format'
+import { CollapsibleHeader } from '../board/TaskDetails'
 import {
   failedLabel,
   summarizeSteps,
@@ -44,30 +40,32 @@ const CATEGORY_ICON: Record<StepCategory, SvgIcon> = {
 /** Mais recentes primeiro quando o log é longo; o resto abre em "Mostrar anteriores". */
 const TAIL = 40
 
+/** Caixa das chamadas de ferramenta (mockup `.tools`): borda suave, fundo da superfície, mono. */
+const TOOLS_BOX =
+  'rounded-lg border border-border-soft bg-surface px-2.5 py-2 font-mono text-xs text-muted-foreground'
+
 function StepRow({ step }: { step: WorkStep }): React.JSX.Element {
   const failed = step.state === 'failed'
   const verb = verbOf(step.tool)
+  const StepIcon = CATEGORY_ICON[step.category]
   return (
-    <HStack gap={2} vAlign="start">
-      <Icon icon={CATEGORY_ICON[step.category]} size="sm" color={failed ? 'error' : 'secondary'} />
-      <StackItem size="fill">
-        <Text type="supporting" color={failed ? 'primary' : 'secondary'}>
-          {verb}
-          {step.summary && (
-            <>
-              {' '}
-              <Code size="inherit">{step.summary}</Code>
-            </>
-          )}
-        </Text>
-      </StackItem>
-      {failed && <StatusToken tone="danger" label="falhou" />}
-      {step.state === 'running' && <StatusToken tone="running" label="rodando" />}
-    </HStack>
+    <div className="flex min-w-0 items-start gap-2">
+      <StepIcon
+        className={cn('mt-0.5 size-3.5', failed ? 'text-danger' : 'text-subtle-foreground')}
+      />
+      <p className={cn('min-w-0 flex-1 break-words', failed && 'text-foreground')}>
+        <span className="font-sans">{verb}</span>
+        {step.summary && <> {step.summary}</>}
+      </p>
+      {failed && <StatusToken tone="danger" label="falhou" className="font-sans" />}
+      {step.state === 'running' && (
+        <StatusToken tone="running" label="rodando" className="font-sans" />
+      )}
+    </div>
   )
 }
 
-function dominantIcon(steps: readonly WorkStep[]): SvgIcon {
+function dominantCategory(steps: readonly WorkStep[]): StepCategory {
   const counts = new Map<StepCategory, number>()
   for (const s of steps) counts.set(s.category, (counts.get(s.category) ?? 0) + 1)
   let best: StepCategory = 'tool'
@@ -78,7 +76,7 @@ function dominantIcon(steps: readonly WorkStep[]): SvgIcon {
       max = n
     }
   }
-  return CATEGORY_ICON[best]
+  return best
 }
 
 function WorkGroup({
@@ -91,33 +89,40 @@ function WorkGroup({
   onToggle(open: boolean): void
 }): React.JSX.Element {
   const only = item.steps.length === 1 ? item.steps[0] : undefined
-  if (only) return <StepRow step={only} />
+  if (only) {
+    return (
+      <div className={TOOLS_BOX}>
+        <StepRow step={only} />
+      </div>
+    )
+  }
   const summary = summarizeSteps(item.steps)
+  const GroupIcon = CATEGORY_ICON[dominantCategory(item.steps)]
   return (
     <Collapsible
-      chevronPosition="start"
-      isOpen={open}
+      open={open}
       onOpenChange={onToggle}
       data-testid="work-group"
-      trigger={
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          <Icon icon={dominantIcon(item.steps)} size="sm" color="secondary" />
-          <Text type="supporting" color="primary">
-            {summary.label}
-          </Text>
-          {item.approvals > 0 && (
-            <Text type="supporting">· {plural(item.approvals, 'aprovação', 'aprovações')}</Text>
-          )}
-          {summary.failed > 0 && <StatusToken tone="danger" label={failedLabel(summary.failed)} />}
-          {item.live && <StatusToken tone="running" label="rodando" />}
-        </HStack>
-      }
+      className={cn(TOOLS_BOX, 'flex flex-col')}
     >
-      <VStack gap={1} role="group" aria-label="Chamadas de ferramenta">
-        {item.steps.map((s) => (
-          <StepRow key={s.id} step={s} />
-        ))}
-      </VStack>
+      <CollapsibleHeader open={open} className="flex-wrap font-sans text-xs text-muted-foreground">
+        <GroupIcon className="size-3.5 text-subtle-foreground" />
+        <span className="text-foreground">{summary.label}</span>
+        {item.approvals > 0 && <span>· {plural(item.approvals, 'aprovação', 'aprovações')}</span>}
+        {summary.failed > 0 && <StatusToken tone="danger" label={failedLabel(summary.failed)} />}
+        {item.live && <StatusToken tone="running" label="rodando" />}
+      </CollapsibleHeader>
+      <CollapsibleContent>
+        <div
+          role="group"
+          aria-label="Chamadas de ferramenta"
+          className="mt-1.5 flex flex-col gap-1"
+        >
+          {item.steps.map((s) => (
+            <StepRow key={s.id} step={s} />
+          ))}
+        </div>
+      </CollapsibleContent>
     </Collapsible>
   )
 }
@@ -132,24 +137,22 @@ function Receipt({
   count: number
 }): React.JSX.Element {
   const problem = tone === 'problem'
+  const ReceiptIcon = problem ? PermissionIcon : InfoIcon
   return (
-    <HStack gap={2} vAlign="start">
-      <Icon
-        icon={problem ? PermissionIcon : InfoIcon}
-        size="sm"
-        color={problem ? 'error' : 'secondary'}
+    <div className="flex items-start gap-2 text-xs">
+      <ReceiptIcon
+        className={cn('mt-0.5 size-3.5', problem ? 'text-danger' : 'text-subtle-foreground')}
       />
-      <StackItem size="fill">
-        <Text
-          type="supporting"
-          color={problem ? 'primary' : 'secondary'}
-          {...(problem ? { weight: 'medium' as const } : {})}
-        >
-          {text}
-          {count > 1 ? ` (×${count})` : ''}
-        </Text>
-      </StackItem>
-    </HStack>
+      <p
+        className={cn(
+          'min-w-0 flex-1',
+          problem ? 'font-medium text-foreground' : 'text-muted-foreground'
+        )}
+      >
+        {text}
+        {count > 1 ? ` (×${count})` : ''}
+      </p>
+    </div>
   )
 }
 
@@ -164,16 +167,20 @@ function ResultFooter({
     item.costUsd !== null ? `${formatUsd(item.costUsd)} (estimado)` : ''
   ].filter(Boolean)
   return (
-    <VStack gap={2} data-testid="run-result">
-      <HStack gap={2} vAlign="center" wrap="wrap">
+    <div data-testid="run-result" className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <StatusToken
           tone={item.ok ? 'success' : 'danger'}
           label={item.ok ? 'Terminou' : 'Terminou com erro'}
         />
-        {meta.length > 0 && <Text type="supporting">{meta.join(' · ')}</Text>}
-      </HStack>
+        {meta.length > 0 && (
+          <span className="tabular font-mono text-2xs text-subtle-foreground">
+            {meta.join(' · ')}
+          </span>
+        )}
+      </div>
       {item.text && <MarkdownText text={item.text} />}
-    </VStack>
+    </div>
   )
 }
 
@@ -194,25 +201,22 @@ export function RunTranscript({
   const shown = hidden > 0 ? items.slice(-tail) : items
 
   return (
-    <VStack gap={3}>
+    <div className="flex flex-col gap-3">
       {items.length > tail && (
-        <HStack>
-          <Button
-            size="sm"
-            variant="ghost"
-            label={showAll ? 'Mostrar só o fim' : `Mostrar ${hidden} anteriores`}
-            onClick={() => setShowAll((v) => !v)}
-          />
-        </HStack>
+        <div>
+          <Button size="sm" variant="ghost" onClick={() => setShowAll((v) => !v)}>
+            {showAll ? 'Mostrar só o fim' : `Mostrar ${hidden} anteriores`}
+          </Button>
+        </div>
       )}
-      <VStack gap={3} role="list" aria-label="Log da execução" aria-live="polite">
+      <ul aria-label="Log da execução" aria-live="polite" className="flex flex-col gap-3">
         {shown.map((item) => (
-          <VStack key={item.key} role="listitem">
+          <li key={item.key} className="flex min-w-0 flex-col">
             {item.kind === 'started' && (
-              <HStack gap={2} vAlign="center">
-                <Icon icon={PlayIcon} size="sm" color="secondary" />
-                <Text type="supporting">Sessão iniciada{item.model ? ` (${item.model})` : ''}</Text>
-              </HStack>
+              <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                <PlayIcon className="size-3.5 text-subtle-foreground" />
+                Sessão iniciada{item.model ? ` (${item.model})` : ''}
+              </p>
             )}
             {item.kind === 'message' && <MarkdownText text={item.text} />}
             {item.kind === 'work' && (
@@ -232,9 +236,9 @@ export function RunTranscript({
                 <StatusToken tone="neutral" label={item.text} />
               ))}
             {item.kind === 'result' && <ResultFooter item={item} />}
-          </VStack>
+          </li>
         ))}
-      </VStack>
-    </VStack>
+      </ul>
+    </div>
   )
 }

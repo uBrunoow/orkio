@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { MetadataList, MetadataListItem } from '@astryxdesign/core/MetadataList'
-import { Selector } from '@astryxdesign/core/Selector'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { Step, Stepper } from '@astryxdesign/core/Stepper'
-import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { SelectField } from '@/components/form'
+import { Spinner } from '@/components/Spinner'
+import { cn } from '@/lib/utils'
 import type {
   ConnectionStatus,
   NotionDataSourceList,
@@ -31,6 +25,8 @@ import { CardHeader } from '../integrations/connection-ui'
 import { tokenColor } from './notion-colors'
 import type { UseNotionWorkspace } from './useNotionWorkspace'
 import { StatusToken, toneOf } from '../../components/StatusToken'
+
+const hint = 'text-xs text-muted-foreground'
 
 type NotionError = Extract<NotionResult<never>, { ok: false }>['error']
 type MappingDraft = Partial<Record<NotionMappingField, string | null>>
@@ -80,54 +76,58 @@ export function NotionWorkspaceCard({
   const health = status?.config ? HEALTH[workspace.revalidating ? 'checking' : status.health] : null
 
   return (
-    <Card role="region" aria-labelledby="notion-workspace-title" aria-busy={workspace.revalidating}>
-      <VStack gap={4}>
-        <CardHeader
-          titleId="notion-workspace-title"
-          title="Bancos do Notion"
-          description="Onde ficam seus Projetos e Tarefas. O Orkio lê as tarefas e só escreve o status quando você (ou uma automação) move um card."
-          icon={<Icon icon={DatabaseIcon} color="primary" size="lg" />}
-          badge={
-            health && !editing ? (
-              <StatusToken
-                label={health.label}
-                tone={toneOf(health.color)}
-                data-testid="workspace-health"
-              />
-            ) : null
-          }
-        />
-
-        {status === null || notionStatus === null ? (
-          <Skeleton height={40} aria-label="Carregando bancos do Notion" />
-        ) : !connected && !status.config ? (
-          <Text color="secondary">
-            Conecte o Notion acima para escolher os bancos de Projetos e Tarefas.
-          </Text>
-        ) : editing || !status.config ? (
-          connected ? (
-            <Wizard
-              status={status}
-              onReconnect={onReconnect}
-              onCancel={status.config ? () => setEditing(false) : undefined}
-              onSaved={(next) => {
-                workspace.setStatus(next)
-                setEditing(false)
-              }}
+    <section
+      aria-labelledby="notion-workspace-title"
+      aria-busy={workspace.revalidating}
+      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
+    >
+      <CardHeader
+        titleId="notion-workspace-title"
+        title="Bancos do Notion"
+        description="Onde ficam seus Projetos e Tarefas. O Orkio lê as tarefas e só escreve o status quando você (ou uma automação) move um card."
+        icon={<DatabaseIcon className="size-5 text-foreground" />}
+        badge={
+          health && !editing ? (
+            <StatusToken
+              label={health.label}
+              tone={toneOf(health.color)}
+              data-testid="workspace-health"
             />
-          ) : (
-            <Text color="secondary">Conecte o Notion acima para revisar o mapeamento.</Text>
-          )
-        ) : (
-          <Summary
+          ) : null
+        }
+      />
+
+      {status === null || notionStatus === null ? (
+        <Skeleton className="h-10" aria-label="Carregando bancos do Notion" />
+      ) : !connected && !status.config ? (
+        <p className="text-sm text-muted-foreground">
+          Conecte o Notion acima para escolher os bancos de Projetos e Tarefas.
+        </p>
+      ) : editing || !status.config ? (
+        connected ? (
+          <Wizard
             status={status}
-            revalidating={workspace.revalidating}
-            onEdit={() => setEditing(true)}
-            onRevalidate={() => void workspace.revalidate()}
+            onReconnect={onReconnect}
+            onCancel={status.config ? () => setEditing(false) : undefined}
+            onSaved={(next) => {
+              workspace.setStatus(next)
+              setEditing(false)
+            }}
           />
-        )}
-      </VStack>
-    </Card>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Conecte o Notion acima para revisar o mapeamento.
+          </p>
+        )
+      ) : (
+        <Summary
+          status={status}
+          revalidating={workspace.revalidating}
+          onEdit={() => setEditing(true)}
+          onRevalidate={() => void workspace.revalidate()}
+        />
+      )}
+    </section>
   )
 }
 
@@ -145,50 +145,39 @@ function Summary({
   const config = status.config!
   const tone = status.health === 'broken' ? 'danger' : 'warning'
   return (
-    <VStack gap={4}>
+    <div className="flex flex-col gap-4">
       {status.messages.length > 0 && (
         <Alert tone={tone}>
-          <VStack gap={1}>
+          <div className="flex flex-col gap-1">
             {status.messages.map((m) => (
               // Esta tela já é Integrações: o card do Notion está logo acima.
-              <Text key={m}>{m.replace(' em Integrações', ' acima')}</Text>
+              <p key={m}>{m.replace(' em Integrações', ' acima')}</p>
             ))}
-          </VStack>
+          </div>
         </Alert>
       )}
-      <VStack role="group" aria-label="Configuração dos bancos do Notion">
-        <MetadataList columns={2} label={{ position: 'start' }}>
-          <MetadataListItem label="Banco de Projetos">
-            {config.projectsDataSource.name}
-          </MetadataListItem>
-          <MetadataListItem label="Banco de Tarefas">
-            {config.tasksDataSource.name}
-          </MetadataListItem>
+      <div role="group" aria-label="Configuração dos bancos do Notion">
+        <dl className="grid grid-cols-1 overflow-hidden rounded-lg border border-border-soft sm:grid-cols-2">
+          <SummaryItem label="Banco de Projetos" value={config.projectsDataSource.name} />
+          <SummaryItem label="Banco de Tarefas" value={config.tasksDataSource.name} />
           {MAPPING_FIELDS.map((field) => {
             const ref = config.mapping[field]
             return ref ? (
-              <MetadataListItem key={field} label={fieldLabel(field)}>
-                {ref.name}
-              </MetadataListItem>
+              <SummaryItem key={field} label={fieldLabel(field)} value={ref.name} />
             ) : null
           })}
-        </MetadataList>
-      </VStack>
-      <HStack gap={2}>
-        <Button
-          variant={status.health === 'broken' ? 'primary' : 'secondary'}
-          label="Revisar mapeamento"
-          onClick={onEdit}
-        />
-        <Button
-          variant="ghost"
-          label="Verificar de novo"
-          icon={<Icon icon={RefreshIcon} />}
-          isLoading={revalidating}
-          onClick={onRevalidate}
-        />
-      </HStack>
-    </VStack>
+        </dl>
+      </div>
+      <div className="flex gap-2">
+        <Button variant={status.health === 'broken' ? 'default' : 'outline'} onClick={onEdit}>
+          Revisar mapeamento
+        </Button>
+        <Button variant="ghost" disabled={revalidating} onClick={onRevalidate}>
+          {revalidating ? <Spinner /> : <RefreshIcon />}
+          Verificar de novo
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -291,28 +280,21 @@ function Wizard({
     schema !== null && !schema.schema.properties.some((p) => p.type === 'unique_id')
 
   return (
-    <VStack gap={4}>
-      <Stepper activeStep={step} label="Configurar bancos do Notion">
-        <Step step={0} label="Projetos" />
-        <Step step={1} label="Tarefas" />
-        <Step step={2} label="Mapeamento" />
-      </Stepper>
+    <div className="flex flex-col gap-4">
+      <WizardSteps active={step} />
 
       {list?.connection === 'oauth' && step < 2 && (
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          <Text type="supporting">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className={hint}>
             Só aparecem os bancos que você escolheu ao autorizar o Orkio no Notion. Falta algum?
             Reconecte e marque as páginas desses bancos.
-          </Text>
+          </p>
           {onReconnect && (
-            <Button
-              variant="ghost"
-              size="sm"
-              label="Reconectar com Notion"
-              onClick={() => void reconnect()}
-            />
+            <Button variant="ghost" size="sm" onClick={() => void reconnect()}>
+              Reconectar com Notion
+            </Button>
           )}
-        </HStack>
+        </div>
       )}
 
       {listError && (
@@ -320,9 +302,9 @@ function Wizard({
       )}
 
       {step === 0 && (
-        <VStack gap={3}>
+        <div className="flex flex-col gap-3">
           {list === null && !listError ? (
-            <Skeleton height={40} aria-label="Carregando bancos" />
+            <Skeleton className="h-10" aria-label="Carregando bancos" />
           ) : (
             <>
               {list?.truncated && (
@@ -331,144 +313,160 @@ function Wizard({
                 </Alert>
               )}
               {list && list.dataSources.length === 0 ? (
-                <Text color="secondary">
+                <p className="text-sm text-muted-foreground">
                   Nenhum banco do Notion está compartilhado com o Orkio.
-                </Text>
+                </p>
               ) : (
-                <Selector
+                <SelectField
                   label="Banco de Projetos"
                   description="O banco com uma página por projeto."
                   options={options}
                   hasSearch
                   searchPlaceholder="Buscar banco…"
                   placeholder="Escolha o banco de Projetos"
-                  emptySearchText="Nenhum banco encontrado"
-                  {...(projectsId ? { value: projectsId } : {})}
+                  value={projectsId}
                   onChange={(value: string) => setProjectsId(value)}
+                  className={FIELD_WIDTH}
                 />
               )}
             </>
           )}
-          <HStack gap={2}>
+          <div className="flex gap-2">
             <Button
-              variant="primary"
-              label="Continuar"
-              isDisabled={!projectsId}
+              disabled={!projectsId}
               onClick={() => {
                 if (tasksId && projectsId && sameId(tasksId, projectsId)) setTasksId(null)
                 setStep(1)
               }}
-            />
-            {onCancel && <Button variant="ghost" label="Cancelar" onClick={onCancel} />}
-          </HStack>
-        </VStack>
+            >
+              Continuar
+            </Button>
+            {onCancel && (
+              <Button variant="ghost" onClick={onCancel}>
+                Cancelar
+              </Button>
+            )}
+          </div>
+        </div>
       )}
 
       {step === 1 && (
-        <VStack gap={3}>
-          <Selector
+        <div className="flex flex-col gap-3">
+          <SelectField
             label="Banco de Tarefas"
             description={`As tarefas, com uma relação para ${projectsName ? `“${projectsName}”` : 'o banco de Projetos'}.`}
             options={options.filter((o) => !projectsId || !sameId(o.value, projectsId))}
             hasSearch
             searchPlaceholder="Buscar banco…"
             placeholder="Escolha o banco de Tarefas"
-            emptySearchText="Nenhum banco encontrado"
-            {...(tasksId ? { value: tasksId } : {})}
+            value={tasksId}
             onChange={(value: string) => setTasksId(value)}
+            className={FIELD_WIDTH}
           />
           {schemaError && (
             <ErrorAlert error={schemaError} onReconnect={onReconnect ? reconnect : undefined} />
           )}
-          <HStack gap={2}>
-            <Button
-              variant="primary"
-              label="Continuar"
-              isDisabled={!tasksId}
-              isLoading={loadingSchema}
-              onClick={() => void loadSchema()}
-            />
-            <Button variant="ghost" label="Voltar" onClick={() => setStep(0)} />
-          </HStack>
-        </VStack>
+          <div className="flex gap-2">
+            <Button disabled={!tasksId || loadingSchema} onClick={() => void loadSchema()}>
+              {loadingSchema && <Spinner />}
+              Continuar
+            </Button>
+            <Button variant="ghost" onClick={() => setStep(0)}>
+              Voltar
+            </Button>
+          </div>
+        </div>
       )}
 
       {step === 2 && schema && projectsId && (
-        <VStack gap={4}>
-          <Text color="secondary">
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
             Confira quais propriedades de “{schema.schema.title}” o Orkio deve usar. Sugerimos pelo
             nome e pelo tipo.
-          </Text>
+          </p>
 
           {lacksUniqueId && (
-            <VStack gap={2} role="status" data-testid="no-unique-id">
-              <Text type="supporting">
+            <div
+              role="status"
+              data-testid="no-unique-id"
+              className="flex flex-col gap-2 border-l-2 border-brand py-1 pl-3"
+            >
+              <p className={hint}>
                 Este banco não tem propriedade de ID, e tudo bem: o Orkio identifica cada tarefa
                 pela página do Notion e liga a branch e a PR pela branch que ele cria (feat/…), pelo
                 link do Notion no corpo da PR ou por “Vincular branch” na tarefa. Quer IDs como
                 TI-42 nos cards e nas branches? Crie no Notion uma propriedade do tipo “ID” com um
                 prefixo e recarregue.
-              </Text>
-              <HStack>
+              </p>
+              <div>
                 <Button
                   size="sm"
                   variant="ghost"
-                  label="Recarregar banco"
-                  isLoading={loadingSchema}
+                  disabled={loadingSchema}
                   onClick={() => void loadSchema()}
-                />
-              </HStack>
-            </VStack>
+                >
+                  {loadingSchema && <Spinner />}
+                  Recarregar banco
+                </Button>
+              </div>
+            </div>
           )}
 
-          {MAPPING_FIELDS.map((field) => {
-            const required = REQUIRED_FIELDS.includes(field)
-            const candidates = candidatesFor(field, schema.schema.properties, projectsId)
-            const value = mapping[field]
-            const noCandidate =
-              required && candidates.length === 0 && !(field === 'uniqueId' && lacksUniqueId)
-            const description = FIELD_HINTS[field]
-            const common = {
-              label: fieldLabel(field),
-              ...(description ? { description } : {}),
-              options: candidates.map((p) => ({
-                value: p.id,
-                label: p.name,
-                description: TYPE_LABELS[p.type] ?? p.type
-              })),
-              placeholder: candidates.length === 0 ? 'Nenhuma propriedade compatível' : 'Escolha',
-              isDisabled: candidates.length === 0,
-              ...(noCandidate
-                ? {
-                    status: {
-                      type: 'error' as const,
-                      message:
-                        field === 'project'
-                          ? 'Nenhuma relação aponta para o banco de Projetos escolhido.'
-                          : 'Nenhuma propriedade compatível neste banco.'
+          <div className="overflow-hidden rounded-xl border border-border-soft bg-card">
+            <div
+              aria-hidden="true"
+              className="flex gap-3 border-b border-border-soft px-3.5 py-2 text-2xs tracking-wider text-subtle-foreground uppercase"
+            >
+              <span className="w-40 shrink-0">Campo do Orkio</span>
+              <span>Propriedade no Notion</span>
+            </div>
+            {MAPPING_FIELDS.map((field) => {
+              const required = REQUIRED_FIELDS.includes(field)
+              const candidates = candidatesFor(field, schema.schema.properties, projectsId)
+              const value = mapping[field]
+              const noCandidate =
+                required && candidates.length === 0 && !(field === 'uniqueId' && lacksUniqueId)
+              const description = FIELD_HINTS[field]
+              return (
+                <div
+                  key={field}
+                  className="border-b border-border-soft px-3.5 py-2.5 last:border-b-0"
+                >
+                  <SelectField
+                    label={fieldLabel(field)}
+                    {...(description ? { description } : {})}
+                    {...(required ? { required: true } : {})}
+                    options={candidates.map((p) => ({
+                      value: p.id,
+                      label: p.name,
+                      description: TYPE_LABELS[p.type] ?? p.type
+                    }))}
+                    placeholder={
+                      candidates.length === 0 ? 'Nenhuma propriedade compatível' : 'Escolha'
                     }
-                  }
-                : {})
-            }
-            return required ? (
-              <Selector
-                key={field}
-                {...common}
-                isRequired
-                {...(value ? { value } : {})}
-                onChange={(next: string) => setMapping((m) => ({ ...m, [field]: next }))}
-              />
-            ) : (
-              <Selector
-                key={field}
-                {...common}
-                isOptional
-                hasClear
-                value={value ?? null}
-                onChange={(next: string | null) => setMapping((m) => ({ ...m, [field]: next }))}
-              />
-            )
-          })}
+                    disabled={candidates.length === 0}
+                    {...(noCandidate
+                      ? {
+                          error:
+                            field === 'project'
+                              ? 'Nenhuma relação aponta para o banco de Projetos escolhido.'
+                              : 'Nenhuma propriedade compatível neste banco.'
+                        }
+                      : {})}
+                    {...(!required && value
+                      ? {
+                          clearLabel: 'Nenhuma (não usar)',
+                          onClear: () => setMapping((m) => ({ ...m, [field]: null }))
+                        }
+                      : {})}
+                    value={value ?? null}
+                    onChange={(next: string) => setMapping((m) => ({ ...m, [field]: next }))}
+                    className={FIELD_WIDTH}
+                  />
+                </div>
+              )
+            })}
+          </div>
 
           <StatusPreview schema={schema} statusId={mapping.status ?? null} />
 
@@ -476,24 +474,71 @@ function Wizard({
             <ErrorAlert error={saveError} onReconnect={onReconnect ? reconnect : undefined} />
           )}
 
-          <HStack gap={2}>
-            <Button
-              variant="primary"
-              label="Salvar"
-              isLoading={saving}
-              isDisabled={missingRequired.length > 0}
-              onClick={() => void save()}
-            />
-            <Button variant="ghost" label="Voltar" onClick={() => setStep(1)} />
-          </HStack>
+          <div className="flex gap-2">
+            <Button disabled={saving || missingRequired.length > 0} onClick={() => void save()}>
+              {saving && <Spinner />}
+              Salvar
+            </Button>
+            <Button variant="ghost" onClick={() => setStep(1)}>
+              Voltar
+            </Button>
+          </div>
           {missingRequired.length > 0 && (
-            <Text type="supporting">
+            <p className={hint}>
               Para salvar, escolha: {missingRequired.map(fieldLabel).join(', ')}.
-            </Text>
+            </p>
           )}
-        </VStack>
+        </div>
       )}
-    </VStack>
+    </div>
+  )
+}
+
+const FIELD_WIDTH = 'max-w-md'
+
+const WIZARD_STEPS = ['Projetos', 'Tarefas', 'Mapeamento'] as const
+
+/** Passos do assistente: círculo numerado (feito = ✓ verde, atual = borda laranja). */
+function WizardSteps({ active }: { active: number }): React.JSX.Element {
+  return (
+    <ol aria-label="Configurar bancos do Notion" className="flex flex-wrap items-center gap-2">
+      {WIZARD_STEPS.map((label, i) => {
+        const done = i < active
+        const current = i === active
+        return (
+          <li
+            key={label}
+            {...(current ? { 'aria-current': 'step' as const } : {})}
+            className="flex items-center gap-2"
+          >
+            {i > 0 && <span aria-hidden="true" className="h-px w-6 bg-border" />}
+            <span
+              aria-hidden="true"
+              className={cn(
+                'grid size-[22px] place-items-center rounded-full border font-mono text-2xs',
+                done && 'border-ok-tint-border bg-ok-tint text-ok',
+                current && 'border-brand text-brand',
+                !done && !current && 'border-border text-subtle-foreground'
+              )}
+            >
+              {done ? '✓' : i + 1}
+            </span>
+            <span className={cn('text-xs', current ? 'text-foreground' : 'text-muted-foreground')}>
+              {label}
+            </span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+function SummaryItem({ label, value }: { label: string; value: string }): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-3 border-b border-border-soft px-3.5 py-2 text-sm">
+      <dt className="w-36 shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 truncate text-foreground">{value}</dd>
+    </div>
   )
 }
 
@@ -507,14 +552,14 @@ function StatusPreview({
   const property = schema.schema.properties.find((p) => p.id === statusId)
   if (!property?.options || property.options.length === 0) return null
   return (
-    <VStack gap={2}>
-      <Text type="supporting">Opções de status:</Text>
-      <HStack gap={2} wrap="wrap" aria-label="Opções de status">
+    <div className="flex flex-col gap-2">
+      <p className={hint}>Opções de status:</p>
+      <div role="group" aria-label="Opções de status" className="flex flex-wrap gap-x-3 gap-y-1.5">
         {property.options.map((o) => (
-          <Token key={o.id || o.name} label={o.name} color={tokenColor(o.color)} size="sm" />
+          <StatusToken key={o.id || o.name} label={o.name} tone={toneOf(tokenColor(o.color))} />
         ))}
-      </HStack>
-    </VStack>
+      </div>
+    </div>
   )
 }
 
@@ -531,7 +576,9 @@ export function ErrorAlert({
       {...(error.canReconnect && onReconnect
         ? {
             action: (
-              <Button size="sm" label="Reconectar com Notion" onClick={() => void onReconnect()} />
+              <Button size="sm" variant="outline" onClick={() => void onReconnect()}>
+                Reconectar com Notion
+              </Button>
             )
           }
         : {})}

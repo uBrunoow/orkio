@@ -1,18 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Card } from '@astryxdesign/core/Card'
-import { HStack } from '@astryxdesign/core/HStack'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Heading } from '@astryxdesign/core/Heading'
-import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 import { tokenColor } from '../notion-workspace/notion-colors'
-import { Icon } from '@astryxdesign/core/Icon'
-import { IconButton } from '@astryxdesign/core/IconButton'
-import { Text } from '@astryxdesign/core/Text'
-import { Tooltip } from '@astryxdesign/core/Tooltip'
-import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
-import { ColumnCollapseIcon, ColumnExpandIcon, DotIcon } from '../../components/icons'
-import { BoardCardBody, BoardCardItem, type CardActions } from './BoardCardView'
+import { ColumnCollapseIcon, ColumnExpandIcon } from '../../components/icons'
+import { BoardCardBody, BoardCardItem, CARD_CLASS, type CardActions } from './BoardCardView'
 
 /** Movimento mínimo (px) para virar arrasto: cliques e o menu do card continuam funcionando. */
 const DRAG_THRESHOLD = 5
@@ -31,9 +24,9 @@ interface DragState {
 }
 
 /**
- * Colunas do quadro com arrasto por ponteiro (lógica do template `kanban-board` da Astryx, sem
- * StyleX: posição do card flutuante pela prop `style`, permitida pela CSP). Teclado/leitor de
- * tela: menu "Mover para…" de cada card.
+ * Colunas do quadro com arrasto por ponteiro (lógica do template `kanban-board`: posição do card
+ * flutuante pela prop `style`, permitida pela CSP). Teclado/leitor de tela: menu "Mover para…" de
+ * cada card.
  */
 export function BoardColumns({
   stages,
@@ -174,7 +167,10 @@ export function BoardColumns({
       }
     } else if (key === 'm') {
       e.preventDefault()
-      el.querySelector<HTMLButtonElement>('button[aria-label^="Ações de"]')?.click()
+      // O gatilho do Radix abre no pointerdown ou no teclado (não no .click()): manda um Enter.
+      const trigger = el.querySelector<HTMLButtonElement>('button[aria-label^="Ações de"]')
+      trigger?.focus()
+      trigger?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
       return
     } else return
     e.preventDefault()
@@ -185,16 +181,12 @@ export function BoardColumns({
 
   return (
     <>
-      <HStack
-        gap={3}
-        vAlign="stretch"
+      <div
         role="list"
         aria-label="Etapas do quadro"
         aria-keyshortcuts="J K ArrowLeft ArrowRight M Control+Enter"
         onKeyDown={onKeyDown}
-        isScrollable
-        height="100%"
-        paddingBlockEnd={2}
+        className="flex h-full min-h-0 items-stretch gap-2.5 overflow-x-auto overflow-y-hidden pb-2"
       >
         {columns.map((column) => {
           const items = byColumn.get(column.id) ?? []
@@ -204,138 +196,135 @@ export function BoardColumns({
             if (el) columnEls.current.set(column.id, el)
             else columnEls.current.delete(column.id)
           }
+          const dot = column.stage ? stageDotClass(column.stage) : 'bg-warn'
           if (collapsed.has(column.id)) {
             return (
-              <VStack
+              <div
                 key={column.id}
+                ref={setColumnEl}
                 role="listitem"
                 aria-label={column.name}
                 data-stage-id={column.id}
                 data-collapsed="true"
-                height="100%"
-                style={{ flexShrink: 0 }}
+                className={cn(
+                  'flex h-full w-9 shrink-0 flex-col items-center gap-2 rounded-[9px] border border-border-soft py-1.5',
+                  isTarget ? 'bg-muted' : 'bg-surface'
+                )}
               >
-                <Card variant={isTarget ? 'default' : 'muted'} padding={0} height="100%">
-                  <VStack ref={setColumnEl} gap={2} padding={2} hAlign="center" height="100%">
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      label={`Expandir ${column.name}`}
-                      icon={<Icon icon={ColumnExpandIcon} />}
-                      onClick={() => toggleCollapsed(column.id)}
-                    />
-                    <Text type="supporting" hasTabularNumbers data-testid="column-count">
-                      {items.length}
-                    </Text>
-                    <Text
-                      type="supporting"
-                      color="secondary"
-                      style={{ writingMode: 'vertical-rl', whiteSpace: 'nowrap' }}
-                    >
-                      {column.name}
-                    </Text>
-                  </VStack>
-                </Card>
-              </VStack>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Expandir ${column.name}`}
+                  onClick={() => toggleCollapsed(column.id)}
+                >
+                  <ColumnExpandIcon />
+                </Button>
+                <span aria-hidden="true" className={cn('size-[7px] rounded-full', dot)} />
+                <span
+                  className="tabular font-mono text-2xs text-subtle-foreground"
+                  data-testid="column-count"
+                >
+                  {items.length}
+                </span>
+                <span className="text-xs whitespace-nowrap text-muted-foreground [writing-mode:vertical-rl]">
+                  {column.name}
+                </span>
+              </div>
             )
           }
           return (
-            <VStack
+            <div
               key={column.id}
+              ref={setColumnEl}
               role="listitem"
               aria-label={column.name}
               data-stage-id={column.id}
-              width="calc(var(--spacing-12) * 6)"
-              height="100%"
               // Colunas não encolhem: o quadro rola na horizontal.
-              style={{ flexShrink: 0 }}
+              className={cn(
+                'group/col flex h-full w-[268px] shrink-0 flex-col gap-2 rounded-[10px] transition-colors',
+                isTarget && 'bg-muted/60'
+              )}
             >
-              <Card variant={isTarget ? 'default' : 'muted'} padding={0} height="100%">
-                <VStack ref={setColumnEl} height="100%">
-                  <HStack gap={2} vAlign="center" padding={3} paddingBlockEnd={1}>
-                    <Icon
-                      icon={DotIcon}
-                      size="sm"
-                      color={column.stage ? stageDotColor(column.stage) : 'warning'}
-                    />
-                    <Tooltip
-                      content={
-                        column.stage
-                          ? `Status no Notion: ${column.stage.notionStatus.name}`
-                          : 'Status do Notion que nenhuma etapa usa'
-                      }
-                      placement="below"
-                      alignment="start"
-                    >
-                      <Heading level={3}>{column.name}</Heading>
-                    </Tooltip>
-                    <StackItem size="fill" />
-                    <Text type="supporting" hasTabularNumbers data-testid="column-count">
-                      {items.length}
-                    </Text>
-                    <IconButton
-                      size="sm"
-                      variant="ghost"
-                      label={`Recolher ${column.name}`}
-                      icon={<Icon icon={ColumnCollapseIcon} />}
-                      onClick={() => toggleCollapsed(column.id)}
-                    />
-                  </HStack>
-                  <StackItem size="fill">
-                    <ScrollableArea
-                      label={`Tarefas em ${column.name} (rolagem)`}
-                      height="100%"
-                      padding={3}
-                      paddingBlockStart={2}
-                    >
-                      <VStack gap={2} role="list" aria-label={`Tarefas em ${column.name}`}>
-                        {visible.map((card) => (
-                          <BoardCardItem
-                            key={card.taskId}
-                            card={card}
-                            stages={stages}
-                            signals={signals[card.taskId]}
-                            actions={actions}
-                            isSelected={selectedTaskId === card.taskId}
-                            cardRef={(el) => {
-                              if (el) cardEls.current.set(card.taskId, el)
-                              else cardEls.current.delete(card.taskId)
-                            }}
-                            onPointerDown={onPointerDown}
-                          />
-                        ))}
-                        {isTarget && drag && (
-                          <Card variant="muted" height={drag.height} aria-hidden />
-                        )}
-                        {visible.length === 0 && !isTarget && (
-                          <Text type="supporting" color="secondary">
-                            Nenhuma tarefa
-                          </Text>
-                        )}
-                      </VStack>
-                    </ScrollableArea>
-                  </StackItem>
-                </VStack>
-              </Card>
-            </VStack>
+              <div className="flex min-w-0 items-center gap-2 px-1 pt-1 pb-1.5 text-muted-foreground">
+                <span aria-hidden="true" className={cn('size-[7px] shrink-0 rounded-full', dot)} />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    {/* O nome da coluna não quebra nem encolhe; o status do Notion encolhe. */}
+                    <h3 className="shrink-0 text-sm font-normal whitespace-nowrap text-muted-foreground">
+                      {column.name}
+                    </h3>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom" align="start">
+                    {column.stage
+                      ? `Status no Notion: ${column.stage.notionStatus.name}`
+                      : 'Status do Notion que nenhuma etapa usa'}
+                  </TooltipContent>
+                </Tooltip>
+                <span
+                  className="tabular shrink-0 text-sm text-subtle-foreground"
+                  data-testid="column-count"
+                >
+                  {items.length}
+                </span>
+                <span className="ml-auto min-w-0 truncate text-right font-mono text-[10.5px] text-subtle-foreground">
+                  {column.stage ? `Notion: ${column.stage.notionStatus.name}` : 'Sem etapa'}
+                </span>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Recolher ${column.name}`}
+                  className="-my-1 opacity-0 group-hover/col:opacity-100 focus-visible:opacity-100"
+                  onClick={() => toggleCollapsed(column.id)}
+                >
+                  <ColumnCollapseIcon />
+                </Button>
+              </div>
+              <div
+                role="list"
+                aria-label={`Tarefas em ${column.name}`}
+                className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-0.5"
+              >
+                {visible.map((card) => (
+                  <BoardCardItem
+                    key={card.taskId}
+                    card={card}
+                    stages={stages}
+                    signals={signals[card.taskId]}
+                    actions={actions}
+                    isSelected={selectedTaskId === card.taskId}
+                    cardRef={(el) => {
+                      if (el) cardEls.current.set(card.taskId, el)
+                      else cardEls.current.delete(card.taskId)
+                    }}
+                    onPointerDown={onPointerDown}
+                  />
+                ))}
+                {isTarget && drag && (
+                  <div
+                    aria-hidden="true"
+                    className="shrink-0 rounded-[9px] border border-dashed border-border bg-muted/40"
+                    style={{ height: drag.height }}
+                  />
+                )}
+                {visible.length === 0 && !isTarget && (
+                  <p className="px-1 text-xs text-subtle-foreground">Nenhuma tarefa</p>
+                )}
+              </div>
+            </div>
           )
         })}
-        {endInset && <VStack aria-hidden width={endInset} style={{ flexShrink: 0 }} />}
-      </HStack>
+        {endInset && <div aria-hidden="true" className="shrink-0" style={{ width: endInset }} />}
+      </div>
       {drag && dragged && (
-        <Card
-          padding={3}
-          aria-hidden
+        <div
+          aria-hidden="true"
+          className={cn(
+            CARD_CLASS,
+            'pointer-events-none fixed top-0 left-0 z-[1000] cursor-grabbing border-brand shadow-xl'
+          )}
           style={{
-            position: 'fixed',
-            insetBlockStart: 0,
-            insetInlineStart: 0,
             width: drag.width,
-            transform: `translate(${drag.x - drag.offsetX}px, ${drag.y - drag.offsetY}px)`,
-            pointerEvents: 'none',
-            cursor: 'grabbing',
-            boxShadow: 'var(--shadow-high)',
-            zIndex: 1000
+            transform: `translate(${drag.x - drag.offsetX}px, ${drag.y - drag.offsetY}px)`
           }}
         >
           <BoardCardBody
@@ -344,16 +333,36 @@ export function BoardColumns({
             signals={signals[dragged.taskId]}
             actions={null}
           />
-        </Card>
+        </div>
       )}
     </>
   )
 }
 
 /** Ponto da coluna com a cor escolhida para a etapa (Etapas e automações); sem cor, neutro. */
-function stageDotColor(
-  stage: BoardStage
+export function stageDotColor(
+  stage: Pick<BoardStage, 'color'>
 ): 'tertiary' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'gray' {
   const c = stage.color ? tokenColor(stage.color) : 'default'
   return c === 'default' ? 'tertiary' : c
+}
+
+/**
+ * Classe de fundo do ponto da etapa. O tema não tem roxo nem rosa: roxo usa o azul de informação e
+ * rosa o vermelho de perigo.
+ */
+const DOT_BG: Record<ReturnType<typeof stageDotColor>, string> = {
+  tertiary: 'bg-subtle-foreground',
+  gray: 'bg-muted-foreground',
+  red: 'bg-danger',
+  orange: 'bg-brand',
+  yellow: 'bg-warn',
+  green: 'bg-ok',
+  blue: 'bg-info',
+  purple: 'bg-purple',
+  pink: 'bg-pink'
+}
+
+export function stageDotClass(stage: Pick<BoardStage, 'color'>): string {
+  return DOT_BG[stageDotColor(stage)]
 }

@@ -7,6 +7,7 @@
  * - Mover/bloquear: grava localmente na hora (otimista) e enfileira a escrita no Notion
  *   (NotionWriteQueue), que confirma, tenta de novo ou desfaz.
  */
+import { WEEK_MS } from '../../shared/overview'
 import type { StageFlow } from '../../shared/task-flow'
 import { defaultRules } from '../../shared/automation'
 import { diffFlow, toBoardStages, validateFlow, type FlowDraft } from '../../shared/flow'
@@ -186,7 +187,11 @@ export class BoardService {
       selectProperties,
       checkboxProperties,
       truncated: data.truncated,
-      fetchedAt: data.fetchedAt
+      fetchedAt: data.fetchedAt,
+      ruleCountsWeek: this.deps.store.ruleCounts(
+        projectId,
+        new Date(this.now().getTime() - WEEK_MS).toISOString()
+      )
     }
 
     if (!board) {

@@ -1,21 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { TextArea } from '@astryxdesign/core/TextArea'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/Spinner'
+import { cn } from '@/lib/utils'
 import type { AgentBadge } from '../../../../shared/agent'
 import type { CatalogCommand, TaskRunsState } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import { SendIcon, StopIcon } from '../../components/icons'
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
-const SEND_HINT = `${IS_MAC ? '⌘' : 'Ctrl'}+Enter envia.`
+const SEND_KEY = `${IS_MAC ? '⌘' : 'Ctrl'} ⏎ enviar`
 
 /** Comandos do catálogo que começam com o que foi digitado depois da barra. */
 export function matchCommands(
@@ -106,90 +99,102 @@ export function SessionComposer({
       setError(r.error.message)
     }
   }
-  const sendRef = useRef(send)
-  useEffect(() => {
-    sendRef.current = send
-  })
-  // A TextArea da Astryx não expõe onKeyDown: o atalho vai direto no elemento.
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault()
-        void sendRef.current()
-      }
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      void send()
     }
-    el.addEventListener('keydown', onKey)
-    return () => el.removeEventListener('keydown', onKey)
-  }, [])
+  }
+  const disabled = !!blocked && !activeRunId
 
   return (
-    <VStack gap={2} role="group" aria-label="Mensagem para a sessão">
+    <div role="group" aria-label="Mensagem para a sessão" className="flex flex-col gap-2">
       {suggestions.length > 0 && (
-        <List density="compact" aria-label="Comandos sugeridos">
+        <ul
+          aria-label="Comandos sugeridos"
+          className="flex flex-col overflow-hidden rounded-lg border border-border-soft bg-card"
+        >
           {suggestions.map((c) => (
-            <Item
-              as="li"
-              key={c.name}
-              label={<Code>/{c.name}</Code>}
-              {...(c.description ? { description: c.description } : {})}
-              onClick={() => {
-                setText(`/${c.name} `)
-                ref.current?.focus()
-              }}
-            />
+            <li key={c.name} className="border-b border-border-soft last:border-b-0">
+              <button
+                type="button"
+                className="flex w-full min-w-0 items-baseline gap-2 px-3 py-1.5 text-left hover:bg-muted"
+                onClick={() => {
+                  setText(`/${c.name} `)
+                  ref.current?.focus()
+                }}
+              >
+                <code className="shrink-0 font-mono text-xs text-foreground">/{c.name}</code>
+                {c.description && (
+                  <span className="min-w-0 truncate text-xs text-muted-foreground">
+                    {c.description}
+                  </span>
+                )}
+              </button>
+            </li>
           ))}
-        </List>
+        </ul>
       )}
-      <TextArea
-        ref={ref}
-        label={`Mensagem para ${who}`}
-        isLabelHidden
-        placeholder={`Escreva para ${who}… ( / para comandos)`}
-        value={text}
-        onChange={setText}
-        rows={2}
-        isDisabled={!!blocked && !activeRunId}
-        {...(blocked && !activeRunId ? { disabledMessage: blocked } : {})}
-      />
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <StackItem size="fill">
-          <Text type="supporting" color="secondary" data-testid="session-context">
-            {flowRunning
-              ? `Piloto automático${autopilotStep ? `: ${autopilotStep}` : ''}. Quando ele parar ou pedir algo, responda aqui.`
-              : activeRunId
-                ? 'O Claude está trabalhando. A próxima mensagem continua desta sessão.'
-                : resumes
-                  ? `Continua a sessão${latest?.command ? ` de /${latest.command}` : ''} na pasta de trabalho da tarefa.`
-                  : 'Começa uma sessão nova com o resumo da tarefa no Notion.'}
-            {!activeRunId && !blocked ? ` ${SEND_HINT}` : ''}
-          </Text>
-        </StackItem>
-        {!activeRunId && !flowRunning && (
-          <Button size="sm" variant="ghost" label="Nova sessão…" onClick={onNewSession} />
+      <div
+        className={cn(
+          'flex items-end gap-2 rounded-[10px] border border-border bg-card py-1.5 pr-1.5 pl-3 focus-within:border-ring',
+          disabled && 'opacity-60'
+        )}
+      >
+        <textarea
+          ref={ref}
+          aria-label={`Mensagem para ${who}`}
+          placeholder={`Escreva para ${who}… ( / para comandos)`}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          rows={1}
+          disabled={disabled}
+          {...(disabled && blocked ? { title: blocked } : {})}
+          className="field-sizing-content max-h-48 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm outline-none placeholder:text-subtle-foreground disabled:cursor-not-allowed"
+        />
+        {!activeRunId && !disabled && (
+          <span className="mb-2 shrink-0 font-mono text-2xs text-subtle-foreground">
+            {SEND_KEY}
+          </span>
         )}
         {activeRunId ? (
           <Button
             size="sm"
             variant="secondary"
-            label="Parar"
-            icon={<Icon icon={StopIcon} />}
             onClick={() => void window.orkio.claude.cancel(activeRunId)}
-          />
+          >
+            <StopIcon />
+            Parar
+          </Button>
         ) : (
           <Button
             size="sm"
-            variant="primary"
-            label="Enviar"
-            icon={<Icon icon={SendIcon} />}
-            isLoading={sending}
-            isDisabled={!text.trim() || !!blocked}
+            disabled={!text.trim() || !!blocked || sending}
             onClick={() => void send()}
-          />
+          >
+            {sending ? <Spinner /> : <SendIcon />}
+            Enviar
+          </Button>
         )}
-      </HStack>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="min-w-0 flex-1 text-xs text-subtle-foreground" data-testid="session-context">
+          {flowRunning
+            ? `Piloto automático${autopilotStep ? `: ${autopilotStep}` : ''}. Quando ele parar ou pedir algo, responda aqui.`
+            : activeRunId
+              ? 'O Claude está trabalhando. A próxima mensagem continua desta sessão.'
+              : resumes
+                ? `Continua a sessão${latest?.command ? ` de /${latest.command}` : ''} na pasta de trabalho da tarefa.`
+                : 'Começa uma sessão nova com o resumo da tarefa no Notion.'}
+        </p>
+        {!activeRunId && !flowRunning && (
+          <Button size="xs" variant="ghost" onClick={onNewSession}>
+            Nova sessão…
+          </Button>
+        )}
+      </div>
       {error && <Alert tone="danger">{error}</Alert>}
-    </VStack>
+    </div>
   )
 }

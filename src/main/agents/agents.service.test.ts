@@ -1,3 +1,4 @@
+import { ACTIVITY_HOURS } from '../../shared/agent'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -284,6 +285,33 @@ describe('limites diários', () => {
         profile: { ...ana.profile, limits: { ...ana.profile.limits, stepsPerDay: 10 } }
       })
     ).toMatch(/custo/)
+  })
+})
+
+describe('atividade (tela Agentes)', () => {
+  it('atividade por hora nas últimas 12 h', async () => {
+    const run = (id: string, startedAt: Date, key = 'builtin:revisor'): void => {
+      db.run(
+        `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, cost, agent_key)
+         VALUES (?, 't1', 'p1', 'command', 'x', 'succeeded', ?, NULL, ?)`,
+        id,
+        startedAt.toISOString(),
+        key
+      )
+    }
+    const ago = (ms: number): Date => new Date(now.getTime() - ms)
+    run('a', ago(10 * 60_000))
+    run('b', ago(10 * 60_000))
+    run('c', ago(5 * 3_600_000 + 60_000))
+    run('d', ago(60_000), 'builtin:qa')
+    run('e', ago(13 * 3_600_000))
+    const { agents } = await service.list('p1')
+    const rev = agents.find((a) => a.key === 'builtin:revisor')!
+    expect(ACTIVITY_HOURS).toBe(12)
+    expect(rev.activity).toHaveLength(12)
+    expect(rev.activity[11]).toBe(2)
+    expect(rev.activity[6]).toBe(1)
+    expect(rev.activity.reduce((x, y) => x + y, 0)).toBe(3)
   })
 })
 

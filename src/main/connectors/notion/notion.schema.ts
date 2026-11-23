@@ -260,6 +260,15 @@ function propertyValue(
   return null
 }
 
+/** Ids das páginas numa propriedade relation (ex.: o projeto da tarefa). */
+export function relationIds(body: unknown, propertyId: string): string[] {
+  if (!isRecord(body)) return []
+  const value = propertyValue(body, propertyId)
+  const rel = value?.['relation']
+  if (!Array.isArray(rel)) return []
+  return rel.flatMap((r) => (isRecord(r) && typeof r['id'] === 'string' ? [r['id']] : []))
+}
+
 function titleOf(page: Record<string, unknown>): string {
   const props = page['properties']
   if (!isRecord(props)) return ''

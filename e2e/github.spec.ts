@@ -60,14 +60,14 @@ test('Device Flow: mostra o código, copia, abre o GitHub e conecta ao autorizar
   const { app, page } = await open({ githubDevice: 'pending' })
   const card = githubCard(page)
   await expect(card.getByText('Desconectado')).toBeVisible()
-  // Catálogo no topo: a linha do GitHub diz o estado e leva ao card.
+  // Lista de integrações: a linha do GitHub diz o estado; sem conexão, o card já vem aberto nela.
   const row = page
     .getByRole('list', { name: 'Catálogo de integrações' })
-    .getByRole('listitem', { name: 'GitHub' })
-  await expect(row).toContainText('Código')
+    .getByRole('listitem', { name: 'GitHub', exact: true })
+  await expect(row).toContainText('Branches, PRs')
   await expect(row).toContainText('Não conectado')
-  await row.getByRole('button', { name: 'Conectar GitHub' }).click()
-  await expect(card.getByRole('button', { name: 'Conectar com GitHub' })).toBeFocused()
+  await expect(row.getByRole('button', { name: 'Fechar GitHub' })).toBeVisible()
+  await expect(row.getByRole('region', { name: 'GitHub' })).toBeVisible()
   await shot(page, 'github-1-desconectado')
 
   await card.getByRole('button', { name: 'Conectar com GitHub' }).click()
@@ -93,7 +93,8 @@ test('Device Flow: mostra o código, copia, abre o GitHub e conecta ao autorizar
   })
   await expect(card.getByText(/@octocat/)).toBeVisible()
   await expect(row).toContainText('Conectado como octocat')
-  await expect(row.getByRole('button', { name: 'Gerenciar GitHub' })).toBeVisible()
+  // A linha continua aberta depois de conectar (a confirmação não some na hora).
+  await expect(row.getByRole('button', { name: 'Fechar GitHub' })).toBeVisible()
   await shot(page, 'github-3-conectado')
 
   // Requisições: Device Flow sem client secret e API com a versão certa.

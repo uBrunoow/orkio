@@ -506,7 +506,12 @@ export interface AgentView {
   /** Tarefas atribuídas neste projeto. */
   assigned: number
   usageToday: { runs: number; costUsd: number }
+  /** Execuções por hora nas últimas `ACTIVITY_HOURS` horas (todos os projetos), da mais antiga à atual. */
+  activity: number[]
 }
+
+/** Janela da atividade dos agentes (mini-histograma da tela Agentes). */
+export const ACTIVITY_HOURS = 12
 
 export interface AgentsState {
   projectId: string

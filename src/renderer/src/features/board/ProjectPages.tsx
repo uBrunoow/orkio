@@ -1,23 +1,15 @@
 import { useState } from 'react'
-import { Tab, TabList } from '@astryxdesign/core/TabList'
-import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardView, ProjectView } from '../../../../shared/ipc-contract'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
-import type { FlowsTab } from '../../app/routes'
+import type { BoardSettingsTab } from '../../app/routes'
 import { AlvaPage } from '../alva/AlvaPage'
-import { ProjectContextPage } from '../claude/ProjectContextPage'
 import { TaskFlowsPage } from '../task-flows/TaskFlowsPage'
 import { BoardSettings } from './BoardSettings'
 import { FlowPage } from './FlowPage'
 import { useBoard, type UseBoard } from './useBoard'
 
 type ConfiguredView = BoardView & { config: NonNullable<BoardView['config']> }
-
-/**
- * Telas por projeto além do Quadro (6E): Etapas e automações (3C), Fluxos (5A + Modelos Alva da
- * 5B) e Contexto do Claude (4B). Cada uma tem o próprio h1; o projeto atual vem do menu.
- */
 
 function NoProject({ onOpenProjects }: { onOpenProjects(): void }): React.JSX.Element {
   return (
@@ -46,10 +38,10 @@ function WithBoard({
   const board = useBoard(projectId)
   const withHeader = (node: React.ReactNode): React.JSX.Element =>
     header ? (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5">
         {header}
         {node}
-      </VStack>
+      </div>
     ) : (
       <>{node}</>
     )
@@ -75,39 +67,44 @@ function WithBoard({
   return <>{children(board.view as ConfiguredView, board)}</>
 }
 
-export function AutomationsPage({
+/**
+ * Configurações › Quadro e automações: abas Colunas · Automações · Fluxos · Entrega sobre o mesmo
+ * rascunho do fluxo do projeto (3C), com os fluxos de tarefa (5A) e os modelos do alva-flow (5B).
+ */
+export function BoardSettingsPage({
   project,
+  tab,
+  onTabChange,
   onOpenBoard,
-  onOpenFlows,
   onOpenProjects
 }: {
   project: ProjectView | null
+  tab: BoardSettingsTab
+  onTabChange(tab: BoardSettingsTab): void
   onOpenBoard(): void
-  onOpenFlows(): void
   onOpenProjects(): void
 }): React.JSX.Element {
   const [notionSettings, setNotionSettings] = useState(false)
   const header = (action?: React.ReactNode): React.JSX.Element => (
     <PageHeader
-      title="Etapas e automações"
-      {...(project ? { context: project.name } : {})}
-      subtitle="Cada etapa corresponde a uma opção do status das Tarefas no Notion. As automações levam a tarefa para a etapa. Nada muda até você salvar."
+      title="Quadro e automações"
+      subtitle="As colunas do quadro e o que o Orkio faz sozinho quando algo acontece no GitHub. Nada muda até você salvar."
       action={action}
     />
   )
   if (!project) {
     return (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5">
         {header()}
         <NoProject onOpenProjects={onOpenProjects} />
-      </VStack>
+      </div>
     )
   }
   return (
     <WithBoard projectId={project.id} onOpenBoard={onOpenBoard} header={header()}>
       {(view, board) =>
         notionSettings ? (
-          <VStack gap={5}>
+          <div className="flex flex-col gap-5">
             {header()}
             <BoardSettings
               view={view}
@@ -118,96 +115,32 @@ export function AutomationsPage({
               }}
               onCancel={() => setNotionSettings(false)}
             />
-          </VStack>
+          </div>
         ) : (
           <FlowPage
             view={view}
             header={header}
-            onSaved={(next) => {
-              board.replace(next)
-              onOpenBoard()
-            }}
+            tab={tab}
+            onTabChange={onTabChange}
+            onSaved={(next) => board.replace(next)}
             onOpenNotionSettings={() => setNotionSettings(true)}
-            onOpenTaskFlows={onOpenFlows}
+            onOpenTaskFlows={() => onTabChange('flows')}
+            flowsSlot={
+              <div className="flex flex-col gap-6">
+                <TaskFlowsPage key={project.id} projectId={project.id} />
+                <section aria-label="Modelos do alva-flow" className="flex flex-col gap-3">
+                  <h2 className="text-base font-medium">Modelos do alva-flow</h2>
+                  <AlvaPage
+                    projectId={project.id}
+                    view={view}
+                    onBoardChanged={() => void board.load(true)}
+                  />
+                </section>
+              </div>
+            }
           />
         )
       }
     </WithBoard>
-  )
-}
-
-export function FlowsPage({
-  project,
-  tab,
-  onTabChange,
-  onOpenBoard,
-  onOpenProjects
-}: {
-  project: ProjectView | null
-  tab: FlowsTab
-  onTabChange(tab: FlowsTab): void
-  onOpenBoard(): void
-  onOpenProjects(): void
-}): React.JSX.Element {
-  return (
-    <VStack gap={5}>
-      <PageHeader
-        title="Fluxos"
-        {...(project ? { context: project.name } : {})}
-        subtitle="Sequências de passos (comandos do Claude Code, aprovações, ações do Orkio) que rodam numa tarefa."
-      />
-      {!project ? (
-        <NoProject onOpenProjects={onOpenProjects} />
-      ) : (
-        <>
-          <TabList
-            value={tab}
-            onChange={(value) => onTabChange(value === 'alva' ? 'alva' : 'flows')}
-            hasDivider
-            role="tablist"
-            aria-label="Seções de Fluxos"
-          >
-            <Tab value="flows" label="Fluxos do projeto" />
-            <Tab value="alva" label="Modelos do alva-flow" />
-          </TabList>
-          {tab === 'flows' ? (
-            <TaskFlowsPage key={project.id} projectId={project.id} />
-          ) : (
-            <WithBoard projectId={project.id} onOpenBoard={onOpenBoard}>
-              {(view, board) => (
-                <AlvaPage
-                  projectId={project.id}
-                  view={view}
-                  onBoardChanged={() => void board.load(true)}
-                />
-              )}
-            </WithBoard>
-          )}
-        </>
-      )}
-    </VStack>
-  )
-}
-
-export function ContextPage({
-  project,
-  onOpenProjects
-}: {
-  project: ProjectView | null
-  onOpenProjects(): void
-}): React.JSX.Element {
-  return (
-    <VStack gap={5}>
-      <PageHeader
-        title="Contexto do Claude"
-        {...(project ? { context: project.name } : {})}
-        subtitle="Vai no resumo da tarefa de toda execução deste projeto, antes da descrição."
-      />
-      {!project ? (
-        <NoProject onOpenProjects={onOpenProjects} />
-      ) : (
-        <ProjectContextPage key={project.id} projectId={project.id} />
-      )}
-    </VStack>
   )
 }

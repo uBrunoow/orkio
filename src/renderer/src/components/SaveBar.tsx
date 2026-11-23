@@ -1,14 +1,10 @@
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { HStack } from '@astryxdesign/core/HStack'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Spinner } from './Spinner'
 
 /**
- * Barra de salvar fixa no rodapé da página (6E): quantas alterações há, Descartar e a ação
- * primária. Borda, sem sombra (system.md). Use como último filho da página (o `position: sticky` depende disso). Avisos e erros
- * que bloqueiam o salvar entram em `children`, acima dos botões.
+ * Barra de salvar fixa no rodapé da página: quantas alterações há, Descartar e a ação primária.
+ * Use como último filho da página (o `sticky` depende disso). Avisos e erros que bloqueiam o
+ * salvar entram em `children`, acima dos botões.
  */
 export function SaveBar({
   label,
@@ -20,7 +16,6 @@ export function SaveBar({
   onDiscard,
   children
 }: {
-  /** Nome acessível da região. */
   label: string
   changes: number
   saveLabel: string
@@ -31,42 +26,29 @@ export function SaveBar({
   children?: React.ReactNode
 }): React.JSX.Element {
   return (
-    <Card
+    <section
       role="region"
       aria-label={label}
-      padding={3}
-      style={{
-        position: 'sticky',
-        insetBlockEnd: 0,
-        zIndex: 1
-      }}
+      className="sticky -bottom-6 z-10 -mb-6 flex flex-col gap-2 border-t border-border-soft bg-background pt-2.5 pb-6"
     >
-      <VStack gap={2}>
-        {children}
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          <Text type="supporting" data-testid="unsaved-changes">
-            {changes === 0
-              ? 'Nenhuma alteração'
-              : changes === 1
-                ? '1 alteração não salva'
-                : `${changes} alterações não salvas`}
-          </Text>
-          <StackItem size="fill" />
-          <Button
-            variant="ghost"
-            label="Descartar alterações"
-            isDisabled={changes === 0}
-            onClick={onDiscard}
-          />
-          <Button
-            variant="primary"
-            label={saveLabel}
-            isLoading={isSaving}
-            isDisabled={isDisabled}
-            onClick={onSave}
-          />
-        </HStack>
-      </VStack>
-    </Card>
+      {children}
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-xs text-muted-foreground" data-testid="unsaved-changes">
+          {changes === 0
+            ? 'Nenhuma alteração'
+            : changes === 1
+              ? '1 alteração não salva'
+              : `${changes} alterações não salvas`}
+        </p>
+        <div className="flex-1" />
+        <Button variant="ghost" disabled={changes === 0} onClick={onDiscard}>
+          Descartar alterações
+        </Button>
+        <Button disabled={isDisabled || isSaving} onClick={onSave}>
+          {isSaving && <Spinner />}
+          {saveLabel}
+        </Button>
+      </div>
+    </section>
   )
 }

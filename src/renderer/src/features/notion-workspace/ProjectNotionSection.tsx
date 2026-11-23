@@ -1,17 +1,9 @@
 import { plural } from '../../lib/format'
 import { useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { IconButton } from '@astryxdesign/core/IconButton'
-import { List } from '@astryxdesign/core/List'
-import { Selector } from '@astryxdesign/core/Selector'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { SelectField } from '@/components/form'
+import { Spinner } from '@/components/Spinner'
 import type {
   NotionProjectChoice,
   NotionResult,
@@ -20,6 +12,7 @@ import type {
   ProjectView
 } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
+import { StatusToken, toneOf } from '../../components/StatusToken'
 import {
   ExternalLinkIcon,
   LinkIcon,
@@ -86,41 +79,36 @@ export function ProjectNotionSection({
         onOpenIntegrations={onOpenIntegrations}
       />
     ) : (
-      <HStack gap={2} vAlign="center">
-        <Button
-          size="sm"
-          label="Vincular ao Notion"
-          icon={<Icon icon={NotionLogo} />}
-          onClick={() => setPicking(true)}
-        />
-      </HStack>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => setPicking(true)}>
+          <NotionLogo />
+          Vincular ao Notion
+        </Button>
+      </div>
     )
   }
 
   return (
-    <VStack gap={2}>
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <Icon icon={NotionLogo} size="sm" color="secondary" />
-        <Text type="supporting" data-testid="notion-link">
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <NotionLogo className="size-3.5 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground" data-testid="notion-link">
           {linked.name}
-        </Text>
+        </span>
         <Button
           size="sm"
-          variant="secondary"
-          label={showTasks ? 'Ocultar tarefas' : 'Ver tarefas'}
-          icon={<Icon icon={TasksIcon} />}
+          variant="outline"
           aria-expanded={showTasks}
           onClick={() => setShowTasks((v) => !v)}
-        />
-        <Button
-          size="sm"
-          variant="ghost"
-          label="Desvincular"
-          icon={<Icon icon={UnlinkIcon} />}
-          isLoading={busy}
-          onClick={() => void unlink()}
-        />
-      </HStack>
+        >
+          <TasksIcon />
+          {showTasks ? 'Ocultar tarefas' : 'Ver tarefas'}
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void unlink()}>
+          {busy ? <Spinner /> : <UnlinkIcon />}
+          Desvincular
+        </Button>
+      </div>
       {error && <Alert tone="danger">{error.message}</Alert>}
       {showTasks && (
         <TasksPanel
@@ -129,7 +117,7 @@ export function ProjectNotionSection({
           onOpenIntegrations={onOpenIntegrations}
         />
       )}
-    </VStack>
+    </div>
   )
 }
 
@@ -189,12 +177,16 @@ function LinkPicker({
     suggestion && !suggestion.linkedTo && suggestion.similarity >= SUGGESTION_THRESHOLD
 
   return (
-    <VStack gap={2} role="group" aria-label={`Vincular ${project.name} ao Notion`}>
+    <div
+      role="group"
+      aria-label={`Vincular ${project.name} ao Notion`}
+      className="flex max-w-md flex-col gap-2"
+    >
       {choices === null ? (
-        <Skeleton height={40} aria-label="Carregando projetos do Notion" />
+        <Skeleton className="h-10" aria-label="Carregando projetos do Notion" />
       ) : (
         <>
-          <Selector
+          <SelectField
             label="Projeto do Notion"
             options={choices.map((c) => ({
               value: c.id,
@@ -206,16 +198,21 @@ function LinkPicker({
             hasSearch
             searchPlaceholder="Buscar projeto…"
             placeholder="Escolha o projeto do Notion"
-            emptyText="Nenhum projeto no banco de Projetos"
-            emptySearchText="Nenhum projeto encontrado"
-            {...(selected ? { value: selected } : {})}
+            value={selected}
             onChange={(value: string) => setSelected(value)}
           />
+          {choices.length === 0 && (
+            <p className="text-xs text-muted-foreground">Nenhum projeto no banco de Projetos</p>
+          )}
           {showSuggestion && (
-            <Text type="supporting">Sugestão pelo nome: “{suggestion.title}”.</Text>
+            <p className="text-xs text-muted-foreground">
+              Sugestão pelo nome: “{suggestion.title}”.
+            </p>
           )}
           {truncated && (
-            <Text type="supporting">Mostrando os 500 primeiros projetos do Notion.</Text>
+            <p className="text-xs text-muted-foreground">
+              Mostrando os 500 primeiros projetos do Notion.
+            </p>
           )}
         </>
       )}
@@ -225,12 +222,9 @@ function LinkPicker({
           {...(error.canReconnect || error.code === 'not_configured'
             ? {
                 action: (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    label="Ir para Integrações"
-                    onClick={onOpenIntegrations}
-                  />
+                  <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
+                    Ir para Integrações
+                  </Button>
                 )
               }
             : {})}
@@ -238,30 +232,28 @@ function LinkPicker({
           {error.message}
         </Alert>
       )}
-      <HStack gap={2}>
-        <Button
-          size="sm"
-          variant="primary"
-          label="Vincular"
-          icon={<Icon icon={LinkIcon} />}
-          isDisabled={!selected}
-          isLoading={linking}
-          onClick={() => void link()}
-        />
+      <div className="flex gap-2">
+        <Button size="sm" disabled={!selected || linking} onClick={() => void link()}>
+          {linking ? <Spinner /> : <LinkIcon />}
+          Vincular
+        </Button>
         <Button
           size="sm"
           variant="ghost"
-          label="Recarregar"
-          icon={<Icon icon={RefreshIcon} />}
           onClick={() => {
             setError(null)
             setChoices(null)
             setReloadKey((n) => n + 1)
           }}
-        />
-        <Button size="sm" variant="ghost" label="Cancelar" onClick={onCancel} />
-      </HStack>
-    </VStack>
+        >
+          <RefreshIcon />
+          Recarregar
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -302,27 +294,28 @@ function TasksPanel({
   const hasPriority = Boolean(workspace.config?.mapping.priority)
 
   return (
-    <VStack gap={2} role="region" aria-label={`Tarefas de ${project.name}`}>
-      <HStack gap={2} vAlign="center">
+    <section aria-label={`Tarefas de ${project.name}`} className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
         <Button
           size="sm"
           variant="ghost"
-          label="Atualizar"
-          icon={<Icon icon={RefreshIcon} />}
-          isLoading={loading && result !== null}
+          disabled={loading && result !== null}
           onClick={() => {
             setLoading(true)
             setError(null)
             setRefreshKey((n) => n + 1)
           }}
-        />
+        >
+          {loading && result !== null ? <Spinner /> : <RefreshIcon />}
+          Atualizar
+        </Button>
         {result && (
-          <Text type="supporting">
+          <span className="text-xs text-muted-foreground">
             {plural(result.tasks.length, 'tarefa', 'tarefas')} · atualizado às{' '}
             {formatTime(result.fetchedAt)}
-          </Text>
+          </span>
         )}
-      </HStack>
+      </div>
 
       {signals.result && signals.result.messages.length > 0 && !error && (
         <Alert
@@ -331,20 +324,20 @@ function TasksPanel({
             ? { action: <ActionLink action={signals.result.action} /> }
             : {})}
         >
-          <VStack gap={1}>
+          <div className="flex flex-col gap-1">
             {signals.result.messages.map((m) => (
-              <Text key={m}>{m}</Text>
+              <p key={m}>{m}</p>
             ))}
-          </VStack>
+          </div>
         </Alert>
       )}
       {signals.error && !error && <Alert tone="warning">{signals.error.message}</Alert>}
       {signals.result && signals.result.tasksWithoutPrefix > 0 && (
-        <Text type="supporting">
+        <p className="text-xs text-muted-foreground">
           {plural(signals.result.tasksWithoutPrefix, 'tarefa', 'tarefas')} sem prefixo no ID não
           podem ser ligadas a branches e PRs. Defina um prefixo na propriedade ID do Notion (ex.:
           ORK).
-        </Text>
+        </p>
       )}
 
       {error && (
@@ -353,12 +346,9 @@ function TasksPanel({
           {...(error.canReconnect || error.code === 'broken' || error.code === 'not_configured'
             ? {
                 action: (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    label="Ir para Integrações"
-                    onClick={onOpenIntegrations}
-                  />
+                  <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
+                    Ir para Integrações
+                  </Button>
                 )
               }
             : {})}
@@ -372,51 +362,62 @@ function TasksPanel({
       )}
 
       {loading && result === null ? (
-        <Skeleton height={40} aria-label="Carregando tarefas" />
+        <Skeleton className="h-10" aria-label="Carregando tarefas" />
       ) : result && result.tasks.length === 0 && !error ? (
-        <Text color="secondary">Nenhuma tarefa ligada a este projeto no Notion.</Text>
+        <p className="text-sm text-muted-foreground">
+          Nenhuma tarefa ligada a este projeto no Notion.
+        </p>
       ) : result && !error ? (
-        <List hasDividers density="compact" aria-label="Tarefas do Notion">
+        <ul
+          aria-label="Tarefas do Notion"
+          className="overflow-hidden rounded-lg border border-border-soft bg-surface"
+        >
           {result.tasks.map((task) => (
-            <Item
-              as="li"
+            <li
               key={task.id}
               aria-label={task.title}
-              startContent={<Code data-testid="task-id">{task.displayId ?? '—'}</Code>}
-              label={task.title}
-              description={<TaskSignalsLine signals={signals.result?.signals[task.id]} />}
-              endContent={
-                <HStack gap={2} vAlign="center">
-                  {hasPriority && task.priority && (
-                    <Text type="supporting" color="secondary" data-testid="task-priority">
-                      {task.priority.name}
-                    </Text>
-                  )}
-                  {task.status && (
-                    <Token
-                      label={task.status.name}
-                      color={tokenColor(task.status.color)}
-                      size="sm"
-                      data-testid="task-status"
-                      data-color={task.status.color}
-                    />
-                  )}
-                  {task.url && (
-                    <IconButton
-                      variant="ghost"
-                      size="sm"
-                      label={`Abrir ${task.displayId ?? task.title} no Notion`}
-                      icon={<Icon icon={ExternalLinkIcon} />}
-                      onClick={() => void window.orkio.openExternal(task.url!)}
-                    />
-                  )}
-                </HStack>
-              }
-            />
+              className="flex items-start gap-3 border-b border-border-soft px-3 py-2 last:border-b-0"
+            >
+              <code
+                data-testid="task-id"
+                className="mt-0.5 w-16 shrink-0 font-mono text-2xs text-subtle-foreground"
+              >
+                {task.displayId ?? '—'}
+              </code>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="truncate text-sm text-foreground">{task.title}</span>
+                <TaskSignalsLine signals={signals.result?.signals[task.id]} />
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {hasPriority && task.priority && (
+                  <span className="text-xs text-muted-foreground" data-testid="task-priority">
+                    {task.priority.name}
+                  </span>
+                )}
+                {task.status && (
+                  <StatusToken
+                    label={task.status.name}
+                    tone={toneOf(tokenColor(task.status.color))}
+                    data-testid="task-status"
+                    data-color={task.status.color}
+                  />
+                )}
+                {task.url && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Abrir ${task.displayId ?? task.title} no Notion`}
+                    onClick={() => void window.orkio.openExternal(task.url!)}
+                  >
+                    <ExternalLinkIcon />
+                  </Button>
+                )}
+              </div>
+            </li>
           ))}
-        </List>
+        </ul>
       ) : null}
-    </VStack>
+    </section>
   )
 }
 

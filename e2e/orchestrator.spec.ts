@@ -9,7 +9,9 @@ import {
   expectTaskHistory,
   launchOrkio,
   removeDir,
-  type OrkioApp
+  openSettings,
+  type OrkioApp,
+  taskScreen
 } from './fixtures'
 
 /**
@@ -190,11 +192,13 @@ test('liga o orquestrador com a sugestão: a tarefa sai da fila e chega a Revisa
   const list = region.getByRole('list', { name: 'Lista de agentes' })
   const implementador = list.getByRole('listitem', { name: 'Implementador', exact: true })
   await expect(implementador).toContainText('Embutido')
-  await expect(implementador).toContainText('Pronto')
+  await expect(implementador).toContainText('Livre')
   await expect(implementador.getByRole('button', { name: 'Duplicar Implementador' })).toBeVisible()
   await expect(implementador.getByRole('button', { name: 'Editar Implementador' })).toHaveCount(0)
 
-  const orch = region.getByRole('region', { name: 'Orquestrador' })
+  // Orquestrador: Configurações › Agentes do projeto.
+  await openSettings(page, 'Agentes do projeto')
+  const orch = page.getByRole('region', { name: 'Orquestrador' })
   await expect(orch).toContainText('Desligado')
   await orch.getByRole('button', { name: 'Configurar orquestrador' }).click()
   const form = orch.getByRole('form', { name: 'Configurar orquestrador' })
@@ -233,7 +237,7 @@ test('liga o orquestrador com a sugestão: a tarefa sai da fila e chega a Revisa
   expect(runs[1]?.['permissionTool']).toBe('mcp__orkio__approve')
 
   await card(page).click()
-  const panel = page.getByRole('complementary', { name: 'Detalhes de ORK-2' })
+  const panel = taskScreen(page, 'ORK-2')
   await expectTaskHistory(
     panel,
     'Atribuída a Implementador pelo orquestrador',

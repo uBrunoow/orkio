@@ -4,22 +4,22 @@
  */
 @layer orkio-brand {
   .orkio-display {
-    font-family: 'Jost', var(--font-family-heading, system-ui), sans-serif;
+    font-family: 'Jost', var(--font-sans), sans-serif;
     font-weight: 300;
   }
 
   .orkio-slogan {
-    font-family: 'Jost', var(--font-family-body, system-ui), sans-serif;
+    font-family: 'Jost', var(--font-sans), sans-serif;
     font-weight: 400;
     letter-spacing: 0.4em;
     text-transform: uppercase;
-    color: var(--color-text-accent);
+    color: var(--brand);
   }
 
   .orkio-mono,
   .orkio-mono-input,
   .orkio-mono-input input {
-    font-family: var(--font-family-code);
+    font-family: var(--font-mono);
   }
 
   /* Bloco de código do texto do Claude (markdown): mono, quebra linha, fundo elevado do tema. */
@@ -27,55 +27,63 @@
     display: block;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    padding: var(--spacing-2) var(--spacing-3);
-    border-radius: var(--radius-element);
-    background: var(--color-background-muted);
-    font-family: var(--font-family-code);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+    border-radius: var(--radius);
+    background: var(--muted);
+    font-family: var(--font-mono);
   }
 
   /* Diff do ambiente (DiffView): linhas coloridas pelos tons de estado do tema. */
   .orkio-diff {
     overflow: hidden;
-    border-radius: var(--radius-element);
-    background: var(--color-background-muted);
+    border-radius: var(--radius);
+    background: var(--muted);
   }
 
   .orkio-diff-hunk {
-    padding: 0 var(--spacing-3);
-    color: var(--color-text-secondary);
-    background: var(--color-background-surface);
-    font-family: var(--font-family-code);
+    padding: 0 calc(var(--spacing) * 3);
+    color: var(--muted-foreground);
+    background: var(--surface);
+    font-family: var(--font-mono);
     white-space: pre-wrap;
   }
 
   .orkio-diff-line {
     display: grid;
-    grid-template-columns: var(--spacing-10) var(--spacing-4) minmax(0, 1fr);
-    font-family: var(--font-family-code);
+    grid-template-columns: calc(var(--spacing) * 10) calc(var(--spacing) * 4) minmax(0, 1fr);
+    font-family: var(--font-mono);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
 
   .orkio-diff-no,
   .orkio-diff-sign {
-    color: var(--color-text-secondary);
+    color: var(--muted-foreground);
     text-align: end;
     user-select: none;
   }
 
   .orkio-diff-add {
-    background: var(--color-background-green);
+    background: var(--ok-tint);
   }
 
   .orkio-diff-del {
-    background: var(--color-background-red);
+    background: var(--danger-tint);
   }
 
   .orkio-diff-stat-add {
-    color: var(--color-text-success);
+    color: var(--ok);
   }
 
   .orkio-diff-stat-del {
-    color: var(--color-text-error);
+    color: var(--danger);
+  }
+}
+
+@layer orkio-brand {
+  .orkio-codeblock code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
   }
 }

@@ -1,15 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Divider } from '@astryxdesign/core/Divider'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { IconButton } from '@astryxdesign/core/IconButton'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { Timer } from '@astryxdesign/core/Timer'
-import { Timestamp } from '@astryxdesign/core/Timestamp'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Timestamp } from '@/components/Timestamp'
 import type { AgentBadge } from '../../../../shared/agent'
 import type { AgentRunView } from '../../../../shared/agent-run'
 import type { BoardHistoryEntry } from '../../../../shared/ipc-contract'
@@ -128,136 +120,148 @@ export function TaskSession({
   }
 
   return (
-    <VStack gap={4} role="region" aria-label="Sessão da tarefa">
-      {!visible ? (
-        <Skeleton height={60} aria-label="Carregando a sessão" />
-      ) : (
-        <VStack gap={3} role="list" aria-label="Conversa da tarefa">
-          {visible.hidden > 0 && (
-            <HStack hAlign="center">
-              <Button
-                size="sm"
-                variant="ghost"
-                label={`Mostrar ${visible.hidden} ${visible.hidden === 1 ? 'item anterior' : 'itens anteriores'}`}
-                onClick={() => setShowAll(true)}
-              />
-            </HStack>
-          )}
-          {visible.items.length === 0 && (
-            <Text type="supporting" color="secondary">
-              Nada aconteceu nesta tarefa ainda. Escreva abaixo para o Claude começar.
-            </Text>
-          )}
-          {visible.items.map((item) => (
-            <SessionRow
-              key={
-                item.kind === 'run' && focusRun?.runId === item.run.id
-                  ? `${item.key}:${focusRun.nonce}`
-                  : item.key
-              }
-              focused={item.kind === 'run' && focusRun?.runId === item.run.id}
-              projectId={projectId}
-              showDocument={
-                item.kind === 'run' && docRuns.has(item.run.id)
-                  ? item.run.id === docOpenId
-                    ? 'open'
-                    : true
-                  : false
-              }
-              changesOpen={item.kind === 'run' && item.run.id === changesOpenId}
-              origin={item.kind === 'run' ? (flowOrigins?.get(item.run.id) ?? null) : null}
-              item={item}
-              agent={agent}
-              stageName={stageName}
-              liveLog={item.kind === 'run' && item.run.id === latestId ? liveLog : null}
-              {...(canRerun ? { onRerun: (run: AgentRunView) => void openNewSession(run) } : {})}
-            />
-          ))}
-        </VStack>
-      )}
-
-      {flowSlot}
-
-      {active && pending.length > 0 && (
-        <VStack gap={3} id={`claude-waiting-${taskId}`}>
-          {pending.map((p) =>
-            p.kind === 'permission' ? (
-              <PermissionCard key={p.requestId} runId={active.id} request={p} />
-            ) : (
-              <QuestionCard
-                key={p.requestId}
-                questions={p.questions}
-                onAnswer={(answers) =>
-                  void window.orkio.claude.answerQuestion(active.id, p.requestId, answers)
+    <section aria-label="Sessão da tarefa" className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-7 py-5">
+        {!visible ? (
+          <Skeleton className="h-[60px]" aria-label="Carregando a sessão" />
+        ) : (
+          <ul role="list" aria-label="Conversa da tarefa" className="flex flex-col gap-4">
+            {visible.hidden > 0 && (
+              <li className="flex justify-center">
+                <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>
+                  {`Mostrar ${visible.hidden} ${visible.hidden === 1 ? 'item anterior' : 'itens anteriores'}`}
+                </Button>
+              </li>
+            )}
+            {visible.items.length === 0 && (
+              <li className="text-xs text-muted-foreground">
+                Nada aconteceu nesta tarefa ainda. Escreva abaixo para o Claude começar.
+              </li>
+            )}
+            {visible.items.map((item) => (
+              <SessionRow
+                key={
+                  item.kind === 'run' && focusRun?.runId === item.run.id
+                    ? `${item.key}:${focusRun.nonce}`
+                    : item.key
                 }
+                focused={item.kind === 'run' && focusRun?.runId === item.run.id}
+                projectId={projectId}
+                showDocument={
+                  item.kind === 'run' && docRuns.has(item.run.id)
+                    ? item.run.id === docOpenId
+                      ? 'open'
+                      : true
+                    : false
+                }
+                changesOpen={item.kind === 'run' && item.run.id === changesOpenId}
+                origin={item.kind === 'run' ? (flowOrigins?.get(item.run.id) ?? null) : null}
+                item={item}
+                agent={agent}
+                stageName={stageName}
+                liveLog={item.kind === 'run' && item.run.id === latestId ? liveLog : null}
+                {...(canRerun ? { onRerun: (run: AgentRunView) => void openNewSession(run) } : {})}
               />
-            )
-          )}
-        </VStack>
-      )}
+            ))}
+          </ul>
+        )}
 
-      {activity && (
-        <HStack
-          gap={2}
-          vAlign="center"
-          role="status"
-          aria-label="Trabalhando agora"
-          data-testid="task-working"
-        >
-          <StatusToken tone="running" label={`${activity.who} trabalhando há`} />
-          <Timer startTime={Date.parse(activity.since)} />
-          {activity.what && (
-            <Text type="supporting" color="secondary" maxLines={1}>
-              · {activity.what}
-            </Text>
-          )}
-        </HStack>
-      )}
+        {flowSlot}
 
-      {newSession ? (
-        newSession.ok ? (
-          <Composer
-            prep={newSession.value}
-            initial={initial}
+        {active && pending.length > 0 && (
+          <div className="flex flex-col gap-3" id={`claude-waiting-${taskId}`}>
+            {pending.map((p) =>
+              p.kind === 'permission' ? (
+                <PermissionCard key={p.requestId} runId={active.id} request={p} />
+              ) : (
+                <QuestionCard
+                  key={p.requestId}
+                  questions={p.questions}
+                  onAnswer={(answers) =>
+                    void window.orkio.claude.answerQuestion(active.id, p.requestId, answers)
+                  }
+                />
+              )
+            )}
+          </div>
+        )}
+
+        {activity && (
+          <div
+            role="status"
+            aria-label="Trabalhando agora"
+            data-testid="task-working"
+            className="flex min-w-0 items-center gap-2 text-xs"
+          >
+            <StatusToken tone="running" label={`${activity.who} trabalhando há`} />
+            <Elapsed since={activity.since} />
+            {activity.what && (
+              <span className="min-w-0 truncate font-mono text-subtle-foreground">
+                · {activity.what}
+              </span>
+            )}
+          </div>
+        )}
+
+        <div id={endId} />
+      </div>
+      {/* O campo fica preso embaixo, fora da rolagem: é onde o olho está. */}
+      <div className="shrink-0 border-t border-border-soft px-7 pt-3 pb-4">
+        {newSession ? (
+          newSession.ok ? (
+            <Composer
+              prep={newSession.value}
+              initial={initial}
+              projectId={projectId}
+              onCancel={() => setNewSession(null)}
+              onStarted={(s) => {
+                setNewSession(null)
+                runs.setState(s)
+                void runs.select(s.activeRunId)
+              }}
+            />
+          ) : (
+            <div className="flex flex-col items-start gap-2">
+              <p className="text-xs">{newSession.error.message}</p>
+              <Button size="sm" variant="ghost" onClick={() => setNewSession(null)}>
+                Fechar
+              </Button>
+            </div>
+          )
+        ) : (
+          <SessionComposer
             projectId={projectId}
-            onCancel={() => setNewSession(null)}
-            onStarted={(s) => {
-              setNewSession(null)
+            taskId={taskId}
+            agent={agent}
+            state={state}
+            flowRunning={flowRunning}
+            autopilotStep={flowRunning ? (activity?.what ?? null) : null}
+            onSent={(s) => {
               runs.setState(s)
               void runs.select(s.activeRunId)
             }}
+            onNewSession={() => void openNewSession()}
           />
-        ) : (
-          <VStack gap={2}>
-            <Text type="supporting">{newSession.error.message}</Text>
-            <HStack>
-              <Button
-                size="sm"
-                variant="ghost"
-                label="Fechar"
-                onClick={() => setNewSession(null)}
-              />
-            </HStack>
-          </VStack>
-        )
-      ) : (
-        <SessionComposer
-          projectId={projectId}
-          taskId={taskId}
-          agent={agent}
-          state={state}
-          flowRunning={flowRunning}
-          autopilotStep={flowRunning ? (activity?.what ?? null) : null}
-          onSent={(s) => {
-            runs.setState(s)
-            void runs.select(s.activeRunId)
-          }}
-          onNewSession={() => void openNewSession()}
-        />
-      )}
-      <VStack id={endId} />
-    </VStack>
+        )}
+      </div>
+    </section>
   )
+}
+
+/** Tempo desde `since`, atualizado a cada segundo ("0:42", "12:05", "1:02:10"). */
+function Elapsed({ since }: { since: string }): React.JSX.Element {
+  const start = Date.parse(since)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  const total = Number.isNaN(start) ? 0 : Math.max(0, Math.floor((now - start) / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const sec = String(total % 60).padStart(2, '0')
+  const text = h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`
+  return <span className="tabular font-mono text-muted-foreground">{text}</span>
 }
 
 function SessionRow({
@@ -285,14 +289,16 @@ function SessionRow({
 }): React.JSX.Element {
   if (item.kind === 'day') {
     return (
-      <VStack role="listitem">
-        <Divider label={item.label} />
-      </VStack>
+      <li className="flex items-center gap-3 text-2xs text-subtle-foreground">
+        <span aria-hidden="true" className="h-px flex-1 bg-border-soft" />
+        <span>{item.label}</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-border-soft" />
+      </li>
     )
   }
   if (item.kind === 'run') {
     return (
-      <VStack role="listitem">
+      <li className="flex flex-col">
         <RunBlock
           run={item.run}
           agent={agent}
@@ -304,14 +310,14 @@ function SessionRow({
           origin={origin}
           {...(onRerun && !origin ? { onRerun: () => onRerun(item.run) } : {})}
         />
-      </VStack>
+      </li>
     )
   }
   const e = item.entry
   const actor = eventActor(e)
   const link = prUrl(e) ?? branchUrl(e)
   return (
-    <HStack gap={2} vAlign="center" role="listitem" data-testid="session-event">
+    <li data-testid="session-event" className="flex min-w-0 items-center gap-2.5">
       {'agent' in actor ? (
         <AgentAvatar
           name={actor.name}
@@ -319,29 +325,27 @@ function SessionRow({
           {...(agent?.name === actor.name ? { seed: agent.key } : {})}
         />
       ) : (
-        <Icon icon={actor.icon} color="secondary" size="sm" />
+        <actor.icon className="size-3.5 text-subtle-foreground" />
       )}
-      <StackItem size="fill">
-        <Text type="supporting" color="secondary">
-          <Text as="span" type="supporting" weight="medium">
-            {actor.name}
-          </Text>{' '}
-          · {describeEvent(e, stageName)} · <Timestamp value={e.at} format="auto" />
-        </Text>
-      </StackItem>
+      <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{actor.name}</span> ·{' '}
+        {describeEvent(e, stageName)} ·{' '}
+        <Timestamp value={e.at} className="text-subtle-foreground" />
+      </p>
       {link && (
-        <IconButton
-          size="sm"
+        <Button
+          size="icon-xs"
           variant="ghost"
-          label={
+          aria-label={
             prNumber(e) !== null
               ? `Abrir a PR #${prNumber(e)} no GitHub`
               : 'Abrir a branch no GitHub'
           }
-          icon={<Icon icon={ExternalLinkIcon} />}
           onClick={() => void window.orkio.openExternal(link)}
-        />
+        >
+          <ExternalLinkIcon />
+        </Button>
       )}
-    </HStack>
+    </li>
   )
 }

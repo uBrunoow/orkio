@@ -16,3 +16,4 @@ playwright-report/
 
 # Snapshots locais da crítica de UI/UX (impeccable)
 .impeccable/
+.superpowers/
