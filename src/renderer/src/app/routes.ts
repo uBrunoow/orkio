@@ -3,56 +3,52 @@
  * uma rota, e toda navegação gera uma chave nova (clicar no item atual remonta a página e sai de
  * qualquer subtela). Pilha simples para "Voltar".
  */
+import type { BoardTaskRef } from '../../../shared/ipc-contract'
 import type { TaskSection } from '../../../shared/overview'
 
-/** Telas de um projeto (dependem do projeto atual do menu). */
-export type ProjectRouteName = 'board' | 'automations' | 'flows' | 'context'
+/** Seções de Configurações (coluna interna). */
+export type SettingsSection = 'integrations' | 'projects' | 'board' | 'agents' | 'updates' | 'about'
+
+/** Abas de Configurações › Quadro e automações. */
+export type BoardSettingsTab = 'columns' | 'rules' | 'flows' | 'delivery'
 
 export type Route =
-  | { name: 'welcome' }
-  /** Visão geral (6D): o que espera você em todos os projetos. */
-  | { name: 'overview' }
-  | { name: 'projects' }
-  /** Agentes (8A): perfis, revisão e regras por coluna (escolhe o projeto na própria tela). */
+  /** Primeiros passos; com `projectId`, só os passos que faltam para aquele projeto. */
+  | { name: 'setup'; projectId?: string }
+  | { name: 'board'; projectId?: string }
+  /** Tela da tarefa (fases, conversa e painel da fase). */
+  | { name: 'task'; projectId: string; taskId: string; section?: TaskSection }
   | { name: 'agents' }
-  | { name: 'integrations' }
-  /** Configurações (6C): Atualizações e Sobre. */
-  | { name: 'settings' }
-  | { name: 'board'; projectId?: string; taskId?: string; section?: TaskSection }
-  | { name: 'automations'; projectId?: string }
-  | { name: 'flows'; projectId?: string; tab?: FlowsTab }
-  | { name: 'context'; projectId?: string }
-  /** Tarefa em tela cheia (o painel lateral do Quadro é a prévia). */
-  | { name: 'task'; projectId: string; taskId: string }
-
-export type FlowsTab = 'flows' | 'alva'
+  | { name: 'settings'; section?: SettingsSection; tab?: BoardSettingsTab; projectId?: string }
 
 export type RouteName = Route['name']
 
-export const PROJECT_ROUTES: readonly ProjectRouteName[] = [
-  'board',
-  'automations',
-  'flows',
-  'context'
-]
-
-export function isProjectRoute(route: Route): route is Extract<Route, { name: ProjectRouteName }> {
-  return (PROJECT_ROUTES as readonly string[]).includes(route.name)
+/** Títulos das telas (barra superior e Command Palette). */
+export const ROUTE_TITLES: Record<RouteName, string> = {
+  setup: 'Primeiros passos',
+  board: 'Quadro',
+  task: 'Tarefa',
+  agents: 'Agentes',
+  settings: 'Configurações'
 }
 
-/** Títulos das telas (menu, cabeçalho e, depois, a Command Palette). */
-export const ROUTE_TITLES: Record<RouteName, string> = {
-  welcome: 'Vamos começar',
-  overview: 'Visão geral',
-  projects: 'Projetos',
-  agents: 'Agentes',
+export const SETTINGS_TITLES: Record<SettingsSection, string> = {
   integrations: 'Integrações',
-  settings: 'Configurações',
-  board: 'Quadro',
-  automations: 'Etapas e automações',
-  flows: 'Fluxos',
-  context: 'Contexto do Claude',
-  task: 'Tarefa'
+  projects: 'Projetos',
+  board: 'Quadro e automações',
+  agents: 'Agentes do projeto',
+  updates: 'Atualizações',
+  about: 'Sobre e diagnóstico'
+}
+
+/** Rota da tela de uma tarefa (notificação, sino, lista lateral, Command Palette). */
+export function routeForTaskRef(ref: BoardTaskRef): Route {
+  return {
+    name: 'task',
+    projectId: ref.projectId,
+    taskId: ref.taskId,
+    ...(ref.section ? { section: ref.section } : {})
+  }
 }
 
 export interface RouterState {

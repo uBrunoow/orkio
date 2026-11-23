@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { globalShortcut, type KeyInput } from './shortcuts'
+import { globalShortcut, SHORTCUTS, type KeyInput } from './shortcuts'
 
 const key = (k: string, extra: Partial<KeyInput> = {}): KeyInput => ({
   key: k,
@@ -20,15 +20,13 @@ describe('globalShortcut', () => {
     expect(globalShortcut(key('k', { metaKey: true }), false)).toBeNull()
   })
 
-  it('Ctrl+número segue a ordem do menu', () => {
+  it('Ctrl+número segue a ordem do menu: Quadro, Agentes, Configurações', () => {
     const go = (n: string): unknown => globalShortcut(key(n, { ctrlKey: true }), false)
-    expect(go('1')).toEqual({ type: 'navigate', route: { name: 'overview' } })
-    expect(go('2')).toEqual({ type: 'navigate', route: { name: 'board' } })
-    expect(go('3')).toEqual({ type: 'navigate', route: { name: 'automations' } })
-    expect(go('6')).toEqual({ type: 'navigate', route: { name: 'projects' } })
-    expect(go('7')).toEqual({ type: 'navigate', route: { name: 'agents' } })
-    expect(go('8')).toEqual({ type: 'navigate', route: { name: 'integrations' } })
-    expect(go('9')).toEqual({ type: 'navigate', route: { name: 'settings' } })
+    expect(SHORTCUTS.map((s) => s.route.name)).toEqual(['board', 'agents', 'settings'])
+    expect(go('1')).toEqual({ type: 'navigate', route: { name: 'board' } })
+    expect(go('2')).toEqual({ type: 'navigate', route: { name: 'agents' } })
+    expect(go('3')).toEqual({ type: 'navigate', route: { name: 'settings' } })
+    expect(go('4')).toBeNull()
     expect(globalShortcut(key('0', { ctrlKey: true }), false)).toBeNull()
   })
 
