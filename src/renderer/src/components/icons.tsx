@@ -49,10 +49,7 @@ import {
   IconCode,
   IconFileDiff,
   IconEraser,
-  IconRoute,
-  IconAdjustmentsHorizontal,
   IconSelector,
-  IconArrowsMaximize,
   IconArrowLeft,
   IconMessage,
   IconShieldCheck,
@@ -61,7 +58,6 @@ import {
   IconInfoCircle,
   IconTool,
   IconFileText,
-  IconLayoutDashboard,
   type Icon as TablerIcon,
   type IconProps as TablerIconProps
 } from '@tabler/icons-react'
@@ -113,10 +109,7 @@ export const EditorIcon = adapt(IconCode)
 export const DiffIcon = adapt(IconFileDiff)
 export const CleanIcon = adapt(IconEraser)
 export const AgentsIcon = adapt(IconRobot)
-export const FlowsIcon = adapt(IconRoute)
-export const StagesIcon = adapt(IconAdjustmentsHorizontal)
 export const SwitchIcon = adapt(IconSelector)
-export const ExpandIcon = adapt(IconArrowsMaximize)
 export const BackIcon = adapt(IconArrowLeft)
 export const MessageIcon = adapt(IconMessage)
 export const PermissionIcon = adapt(IconShieldCheck)
@@ -125,7 +118,6 @@ export const FinishIcon = adapt(IconFlag)
 export const InfoIcon = adapt(IconInfoCircle)
 export const ToolIcon = adapt(IconTool)
 export const ReadIcon = adapt(IconFileText)
-export const OverviewIcon = adapt(IconLayoutDashboard)
 /** Ponto de estado (StatusToken). */
 export const BellIcon = adapt(IconBell)
 export const DotIcon = adapt(IconPointFilled)
@@ -145,14 +137,6 @@ export const TodoIcon = adapt(IconCircleDashed)
 export const ProblemIcon = adapt(IconAlertCircle)
 export const CopyIcon = adapt(IconCopy)
 
-/** Visão geral com um ponto de atenção (há algo esperando você); a coluna de ícones não mostra contador. */
-export const OverviewAttentionIcon: SvgIcon = (props) => (
-  <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
-    <OverviewIcon width={24} height={24} />
-    <circle cx="19" cy="5" r="4" fill="var(--color-accent)" />
-  </svg>
-)
-OverviewAttentionIcon.displayName = 'OverviewAttentionIcon'
 
 /** Ponto de estado colorido pelo tema (itens da lista lateral, onde o ícone não recebe cor). */
 function toneDot(color: string, name: string): SvgIcon {

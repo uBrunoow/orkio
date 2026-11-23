@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { OverviewResult } from '../../../../shared/ipc-contract'
-import type { ActivityGroup, ActivityItem, OverviewSnapshot } from '../../../../shared/overview'
+import type { OverviewSnapshot } from '../../../../shared/overview'
 
 /** Relê a visão (só dados locais) a cada minuto com a janela visível: PRs e saúde mudam sozinhos. */
 const RELOAD_MS = 60_000
@@ -69,81 +69,4 @@ export function useOverview(): OverviewState {
   }, [])
 
   return { snapshot, error, loading, refreshing, refresh }
-}
-
-/** Atividade recente com filtro por projeto e tipo e "Mostrar mais". */
-export function useActivity(
-  projectId: string | null,
-  group: ActivityGroup | null,
-  /** Muda quando a visão é relida (evento novo pode ter entrado). */
-  version: string | null
-): {
-  items: ActivityItem[] | null
-  hasMore: boolean
-  loadingMore: boolean
-  error: string | null
-  loadMore(): void
-} {
-  const [items, setItems] = useState<ActivityItem[] | null>(null)
-  const [hasMore, setHasMore] = useState(false)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    let active = true
-    void window.orkio.overview
-      .activity({ projectId, group, limit: 30 })
-      .then((r) => {
-        if (!active) return
-        if (r.ok) {
-          setItems(r.value.items)
-          setHasMore(r.value.hasMore)
-          setError(null)
-        } else setError(r.error.message)
-      })
-      .catch(() => {
-        if (active) setError('Não foi possível ler a atividade.')
-      })
-    return () => {
-      active = false
-    }
-  }, [projectId, group, version])
-
-  const loadMore = useCallback(() => {
-    const last = items?.[items.length - 1]
-    if (!last) return
-    setLoadingMore(true)
-    void window.orkio.overview
-      .activity({ projectId, group, beforeId: last.id, limit: 30 })
-      .then((r) => {
-        if (r.ok) {
-          setItems((prev) => [...(prev ?? []), ...r.value.items])
-          setHasMore(r.value.hasMore)
-        }
-      })
-      .finally(() => setLoadingMore(false))
-  }, [items, projectId, group])
-
-  return { items, hasMore, loadingMore, error, loadMore }
-}
-
-/** Total de "Esperando você" para o menu lateral (atualiza com `overview:changed`). */
-export function useWaitingCount(enabled: boolean): number {
-  const [count, setCount] = useState(0)
-  useEffect(() => {
-    if (!enabled) return
-    let active = true
-    void window.orkio.overview
-      .get()
-      .then((r) => {
-        if (active && r.ok) setCount(r.value.waiting.length)
-      })
-      .catch(() => undefined)
-    const off = window.orkio.overview.onChanged((e) => setCount(e.waiting))
-    return () => {
-      active = false
-      off()
-    }
-  }, [enabled])
-  return count
 }
