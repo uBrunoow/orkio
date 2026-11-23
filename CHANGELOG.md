@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.2] - 2026-11-23
+
 ### Adicionado
 
 - Piloto automático na sessão da tarefa: cada passo de um fluxo aparece na conversa como um turno
