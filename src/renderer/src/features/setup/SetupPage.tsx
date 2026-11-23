@@ -1,16 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Code } from '@astryxdesign/core/Code'
-import { Divider } from '@astryxdesign/core/Divider'
-import { Heading } from '@astryxdesign/core/Heading'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import type {
   BoardTaskRef,
@@ -20,7 +10,7 @@ import type {
   ProjectView
 } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
-import { DoneIcon, FolderPlusIcon, TodoIcon } from '../../components/icons'
+import { FolderPlusIcon } from '../../components/icons'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
 import { StatusToken } from '../../components/StatusToken'
 import { BoardSettings } from '../board/BoardSettings'
@@ -211,27 +201,28 @@ export function SetupPage({
           onCancel={() => setSelection(null)}
         />
       ) : (
-        <VStack gap={3}>
+        <div className="flex flex-col gap-3">
           {project && (
-            <Text>
-              Projeto atual: <Code>{project.name}</Code> ({project.localPath})
-            </Text>
+            <p className="text-sm text-foreground">
+              Projeto atual: <code className="font-mono text-xs">{project.name}</code>{' '}
+              <span className="font-mono text-xs text-subtle-foreground">
+                ({project.localPath})
+              </span>
+            </p>
           )}
           {pickError && <Alert tone="danger">{pickError}</Alert>}
-          <HStack>
-            <Button
-              variant={project ? 'secondary' : 'primary'}
-              label={project ? 'Adicionar outro projeto' : 'Escolher pasta'}
-              icon={<Icon icon={FolderPlusIcon} />}
-              onClick={() => void pickFolder()}
-            />
-          </HStack>
-        </VStack>
+          <div className="flex">
+            <Button variant={project ? 'outline' : 'default'} onClick={() => void pickFolder()}>
+              <FolderPlusIcon />
+              {project ? 'Adicionar outro projeto' : 'Escolher pasta'}
+            </Button>
+          </div>
+        </div>
       )
       break
     case 'notion-data':
       content = (
-        <VStack gap={4}>
+        <div className="flex flex-col gap-4">
           <NotionWorkspaceCard
             workspace={workspace}
             notionStatus={notion.status}
@@ -245,13 +236,17 @@ export function SetupPage({
               onOpenIntegrations={onOpenIntegrations}
             />
           )}
-          {!project && <Text type="supporting">Escolha a pasta do projeto antes.</Text>}
-        </VStack>
+          {!project && (
+            <p className="text-xs text-muted-foreground">Escolha a pasta do projeto antes.</p>
+          )}
+        </div>
       )
       break
     case 'board':
       content = !project?.notionProject ? (
-        <Text type="supporting">Vincule o projeto a uma página do Notion antes.</Text>
+        <p className="text-xs text-muted-foreground">
+          Vincule o projeto a uma página do Notion antes.
+        </p>
       ) : board.view ? (
         board.view.config ? (
           <StatusToken
@@ -273,29 +268,37 @@ export function SetupPage({
           />
         )
       ) : (
-        <Text type="supporting">Carregando o quadro…</Text>
+        <p className="text-xs text-muted-foreground">Carregando o quadro…</p>
       )
       break
     case 'first-task': {
       const cards = board.view?.cards.slice(0, 8) ?? []
       content =
         !project || cards.length === 0 ? (
-          <Text type="supporting">
+          <p className="text-xs text-muted-foreground">
             Nenhuma tarefa sua neste projeto ainda. Elas aparecem quando você for o responsável no
             Notion.
-          </Text>
+          </p>
         ) : (
-          <List hasDividers aria-label="Suas tarefas">
+          <ul
+            aria-label="Suas tarefas"
+            className="flex flex-col divide-y divide-border-soft overflow-hidden rounded-xl border border-border-soft bg-card"
+          >
             {cards.map((c) => (
-              <Item
-                as="li"
-                key={c.taskId}
-                label={c.title}
-                description={c.displayId ?? 'Tarefa do Notion'}
-                onClick={() => onOpenTask({ projectId: project.id, taskId: c.taskId })}
-              />
+              <li key={c.taskId}>
+                <button
+                  type="button"
+                  onClick={() => onOpenTask({ projectId: project.id, taskId: c.taskId })}
+                  className="flex w-full items-center gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted focus-visible:bg-muted"
+                >
+                  <span className="w-16 shrink-0 font-mono text-xs text-subtle-foreground">
+                    {c.displayId ?? 'Notion'}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-foreground">{c.title}</span>
+                </button>
+              </li>
             ))}
-          </List>
+          </ul>
         )
       break
     }
@@ -303,19 +306,22 @@ export function SetupPage({
 
   const next = steps[index + 1]
   return (
-    <VStack className="orkio-intro" role="main" aria-labelledby="setup-title">
-      <HStack className="orkio-intro__content" vAlign="stretch">
-        <VStack gap={2} padding={8} width="calc(var(--spacing-12) * 7)">
-          <OrkioLogo variant="simple" withWordmark size={24} />
-          <Heading level={1} id="setup-title">
+    <main className="orkio-intro" aria-labelledby="setup-title">
+      <div className="orkio-intro__content flex">
+        <div className="flex w-[320px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border-soft px-7 py-10">
+          <OrkioLogo variant="simple" withWordmark size={18} />
+          <h1
+            id="setup-title"
+            className="mt-4 mb-1 font-display text-[22px] leading-snug font-light tracking-[0.04em] text-foreground"
+          >
             {projectId ? 'Continuar configuração' : 'Vamos deixar tudo pronto'}
-          </Heading>
-          <Text type="supporting" color="secondary" data-testid="setup-pending">
+          </h1>
+          <p data-testid="setup-pending" className="mb-[22px] text-sm text-muted-foreground">
             {pending === 0
               ? 'Tudo pronto.'
               : `${pending} ${pending === 1 ? 'passo falta' : 'passos faltam'}. Dá para parar e voltar depois.`}
-          </Text>
-          <List aria-label="Primeiros passos" density="balanced">
+          </p>
+          <ul aria-label="Primeiros passos" className="flex flex-col gap-0.5">
             {steps.map((s, i) => (
               <StepItem
                 key={s.id}
@@ -325,63 +331,55 @@ export function SetupPage({
                 onSelect={() => setSelected(s.id)}
               />
             ))}
-          </List>
-        </VStack>
-        <Divider orientation="vertical" />
-        <StackItem size="fill">
-          <ScrollableArea label="Passo atual" height="100%" padding={8}>
-            <VStack
-              gap={5}
-              maxWidth="calc(var(--spacing-12) * 16)"
-              role="region"
-              aria-label={step.title}
+          </ul>
+        </div>
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          <div
+            role="region"
+            aria-label={step.title}
+            className="flex max-w-[820px] flex-col gap-[18px] p-12"
+          >
+            <p className="font-mono text-2xs tracking-[0.04em] text-subtle-foreground">
+              {`PASSO ${index + 1} DE ${steps.length}`}
+            </p>
+            <h2 className="text-[22px] leading-tight font-medium text-foreground">{step.title}</h2>
+            <p className="max-w-[600px] text-sm text-muted-foreground">{LEAD[step.id]}</p>
+            {content}
+            <p
+              data-testid="setup-why"
+              className="border-l-2 border-brand px-3 py-1 text-[12.5px] text-muted-foreground"
             >
-              <Text type="supporting" color="secondary">
-                {`PASSO ${index + 1} DE ${steps.length}`}
-              </Text>
-              <Heading level={2}>{step.title}</Heading>
-              <Text color="secondary">{LEAD[step.id]}</Text>
-              {content}
-              <Text type="supporting" color="secondary" data-testid="setup-why">
-                Por que isso? {WHY[step.id]}
-              </Text>
-              <HStack gap={2} vAlign="center">
-                {step.state === 'done' && next && (
-                  <Button
-                    variant="primary"
-                    label="Continuar"
-                    onClick={() => setSelected(next.id)}
-                  />
-                )}
-                {index > 0 && (
-                  <Button
-                    variant="ghost"
-                    label="Voltar"
-                    onClick={() => setSelected(steps[index - 1]!.id)}
-                  />
-                )}
-                <StackItem size="fill" />
-                <Button variant="ghost" label="Fazer depois" onClick={onExit} />
-              </HStack>
-            </VStack>
-          </ScrollableArea>
-        </StackItem>
-      </HStack>
+              Por que isso? {WHY[step.id]}
+            </p>
+            <div className="flex items-center gap-2">
+              {step.state === 'done' && next && (
+                <Button onClick={() => setSelected(next.id)}>Continuar</Button>
+              )}
+              {index > 0 && (
+                <Button variant="outline" onClick={() => setSelected(steps[index - 1]!.id)}>
+                  Voltar
+                </Button>
+              )}
+              <Button variant="outline" className="ml-auto" onClick={onExit}>
+                Fazer depois
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
       {splash && (
-        <VStack
-          className="orkio-intro__splash"
-          hAlign="center"
-          vAlign="center"
+        <div
+          className="orkio-intro__splash flex flex-col items-center justify-center"
           aria-hidden="true"
           onAnimationEnd={(e: React.AnimationEvent) => {
             if (e.target === e.currentTarget) setSplash(false)
           }}
         >
           <OrkioLogo variant="full" size={160} label="" className="orkio-intro__splash-logo" />
-          <Text className="orkio-intro__splash-word">ORKIO</Text>
-        </VStack>
+          <span className="orkio-intro__splash-word">ORKIO</span>
+        </div>
       )}
-    </VStack>
+    </main>
   )
 }
 
@@ -399,21 +397,43 @@ function StepItem({
   const stateLabel =
     step.state === 'done' ? 'feito' : step.state === 'current' ? 'agora' : 'a fazer'
   return (
-    <Item
-      as="li"
-      aria-label={`${number}. ${step.title}: ${stateLabel}`}
-      label={`${number}. ${step.title}`}
-      description={step.summary ?? stateLabel}
-      isSelected={isSelected}
-      startContent={
-        <Icon
-          icon={step.state === 'done' ? DoneIcon : TodoIcon}
-          color={
-            step.state === 'done' ? 'success' : step.state === 'current' ? 'accent' : 'tertiary'
-          }
-        />
-      }
-      onClick={onSelect}
-    />
+    <li aria-label={`${number}. ${step.title}: ${stateLabel}`}>
+      <button
+        type="button"
+        aria-current={isSelected ? 'step' : undefined}
+        onClick={onSelect}
+        className={cn(
+          'flex w-full items-start gap-3 rounded-lg px-2.5 py-[9px] text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60',
+          isSelected ? 'bg-muted' : 'hover:bg-muted/50'
+        )}
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            'grid size-[22px] shrink-0 place-items-center rounded-full border font-mono text-2xs',
+            step.state === 'done'
+              ? 'border-ok-tint-border bg-ok-tint text-ok'
+              : step.state === 'current'
+                ? 'border-brand text-brand'
+                : 'border-border text-subtle-foreground'
+          )}
+        >
+          {step.state === 'done' ? '✓' : number}
+        </span>
+        <span className="flex min-w-0 flex-col">
+          <span
+            className={cn(
+              'text-sm',
+              isSelected || step.state === 'current' ? 'text-foreground' : 'text-muted-foreground'
+            )}
+          >
+            {step.title}
+          </span>
+          <span className="truncate text-[11.5px] text-subtle-foreground">
+            {step.summary ?? stateLabel}
+          </span>
+        </span>
+      </button>
+    </li>
   )
 }

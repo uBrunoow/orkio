@@ -1,31 +1,30 @@
-import { Heading } from '@astryxdesign/core/Heading'
+import { cn } from '@/lib/utils'
 
 /**
- * O h1 da tela com o tamanho de outro nível do tema (a barra e as seções usam títulos pequenos,
- * como no mockup). Tag `h1` de verdade: `aria-level` num `h3` não vale para todo leitor.
- * Só tokens do tema, pelo CSSOM (`style`), permitido pela CSP.
+ * O h1 da tela. `look` 3 = título de seção (Configurações, 18 px como no mockup); 5 = título na
+ * barra da tela (13 px, peso médio).
  */
 export function ScreenTitle({
   look,
   maxLines,
+  className,
   children
 }: {
-  /** Nível visual do tema: 3 (título de seção) ou 5 (barra da tela). */
   look: 3 | 5
   maxLines?: number
+  className?: string
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <Heading
-      level={1}
-      {...(maxLines ? { maxLines } : {})}
-      style={{
-        fontSize: `var(--text-heading-${look}-size)`,
-        lineHeight: `var(--text-heading-${look}-leading)`,
-        fontWeight: `var(--text-heading-${look}-weight)`
-      }}
+    <h1
+      className={cn(
+        'min-w-0 font-medium text-foreground',
+        look === 3 ? 'text-lg leading-tight' : 'text-sm',
+        maxLines === 1 && 'truncate',
+        className
+      )}
     >
       {children}
-    </Heading>
+    </h1>
   )
 }

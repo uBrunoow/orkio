@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Avatar } from '@astryxdesign/core/Avatar'
-import { Button } from '@astryxdesign/core/Button'
-import { DropdownMenu } from '@astryxdesign/core/DropdownMenu'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
+import { cn } from '@/lib/utils'
 import type { ConnectionStatus } from '../../../shared/ipc-contract'
 import { SwitchIcon } from '../components/icons'
 
@@ -56,21 +58,25 @@ export function useAccount(refreshKey: number): Account | null {
   return account
 }
 
-function accountAvatar(account: Account, size: 'sm' | 'md'): React.JSX.Element {
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : '')).toUpperCase()
+}
+
+function AccountAvatar({ account, small }: { account: Account; small?: boolean }): React.JSX.Element {
   return (
-    <Avatar
-      name={account.name}
-      size={size}
-      shape="rounded"
-      tooltip={false}
-      {...(account.avatarUrl ? { src: account.avatarUrl } : {})}
-    />
+    <Avatar className={cn('rounded-md', small ? 'size-6' : 'size-7')}>
+      {account.avatarUrl && <AvatarImage src={account.avatarUrl} alt="" />}
+      <AvatarFallback className="rounded-md bg-brand-tint text-2xs font-semibold text-brand-tint-foreground">
+        {initials(account.name)}
+      </AvatarFallback>
+    </Avatar>
   )
 }
 
 /**
  * Conta na lateral (rodapé, como no Alva Tasks: avatar, nome e login) e no canto da barra (só o
- * avatar). Os dois abrem o mesmo menu: contas conectadas e configurações.
+ * avatar). Os dois abrem o mesmo menu: contas conectadas, configurações e Sair.
  */
 export function AccountMenu({
   account,
@@ -85,89 +91,93 @@ export function AccountMenu({
   onOpenSettings(): void
   /** "Sair": desconecta GitHub e Notion (não há login próprio no Orkio). */
   onSignOut(): Promise<void>
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const [confirming, setConfirming] = useState(false)
   const [leaving, setLeaving] = useState(false)
-  const items = [
-    { label: 'Contas e integrações', onClick: onOpenIntegrations },
-    { label: 'Configurações', onClick: onOpenSettings }
-  ]
   if (!account) {
     return variant === 'row' ? (
-      <Item
-        density="compact"
-        label="Conectar sua conta"
-        description="GitHub ou Notion"
+      <button
+        type="button"
         onClick={onOpenIntegrations}
-      />
-    ) : (
-      <></>
-    )
+        className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left hover:bg-sidebar-accent"
+      >
+        <span className="text-sm text-foreground">Conectar sua conta</span>
+        <span className="text-xs text-muted-foreground">GitHub ou Notion</span>
+      </button>
+    ) : null
   }
+  const menu = (
+    <DropdownMenuContent
+      side={variant === 'row' ? 'top' : 'bottom'}
+      align={variant === 'row' ? 'start' : 'end'}
+      className="w-56"
+    >
+      <DropdownMenuLabel className="flex flex-col gap-0.5 font-normal">
+        <span className="truncate text-sm">{account.name}</span>
+        {account.detail && (
+          <span className="truncate text-xs text-muted-foreground">{account.detail}</span>
+        )}
+      </DropdownMenuLabel>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onSelect={onOpenIntegrations}>Contas e integrações</DropdownMenuItem>
+      <DropdownMenuItem onSelect={onOpenSettings}>Configurações</DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <DropdownMenuItem variant="destructive" onSelect={() => setConfirming(true)}>
+        Sair…
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  )
   if (variant === 'avatar') {
     return (
-      <DropdownMenu
-        button={{
-          label: `Conta: ${account.name}`,
-          isIconOnly: true,
-          variant: 'ghost',
-          size: 'sm',
-          icon: accountAvatar(account, 'sm')
-        }}
-        placement="below"
-        alignment="end"
-        items={items}
-      />
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={`Conta: ${account.name}`}
+          className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          <AccountAvatar account={account} small />
+        </DropdownMenuTrigger>
+        {menu}
+      </DropdownMenu>
     )
   }
   return (
-    <VStack gap={2}>
-      <DropdownMenu
-        placement="above"
-        items={[
-          ...items,
-          { label: 'Sair…', variant: 'destructive', onClick: () => setConfirming(true) }
-        ]}
-        renderTrigger={(props) => (
-          // Linha inteira como gatilho (Alva Tasks): avatar, nome e login à esquerda, seta à direita.
-          <HStack
-            as="button"
-            {...props}
-            aria-label={`Conta: ${account.name}. Abrir menu da conta`}
-            gap={2}
-            vAlign="center"
-            width="100%"
-            paddingInline={2}
-            paddingBlock={1.5}
-          >
-            {accountAvatar(account, 'md')}
-            <StackItem size="fill">
-              <VStack hAlign="start">
-                <Text maxLines={1}>{account.name}</Text>
-                {account.detail && (
-                  <Text type="supporting" color="secondary" maxLines={1}>
-                    {account.detail}
-                  </Text>
-                )}
-              </VStack>
-            </StackItem>
-            <Icon icon={SwitchIcon} size="sm" color="secondary" />
-          </HStack>
-        )}
-      />
+    <div className="flex flex-col gap-2">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          aria-label={`Conta: ${account.name}. Abrir menu da conta`}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/40 data-[state=open]:bg-sidebar-accent"
+        >
+          <AccountAvatar account={account} />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-sm text-foreground">{account.name}</span>
+            {account.detail && (
+              <span className="truncate font-mono text-2xs text-subtle-foreground">
+                {account.detail}
+              </span>
+            )}
+          </span>
+          <SwitchIcon className="size-3.5 text-subtle-foreground" />
+        </DropdownMenuTrigger>
+        {menu}
+      </DropdownMenu>
       {confirming && (
-        <VStack gap={2} role="group" aria-label="Confirmar saída" paddingInline={2}>
-          <Text type="supporting">
+        <div
+          role="group"
+          aria-label="Confirmar saída"
+          className="flex flex-col gap-2 rounded-md border border-danger-tint-border bg-danger-tint p-2.5"
+        >
+          <p className="text-xs text-foreground">
             Desconectar o GitHub e o Notion deste computador? Os tokens são apagados; projetos e
             quadros ficam.
-          </Text>
-          <HStack gap={2}>
-            <Button size="sm" label="Cancelar" onClick={() => setConfirming(false)} />
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>
+              Cancelar
+            </Button>
             <Button
               size="sm"
               variant="destructive"
-              label="Sair"
-              isLoading={leaving}
+              disabled={leaving}
               onClick={() => {
                 setLeaving(true)
                 void onSignOut().finally(() => {
@@ -175,10 +185,12 @@ export function AccountMenu({
                   setConfirming(false)
                 })
               }}
-            />
-          </HStack>
-        </VStack>
+            >
+              Sair
+            </Button>
+          </div>
+        </div>
       )}
-    </VStack>
+    </div>
   )
 }

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Skeleton } from '@/components/ui/skeleton'
+import { cn } from '@/lib/utils'
 import type { AgentsState } from '../../../../shared/agent'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
@@ -37,7 +36,7 @@ export function ProjectAgentsSettings({ projectId }: { projectId: string }): Rea
   }, [projectId])
 
   return (
-    <VStack gap={5} maxWidth={PAGE_WIDTH.list} role="region" aria-label="Agentes">
+    <section aria-label="Agentes" className={cn('flex flex-col gap-[18px]', PAGE_WIDTH.list)}>
       <PageHeader
         title="Agentes do projeto"
         subtitle="Quem pega as tarefas do quadro e para quem elas vão a cada coluna."
@@ -46,10 +45,12 @@ export function ProjectAgentsSettings({ projectId }: { projectId: string }): Rea
         (message.tone === 'error' ? (
           <Alert tone="danger">{message.text}</Alert>
         ) : (
-          <Text role="status">{message.text}</Text>
+          <p role="status" className="text-xs text-muted-foreground">
+            {message.text}
+          </p>
         ))}
       {state === null ? (
-        <Skeleton height={120} aria-label="Carregando agentes" />
+        <Skeleton className="h-30" aria-label="Carregando agentes" />
       ) : (
         <>
           {state.stages.length > 0 && <OrchestratorSection projectId={projectId} agents={state} />}
@@ -66,6 +67,6 @@ export function ProjectAgentsSettings({ projectId }: { projectId: string }): Rea
           />
         </>
       )}
-    </VStack>
+    </section>
   )
 }

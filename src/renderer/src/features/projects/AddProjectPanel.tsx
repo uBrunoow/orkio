@@ -1,13 +1,7 @@
 import { useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
-import { Text } from '@astryxdesign/core/Text'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { CheckboxField, RadioListField, TextField } from '@/components/form'
+import { Spinner } from '@/components/Spinner'
 import type {
   CreateProjectInput,
   ProjectError,
@@ -16,6 +10,8 @@ import type {
 } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { ActionLink } from './ActionLink'
+
+const mono = 'font-mono text-xs text-muted-foreground'
 
 /** Segundo passo do "Adicionar projeto": confirma remote, host e nome. */
 export function AddProjectPanel({
@@ -61,111 +57,111 @@ export function AddProjectPanel({
   }
 
   return (
-    <Card role="region" aria-labelledby="add-project-title" elevation="low">
-      <VStack gap={4}>
-        <VStack gap={1}>
-          <Text as="h2" id="add-project-title" type="large" weight="semibold">
-            Adicionar projeto
-          </Text>
-          <Text type="supporting">
-            <Code>{selection.rootPath}</Code>
-          </Text>
-        </VStack>
+    <section
+      aria-labelledby="add-project-title"
+      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
+    >
+      <div className="flex flex-col gap-1">
+        <h2 id="add-project-title" className="text-base font-medium">
+          Adicionar projeto
+        </h2>
+        <p>
+          <code className={mono}>{selection.rootPath}</code>
+        </p>
+      </div>
 
-        {selection.resolvedFromSubfolder && (
-          <Alert tone="warning">
-            Você escolheu uma subpasta. O Orkio vai usar a raiz do repositório:{' '}
-            <Code>{selection.folderName}</Code>.
-          </Alert>
-        )}
+      {selection.resolvedFromSubfolder && (
+        <Alert tone="warning">
+          Você escolheu uma subpasta. O Orkio vai usar a raiz do repositório:{' '}
+          <code className="font-mono text-xs">{selection.folderName}</code>.
+        </Alert>
+      )}
 
-        <Text color="secondary">
-          Branch atual: <Code>{selection.branch ?? '(detached HEAD)'}</Code>
-          {selection.dirty && ' · com alterações não commitadas'}
-        </Text>
+      <p className="text-sm text-muted-foreground">
+        Branch atual: <code className={mono}>{selection.branch ?? '(detached HEAD)'}</code>
+        {selection.dirty && ' · com alterações não commitadas'}
+      </p>
 
-        {selection.candidates.length > 1 ? (
-          <RadioList
-            label="Qual repositório o Orkio deve acompanhar?"
-            value={remoteName}
-            onChange={chooseRemote}
-            isDisabled={saving}
-            {...(isFork
-              ? {
-                  description:
-                    'Parece um fork: “origin” é a sua cópia e “upstream” o repositório original.'
-                }
-              : {})}
-          >
-            {selection.candidates.map((c) => (
-              <RadioListItem
-                key={c.remoteName}
-                value={c.remoteName}
-                label={`${c.remoteName} — ${c.owner}/${c.name} (${c.host})`}
-              />
-            ))}
-          </RadioList>
-        ) : (
-          <Text>
-            Repositório:{' '}
-            <Text weight="semibold">
-              {candidate.owner}/{candidate.name}
-            </Text>{' '}
-            <Text type="supporting">
-              ({candidate.remoteName} · {candidate.host})
-            </Text>
-          </Text>
-        )}
-
-        {needsConfirmation && (
-          <CheckboxInput
-            value={confirmed}
-            onChange={(checked) => setConfirmed(checked)}
-            isDisabled={saving}
-            label={
-              candidate.hostKind === 'ssh-alias'
-                ? `Confirmo que ${candidate.host} é um alias do meu ~/.ssh/config para o github.com.`
-                : `Confirmo que ${candidate.host} é um GitHub Enterprise.`
-            }
-            {...(candidate.hostKind === 'enterprise'
-              ? {
-                  description:
-                    'O Orkio ainda não verifica repositórios do GitHub Enterprise: o projeto fica como “não verificado”.'
-                }
-              : {})}
-          />
-        )}
-
-        <TextInput
-          label="Nome no Orkio"
-          value={name}
-          onChange={(value) => {
-            setName(value.slice(0, 80))
-            setNameEdited(true)
-          }}
-          isDisabled={saving}
+      {selection.candidates.length > 1 ? (
+        <RadioListField
+          label="Qual repositório o Orkio deve acompanhar?"
+          value={remoteName}
+          onChange={chooseRemote}
+          {...(isFork
+            ? {
+                description:
+                  'Parece um fork: “origin” é a sua cópia e “upstream” o repositório original.'
+              }
+            : {})}
+          options={selection.candidates.map((c) => ({
+            value: c.remoteName,
+            label: `${c.remoteName} — ${c.owner}/${c.name} (${c.host})`,
+            disabled: saving
+          }))}
         />
+      ) : (
+        <p className="text-sm">
+          Repositório:{' '}
+          <span className="font-medium">
+            {candidate.owner}/{candidate.name}
+          </span>{' '}
+          <span className="text-xs text-muted-foreground">
+            ({candidate.remoteName} · {candidate.host})
+          </span>
+        </p>
+      )}
 
-        {error && (
-          <Alert
-            tone="danger"
-            {...(error.action ? { action: <ActionLink action={error.action} /> } : {})}
-          >
-            {error.message}
-          </Alert>
-        )}
+      {needsConfirmation && (
+        <CheckboxField
+          checked={confirmed}
+          onChange={(checked) => setConfirmed(checked)}
+          disabled={saving}
+          label={
+            candidate.hostKind === 'ssh-alias'
+              ? `Confirmo que ${candidate.host} é um alias do meu ~/.ssh/config para o github.com.`
+              : `Confirmo que ${candidate.host} é um GitHub Enterprise.`
+          }
+          {...(candidate.hostKind === 'enterprise'
+            ? {
+                description:
+                  'O Orkio ainda não verifica repositórios do GitHub Enterprise: o projeto fica como “não verificado”.'
+              }
+            : {})}
+        />
+      )}
 
-        <HStack gap={2}>
-          <Button
-            variant="primary"
-            label={saving ? 'Verificando no GitHub…' : 'Adicionar projeto'}
-            isLoading={saving}
-            isDisabled={needsConfirmation && !confirmed}
-            onClick={() => void submit()}
-          />
-          <Button label="Cancelar" onClick={onCancel} isDisabled={saving} />
-        </HStack>
-      </VStack>
-    </Card>
+      <TextField
+        label="Nome no Orkio"
+        value={name}
+        onChange={(value) => {
+          setName(value.slice(0, 80))
+          setNameEdited(true)
+        }}
+        disabled={saving}
+        className="max-w-sm"
+      />
+
+      {error && (
+        <Alert
+          tone="danger"
+          {...(error.action ? { action: <ActionLink action={error.action} /> } : {})}
+        >
+          {error.message}
+        </Alert>
+      )}
+
+      <div className="flex gap-2">
+        <Button
+          disabled={saving || (needsConfirmation && !confirmed)}
+          onClick={() => void submit()}
+        >
+          {saving && <Spinner />}
+          {saving ? 'Verificando no GitHub…' : 'Adicionar projeto'}
+        </Button>
+        <Button variant="ghost" onClick={onCancel} disabled={saving}>
+          Cancelar
+        </Button>
+      </div>
+    </section>
   )
 }

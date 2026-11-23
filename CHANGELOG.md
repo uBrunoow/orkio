@@ -21,6 +21,16 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 - Agentes em cards com o que cada um está fazendo, atividade das últimas 12 horas e vagas.
 - Primeiros passos: do zero à primeira tarefa em sete passos, com o estado real de cada um; dá
   para parar e continuar depois pela lista lateral.
+- Visual novo em todas as telas (shadcn/ui + Tailwind): mais denso, com divisórias finas, tabelas
+  com cabeçalho de coluna e IDs em fonte mono, igual ao mockup aprovado.
+- Conectar o GitHub passou a ser obrigatório nos Primeiros passos.
+
+### Adicionado
+
+- "Buscar tarefa" procura no banco de Tarefas do Notion inteiro (título ou ID, de qualquer pessoa
+  e projeto); a tarefa que não está no quadro abre no Notion.
+- A conta conectada aparece no rodapé da lista lateral e no canto da barra, com "Sair" (desconecta
+  o GitHub e o Notion deste computador).
 
 ### Removido
 

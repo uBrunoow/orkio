@@ -65,7 +65,6 @@ test('"Conectar com Notion" autoriza no navegador e conecta via intermediário',
 
   await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
   await expect(notionCard(page).getByText(/Acme Labs/)).toBeVisible()
-  await expect(page.getByTestId('empty-hero')).toHaveCount(0)
   await shot(page, 'oauth-2-conectado')
 
   // Página de autorização aberta no navegador com os parâmetros certos.

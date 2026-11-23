@@ -1,25 +1,17 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Icon } from '@astryxdesign/core/Icon'
+import { Button } from '@/components/ui/button'
 import {
-  BoardIcon,
-  DoneIcon,
-  FolderPlusIcon,
-  FolderSearchIcon,
-  ProblemIcon
-} from '../../components/icons'
-import { Card } from '@astryxdesign/core/Card'
-import { Code } from '@astryxdesign/core/Code'
-import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { MoreMenu } from '@astryxdesign/core/MoreMenu'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
+import { Skeleton } from '@/components/ui/skeleton'
+import { EmptyState } from '@/components/PageState'
+import { Spinner } from '@/components/Spinner'
+import { cn } from '@/lib/utils'
+import { BoardIcon, FolderPlusIcon, FolderSearchIcon, MoreIcon } from '../../components/icons'
 import { StatusToken, toneOf } from '../../components/StatusToken'
-import { VStack } from '@astryxdesign/core/VStack'
 import type {
   ProjectError,
   ProjectHealthState,
@@ -50,6 +42,23 @@ const HEALTH: Record<ProjectHealthState, { label: string; color: TokenColor }> =
   unverified: { label: 'Não verificado', color: 'yellow' },
   git_error: { label: 'Erro do git', color: 'red' }
 }
+
+/** Cor do quadradinho do projeto (inicial), estável pelo id (igual à lista lateral). */
+const PROJECT_TINTS = [
+  'bg-brand text-black',
+  'bg-info text-black',
+  'bg-ok text-black',
+  'bg-warn text-black',
+  'bg-danger text-black'
+]
+function projectTint(id: string): string {
+  let h = 0
+  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return PROJECT_TINTS[h % PROJECT_TINTS.length]!
+}
+
+/** Colunas da lista (cabeçalho e linhas). */
+const STATE_COL = 'w-[220px] shrink-0'
 
 export function ProjectsPage({
   onOpenIntegrations,
@@ -84,19 +93,15 @@ export function ProjectsPage({
   const list = projects.projects
 
   return (
-    <VStack gap={5} maxWidth={PAGE_WIDTH.list}>
+    <div className={cn('flex flex-col gap-[18px]', PAGE_WIDTH.list)}>
       <PageHeader
         title="Projetos"
         subtitle="Pastas locais ligadas a repositórios do GitHub. O Orkio acompanha a branch atual."
         action={
-          <Button
-            variant="primary"
-            label={picking ? 'Analisando pasta…' : 'Adicionar projeto'}
-            icon={<Icon icon={FolderPlusIcon} />}
-            isLoading={picking}
-            isDisabled={selection !== null}
-            onClick={() => void addProject()}
-          />
+          <Button disabled={picking || selection !== null} onClick={() => void addProject()}>
+            {picking ? <Spinner /> : <FolderPlusIcon />}
+            {picking ? 'Analisando pasta…' : 'Adicionar projeto'}
+          </Button>
         }
       />
 
@@ -106,12 +111,9 @@ export function ProjectsPage({
         <Alert
           tone="warning"
           action={
-            <Button
-              variant="ghost"
-              size="sm"
-              label="Ir para Integrações"
-              onClick={onOpenIntegrations}
-            />
+            <Button variant="ghost" size="sm" onClick={onOpenIntegrations}>
+              Ir para Integrações
+            </Button>
           }
         >
           Conecte sua conta do GitHub para adicionar e verificar projetos.
@@ -142,39 +144,30 @@ export function ProjectsPage({
       )}
 
       {list === null ? (
-        <VStack gap={3} aria-label="Carregando projetos">
-          <Skeleton height={72} />
-          <Skeleton height={72} index={1} />
-        </VStack>
+        <div className="flex flex-col gap-3" aria-label="Carregando projetos">
+          <Skeleton className="h-[72px]" />
+          <Skeleton className="h-[72px]" />
+        </div>
       ) : list.length === 0 ? (
         !selection && (
           <EmptyState
             title="Nenhum projeto ainda"
             description="Escolha a pasta de um repositório clonado no seu computador. O Orkio detecta o repositório do GitHub automaticamente."
-            headingLevel={2}
           />
         )
       ) : (
-        <Card padding={0}>
-          <List
-            hasDividers
-            density="balanced"
-            aria-label="Projetos"
-            aria-busy={projects.revalidating}
+        <div className="overflow-hidden rounded-xl border border-border-soft bg-card">
+          {/* Cabeçalho das colunas (só visual: cada linha já diz o projeto e o estado). */}
+          <div
+            aria-hidden="true"
+            className="flex gap-3.5 border-b border-border-soft px-4 py-2 text-2xs tracking-wider text-subtle-foreground uppercase"
           >
-            <Item
-              label={
-                <Text type="supporting" color="secondary">
-                  Projeto
-                </Text>
-              }
-              endContent={
-                <Text type="supporting" color="secondary">
-                  Estado
-                </Text>
-              }
-              aria-hidden="true"
-            />
+            <span className="w-8 shrink-0" />
+            <span className="flex-1">Projeto</span>
+            <span className={STATE_COL}>Estado</span>
+            <span className="w-[200px] shrink-0" />
+          </div>
+          <ul aria-label="Projetos" aria-busy={projects.revalidating}>
             {list.map((project) => (
               <ProjectRow
                 key={project.id}
@@ -200,10 +193,10 @@ export function ProjectsPage({
                 }
               />
             ))}
-          </List>
-        </Card>
+          </ul>
+        </div>
       )}
-    </VStack>
+    </div>
   )
 }
 
@@ -243,131 +236,172 @@ function ProjectRow({
   }
 
   return (
-    <Item
-      as="li"
+    <li
       aria-label={project.name}
-      align="start"
-      startContent={
-        <Token label={project.name.slice(0, 1).toUpperCase()} color="orange" aria-hidden />
-      }
-      label={
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          <Text weight="semibold">{project.name}</Text>
-          <Text type="supporting" color="secondary" className="orkio-mono">
-            {[project.localPath, project.repo ? `${project.repo.owner}/${project.repo.name}` : null]
-              .filter(Boolean)
-              .join(' · ')}
-          </Text>
-          {project.local && (
-            <Code data-testid="project-branch">{project.local.branch ?? '(detached HEAD)'}</Code>
-          )}
-        </HStack>
-      }
-      description={
-        <VStack gap={1}>
-          {project.local?.dirty && <StatusToken label="alterações não commitadas" tone="warning" />}
-          <HStack gap={3} vAlign="center" wrap="wrap" data-testid="project-checks">
-            {checks.map((c) => (
-              <HStack key={c.id} gap={1} vAlign="center">
-                <Icon
-                  icon={c.state === 'ok' ? DoneIcon : ProblemIcon}
-                  size="sm"
-                  color={c.state === 'ok' ? 'success' : c.state === 'warning' ? 'warning' : 'error'}
-                />
-                <Text type="supporting" color={c.state === 'ok' ? 'secondary' : 'primary'}>
-                  {c.label}
-                </Text>
-              </HStack>
-            ))}
-          </HStack>
-          {project.health.message && project.health.state !== 'ok' && (
-            <HStack gap={2} vAlign="center" wrap="wrap">
-              <Text type="supporting">{project.health.message}</Text>
-              {project.health.action && <ActionLink action={project.health.action} />}
-            </HStack>
-          )}
-          {project.notices.map((notice) => (
-            <Text key={notice.code} type="supporting">
-              {notice.message}
-            </Text>
-          ))}
-          {notion}
-          {relocateError && (
-            <Alert
-              tone="danger"
-              {...(relocateError.action
-                ? { action: <ActionLink action={relocateError.action} /> }
-                : {})}
+      className="flex items-start gap-3.5 border-b border-border-soft px-4 py-3 last:border-b-0"
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'grid size-8 shrink-0 place-items-center rounded-lg text-sm font-semibold',
+          projectTint(project.id)
+        )}
+      >
+        {project.name.slice(0, 1).toUpperCase()}
+      </span>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="font-medium text-foreground">{project.name}</span>
+          <span className="font-mono text-[11.5px] break-all text-subtle-foreground">
+            <span>{project.localPath}</span>
+            {project.repo && (
+              <>
+                <span aria-hidden="true"> · </span>
+                <span>
+                  {project.repo.owner}/{project.repo.name}
+                </span>
+              </>
+            )}
+            {project.local && (
+              <>
+                <span aria-hidden="true"> · </span>
+                <code data-testid="project-branch">
+                  {project.local.branch ?? '(detached HEAD)'}
+                </code>
+              </>
+            )}
+          </span>
+        </div>
+        {project.local?.dirty && <StatusToken label="alterações não commitadas" tone="warning" />}
+        <div
+          className="flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs"
+          data-testid="project-checks"
+        >
+          {checks.map((c) => (
+            <span
+              key={c.id}
+              className={cn(
+                'inline-flex items-center gap-1',
+                c.state === 'ok' ? 'text-muted-foreground' : 'text-foreground',
+                c.state === 'problem' && 'text-danger'
+              )}
             >
-              {relocateError.message}
-            </Alert>
-          )}
-        </VStack>
-      }
-      endContent={
-        confirmingRemove ? (
-          <HStack
-            gap={2}
-            vAlign="center"
-            role="group"
-            aria-label={`Confirmar remoção de ${project.name}`}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'font-medium',
+                  c.state === 'ok' ? 'text-ok' : c.state === 'warning' ? 'text-warn' : 'text-danger'
+                )}
+              >
+                {c.state === 'ok' ? '✓' : '!'}
+              </span>
+              {c.label}
+            </span>
+          ))}
+        </div>
+        {project.health.message && project.health.state !== 'ok' && (
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>{project.health.message}</span>
+            {project.health.action && <ActionLink action={project.health.action} />}
+          </div>
+        )}
+        {project.notices.map((notice) => (
+          <p key={notice.code} className="text-xs text-muted-foreground">
+            {notice.message}
+          </p>
+        ))}
+        {notion}
+        {relocateError && (
+          <Alert
+            tone="danger"
+            {...(relocateError.action
+              ? { action: <ActionLink action={relocateError.action} /> }
+              : {})}
           >
-            <Text type="supporting">Remover do Orkio? Nenhum arquivo será apagado.</Text>
-            <Button label="Cancelar" onClick={() => setConfirmingRemove(false)} />
-            <Button
-              variant="destructive"
-              label="Remover"
-              isLoading={busy === 'remove'}
-              onClick={() => {
-                setBusy('remove')
-                void onRemove().finally(() => {
-                  setBusy(null)
-                  setConfirmingRemove(false)
-                })
-              }}
-            />
-          </HStack>
-        ) : (
-          <HStack gap={2} vAlign="center">
+            {relocateError.message}
+          </Alert>
+        )}
+      </div>
+
+      {confirmingRemove ? (
+        <div
+          role="group"
+          aria-label={`Confirmar remoção de ${project.name}`}
+          className="flex shrink-0 flex-wrap items-center gap-2 self-center"
+        >
+          <span className="text-xs text-muted-foreground">
+            Remover do Orkio? Nenhum arquivo será apagado.
+          </span>
+          <Button variant="outline" size="sm" onClick={() => setConfirmingRemove(false)}>
+            Cancelar
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={busy === 'remove'}
+            onClick={() => {
+              setBusy('remove')
+              void onRemove().finally(() => {
+                setBusy(null)
+                setConfirmingRemove(false)
+              })
+            }}
+          >
+            {busy === 'remove' && <Spinner />}
+            Remover
+          </Button>
+        </div>
+      ) : (
+        <>
+          <span className={cn(STATE_COL, 'self-center')}>
             <StatusToken
               label={health.label}
               tone={toneOf(health.color)}
               data-health={project.health.state}
             />
+          </span>
+          <div className="flex shrink-0 items-center justify-end gap-1.5 self-center">
             {folderProblem ? (
               // A pasta sumiu ou mudou: reapontar é a correção, fica à vista.
-              <Button
-                variant="secondary"
-                label={busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
-                icon={<Icon icon={FolderSearchIcon} />}
-                isLoading={busy === 'relocate'}
-                isDisabled={busy !== null && busy !== 'relocate'}
-                onClick={() => void relocate()}
-              />
+              <Button variant="outline" disabled={busy !== null} onClick={() => void relocate()}>
+                {busy === 'relocate' ? <Spinner /> : <FolderSearchIcon />}
+                {busy === 'relocate' ? 'Escolhendo…' : 'Reapontar pasta'}
+              </Button>
             ) : missingSteps(checks) > 0 ? (
-              <Button variant="primary" label="Continuar configuração" onClick={onContinueSetup} />
+              <Button onClick={onContinueSetup}>Continuar configuração</Button>
             ) : (
-              <Button
-                variant="secondary"
-                label="Abrir quadro"
-                icon={<Icon icon={BoardIcon} />}
-                onClick={onOpenBoard}
-              />
+              <Button variant="outline" onClick={onOpenBoard}>
+                <BoardIcon />
+                Abrir quadro
+              </Button>
             )}
-            <MoreMenu
-              label={`Mais ações de ${project.name}`}
-              isDisabled={busy !== null}
-              items={[
-                ...(folderProblem
-                  ? []
-                  : [{ label: 'Reapontar pasta', onClick: () => void relocate() }]),
-                { label: 'Remover do Orkio', onClick: () => setConfirmingRemove(true) }
-              ]}
-            />
-          </HStack>
-        )
-      }
-    />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={`Mais ações de ${project.name}`}
+                  disabled={busy !== null}
+                >
+                  <MoreIcon />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {!folderProblem && (
+                  <DropdownMenuItem onSelect={() => void relocate()}>
+                    Reapontar pasta
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onSelect={() => setConfirmingRemove(true)}>
+                  Remover do Orkio
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </>
+      )}
+    </li>
   )
 }
 

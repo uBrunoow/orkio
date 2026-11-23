@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Selector } from '@astryxdesign/core/Selector'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { SelectField } from '@/components/form'
 import type { AgentBadge, AgentView } from '../../../../shared/agent'
 import { Alert } from '../../components/Alert'
 import { AgentAvatar } from './AgentAvatar'
@@ -45,9 +42,9 @@ export function TaskAgentSection({
   )
   if (agents !== null && usable.length === 0 && !agent) {
     return (
-      <Text type="supporting">
+      <p className="text-xs text-muted-foreground">
         Sem agentes neste projeto. Crie um na tela Agentes para atribuir tarefas.
-      </Text>
+      </p>
     )
   }
   const options = [
@@ -59,15 +56,20 @@ export function TaskAgentSection({
   ]
 
   return (
-    <VStack gap={2}>
-      <HStack gap={2} vAlign="end">
-        {agent && <AgentAvatar name={agent.name} color={agent.color} seed={agent.key} />}
-        <Selector
+    <div className="flex flex-col gap-2">
+      <div className="flex items-end gap-2">
+        {agent && (
+          <span className="mb-1.5 shrink-0">
+            <AgentAvatar name={agent.name} color={agent.color} seed={agent.key} />
+          </span>
+        )}
+        <SelectField
+          className="flex-1"
           label="Agente"
           description="Roda os fluxos desta tarefa com as instruções e limites dele."
           options={options}
           value={agent?.key ?? NONE}
-          isDisabled={busy}
+          disabled={busy}
           onChange={(value: string) => {
             setBusy(true)
             setError(null)
@@ -79,9 +81,9 @@ export function TaskAgentSection({
               .finally(() => setBusy(false))
           }}
         />
-      </HStack>
+      </div>
       {agent?.problem && <Alert tone="warning">{agent.problem}</Alert>}
       {error && <Alert tone="danger">{error}</Alert>}
-    </VStack>
+    </div>
   )
 }

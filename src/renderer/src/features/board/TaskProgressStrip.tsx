@@ -1,8 +1,4 @@
-import { Grid } from '@astryxdesign/core/Grid'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { cn } from '@/lib/utils'
 import { DoneIcon, DotIcon, ProblemIcon, TodoIcon } from '../../components/icons'
 import type { Milestone } from './task-progress'
 
@@ -27,51 +23,56 @@ export function TaskProgressStrip({
   compact?: boolean
 }): React.JSX.Element {
   const marks = milestones.map((m) => (
-    <VStack
+    <li
       key={m.key}
-      gap={0}
-      role="listitem"
       aria-label={`${m.label}: ${STATE_TEXT[m.state]}${m.detail !== '—' ? ` (${m.detail})` : ''}`}
       data-testid={`progress-${m.key}`}
       data-state={m.state}
+      className="flex min-w-0 flex-col"
     >
-      <HStack gap={1} vAlign="center">
+      <span className="flex items-center gap-1">
         {m.state === 'done' ? (
-          <Icon icon={DoneIcon} color="success" size="sm" />
+          <DoneIcon className="size-3.5 text-ok" />
         ) : m.state === 'problem' ? (
-          <Icon icon={ProblemIcon} color="error" size="sm" />
+          <ProblemIcon className="size-3.5 text-danger" />
         ) : m.state === 'current' ? (
-          <Icon icon={DotIcon} color="primary" size="sm" />
+          <DotIcon className="size-3.5 text-brand" />
         ) : m.state === 'waiting' ? (
-          <Icon icon={DotIcon} color="warning" size="sm" />
+          <DotIcon className="size-3.5 text-warn" />
         ) : (
-          <Icon icon={TodoIcon} color="tertiary" size="sm" />
+          <TodoIcon className="size-3.5 text-subtle-foreground" />
         )}
-        <Text
-          type={compact ? 'supporting' : 'body'}
-          weight="medium"
-          color={m.state === 'todo' ? 'secondary' : 'primary'}
+        <span
+          className={cn(
+            'font-medium',
+            compact ? 'text-xs' : 'text-sm',
+            m.state === 'todo' ? 'text-muted-foreground' : 'text-foreground'
+          )}
         >
           {m.label}
-        </Text>
-      </HStack>
+        </span>
+      </span>
       {!compact && (
-        <Text type="supporting" color="secondary" maxLines={1}>
+        <span className="truncate text-xs text-muted-foreground">
           {m.detail === '—' ? 'ainda não' : m.detail}
-        </Text>
+        </span>
       )}
-    </VStack>
+    </li>
   ))
   if (compact) {
     return (
-      <HStack gap={3} wrap="wrap" role="list" aria-label="Andamento da tarefa">
+      <ul aria-label="Andamento da tarefa" className="flex flex-wrap gap-3">
         {marks}
-      </HStack>
+      </ul>
     )
   }
   return (
-    <Grid columns={milestones.length} gap={3} role="list" aria-label="Andamento da tarefa">
+    <ul
+      aria-label="Andamento da tarefa"
+      className="grid gap-3"
+      style={{ gridTemplateColumns: `repeat(${milestones.length}, minmax(0, 1fr))` }}
+    >
       {marks}
-    </Grid>
+    </ul>
   )
 }

@@ -1,17 +1,10 @@
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Divider } from '@astryxdesign/core/Divider'
 import { useEffect, useState } from 'react'
-import { Card } from '@astryxdesign/core/Card'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { cn } from '@/lib/utils'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import type { AlvaPrecheck } from '../../../../shared/alva'
 import type { ConnectionStatus, NotionWorkspaceStatus } from '../../../../shared/ipc-contract'
 import type { StatusTone } from '../../components/StatusToken'
 import { ClaudeLogo, GitHubLogo, NotionLogo, TerminalIcon } from '../../components/icons'
-import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
 import { PageHeader } from '../../components/PageHeader'
 import { ClaudeCodeCard } from '../claude/ClaudeCodeCard'
 import { NotionWorkspaceCard } from '../notion-workspace/NotionWorkspaceCard'
@@ -20,7 +13,7 @@ import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
 import { useGitHubConnection } from './useGitHubConnection'
 import { useNotionConnection } from './useNotionConnection'
-import { IntegrationRow } from './IntegrationRow'
+import { IntegrationListHeader, IntegrationRow } from './IntegrationRow'
 import { PAGE_WIDTH } from '../../components/page-width'
 
 export function IntegrationsPage({
@@ -33,7 +26,6 @@ export function IntegrationsPage({
   const github = useGitHubConnection()
   // Revalida os bancos quando a conexão do Notion muda (conectou, desconectou, reconectou).
   const workspace = useNotionWorkspace(connectionKey(notion.status))
-  const nothingConnected = [notion.status, github.status].every(isEmpty)
   const claude = useClaudeStatus()
   const precheck = usePrecheck(projectId)
 
@@ -82,54 +74,22 @@ export function IntegrationsPage({
       : { label: gh.detail, tone: 'warning' }
 
   return (
-    <VStack gap={6} maxWidth={PAGE_WIDTH.list}>
+    <div className={cn('flex flex-col gap-[18px]', PAGE_WIDTH.list)}>
       <PageHeader
         title="Integrações"
         subtitle="Contas que o Orkio usa. Os tokens ficam cifrados neste computador e nunca saem dele."
       />
 
-      {nothingConnected && (
-        <Card
-          variant="transparent"
-          role="region"
-          aria-labelledby="empty-hero-title"
-          data-testid="empty-hero"
+      <div className="overflow-hidden rounded-xl border border-border-soft bg-card">
+        <IntegrationListHeader />
+        <ul
+          aria-label="Catálogo de integrações"
+          className="flex flex-col divide-y divide-border-soft"
         >
-          <HStack gap={5} vAlign="center">
-            <OrkioLogo variant="full" size={64} />
-            <VStack gap={1}>
-              <Text type="supporting" className="orkio-slogan">
-                Do contexto ao commit
-              </Text>
-              <Text as="h2" id="empty-hero-title" type="display-3" className="orkio-display">
-                Conecte suas ferramentas
-              </Text>
-              <Text color="secondary">
-                Notion para o planejamento, GitHub para o código e Claude Code para executar. O
-                Orkio liga tudo.
-              </Text>
-            </VStack>
-          </HStack>
-        </Card>
-      )}
-
-      <Card padding={0}>
-        {/* Cabeçalho das colunas (só visual: cada linha já diz o serviço e o estado). */}
-        <HStack gap={4} paddingInline={4} paddingBlock={2} aria-hidden="true">
-          <StackItem size="fill">
-            <Text type="supporting" color="secondary">
-              Serviço
-            </Text>
-          </StackItem>
-          <Text type="supporting" color="secondary">
-            Estado
-          </Text>
-        </HStack>
-        <Divider />
-        <VStack role="list" aria-label="Catálogo de integrações">
           <IntegrationRow
             id="notion"
             logo={NotionLogo}
+            logoClassName="bg-foreground text-background"
             name="Notion"
             purpose="Lê suas tarefas e move o status quando você move o card."
             status={connectionStatus(notion.status)}
@@ -160,6 +120,7 @@ export function IntegrationsPage({
           <IntegrationRow
             id="github"
             logo={GitHubLogo}
+            logoClassName="border border-border bg-surface text-foreground"
             name="GitHub"
             purpose="Branches, PRs, revisões e CI das tarefas; pedir review."
             status={connectionStatus(github.status)}
@@ -172,6 +133,7 @@ export function IntegrationsPage({
           <IntegrationRow
             id="claude"
             logo={ClaudeLogo}
+            logoClassName="bg-brand text-primary-foreground"
             name="Claude Code"
             purpose="Roda as tarefas com o seu login do claude. O Orkio não guarda chave."
             status={claudeStatus(claude)}
@@ -204,6 +166,7 @@ export function IntegrationsPage({
           <IntegrationRow
             id="gh"
             logo={TerminalIcon}
+            logoClassName="bg-muted text-muted-foreground"
             name="GitHub CLI (opcional)"
             purpose="Usado pelo /alva-flow:pr para abrir a PR."
             status={ghStatus}
@@ -212,16 +175,21 @@ export function IntegrationsPage({
             onToggle={() => toggle('gh', true)}
           >
             {gh?.fix ? (
-              <Text type="supporting">
-                Rode no terminal: <Code>{gh.fix}</Code>
-              </Text>
+              <p className="text-xs text-muted-foreground">
+                Rode no terminal:{' '}
+                <code className="font-mono text-xs text-foreground">{gh.fix}</code>
+              </p>
             ) : (
-              <Text type="supporting">Nada a fazer: o gh está pronto.</Text>
+              <p className="text-xs text-muted-foreground">Nada a fazer: o gh está pronto.</p>
             )}
           </IntegrationRow>
-        </VStack>
-      </Card>
-    </VStack>
+        </ul>
+      </div>
+      <p className="border-l-2 border-brand px-3 py-1 text-[12.5px] text-muted-foreground">
+        Faltando algo? Cada linha diz o que fazer. As mesmas checagens aparecem nos “Primeiros
+        passos” e no item do projeto.
+      </p>
+    </div>
   )
 }
 
@@ -312,14 +280,6 @@ function useClaudeStatus(): ClaudeCodeStatus | null {
   return status
 }
 
-/**
- * Sem conexão nem credencial salva. Enquanto carrega (`null`), não conta como vazio,
- * para o destaque não "piscar".
- */
-function isEmpty(status: ConnectionStatus | null): boolean {
-  if (status === null || status.state === 'connected') return false
-  return !(status.state === 'error' && status.hasStoredCredentials)
-}
 
 function connectionKey(status: ConnectionStatus | null): string | null {
   if (status === null || status.state === 'connecting') return null

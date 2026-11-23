@@ -1,8 +1,4 @@
-import { Divider } from '@astryxdesign/core/Divider'
-import { HStack } from '@astryxdesign/core/HStack'
-import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core/SideNav'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { VStack } from '@astryxdesign/core/VStack'
+import { cn } from '@/lib/utils'
 import { SETTINGS_TITLES, type SettingsSection } from '../../app/routes'
 import {
   AgentsIcon,
@@ -56,34 +52,57 @@ export function SettingsLayout({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <HStack vAlign="stretch" height="100%">
-      <VStack padding={2}>
-        <SideNav aria-label="Configurações">
-          {GROUPS.filter((g) => !g.project || projectName).map((g) => (
-            <SideNavSection
-              key={g.title}
-              title={g.project && projectName ? `Projeto · ${projectName}` : g.title}
-            >
-              {g.items.map(([id, icon]) => (
-                <SideNavItem
-                  key={id}
-                  label={SETTINGS_TITLES[id]}
-                  icon={icon}
-                  isSelected={section === id}
-                  onClick={() => onSection(id)}
-                />
-              ))}
-            </SideNavSection>
-          ))}
-        </SideNav>
-      </VStack>
-      <Divider orientation="vertical" />
-      <StackItem size="fill">
-        {/* A seção rola sozinha; a coluna interna fica parada. */}
-        <VStack height="100%" isScrollable paddingInline={8} paddingBlock={6}>
-          {children}
-        </VStack>
-      </StackItem>
-    </HStack>
+    <div className="flex h-full min-h-0">
+      <nav
+        aria-label="Configurações"
+        className="flex w-[220px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border-soft px-2.5 py-3.5"
+      >
+        {GROUPS.filter((g) => !g.project || projectName).map((g, i) => {
+          const title = g.project && projectName ? `Projeto · ${projectName}` : g.title
+          return (
+            <div key={g.title} className={cn('flex flex-col gap-0.5', i > 0 && 'pt-3.5')}>
+              <span
+                id={`settings-nav-${g.title}`}
+                className="truncate px-2 pt-1 pb-1 text-[10.5px] tracking-[0.08em] text-subtle-foreground uppercase"
+              >
+                {title}
+              </span>
+              <ul aria-labelledby={`settings-nav-${g.title}`} className="flex flex-col gap-0.5">
+                {g.items.map(([id, Icon]) => {
+                  const selected = section === id
+                  return (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        aria-current={selected ? 'page' : undefined}
+                        onClick={() => onSection(id)}
+                        className={cn(
+                          'flex w-full items-center gap-2.5 rounded-md px-2 py-[7px] text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60',
+                          selected
+                            ? 'bg-muted text-foreground'
+                            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                        )}
+                      >
+                        <Icon
+                          className={cn(
+                            'size-4',
+                            selected ? 'text-foreground' : 'text-subtle-foreground'
+                          )}
+                        />
+                        <span className="truncate">{SETTINGS_TITLES[id]}</span>
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )
+        })}
+      </nav>
+      {/* A seção rola sozinha; a coluna interna fica parada. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[18px] overflow-y-auto px-8 py-6">
+        {children}
+      </div>
+    </div>
   )
 }

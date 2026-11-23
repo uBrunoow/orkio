@@ -75,15 +75,18 @@ Sem assinatura de código nem auto-update por enquanto.
 
 ## Identidade visual e UI
 
-A interface usa o design system **[Astryx](https://github.com/meta/astryx)** (`@astryxdesign/core`)
-com o **tema Orkio** (dark, laranja da marca com texto preto, Inter na UI, JetBrains Mono em
-código). A fonte da verdade da marca continua em [`brand/`](../brand/BRAND.md).
+A interface usa **[shadcn/ui](https://ui.shadcn.com)** (componentes Radix copiados para
+`src/renderer/src/components/ui/`) e **Tailwind CSS v4**, com o **tema Orkio** em
+`src/renderer/src/styles/globals.css` (escuro, laranja da marca com texto preto, Inter na UI,
+JetBrains Mono em IDs e código). A referência visual é o mockup
+(`docs/superpowers/specs/2026-11-23-orkio-ui-mockup.html`); a marca continua em
+[`brand/`](../brand/BRAND.md).
 
-- **Tema:** `themes/orkio/` (editado com `pnpm exec astryx experimental theme editor …`) gera a
-  cópia em `src/themes/orkio/` e `src/astryx-themes.ts`. O tema é CSS estático (pré-compilado).
-- **CSP estrita:** a Astryx injetaria alguns estilos em runtime; o Orkio entrega esse CSS como
-  arquivo estático (`pnpm astryx:static-css`, rode após atualizar a Astryx) e não usa componentes
-  que dependem de injeção. Detalhes no `CLAUDE.md`.
+- **Novo componente:** `pnpm dlx shadcn@latest add <nome>` (o CLI grava em `@/components/ui`;
+  mova para `src/renderer/src/components/ui/` e troque os ícones `lucide-react` pelos do Tabler).
+- **CSP estrita:** o Tailwind gera um `.css` estático. Partes do Radix injetam `<style>` (Select,
+  ScrollArea e o modo modal de Dialog/DropdownMenu): o Orkio usa um Select próprio, rolagem nativa
+  e diálogos/menus não modais. Detalhes no `CLAUDE.md`.
 - **Fontes:** locais via `@fontsource` (Inter, Jost no logo e em títulos de destaque, JetBrains Mono).
 - **Ícones:** [Tabler Icons](https://tabler.io/icons) (`@tabler/icons-react`), inclusive os logos do GitHub e do Notion.
 - **Logo:** `<OrkioLogo variant="full|simple" withWordmark size />`.

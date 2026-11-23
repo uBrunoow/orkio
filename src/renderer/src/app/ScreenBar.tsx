@@ -1,14 +1,9 @@
 import { createContext, useContext, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { HStack } from '@astryxdesign/core/HStack'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
-import { Divider } from '@astryxdesign/core/Divider'
 
 /**
- * Barra fina no topo de cada tela (mockup da reestruturação): à esquerda o caminho e o que a tela
- * põe ali (título, Kanban/Lista, fases da tarefa); à direita as ações da tela e o sino. A tela
+ * Barra fina no topo de cada tela (48 px, mockup): à esquerda o caminho e o que a tela põe ali
+ * (título, Kanban/Lista, fases da tarefa); à direita as ações da tela, o sino e a conta. A tela
  * preenche os encaixes com `<ScreenBarStart>`/`<ScreenBarEnd>` (portal), sem conhecer o App.
  */
 interface Slots {
@@ -28,21 +23,18 @@ export function ScreenBarEnd({ children }: { children: React.ReactNode }): React
   return end ? createPortal(children, end) : null
 }
 
-/** Caminho em texto cinza ("Configurações › Integrações"); o último trecho em texto normal. */
+/** Caminho em cinza ("Configurações › Integrações"); o último trecho em branco, peso médio. */
 export function Crumbs({ parts }: { parts: readonly string[] }): React.JSX.Element {
   const last = parts.at(-1)
   return (
-    <Text type="supporting" color="secondary" maxLines={1}>
+    <p className="min-w-0 truncate text-sm text-muted-foreground">
       {parts.slice(0, -1).map((p) => `${p} › `)}
-      <Text type="supporting">{last}</Text>
-    </Text>
+      <span className="font-medium text-foreground">{last}</span>
+    </p>
   )
 }
 
-/**
- * Moldura do conteúdo: a barra (caminho padrão do App + encaixes) e a tela embaixo, ocupando o
- * resto da altura.
- */
+/** Moldura do conteúdo: a barra (caminho padrão do App + encaixes) e a tela embaixo. */
 export function ScreenFrame({
   crumbs,
   bell,
@@ -57,27 +49,20 @@ export function ScreenFrame({
   const [end, setEnd] = useState<HTMLElement | null>(null)
   return (
     <SlotsContext.Provider value={{ start, end }}>
-      <VStack height="100%">
-        <HStack
-          gap={4}
-          vAlign="center"
-          paddingInline={5}
-          paddingBlock={2}
-          minHeight="calc(var(--spacing-12) + var(--spacing-1))"
+      <div className="flex h-full min-h-0 min-w-0 flex-col">
+        <div
           data-testid="top-bar"
+          className="flex h-12 shrink-0 items-center gap-3 border-b border-border-soft px-4"
         >
-          <StackItem size="fill">
-            <HStack gap={4} vAlign="center">
-              {crumbs && <Crumbs parts={crumbs} />}
-              <HStack gap={3} vAlign="center" ref={setStart} />
-            </HStack>
-          </StackItem>
-          <HStack gap={2} vAlign="center" ref={setEnd} />
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            {crumbs && <Crumbs parts={crumbs} />}
+            <div ref={setStart} className="flex min-w-0 items-center gap-3" />
+          </div>
+          <div ref={setEnd} className="flex shrink-0 items-center gap-2" />
           {bell}
-        </HStack>
-        <Divider />
-        <StackItem size="fill">{children}</StackItem>
-      </VStack>
+        </div>
+        <div className="min-h-0 flex-1">{children}</div>
+      </div>
     </SlotsContext.Provider>
   )
 }

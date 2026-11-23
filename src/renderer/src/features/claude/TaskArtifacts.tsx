@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/Spinner'
+import { StatusToken } from '../../components/StatusToken'
 import type {
   ArtifactCandidate,
   ArtifactPublishMode,
@@ -95,113 +88,128 @@ export function TaskArtifacts({
   }
 
   return (
-    <VStack gap={2} role="region" aria-label="Documentos para o Notion">
-      <Text weight="semibold">Documentos para o Notion</Text>
+    <section aria-label="Documentos para o Notion" className="flex flex-col gap-2.5">
+      <p className="text-sm font-medium">Documentos para o Notion</p>
       {pending.length > 0 && (
-        <List hasDividers density="compact" aria-label="Documentos alterados">
+        <ul
+          aria-label="Documentos alterados"
+          className="overflow-hidden rounded-lg border border-border-soft bg-card"
+        >
           {pending.map((c) => (
-            <Item
-              as="li"
+            <li
               key={c.path}
-              label={<Code>{c.path}</Code>}
-              description={c.committed ? 'Commitado' : 'Mudanças não commitadas'}
-              endContent={
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  label="Anexar"
-                  aria-label={`Anexar ${c.path}`}
-                  isDisabled={!c.committed || busy}
-                  {...(!c.committed
-                    ? { disabledMessage: 'Faça commit do documento antes de anexar.' }
-                    : {})}
-                  onClick={() => void attach(c.path)}
-                />
-              }
-            />
+              className="flex items-center gap-2 border-b border-border-soft px-3 py-2 last:border-b-0"
+            >
+              <div className="flex min-w-0 flex-1 flex-col">
+                <code className="truncate font-mono text-xs">{c.path}</code>
+                <span className="text-2xs text-muted-foreground">
+                  {c.committed ? 'Commitado' : 'Mudanças não commitadas'}
+                </span>
+              </div>
+              <Button
+                size="xs"
+                variant="outline"
+                aria-label={`Anexar ${c.path}`}
+                disabled={!c.committed || busy}
+                {...(!c.committed ? { title: 'Faça commit do documento antes de anexar.' } : {})}
+                onClick={() => void attach(c.path)}
+              >
+                Anexar
+              </Button>
+            </li>
           ))}
-        </List>
+        </ul>
       )}
       {data.attached.length > 0 && (
-        <List hasDividers density="compact" aria-label="Documentos anexados">
+        <ul
+          aria-label="Documentos anexados"
+          className="overflow-hidden rounded-lg border border-border-soft bg-card"
+        >
           {data.attached.map((a) => (
-            <Item
-              as="li"
+            <li
               key={a.id}
-              label={<Code>{a.path}</Code>}
-              description={`Commit ${a.commit.slice(0, 7)}`}
-              endContent={
-                <HStack gap={1} vAlign="center" wrap="wrap">
-                  {a.notion && (
-                    <Token
-                      size="sm"
-                      color="green"
-                      label={
-                        a.notion.mode === 'section' ? 'No Notion (seção)' : 'No Notion (subpágina)'
-                      }
-                    />
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    label="Publicar como seção"
-                    aria-label={`Publicar ${a.path} como seção`}
-                    isDisabled={busy}
-                    onClick={() => setConfirm({ artifact: a, mode: 'section' })}
+              className="flex flex-col gap-1.5 border-b border-border-soft px-3 py-2 last:border-b-0"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <code className="truncate font-mono text-xs">{a.path}</code>
+                  <span className="font-mono text-2xs text-subtle-foreground">
+                    Commit {a.commit.slice(0, 7)}
+                  </span>
+                </div>
+                {a.notion && (
+                  <StatusToken
+                    tone="success"
+                    label={
+                      a.notion.mode === 'section' ? 'No Notion (seção)' : 'No Notion (subpágina)'
+                    }
                   />
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    label="Publicar como subpágina"
-                    aria-label={`Publicar ${a.path} como subpágina`}
-                    isDisabled={busy}
-                    onClick={() => setConfirm({ artifact: a, mode: 'child_page' })}
-                  />
-                </HStack>
-              }
-            />
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label={`Publicar ${a.path} como seção`}
+                  disabled={busy}
+                  onClick={() => setConfirm({ artifact: a, mode: 'section' })}
+                >
+                  Publicar como seção
+                </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  aria-label={`Publicar ${a.path} como subpágina`}
+                  disabled={busy}
+                  onClick={() => setConfirm({ artifact: a, mode: 'child_page' })}
+                >
+                  Publicar como subpágina
+                </Button>
+              </div>
+            </li>
           ))}
-        </List>
+        </ul>
       )}
       {confirm && (
-        <Card role="alertdialog" aria-label="Confirmar publicação">
-          <VStack gap={2}>
-            <Text>
-              Publicar <Code>{confirm.artifact.path}</Code> (commit{' '}
-              {confirm.artifact.commit.slice(0, 7)}) no Notion como {MODE_LABEL[confirm.mode]}? O
-              conteúdo fica visível para quem vê a tarefa. Segredos reconhecidos são omitidos.
-            </Text>
-            <HStack gap={2}>
-              <Button
-                size="sm"
-                variant="primary"
-                label="Publicar"
-                icon={<Icon icon={NotionLogo} />}
-                isLoading={busy}
-                onClick={() => void publish()}
-              />
-              <Button size="sm" variant="ghost" label="Cancelar" onClick={() => setConfirm(null)} />
-            </HStack>
-          </VStack>
-        </Card>
+        <div
+          role="alertdialog"
+          aria-label="Confirmar publicação"
+          className="flex flex-col gap-2.5 rounded-[10px] border border-warn-tint-border bg-warn-tint p-3.5"
+        >
+          <p className="text-sm">
+            Publicar <code className="font-mono text-xs">{confirm.artifact.path}</code> (commit{' '}
+            {confirm.artifact.commit.slice(0, 7)}) no Notion como {MODE_LABEL[confirm.mode]}? O
+            conteúdo fica visível para quem vê a tarefa. Segredos reconhecidos são omitidos.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy} onClick={() => void publish()}>
+              {busy ? <Spinner /> : <NotionLogo />}
+              Publicar
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirm(null)}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
       )}
       {published && (
-        <HStack gap={2} vAlign="center" role="status">
-          <Text type="supporting">
-            <Code>{published.path}</Code> publicado no Notion.
-          </Text>
+        <div role="status" className="flex flex-wrap items-center gap-2 text-xs">
+          <span>
+            <code className="font-mono">{published.path}</code> publicado no Notion.
+          </span>
           {published.url && (
             <Button
-              size="sm"
+              size="xs"
               variant="ghost"
-              label="Abrir no Notion"
-              icon={<Icon icon={ExternalLinkIcon} />}
               onClick={() => void window.orkio.openExternal(published.url!)}
-            />
+            >
+              <ExternalLinkIcon />
+              Abrir no Notion
+            </Button>
           )}
-        </HStack>
+        </div>
       )}
       {error && <Alert tone="danger">{error}</Alert>}
-    </VStack>
+    </section>
   )
 }

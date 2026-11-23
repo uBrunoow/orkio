@@ -12,7 +12,7 @@ Claude Code. Hoje existem:
 - **Sinais (2D):** branch local/remota e PR de cada tarefa, casadas pelo ID (ex.: ORK-142).
 - **Quadro (3A):** kanban por projeto com etapas próprias ligadas ao status do Notion; mover
   card escreve no Notion (fila persistente); estado local e histórico em SQLite.
-- **UI:** design system Astryx com o tema Orkio, CSP estrita, textos da Astryx em pt-BR.
+- **UI:** shadcn/ui (Radix) + Tailwind v4 com o tema Orkio (`styles/globals.css`), CSP estrita, pt-BR.
 - **Automações (3B):** eventos do git/GitHub (por diff de sinais) movem tarefas por regras
   declarativas, em segundo plano, com idempotência no SQLite.
 - **Fluxo do projeto (3C):** tela para editar etapas e automações (frases, formulário),
@@ -82,7 +82,6 @@ pnpm dist         # empacota (electron-builder.ts)
 pnpm dist:dir     # só a pasta do app em dist/ (sem instalador)
 pnpm smoke:packaged  # smoke do app empacotado (dist/): tela inicial + ponte MCP. Linux: xvfb-run -a
 pnpm release <patch|minor|major|beta> [--beta]  # versão + CHANGELOG + commit + tag (sem push)
-pnpm astryx:static-css  # regenera o CSS estático das camadas da Astryx (após upgrade)
 pnpm --dir site install|dev|test|typecheck|lint|build   # site (package próprio, ver site/README.md)
 ```
 
@@ -162,18 +161,17 @@ src/
                            # reply-chips, task-layout (puros)
       setup/               # 9: Primeiros passos (SetupPage, setup-steps puro)
       settings/            # Configurações (SettingsNav, seções), UpdateBanner, WhatsNewPanel
-    components/Alert.tsx   # mensagens (Banner da Astryx)
+    components/ui/         # shadcn/ui (copiados pelo CLI e ajustados: Select próprio, Dialog/Menu não modais)
+    components/form.tsx    # campos (TextField, SelectField, CheckboxField, RadioListField, SegmentedControl...)
+    components/Alert.tsx   # mensagens (erro = role alert, aviso/info = role status)
     components/PageHeader.tsx  # o único h1 da tela, contexto (projeto) acima e ações à direita
     components/StatusToken.tsx # estado único: ponto + texto (success/warning/danger/running/neutral)
     components/PageState.tsx   # carregando / vazio (com ação) / erro, iguais em todas as telas
     components/SaveBar.tsx     # barra de salvar fixa (alterações não salvas, Descartar, Salvar)
     components/OrkioLogo/  # logo (símbolo full/simple + wordmark)
-    styles/astryx.css      # reset + CSS pré-compilado da Astryx
-    styles/brand.css       # camada orkio-brand: só Jost/mono da marca, com tokens do tema
+    styles/globals.css     # Tailwind v4 + tema Orkio (tokens do mockup, só escuro)
+    styles/brand.css       # camada orkio-brand: marca, bloco de código e diff, com tokens do tema
     styles/fonts.css       # fontes locais via @fontsource
-  astryx-themes.ts         # GERADO por `astryx theme add` (tema Orkio)
-  themes/orkio/            # GERADO: cópia do tema no app (CSS estático + módulo)
-themes/orkio/              # fonte do tema (editor de temas da Astryx)
 brand/                     # fonte da verdade da marca (BRAND.md, SVGs, ícone 1024, tokens)
 build/                     # ícones do empacotador (gerados por pnpm icons)
 resources/icon.png         # ícone da janela em runtime
@@ -323,24 +321,24 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 
 Leia `brand/BRAND.md` antes de mexer em UI.
 
-- **Tema Orkio** (Astryx): `themes/orkio/` (fonte, editado só pelo editor de temas) gera a cópia
-  do app em `src/themes/orkio/` e `src/astryx-themes.ts` (não edite à mão). Cores da marca, dark
-  only, Inter na UI e JetBrains Mono em código. Mude com
-  `pnpm exec astryx experimental theme editor set orkio <coisa> <valor>` e confira o PNG
-  (`… editor show orkio --png`).
-- Cores e medidas: só tokens do tema (`var(--color-*)`, `--spacing-*`, `--radius-*`). Nada de
-  hex/px. Única exceção: `backgroundColor` do `BrowserWindow` no main (espelha o fundo do tema).
+- **Tema Orkio** (`src/renderer/src/styles/globals.css`): cores e medidas do mockup
+  (`docs/superpowers/specs/2026-11-23-orkio-ui-mockup.html`) como variáveis CSS ligadas ao Tailwind
+  (`@theme inline`): `bg-background < bg-surface < bg-card < bg-muted`, `text-foreground /
+  text-muted-foreground / text-subtle-foreground`, `border-border` (controles) e `border-border-soft`
+  (divisórias), `brand`/`brand-tint`, `ok`/`warn`/`danger` (+ `-tint`). Só escuro.
+- Cores: hex só no `globals.css`. Nos componentes, só as classes do tema (nada de `zinc-800`, hex
+  ou `rgb()`). Única exceção: `backgroundColor` do `BrowserWindow` no main (espelha o fundo do tema).
 - Inter = UI; **Jost só para logo e títulos de destaque** (`brand.css`: `.orkio-display`,
-  `.orkio-slogan`); mono para IDs e tokens (`Code`, ou `.orkio-mono-input` em campos).
-- Fontes vêm de `@fontsource` (`styles/fonts.css` + o `orkio.fonts.css` do tema). Nunca CDN. O
+  `.orkio-slogan`); mono (`font-mono`) para IDs, branches, comandos e caminhos.
+- Fontes vêm de `@fontsource` (`styles/fonts.css`). Nunca CDN. O
   build não transforma fontes em `data:` URI (`assetsInlineLimit`).
 - Logo: `<OrkioLogo>` (SVG da marca; abaixo de 48 px usa a versão simple). Wordmark em Jost 300,
   letter-spacing 0.25em (Jost 400 se ≤ 18 px). Não distorcer, girar nem aplicar gradiente/sombra.
-- Laranja com parcimônia: ação principal (`Button variant="primary"`), símbolo, estados de agente.
-  Texto sobre laranja é sempre preto (`--color-on-accent`), nunca branco.
+- Laranja com parcimônia: ação principal (`<Button>` padrão), símbolo, estados de agente.
+  Texto sobre laranja é sempre preto (`text-primary-foreground`), nunca branco.
 - Ícones de interface: **Tabler** (`@tabler/icons-react`), sempre via `components/icons.tsx`
-  (adaptador para o `Icon` da Astryx; inclui os logos `GitHubLogo` e `NotionLogo`). Use
-  `<Icon icon={X} />` ou a prop `icon` dos componentes. Novo ícone? Exporte-o de `icons.tsx`.
+  (traço e `size-4` padrão; inclui os logos `GitHubLogo`, `NotionLogo` e `ClaudeLogo`). Use
+  `<BoardIcon className="size-3.5 text-muted-foreground" />`. Novo ícone? Exporte-o de `icons.tsx`.
 - Ícones do app: não edite `build/` à mão; troque `brand/orkio-app-icon-1024.png` e rode `pnpm icons`
   (gera também `build/icons/NxN.png`, 16 a 512, para o Linux: o tema hicolor não procura 1024).
 
@@ -348,18 +346,21 @@ Leia `brand/BRAND.md` antes de mexer em UI.
 
 - TypeScript strict (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
 - Prettier: sem ponto e vírgula, aspas simples, 100 colunas.
-- **UI com Astryx** (`@astryxdesign/core`). Leia as props com `pnpm exec astryx component <Nome>`
-  antes de usar. Layout com `VStack`/`HStack`/`Grid`/`Card`, texto com `Text`/`Heading`, nada de
-  `<div>`/`<span>` cru. Dados densos em `List`/`Item`. Estado em `StatusToken` (ponto colorido + texto, nunca bloco; `Token` só para categoria; `Badge` só para contagens).
-  Mensagens: `components/Alert.tsx` (Banner; erro = `role="alert"`, aviso = `role="status"`).
-- CSS próprio só na camada `orkio-brand` (`styles/brand.css`, `OrkioLogo.css`), apenas para a
-  marca e com tokens do tema. Nada de CSS de layout. Exceção: `features/welcome/welcome.css`
-  (abertura laranja + Primeiros passos em tela cheia, sem sidebar: posição fixa, grade de
-  fundo e animações; respeita `prefers-reduced-motion`).
+- **UI com shadcn/ui + Tailwind v4.** Componentes em `components/ui/` (adicione com
+  `pnpm dlx shadcn@latest add <nome>` e mova de `@/components/ui` para `src/renderer/src/components/ui`;
+  troque `lucide-react` pelos ícones do Tabler). Campos sempre por `components/form.tsx` (rótulo,
+  descrição e erro ligados por id). Estado em `StatusToken`/`StatusDot` (ponto colorido + texto,
+  nunca bloco); `Badge` só para categoria/contagem. Mensagens: `components/Alert.tsx`.
+- Visual do mockup e do Alva Tasks: barra de 48 px por tela, divisórias `border-border-soft`
+  entre lateral, conteúdo e painel; listas e tabelas numa caixa só (`rounded-xl border`) com
+  cabeçalho de coluna em caixa-alta pequena; texto base 13 px; IDs em mono apagado.
+- CSS próprio só na camada `orkio-brand` (`styles/brand.css`, `OrkioLogo.css`) e em
+  `features/welcome/welcome.css` (abertura + Primeiros passos em tela cheia; respeita
+  `prefers-reduced-motion`). O resto é classe do Tailwind.
 - Ganchos de teste: papéis/nomes acessíveis primeiro; `data-testid` quando não houver (ex.:
-  `device-code`, `project-branch`, `empty-hero`). Nunca classes da Astryx (`astryx-*`, `x…`).
+  `device-code`, `project-branch`, `empty-hero`). Nunca classes do Tailwind.
 - CSP: nada de `<style>`/`<script>` inline em produção. `style-src` só é relaxado no dev server.
-  A prop `style` do React (CSSOM) é permitida. Ver "Astryx e CSP" abaixo.
+  A prop `style` do React (CSSOM) é permitida. Ver "shadcn/Radix e CSP" abaixo.
 - Textos de UI em pt-BR.
 
 ## Sinais das tarefas (Etapa 2D)
@@ -500,8 +501,8 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   de rodar e gravado em `.orkio/briefing.md` (com `.orkio/.gitignore` = `*`). Não vai ao Notion.
 - Resumo ao terminar: `git diff --stat`/arquivos e commits desde a base e comandos de teste vistos.
 - **Sessão como conversa** (`features/claude/run-transcript.ts` puro + `RunTranscript.tsx`): o log
-  normalizado vira itens: mensagens (markdown da Astryx com `components.code` próprio, porque o
-  `CodeBlock` injeta `<style>`; classe `.orkio-codeblock` na camada da marca), grupos de
+  normalizado vira itens: mensagens (`MarkdownText`: react-markdown + remark-gfm, sem destaque
+  de sintaxe; classe `.orkio-codeblock` na camada da marca), grupos de
   ferramentas com uma frase (arquivos distintos; só o grupo ao vivo abre sozinho), recibos
   (aprovada entra no grupo; negada/bloqueada fica visível), aviso de falha e fechamento com turnos,
   tempo e custo (o texto final só aparece se não repetir a última mensagem). Pedidos pendentes
@@ -663,7 +664,7 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 - **Spec e plano na tela:** `alva.taskDocument` (IPC só leitura) devolve o texto da task do
   Backlog.md (worktree primeiro, depois a pasta do projeto): sem frontmatter nem marcadores HTML,
   `redactSecrets`, corte em `BACKLOG_DOC_LIMIT`; nada é guardado. `BacklogDocumentView` mostra com
-  `MarkdownText` (markdown da Astryx sem `CodeBlock`). Gate com `show: 'backlog'` (a config aceita o
+  `MarkdownText` (react-markdown, sem destaque de sintaxe). Gate com `show: 'backlog'` (a config aceita o
   valor); os templates ganharam os gates `aprovar-spec` (depois do /spec) e `aprovar-plano` (depois
   do /plan), e Detalhes → Documentos tem o "Spec e plano" recolhível. Fluxos já salvos não mudam.
 - **Diff na tela:** `lib/diff.ts` (puro) lê o `git diff` unificado em arquivos/hunks/linhas
@@ -978,7 +979,7 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`
 - GitHub simulado (2D): `githubBranches`, `githubPulls`, `githubPrDetails`; listas com ETag
   (304 quando `If-None-Match` bate) e GraphQL por alias. `__calls` registra `ifNoneMatch`/`status`.
 - Notion simulado: `notionTasks` (`ok`, `no_unique_id`, `renamed`, `status_deleted`) e ids fixos
-  em `NOTION_FAKE` (`e2e/fixtures.ts`). Selector da Astryx no E2E: gatilho com papel `button`
+  em `NOTION_FAKE` (`e2e/fixtures.ts`). Select no E2E: gatilho com papel `button`
   (sem valor) ou `combobox` (com valor), nome começando pelo rótulo; opções têm papel `option`.
 
 ## Decisões registradas
@@ -1005,14 +1006,12 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`
 | GitHub Enterprise salvo como "não verificado"                                                               | A conta conectada é do github.com; não há como validar acesso/push no GHE ainda.                                                                                                                                                                            |
 | Sem projeto, o app abre nos Primeiros passos (abertura + passos, sem sidebar)                               | Um caminho só do zero à primeira tarefa; o estado de cada passo vem do real. O E2E sai por "Fazer depois" no fixture (a abertura não bloqueia cliques: `pointer-events: none`).                                                                             |
 | Watcher no diretório do git (não no arquivo HEAD)                                                           | O git troca o HEAD via rename (HEAD.lock → HEAD), o que quebra watchers de arquivo.                                                                                                                                                                         |
-| UI em Astryx com tema Orkio compilado                                                                       | Pedido do produto. Tema estático (`astryx theme build`) mantém a CSP estrita.                                                                                                                                                                               |
-| CSS das camadas da Astryx como arquivo estático                                                             | `ensureSlideRules` só injeta `<style>` se não achar o id; o arquivo estático (gerado e testado contra a versão instalada) evita relaxar a CSP.                                                                                                              |
+| UI em shadcn/ui + Tailwind v4 (antes Astryx)                                                               | Pedido do produto: padrões de mercado e fidelidade ao mockup. O Tailwind compila para um .css estático (CSP estrita); o shadcn é código nosso, ajustável. |
 | Confirmações inline em vez de `AlertDialog`                                                                 | Diálogos usam camadas sobrepostas; inline é suficiente e mantém o risco de CSP baixo.                                                                                                                                                                       |
 | Peças de UI dos cards em `connection-ui.tsx`                                                                | Notion e GitHub compartilham conectado/erro/token/desconectar; cada card só implementa o próprio fluxo de login.                                                                                                                                            |
 | Mapeamento das Tarefas salvo por **id de propriedade**                                                      | O id é estável a renomeações: renomear vira só aviso (e atualizamos o nome); apagar/mudar tipo é detectado na revalidação.                                                                                                                                  |
 | Tarefas do Notion só em memória (cache 60 s, até 500)                                                       | Nada de conteúdo do Notion no disco; o Notion continua a fonte da verdade. 60 s equilibra rate limit (~3 req/s) e frescor; "Atualizar" força.                                                                                                               |
 | Config v2 com bloco `notion` inválido → "não configurado" com aviso                                         | Um mapeamento corrompido não pode derrubar a lista de projetos.                                                                                                                                                                                             |
-| `InternationalizationProvider` pt-BR da Astryx                                                              | Textos internos dos componentes (Obrigatório, Limpar, busca) seguem a regra de UI em pt-BR.                                                                                                                                                                 |
 | SQLite via `node:sqlite` (não `better-sqlite3`)                                                             | Embutido no Node do Electron 45 (Node 24): sem módulo nativo, rebuild nem mudança no empacotamento. API ainda "release candidate": isolada em `db/database.ts`.                                                                                             |
 | Escritas pendentes no SQLite, calculadas contra o último valor conhecido do Notion                          | Sobrevivem a fechar o app; mover e voltar antes de sincronizar não gera escrita; rollback restaura o estado anterior à primeira mudança.                                                                                                                    |
 | "Bloqueada" local, com checkbox do Notion opcional                                                          | Nem todo banco tem a propriedade; não criamos checkbox sem pedir. Com mapeamento, o Notion é a fonte da verdade.                                                                                                                                            |
@@ -1043,7 +1042,7 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`
 | Menu com só Quadro, Agentes e Configurações; lista lateral por "o que fazer" (fase 9)                       | O trabalho do dia é a tarefa: o que espera você e o que roda ficam sempre à vista; telas de configuração saem do menu e vão para Configurações.                                                                                                             |
 | Tarefa em tela própria com fases e painel da fase (fase 9)                                                  | A conversa com o agente é o centro; o painel mostra o que importa na fase (spec, plano, diff, PR) sem trocar de tela.                                                                                                                                       |
 | O Orkio não cria tarefas; contexto só da tarefa (fase 9)                                                    | O Notion é a fonte das tarefas; o contexto do projeto duplicava o briefing e o CLAUDE.md do repositório.                                                                                                                                                    |
-| Command Palette da Astryx (6E)                                                                              | Monta um `Dialog`; o E2E confirmou que não viola a CSP. Só navega: nada nela escreve no Notion ou roda agente.                                                                                                                                              |
+| Command Palette com cmdk num Dialog não modal (6E)                                                          | Só navega: nada nela escreve no Notion ou roda agente. Não modal para não injetar `<style>` (react-remove-scroll). |
 | Entrega em Quadro e automações (6E)                                                                         | "Exigir aprovação para push" é regra do projeto, não de um fluxo.                                                                                                                                                                                           |
 | Releases no próprio repo, que é público (`GITHUB_TOKEN`, sem token pessoal)                                 | Release de repo privado exigiria um token embutido no app (que leria o código). Antes era um repo só de binários (`orkio-releases`); com o código público, um repo só basta.                                                                                |
 | Release como rascunho criado antes da matriz, publicado num job final                                       | Os jobs do mac e do Windows sobem para o mesmo release sem duplicar; nada é publicado se um pacote ou smoke falhar.                                                                                                                                         |
@@ -1051,56 +1050,17 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`
 | Fuse `RunAsNode` ligado                                                                                     | A ponte MCP de permissões é um processo que o CLI do Claude abre com o executável do Orkio + `ELECTRON_RUN_AS_NODE`.                                                                                                                                        |
 | CI de PR só no Linux (smoke do pacote incluso)                                                              | Em repo privado, minuto de macOS custa 10x; o mac roda no release, no teste manual e por dispatch.                                                                                                                                                          |
 
-## Astryx e CSP (regra inegociável)
+## shadcn/Radix e CSP (regra inegociável)
 
-A UI usa Astryx com a **CSP de produção estrita** (`style-src 'self'`). Componentes que injetam
-`<style>` em runtime quebram isso. O E2E falha com qualquer violação (`securitypolicyviolation`).
+A UI roda com a **CSP de produção estrita** (`style-src 'self'`). O Tailwind compila tudo num
+`.css` estático. O risco são partes do Radix que injetam `<style>` em runtime; o E2E falha com
+qualquer violação (`securitypolicyviolation`) e `test/renderer-csp-guard.test.ts` trava os usos:
 
-- **Tema** sempre pré-compilado (`__built: true`): o `<Theme>` não injeta nada.
-- **Camadas (Layer: popovers, tooltips)** injetariam `astryx-layer-slide-rules`. Entregamos esse
-  CSS como arquivo estático (`src/renderer/public/astryx-layer-slide-rules.css`, carregado no
-  `index.html` com o mesmo id), gerado por `pnpm astryx:static-css`. Depois de atualizar
-  `@astryxdesign/core`, rode o comando de novo; `test/astryx-static-css.test.ts` falha se divergir.
-- **Evitar** (injetam `<style>` sem saída estática): `CodeBlock` (destaque), `Chat` (scroll
-  anchoring), segmentos nativos do `DateInput`, e a gaveta mobile do `AppShell`
-  (`mobileNav={false}`). Diálogos/gavetas: confirmar no E2E antes de usar.
-- Dúvida se um componente injeta estilo? `grep -rl "createElement('style')" node_modules/@astryxdesign/core/dist`.
-- `astryx doctor --built src/renderer` deve terminar sem falhas. Os avisos restantes são as
-  exceções da marca (logo/ícones SVG, classes Jost/mono) e as fontes locais do `@fontsource`.
-
-O bloco abaixo foi gerado por `astryx init --features agents` (não edite entre os marcadores; o
-CLI o regenera). Onde ele conflitar com as regras acima (CSP, exceções da marca), valem as acima.
-
-<!-- prettier-ignore-start -->
-<!-- ASTRYX:START -->
-Astryx v0.7.16 · 90+ components
-CLI: run every command as `pnpm exec astryx <cmd>` (shown below as `astryx ...`).
-
-SETUP (once, in app entry e.g. main.tsx) — without these, components render unstyled:
-  import "@astryxdesign/core/reset.css";
-  import "@astryxdesign/core/astryx.css";
-
-WORKFLOW — start every page from a template, never from scratch:
-1. `astryx build "<idea>"` — names the template to scaffold from and the parts it lacks.
-2. `astryx template <name> <path>` — scaffold it; keep its frame, gap and padding; replace the content.
-3. `astryx template <Block>` for parts it lacks; `astryx component <Name>` to read props before using one.
-Changing an existing page? Keep it: skip step 2 and add blocks/components inside its sections.
-Before you deliver a build, run `astryx doctor --built <dir>`; don't deliver it if it fails.
-
-RULES:
-- No <div> — components handle all layout and spacing.
-- Read `astryx docs layout` before changing a template's frame.
-- Dense data = rows (Table, List/Item), not Card-wrapped lists. Badge = counts only.
-- Style with component props first, then tokens (var(--color-*|--spacing-*|--radius-*)). No raw hex/px. No StyleX/Tailwind compiler here — don't use xstyle/utility classes directly. Some templates use StyleX and need a compiler plugin; see `astryx docs styling-overview`.
-- THEMES: palettes and custom colors go through the theme, never :root overrides. To make or change a theme (colors, fonts, corners, spacing, a look from a picture), prefer the experimental theme editor over hand-written theme files: `astryx experimental theme editor new <name> --like neutral`, then `editor set <name> <thing> <value>` or `editor how "<what you want>"`; wire it with `astryx theme add <name>`; after each change look at it with `astryx experimental theme editor show <name> --png` and open the PNGs it writes (changes nothing in the app); a theme change is not done until you have looked at the pictures. In code, extend an imported theme to customize it; `theme eject <slug>` only forks source. See `astryx docs theme`.
-- SELF-CHECK: re-read the file; replace any raw <div>/<span>, imported .css/@apply, or hardcoded #hex/px with the component or a token.
-
-`astryx help` lists every command. Key ones beyond the workflow:
-  search "<query>"   find any component / hook / doc / template
-  discover <words>   integrations you could add
-  docs <topic>       getting-started, principles, tokens, theme … (`astryx docs` lists all)
-  docs cli           commands and API reference
-  docs authoring     build an integration package, and every field it holds
-  upgrade --from <old version> --apply   run after a dependency bump
-<!-- ASTRYX:END -->
-<!-- prettier-ignore-end -->
+- **Select do Radix: proibido** (sempre usa react-remove-scroll e um `<style>` no viewport). Use
+  `components/ui/select.tsx` (Popover não modal + lista do cmdk; gatilho `combobox`, opções `option`).
+- **ScrollArea do Radix: proibida** (injeta `<style>`). Use rolagem nativa (`overflow-y-auto`).
+- **Modo modal: nunca.** `Dialog` e `DropdownMenu` (`components/ui/`) forçam `modal={false}`
+  (o modo modal usa react-remove-scroll); o fundo escuro do Dialog é um elemento comum. Popover já é
+  não modal por padrão.
+- Nada de `sonner` (injeta CSS) nem de bibliotecas que tragam `<style>`/`dangerouslySetInnerHTML`.
+- Dúvida se um pacote injeta estilo? `grep -lE "createElement\(['\"]style|dangerouslySetInnerHTML|RemoveScroll" node_modules/<pacote>/dist/*`.

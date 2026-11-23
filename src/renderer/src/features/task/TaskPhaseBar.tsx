@@ -1,9 +1,5 @@
-import { Card } from '@astryxdesign/core/Card'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Text } from '@astryxdesign/core/Text'
-import { Token } from '@astryxdesign/core/Token'
-import { DoneIcon, DotIcon, ProblemIcon } from '../../components/icons'
+import { cn } from '@/lib/utils'
+import { DoneIcon, ProblemIcon } from '../../components/icons'
 import type { PhaseState, TaskPhase } from './task-phases'
 
 const SUFFIX: Record<PhaseState, string> = {
@@ -15,10 +11,18 @@ const SUFFIX: Record<PhaseState, string> = {
 }
 
 /** Fase em destaque: o tom diz se o agente trabalha (laranja), espera você ou parou. */
-const ACTIVE: Partial<Record<PhaseState, 'orange' | 'yellow' | 'red'>> = {
-  current: 'orange',
-  waiting: 'yellow',
-  failed: 'red'
+const PHASE_CLASS: Record<PhaseState, string> = {
+  done: 'text-muted-foreground',
+  current: 'bg-brand-tint text-brand-tint-foreground',
+  waiting: 'bg-warn-tint text-warn',
+  failed: 'bg-danger-tint text-danger',
+  next: 'text-subtle-foreground'
+}
+
+/** Ponto na fase de agora (laranja), esperando você (amarelo). */
+const DOT_CLASS: Partial<Record<PhaseState, string>> = {
+  current: 'bg-brand',
+  waiting: 'bg-warn'
 }
 
 /**
@@ -32,37 +36,33 @@ export function TaskPhaseBar({
 }): React.JSX.Element | null {
   if (phases.length === 0) return null
   return (
-    <Card padding={0.5}>
-      <HStack gap={0.5} vAlign="center" role="list" aria-label="Fases da tarefa">
-        {phases.map((phase) => {
-          const color = ACTIVE[phase.state]
-          return (
-            <HStack
-              key={phase.id}
-              vAlign="center"
-              role="listitem"
-              aria-label={`${phase.label}: ${SUFFIX[phase.state]}`}
-              data-phase-state={phase.state}
-            >
-              {color ? (
-                <Token
-                  size="sm"
-                  color={color}
-                  label={phase.label}
-                  icon={<Icon icon={phase.state === 'failed' ? ProblemIcon : DotIcon} size="sm" />}
-                />
-              ) : (
-                <HStack gap={1} vAlign="center" paddingInline={2} paddingBlock={0.5}>
-                  {phase.state === 'done' && <Icon icon={DoneIcon} size="sm" color="success" />}
-                  <Text type="supporting" color="secondary" className="orkio-mono">
-                    {phase.label}
-                  </Text>
-                </HStack>
-              )}
-            </HStack>
-          )
-        })}
-      </HStack>
-    </Card>
+    <ul
+      role="list"
+      aria-label="Fases da tarefa"
+      className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border p-0.5"
+    >
+      {phases.map((phase) => {
+        const dot = DOT_CLASS[phase.state]
+        return (
+          <li
+            key={phase.id}
+            role="listitem"
+            aria-label={`${phase.label}: ${SUFFIX[phase.state]}`}
+            data-phase-state={phase.state}
+            className={cn(
+              'flex items-center gap-1.5 rounded-md px-2.5 py-1 font-mono text-[11.5px] leading-4 whitespace-nowrap',
+              PHASE_CLASS[phase.state]
+            )}
+          >
+            {phase.state === 'done' && <DoneIcon className="size-3 text-ok" />}
+            {phase.state === 'failed' && <ProblemIcon className="size-3" />}
+            {dot && (
+              <span aria-hidden="true" className={cn('size-1.5 shrink-0 rounded-full', dot)} />
+            )}
+            {phase.label}
+          </li>
+        )
+      })}
+    </ul>
   )
 }

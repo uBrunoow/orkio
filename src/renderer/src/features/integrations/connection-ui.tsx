@@ -1,18 +1,14 @@
 /**
- * Peças de UI compartilhadas pelos cards de integração (Notion, GitHub, ...), em Astryx.
+ * Peças de UI compartilhadas pelos cards de integração (Notion, GitHub, ...).
  * Cada card monta seu fluxo de conexão; estado conectado/erro/desconectar é igual para todos.
  */
 import { useState, type FormEvent } from 'react'
-import { Avatar } from '@astryxdesign/core/Avatar'
-import { Button } from '@astryxdesign/core/Button'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Item } from '@astryxdesign/core/Item'
-import { Link } from '@astryxdesign/core/Link'
-import { Text } from '@astryxdesign/core/Text'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { StackItem } from '@astryxdesign/core/Stack'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Field } from '@/components/form'
+import { Spinner } from '@/components/Spinner'
 import { StatusToken, toneOf } from '../../components/StatusToken'
-import { VStack } from '@astryxdesign/core/VStack'
 import type { ConnectedAccount, ConnectionStatus } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 
@@ -36,9 +32,10 @@ export function StatusBadge({
   waitingLabel: string
 }): React.JSX.Element | null {
   if (status === null) return null
-  const token = (label: string, color: 'default' | 'green' | 'yellow' | 'red') => (
-    <StatusToken label={label} tone={toneOf(color)} data-status={label} />
-  )
+  const token = (
+    label: string,
+    color: 'default' | 'green' | 'yellow' | 'red'
+  ): React.JSX.Element => <StatusToken label={label} tone={toneOf(color)} data-status={label} />
   if (activity === 'testing') return token('Verificando…', 'default')
   if (activity === 'authorizing') return token(waitingLabel, 'default')
   switch (status.state) {
@@ -84,49 +81,56 @@ export function TokenForm({
   }
 
   return (
-    <VStack
-      as="form"
-      gap={4}
+    <form
+      className="flex flex-col gap-4"
       onSubmit={(e: FormEvent) => {
         e.preventDefault()
         void submit()
       }}
     >
-      <Text color="secondary">{copy.description}</Text>
+      <p className="text-sm text-muted-foreground">{copy.description}</p>
       {error && <Alert tone="danger">{error}</Alert>}
-      <VStack gap={1}>
-        <TextInput
-          type="password"
-          label={copy.label}
-          value={token}
-          onChange={(value) => setToken(value)}
-          placeholder={copy.placeholder}
-          description={copy.hint}
-          autoComplete="off"
-          hasSpellCheck={false}
-          isDisabled={connecting}
-          // Tokens em fonte mono (BRAND.md): classe da camada da marca, com token do tema.
-          controlClassName="orkio-mono-input"
-          {...(error ? { status: { type: 'error' as const } } : {})}
-        />
-        <Link
-          label="Como criar um token"
+      <div className="flex flex-col gap-1.5">
+        <Field label={copy.label} description={copy.hint}>
+          {({ id, describedBy }) => (
+            <Input
+              id={id}
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder={copy.placeholder}
+              autoComplete="off"
+              spellCheck={false}
+              disabled={connecting}
+              aria-describedby={describedBy}
+              aria-invalid={error ? true : undefined}
+              // Tokens em fonte mono (BRAND.md).
+              className="font-mono"
+            />
+          )}
+        </Field>
+        <Button
+          type="button"
+          variant="link"
+          className="self-start text-xs"
           onClick={() => void window.orkio.openExternal(copy.docsUrl)}
         >
           Como criar um token ↗
-        </Link>
-      </VStack>
-      <HStack gap={2}>
-        <Button
-          type="submit"
-          variant="primary"
-          label={error ? 'Tentar novamente' : 'Conectar'}
-          isLoading={connecting}
-          isDisabled={!connecting && token.trim() === ''}
-        />
-      </HStack>
-    </VStack>
+        </Button>
+      </div>
+      <div className="flex gap-2">
+        <Button type="submit" disabled={connecting || token.trim() === ''}>
+          {connecting && <Spinner />}
+          {error ? 'Tentar novamente' : 'Conectar'}
+        </Button>
+      </div>
+    </form>
   )
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : '')).toUpperCase()
 }
 
 export function ConnectedView({
@@ -153,36 +157,37 @@ export function ConnectedView({
     `Conectado em ${formatDate(connectedAt)}`
   ].filter(Boolean)
   return (
-    <VStack gap={4}>
-      <Item
-        startContent={
-          <Avatar
-            name={account.userName}
-            size="md"
-            {...(account.avatarUrl ? { src: account.avatarUrl } : {})}
-          />
-        }
-        label={account.userName}
-        description={meta.join(' · ')}
-      />
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-3">
+        <Avatar className="size-8 rounded-lg">
+          {account.avatarUrl && <AvatarImage src={account.avatarUrl} alt="" />}
+          <AvatarFallback className="rounded-lg bg-muted text-xs font-semibold text-muted-foreground">
+            {initials(account.userName)}
+          </AvatarFallback>
+        </Avatar>
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-medium text-foreground">{account.userName}</span>
+          <span className="truncate text-xs text-muted-foreground">{meta.join(' · ')}</span>
+        </div>
+      </div>
       {warning && <Alert tone="warning">{warning}</Alert>}
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <Button
-          label={activity === 'testing' ? 'Testando…' : 'Testar conexão'}
-          onClick={() => void onTest()}
-          isLoading={activity === 'testing'}
-          isDisabled={busy && activity !== 'testing'}
-        />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" onClick={() => void onTest()} disabled={busy}>
+          {activity === 'testing' && <Spinner />}
+          {activity === 'testing' ? 'Testando…' : 'Testar conexão'}
+        </Button>
         <DisconnectButton
           busy={busy}
           disconnecting={activity === 'disconnecting'}
           onConfirm={onDisconnect}
         />
         {lastVerifiedAt && !warning && activity === 'idle' && (
-          <Text type="supporting">Verificado às {timeFormatter.format(lastVerifiedAt)}</Text>
+          <span className="text-xs text-muted-foreground">
+            Verificado às {timeFormatter.format(lastVerifiedAt)}
+          </span>
         )}
-      </HStack>
-    </VStack>
+      </div>
+    </div>
   )
 }
 
@@ -204,39 +209,34 @@ export function StoredCredentialErrorView({
 }): React.JSX.Element {
   const busy = activity !== 'idle'
   return (
-    <VStack gap={4}>
+    <div className="flex flex-col gap-4">
       <Alert tone="danger">{message}</Alert>
-      <Text color="secondary">
+      <p className="text-sm text-muted-foreground">
         {onReconnect
           ? 'Reconecte para autorizar o Orkio de novo, ou desconecte para remover a conexão.'
           : 'Se o token foi revogado, desconecte e conecte de novo com um token novo.'}
-      </Text>
-      <HStack gap={2} wrap="wrap">
+      </p>
+      <div className="flex flex-wrap gap-2">
         {onReconnect && (
-          <Button
-            variant="primary"
-            label={reconnectLabel}
-            onClick={() => void onReconnect()}
-            isDisabled={busy}
-          />
+          <Button onClick={() => void onReconnect()} disabled={busy}>
+            {reconnectLabel}
+          </Button>
         )}
-        <Button
-          label={activity === 'testing' ? 'Testando…' : 'Tentar novamente'}
-          onClick={() => void onRetry()}
-          isLoading={activity === 'testing'}
-          isDisabled={busy && activity !== 'testing'}
-        />
+        <Button variant="outline" onClick={() => void onRetry()} disabled={busy}>
+          {activity === 'testing' && <Spinner />}
+          {activity === 'testing' ? 'Testando…' : 'Tentar novamente'}
+        </Button>
         <DisconnectButton
           busy={busy}
           disconnecting={activity === 'disconnecting'}
           onConfirm={onDisconnect}
         />
-      </HStack>
-    </VStack>
+      </div>
+    </div>
   )
 }
 
-/** Confirmação inline (sem diálogo: camadas sobrepostas da Astryx injetam <style>). */
+/** Confirmação inline (sem diálogo). */
 export function DisconnectButton({
   busy,
   disconnecting,
@@ -250,27 +250,32 @@ export function DisconnectButton({
 
   if (!confirming && !disconnecting) {
     return (
-      <Button
-        // Vermelho só na confirmação: a ação ainda não aconteceu.
-        variant="ghost"
-        label="Desconectar"
-        onClick={() => setConfirming(true)}
-        isDisabled={busy}
-      />
+      // Vermelho só na confirmação: a ação ainda não aconteceu.
+      <Button variant="ghost" onClick={() => setConfirming(true)} disabled={busy}>
+        Desconectar
+      </Button>
     )
   }
 
   return (
-    <HStack gap={2} vAlign="center" role="group" aria-label="Confirmar desconexão">
-      <Text>Remover a conexão deste computador?</Text>
-      <Button label="Cancelar" onClick={() => setConfirming(false)} isDisabled={disconnecting} />
+    <div
+      className="flex flex-wrap items-center gap-2"
+      role="group"
+      aria-label="Confirmar desconexão"
+    >
+      <span className="text-sm text-foreground">Remover a conexão deste computador?</span>
+      <Button variant="outline" onClick={() => setConfirming(false)} disabled={disconnecting}>
+        Cancelar
+      </Button>
       <Button
         variant="destructive"
-        label={disconnecting ? 'Desconectando…' : 'Desconectar'}
-        isLoading={disconnecting}
+        disabled={disconnecting}
         onClick={() => void onConfirm().finally(() => setConfirming(false))}
-      />
-    </HStack>
+      >
+        {disconnecting && <Spinner />}
+        {disconnecting ? 'Desconectando…' : 'Desconectar'}
+      </Button>
+    </div>
   )
 }
 
@@ -289,17 +294,13 @@ export function TokenFallbackFooter({
   onBack: () => void
 }): React.JSX.Element {
   return oauthAvailable ? (
-    <HStack>
-      <Button
-        variant="ghost"
-        size="sm"
-        label={`← Voltar para “${primaryLabel}”`}
-        onClick={onBack}
-        isDisabled={connecting}
-      />
-    </HStack>
+    <div className="flex">
+      <Button variant="ghost" size="sm" onClick={onBack} disabled={connecting}>
+        ← Voltar para “{primaryLabel}”
+      </Button>
+    </div>
   ) : (
-    <Text type="supporting">{unavailableMessage}</Text>
+    <p className="text-xs text-muted-foreground">{unavailableMessage}</p>
   )
 }
 
@@ -318,21 +319,25 @@ export function CardHeader({
   badge: React.ReactNode
 }): React.JSX.Element {
   return (
-    <HStack gap={3} vAlign="center">
-      {icon}
-      <StackItem size="fill">
-        <VStack gap={0}>
-          <Text as="h2" id={titleId} type="large" weight="semibold">
-            {title}
-          </Text>
-          <Text type="supporting">{description}</Text>
-        </VStack>
-      </StackItem>
+    <div className="flex items-center gap-3">
+      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border-soft bg-muted text-foreground">
+        {icon}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <h2 id={titleId} className="text-sm font-medium text-foreground">
+          {title}
+        </h2>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
       {/* O status mantém o tamanho natural (não é truncado). */}
-      <StackItem>{badge}</StackItem>
-    </HStack>
+      <div className="shrink-0">{badge}</div>
+    </div>
   )
 }
+
+/** Caixa dos cards de conexão: borda fina, fundo de card (região nomeada pelo título). */
+export const CONNECTION_CARD_CLASS =
+  'flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-4'
 
 function formatDate(iso: string): string {
   const date = new Date(iso)

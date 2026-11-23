@@ -1,8 +1,8 @@
-import { HStack } from '@astryxdesign/core/HStack'
+import { cn } from '@/lib/utils'
 
 /**
- * Mini-histograma da atividade (execuções por hora). Barras com altura pelo `style` (CSSOM, não
- * fere a CSP) e cor pelos tokens do tema.
+ * Mini-histograma da atividade (execuções por hora), como no mockup: barras de 3 px, até 16 px de
+ * altura. A altura vai pelo `style` (valor dinâmico; CSSOM não fere a CSP).
  */
 export function Sparkline({
   values,
@@ -13,18 +13,20 @@ export function Sparkline({
 }): React.JSX.Element {
   const max = Math.max(1, ...values)
   return (
-    <HStack gap={0.5} vAlign="end" role="img" aria-label={label} data-testid="agent-activity">
+    <span
+      role="img"
+      aria-label={label}
+      data-testid="agent-activity"
+      className="flex h-4 shrink-0 items-end gap-0.5"
+    >
       {values.map((v, i) => (
-        <HStack
+        <span
           key={i}
-          style={{
-            width: 'var(--spacing-1)',
-            height: `calc(var(--spacing-1) * ${(1 + (4 * v) / max).toFixed(2)})`,
-            borderRadius: 'var(--radius-inner)',
-            background: v > 0 ? 'var(--color-text-secondary)' : 'var(--color-border)'
-          }}
+          aria-hidden="true"
+          className={cn('w-[3px] rounded-[1px]', v > 0 ? 'bg-subtle-foreground' : 'bg-border')}
+          style={{ height: `${(2 + (14 * v) / max).toFixed(1)}px` }}
         />
       ))}
-    </HStack>
+    </span>
   )
 }

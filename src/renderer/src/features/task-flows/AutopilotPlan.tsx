@@ -1,28 +1,16 @@
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
 import type { FlowRunView } from '../../../../shared/task-flow'
-import { DoneIcon, DotIcon, ProblemIcon, TodoIcon } from '../../components/icons'
+import { DoneIcon, DotIcon, ProblemIcon, TodoIcon } from '@/components/icons'
+import { cn } from '@/lib/utils'
 import { flowPlan, planProgress, type PlanState } from './flow-plan'
 
-const STATE: Record<
-  PlanState,
-  {
-    label: string
-    icon: typeof DoneIcon
-    color: 'success' | 'warning' | 'error' | 'accent' | 'tertiary' | 'secondary'
-  }
-> = {
-  done: { label: 'feito', icon: DoneIcon, color: 'success' },
-  current: { label: 'agora', icon: DotIcon, color: 'accent' },
-  waiting: { label: 'esperando você', icon: DotIcon, color: 'warning' },
-  failed: { label: 'parou aqui', icon: ProblemIcon, color: 'error' },
-  skipped: { label: 'pulado', icon: TodoIcon, color: 'tertiary' },
-  next: { label: 'a seguir', icon: TodoIcon, color: 'tertiary' },
-  unreached: { label: 'não precisou', icon: TodoIcon, color: 'tertiary' }
+const STATE: Record<PlanState, { label: string; icon: typeof DoneIcon; className: string }> = {
+  done: { label: 'feito', icon: DoneIcon, className: 'text-ok' },
+  current: { label: 'agora', icon: DotIcon, className: 'text-brand' },
+  waiting: { label: 'esperando você', icon: DotIcon, className: 'text-warn' },
+  failed: { label: 'parou aqui', icon: ProblemIcon, className: 'text-danger' },
+  skipped: { label: 'pulado', icon: TodoIcon, className: 'text-subtle-foreground' },
+  next: { label: 'a seguir', icon: TodoIcon, className: 'text-subtle-foreground' },
+  unreached: { label: 'não precisou', icon: TodoIcon, className: 'text-subtle-foreground' }
 }
 
 /**
@@ -34,42 +22,45 @@ export function AutopilotPlan({ run }: { run: FlowRunView }): React.JSX.Element 
   const plan = flowPlan(run)
   const { done, total } = planProgress(plan)
   return (
-    <VStack gap={1} role="group" aria-label="Plano do piloto automático">
-      <HStack gap={2} vAlign="center">
-        <Text type="supporting" weight="medium">
-          Plano
-        </Text>
-        <Text type="supporting" color="secondary" data-testid="autopilot-progress">
+    <div
+      role="group"
+      aria-label="Plano do piloto automático"
+      className="flex flex-col gap-1.5 rounded-lg border border-border-soft bg-surface px-3 py-2.5"
+    >
+      <div className="flex items-center gap-2 text-xs">
+        <span className="font-medium text-foreground">Plano</span>
+        <span className="tabular text-muted-foreground" data-testid="autopilot-progress">
           {done} de {total} {total === 1 ? 'passo feito' : 'passos feitos'}
-        </Text>
-      </HStack>
-      <List density="compact" aria-label="Passos do plano">
+        </span>
+      </div>
+      <ul aria-label="Passos do plano" className="flex flex-col gap-1">
         {plan.map((p) => {
           const s = STATE[p.state]
+          const Icon = s.icon
           const extra = p.visits > 1 ? ` · ${p.visits}ª vez` : ''
+          const strong = p.state === 'current' || p.state === 'waiting'
+          const dim = p.state === 'next' || p.state === 'unreached' || p.state === 'skipped'
           return (
-            <Item
-              as="li"
-              key={p.id}
-              data-state={p.state}
-              startContent={<Icon icon={s.icon} size="sm" color={s.color} />}
-              label={
-                <Text
-                  weight={p.state === 'current' || p.state === 'waiting' ? 'semibold' : 'normal'}
-                  color={
-                    p.state === 'next' || p.state === 'unreached' || p.state === 'skipped'
-                      ? 'secondary'
-                      : 'primary'
-                  }
+            <li key={p.id} data-state={p.state} className="flex items-start gap-2">
+              <Icon className={cn('mt-0.5 size-3.5', s.className)} />
+              <div className="flex min-w-0 flex-col">
+                <span
+                  className={cn(
+                    'text-sm',
+                    strong ? 'font-medium text-foreground' : dim ? 'text-muted-foreground' : ''
+                  )}
                 >
                   {p.name}
-                </Text>
-              }
-              description={`${p.detail} · ${s.label}${extra}`}
-            />
+                </span>
+                <span className="text-xs text-subtle-foreground">
+                  {p.detail} · {s.label}
+                  {extra}
+                </span>
+              </div>
+            </li>
           )
         })}
-      </List>
-    </VStack>
+      </ul>
+    </div>
   )
 }

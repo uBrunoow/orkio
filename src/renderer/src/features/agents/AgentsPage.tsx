@@ -1,30 +1,4 @@
-import { ScreenTitle } from '../../components/ScreenTitle'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { Divider } from '@astryxdesign/core/Divider'
-import { IconButton } from '@astryxdesign/core/IconButton'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Grid } from '@astryxdesign/core/Grid'
-import { Item } from '@astryxdesign/core/Item'
-import { MoreMenu } from '@astryxdesign/core/MoreMenu'
-import { List } from '@astryxdesign/core/List'
-import { MultiSelector } from '@astryxdesign/core/MultiSelector'
-import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
-import { Selector } from '@astryxdesign/core/Selector'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { TextArea } from '@astryxdesign/core/TextArea'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { Token } from '@astryxdesign/core/Token'
-import { StatusToken, toneOf } from '../../components/StatusToken'
-import { VStack } from '@astryxdesign/core/VStack'
 import {
   AGENT_COLORS,
   AGENT_LIMITS,
@@ -43,17 +17,52 @@ import {
   type AgentView
 } from '../../../../shared/agent'
 import type { ProjectView } from '../../../../shared/ipc-contract'
-import { Alert } from '../../components/Alert'
+import type { OrchestratorAgentLoad, OrchestratorState } from '../../../../shared/orchestrator'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Kbd } from '@/components/ui/kbd'
+import { Select } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import {
+  CheckboxField,
+  Field,
+  RadioListField,
+  SelectField,
+  TextAreaField,
+  TextField
+} from '@/components/form'
+import { cn } from '@/lib/utils'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
 import { isTextField } from '../../app/shortcuts'
-import { CopyIcon, EditIcon, PlusIcon, TrashIcon } from '../../components/icons'
-import { AgentAvatar } from './AgentAvatar'
-import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
-import { useAgentBadges } from './agent-badges'
-import { Sparkline } from './Sparkline'
-import { useOverview } from '../overview/useOverview'
+import { Alert } from '../../components/Alert'
+import { EmptyState } from '../../components/PageState'
+import { ScreenTitle } from '../../components/ScreenTitle'
+import { Spinner } from '../../components/Spinner'
+import { StatusToken, toneOf } from '../../components/StatusToken'
+import {
+  CopyIcon,
+  EditIcon,
+  GridIcon,
+  ListIcon,
+  MoreIcon,
+  PlusIcon,
+  TrashIcon
+} from '../../components/icons'
 import { formatUsd } from '../../lib/format'
-import type { OrchestratorAgentLoad, OrchestratorState } from '../../../../shared/orchestrator'
+import { useOverview } from '../overview/useOverview'
+import { AgentAvatar } from './AgentAvatar'
+import { useAgentBadges } from './agent-badges'
+import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
+import { MultiSelectField } from './MultiSelectField'
+import { Sparkline } from './Sparkline'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',
@@ -98,13 +107,13 @@ export function AgentsPage({
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [layout, setLayout] = useState<'cards' | 'rows'>('cards')
-  const searchBox = useRef<HTMLDivElement | null>(null)
+  const searchInput = useRef<HTMLInputElement | null>(null)
 
   // "/" foca a busca (fora de campos de texto), como nas listas das referências.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return
-      const input = searchBox.current?.querySelector('input')
+      const input = searchInput.current
       if (!input) return
       e.preventDefault()
       input.focus()
@@ -165,32 +174,27 @@ export function AgentsPage({
   const { snapshot } = useOverview()
   const orchestrator = useOrchestrator(projectId)
 
-  if (projects === null) return <Skeleton height={240} aria-label="Carregando agentes" />
+  if (projects === null) return <Skeleton className="h-60" aria-label="Carregando agentes" />
 
   const active = (state?.agents ?? []).filter((a) => a.status !== 'archived').length
   const header = (
     <>
       <ScreenBarStart>
-        <HStack gap={2} vAlign="center">
+        <div className="flex items-center gap-2">
           <ScreenTitle look={5}>Agentes</ScreenTitle>
-          {state && (
-            <Text type="supporting" color="secondary" hasTabularNumbers>
-              {active}
-            </Text>
-          )}
-        </HStack>
+          {state && <span className="tabular text-sm text-subtle-foreground">{active}</span>}
+        </div>
       </ScreenBarStart>
       <ScreenBarEnd>
-        <HStack gap={2} vAlign="center">
+        <div className="flex items-center gap-2">
           {projects.length > 1 && (
-            <Selector
-              label="Projeto"
-              isLabelHidden
+            <Select
+              aria-label="Projeto"
               size="sm"
-              width={200}
+              className="w-[200px]"
               options={projects.map((p) => ({ value: p.id, label: p.name }))}
-              {...(projectId ? { value: projectId } : {})}
-              onChange={(value: string) => {
+              value={projectId}
+              onChange={(value) => {
                 setState(null)
                 setEditing(null)
                 setProjectId(value)
@@ -198,39 +202,35 @@ export function AgentsPage({
             />
           )}
           {projectId && onOpenOrchestrator && (
-            <Button
-              size="sm"
-              variant="secondary"
-              label={`Orquestrador: ${orchestrator?.config.enabled ? 'ligado' : 'desligado'}`}
-              onClick={onOpenOrchestrator}
-            />
+            <Button variant="outline" onClick={onOpenOrchestrator}>
+              {`Orquestrador: ${orchestrator?.config.enabled ? 'ligado' : 'desligado'}`}
+            </Button>
           )}
           {projectId && (
             <Button
-              size="sm"
-              variant="primary"
-              label="Novo agente"
-              icon={<Icon icon={PlusIcon} />}
               onClick={() => {
                 setMessage(null)
                 setEditing({ mode: 'new', scope: 'repo', draft: defaultAgent(), key: null })
               }}
-            />
+            >
+              <PlusIcon />
+              Novo agente
+            </Button>
           )}
-        </HStack>
+        </div>
       </ScreenBarEnd>
     </>
   )
 
   if (!projectId) {
     return (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5">
         {header}
         <EmptyState
           title="Nenhum projeto ainda"
           description="Adicione um projeto em Projetos para criar agentes para ele."
         />
-      </VStack>
+      </div>
     )
   }
 
@@ -282,6 +282,8 @@ export function AgentsPage({
           (a.profile ? AGENT_ROLE_LABELS[a.profile.role].toLowerCase().includes(q) : false))
     )
     .sort((a, b) => ORDER[allNow.get(a.key)!.filter] - ORDER[allNow.get(b.key)!.filter])
+  const countOf = (f: Filter): number =>
+    (state?.agents ?? []).filter((a) => matchesFilter(a, allNow.get(a.key)!, f)).length
   const handlersFor = (a: AgentView): AgentHandlers => ({
     isReviewing: reviewing === a.key,
     busy,
@@ -320,128 +322,157 @@ export function AgentsPage({
     onReview: () => setReviewing(reviewing === a.key ? null : a.key),
     onApprove: () => void approve(a)
   })
+  const hasAgents = state !== null && state.agents.length > 0
 
   return (
-    <VStack gap={5} role="region" aria-label="Agentes">
+    // A tela vem num contêiner com margem (App): a barra de filtros ocupa a largura toda.
+    <div role="region" aria-label="Agentes" className="-mx-6 -mt-5 flex flex-col">
       {header}
-      {message &&
-        (message.tone === 'error' ? (
-          <Alert tone="danger">{message.text}</Alert>
-        ) : (
-          <Text role="status">{message.text}</Text>
-        ))}
-
-      {editing && (
-        <AgentEditor
-          editing={editing}
-          state={state}
-          commands={commands}
-          busy={busy}
-          onChange={setEditing}
-          onCancel={() => setEditing(null)}
-          onSave={(e) => void save(e)}
-        />
-      )}
-
-      {state === null ? (
-        <Skeleton height={120} aria-label="Carregando agentes" />
-      ) : state.agents.length === 0 && !editing ? (
-        <EmptyState
-          title="Nenhum agente ainda"
-          description="Crie um agente (ex.: Ana, implementadora) e atribua tarefas a ele no quadro."
-        />
-      ) : (
-        <VStack gap={3}>
-          <HStack
-            gap={3}
-            vAlign="center"
-            wrap="wrap"
-            role="toolbar"
-            aria-label="Filtros de agentes"
+      {hasAgents && (
+        <div
+          role="toolbar"
+          aria-label="Filtros de agentes"
+          className="flex flex-wrap items-center gap-2 border-b border-border-soft px-[18px] py-3"
+        >
+          <div className="relative w-60">
+            <Input
+              ref={searchInput}
+              type="search"
+              aria-label="Buscar agentes"
+              placeholder="Buscar agentes"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="bg-transparent pr-8"
+            />
+            {!query && <Kbd className="absolute top-1/2 right-2 -translate-y-1/2 border-0">/</Kbd>}
+          </div>
+          <div className="flex-1" />
+          <ToggleGroup
+            type="single"
+            spacing={0.5}
+            aria-label="Filtrar por estado"
+            value={filter}
+            onValueChange={(v) => {
+              const next = FILTERS.find((f) => f.value === v)
+              if (next) setFilter(next.value)
+            }}
           >
-            <HStack ref={searchBox}>
-              <TextInput
-                type="search"
-                label="Buscar agentes"
-                isLabelHidden
-                placeholder="Buscar agentes  /"
-                hasClear
-                value={query}
-                onChange={setQuery}
-              />
-            </HStack>
-            <StackItem size="fill" />
-            <SegmentedControl
-              label="Filtrar por estado"
-              size="sm"
-              value={filter}
-              onChange={(v) => setFilter(FILTERS.find((f) => f.value === v)?.value ?? 'all')}
-            >
-              {FILTERS.map((f) => (
-                <SegmentedControlItem
-                  key={f.value}
-                  value={f.value}
-                  label={`${f.label} ${
-                    state.agents.filter((a) => matchesFilter(a, allNow.get(a.key)!, f.value)).length
-                  }`}
-                />
-              ))}
-            </SegmentedControl>
-            <SegmentedControl
-              label="Visualização dos agentes"
-              size="sm"
-              value={layout}
-              onChange={(v) => setLayout(v === 'rows' ? 'rows' : 'cards')}
-            >
-              <SegmentedControlItem value="rows" label="Linhas" />
-              <SegmentedControlItem value="cards" label="Cards" />
-            </SegmentedControl>
-          </HStack>
-          {visibleAgents.length === 0 ? (
-            <Text type="supporting" color="secondary">
-              Nenhum agente com esse filtro.
-            </Text>
-          ) : layout === 'rows' ? (
-            <List hasDividers aria-label="Lista de agentes">
-              {visibleAgents.map((a) => (
-                <AgentRow key={a.key} view={a} state={state} {...handlersFor(a)} />
-              ))}
-            </List>
-          ) : (
-            <VStack gap={5} role="list" aria-label="Lista de agentes">
-              {[
-                {
-                  title: 'Trabalhando agora',
-                  agents: visibleAgents.filter((a) => allNow.get(a.key)!.filter !== 'stopped')
-                },
-                {
-                  title: filter === 'archived' ? 'Arquivados' : 'Disponíveis',
-                  agents: visibleAgents.filter((a) => allNow.get(a.key)!.filter === 'stopped')
-                }
-              ]
-                .filter((g) => g.agents.length > 0)
-                .map((g) => (
-                  <VStack key={g.title} gap={3} role="presentation">
-                    <HStack gap={2} vAlign="center" role="presentation">
-                      <Text weight="medium">{g.title}</Text>
-                      <Text type="supporting" color="secondary" hasTabularNumbers>
-                        {g.agents.length}
-                      </Text>
-                    </HStack>
-                    <Grid columns={{ minWidth: 280 }} gap={3} role="presentation">
-                      {g.agents.map((a) => (
-                        <AgentCard key={a.key} view={a} state={state} {...handlersFor(a)} />
-                      ))}
-                    </Grid>
-                  </VStack>
-                ))}
-            </VStack>
-          )}
-        </VStack>
+            {FILTERS.filter(
+              (f) => f.value !== 'archived' || filter === 'archived' || countOf(f.value) > 0
+            ).map((f) => (
+              <ToggleGroupItem key={f.value} value={f.value} className={PILL}>
+                {f.label}
+                {f.value !== 'all' && (
+                  <span className="tabular font-normal text-subtle-foreground">
+                    {countOf(f.value)}
+                  </span>
+                )}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <ToggleGroup
+            type="single"
+            spacing={0.5}
+            aria-label="Visualização dos agentes"
+            value={layout}
+            onValueChange={(v) => {
+              if (v) setLayout(v === 'rows' ? 'rows' : 'cards')
+            }}
+            className="ml-3"
+          >
+            <ToggleGroupItem value="rows" className={PILL}>
+              <ListIcon className="size-3.5" />
+              Linhas
+            </ToggleGroupItem>
+            <ToggleGroupItem value="cards" className={PILL}>
+              <GridIcon className="size-3.5" />
+              Cards
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
       )}
-    </VStack>
+
+      <div className="flex flex-col gap-4 px-[18px] py-4">
+        {message &&
+          (message.tone === 'error' ? (
+            <Alert tone="danger">{message.text}</Alert>
+          ) : (
+            <p role="status" className="text-xs text-muted-foreground">
+              {message.text}
+            </p>
+          ))}
+
+        {editing && (
+          <AgentEditor
+            editing={editing}
+            state={state}
+            commands={commands}
+            busy={busy}
+            onChange={setEditing}
+            onCancel={() => setEditing(null)}
+            onSave={(e) => void save(e)}
+          />
+        )}
+
+        {state === null ? (
+          <Skeleton className="h-30" aria-label="Carregando agentes" />
+        ) : state.agents.length === 0 ? (
+          !editing && (
+            <EmptyState
+              title="Nenhum agente ainda"
+              description="Crie um agente (ex.: Ana, implementadora) e atribua tarefas a ele no quadro."
+            />
+          )
+        ) : visibleAgents.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Nenhum agente com esse filtro.</p>
+        ) : layout === 'rows' ? (
+          <ul
+            aria-label="Lista de agentes"
+            className="overflow-hidden rounded-xl border border-border-soft bg-card"
+          >
+            {visibleAgents.map((a) => (
+              <AgentRow key={a.key} view={a} state={state} {...handlersFor(a)} />
+            ))}
+          </ul>
+        ) : (
+          <div role="list" aria-label="Lista de agentes" className="flex flex-col gap-5">
+            {[
+              {
+                title: 'Trabalhando agora',
+                agents: visibleAgents.filter((a) => allNow.get(a.key)!.filter !== 'stopped')
+              },
+              {
+                title: filter === 'archived' ? 'Arquivados' : 'Disponíveis',
+                agents: visibleAgents.filter((a) => allNow.get(a.key)!.filter === 'stopped')
+              }
+            ]
+              .filter((g) => g.agents.length > 0)
+              .map((g) => (
+                <div key={g.title} role="presentation" className="flex flex-col gap-3">
+                  <p role="presentation" className="flex items-center gap-2 text-muted-foreground">
+                    {g.title}
+                    <span className="tabular text-subtle-foreground">{g.agents.length}</span>
+                  </p>
+                  <div
+                    role="presentation"
+                    className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3"
+                  >
+                    {g.agents.map((a) => (
+                      <AgentCard key={a.key} view={a} state={state} {...handlersFor(a)} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
+
+/** Pílula dos filtros e da visualização (mockup `.pill`). */
+const PILL =
+  'h-7 gap-1.5 rounded-full px-2.5 text-xs font-normal text-muted-foreground hover:bg-muted hover:text-foreground data-[state=on]:bg-muted data-[state=on]:text-foreground'
 
 /** Onde o perfil mora (etiqueta do card quando o agente está livre). */
 const SCOPE_TAG: Record<AgentView['scope'], string> = {
@@ -488,6 +519,50 @@ interface AgentHandlers {
   onApprove(): void
 }
 
+/** Chip mono do rodapé do card (mockup `.tag`); `hot` = tarefa esperando você. */
+function Tag({ hot = false, children }: { hot?: boolean; children: string }): React.JSX.Element {
+  return (
+    <span
+      className={cn(
+        'rounded-full border px-2 py-0.5 font-mono text-2xs',
+        hot
+          ? 'border-brand-tint-border bg-brand-tint text-brand-tint-foreground'
+          : 'border-border text-muted-foreground'
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+/** Campo de texto só leitura (prévia do prompt): continua `textbox` com o rótulo como nome. */
+function ReadOnlyText({
+  label,
+  description,
+  value,
+  rows
+}: {
+  label: string
+  description?: string
+  value: string
+  rows: number
+}): React.JSX.Element {
+  return (
+    <Field label={label} description={description}>
+      {({ id, describedBy }) => (
+        <Textarea
+          id={id}
+          readOnly
+          rows={rows}
+          value={value}
+          aria-describedby={describedBy}
+          className="font-mono text-xs text-muted-foreground"
+        />
+      )}
+    </Field>
+  )
+}
+
 /** Linha de metadados, erros, avisos e a revisão do perfil (igual em linha e card). */
 function AgentDetails({
   view,
@@ -497,7 +572,11 @@ function AgentDetails({
   onReview,
   onApprove,
   compact = false
-}: { view: AgentView; state: AgentsState; compact?: boolean } & AgentHandlers): React.JSX.Element {
+}: {
+  view: AgentView
+  state: AgentsState
+  compact?: boolean
+} & AgentHandlers): React.JSX.Element | null {
   const p = view.profile
   const name = p?.name ?? view.id
   const flowName = p?.flow ? (state.flows.find((f) => f.id === p.flow)?.name ?? p.flow) : null
@@ -506,135 +585,156 @@ function AgentDetails({
     view.usageToday.runs === 1 ? '1 execução hoje' : `${view.usageToday.runs} execuções hoje`,
     flowName ? `fluxo ${flowName}` : null
   ].filter(Boolean)
+  const needsReview = view.status === 'needs_review' && p
+  if (
+    compact &&
+    view.errors.length === 0 &&
+    view.warnings.length === 0 &&
+    !needsReview &&
+    !(isReviewing && p)
+  ) {
+    return null
+  }
   return (
-    <VStack gap={2}>
-      {!compact && (
-        <Text type="supporting" color="secondary">
-          {details.join(' · ')}
-        </Text>
-      )}
+    <div className="flex flex-col gap-2">
+      {!compact && <p className="text-xs text-muted-foreground">{details.join(' · ')}</p>}
       {view.errors.map((e) => (
         <Alert key={e} tone="danger">
           {e}
         </Alert>
       ))}
       {view.warnings.map((w) => (
-        <Text key={w} type="supporting">
+        <p key={w} className="text-xs text-warn">
           {w}
-        </Text>
+        </p>
       ))}
-      {view.status === 'needs_review' && p && (
-        <Alert tone="warning">
+      {needsReview && (
+        <Alert
+          tone="warning"
+          {...(!isReviewing
+            ? {
+                action: (
+                  <Button size="xs" variant="outline" onClick={onReview}>
+                    {`Revisar ${name}`}
+                  </Button>
+                )
+              }
+            : {})}
+        >
           O perfil de {name} mudou no repositório desde a última aprovação. Revise antes de ele
           rodar de novo.
         </Alert>
       )}
       {isReviewing && p && (
-        <VStack gap={3}>
+        <div className="flex flex-col gap-3">
           <ProfileSummary profile={p} state={state} />
-          <TextArea
+          <ReadOnlyText
             label="O que vai no início da conversa"
             value={buildAgentPrompt(p)}
-            isReadOnly
             rows={8}
-            onChange={() => undefined}
           />
-          <HStack gap={2}>
-            <Button
-              size="sm"
-              variant="primary"
-              label="Aprovar este perfil"
-              isLoading={busy}
-              onClick={onApprove}
-            />
-            <Button size="sm" variant="ghost" label="Fechar" onClick={onReview} />
-          </HStack>
-        </VStack>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy} onClick={onApprove}>
+              {busy && <Spinner />}
+              Aprovar este perfil
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onReview}>
+              Fechar
+            </Button>
+          </div>
+        </div>
       )}
-    </VStack>
+    </div>
   )
 }
 
-/** Ações do agente: Revisar (quando pede), Editar e o menu com Duplicar/Arquivar. */
+/** Ações do agente: Editar e o menu com Duplicar/Arquivar (embutido: só Duplicar). */
 function AgentActions({
   view,
-  isReviewing,
   onEdit,
   onDuplicate,
-  onArchive,
-  onReview
+  onArchive
 }: { view: AgentView } & AgentHandlers): React.JSX.Element | null {
   const p = view.profile
-  const name = p?.name ?? view.id
+  if (!p) return null
+  const name = p.name
+  if (view.scope === 'builtin') {
+    return (
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label={`Duplicar ${name}`}
+        title="Duplicar"
+        onClick={onDuplicate}
+      >
+        <CopyIcon />
+      </Button>
+    )
+  }
   return (
-    <HStack gap={1} vAlign="center">
-      {view.status === 'needs_review' && p && !isReviewing && (
-        <Button size="sm" variant="secondary" label={`Revisar ${name}`} onClick={onReview} />
-      )}
-      {p && view.scope === 'builtin' && (
-        <IconButton
-          size="sm"
-          variant="ghost"
-          label={`Duplicar ${name}`}
-          icon={<Icon icon={CopyIcon} />}
-          onClick={onDuplicate}
-        />
-      )}
-      {p && view.scope !== 'builtin' && (
-        <>
-          <IconButton
-            size="sm"
-            variant="ghost"
-            label={`Editar ${name}`}
-            icon={<Icon icon={EditIcon} />}
-            onClick={onEdit}
-          />
-          <MoreMenu
-            label={`Ações de ${name}`}
-            size="sm"
-            items={[
-              { label: `Duplicar ${name}`, onClick: onDuplicate },
-              { label: p.archived ? `Desarquivar ${name}` : `Arquivar ${name}`, onClick: onArchive }
-            ]}
-          />
-        </>
-      )}
-    </HStack>
+    <div className="flex shrink-0 items-center">
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        aria-label={`Editar ${name}`}
+        title="Editar"
+        onClick={onEdit}
+      >
+        <EditIcon />
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="icon-sm" variant="ghost" aria-label={`Ações de ${name}`}>
+            <MoreIcon />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={onDuplicate}>{`Duplicar ${name}`}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onArchive}>
+            {p.archived ? `Desarquivar ${name}` : `Arquivar ${name}`}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   )
 }
 
 function AgentRow(
   props: { view: AgentView; state: AgentsState } & AgentHandlers
 ): React.JSX.Element {
-  const { view } = props
+  const { view, now } = props
   const p = view.profile
   const name = p?.name ?? view.id
   const status = STATUS_TOKEN[view.status]
   return (
-    <Item
-      as="li"
-      align="start"
-      startContent={<AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} />}
-      label={name}
-      description={
-        <VStack gap={1}>
-          {p && <Text type="supporting">{roleLine(view)}</Text>}
-          <AgentDetails {...props} />
-        </VStack>
-      }
-      endContent={
-        <HStack gap={2} vAlign="center">
-          <StatusToken tone={toneOf(status.color)} label={status.label} />
-          <AgentActions {...props} />
-        </HStack>
-      }
-    />
+    <li
+      aria-label={name}
+      className="flex items-start gap-3 border-b border-border-soft px-4 py-3 last:border-b-0"
+    >
+      <AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} size="md" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <span className="truncate font-medium">{name}</span>
+          {p && <span className="text-xs text-muted-foreground">{roleLine(view)}</span>}
+        </div>
+        <StatusToken tone={now.tone} label={now.text} data-testid="agent-now" />
+        <AgentDetails {...props} />
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Sparkline
+          values={view.activity}
+          label={`${view.activity.reduce((x, y) => x + y, 0)} execuções nas últimas 12 horas`}
+        />
+        <StatusToken tone={toneOf(status.color)} label={status.label} />
+        <AgentActions {...props} />
+      </div>
+    </li>
   )
 }
 
 /**
- * Card do agente (estilo das referências): avatar, nome e papel; o que está fazendo agora e a
- * atividade das últimas horas; as tarefas dele; vagas e custo do dia; ações no rodapé.
+ * Card do agente (mockup `.ag`): avatar, nome e descrição; o que está fazendo agora e a atividade
+ * das últimas horas; avisos e a revisão do perfil; no rodapé, as tarefas dele, vagas e custo.
  */
 function AgentCard(
   props: { view: AgentView; state: AgentsState } & AgentHandlers
@@ -648,62 +748,52 @@ function AgentCard(
     : null
   const cost = view.usageToday.costUsd > 0 ? `${formatUsd(view.usageToday.costUsd)} hoje` : null
   return (
-    <Card padding={4} role="listitem" aria-label={name} data-testid="agent-card">
-      <VStack gap={3} height="100%">
-        <HStack gap={3} vAlign="center">
-          <AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} size="lg" />
-          <StackItem size="fill">
-            <VStack gap={0.5}>
-              <Text weight="semibold" maxLines={1}>
-                {name}
-              </Text>
-              <Text type="supporting" color="secondary" maxLines={1}>
-                {p
-                  ? (p.instructions.split('\n').find((l) => l.trim()) ?? roleLine(view))
-                  : view.file}
-              </Text>
-            </VStack>
-          </StackItem>
-          {view.status !== 'ready' && (
-            <StatusToken tone={toneOf(status.color)} label={status.label} />
-          )}
-        </HStack>
-        <HStack gap={2} vAlign="center">
-          <StackItem size="fill">
-            <StatusToken tone={now.tone} label={now.text} data-testid="agent-now" />
-          </StackItem>
-          <Sparkline
-            values={view.activity}
-            label={`${view.activity.reduce((x, y) => x + y, 0)} execuções nas últimas 12 horas`}
-          />
-        </HStack>
-        <StackItem size="fill">
-          <AgentDetails {...props} compact />
-        </StackItem>
-        <Divider />
-        <HStack gap={2} vAlign="center" wrap="wrap">
-          {now.tasks.slice(0, 3).map((t) => (
-            <Token
-              key={t.taskId}
-              size="sm"
-              color={t.hot ? 'orange' : 'default'}
-              label={t.displayId ?? 'tarefa'}
-              className="orkio-mono"
-            />
-          ))}
-          {now.tasks.length === 0 && (
-            <Token size="sm" label={SCOPE_TAG[view.scope]} className="orkio-mono" />
-          )}
-          <StackItem size="fill" />
-          {(capacity || cost) && (
-            <Text type="supporting" color="secondary">
-              {[capacity, cost].filter(Boolean).join(' · ')}
-            </Text>
-          )}
-          <AgentActions {...props} />
-        </HStack>
-      </VStack>
-    </Card>
+    <div
+      role="listitem"
+      aria-label={name}
+      data-testid="agent-card"
+      className="flex flex-col gap-3 rounded-xl border border-border-soft bg-card p-3.5"
+    >
+      <div className="flex items-start gap-3">
+        <AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} size="lg" />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5">
+          <p className="truncate font-medium">{name}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {p ? (p.instructions.split('\n').find((l) => l.trim()) ?? roleLine(view)) : view.file}
+          </p>
+        </div>
+        <AgentActions {...props} />
+      </div>
+      <div className="flex items-center gap-2">
+        <StatusToken
+          tone={now.tone}
+          label={now.text}
+          data-testid="agent-now"
+          className="min-w-0 flex-1 text-sm"
+        />
+        <Sparkline
+          values={view.activity}
+          label={`${view.activity.reduce((x, y) => x + y, 0)} execuções nas últimas 12 horas`}
+        />
+      </div>
+      <AgentDetails {...props} compact />
+      <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-border-soft pt-2.5">
+        {now.tasks.slice(0, 3).map((t) => (
+          <Tag key={t.taskId} hot={t.hot}>
+            {t.displayId ?? 'tarefa'}
+          </Tag>
+        ))}
+        {now.tasks.length === 0 && <Tag>{SCOPE_TAG[view.scope]}</Tag>}
+        {view.status !== 'ready' && (
+          <StatusToken tone={toneOf(status.color)} label={status.label} className="ml-1" />
+        )}
+        {(capacity || cost) && (
+          <span className="tabular ml-auto text-2xs text-subtle-foreground">
+            {[capacity, cost].filter(Boolean).join(' · ')}
+          </span>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -716,19 +806,19 @@ function ProfileSummary({
 }): React.JSX.Element {
   const flow = p.flow ? (state.flows.find((f) => f.id === p.flow)?.name ?? p.flow) : 'o da coluna'
   return (
-    <VStack gap={1}>
-      <Text type="supporting">
+    <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+      <p>
         Papel: {AGENT_ROLE_LABELS[p.role]} · Modelo: {AGENT_MODEL_LABELS[p.model]} · Fluxo: {flow}
-      </Text>
-      <Text type="supporting">
+      </p>
+      <p>
         Entrega: {p.delivery ? 'pode (com os gates do Orkio)' : 'não pode'} · Comandos:{' '}
         {p.commands.length === 0 ? 'todos' : p.commands.map((c) => `/${c}`).join(', ')}
-      </Text>
-      <Text type="supporting">
+      </p>
+      <p>
         Limites: {p.limits.parallel} em paralelo · {p.limits.stepsPerDay} execuções/dia
         {p.limits.costPerDayUsd !== null ? ` · US$ ${p.limits.costPerDayUsd}/dia` : ''}
-      </Text>
-    </VStack>
+      </p>
+    </div>
   )
 }
 
@@ -764,176 +854,161 @@ function AgentEditor({
   const [costText, setCostText] = useState(
     d.limits.costPerDayUsd === null ? '' : String(d.limits.costPerDayUsd)
   )
+  const title = isNew ? 'Novo agente' : `Editar ${d.name}`
 
   return (
-    <Card role="form" aria-label={isNew ? 'Novo agente' : `Editar ${d.name}`}>
-      <VStack gap={4}>
-        <Heading level={2}>{isNew ? 'Novo agente' : `Editar ${d.name}`}</Heading>
-        <HStack gap={3} wrap="wrap">
-          <StackItem size="fill">
-            <TextInput
-              label="Nome"
-              value={d.name}
-              isRequired
-              onChange={(name: string) =>
-                set(isNew && !idTouched ? { name, id: agentIdFromName(name) } : { name })
-              }
-            />
-          </StackItem>
-          <StackItem size="fill">
-            <TextInput
-              label="Id"
-              description="Nome do arquivo (.orkio/agents/<id>.md). Não muda depois de criado."
-              value={d.id}
-              isDisabled={!isNew}
-              onChange={(id: string) => {
-                setIdTouched(true)
-                set({ id })
-              }}
-            />
-          </StackItem>
-        </HStack>
-        <HStack gap={3} wrap="wrap">
-          <StackItem size="fill">
-            <Selector
-              label="Papel"
-              options={AGENT_ROLES.map((r) => ({ value: r, label: AGENT_ROLE_LABELS[r] }))}
-              value={d.role}
-              onChange={(role: string) => set({ role: role as AgentProfile['role'] })}
-            />
-          </StackItem>
-          <StackItem size="fill">
-            <Selector
-              label="Cor"
-              options={AGENT_COLORS.map((c) => ({ value: c, label: COLOR_LABELS[c] }))}
-              value={d.color}
-              onChange={(color: string) => set({ color: color as AgentColor })}
-            />
-          </StackItem>
-          <StackItem size="fill">
-            <Selector
-              label="Modelo"
-              options={AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }))}
-              value={d.model}
-              onChange={(model: string) => set({ model: model as AgentProfile['model'] })}
-            />
-          </StackItem>
-        </HStack>
-        <Selector
-          label="Fluxo preferido"
-          description="Usado quando a coluna dispara um fluxo e a tarefa é deste agente. Sem fluxo preferido, roda o fluxo da coluna com as instruções do agente."
+    <div
+      role="form"
+      aria-label={title}
+      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
+    >
+      <h2 className="text-base font-medium">{title}</h2>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <TextField
+          label="Nome"
+          value={d.name}
+          required
+          onChange={(name) =>
+            set(isNew && !idTouched ? { name, id: agentIdFromName(name) } : { name })
+          }
+        />
+        <TextField
+          label="Id"
+          description="Nome do arquivo (.orkio/agents/<id>.md). Não muda depois de criado."
+          value={d.id}
+          mono
+          disabled={!isNew}
+          onChange={(id) => {
+            setIdTouched(true)
+            set({ id })
+          }}
+        />
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <SelectField
+          label="Papel"
+          options={AGENT_ROLES.map((r) => ({ value: r, label: AGENT_ROLE_LABELS[r] }))}
+          value={d.role}
+          onChange={(role) => set({ role: role as AgentProfile['role'] })}
+        />
+        <SelectField
+          label="Cor"
+          options={AGENT_COLORS.map((c) => ({ value: c, label: COLOR_LABELS[c] }))}
+          value={d.color}
+          onChange={(color) => set({ color: color as AgentColor })}
+        />
+        <SelectField
+          label="Modelo"
+          options={AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }))}
+          value={d.model}
+          onChange={(model) => set({ model: model as AgentProfile['model'] })}
+        />
+      </div>
+      <SelectField
+        label="Fluxo preferido"
+        description="Usado quando a coluna dispara um fluxo e a tarefa é deste agente. Sem fluxo preferido, roda o fluxo da coluna com as instruções do agente."
+        options={[
+          { value: '', label: 'O fluxo da coluna' },
+          ...(state?.flows ?? []).map((f) => ({ value: f.id, label: f.name }))
+        ]}
+        value={d.flow ?? ''}
+        onChange={(flow) => set({ flow: flow || null })}
+      />
+      <MultiSelectField
+        label="Comandos permitidos"
+        placeholder="Todos os comandos"
+        options={commandOptions}
+        value={d.commands}
+        hasSearch
+        onChange={(value) => set({ commands: value })}
+      />
+      <CheckboxField
+        label="Pode entregar (push, PR e pedir review, sempre pelos gates do Orkio)"
+        checked={d.delivery}
+        onChange={(delivery) => set({ delivery })}
+      />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <SelectField
+          label="Fluxos ao mesmo tempo"
+          options={Array.from({ length: AGENT_LIMITS.parallel }, (_, i) => ({
+            value: String(i + 1),
+            label: String(i + 1)
+          }))}
+          value={String(d.limits.parallel)}
+          onChange={(v) => set({ limits: { ...d.limits, parallel: Number(v) } })}
+        />
+        <TextField
+          label="Execuções do Claude Code por dia"
+          value={stepsText}
+          onChange={(v) => {
+            setStepsText(v)
+            const n = Number(v)
+            set({ limits: { ...d.limits, stepsPerDay: Number.isFinite(n) ? n : 0 } })
+          }}
+        />
+        <TextField
+          label="Custo máximo por dia (US$)"
+          description="Vazio = sem limite."
+          value={costText}
+          onChange={(v) => {
+            setCostText(v)
+            const t = v.trim().replace(',', '.')
+            set({ limits: { ...d.limits, costPerDayUsd: t === '' ? null : Number(t) } })
+          }}
+        />
+      </div>
+      <TextAreaField
+        label="Instruções"
+        description="Como este agente trabalha: convenções, o que sempre fazer, o que evitar. Nada de tokens ou senhas."
+        value={d.instructions}
+        rows={8}
+        onChange={(instructions) =>
+          set({ instructions: instructions.slice(0, AGENT_LIMITS.instructions) })
+        }
+      />
+      {isNew && (
+        <RadioListField
+          label="Onde salvar"
+          value={editing.scope}
+          onChange={(scope) => onChange({ ...editing, scope: scope as AgentScope })}
           options={[
-            { value: '', label: 'O fluxo da coluna' },
-            ...(state?.flows ?? []).map((f) => ({ value: f.id, label: f.name }))
+            {
+              value: 'repo',
+              label: 'No repositório do projeto',
+              description:
+                'Grava .orkio/agents/<id>.md na pasta do projeto (sem commit). O time usa o mesmo agente.'
+            },
+            {
+              value: 'local',
+              label: 'Só neste computador',
+              description: 'Vale para todos os seus projetos.'
+            }
           ]}
-          value={d.flow ?? ''}
-          onChange={(flow: string) => set({ flow: flow || null })}
         />
-        <MultiSelector
-          label="Comandos permitidos"
-          placeholder="Todos os comandos"
-          options={commandOptions}
-          value={d.commands}
-          triggerDisplay="labels"
-          hasSearch
-          onChange={(value: string[]) => set({ commands: value })}
-        />
-        <CheckboxInput
-          label="Pode entregar (push, PR e pedir review, sempre pelos gates do Orkio)"
-          value={d.delivery}
-          onChange={(delivery) => set({ delivery })}
-        />
-        <HStack gap={3} wrap="wrap">
-          <StackItem size="fill">
-            <Selector
-              label="Fluxos ao mesmo tempo"
-              options={Array.from({ length: AGENT_LIMITS.parallel }, (_, i) => ({
-                value: String(i + 1),
-                label: String(i + 1)
-              }))}
-              value={String(d.limits.parallel)}
-              onChange={(v: string) => set({ limits: { ...d.limits, parallel: Number(v) } })}
-            />
-          </StackItem>
-          <StackItem size="fill">
-            <TextInput
-              label="Execuções do Claude Code por dia"
-              value={stepsText}
-              onChange={(v: string) => {
-                setStepsText(v)
-                const n = Number(v)
-                set({ limits: { ...d.limits, stepsPerDay: Number.isFinite(n) ? n : 0 } })
-              }}
-            />
-          </StackItem>
-          <StackItem size="fill">
-            <TextInput
-              label="Custo máximo por dia (US$)"
-              description="Vazio = sem limite."
-              value={costText}
-              onChange={(v: string) => {
-                setCostText(v)
-                const t = v.trim().replace(',', '.')
-                set({ limits: { ...d.limits, costPerDayUsd: t === '' ? null : Number(t) } })
-              }}
-            />
-          </StackItem>
-        </HStack>
-        <TextArea
-          label="Instruções"
-          description="Como este agente trabalha: convenções, o que sempre fazer, o que evitar. Nada de tokens ou senhas."
-          value={d.instructions}
-          maxLength={AGENT_LIMITS.instructions}
-          rows={8}
-          onChange={(instructions) => set({ instructions })}
-        />
-        {isNew && (
-          <RadioList
-            label="Onde salvar"
-            value={editing.scope}
-            onChange={(scope) => onChange({ ...editing, scope: scope as AgentScope })}
-          >
-            <RadioListItem
-              value="repo"
-              label="No repositório do projeto"
-              description="Grava .orkio/agents/<id>.md na pasta do projeto (sem commit). O time usa o mesmo agente."
-            />
-            <RadioListItem
-              value="local"
-              label="Só neste computador"
-              description="Vale para todos os seus projetos."
-            />
-          </RadioList>
-        )}
-        <TextArea
-          label="Prévia: o que vai no início da conversa"
-          description="Entra com --append-system-prompt. O resumo da tarefa continua igual."
-          value={buildAgentPrompt(d)}
-          isReadOnly
-          rows={6}
-          onChange={() => undefined}
-        />
-        {errors.length > 0 && (
-          <VStack gap={1}>
-            {errors.map((e) => (
-              <Text key={e} type="supporting">
-                {e}
-              </Text>
-            ))}
-          </VStack>
-        )}
-        <HStack gap={2}>
-          <Button
-            variant="primary"
-            label="Salvar agente"
-            isLoading={busy}
-            isDisabled={errors.length > 0}
-            onClick={() => onSave(editing)}
-          />
-          <Button variant="ghost" label="Cancelar" onClick={onCancel} />
-        </HStack>
-      </VStack>
-    </Card>
+      )}
+      <ReadOnlyText
+        label="Prévia: o que vai no início da conversa"
+        description="Entra com --append-system-prompt. O resumo da tarefa continua igual."
+        value={buildAgentPrompt(d)}
+        rows={6}
+      />
+      {errors.length > 0 && (
+        <ul className="flex flex-col gap-1 text-xs text-danger">
+          {errors.map((e) => (
+            <li key={e}>{e}</li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2">
+        <Button disabled={busy || errors.length > 0} onClick={() => onSave(editing)}>
+          {busy && <Spinner />}
+          Salvar agente
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -953,10 +1028,12 @@ export function AssignRules({
   )
   if (state.stages.length === 0) {
     return (
-      <VStack gap={2}>
-        <Heading level={2}>Atribuição por coluna</Heading>
-        <Text type="supporting">Crie o quadro deste projeto para atribuir tarefas por coluna.</Text>
-      </VStack>
+      <div className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium">Atribuição por coluna</h2>
+        <p className="text-xs text-muted-foreground">
+          Crie o quadro deste projeto para atribuir tarefas por coluna.
+        </p>
+      </div>
     )
   }
   const stageName = (id: string): string =>
@@ -967,68 +1044,74 @@ export function AssignRules({
   const dirty = JSON.stringify(rules) !== JSON.stringify(state.rules)
 
   return (
-    <VStack gap={3}>
-      <Heading level={2}>Atribuição por coluna</Heading>
-      <Text type="supporting">
+    <div className="flex flex-col gap-3 rounded-xl border border-border-soft bg-card p-4">
+      <h2 className="text-sm font-medium">Atribuição por coluna</h2>
+      <p className="text-xs text-muted-foreground">
         Tarefa sem agente que entra na coluna (à mão ou por automação) fica com o agente escolhido.
         Se a coluna tem fluxo ligado ao entrar, ele começa com esse agente.
-      </Text>
+      </p>
       {rules.length > 0 && (
-        <List hasDividers density="compact" aria-label="Regras de atribuição">
+        <ul aria-label="Regras de atribuição" className="rounded-lg border border-border-soft">
           {rules.map((r) => (
-            <Item
-              as="li"
+            <li
               key={r.stageId}
-              label={`Ao entrar em ${stageName(r.stageId)}, atribuir a ${agentName(r.agentKey)}`}
-              endContent={
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  isIconOnly
-                  label={`Remover regra de ${stageName(r.stageId)}`}
-                  icon={<Icon icon={TrashIcon} />}
-                  onClick={() => setRules(rules.filter((x) => x.stageId !== r.stageId))}
-                />
-              }
-            />
+              className="flex items-center gap-3 border-b border-border-soft px-3 py-2 last:border-b-0"
+            >
+              <span className="min-w-0 flex-1">
+                {`Ao entrar em ${stageName(r.stageId)}, atribuir a ${agentName(r.agentKey)}`}
+              </span>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={`Remover regra de ${stageName(r.stageId)}`}
+                onClick={() => setRules(rules.filter((x) => x.stageId !== r.stageId))}
+              >
+                <TrashIcon />
+              </Button>
+            </li>
           ))}
-        </List>
+        </ul>
       )}
       {free.length > 0 && usable.length > 0 && (
-        <HStack gap={2} vAlign="end" wrap="wrap">
-          <Selector
+        <div className="flex flex-wrap items-end gap-2">
+          <SelectField
+            className="w-56"
             label="Ao entrar em"
             placeholder="Escolha a coluna"
             options={free.map((s) => ({ value: s.id, label: s.name }))}
-            {...(stageId ? { value: stageId } : {})}
-            onChange={(v: string) => setStageId(v)}
+            value={stageId || null}
+            onChange={(v) => setStageId(v)}
           />
-          <Selector
+          <SelectField
+            className="w-56"
             label="Atribuir a"
             placeholder="Escolha o agente"
             options={usable.map((a) => ({ value: a.key, label: a.profile!.name }))}
-            {...(agentKey ? { value: agentKey } : {})}
-            onChange={(v: string) => setAgentKey(v)}
+            value={agentKey || null}
+            onChange={(v) => setAgentKey(v)}
           />
           <Button
-            variant="secondary"
-            label="Adicionar regra"
-            isDisabled={!stageId || !agentKey}
+            variant="outline"
+            disabled={!stageId || !agentKey}
             onClick={() => {
               setRules([...rules, { stageId, agentKey }])
               setStageId('')
               setAgentKey('')
             }}
-          />
-        </HStack>
+          >
+            Adicionar regra
+          </Button>
+        </div>
       )}
       {dirty && (
-        <HStack gap={2}>
-          <Button variant="primary" label="Salvar regras" onClick={() => void onSave(rules)} />
-          <Button variant="ghost" label="Descartar" onClick={() => setRules(state.rules)} />
-        </HStack>
+        <div className="flex gap-2">
+          <Button onClick={() => void onSave(rules)}>Salvar regras</Button>
+          <Button variant="ghost" onClick={() => setRules(state.rules)}>
+            Descartar
+          </Button>
+        </div>
       )}
-    </VStack>
+    </div>
   )
 }
 

@@ -1,6 +1,4 @@
-import { Text } from '@astryxdesign/core/Text'
-import { Timestamp } from '@astryxdesign/core/Timestamp'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Timestamp } from '@/components/Timestamp'
 import type { ActivityItem } from '../../../../shared/overview'
 import type { Flow, StageFlow, Step } from '../../../../shared/task-flow'
 import { ExecutionsTable, SentenceDetail } from '../../components/SentenceDetail'
@@ -108,36 +106,37 @@ export function FlowDetail({
       label={`Fluxo ${flow.name}`}
       sentence={describeFlow(flow, bindings, stageName, actionLabel)}
       starts={
-        <VStack gap={1}>
+        <div className="flex flex-col gap-1">
           {bindings.length === 0 ? (
-            <Text>
+            <p>
               Não está ligado a nenhuma coluna. Ligue em Etapas e automações (“Fluxo desta coluna”)
               ou rode pelo painel da tarefa.
-            </Text>
+            </p>
           ) : (
             bindings.map((b) => (
-              <Text key={b.stageId}>
+              <p key={b.stageId}>
                 {b.mode === 'on_enter'
                   ? `Quando a tarefa entra em ${stageName(b.stageId)}.`
                   : `Pelo botão “Rodar fluxo” em tarefas de ${stageName(b.stageId)}.`}
-              </Text>
+              </p>
             ))
           )}
-        </VStack>
+        </div>
       }
       does={
         flow.steps.length === 0 ? (
-          <Text type="supporting" color="secondary">
-            Nenhum passo ainda.
-          </Text>
+          <p className="text-xs text-muted-foreground">Nenhum passo ainda.</p>
         ) : (
-          <VStack gap={1} role="list" aria-label="Passos em frase">
+          <ol aria-label="Passos em frase" className="flex flex-col gap-1">
             {flow.steps.map((s, i) => (
-              <Text key={s.id} role="listitem">
-                {i + 1}. {stepSentence(s, stepName, actionLabel)}
-              </Text>
+              <li key={s.id} className="flex gap-2">
+                <span className="tabular w-4 shrink-0 font-mono text-xs leading-5 text-subtle-foreground">
+                  {i + 1}.
+                </span>
+                <span className="min-w-0">{stepSentence(s, stepName, actionLabel)}</span>
+              </li>
             ))}
-          </VStack>
+          </ol>
         )
       }
       executions={
@@ -158,7 +157,10 @@ export function FlowDetail({
           value: last ? <Timestamp value={last.at} format="auto" /> : 'Nunca'
         },
         { label: 'Execuções recentes', value: executions ? String(executions.length) : '…' },
-        { label: 'Id', value: <Text type="code">{flow.id}</Text> }
+        {
+          label: 'Id',
+          value: <code className="font-mono text-xs text-subtle-foreground">{flow.id}</code>
+        }
       ]}
       onEdit={onEdit}
     />

@@ -1,11 +1,14 @@
-import { useMemo, useRef } from 'react'
-import { CommandPalette } from '@astryxdesign/core/CommandPalette'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Kbd } from '@astryxdesign/core/Kbd'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import type { SearchableItem, SearchSource } from '@astryxdesign/core/Typeahead'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem as CommandRowItem,
+  CommandList
+} from '@/components/ui/command'
+import { Kbd } from '@/components/ui/kbd'
+import { Spinner } from '@/components/Spinner'
 import type { BoardCard, ProjectView } from '../../../shared/ipc-contract'
 import { SETTINGS_TITLES, type Route, type SettingsSection } from './routes'
 import { SHORTCUTS } from './shortcuts'
@@ -23,7 +26,16 @@ export interface CommandData {
   url?: string
 }
 
-export type CommandItem = SearchableItem<CommandData>
+export interface CommandItem {
+  id: string
+  label: string
+  auxiliaryData?: CommandData
+}
+
+interface SearchSource {
+  bootstrap(): Promise<CommandItem[]>
+  search(query: string): Promise<CommandItem[]>
+}
 
 /** Comandos fixos de navegação, com o atalho de cada um, e as seções de Configurações. */
 function navigationItems(hasProject: boolean): CommandItem[] {
@@ -141,9 +153,7 @@ export function CommandMenu({
   currentProjectId: string | null
   onRun(item: CommandData): void
 }): React.JSX.Element {
-  // id → comando, dos itens já mostrados (a seleção só devolve o id).
-  const index = useRef(new Map<string, CommandData>())
-  const source = useMemo((): SearchSource<CommandItem> => {
+  const source = useMemo((): SearchSource => {
     let tasks: Promise<CommandItem[]> | null = null
     const all = async (): Promise<CommandItem[]> => {
       tasks ??= loadTasks(projects)
@@ -154,10 +164,7 @@ export function CommandMenu({
           label: `Trocar para ${p.name}`,
           auxiliaryData: { group: 'Projetos', projectId: p.id }
         }))
-      const items = [...(await tasks), ...navigationItems(projects.length > 0), ...switchItems]
-      for (const item of items)
-        if (item.auxiliaryData) index.current.set(item.id, item.auxiliaryData)
-      return items
+      return [...(await tasks), ...navigationItems(projects.length > 0), ...switchItems]
     }
     // Modo tarefas: tarefas do quadro (para saber o que abre no Orkio) + busca no Notion.
     let board: Promise<Set<string>> | null = null
@@ -172,10 +179,7 @@ export function CommandMenu({
             )
           )
       )
-      const items = await searchNotionTasks(query, await board)
-      for (const item of items)
-        if (item.auxiliaryData) index.current.set(item.id, item.auxiliaryData)
-      return items
+      return searchNotionTasks(query, await board)
     }
     if (mode === 'tasks') {
       return { bootstrap: () => notion(''), search: (query) => notion(query) }
@@ -197,25 +201,97 @@ export function CommandMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, currentProjectId, isOpen, mode])
 
+  const [query, setQuery] = useState('')
+  const [items, setItems] = useState<CommandItem[] | null>(null)
+  // Ao fechar, limpa a busca (ajuste de estado durante a renderização, sem efeito).
+  const [wasOpen, setWasOpen] = useState(isOpen)
+  if (wasOpen !== isOpen) {
+    setWasOpen(isOpen)
+    if (!isOpen) {
+      setQuery('')
+      setItems(null)
+    }
+  }
+  useEffect(() => {
+    if (!isOpen) return
+    let alive = true
+    // Busca no Notion com um respiro entre teclas; a lista local responde na hora.
+    const delay = mode === 'tasks' && query.trim() ? 250 : 0
+    const timer = window.setTimeout(() => {
+      const run = query.trim() ? source.search(query) : source.bootstrap()
+      void run
+        .then((list) => alive && setItems(list))
+        .catch(() => alive && setItems([]))
+    }, delay)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [isOpen, query, source, mode])
+
+  const groups = useMemo(() => {
+    const map = new Map<string, CommandItem[]>()
+    for (const item of items ?? []) {
+      const g = item.auxiliaryData?.group ?? ''
+      map.set(g, [...(map.get(g) ?? []), item])
+    }
+    return [...map.entries()]
+  }, [items])
+
+  const label = mode === 'tasks' ? 'Buscar tarefas no Notion' : 'Buscar tarefas e comandos'
   return (
-    <CommandPalette<CommandItem>
-      isOpen={isOpen}
+    <CommandDialog
+      open={isOpen}
       onOpenChange={onOpenChange}
-      label={mode === 'tasks' ? 'Buscar tarefas no Notion' : 'Buscar tarefas e comandos'}
-      searchSource={source}
-      value=""
-      onValueChange={(id) => {
-        const data = index.current.get(id)
-        if (data) onRun(data)
-      }}
-      emptySearchText={
-        mode === 'tasks' ? 'Nenhuma tarefa sua com esse ID ou título' : 'Nada encontrado'
+      title={label}
+      description={
+        mode === 'tasks'
+          ? 'Título ou ID de qualquer tarefa do banco de Tarefas do Notion.'
+          : 'Tarefas, telas e projetos.'
       }
-      emptyBootstrapText={
-        mode === 'tasks' ? 'Nenhuma tarefa sua nos projetos vinculados' : 'Digite para buscar'
-      }
-      renderItem={(item) => <CommandRow item={item} />}
-    />
+      showCloseButton={false}
+      shouldFilter={false}
+    >
+      <CommandInput
+        value={query}
+        onValueChange={setQuery}
+        placeholder={mode === 'tasks' ? 'Título ou ID (ex.: ORK-142)…' : 'Buscar tarefa, tela ou projeto…'}
+        aria-label={label}
+      />
+      <CommandList className="max-h-[60vh]">
+        {items === null ? (
+          <div className="flex items-center gap-2 px-4 py-6 text-xs text-muted-foreground">
+            <Spinner /> Buscando…
+          </div>
+        ) : (
+          <CommandEmpty>
+            {query.trim()
+              ? mode === 'tasks'
+                ? 'Nenhuma tarefa com esse ID ou título'
+                : 'Nada encontrado'
+              : mode === 'tasks'
+                ? 'Nenhuma tarefa nos projetos vinculados'
+                : 'Digite para buscar'}
+          </CommandEmpty>
+        )}
+        {groups.map(([group, list]) => (
+          <CommandGroup key={group} heading={group}>
+            {list.map((item) => (
+              <CommandRowItem
+                key={item.id}
+                value={item.id}
+                onSelect={() => {
+                  if (item.auxiliaryData) onRun(item.auxiliaryData)
+                  onOpenChange(false)
+                }}
+              >
+                <CommandRow item={item} />
+              </CommandRowItem>
+            ))}
+          </CommandGroup>
+        ))}
+      </CommandList>
+    </CommandDialog>
   )
 }
 
@@ -226,25 +302,34 @@ function CommandRow({ item }: { item: CommandItem }): React.JSX.Element {
       ? item.label.slice(data.taskRef.displayId.length).trim()
       : item.label
     return (
-      <HStack gap={2} vAlign="center" width="100%">
-        {data.taskRef.displayId && <Code>{data.taskRef.displayId}</Code>}
-        <StackItem size="fill">
-          <Text>{title}</Text>
-        </StackItem>
-        <Text type="supporting" color="secondary">
+      <span className="flex w-full min-w-0 items-center gap-2">
+        {data.taskRef.displayId && (
+          <span className="shrink-0 font-mono text-xs text-subtle-foreground">
+            {data.taskRef.displayId}
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className="shrink-0 truncate text-xs text-muted-foreground">
           {data.taskRef.where}
-        </Text>
-      </HStack>
+        </span>
+      </span>
     )
   }
   return (
-    <HStack gap={2} vAlign="center" width="100%">
-      <StackItem size="fill">
-        <Text>{item.label}</Text>
-      </StackItem>
-      {data?.keys && <Kbd keys={data.keys} />}
-    </HStack>
+    <span className="flex w-full items-center gap-2">
+      <span className="flex-1">{item.label}</span>
+      {data?.keys && <Kbd>{formatKeys(data.keys)}</Kbd>}
+    </span>
   )
+}
+
+/** "mod+1" → "Ctrl 1" / "⌘ 1". */
+export function formatKeys(keys: string): string {
+  const mac = navigator.userAgent.includes('Mac')
+  return keys
+    .split('+')
+    .map((k) => (k === 'mod' ? (mac ? '⌘' : 'Ctrl') : k.length === 1 ? k.toUpperCase() : k))
+    .join(' ')
 }
 
 /** Busca sem diferenciar maiúsculas e acentos. */

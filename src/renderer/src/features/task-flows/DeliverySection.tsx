@@ -1,9 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Card } from '@astryxdesign/core/Card'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { Heading } from '@astryxdesign/core/Heading'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Skeleton } from '@/components/ui/skeleton'
+import { CheckboxField } from '@/components/form'
 import { Alert } from '../../components/Alert'
 
 /**
@@ -27,20 +24,20 @@ export function DeliverySection({ projectId }: { projectId: string }): React.JSX
   }, [projectId])
 
   return (
-    <Card role="region" aria-label="Entrega">
-      <VStack gap={2}>
-        <Heading level={2}>Entrega</Heading>
+    <section aria-label="Entrega" className="flex flex-col gap-3">
+      <h2 className="text-base font-medium">Entrega</h2>
+      <div className="rounded-xl border border-border-soft bg-card px-4 py-3.5">
         {requireApproval === null ? (
           error ? (
             <Alert tone="danger">{error}</Alert>
           ) : (
-            <Skeleton height={32} aria-label="Carregando ajustes de entrega" />
+            <Skeleton className="h-8" aria-label="Carregando ajustes de entrega" />
           )
         ) : (
-          <CheckboxInput
+          <CheckboxField
             label="Exigir minha aprovação para push"
             description="Antes de cada push da branch da tarefa (pelo Orkio ou pelo Claude Code em modo entrega), o fluxo mostra commits, diff e destino e espera você. A branch padrão (main/master, develop, production, release) nunca recebe push, com ou sem este ajuste."
-            value={requireApproval}
+            checked={requireApproval}
             onChange={(on) =>
               void window.orkio.taskFlows
                 .setDelivery(projectId, { requirePushApproval: on })
@@ -53,8 +50,8 @@ export function DeliverySection({ projectId }: { projectId: string }): React.JSX
             }
           />
         )}
-        {requireApproval !== null && error && <Alert tone="danger">{error}</Alert>}
-      </VStack>
-    </Card>
+      </div>
+      {requireApproval !== null && error && <Alert tone="danger">{error}</Alert>}
+    </section>
   )
 }

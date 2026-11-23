@@ -1,24 +1,30 @@
-import { ScreenTitle } from '../../components/ScreenTitle'
 import { useEffect, useMemo, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { EmptyState } from '@astryxdesign/core/EmptyState'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { MoreMenu } from '@astryxdesign/core/MoreMenu'
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
-import { Selector } from '@astryxdesign/core/Selector'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { TextInput } from '@astryxdesign/core/TextInput'
-import { ToggleButton } from '@astryxdesign/core/ToggleButton'
-import { Tooltip } from '@astryxdesign/core/Tooltip'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Select } from '@/components/ui/select'
+import { Toggle } from '@/components/ui/toggle'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { CheckboxField, SegmentedControl } from '@/components/form'
+import { cn } from '@/lib/utils'
 import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
+import { ScreenTitle } from '../../components/ScreenTitle'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
-import { PageState } from '../../components/PageState'
-import { AutomationIcon, PauseIcon, RefreshIcon } from '../../components/icons'
+import { EmptyState, PageState } from '../../components/PageState'
+import { Spinner } from '../../components/Spinner'
+import {
+  AutomationIcon,
+  MoreIcon,
+  PauseIcon,
+  RefreshIcon,
+  SearchIcon
+} from '../../components/icons'
 import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
 import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
@@ -50,7 +56,7 @@ export function BoardPage({
 }): React.JSX.Element {
   if (!project) {
     return (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5 p-4">
         <ScreenBarStart>
           <ScreenTitle look={5}>Quadro</ScreenTitle>
         </ScreenBarStart>
@@ -60,7 +66,7 @@ export function BoardPage({
           description="Vincule um projeto a um projeto do Notion em Projetos para abrir o quadro."
           action={{ label: 'Ir para Projetos', onClick: onOpenProjects }}
         />
-      </VStack>
+      </div>
     )
   }
   return (
@@ -136,23 +142,25 @@ function Board({
 
   if (!view) {
     return (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5 p-4">
         {header()}
         {board.error ? (
           <BoardErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
         ) : (
           <PageState kind="loading" label="Carregando quadro" />
         )}
-      </VStack>
+      </div>
     )
   }
 
   if (!view.config) {
     return (
-      <VStack gap={5}>
-        {header()}
-        <BoardSettings view={view} onSave={(input) => board.save(input)} onCancel={undefined} />
-      </VStack>
+      <div className="h-full overflow-y-auto">
+        <div className="mx-auto flex max-w-[63rem] flex-col gap-5 px-8 py-6">
+          {header()}
+          <BoardSettings view={view} onSave={(input) => board.save(input)} onCancel={undefined} />
+        </div>
+      </div>
     )
   }
 
@@ -164,10 +172,11 @@ function Board({
       void board.setAutomationPaused(taskId, paused),
     onExpand: onOpenTask
   }
+  const refreshing = board.loading || automation.running
 
   return (
     // Ocupa a altura útil da janela: as colunas e o painel rolam por dentro.
-    <VStack gap={4} height="100%">
+    <div className="flex h-full min-h-0 flex-col gap-3 p-3.5">
       <ScreenBarStart>
         <ScreenTitle look={5}>Quadro</ScreenTitle>
         <SegmentedControl
@@ -175,10 +184,11 @@ function Board({
           size="sm"
           value={layout}
           onChange={(v) => setLayout(v === 'list' ? 'list' : 'kanban')}
-        >
-          <SegmentedControlItem value="kanban" label="Kanban" />
-          <SegmentedControlItem value="list" label="Lista" />
-        </SegmentedControl>
+          options={[
+            { value: 'kanban', label: 'Kanban' },
+            { value: 'list', label: 'Lista' }
+          ]}
+        />
         <AgentRow
           cards={view.cards}
           badges={agentBadges}
@@ -188,60 +198,75 @@ function Board({
         />
       </ScreenBarStart>
       <ScreenBarEnd>
-        <TextInput
-          type="search"
-          size="sm"
-          label="Buscar tarefas"
-          isLabelHidden
-          placeholder="Filtrar por ID ou título"
-          hasClear
-          value={query}
-          onChange={setQuery}
-        />
+        <div className="relative w-56">
+          <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-subtle-foreground" />
+          <Input
+            type="search"
+            aria-label="Buscar tarefas"
+            placeholder="Filtrar por ID ou título"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-7 pl-7 text-xs"
+          />
+        </div>
         <Button
           size="sm"
-          label="Atualizar"
-          icon={<Icon icon={RefreshIcon} />}
-          isLoading={board.loading || automation.running}
+          variant="outline"
+          disabled={refreshing}
           onClick={() => {
             // Verifica git/GitHub agora (automações) e relê o Notion.
             void automation.runNow().then(() => board.load(true))
           }}
-        />
-        <MoreMenu
-          label="Mais ações do quadro"
-          size="sm"
-          alignment="end"
-          items={[
-            {
-              label: automation.status?.paused ? 'Retomar automações' : 'Pausar todas',
-              onClick: () => void automation.setPaused(!automation.status?.paused)
-            }
-          ]}
-        />
+        >
+          {refreshing ? <Spinner className="size-3.5" /> : <RefreshIcon />}
+          Atualizar
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label="Mais ações do quadro">
+              <MoreIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              onSelect={() => void automation.setPaused(!automation.status?.paused)}
+            >
+              {automation.status?.paused ? 'Retomar automações' : 'Pausar todas'}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </ScreenBarEnd>
       {/* Filtros finos e o estado das automações, numa linha só acima das colunas. */}
-      <HStack gap={4} vAlign="center" wrap="wrap" role="toolbar" aria-label="Filtros do quadro">
+      <div
+        role="toolbar"
+        aria-label="Filtros do quadro"
+        className="flex flex-wrap items-center gap-4 px-1"
+      >
         {priorities.length > 0 && (
-          <Selector
-            label="Prioridade"
-            isLabelHidden
+          <Select
+            aria-label="Prioridade"
             size="sm"
             placeholder="Todas as prioridades"
-            hasClear
+            clearLabel="Todas as prioridades"
+            onClear={() => setPriority(null)}
             options={priorities.map((p) => ({ value: p, label: p }))}
             value={priority}
-            onChange={(value: string | null) => setPriority(value)}
+            onChange={(value) => setPriority(value)}
+            className="w-48"
           />
         )}
-        <CheckboxInput label="Só bloqueadas" value={onlyBlocked} onChange={setOnlyBlocked} />
-        <StackItem size="fill" />
+        <CheckboxField label="Só bloqueadas" checked={onlyBlocked} onChange={setOnlyBlocked} />
+        <div className="flex-1" />
         <AutomationLine status={automation.status} onOpenIntegrations={onOpenIntegrations} />
-      </HStack>
+      </div>
       {view.pendingCount > 0 && (
         <Alert
           tone="warning"
-          action={<Button size="sm" label="Tentar agora" onClick={() => void board.retryNow()} />}
+          action={
+            <Button size="sm" variant="outline" onClick={() => void board.retryNow()}>
+              Tentar agora
+            </Button>
+          }
         >
           {view.pendingCount === 1
             ? '1 alteração aguardando o Notion.'
@@ -256,22 +281,16 @@ function Board({
         <Alert
           tone="danger"
           action={
-            <HStack gap={2}>
+            <>
               {board.notice.canReconnect && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  label="Ir para Integrações"
-                  onClick={onOpenIntegrations}
-                />
+                <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
+                  Ir para Integrações
+                </Button>
               )}
-              <Button
-                size="sm"
-                variant="ghost"
-                label="Fechar aviso"
-                onClick={board.dismissNotice}
-              />
-            </HStack>
+              <Button size="sm" variant="ghost" onClick={board.dismissNotice}>
+                Fechar aviso
+              </Button>
+            </>
           }
         >
           {board.notice.message}
@@ -279,58 +298,53 @@ function Board({
       )}
       {view.issues.length > 0 && (
         <Alert tone={view.issues.some((i) => i.level === 'error') ? 'danger' : 'warning'}>
-          <VStack gap={1}>
+          <div className="flex flex-col gap-1">
             {view.issues.map((i) => (
-              <Text key={`${i.stageId}-${i.message}`}>{i.message}</Text>
+              <p key={`${i.stageId}-${i.message}`}>{i.message}</p>
             ))}
-          </VStack>
+          </div>
         </Alert>
       )}
       {view.truncated && (
-        <Text type="supporting">Mostrando as 500 tarefas mais recentes deste projeto.</Text>
+        <p className="px-1 text-xs text-muted-foreground">
+          Mostrando as 500 tarefas mais recentes deste projeto.
+        </p>
       )}
 
-      <StackItem size="fill">
-        <VStack
-          height="100%"
-          minHeight="calc(var(--spacing-12) * 6)"
-          style={{ position: 'relative' }}
-        >
-          {view.cards.length === 0 ? (
-            <EmptyState
-              title="Nenhuma tarefa neste projeto"
-              description="As tarefas do Notion ligadas a este projeto aparecem aqui."
-              headingLevel={2}
-            />
-          ) : (
-            <TaskActivityProvider value={taskActivity}>
-              <ActiveFlowsProvider value={activeFlows}>
-                <AgentBadgesProvider value={agentBadges}>
-                  {layout === 'list' ? (
-                    <BoardList
-                      stages={view.config.stages}
-                      cards={cards}
-                      signals={signals.result?.signals ?? {}}
-                      selectedTaskId={null}
-                      actions={actions}
-                    />
-                  ) : (
-                    <BoardColumns
-                      stages={view.config.stages}
-                      cards={cards}
-                      signals={signals.result?.signals ?? {}}
-                      selectedTaskId={null}
-                      actions={actions}
-                      endInset={null}
-                    />
-                  )}
-                </AgentBadgesProvider>
-              </ActiveFlowsProvider>
-            </TaskActivityProvider>
-          )}
-        </VStack>
-      </StackItem>
-    </VStack>
+      <div className="relative min-h-72 flex-1">
+        {view.cards.length === 0 ? (
+          <EmptyState
+            title="Nenhuma tarefa neste projeto"
+            description="As tarefas do Notion ligadas a este projeto aparecem aqui."
+          />
+        ) : (
+          <TaskActivityProvider value={taskActivity}>
+            <ActiveFlowsProvider value={activeFlows}>
+              <AgentBadgesProvider value={agentBadges}>
+                {layout === 'list' ? (
+                  <BoardList
+                    stages={view.config.stages}
+                    cards={cards}
+                    signals={signals.result?.signals ?? {}}
+                    selectedTaskId={null}
+                    actions={actions}
+                  />
+                ) : (
+                  <BoardColumns
+                    stages={view.config.stages}
+                    cards={cards}
+                    signals={signals.result?.signals ?? {}}
+                    selectedTaskId={null}
+                    actions={actions}
+                    endInset={null}
+                  />
+                )}
+              </AgentBadgesProvider>
+            </ActiveFlowsProvider>
+          </TaskActivityProvider>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -349,12 +363,9 @@ function BoardErrorAlert({
       {...(toIntegrations
         ? {
             action: (
-              <Button
-                size="sm"
-                variant="ghost"
-                label="Ir para Integrações"
-                onClick={onOpenIntegrations}
-              />
+              <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
+                Ir para Integrações
+              </Button>
             )
           }
         : {})}
@@ -439,24 +450,30 @@ function AutomationLine({
   const detail = status.paused
     ? 'Os eventos são registrados no histórico, sem mover tarefas.'
     : 'As automações movem as tarefas pelos eventos do git e do GitHub.'
+  const Icon = status.paused ? PauseIcon : AutomationIcon
   return (
-    <HStack gap={2} vAlign="center" data-testid="automation-status">
-      <Tooltip content={detail} placement="below">
-        <HStack gap={1} vAlign="center">
-          <Icon icon={status.paused ? PauseIcon : AutomationIcon} size="sm" color="secondary" />
-          <Text type="supporting">{text}</Text>
-        </HStack>
+    <div className="flex items-center gap-2" data-testid="automation-status">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Icon className="size-3.5 text-subtle-foreground" />
+            {text}
+          </p>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{detail}</TooltipContent>
       </Tooltip>
       {!status.paused && status.github === 'disconnected' && (
-        <Button size="sm" variant="ghost" label="Conectar GitHub" onClick={onOpenIntegrations} />
+        <Button size="xs" variant="ghost" onClick={onOpenIntegrations}>
+          Conectar GitHub
+        </Button>
       )}
-    </HStack>
+    </div>
   )
 }
 
 /**
- * Agentes com tarefas neste quadro: avatar, nome e quantas tarefas. Clicar filtra o quadro pelo
- * agente; o ponto laranja marca agente com fluxo rodando agora.
+ * Agentes com tarefas neste quadro: avatar e quantas tarefas. Clicar filtra o quadro pelo agente;
+ * o ponto laranja marca agente com fluxo rodando agora.
  */
 function AgentRow({
   cards,
@@ -491,17 +508,36 @@ function AgentRow({
   if (agents.size === 0) return null
   const list = [...agents.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'pt-BR'))
   return (
-    <HStack gap={1} vAlign="center" role="group" aria-label="Agentes do quadro">
-      {list.map(([key, a]) => (
-        <ToggleButton
-          key={key}
-          size="sm"
-          label={`${a.name}: ${a.count === 1 ? '1 tarefa' : `${a.count} tarefas`}${a.running ? ', rodando' : ''}`}
-          isPressed={selected === key}
-          onPressedChange={(pressed) => onSelect(pressed ? key : null)}
-          icon={<AgentAvatar name={a.name} color={a.color} seed={key} />}
-        />
-      ))}
-    </HStack>
+    <div role="group" aria-label="Agentes do quadro" className="flex items-center gap-1">
+      {list.map(([key, a]) => {
+        const label = `${a.name}: ${a.count === 1 ? '1 tarefa' : `${a.count} tarefas`}${a.running ? ', rodando' : ''}`
+        return (
+          <Tooltip key={key}>
+            <TooltipTrigger asChild>
+              <Toggle
+                size="sm"
+                aria-label={label}
+                pressed={selected === key}
+                onPressedChange={(pressed) => onSelect(pressed ? key : null)}
+                className={cn(
+                  'relative h-7 min-w-7 gap-1 px-1 font-mono text-2xs text-subtle-foreground',
+                  'data-[state=on]:bg-muted data-[state=on]:text-foreground data-[state=on]:ring-1 data-[state=on]:ring-border'
+                )}
+              >
+                <AgentAvatar name={a.name} color={a.color} seed={key} />
+                <span className="tabular">{a.count}</span>
+                {a.running && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-brand"
+                  />
+                )}
+              </Toggle>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{label}</TooltipContent>
+          </Tooltip>
+        )
+      })}
+    </div>
   )
 }

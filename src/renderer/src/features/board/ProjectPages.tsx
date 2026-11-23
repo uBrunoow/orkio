@@ -1,6 +1,4 @@
 import { useState } from 'react'
-import { Heading } from '@astryxdesign/core/Heading'
-import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardView, ProjectView } from '../../../../shared/ipc-contract'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
@@ -40,10 +38,10 @@ function WithBoard({
   const board = useBoard(projectId)
   const withHeader = (node: React.ReactNode): React.JSX.Element =>
     header ? (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5">
         {header}
         {node}
-      </VStack>
+      </div>
     ) : (
       <>{node}</>
     )
@@ -90,24 +88,23 @@ export function BoardSettingsPage({
   const header = (action?: React.ReactNode): React.JSX.Element => (
     <PageHeader
       title="Quadro e automações"
-      {...(project ? { context: project.name } : {})}
       subtitle="As colunas do quadro e o que o Orkio faz sozinho quando algo acontece no GitHub. Nada muda até você salvar."
       action={action}
     />
   )
   if (!project) {
     return (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5">
         {header()}
         <NoProject onOpenProjects={onOpenProjects} />
-      </VStack>
+      </div>
     )
   }
   return (
     <WithBoard projectId={project.id} onOpenBoard={onOpenBoard} header={header()}>
       {(view, board) =>
         notionSettings ? (
-          <VStack gap={5}>
+          <div className="flex flex-col gap-5">
             {header()}
             <BoardSettings
               view={view}
@@ -118,7 +115,7 @@ export function BoardSettingsPage({
               }}
               onCancel={() => setNotionSettings(false)}
             />
-          </VStack>
+          </div>
         ) : (
           <FlowPage
             view={view}
@@ -129,17 +126,17 @@ export function BoardSettingsPage({
             onOpenNotionSettings={() => setNotionSettings(true)}
             onOpenTaskFlows={() => onTabChange('flows')}
             flowsSlot={
-              <VStack gap={6}>
+              <div className="flex flex-col gap-6">
                 <TaskFlowsPage key={project.id} projectId={project.id} />
-                <VStack gap={3} role="region" aria-label="Modelos do alva-flow">
-                  <Heading level={2}>Modelos do alva-flow</Heading>
+                <section aria-label="Modelos do alva-flow" className="flex flex-col gap-3">
+                  <h2 className="text-base font-medium">Modelos do alva-flow</h2>
                   <AlvaPage
                     projectId={project.id}
                     view={view}
                     onBoardChanged={() => void board.load(true)}
                   />
-                </VStack>
-              </VStack>
+                </section>
+              </div>
             }
           />
         )

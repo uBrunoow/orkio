@@ -1,12 +1,6 @@
-import { ScreenTitle } from '../../components/ScreenTitle'
 import { useEffect, useMemo, useState } from 'react'
-import { Divider } from '@astryxdesign/core/Divider'
-import { HStack } from '@astryxdesign/core/HStack'
-import { ScrollableArea } from '@astryxdesign/core/ScrollableArea'
-import { StackItem } from '@astryxdesign/core/Stack'
-import { Text } from '@astryxdesign/core/Text'
-import { Tab, TabList } from '@astryxdesign/core/TabList'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ScreenTitle } from '../../components/ScreenTitle'
 import type {
   BoardCard,
   BoardHistoryEntry,
@@ -28,12 +22,6 @@ import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
 import { useWindowWidth } from '../task/useWindowWidth'
 import { StageSelector, TaskChanges, TaskDetails, useBacklogSummary } from './TaskDetails'
 import { TaskSession } from './TaskSession'
-
-/**
- * Aba inativa: fica montada (o fluxo e os pedidos continuam vivos fora da aba), mas escondida.
- * O `hidden` sozinho perde para o `display: flex` da pilha; o estilo inline (CSSOM) não fere a CSP.
- */
-const HIDDEN = { display: 'none' } as const
 
 /**
  * Tarefa como sessão: no topo, em que pé está (marcos) e o que espera você; no centro, a conversa
@@ -163,7 +151,7 @@ export function TaskPanel({
   const label = card.displayId ?? card.title
 
   const flowSlot = (
-    <VStack data-panel-section="flow">
+    <div data-panel-section="flow" className="flex flex-col">
       <TaskFlowSection
         projectId={projectId}
         taskId={card.taskId}
@@ -175,11 +163,11 @@ export function TaskPanel({
         onLiveChange={setFlowLive}
         onRunsChange={setFlowRuns}
       />
-    </VStack>
+    </div>
   )
 
   const session = (
-    <VStack data-panel-section="claude" height="100%">
+    <div data-panel-section="claude" className="flex h-full min-h-0 flex-col">
       <TaskSession
         projectId={projectId}
         taskId={card.taskId}
@@ -195,7 +183,7 @@ export function TaskPanel({
         backlogLinked={!!backlog?.linked}
         flowOrigins={flowOrigins}
       />
-    </VStack>
+    </div>
   )
   const changes = (
     <TaskChanges
@@ -269,87 +257,85 @@ export function TaskPanel({
   }
 
   const sidePanel = (
-    <VStack role="complementary" aria-label={`Detalhes de ${label}`} height="100%">
-      <TabList
+    <aside aria-label={`Detalhes de ${label}`} className="flex h-full min-h-0 flex-col bg-surface">
+      <Tabs
         value={tab}
-        onChange={(v) => setTab(tabs.find((t) => t === v) ?? suggested)}
-        role="tablist"
-        size="sm"
-        hasDivider
+        onValueChange={(v) => setTab(tabs.find((t) => t === v) ?? suggested)}
+        className="flex min-h-0 flex-1 flex-col gap-0"
       >
-        {tabs.map((t) => (
-          <Tab
-            key={t}
-            value={t}
-            label={PANEL_TAB_LABEL[t]}
-            panelId={`task-tab-${t}-${card.taskId}`}
-          />
-        ))}
-      </TabList>
-      <StackItem size="fill">
-        <ScrollableArea label={`Detalhes de ${label} (rolagem)`} height="100%" padding={4}>
+        <TabsList
+          variant="line"
+          className="h-[42px] w-full shrink-0 items-end justify-start gap-4 rounded-none border-b border-border-soft px-[18px] py-0 group-data-[orientation=horizontal]/tabs:h-[42px]"
+        >
           {tabs.map((t) => (
-            <VStack
+            <TabsTrigger
               key={t}
-              role="tabpanel"
-              id={`task-tab-${t}-${card.taskId}`}
-              aria-label={PANEL_TAB_LABEL[t]}
-              hidden={tab !== t}
-              {...(tab !== t ? { style: HIDDEN } : {})}
+              value={t}
+              className="h-full flex-none items-end rounded-none px-0 pt-0 pb-2.5 text-[12.5px] font-normal text-subtle-foreground after:bg-brand group-data-[orientation=horizontal]/tabs:after:bottom-[-1px] hover:text-foreground data-[state=active]:text-foreground"
+            >
+              {PANEL_TAB_LABEL[t]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        <div className="min-h-0 flex-1 overflow-y-auto p-[18px]">
+          {tabs.map((t) => (
+            // Aba inativa: fica montada (o fluxo e os pedidos continuam vivos fora da aba), mas
+            // escondida.
+            <TabsContent
+              key={t}
+              value={t}
+              forceMount
+              className="flex flex-col data-[state=inactive]:hidden"
             >
               {tabContent[t]}
-            </VStack>
+            </TabsContent>
           ))}
-        </ScrollableArea>
-      </StackItem>
-    </VStack>
+        </div>
+      </Tabs>
+    </aside>
   )
 
   const branch = signals?.localBranches[0] ?? signals?.remoteBranches[0] ?? null
 
   return (
-    <VStack role="region" aria-label={`Tarefa ${label}`} height="100%">
+    <section aria-label={`Tarefa ${label}`} className="flex h-full min-h-0 flex-col">
       <ScreenBarStart>
-        <HStack gap={2} vAlign="center">
-          {projectName && (
-            <Text type="supporting" color="secondary">
-              {`${projectName} ›`}
-            </Text>
-          )}
-          {card.displayId && (
-            <Text type="supporting" color="secondary" className="orkio-mono">
-              {`${card.displayId} ·`}
-            </Text>
-          )}
-          <ScreenTitle look={5} maxLines={1}>
-            {card.title}
-          </ScreenTitle>
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 items-center gap-1 text-sm">
+            {projectName && (
+              <span className="shrink-0 text-muted-foreground">{`${projectName} ›`}</span>
+            )}
+            {card.displayId && (
+              <span className="shrink-0 font-medium text-foreground">{`${card.displayId} ·`}</span>
+            )}
+            <ScreenTitle look={5} maxLines={1}>
+              {card.title}
+            </ScreenTitle>
+          </div>
           {branch && (
-            <Text type="supporting" color="secondary" className="orkio-mono" maxLines={1}>
+            <span className="min-w-0 truncate font-mono text-2xs text-subtle-foreground">
               {branch}
-            </Text>
+            </span>
           )}
-        </HStack>
+        </div>
       </ScreenBarStart>
       <ScreenBarEnd>
         <TaskPhaseBar phases={phases} />
         <StageSelector card={card} stages={stages} onMove={onMove} compact />
       </ScreenBarEnd>
       {layout === 'columns' ? (
-        <HStack vAlign="stretch" height="100%">
-          <StackItem size="fill">{session}</StackItem>
-          <Divider orientation="vertical" />
-          <VStack width="calc(var(--spacing-12) * 9)" height="100%">
-            {sidePanel}
-          </VStack>
-        </HStack>
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col border-r border-border-soft">{session}</div>
+          <div className="flex w-[460px] shrink-0 flex-col">{sidePanel}</div>
+        </div>
       ) : (
-        <VStack height="100%">
-          <VStack height="calc(var(--spacing-12) * 5)">{sidePanel}</VStack>
-          <Divider />
-          <StackItem size="fill">{session}</StackItem>
-        </VStack>
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="flex h-[300px] shrink-0 flex-col border-b border-border-soft">
+            {sidePanel}
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col">{session}</div>
+        </div>
       )}
-    </VStack>
+    </section>
   )
 }

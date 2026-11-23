@@ -5,16 +5,12 @@ import globals from 'globals'
 
 export default tseslint.config(
   {
-    // Gerados pelo `astryx theme` (não editar à mão).
     ignores: [
       'out/**',
       'dist/**',
       // Site (Vercel): package próprio, com ESLint/TS/Vitest próprios (site/).
       'site/**',
-      'node_modules/**',
-      'themes/**',
-      'src/themes/**',
-      'src/astryx-themes.ts'
+      'node_modules/**'
     ]
   },
   js.configs.recommended,

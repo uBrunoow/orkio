@@ -1,21 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { Collapsible } from '@astryxdesign/core/Collapsible'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Heading } from '@astryxdesign/core/Heading'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { Text } from '@astryxdesign/core/Text'
-import { TextArea } from '@astryxdesign/core/TextArea'
-import { StatusToken, toneOf } from '../../components/StatusToken'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Textarea } from '@/components/ui/textarea'
+import { CheckboxField, Field, RadioListField, TextField } from '@/components/form'
+import { Spinner } from '@/components/Spinner'
+import { StatusDot, StatusToken, toneOf } from '../../components/StatusToken'
 import type { RunSummary } from '../../../../shared/agent-run'
-import { RadioList, RadioListItem } from '@astryxdesign/core/RadioList'
-import { CheckboxInput } from '@astryxdesign/core/CheckboxInput'
-import { Code } from '@astryxdesign/core/Code'
-import { TextInput } from '@astryxdesign/core/TextInput'
 import { ALVA_TEMPLATE_IDS } from '../../../../shared/alva-templates'
 import type { TaskPullRequest } from '../../../../shared/task-signals'
 import {
@@ -26,7 +16,12 @@ import {
   type StageFlow
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
-import { AutomationIcon, ExternalLinkIcon, PlayIcon } from '../../components/icons'
+import {
+  AutomationIcon,
+  ColumnExpandIcon,
+  ExternalLinkIcon,
+  PlayIcon
+} from '../../components/icons'
 import { DiffView } from '../../components/DiffView'
 import { describeFlowProblem } from '../../../../shared/flow-problem'
 import { FlowProblemCard } from './FlowProblemCard'
@@ -207,12 +202,16 @@ export function TaskFlowSection({
   const problem = run ? describeFlowProblem(run) : null
 
   return (
-    <VStack gap={3} role="region" aria-label="Fluxo da tarefa">
-      <HStack gap={2} vAlign="center" wrap="wrap">
-        <Icon icon={AutomationIcon} />
-        <Heading level={5} accessibilityLevel={3}>
+    <section
+      role="region"
+      aria-label="Fluxo da tarefa"
+      className="flex flex-col gap-3 border-t border-border-soft pt-3"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <AutomationIcon className="text-muted-foreground" />
+        <h3 className="text-sm font-medium">
           {run ? `Fluxo: ${run.flowName}${run.agent ? ` · ${run.agent.name}` : ''}` : 'Fluxo'}
-        </Heading>
+        </h3>
         {run && (
           <StatusToken
             tone={
@@ -228,30 +227,33 @@ export function TaskFlowSection({
             data-testid="flow-status"
           />
         )}
-      </HStack>
+      </div>
 
       {run?.status === 'running' && (
-        <Text type="supporting" color="secondary" data-testid="autopilot-hint">
+        <p className="text-xs text-muted-foreground" data-testid="autopilot-hint">
           Piloto automático: o Orkio manda cada passo para o Claude Code e segue sozinho. Ele para
           quando precisar de você.
-        </Text>
+        </p>
       )}
 
       {/* Encerrado, o histórico abaixo já conta o que rodou: o plano só vale enquanto há caminho. */}
       {run && live && <AutopilotPlan run={run} />}
 
       {!live && binding && (
-        <Button
-          variant="secondary"
-          label={run ? 'Rodar fluxo de novo' : `Rodar fluxo “${binding.flowName}”`}
-          icon={<Icon icon={PlayIcon} />}
-          isLoading={busy}
-          onClick={() => void act(() => window.orkio.taskFlows.start(projectId, taskId))}
-        />
+        <div className="flex">
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() => void act(() => window.orkio.taskFlows.start(projectId, taskId))}
+          >
+            {busy ? <Spinner /> : <PlayIcon />}
+            {run ? 'Rodar fluxo de novo' : `Rodar fluxo “${binding.flowName}”`}
+          </Button>
+        </div>
       )}
 
       {openPr?.checks && (
-        <HStack gap={2} vAlign="center" wrap="wrap">
+        <div className="flex flex-wrap items-center gap-2">
           <StatusToken
             tone={toneOf(CI_LABEL[openPr.checks].color)}
             label={`${CI_LABEL[openPr.checks].label} (PR #${openPr.number})`}
@@ -260,54 +262,65 @@ export function TaskFlowSection({
           {openPr.checks === 'failure' && ciFlow && !live && (
             <Button
               size="sm"
-              variant="secondary"
-              label="Rodar fluxo CI vermelho"
-              icon={<Icon icon={PlayIcon} />}
-              isLoading={busy}
+              variant="outline"
+              disabled={busy}
               onClick={() =>
                 void act(() => window.orkio.taskFlows.startById(projectId, taskId, ciFlow.id))
               }
-            />
+            >
+              {busy ? <Spinner /> : <PlayIcon />}
+              Rodar fluxo CI vermelho
+            </Button>
           )}
-        </HStack>
+        </div>
       )}
 
       {run && run.history.length > 0 && (
         <Collapsible
-          trigger={
-            <Text type="supporting" color="secondary" data-testid="flow-steps-summary">
-              Histórico do fluxo: {stepSummary(run.history)}
-            </Text>
-          }
-          isOpen={stepsOpen ?? !(live && run.status !== 'paused')}
+          open={stepsOpen ?? !(live && run.status !== 'paused')}
           onOpenChange={setStepsOpen}
+          className="flex flex-col gap-1.5"
         >
-          <List hasDividers density="compact" aria-label="Linha do tempo do fluxo">
-            {run.history.map((h) => (
-              <Item
-                as="li"
-                key={h.seq}
-                label={stepName(h.stepId)}
-                description={[
-                  STEP_STATUS[h.status],
-                  duration(h.startedAt, h.endedAt),
-                  h.costUsd !== null ? formatUsd(h.costUsd) : '',
-                  h.message ?? ''
-                ]
-                  .filter(Boolean)
-                  .join(' · ')}
-              />
-            ))}
-          </List>
+          <CollapsibleTrigger className="group flex w-fit items-center gap-1.5 rounded-sm text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40">
+            <ColumnExpandIcon className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
+            <span data-testid="flow-steps-summary">
+              Histórico do fluxo: {stepSummary(run.history)}
+            </span>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul
+              aria-label="Linha do tempo do fluxo"
+              className="overflow-hidden rounded-lg border border-border-soft bg-card"
+            >
+              {run.history.map((h) => (
+                <li
+                  key={h.seq}
+                  className="flex flex-col gap-0.5 border-b border-border-soft px-3 py-2 last:border-b-0"
+                >
+                  <span className="text-sm">{stepName(h.stepId)}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {[
+                      STEP_STATUS[h.status],
+                      duration(h.startedAt, h.endedAt),
+                      h.costUsd !== null ? formatUsd(h.costUsd) : '',
+                      h.message ?? ''
+                    ]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
         </Collapsible>
       )}
 
       {run?.status === 'running' && current?.type === 'claude_command' && (
-        <Text type="supporting" data-testid="flow-running-step">
+        <p className="text-xs text-muted-foreground" data-testid="flow-running-step">
           {/:pr$/.test(current.command) && !/--comments/.test(current.args)
             ? 'Aguardando CI do GitHub: o /pr acompanha os checks até terminar (pode levar vários minutos).'
             : `Rodando /${current.command}. A conversa deste passo está logo acima.`}
-        </Text>
+        </p>
       )}
 
       {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && run.confirm && (
@@ -324,27 +337,28 @@ export function TaskFlowSection({
       )}
 
       {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && !run.confirm && (
-        <Card variant="yellow" role="group" aria-label="Ação pendente do fluxo">
-          <VStack gap={2}>
-            <Text weight="semibold">{current.name}</Text>
-            <Text>{pending[current.action] ?? 'Esta ação ainda não existe no Orkio.'}</Text>
-            <HStack gap={2}>
-              <Button
-                size="sm"
-                variant="primary"
-                label="Já fiz, seguir"
-                isLoading={busy}
-                onClick={() => void act(() => window.orkio.taskFlows.approve(run.id))}
-              />
-              <Button
-                size="sm"
-                variant="ghost"
-                label="Encerrar o fluxo"
-                onClick={() => void act(() => window.orkio.taskFlows.reject(run.id))}
-              />
-            </HStack>
-          </VStack>
-        </Card>
+        <WaitCard label="Ação pendente do fluxo" title={current.name}>
+          <p className="text-sm text-muted-foreground">
+            {pending[current.action] ?? 'Esta ação ainda não existe no Orkio.'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() => void act(() => window.orkio.taskFlows.approve(run.id))}
+            >
+              {busy && <Spinner />}
+              Já fiz, seguir
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void act(() => window.orkio.taskFlows.reject(run.id))}
+            >
+              Encerrar o fluxo
+            </Button>
+          </div>
+        </WaitCard>
       )}
 
       {run?.status === 'paused' && run.pauseReason === 'needs_choice' && run.choice && (
@@ -371,8 +385,8 @@ export function TaskFlowSection({
 
       {run?.status === 'paused' &&
         (run.pauseReason === 'waiting_slot' || run.pauseReason === 'waiting_agent') && (
-          <VStack gap={2}>
-            <Alert tone="warning">
+          <div className="flex flex-col items-start gap-2">
+            <Alert tone="warning" className="self-stretch">
               {run.pauseReason === 'waiting_agent'
                 ? `Aguardando ${run.agent?.name ?? 'o agente'} terminar outra tarefa (limite de fluxos ao mesmo tempo). Começa sozinho.`
                 : 'Aguardando outro fluxo Alva deste projeto terminar (Docker e portas). Começa sozinho.'}
@@ -380,10 +394,11 @@ export function TaskFlowSection({
             <Button
               size="sm"
               variant="ghost"
-              label="Cancelar fluxo"
               onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
-            />
-          </VStack>
+            >
+              Cancelar fluxo
+            </Button>
+          </div>
         )}
 
       {run && problem && (
@@ -402,38 +417,69 @@ export function TaskFlowSection({
       )}
 
       {run?.status === 'awaiting_decision' && (
-        <VStack gap={2}>
-          <Alert tone="warning">
-            A tarefa saiu da etapa deste fluxo. O passo atual termina, mas o fluxo só segue com a
-            sua escolha.
-          </Alert>
-          <HStack gap={2}>
+        <WaitCard label="Decisão do fluxo" title="A tarefa saiu da etapa deste fluxo">
+          <p className="text-sm text-muted-foreground">
+            O passo atual termina, mas o fluxo só segue com a sua escolha.
+          </p>
+          <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              variant="secondary"
-              label="Deixar terminar"
               onClick={() => void act(() => window.orkio.taskFlows.decideLeft(run.id, 'continue'))}
-            />
+            >
+              Deixar terminar
+            </Button>
             <Button
               size="sm"
               variant="ghost"
-              label="Cancelar fluxo"
               onClick={() => void act(() => window.orkio.taskFlows.decideLeft(run.id, 'cancel'))}
-            />
-          </HStack>
-        </VStack>
+            >
+              Cancelar fluxo
+            </Button>
+          </div>
+        </WaitCard>
       )}
 
       {(run?.status === 'running' || run?.status === 'waiting_gate') && (
-        <Button
-          size="sm"
-          variant="ghost"
-          label="Cancelar fluxo"
-          onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
-        />
+        <div className="flex">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
+          >
+            Cancelar fluxo
+          </Button>
+        </div>
       )}
       {error && <Alert tone="danger">{error}</Alert>}
-    </VStack>
+    </section>
+  )
+}
+
+/**
+ * Cartão "esperando você" (gate, ação pendente, escolha, decisão): fundo amarelo discreto, título
+ * com o ponto de estado e as ações embaixo (mockup `.gate`).
+ */
+function WaitCard({
+  label,
+  title,
+  children
+}: {
+  label: string
+  title: React.ReactNode
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="flex flex-col gap-2 rounded-[10px] border border-warn-tint-border bg-warn-tint p-3.5"
+    >
+      <p className="flex items-center gap-2 font-medium">
+        <StatusDot tone="warning" />
+        <span className="min-w-0">{title}</span>
+      </p>
+      {children}
+    </div>
   )
 }
 
@@ -457,78 +503,90 @@ function ConfirmCard({
     .filter(Boolean)
   const values = info.input ? [...new Set([...chosen, ...extra])] : null
   const invalid = values?.some((v) => !/^(team:)?[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(v)) ?? false
+  const none = values !== null && values.length === 0
   return (
-    <Card role="group" aria-label={info.title}>
-      <VStack gap={2}>
-        <Text weight="semibold">{info.title}</Text>
-        <Text>{info.message}</Text>
-        {info.details.length > 0 && (
-          <List density="compact" aria-label="Detalhes da ação">
-            {info.details.map((d) => (
-              <Item as="li" key={d.label} label={d.label} description={d.value} />
-            ))}
-          </List>
-        )}
-        {info.commits && info.commits.length > 0 && (
-          <List density="compact" aria-label="Commits que vão para o GitHub">
-            {info.commits.map((c) => (
-              <Item as="li" key={c.hash} label={c.subject} startContent={<Code>{c.hash}</Code>} />
-            ))}
-          </List>
-        )}
-        {info.stat && (
-          <Text type="supporting" data-testid="confirm-stat">
-            <Code>{info.stat}</Code>
-          </Text>
-        )}
-        {info.input && (
-          <VStack gap={1} role="group" aria-label={info.input.label}>
-            <Text weight="semibold">{info.input.label}</Text>
-            {info.input.options.map((o) => (
-              <CheckboxInput
-                key={o}
-                label={o}
-                value={chosen.includes(o)}
-                onChange={(on) =>
-                  setChosen((all) => (on ? [...all, o] : all.filter((x) => x !== o)))
-                }
-              />
-            ))}
-            {info.input.allowOther && (
-              <TextInput
-                label="Outros (logins separados por vírgula)"
-                value={other}
-                onChange={setOther}
-                {...(invalid ? { error: 'Use logins do GitHub (ou team:slug).' } : {})}
-              />
-            )}
-          </VStack>
-        )}
-        {info.link && (
+    <WaitCard label={info.title} title={info.title}>
+      <p className="text-sm text-muted-foreground">{info.message}</p>
+      {info.details.length > 0 && (
+        <ul
+          aria-label="Detalhes da ação"
+          className="flex flex-col gap-1 rounded-lg border border-border-soft bg-card px-3 py-2"
+        >
+          {info.details.map((d) => (
+            <li key={d.label} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              <span className="w-28 shrink-0 text-xs text-muted-foreground">{d.label}</span>
+              <span className="min-w-0 font-mono text-xs break-all">{d.value}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {info.commits && info.commits.length > 0 && (
+        <ul
+          aria-label="Commits que vão para o GitHub"
+          className="flex flex-col gap-1 rounded-lg border border-border-soft bg-card px-3 py-2"
+        >
+          {info.commits.map((c) => (
+            <li key={c.hash} className="flex items-baseline gap-2">
+              <code className="shrink-0 font-mono text-xs text-subtle-foreground">{c.hash}</code>
+              <span className="min-w-0 truncate text-sm">{c.subject}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {info.stat && (
+        <pre
+          className="overflow-x-auto rounded-lg border border-border-soft bg-surface px-3 py-2 font-mono text-xs whitespace-pre text-muted-foreground"
+          data-testid="confirm-stat"
+        >
+          <code>{info.stat}</code>
+        </pre>
+      )}
+      {info.input && (
+        <div role="group" aria-label={info.input.label} className="flex flex-col gap-1.5">
+          <p className="text-sm font-medium">{info.input.label}</p>
+          {info.input.options.map((o) => (
+            <CheckboxField
+              key={o}
+              label={o}
+              checked={chosen.includes(o)}
+              onChange={(on) => setChosen((all) => (on ? [...all, o] : all.filter((x) => x !== o)))}
+            />
+          ))}
+          {info.input.allowOther && (
+            <TextField
+              label="Outros (logins separados por vírgula)"
+              value={other}
+              onChange={setOther}
+              error={invalid ? 'Use logins do GitHub (ou team:slug).' : undefined}
+            />
+          )}
+        </div>
+      )}
+      {info.link && (
+        <div className="flex">
           <Button
             size="sm"
             variant="ghost"
-            label={info.link.label}
-            icon={<Icon icon={ExternalLinkIcon} />}
             onClick={() => void window.orkio.openExternal(info.link!.url)}
-          />
+          >
+            <ExternalLinkIcon />
+            {info.link.label}
+          </Button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" disabled={busy || invalid || none} onClick={() => onApprove(values)}>
+          {busy && <Spinner />}
+          {info.approveLabel}
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onReject}>
+          Recusar e encerrar
+        </Button>
+        {none && (
+          <span className="text-xs text-muted-foreground">Escolha pelo menos um revisor.</span>
         )}
-        <HStack gap={2}>
-          <Button
-            size="sm"
-            variant="primary"
-            label={info.approveLabel}
-            isLoading={busy}
-            isDisabled={invalid || (values !== null && values.length === 0)}
-            {...(values !== null && values.length === 0
-              ? { disabledMessage: 'Escolha pelo menos um revisor.' }
-              : {})}
-            onClick={() => onApprove(values)}
-          />
-          <Button size="sm" variant="ghost" label="Recusar e encerrar" onClick={onReject} />
-        </HStack>
-      </VStack>
-    </Card>
+      </div>
+    </WaitCard>
   )
 }
 
@@ -545,25 +603,19 @@ function ChoiceCard({
 }): React.JSX.Element {
   const [value, setValue] = useState('')
   return (
-    <Card variant="yellow" role="group" aria-label="Escolha do fluxo">
-      <VStack gap={2}>
-        <RadioList label={prompt} value={value} onChange={setValue}>
-          {options.map((o) => (
-            <RadioListItem key={o.value} value={o.value} label={o.label} />
-          ))}
-        </RadioList>
-        <HStack gap={2}>
-          <Button
-            size="sm"
-            variant="primary"
-            label="Confirmar"
-            isDisabled={!value}
-            isLoading={busy}
-            onClick={() => onChoose(value)}
-          />
-        </HStack>
-      </VStack>
-    </Card>
+    <div
+      role="group"
+      aria-label="Escolha do fluxo"
+      className="flex flex-col gap-2 rounded-[10px] border border-warn-tint-border bg-warn-tint p-3.5"
+    >
+      <RadioListField label={prompt} options={options} value={value} onChange={setValue} />
+      <div className="flex gap-2">
+        <Button size="sm" disabled={!value || busy} onClick={() => onChoose(value)}>
+          {busy && <Spinner />}
+          Confirmar
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -613,68 +665,64 @@ function GateCard({
   }, [projectId, taskId, show])
 
   return (
-    <Card variant="yellow" role="group" aria-label="Aprovação do fluxo">
-      <VStack gap={2}>
-        <Text weight="semibold">{message}</Text>
-        {show === 'backlog' && <BacklogDocumentView projectId={projectId} taskId={taskId} />}
-        {show === 'diff' &&
-          diffData &&
-          ('error' in diffData ? (
-            <Alert tone="danger">{diffData.error}</Alert>
-          ) : (
-            <>
-              {diffData.secrets.length > 0 && (
-                <Alert tone="danger">
-                  {`Parece haver um segredo (token, chave ou senha) em ${diffData.secrets.join(', ')}. O valor está escondido abaixo, mas aprovar segue com ele no código. Recuse e peça para remover, se não for de propósito.`}
-                </Alert>
-              )}
-              <DiffView
-                label="Diff para aprovar"
-                diff={diffData.diff}
-                truncated={diffData.truncated}
-                untracked={diffData.untracked}
-              />
-            </>
-          ))}
-        {show === 'summary' && detail !== null && (
-          <TextArea
-            label="Resumo para aprovar"
-            value={detail}
-            isReadOnly
-            rows={5}
-            controlClassName="orkio-mono-input"
-          />
-        )}
-        <HStack gap={2}>
-          {replyChips('gate').map((chip) =>
-            chip.action === 'approve' ? (
-              <Button
-                key={chip.label}
-                size="sm"
-                variant="primary"
-                label={chip.label}
-                isLoading={busy}
-                onClick={onApprove}
-              />
-            ) : (
-              <Button
-                key={chip.label}
-                size="sm"
-                variant="ghost"
-                label={chip.label}
-                onClick={focusComposer}
-              />
-            )
+    <WaitCard label="Aprovação do fluxo" title={message}>
+      {show === 'backlog' && <BacklogDocumentView projectId={projectId} taskId={taskId} />}
+      {show === 'diff' &&
+        diffData &&
+        ('error' in diffData ? (
+          <Alert tone="danger">{diffData.error}</Alert>
+        ) : (
+          <>
+            {diffData.secrets.length > 0 && (
+              <Alert tone="danger">
+                {`Parece haver um segredo (token, chave ou senha) em ${diffData.secrets.join(', ')}. O valor está escondido abaixo, mas aprovar segue com ele no código. Recuse e peça para remover, se não for de propósito.`}
+              </Alert>
+            )}
+            <DiffView
+              label="Diff para aprovar"
+              diff={diffData.diff}
+              truncated={diffData.truncated}
+              untracked={diffData.untracked}
+            />
+          </>
+        ))}
+      {show === 'summary' && detail !== null && (
+        <Field label="Resumo para aprovar">
+          {({ id, describedBy }) => (
+            <Textarea
+              id={id}
+              aria-describedby={describedBy}
+              value={detail}
+              readOnly
+              rows={5}
+              className="font-mono text-xs"
+            />
           )}
-          <Button size="sm" variant="secondary" label="Recusar" onClick={onReject} />
-        </HStack>
-        {outcomes && (
-          <Text type="supporting" color="secondary" data-testid="gate-outcomes">
-            {outcomes.approve} {outcomes.reject}
-          </Text>
+        </Field>
+      )}
+      <div className="flex flex-wrap gap-2">
+        {replyChips('gate').map((chip) =>
+          chip.action === 'approve' ? (
+            <Button key={chip.label} size="sm" disabled={busy} onClick={onApprove}>
+              {busy && <Spinner />}
+              {chip.label}
+            </Button>
+          ) : (
+            <Button key={chip.label} size="sm" variant="outline" onClick={focusComposer}>
+              {chip.label}
+            </Button>
+          )
         )}
-      </VStack>
-    </Card>
+        <Button size="sm" variant="ghost" onClick={onReject}>
+          Recusar
+        </Button>
+      </div>
+      {outcomes && (
+        <p className="text-xs text-muted-foreground" data-testid="gate-outcomes">
+          {outcomes.approve} {outcomes.reject}
+        </p>
+      )}
+    </WaitCard>
   )
 }
 

@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import { VStack } from '@astryxdesign/core/VStack'
 import type { ProjectView } from '../../../../shared/ipc-contract'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
@@ -38,7 +37,7 @@ export function TaskScreen({
 
   if (!project) {
     return (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5 px-8 py-6">
         <PageHeader title="Tarefa" />
         <PageState
           kind="empty"
@@ -46,19 +45,23 @@ export function TaskScreen({
           description="O projeto desta tarefa não está vinculado ao Notion."
           action={{ label: 'Voltar ao quadro', onClick: onBackToBoard }}
         />
-      </VStack>
+      </div>
     )
   }
   if (!board.view) {
-    return board.error ? (
-      <PageState kind="error" message={board.error.message} />
-    ) : (
-      <PageState kind="loading" label="Carregando tarefa" />
+    return (
+      <div className="px-8 py-6">
+        {board.error ? (
+          <PageState kind="error" message={board.error.message} />
+        ) : (
+          <PageState kind="loading" label="Carregando tarefa" />
+        )}
+      </div>
     )
   }
   if (!card || !board.view.config) {
     return (
-      <VStack gap={5}>
+      <div className="flex flex-col gap-5 px-8 py-6">
         <PageHeader title="Tarefa" />
         <PageState
           kind="empty"
@@ -66,7 +69,7 @@ export function TaskScreen({
           description="Ela pode ter saído do projeto no Notion ou do quadro."
           action={{ label: 'Voltar ao quadro', onClick: onBackToBoard }}
         />
-      </VStack>
+      </div>
     )
   }
   return (

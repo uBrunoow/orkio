@@ -1,6 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { AppShell } from '@astryxdesign/core/AppShell'
-import { VStack } from '@astryxdesign/core/VStack'
 import type { BoardTaskRef, ProjectView } from '../../shared/ipc-contract'
 import {
   ROUTE_TITLES,
@@ -18,7 +16,6 @@ import { useSetupPending } from './app/useSetupPending'
 import { WaitingBell } from './app/WaitingBell'
 import { Sidebar } from './app/Sidebar'
 import { AccountMenu, useAccount } from './app/AccountMenu'
-import { HStack } from '@astryxdesign/core/HStack'
 import { ScreenFrame } from './app/ScreenBar'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
@@ -273,18 +270,18 @@ export function App(): React.JSX.Element | null {
           break
         case 'updates':
           page = (
-            <VStack gap={6} maxWidth={PAGE_WIDTH.form}>
+            <div className={`flex flex-col gap-6 ${PAGE_WIDTH.form}`}>
               <PageHeader title={SETTINGS_TITLES.updates} />
               <UpdatesSection />
-            </VStack>
+            </div>
           )
           break
         case 'about':
           page = (
-            <VStack gap={6} maxWidth={PAGE_WIDTH.form}>
+            <div className={`flex flex-col gap-6 ${PAGE_WIDTH.form}`}>
               <PageHeader title={SETTINGS_TITLES.about} />
               <AboutSection />
-            </VStack>
+            </div>
           )
           break
       }
@@ -313,22 +310,16 @@ export function App(): React.JSX.Element | null {
       : null
   // Quadro e tarefa ocupam a altura toda (rolagem própria); o resto rola com margem.
   const fullHeight = route.name === 'board' || route.name === 'task'
+  const keyed = <Fragment key={router.key}>{page}</Fragment>
   return (
-    <AppShell
-      height="fill"
-      variant="section"
-      contentPadding={0}
-      // Sem gaveta mobile: as camadas deslizantes da Astryx injetam <style> (bloqueado pela CSP).
-      mobileNav={false}
-      // Atualização pronta (6C) e "O que há de novo": acima de tudo.
-      banner={
-        <UpdateBanner
-          {...(route.name === 'settings'
-            ? {}
-            : { onOpenSettings: () => navigate({ name: 'settings', section: 'updates' }) })}
-        />
-      }
-      sideNav={
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      {/* Atualização pronta (6C) e "O que há de novo": acima de tudo. */}
+      <UpdateBanner
+        {...(route.name === 'settings'
+          ? {}
+          : { onOpenSettings: () => navigate({ name: 'settings', section: 'updates' }) })}
+      />
+      <div className="flex min-h-0 flex-1">
         <Sidebar
           route={route}
           project={project}
@@ -367,40 +358,31 @@ export function App(): React.JSX.Element | null {
             />
           }
         />
-      }
-    >
-      <ScreenFrame
-        crumbs={crumbs}
-        bell={
-          <HStack gap={2} vAlign="center">
-            <WaitingBell snapshot={sidebar.snapshot} onOpen={openTask} />
-            <AccountMenu
-              account={account}
-              variant="avatar"
-              onOpenIntegrations={() => toSettings('integrations')}
-              onOpenSettings={() => navigate({ name: 'settings' })}
-              onSignOut={signOut}
-            />
-          </HStack>
-        }
-      >
-        {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
-        {route.name === 'board' ? (
-          <VStack height="100%" padding={4}>
-            <Fragment key={router.key}>{page}</Fragment>
-          </VStack>
-        ) : fullHeight ? (
-          <VStack height="100%">
-            <Fragment key={router.key}>{page}</Fragment>
-          </VStack>
-        ) : route.name === 'agents' ? (
-          <VStack height="100%" isScrollable paddingInline={6} paddingBlock={5}>
-            <Fragment key={router.key}>{page}</Fragment>
-          </VStack>
-        ) : (
-          <Fragment key={router.key}>{page}</Fragment>
-        )}
-      </ScreenFrame>
+        <main className="min-h-0 min-w-0 flex-1">
+          <ScreenFrame
+            crumbs={crumbs}
+            bell={
+              <div className="flex items-center gap-2">
+                <WaitingBell snapshot={sidebar.snapshot} onOpen={openTask} />
+                <AccountMenu
+                  account={account}
+                  variant="avatar"
+                  onOpenIntegrations={() => toSettings('integrations')}
+                  onOpenSettings={() => navigate({ name: 'settings' })}
+                  onSignOut={signOut}
+                />
+              </div>
+            }
+          >
+            {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
+            {fullHeight || route.name === 'settings' ? (
+              <div className="h-full min-h-0">{keyed}</div>
+            ) : (
+              <div className="h-full min-h-0 overflow-y-auto px-6 py-5">{keyed}</div>
+            )}
+          </ScreenFrame>
+        </main>
+      </div>
       <CommandMenu
         isOpen={palette !== null}
         onOpenChange={(open) => setPalette(open ? (palette ?? 'all') : null)}
@@ -409,6 +391,6 @@ export function App(): React.JSX.Element | null {
         currentProjectId={project?.id ?? null}
         onRun={runCommand}
       />
-    </AppShell>
+    </div>
   )
 }

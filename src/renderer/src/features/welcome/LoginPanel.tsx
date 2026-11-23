@@ -1,9 +1,5 @@
 import { useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
 import type { ConnectionStatus, DeviceFlowInfo } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { GitHubLogo } from '../../components/icons'
@@ -48,30 +44,32 @@ export function LoginPanel({
   }
 
   return (
-    <VStack gap={4} role="region" aria-label="Entrar no Orkio">
+    <div role="region" aria-label="Entrar no Orkio" className="flex flex-col gap-4">
       {error && <Alert tone="danger">{error}</Alert>}
       {authorizing ? (
-        <DeviceFlowView
-          flow={flow}
-          onCancel={() => window.orkio.github.cancelDeviceFlow().catch(() => undefined)}
-        />
+        <div className="rounded-xl border border-border-soft bg-card p-4">
+          <DeviceFlowView
+            flow={flow}
+            onCancel={() => window.orkio.github.cancelDeviceFlow().catch(() => undefined)}
+          />
+        </div>
       ) : (
-        <HStack gap={2} vAlign="center" wrap="wrap">
+        <div className="flex flex-wrap items-center gap-2">
           {oauth ? (
-            <Button
-              variant="primary"
-              label={error ? 'Tentar de novo' : 'Entrar com GitHub'}
-              icon={<Icon icon={GitHubLogo} />}
-              onClick={() => void signIn()}
-            />
+            <Button onClick={() => void signIn()}>
+              <GitHubLogo />
+              {error ? 'Tentar de novo' : 'Entrar com GitHub'}
+            </Button>
           ) : (
-            <Text type="supporting" color="secondary">
+            <p className="text-xs text-muted-foreground">
               Este build não tem o login do GitHub configurado. Conecte com um token.
-            </Text>
+            </p>
           )}
-          <Button variant="secondary" label="Usar um token" onClick={onUseToken} />
-        </HStack>
+          <Button variant="outline" onClick={onUseToken}>
+            Usar um token
+          </Button>
+        </div>
       )}
-    </VStack>
+    </div>
   )
 }

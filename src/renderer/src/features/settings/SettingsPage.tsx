@@ -1,14 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { Code } from '@astryxdesign/core/Code'
-import { Heading } from '@astryxdesign/core/Heading'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Link } from '@astryxdesign/core/Link'
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl'
-import { Text } from '@astryxdesign/core/Text'
-import { TextArea } from '@astryxdesign/core/TextArea'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { Field, SegmentedControl } from '@/components/form'
+import { Spinner } from '@/components/Spinner'
 import type { AboutInfo } from '../../../../shared/ipc-contract'
 import type { ReleaseNotes, UpdateStatus } from '../../../../shared/updates'
 import { InstallControls } from './InstallControls'
@@ -21,87 +15,97 @@ export function UpdatesSection(): React.JSX.Element {
   const [notes, setNotes] = useState<ReleaseNotes | null>(null)
 
   return (
-    <Card role="region" aria-labelledby="updates-title">
-      <VStack gap={4}>
-        <HStack gap={2} vAlign="center" justify="between">
-          <Heading level={2} id="updates-title">
-            Atualizações
-          </Heading>
-          {status && <PhaseToken status={status} />}
-        </HStack>
-        {!status ? (
-          <Text color="secondary">Carregando…</Text>
-        ) : (
-          <VStack gap={4}>
-            <HStack gap={6} wrap="wrap">
-              <VStack gap={1}>
-                <Text type="supporting" color="secondary">
-                  Versão atual
-                </Text>
-                <Code data-testid="current-version">{status.currentVersion}</Code>
-              </VStack>
-              <VStack gap={1}>
-                <Text type="supporting" color="secondary">
-                  Última verificação
-                </Text>
-                <Text data-testid="last-check">{formatDateTime(status.lastCheckAt)}</Text>
-              </VStack>
-            </HStack>
+    <section aria-labelledby="updates-title" className={SECTION_CLASS}>
+      <div className="flex items-center justify-between gap-2">
+        <h2 id="updates-title" className="text-sm font-medium text-foreground">
+          Atualizações
+        </h2>
+        {status && <PhaseToken status={status} />}
+      </div>
+      {!status ? (
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-8">
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Versão atual</span>
+              <code data-testid="current-version" className="font-mono text-xs text-foreground">
+                {status.currentVersion}
+              </code>
+            </div>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">Última verificação</span>
+              <span data-testid="last-check" className="text-sm text-foreground tabular">
+                {formatDateTime(status.lastCheckAt)}
+              </span>
+            </div>
+          </div>
 
-            <VStack gap={1}>
-              <SegmentedControl
-                label="Canal"
-                size="sm"
-                value={status.channel}
-                onChange={(value) => void setChannel(value === 'beta' ? 'beta' : 'stable')}
-              >
-                <SegmentedControlItem value="stable" label="Estável" />
-                <SegmentedControlItem value="beta" label="Beta" />
-              </SegmentedControl>
-              <Text type="supporting" color="secondary">
-                {status.channel === 'beta'
-                  ? 'Recebe versões de teste antes de todo mundo. Podem ter problemas.'
-                  : 'Só versões testadas.'}
-              </Text>
-              {status.channelNote && (
-                <Text type="supporting" color="secondary">
-                  {status.channelNote}
-                </Text>
-              )}
-            </VStack>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium text-foreground" aria-hidden="true">
+              Canal
+            </span>
+            <SegmentedControl
+              label="Canal"
+              size="sm"
+              className="self-start"
+              value={status.channel}
+              onChange={(value) => void setChannel(value === 'beta' ? 'beta' : 'stable')}
+              options={[
+                { value: 'stable', label: 'Estável' },
+                { value: 'beta', label: 'Beta' }
+              ]}
+            />
+            <p className="text-xs text-muted-foreground">
+              {status.channel === 'beta'
+                ? 'Recebe versões de teste antes de todo mundo. Podem ter problemas.'
+                : 'Só versões testadas.'}
+            </p>
+            {status.channelNote && (
+              <p className="text-xs text-muted-foreground">{status.channelNote}</p>
+            )}
+          </div>
 
-            <StatusLine status={status} />
-            <InstallControls status={status} />
+          <StatusLine status={status} />
+          <InstallControls status={status} />
 
-            <HStack gap={2} wrap="wrap">
-              <Button
-                label="Procurar atualizações"
-                isLoading={checking || status.phase === 'checking'}
-                isDisabled={status.mode === 'disabled' || status.phase === 'downloading'}
-                onClick={() => void check()}
-              />
-              <Button
-                variant="ghost"
-                label="Ver novidades desta versão"
-                onClick={async () =>
-                  setNotes(
-                    (await window.orkio.updates.releaseNotes()) ?? {
-                      version: status.currentVersion,
-                      notes: ''
-                    }
-                  )
-                }
-              />
-            </HStack>
-          </VStack>
-        )}
-        {notes && (
-          <WhatsNewPanel notes={notes} closeLabel="Fechar" onClose={() => setNotes(null)} />
-        )}
-      </VStack>
-    </Card>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              disabled={
+                checking ||
+                status.phase === 'checking' ||
+                status.mode === 'disabled' ||
+                status.phase === 'downloading'
+              }
+              onClick={() => void check()}
+            >
+              {(checking || status.phase === 'checking') && <Spinner />}
+              Procurar atualizações
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={async () =>
+                setNotes(
+                  (await window.orkio.updates.releaseNotes()) ?? {
+                    version: status.currentVersion,
+                    notes: ''
+                  }
+                )
+              }
+            >
+              Ver novidades desta versão
+            </Button>
+          </div>
+        </div>
+      )}
+      {notes && <WhatsNewPanel notes={notes} closeLabel="Fechar" onClose={() => setNotes(null)} />}
+    </section>
   )
 }
+
+/** Caixa das seções de Configurações (borda fina, fundo de card). */
+const SECTION_CLASS = 'flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5'
 
 function PhaseToken({ status }: { status: UpdateStatus }): React.JSX.Element | null {
   if (status.mode === 'disabled') return <StatusToken label="Desligadas" />
@@ -129,9 +133,9 @@ function StatusLine({ status }: { status: UpdateStatus }): React.JSX.Element {
     text = 'Você está na versão mais recente.'
   }
   return (
-    <Text role="status" data-testid="update-status">
+    <p role="status" data-testid="update-status" className="text-sm text-foreground">
       {status.phase !== 'error' && status.error ? `${text} ${status.error}` : text}
-    </Text>
+    </p>
   )
 }
 
@@ -147,29 +151,31 @@ export function AboutSection(): React.JSX.Element {
     }
   }, [])
   return (
-    <Card role="region" aria-labelledby="about-title">
-      <VStack gap={3}>
-        <Heading level={2} id="about-title">
-          Sobre
-        </Heading>
-        <HStack gap={2} vAlign="center">
-          <Text>Orkio</Text>
-          {about && <Code>{about.version}</Code>}
-        </HStack>
-        {about?.links ? (
-          <HStack gap={4} wrap="wrap">
-            <ExternalLink label="Site" url={about.links.site} />
-            <ExternalLink label="Privacidade" url={about.links.privacy} />
-            <ExternalLink label="Termos de uso" url={about.links.terms} />
-          </HStack>
-        ) : (
-          <Text color="secondary">
-            Site, privacidade e termos aparecem aqui nas versões publicadas.
-          </Text>
+    <section aria-labelledby="about-title" className={SECTION_CLASS}>
+      <h2 id="about-title" className="text-sm font-medium text-foreground">
+        Sobre
+      </h2>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-foreground">Orkio</span>
+        {about && (
+          <code className="rounded-sm border border-border px-1.5 font-mono text-2xs text-muted-foreground">
+            {about.version}
+          </code>
         )}
-        <DiagnosticsBlock />
-      </VStack>
-    </Card>
+      </div>
+      {about?.links ? (
+        <div className="flex flex-wrap gap-4">
+          <ExternalLink label="Site" url={about.links.site} />
+          <ExternalLink label="Privacidade" url={about.links.privacy} />
+          <ExternalLink label="Termos de uso" url={about.links.terms} />
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Site, privacidade e termos aparecem aqui nas versões publicadas.
+        </p>
+      )}
+      <DiagnosticsBlock />
+    </section>
   )
 }
 
@@ -196,45 +202,46 @@ function DiagnosticsBlock(): React.JSX.Element {
     )
   }
   return (
-    <VStack gap={2} role="group" aria-label="Diagnóstico">
-      <Text type="supporting" color="secondary">
+    <div
+      role="group"
+      aria-label="Diagnóstico"
+      className="flex flex-col gap-2 border-t border-border-soft pt-4"
+    >
+      <p className="text-xs text-muted-foreground">
         Para pedir ajuda: versões, banco local, filas e conexões, sem tokens, contas, títulos de
         tarefas ou caminhos.
-      </Text>
-      <HStack gap={2} vAlign="center">
-        <Button
-          variant="secondary"
-          size="sm"
-          label="Copiar diagnóstico"
-          isLoading={loading}
-          onClick={() => void copy()}
-        />
+      </p>
+      <div className="flex items-center gap-2">
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => void copy()}>
+          {loading && <Spinner />}
+          Copiar diagnóstico
+        </Button>
         {!text && (
-          <Button size="sm" variant="ghost" label="Ver antes" onClick={() => void load()} />
+          <Button size="sm" variant="ghost" onClick={() => void load()}>
+            Ver antes
+          </Button>
         )}
         {copied && (
-          <Text type="supporting" role="status">
+          <span role="status" className="text-xs text-muted-foreground">
             Copiado.
-          </Text>
+          </span>
         )}
-      </HStack>
+      </div>
       {text && (
-        <TextArea
-          label="Diagnóstico"
-          value={text}
-          isReadOnly
-          rows={10}
-          controlClassName="orkio-mono-input"
-        />
+        <Field label="Diagnóstico">
+          {({ id }) => (
+            <Textarea id={id} value={text} readOnly rows={10} className="font-mono text-xs" />
+          )}
+        </Field>
       )}
-    </VStack>
+    </div>
   )
 }
 
 function ExternalLink({ label, url }: { label: string; url: string }): React.JSX.Element {
   return (
-    <Link label={`${label} ↗`} onClick={() => void window.orkio.openExternal(url)}>
+    <Button variant="link" className="text-sm" onClick={() => void window.orkio.openExternal(url)}>
       {label} ↗
-    </Link>
+    </Button>
   )
 }

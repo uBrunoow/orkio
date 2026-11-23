@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'electron-vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
 /**
  * Em dev, o Vite injeta CSS via <style>, o que a CSP estrita bloqueia.
@@ -37,7 +38,8 @@ export default defineConfig({
   },
   renderer: {
     root: resolve('src/renderer'),
-    plugins: [react(), devOnlyRelaxedStyleCsp()],
+    resolve: { alias: { '@': resolve('src/renderer/src') } },
+    plugins: [react(), tailwindcss(), devOnlyRelaxedStyleCsp()],
     build: {
       // Fontes nunca viram data: URI — a CSP só permite font-src 'self'.
       assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined)

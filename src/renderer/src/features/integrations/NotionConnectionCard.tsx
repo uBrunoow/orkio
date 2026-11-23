@@ -1,18 +1,13 @@
 import { useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
+import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Spinner } from '@/components/Spinner'
 import { NotionLogo } from '../../components/icons'
-import { Item } from '@astryxdesign/core/Item'
-import { Skeleton } from '@astryxdesign/core/Skeleton'
-import { Spinner } from '@astryxdesign/core/Spinner'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
 import { NOTION_TOKEN_DOCS_URL, type ConnectionStatus } from '../../../../shared/ipc-contract'
 import {
   Alert,
   CardHeader,
+  CONNECTION_CARD_CLASS,
   ConnectedView,
   StatusBadge,
   StoredCredentialErrorView,
@@ -39,53 +34,55 @@ export function NotionConnectionCard({
   const { status, activity } = notion
 
   return (
-    <Card role="region" aria-labelledby="notion-card-title" aria-busy={activity !== 'idle'}>
-      <VStack gap={4}>
-        <CardHeader
-          titleId="notion-card-title"
-          title="Notion"
-          description="Planejamento: páginas, bancos e tarefas."
-          icon={<Icon icon={NotionLogo} color="primary" size="lg" />}
-          badge={
-            <StatusBadge status={status} activity={activity} waitingLabel="Aguardando o Notion…" />
-          }
-        />
-        <VStack gap={4} aria-live="polite">
-          {status === null ? (
-            <Skeleton height={40} aria-label="Carregando status da conexão" />
-          ) : activity === 'authorizing' ? (
-            <AuthorizingView onCancel={notion.cancelOAuth} />
-          ) : status.state === 'connected' ? (
-            <ConnectedView
-              account={status.account}
-              connectedAt={status.connectedAt}
-              warning={status.warning}
-              activity={activity}
-              lastVerifiedAt={notion.lastVerifiedAt}
-              onTest={notion.testConnection}
-              onDisconnect={notion.disconnect}
-            />
-          ) : status.state === 'error' && status.hasStoredCredentials ? (
-            <StoredCredentialErrorView
-              message={status.message}
-              activity={activity}
-              onRetry={notion.testConnection}
-              onDisconnect={notion.disconnect}
-              onReconnect={notion.authOptions?.oauth ? notion.startOAuth : undefined}
-              reconnectLabel="Reconectar com Notion"
-            />
-          ) : (
-            <DisconnectedView
-              error={status.state === 'error' ? status.message : null}
-              connecting={activity === 'connecting'}
-              oauthAvailable={notion.authOptions ? notion.authOptions.oauth : null}
-              onConnectToken={notion.connect}
-              onStartOAuth={notion.startOAuth}
-            />
-          )}
-        </VStack>
-      </VStack>
-    </Card>
+    <section
+      aria-labelledby="notion-card-title"
+      aria-busy={activity !== 'idle'}
+      className={CONNECTION_CARD_CLASS}
+    >
+      <CardHeader
+        titleId="notion-card-title"
+        title="Notion"
+        description="Planejamento: páginas, bancos e tarefas."
+        icon={<NotionLogo className="size-[18px]" />}
+        badge={
+          <StatusBadge status={status} activity={activity} waitingLabel="Aguardando o Notion…" />
+        }
+      />
+      <div className="flex flex-col gap-4" aria-live="polite">
+        {status === null ? (
+          <Skeleton className="h-10" aria-label="Carregando status da conexão" />
+        ) : activity === 'authorizing' ? (
+          <AuthorizingView onCancel={notion.cancelOAuth} />
+        ) : status.state === 'connected' ? (
+          <ConnectedView
+            account={status.account}
+            connectedAt={status.connectedAt}
+            warning={status.warning}
+            activity={activity}
+            lastVerifiedAt={notion.lastVerifiedAt}
+            onTest={notion.testConnection}
+            onDisconnect={notion.disconnect}
+          />
+        ) : status.state === 'error' && status.hasStoredCredentials ? (
+          <StoredCredentialErrorView
+            message={status.message}
+            activity={activity}
+            onRetry={notion.testConnection}
+            onDisconnect={notion.disconnect}
+            onReconnect={notion.authOptions?.oauth ? notion.startOAuth : undefined}
+            reconnectLabel="Reconectar com Notion"
+          />
+        ) : (
+          <DisconnectedView
+            error={status.state === 'error' ? status.message : null}
+            connecting={activity === 'connecting'}
+            oauthAvailable={notion.authOptions ? notion.authOptions.oauth : null}
+            onConnectToken={notion.connect}
+            onStartOAuth={notion.startOAuth}
+          />
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -106,12 +103,12 @@ function DisconnectedView({
   const [useToken, setUseToken] = useState(false)
 
   if (oauthAvailable === null) {
-    return <Skeleton height={40} aria-label="Carregando opções de conexão" />
+    return <Skeleton className="h-10" aria-label="Carregando opções de conexão" />
   }
 
   if (useToken || !oauthAvailable) {
     return (
-      <VStack gap={3}>
+      <div className="flex flex-col gap-3">
         <TokenForm
           copy={TOKEN_COPY}
           error={error}
@@ -125,41 +122,47 @@ function DisconnectedView({
           unavailableMessage="O login com Notion não está disponível nesta versão do Orkio."
           onBack={() => setUseToken(false)}
         />
-      </VStack>
+      </div>
     )
   }
 
   return (
-    <VStack gap={4}>
-      <Text color="secondary">
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">
         Entre com a sua conta do Notion e escolha as páginas que o Orkio pode ler. Você autoriza no
         navegador; nenhuma senha passa pelo Orkio.
-      </Text>
+      </p>
       {error && <Alert tone="danger">{error}</Alert>}
-      <HStack gap={2} vAlign="center">
-        <Button
-          variant="primary"
-          label={error ? 'Tentar novamente' : 'Conectar com Notion'}
-          onClick={() => void onStartOAuth()}
-        />
-        <Button variant="ghost" label="Usar token" onClick={() => setUseToken(true)} />
-      </HStack>
-    </VStack>
+      <div className="flex items-center gap-2">
+        <Button onClick={() => void onStartOAuth()}>
+          {error ? 'Tentar novamente' : 'Conectar com Notion'}
+        </Button>
+        <Button variant="ghost" onClick={() => setUseToken(true)}>
+          Usar token
+        </Button>
+      </div>
+    </div>
   )
 }
 
 function AuthorizingView({ onCancel }: { onCancel: () => Promise<void> }): React.JSX.Element {
   return (
-    <VStack gap={4}>
-      <Item
-        role="status"
-        startContent={<Spinner size="md" aria-label="Aguardando" />}
-        label="Aguardando autorização no Notion…"
-        description="Conclua no navegador que abriu: escolha o workspace e as páginas e clique em Permitir. Depois é só voltar para cá."
-      />
-      <HStack>
-        <Button label="Cancelar" onClick={() => void onCancel()} />
-      </HStack>
-    </VStack>
+    <div className="flex flex-col gap-4">
+      <div role="status" className="flex items-start gap-2.5">
+        <Spinner label="Aguardando" className="mt-0.5" />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-sm text-foreground">Aguardando autorização no Notion…</span>
+          <span className="text-xs text-muted-foreground">
+            Conclua no navegador que abriu: escolha o workspace e as páginas e clique em Permitir.
+            Depois é só voltar para cá.
+          </span>
+        </div>
+      </div>
+      <div className="flex">
+        <Button variant="outline" onClick={() => void onCancel()}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
   )
 }

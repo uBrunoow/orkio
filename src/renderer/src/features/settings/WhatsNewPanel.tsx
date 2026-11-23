@@ -1,11 +1,4 @@
-import { Button } from '@astryxdesign/core/Button'
-import { Card } from '@astryxdesign/core/Card'
-import { Heading } from '@astryxdesign/core/Heading'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
 import { noteBlocks, type NoteBlock, type ReleaseNotes } from '../../../../shared/updates'
 
 /** "O que há de novo": notas da versão (do CHANGELOG embutido), em texto simples. */
@@ -20,35 +13,47 @@ export function WhatsNewPanel({
 }): React.JSX.Element {
   const groups = groupBlocks(noteBlocks(notes.notes))
   return (
-    <Card role="region" aria-labelledby="whats-new-title" data-testid="whats-new">
-      <VStack gap={3}>
-        <Heading level={2} id="whats-new-title">
-          O que há de novo na versão {notes.version}
-        </Heading>
-        {groups.length === 0 ? (
-          <Text color="secondary">Esta versão não trouxe notas.</Text>
-        ) : (
-          groups.map((g, i) =>
-            g.type === 'heading' ? (
-              <Heading level={3} key={i}>
-                {g.text}
-              </Heading>
-            ) : g.type === 'paragraph' ? (
-              <Text key={i}>{g.text}</Text>
-            ) : (
-              <List key={i} density="compact" aria-label="Mudanças">
-                {g.items.map((text, j) => (
-                  <Item as="li" key={j} label={text} />
-                ))}
-              </List>
-            )
+    <section
+      aria-labelledby="whats-new-title"
+      data-testid="whats-new"
+      className="flex flex-col gap-3 rounded-xl border border-border-soft bg-card p-5"
+    >
+      <h2 id="whats-new-title" className="text-sm font-medium text-foreground">
+        O que há de novo na versão {notes.version}
+      </h2>
+      {groups.length === 0 ? (
+        <p className="text-sm text-muted-foreground">Esta versão não trouxe notas.</p>
+      ) : (
+        groups.map((g, i) =>
+          g.type === 'heading' ? (
+            <h3
+              key={i}
+              className="pt-1 text-xs font-medium tracking-[0.06em] text-muted-foreground uppercase"
+            >
+              {g.text}
+            </h3>
+          ) : g.type === 'paragraph' ? (
+            <p key={i} className="text-sm text-foreground">
+              {g.text}
+            </p>
+          ) : (
+            <ul key={i} aria-label="Mudanças" className="flex flex-col gap-1 pl-1">
+              {g.items.map((text, j) => (
+                <li key={j} className="flex gap-2 text-sm text-foreground">
+                  <span aria-hidden="true" className="text-subtle-foreground">
+                    •
+                  </span>
+                  <span className="min-w-0">{text}</span>
+                </li>
+              ))}
+            </ul>
           )
-        )}
-        <HStack>
-          <Button variant="primary" label={closeLabel} onClick={onClose} />
-        </HStack>
-      </VStack>
-    </Card>
+        )
+      )}
+      <div className="flex">
+        <Button onClick={onClose}>{closeLabel}</Button>
+      </div>
+    </section>
   )
 }
 

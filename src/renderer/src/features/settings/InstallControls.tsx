@@ -1,10 +1,6 @@
 import { useState } from 'react'
-import { Button } from '@astryxdesign/core/Button'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Item } from '@astryxdesign/core/Item'
-import { List } from '@astryxdesign/core/List'
-import { Text } from '@astryxdesign/core/Text'
-import { VStack } from '@astryxdesign/core/VStack'
+import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/Spinner'
 import type { BusyItem, UpdateStatus } from '../../../../shared/updates'
 
 /**
@@ -32,80 +28,77 @@ export function InstallControls({ status }: { status: UpdateStatus }): React.JSX
 
   if (status.mode === 'manual' && status.phase === 'available') {
     return (
-      <Button
-        variant="primary"
-        label="Baixar"
-        onClick={() => void window.orkio.updates.openDownload()}
-      />
+      <div className="flex">
+        <Button onClick={() => void window.orkio.updates.openDownload()}>Baixar</Button>
+      </div>
     )
   }
   if (status.mode !== 'auto' || status.phase !== 'downloaded') return null
 
   if (status.installWhenIdle) {
     return (
-      <VStack gap={2}>
-        <Text>Vai reiniciar e atualizar assim que tudo terminar.</Text>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm text-foreground">
+          Vai reiniciar e atualizar assim que tudo terminar.
+        </p>
         <BusyList items={status.busy} />
-        <HStack gap={2} wrap="wrap">
-          <Button
-            label="Atualizar agora mesmo assim"
-            isDisabled={working}
-            onClick={() => void install('now')}
-          />
-          <Button
-            variant="ghost"
-            label="Desistir de esperar"
-            isDisabled={working}
-            onClick={() => void install('cancel_wait')}
-          />
-        </HStack>
-      </VStack>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={working} onClick={() => void install('now')}>
+            Atualizar agora mesmo assim
+          </Button>
+          <Button variant="ghost" disabled={working} onClick={() => void install('cancel_wait')}>
+            Desistir de esperar
+          </Button>
+        </div>
+      </div>
     )
   }
 
   if (busy) {
     return (
-      <VStack gap={2}>
-        <Text>Ainda tem coisa rodando. Reiniciar agora cancelaria:</Text>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm text-foreground">
+          Ainda tem coisa rodando. Reiniciar agora cancelaria:
+        </p>
         <BusyList items={busy} />
-        <HStack gap={2} wrap="wrap">
-          <Button
-            variant="primary"
-            label="Atualizar quando terminar"
-            isDisabled={working}
-            onClick={() => void install('when_idle')}
-          />
-          <Button
-            label="Atualizar agora mesmo assim"
-            isDisabled={working}
-            onClick={() => void install('now')}
-          />
-          <Button variant="ghost" label="Cancelar" onClick={() => setBusy(null)} />
-        </HStack>
-      </VStack>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={working} onClick={() => void install('when_idle')}>
+            Atualizar quando terminar
+          </Button>
+          <Button variant="outline" disabled={working} onClick={() => void install('now')}>
+            Atualizar agora mesmo assim
+          </Button>
+          <Button variant="ghost" onClick={() => setBusy(null)}>
+            Cancelar
+          </Button>
+        </div>
+      </div>
     )
   }
 
   return (
-    <VStack gap={1}>
-      <Button
-        variant="primary"
-        label="Reiniciar e atualizar"
-        isLoading={working}
-        onClick={() => void install('if_idle')}
-      />
-      {message && <Text color="secondary">{message}</Text>}
-    </VStack>
+    <div className="flex flex-col items-start gap-1">
+      <Button disabled={working} onClick={() => void install('if_idle')}>
+        {working && <Spinner />}
+        Reiniciar e atualizar
+      </Button>
+      {message && <p className="text-sm text-muted-foreground">{message}</p>}
+    </div>
   )
 }
 
 function BusyList({ items }: { items: BusyItem[] }): React.JSX.Element | null {
   if (items.length === 0) return null
   return (
-    <List hasDividers density="compact" aria-label="O que está rodando">
+    <ul
+      aria-label="O que está rodando"
+      className="flex flex-col divide-y divide-border-soft rounded-lg border border-border-soft bg-card"
+    >
       {items.map((item, i) => (
-        <Item as="li" key={`${item.kind}-${i}`} label={item.label} />
+        <li key={`${item.kind}-${i}`} className="px-3 py-1.5 text-sm text-foreground">
+          {item.label}
+        </li>
       ))}
-    </List>
+    </ul>
   )
 }

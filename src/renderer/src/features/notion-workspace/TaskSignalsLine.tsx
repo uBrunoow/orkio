@@ -1,8 +1,4 @@
-import { Button } from '@astryxdesign/core/Button'
-import { Code } from '@astryxdesign/core/Code'
-import { HStack } from '@astryxdesign/core/HStack'
-import { Icon } from '@astryxdesign/core/Icon'
-import { Text } from '@astryxdesign/core/Text'
+import { Button } from '@/components/ui/button'
 import type { TaskSignals } from '../../../../shared/ipc-contract'
 import type { ChecksState, PullRequestState, ReviewDecision } from '../../../../shared/task-signals'
 import { StatusToken, toneOf } from '../../components/StatusToken'
@@ -41,27 +37,30 @@ export function TaskSignalsLine({
   if (branches.length === 0 && !pr) return null
 
   return (
-    <HStack gap={2} vAlign="center" wrap="wrap" data-testid="task-signals">
+    <div className="flex flex-wrap items-center gap-2" data-testid="task-signals">
       {branches.length > 0 && (
-        <HStack gap={1} vAlign="center" data-testid="task-branch">
-          <Icon icon={GitBranchIcon} size="sm" color="secondary" />
-          <Code>{branches[0]}</Code>
-          {branches.length > 1 && <Text type="supporting">+{branches.length - 1}</Text>}
-          <Text type="supporting" data-testid="task-branch-where">
+        <div className="flex min-w-0 items-center gap-1" data-testid="task-branch">
+          <GitBranchIcon className="size-3.5 text-subtle-foreground" />
+          <code className="truncate font-mono text-xs text-muted-foreground">{branches[0]}</code>
+          {branches.length > 1 && (
+            <span className="text-xs text-subtle-foreground">+{branches.length - 1}</span>
+          )}
+          <span className="text-xs text-subtle-foreground" data-testid="task-branch-where">
             {whereLabel(signals, branches[0]!)}
-          </Text>
-        </HStack>
+          </span>
+        </div>
       )}
       {pr && (
-        <HStack gap={1} vAlign="center" wrap="wrap" data-testid="task-pr">
+        <div className="flex flex-wrap items-center gap-2" data-testid="task-pr">
           <Button
-            size="sm"
+            size="xs"
             variant="ghost"
-            icon={<Icon icon={PullRequestIcon} />}
-            label={`#${pr.number}`}
+            className="font-mono"
             aria-label={`Abrir a PR #${pr.number} no GitHub`}
             onClick={() => void window.orkio.openExternal(pr.url)}
-          />
+          >
+            <PullRequestIcon />#{pr.number}
+          </Button>
           <StatusToken
             label={PR_STATE[pr.state].label}
             tone={toneOf(PR_STATE[pr.state].color)}
@@ -85,13 +84,13 @@ export function TaskSignalsLine({
             <StatusToken label={CHECKS[pr.checks].label} tone={toneOf(CHECKS[pr.checks].color)} />
           )}
           {signals.otherPrs > 0 && (
-            <Text type="supporting">
+            <span className="text-xs text-subtle-foreground">
               +{signals.otherPrs} {signals.otherPrs === 1 ? 'PR' : 'PRs'}
-            </Text>
+            </span>
           )}
-        </HStack>
+        </div>
       )}
-    </HStack>
+    </div>
   )
 }
 
