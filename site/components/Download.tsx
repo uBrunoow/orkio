@@ -17,7 +17,7 @@ type UAData = {
   getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }>
 }
 
-const ORDER: DownloadKind[] = ['mac-arm64', 'mac-x64', 'windows']
+const ORDER: DownloadKind[] = ['mac-arm64', 'mac-x64', 'windows', 'linux-appimage', 'linux-deb']
 
 function size(bytes: number): string {
   return bytes > 0 ? ` · ${(bytes / 1024 / 1024).toFixed(0)} MB` : ''
@@ -103,7 +103,9 @@ export function Download({
       )}
       <p className={styles.note}>
         {t.download.version} {release.version}
-        {platform?.os === 'linux' ? ` · ${t.download.linux}` : ''}
+        {platform?.os === 'linux' && !release.files['linux-appimage'] && !release.files['linux-deb']
+          ? ` · ${t.download.linux}`
+          : ''}
       </p>
       {variant === 'full' && (
         <>
@@ -122,7 +124,11 @@ export function Download({
                 </li>
               ))}
           </ul>
-          {platform?.os !== 'windows' && <p className={styles.note}>{t.download.macNote}</p>}
+          {platform?.os === 'linux' ? (
+            <p className={styles.note}>{t.download.linuxNote}</p>
+          ) : (
+            platform?.os !== 'windows' && <p className={styles.note}>{t.download.macNote}</p>
+          )}
           <a className={styles.textLink} href={release.url}>
             {t.download.all}
           </a>

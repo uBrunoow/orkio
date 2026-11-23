@@ -61,6 +61,8 @@ export interface UpdateServiceDeps {
   isPackaged(): boolean
   platform: NodeJS.Platform
   arch: string
+  /** Linux: rodando de um AppImage (`APPIMAGE` no ambiente)? Só ele se atualiza sozinho; o .deb não. */
+  isAppImage?: boolean
   /** macOS: o bundle tem assinatura Developer ID? (só é chamada no macOS, uma vez). */
   macSigned(): Promise<boolean>
   settings: {
@@ -267,7 +269,8 @@ export class UpdateService {
   private mode(): UpdateMode {
     const u = this.deps.updater
     const enabled =
-      u.forceDevUpdateConfig || (this.deps.isPackaged() && this.deps.platform !== 'linux')
+      u.forceDevUpdateConfig ||
+      (this.deps.isPackaged() && (this.deps.platform !== 'linux' || this.deps.isAppImage === true))
     if (!enabled) return 'disabled'
     if (this.deps.platform === 'darwin' && this.macSigned === false) return 'manual'
     return 'auto'

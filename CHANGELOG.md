@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Linux (x64): AppImage, que roda em qualquer distro e se atualiza sozinho, e .deb para
+  Ubuntu/Debian. O site sugere o AppImage para quem abre no Linux. Os tokens ficam no chaveiro do
+  sistema (GNOME Keyring ou KWallet).
+
 ## [0.2.2] - 2026-11-23
 
 ### Adicionado
@@ -44,12 +50,6 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   "Artefatos"), "Modelos do alva-flow" e "resumo da tarefa" (antes "briefing").
 - Mesma largura nas telas de formulário e nas de lista; a barra de salvar não tem mais sombra e
   "Salvar fluxo" fica desligado sem alterações.
-
-### Corrigido
-
-- O pacote do macOS não quebra mais quando o certificado de assinatura não está configurado (o
-  release ficava parado em rascunho).
-
 - A tarefa virou uma sessão: uma conversa só com os eventos do Notion e do GitHub, os passos do
   fluxo, as respostas inteiras do Claude Code em cada execução e as suas decisões. Logo depois de
   cada execução aparece o que ela produziu: a spec ou o plano do Backlog.md (/spec, /plan) e os
@@ -68,6 +68,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Corrigido
 
+- O pacote do macOS não quebra mais quando o certificado de assinatura não está configurado (o
+  release ficava parado em rascunho).
 - A pergunta do Claude Code não é mais negada depois de 10 minutos: ela espera a sua resposta por
   até 24 horas, em "Esperando você". Pedidos de permissão continuam expirando em 10 minutos.
 - Login com Notion: os erros do serviço de login dizem a causa (site fora do alcance, intermediário

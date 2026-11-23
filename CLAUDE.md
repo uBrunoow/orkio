@@ -43,8 +43,8 @@ Claude Code. Hoje existem:
   Contexto do Claude), Projetos, Agentes, Integrações e Configurações (Ctrl/Cmd+1…9 nessa ordem), numa coluna só de ícones (tooltip e nome acessível) sob uma barra superior com o seletor de projeto, buscar e o sino de "esperando você", rotas tipadas, tarefa em
   painel ou tela cheia, Command Palette (Ctrl/Cmd+K), card do quadro com um estado só (`cardStatus`).
   Diagnóstico e decisões em `docs/ui-reorg.md`; linguagem visual na skill `orkio-design`. Redesign em fases (densidade pelo tema, estado em ponto + texto, moldura, quadro com tarefa em folha sobre as colunas e Kanban/Lista, agentes com avatar geométrico) em `docs/ui-redesign.md`.
-- **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64) e
-  Windows (nsis), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
+- **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
+  Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
 - **Tarefa como sessão (fase 8 do redesign):** a tarefa é uma conversa só (eventos, execuções do
   Claude Code, fluxo) com "em que pé está" no topo e um campo de mensagem que continua a última
@@ -812,7 +812,8 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
   `publish` github → `uBrunoow/orkio` (`RELEASES_REPO` em `shared/updates.ts`; precisa bater
   com o electron-builder da 6B). O feed é público: nada de token.
 - `UpdateService` (`main/updates/`) recebe o `autoUpdater` como `UpdaterLike`. Ligado só com
-  `app.isPackaged` fora do Linux (ou `forceDevUpdateConfig`, flag oficial, usada no E2E). Checa 10 s
+  `app.isPackaged`; no Linux, só no AppImage (`APPIMAGE` no ambiente, `isAppImage`; o .deb não se
+  atualiza) (ou `forceDevUpdateConfig`, flag oficial, usada no E2E). Checa 10 s
   depois de abrir e a cada 4 h (±10%) e em "Procurar atualizações".
 - **Modos:** Windows e macOS assinado = `auto` (`autoDownload`, `autoInstallOnAppQuit`; instala ao
   sair ou em "Reiniciar e atualizar"). macOS sem Developer ID (`codesign -dv` no bundle: ad-hoc ou
@@ -844,8 +845,9 @@ trunk/gh-pages` e `release*/hotfix*` nunca; sem força, sem remoção.
 
 - **Config:** `electron-builder.ts` (TypeScript, achado pelo nome; `builderConfig(env)` é pura e
   testada em `test/electron-builder-config.test.ts`). Nomes com a arquitetura
-  (`Orkio-<v>-mac-<arch>.dmg|zip`, `Orkio-<v>-win-<arch>-setup.exe`): o site
-  (`site/lib/releases.ts`) e o auto-update (6C) dependem deles. Linux comentado.
+  (`Orkio-<v>-mac-<arch>.dmg|zip`, `Orkio-<v>-win-<arch>-setup.exe`,
+  `Orkio-<v>-linux-x86_64.AppImage`, `Orkio-<v>-linux-amd64.deb`): o site (`site/lib/releases.ts`)
+  e o auto-update (6C) dependem deles; o `release.yml` confere cada um e o `latest-linux.yml`.
 - **Assinatura pelo ambiente:** mac assinado só com `CSC_LINK`/`CSC_NAME` (hardened runtime,
   `build/entitlements.mac.plist` só com `allow-jit`, notarização se houver `APPLE_*`); senão ad-hoc
   (`identity: '-'`) **sem** hardened runtime. Windows só com `WIN_SIGNING=azure` + `AZURE_SIGNING_*`.

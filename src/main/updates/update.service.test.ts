@@ -64,6 +64,7 @@ function setup(
     writable?: boolean
     version?: string
     arch?: string
+    isAppImage?: boolean
   } = {}
 ) {
   const updater = new FakeUpdater()
@@ -84,6 +85,7 @@ function setup(
     currentVersion: options.version ?? '1.0.0',
     isPackaged: () => options.packaged ?? true,
     platform: options.platform ?? 'win32',
+    isAppImage: options.isAppImage ?? false,
     arch: options.arch ?? 'x64',
     macSigned: async () => options.macSigned ?? false,
     settings: {
@@ -147,7 +149,13 @@ describe('UpdateService', () => {
     expect(updater.allowDowngrade).toBe(false)
   })
 
-  it('fora do app empacotado (ou no Linux) fica desligado e não consulta nada', async () => {
+  it('no Linux, só o AppImage se atualiza sozinho (o .deb fica desligado)', async () => {
+    const appImage = setup({ platform: 'linux', isAppImage: true })
+    expect((await appImage.service.check()).mode).toBe('auto')
+    expect(appImage.updater.checks).toHaveLength(1)
+  })
+
+  it('fora do app empacotado (ou no Linux sem AppImage) fica desligado e não consulta nada', async () => {
     const dev = setup({ packaged: false })
     expect((await dev.service.check()).mode).toBe('disabled')
     expect(dev.updater.checks).toHaveLength(0)

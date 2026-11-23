@@ -66,3 +66,16 @@ describe('electron-builder.ts', () => {
     expect(signed.azureSignOptions?.codeSigningAccountName).toBe('conta')
   })
 })
+
+describe('Linux', () => {
+  it('gera AppImage (atualiza sozinho) e .deb, x64, com nomes que o release confere', () => {
+    const c = builderConfig({})
+    expect(c.linux?.target).toEqual([
+      { target: 'AppImage', arch: ['x64'] },
+      { target: 'deb', arch: ['x64'] }
+    ])
+    expect(c.linux?.executableName).toBe('orkio')
+    expect(c.appImage?.artifactName).toBe('${productName}-${version}-linux-${arch}.${ext}')
+    expect(c.deb?.artifactName).toBe('${productName}-${version}-linux-${arch}.${ext}')
+  })
+})

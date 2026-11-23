@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-latest, windows-latest, ubuntu-latest]
     env:
       PUBLISH: ${{ inputs.publish && 'always' || 'never' }}
       # Não são segredos (vão dentro do binário): `vars`, com `secrets` como alternativa.
@@ -128,11 +128,21 @@ jobs:
             if [ -z "${!name}" ]; then unset "$name"; fi
           done
           if [ -n "${APPLE_API_KEY_PATH:-}" ]; then export APPLE_API_KEY="$APPLE_API_KEY_PATH"; fi
-          if [ "$RUNNER_OS" = "macOS" ]; then platform="--mac"; else platform="--win"; fi
+          case "$RUNNER_OS" in
+            macOS) platform="--mac" ;;
+            Windows) platform="--win" ;;
+            *) platform="--linux" ;;
+          esac
           pnpm exec electron-builder "$platform" --publish "$PUBLISH"
 
       - name: Smoke test do app empacotado
-        run: pnpm smoke:packaged --trace off
+        run: |
+          # Linux sem tela: o Electron precisa de um X virtual.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a pnpm smoke:packaged --trace off
+          else
+            pnpm smoke:packaged --trace off
+          fi
 
       - name: Remover a chave da Apple
         if: always() && runner.os == 'macOS'
@@ -147,6 +157,8 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
             dist/*.blockmap
             dist/*.yml
             !dist/builder-debug.yml
