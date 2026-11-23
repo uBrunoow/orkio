@@ -48,13 +48,13 @@ export function normalizePageId(id: string): string {
 }
 
 /**
- * Ids de páginas do Notion citadas num texto (corpo de PR): links `notion.so`/`notion.site` terminam
+ * Ids de páginas do Notion citadas num texto (corpo de PR): links `notion.so`/`notion.com`/`notion.site` terminam
  * com o id de 32 caracteres hexadecimais (com ou sem hífens). Devolve normalizados, sem repetir.
  */
 export function notionPageIdsIn(text: string | null | undefined): string[] {
   if (!text) return []
   const out = new Set<string>()
-  const url = /https?:\/\/(?:www\.)?[a-z0-9-]*\.?notion\.(?:so|site)\/[^\s)\]>"']+/gi
+  const url = /https?:\/\/(?:www\.)?[a-z0-9-]*\.?notion\.(?:so|com|site)\/[^\s)\]>"']+/gi
   for (const m of text.matchAll(url)) {
     const path = m[0].split(/[?#]/)[0] ?? ''
     const id = /([0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i.exec(
