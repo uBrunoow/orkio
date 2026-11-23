@@ -485,6 +485,8 @@ export interface BoardView {
   truncated: boolean
   pendingCount: number
   fetchedAt: string
+  /** Movimentos de cada automação (id da regra) nos últimos 7 dias. */
+  ruleCountsWeek: Record<string, number>
 }
 
 export type OrkioStageChoice =

@@ -191,6 +191,21 @@ export class BoardStore {
     )
   }
 
+  /** Movimentos feitos por cada automação desde `sinceIso` (disparos da semana). */
+  ruleCounts(projectId: string, sinceIso: string): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (const r of this.db.all<{ rule_id: string | null; n: number }>(
+      `SELECT json_extract(detail_json, '$.ruleId') AS rule_id, COUNT(*) AS n FROM task_events
+       WHERE project_id = ? AND source = 'automation' AND kind = 'moved' AND at >= ?
+       GROUP BY rule_id`,
+      projectId,
+      sinceIso
+    )) {
+      if (r.rule_id) out[r.rule_id] = r.n
+    }
+    return out
+  }
+
   /** Esta chave de evento (idempotência das automações) já foi processada? */
   hasEventKey(key: string): boolean {
     return this.db.get('SELECT 1 AS x FROM task_events WHERE event_key = ?', key) !== undefined

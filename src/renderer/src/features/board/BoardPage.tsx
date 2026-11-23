@@ -393,7 +393,6 @@ function useAutomationStatus(projectId: string): {
   }
 }
 
-
 /** Estado das automações, curto, no cabeçalho do quadro. */
 function AutomationLine({
   status,

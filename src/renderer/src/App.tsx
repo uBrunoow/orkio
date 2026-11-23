@@ -27,7 +27,7 @@ import { useSidebarData } from './app/useSidebarData'
 import { WaitingBell } from './app/WaitingBell'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
-import { AutomationsPage, FlowsPage } from './features/board/ProjectPages'
+import { BoardSettingsPage } from './features/board/ProjectPages'
 import { TaskScreen } from './features/task/TaskScreen'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 import { WelcomePage } from './features/welcome/WelcomePage'
@@ -242,23 +242,15 @@ export function App(): React.JSX.Element | null {
           )
           break
         case 'board':
-          page =
-            route.tab === 'flows' ? (
-              <FlowsPage
-                project={linkedProject}
-                tab="flows"
-                onTabChange={() => undefined}
-                onOpenBoard={toBoard}
-                onOpenProjects={() => toSettings('projects')}
-              />
-            ) : (
-              <AutomationsPage
-                project={linkedProject}
-                onOpenBoard={toBoard}
-                onOpenFlows={() => navigate({ name: 'settings', section: 'board', tab: 'flows' })}
-                onOpenProjects={() => toSettings('projects')}
-              />
-            )
+          page = (
+            <BoardSettingsPage
+              project={linkedProject}
+              tab={route.tab ?? 'columns'}
+              onTabChange={(tab) => navigate({ name: 'settings', section: 'board', tab })}
+              onOpenBoard={toBoard}
+              onOpenProjects={() => toSettings('projects')}
+            />
+          )
           break
         case 'agents':
           page = <AgentsPage />
