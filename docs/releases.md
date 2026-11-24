@@ -200,6 +200,6 @@ ligar o Artifact Signing:
   roda a ponte MCP do asar com um socket simulado (initialize → tools/list → tools/call). Roda no
   Linux em todo PR e no mac arm64 e no Windows ao empacotar. O mac x64 não é testado (os runners são
   arm64).
-- **Custo do Actions:** o CI de PR é só Linux; macOS só no release, no teste manual e no E2E
-  opcional do CI (dispatch). A decisão veio de quando o repositório era privado (minuto de macOS
+- **Custo do Actions:** o CI de PR é só Linux; macOS só no release e no teste manual. O CI não
+  roda no push da `main` (o release já roda o mesmo CI antes de empacotar). A decisão veio de quando o repositório era privado (minuto de macOS
   conta 10x); em repositório público os runners padrão são gratuitos.

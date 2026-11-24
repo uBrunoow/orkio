@@ -37,7 +37,7 @@ describe('workflows', () => {
       ...pathsIgnore(workflow('release-on-merge.yml')),
       ...pathsIgnore(workflow('release-label.yml'))
     ]
-    expect(lists).toHaveLength(4) // ci: push + pull_request
+    expect(lists).toHaveLength(3) // ci (só pull_request), release-on-merge, release-label
     for (const list of lists) expect(list).toEqual(lists[0])
     expect(lists[0]).toContain('site/**')
     // Nada do app fica de fora (src, e2e, scripts, configs).

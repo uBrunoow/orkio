@@ -1384,8 +1384,9 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   itens em `## [Não lançado]`; move para `## [X.Y.Z] - AAAA-MM-DD`. Leitor único do CHANGELOG em
   `src/shared/changelog.mts` (release, notas do GitHub e "O que há de novo" da 6C;
   `test/changelog.test.ts` compara os dois lados em toda versão do CHANGELOG real). Não faz push.
-- **Workflows:** `ci.yml` (PR/push na main, sem `site/**`; lint, typecheck, test, e2e Linux,
-  `package-smoke` Linux; E2E no macOS só por dispatch). `package.yml` (dispatch = empacota sem
+- **Workflows:** `ci.yml` (só PR, sem `site/**`/`docs/**`/`README.md`, e chamado pelo release; sem
+  push na main, que duplicava o CI do release; lint, typecheck, test, e2e Linux, `package-smoke`
+  Linux). `release-label.yml` ignora os mesmos caminhos do `release-on-merge.yml`. `package.yml` (dispatch = empacota sem
   publicar e sobe artefatos; `workflow_call` com `publish`). `release.yml` (tag): `release-check` →
   `ci.yml` → rascunho do release (notas do CHANGELOG, `GITHUB_TOKEN` com `contents: write` só nos
   jobs que publicam) → `package.yml` com
@@ -1557,7 +1558,7 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
 | Release como rascunho criado antes da matriz, publicado num job final                                       | Os jobs do mac e do Windows sobem para o mesmo release sem duplicar; nada é publicado se um pacote ou smoke falhar.                                                                                                                                         |
 | mac sem Developer ID = ad-hoc sem hardened runtime                                                          | Apple Silicon exige assinatura; hardened runtime com ad-hoc recusa o Electron Framework (validação de bibliotecas).                                                                                                                                         |
 | Fuse `RunAsNode` ligado                                                                                     | A ponte MCP de permissões é um processo que o CLI do Claude abre com o executável do Orkio + `ELECTRON_RUN_AS_NODE`.                                                                                                                                        |
-| CI de PR só no Linux (smoke do pacote incluso)                                                              | Em repo privado, minuto de macOS custa 10x; o mac roda no release, no teste manual e por dispatch.                                                                                                                                                          |
+| CI de PR só no Linux (smoke do pacote incluso)                                                              | Em repo privado, minuto de macOS custava 10x; o mac roda no release e no teste manual.                                                                                                                                                                      |
 
 ## shadcn/Radix e CSP (regra inegociável)
 
