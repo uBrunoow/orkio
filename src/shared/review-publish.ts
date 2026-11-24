@@ -157,5 +157,10 @@ export function parseReviewAnswer(
     }
     comments.push({ path: c['path'].trim(), line: c['line'], body: c['body'] })
   }
-  return { ok: true, review: { event, summary, comments } }
+  // Comentário por linha = algo a corrigir: a revisão pede alterações (a regra "Alterações
+  // pedidas → Revisado" e o fluxo de comentários dependem disso), mesmo que o agente diga COMMENT.
+  return {
+    ok: true,
+    review: { event: comments.length > 0 ? 'REQUEST_CHANGES' : event, summary, comments }
+  }
 }

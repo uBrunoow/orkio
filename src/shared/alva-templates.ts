@@ -295,7 +295,7 @@ export function alvaReviewedFlow(): Flow {
 export const REVIEW_JSON_PROMPT = [
   'Converta a revisão acima no JSON abaixo e responda só com ele, num bloco ```json (sem texto antes ou depois):',
   '{"event": "REQUEST_CHANGES" ou "COMMENT", "summary": "resumo da revisão em markdown", "comments": [{"path": "caminho/do/arquivo", "line": 42, "body": "o problema e a correção sugerida"}]}',
-  'Use "REQUEST_CHANGES" se houver algum achado que bloqueia; senão "COMMENT". Nunca aprove.',
+  'Use "REQUEST_CHANGES" se houver qualquer coisa a corrigir (cada item de "comments" é uma correção pedida); "COMMENT" só quando não há nada a corrigir. Nunca aprove.',
   'Em "comments", só achados com arquivo e linha do diff da PR (a linha no arquivo novo), no máximo 50; os demais vão no "summary". Escreva em pt-BR. Não altere arquivos.'
 ].join('\n')
 

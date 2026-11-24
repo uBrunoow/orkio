@@ -141,7 +141,9 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
           ? `Atribuída a ${String(e.detail?.['agent'] ?? '')} pelo orquestrador`
           : `Atribuída a ${String(e.detail?.['agent'] ?? '')}`
     case 'agent_unassigned':
-      return 'Atribuição de agente removida'
+      return e.detail?.['by'] === 'orchestrator' && e.detail?.['agent']
+        ? `${String(e.detail['agent'])} saiu da tarefa (etapa sem agente do orquestrador)`
+        : 'Atribuição de agente removida'
     case 'step_started':
       return `Passo começou: ${stepLabel(e)}`
     case 'step_finished':

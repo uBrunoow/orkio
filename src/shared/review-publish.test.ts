@@ -24,7 +24,18 @@ describe('parseReviewAnswer', () => {
       ok: true
     })
     const two = `\`\`\`json\n{"x":1}\n\`\`\`\n\`\`\`json\n${JSON.stringify({ ...REVIEW, event: 'COMMENT' })}\n\`\`\``
-    expect(parseReviewAnswer(two)).toMatchObject({ ok: true, review: { event: 'COMMENT' } })
+    expect(parseReviewAnswer(two)).toMatchObject({ ok: true, review: { event: 'REQUEST_CHANGES' } })
+  })
+
+  it('com comentário por linha, a revisão pede alterações mesmo se o agente disse COMMENT', () => {
+    expect(parseReviewAnswer(JSON.stringify({ ...REVIEW, event: 'COMMENT' }))).toEqual({
+      ok: true,
+      review: REVIEW
+    })
+    // Só resumo, sem nada por linha: fica como o agente disse.
+    expect(
+      parseReviewAnswer(JSON.stringify({ event: 'COMMENT', summary: 'ok', comments: [] }))
+    ).toMatchObject({ ok: true, review: { event: 'COMMENT' } })
   })
 
   it('comentários são opcionais', () => {

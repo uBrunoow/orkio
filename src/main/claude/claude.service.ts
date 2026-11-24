@@ -536,12 +536,20 @@ export class ClaudeService {
       req.branchKind ? { kind: req.branchKind } : {}
     )
     let deliveryInput: { target: DeliveryTarget; requirePushApproval: boolean } | null = null
+    let githubRead: DeliveryTarget | null = null
     if (delivery) {
       if (!this.deps.deliveryTarget) return fail('no_repo', CLAUDE_MESSAGES.noRepo)
       try {
         deliveryInput = this.deps.deliveryTarget(req.projectId, req.taskId)
       } catch (error) {
         return fail('no_repo', error instanceof Error ? error.message : CLAUDE_MESSAGES.noRepo)
+      }
+    } else {
+      // Fora da entrega, o repositório só libera a leitura da PR; sem ele, nada muda.
+      try {
+        githubRead = this.deps.deliveryTarget?.(req.projectId, req.taskId).target ?? null
+      } catch {
+        githubRead = null
       }
     }
     const view = await this.deps.runs.start({
@@ -554,6 +562,7 @@ export class ClaudeService {
       ...(timeoutMin ? { timeoutMin } : {}),
       includeBriefing,
       delivery: deliveryInput,
+      githubRead,
       agent: agent && !status.supportsEffort ? { ...agent, effort: null } : agent,
       // CLI sem `--effort`: o raciocínio some (o seletor também some na UI).
       runtime:

@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 import type { DeliveryTarget } from '../../shared/delivery'
 import { checkPushBranch, isProtectedBranch } from '../../shared/delivery'
 import { topLevelFields, type DeliveryKind } from './delivery-policy'
-import { DELIVERY_ALLOWED, POLICY_MESSAGES, evaluatePermission, type PolicyContext } from './policy'
+import {
+  DELIVERY_ALLOWED,
+  GH_READ_ALLOWED,
+  POLICY_MESSAGES,
+  evaluatePermission,
+  type PolicyContext
+} from './policy'
 
 const WT = '/home/u/.config/orkio/worktrees/p1/ORK-7'
 const BRANCH = 'ORK-7/exportar-csv'
@@ -198,6 +204,50 @@ describe('modo entrega: git push', () => {
     expect(denied(`git push origin ${BRANCH}`, c)).toBe(POLICY_MESSAGES.push)
     expect(denied('gh pr create --fill', c)).toBe(POLICY_MESSAGES.gh)
     expect(denied('gh api repos/acme/app/pulls', c)).toBe(POLICY_MESSAGES.gh)
+  })
+
+  it('fora do modo entrega, com o repositório do projeto: ler a PR passa, escrever não', () => {
+    const c: PolicyContext = { ...ctx({ delivery: false }), allowRules: [], repo: target }
+    // O caso real (alva-hub #14): ler revisões e comentários numa linha só.
+    expect(
+      allowed(
+        "gh pr view 14 --json reviews,comments,state --jq '{state, reviews: [.reviews[] | {state}]}'; gh api repos/acme/app/pulls/14/comments --paginate",
+        c
+      )
+    ).toEqual({ decision: 'allow', reason: GH_READ_ALLOWED })
+    for (const cmd of [
+      'gh pr diff 14',
+      'gh pr checks 14',
+      'gh pr list --state open',
+      'gh run view 123 --log-failed',
+      'gh api repos/{owner}/{repo}/pulls/14/reviews',
+      'gh api -X GET repos/acme/app/pulls/14/comments -f per_page=100',
+      `gh api graphql -f query='query { repository(owner: "acme", name: "app") { pullRequest(number: 14) { reviewThreads(first: 50) { nodes { isResolved } } } } }'`
+    ]) {
+      allowed(cmd, c)
+    }
+    for (const cmd of [
+      'gh pr create --fill',
+      'gh pr comment 14 --body ok',
+      'gh pr review 14 --approve',
+      'gh pr merge 14',
+      'gh api repos/acme/app/pulls/14/comments -f body=oi',
+      'gh api -X PATCH repos/acme/app/pulls/14 -f state=closed',
+      'gh api --input body.json repos/acme/app/pulls/14/reviews',
+      `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "x"}) { clientMutationId } }'`,
+      `gh api graphql -f query='mutation { unresolveReviewThread(input: {threadId: "x"}) { clientMutationId } }'`,
+      'gh api repos/evil/app/pulls/14/comments',
+      'gh pr view -R evil/app 14',
+      'gh api graphql -f query=@q.graphql'
+    ]) {
+      expect(denied(cmd, c), cmd).toBe(POLICY_MESSAGES.gh)
+    }
+    // Leitura junto com outro comando: não bloqueia, mas pergunta (sem regra "sempre").
+    expect(bash('gh pr view 14; npm test', c).decision).toBe('ask')
+    // Sem repositório verificado: continua bloqueado.
+    expect(denied('gh pr view 14', { ...c, repo: null })).toBe(POLICY_MESSAGES.gh)
+    // No modo entrega, a regra é a da entrega (o `repo` é ignorado).
+    expect(bash('gh pr view 14', ctx()).decision).toBe('allow')
   })
 })
 

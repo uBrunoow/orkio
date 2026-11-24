@@ -49,7 +49,7 @@ import { registerAutomationIpc } from './ipc/automation.ipc'
 import { AutomationService, type AutomationNotification } from './automation/automation.service'
 import { AutomationScheduler } from './automation/scheduler'
 import { errorName } from './ipc/payload'
-import { BoardService } from './board/board.service'
+import { BoardService, type StageChange } from './board/board.service'
 import { BoardStore } from './board/board.store'
 import { NotionWriteQueue } from './board/write-queue'
 import { openDatabase } from './db/database'
@@ -556,6 +556,12 @@ function registerIpc(): void {
       ),
       send,
       onFlowFinished: (projectId) => orchestrator?.runSoon(projectId),
+      // Mesma ordem da entrada pelo quadro (orquestrador → regra da coluna → fluxo da coluna).
+      stageEntered: (change) => {
+        orchestrator?.onStageChanged(change)
+        agents.onStageChanged(change)
+        flowRunner?.onStageChanged(change)
+      },
       isTrustedSender,
       ready: projectsReady
     })
@@ -886,6 +892,7 @@ function createFlowRunner(deps: {
   deliveryActions: OrkioAction[]
   send: (channel: string, payload: unknown) => void
   onFlowFinished: (projectId: string) => void
+  stageEntered: (change: StageChange) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
 }): FlowRunner {
@@ -988,7 +995,8 @@ function createFlowRunner(deps: {
     notify: (title, body, ref) =>
       showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, deps.send),
     emit: (ref) => deps.send(IPC_CHANNELS.taskFlows.changed, ref),
-    onFinished: (ref) => deps.onFlowFinished(ref.projectId)
+    onFinished: (ref) => deps.onFlowFinished(ref.projectId),
+    stageEntered: (change) => deps.stageEntered(change)
   })
   deps.runs.onFinished((info) => runner.onRunFinished(info))
   runner.init()

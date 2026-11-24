@@ -207,7 +207,8 @@ describe('publish_review: aprovar', () => {
         'app',
         7,
         {
-          event: 'COMMENT',
+          // Com comentário por linha, sai como "Pedir alterações" (parseReviewAnswer).
+          event: 'REQUEST_CHANGES',
           body: 'Resumo  [imagem: g] [ok](https://d.example)',
           comments: [{ path: 'src/a.ts', line: 3, body: 'Valide.' }]
         }

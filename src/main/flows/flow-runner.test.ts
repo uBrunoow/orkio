@@ -846,6 +846,86 @@ describe('FlowRunner', () => {
       expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'depois' })
     })
 
+    it('a revisão publicada moveu a tarefa: ao terminar, o fluxo da coluna nova começa', async () => {
+      // Caso real: revisão do orkio[bot] com "Pedir alterações" → regra move para Revisado durante
+      // o passo → ao terminar, o "comentários da PR" (ligado a Revisado) tem que começar.
+      let runner: FlowRunner | null = null
+      const PUBLISH = {
+        id: 'publish_review',
+        label: 'Publicar revisão',
+        run: async () => {
+          stage = 's-revisado'
+          runner!.onStageChanged({
+            projectId: 'p1',
+            taskId: 't1',
+            from: 's-rev',
+            to: 's-revisado',
+            source: 'automation'
+          })
+          await flush()
+          return { ok: true as const }
+        }
+      }
+      config = {
+        flows: [
+          {
+            id: 'd',
+            name: 'Revisão publicada',
+            steps: [{ id: 'pub', name: 'Publicar', type: 'orkio_action', action: 'publish_review' }]
+          },
+          { id: 'c', name: 'Comentários', steps: [DELIVER.steps[1]!] }
+        ],
+        bindings: [
+          { stageId: 's-rev', flowId: 'd', enabled: true, mode: 'on_enter' },
+          { stageId: 's-revisado', flowId: 'c', enabled: true, mode: 'on_enter' }
+        ]
+      }
+      const entered: StageChange[] = []
+      runner = makeRunner({
+        actions: [PUBLISH],
+        stageEntered: (change) => {
+          entered.push(change)
+          runner!.onStageChanged(change)
+        }
+      })
+      enter(runner, 'manual')
+      for (let i = 0; i < 4; i++) await flush()
+      expect(runner.view('fr-1')).toMatchObject({ status: 'finished', result: 'done' })
+      expect(entered).toEqual([
+        { projectId: 'p1', taskId: 't1', from: 's-rev', to: 's-revisado', source: 'automation' }
+      ])
+      expect(started.map((s) => s.command)).toEqual(['revisar'])
+      expect(runner.view('fr-2')).toMatchObject({ flowId: 'c', status: 'running' })
+    })
+
+    it('outros passos de entrega (/pr → Revisando) não disparam a coluna nova ao terminar', async () => {
+      config = {
+        flows: [{ id: 'd', name: 'Entregar', steps: [DELIVER.steps[0]!] }],
+        bindings: [
+          { stageId: 's-rev', flowId: 'd', enabled: true, mode: 'on_enter' },
+          { stageId: 's-revisando', flowId: 'd', enabled: true, mode: 'on_enter' }
+        ]
+      }
+      const entered: StageChange[] = []
+      const runner = makeRunner({ stageEntered: (c) => void entered.push(c) })
+      enter(runner, 'manual')
+      await flush()
+      await flush()
+      stage = 's-revisando'
+      runner.onStageChanged({
+        projectId: 'p1',
+        taskId: 't1',
+        from: 's-rev',
+        to: 's-revisando',
+        source: 'automation'
+      })
+      await flush()
+      finish(runner, 'run-1', 'succeeded')
+      await flush()
+      expect(runner.view('fr-1')).toMatchObject({ status: 'finished', result: 'done' })
+      expect(entered).toEqual([])
+    })
+
     it('reabrir o app com a confirmação aberta: continua esperando, com o que mostrar', async () => {
       const runner = deliveryRunner()
       const { id } = await runner.startManual('p1', 't1')

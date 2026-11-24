@@ -293,6 +293,35 @@ describe('entrada por outro caminho', () => {
     expect(agents.assignment('z')).toBeNull()
   })
 
+  it('etapa sem raia (ex.: Revisado): o agente do orquestrador sai; o escolhido à mão fica', async () => {
+    await enable()
+    // Caso real: Revisando → Revisado com o Revisor (que não entrega) travava o fluxo da coluna.
+    place('t', 'rev', at(5))
+    store.transaction(() => agents.assignByOrchestrator(P, 't', 'builtin:revisor', 'Revisor'))
+    flowRun('t', 'rev', at(6), at(20), { agent: 'builtin:revisor' })
+    await service.tick(P)
+    expect(cards[0]?.stageId).toBe('ok')
+    expect(agents.assignment('t')).toBeNull()
+    expect(store.events('t').find((e) => e.kind === 'agent_unassigned')).toMatchObject({
+      detail: { agentKey: 'builtin:revisor', agent: 'Revisor', by: 'orchestrator' }
+    })
+
+    await agents.assign(P, 'm', 'builtin:revisor')
+    service.onStageChanged({ projectId: P, taskId: 'm', from: 'rev', to: 'ok', source: 'manual' })
+    expect(agents.assignment('m')?.key).toBe('builtin:revisor')
+
+    // Agente que não é de nenhuma raia (regra de coluna da 8A) também fica.
+    store.transaction(() => agents.assignByOrchestrator(P, 'q', 'builtin:qa', 'QA'))
+    service.onStageChanged({
+      projectId: P,
+      taskId: 'q',
+      from: 'rev',
+      to: 'ok',
+      source: 'automation'
+    })
+    expect(agents.assignment('q')?.key).toBe('builtin:qa')
+  })
+
   it('antes da primeira rodada, o histórico mostra o nome do agente embutido (não o id)', async () => {
     await enable()
     service.onStageChanged({ projectId: P, taskId: 'w', from: 'fila', to: 'rev', source: 'manual' })

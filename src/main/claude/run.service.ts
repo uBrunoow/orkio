@@ -117,6 +117,11 @@ export interface StartRunInput {
   /** Modo entrega (5C): só em passo de fluxo marcado; vale só nesta execução. */
   delivery?: { target: DeliveryTarget; requirePushApproval: boolean } | null
   /**
+   * Repositório do projeto fora do modo entrega: libera só a leitura do GitHub (`gh pr view`,
+   * `gh api` GET) nesse repositório. `null` = sem repositório verificado (gh segue bloqueado).
+   */
+  githubRead?: DeliveryTarget | null
+  /**
    * Agente (8A): instruções no system prompt e modelo. Não muda nenhuma permissão: a política,
    * o modo entrega e as aprovações são os mesmos de uma execução sem agente.
    */
@@ -199,6 +204,7 @@ interface ActiveRun {
   secrets: Set<string>
   /** Modo entrega (5C) e categorias já aprovadas nesta execução. */
   delivery: StartRunInput['delivery'] | null
+  githubRead: DeliveryTarget | null
   granted: Set<DeliveryKind>
   aliases: PolicyAliases
   pushDefault: string | null
@@ -381,6 +387,7 @@ export class RunService {
       timedOut: false,
       secrets: new Set(),
       delivery: input.delivery ?? null,
+      githubRead: input.githubRead ?? null,
       granted: new Set(),
       aliases: {},
       pushDefault: null,
@@ -650,6 +657,7 @@ export class RunService {
         worktree: run.worktree.path,
         allowRules: this.allowRules(run.projectId),
         aliases: run.aliases,
+        repo: run.delivery ? null : run.githubRead,
         delivery: run.delivery
           ? {
               target: run.delivery.target,

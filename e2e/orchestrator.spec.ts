@@ -237,10 +237,8 @@ test('orquestrador não puxa da fila; movida à mão, a tarefa chega a Revisado 
   await expect(
     page.getByRole('list', { name: 'Tarefas em Revisado' }).getByRole('listitem', { name: /ORK-2/ })
   ).toBeVisible({ timeout: 60_000 })
-  await expect(card(page).getByTestId('card-agent')).toHaveAttribute(
-    'aria-label',
-    'Agente: Revisor'
-  )
+  // Revisado não é etapa do orquestrador: o Revisor sai (o fluxo da coluna roda sem ele).
+  await expect(card(page).getByTestId('card-agent')).toHaveCount(0)
 
   const runs = agentArgs()
   expect(runs).toHaveLength(2)
@@ -255,7 +253,8 @@ test('orquestrador não puxa da fila; movida à mão, a tarefa chega a Revisado 
     panel,
     'Atribuída a Implementador pelo orquestrador',
     'Atribuída a Revisor pelo orquestrador',
-    'Orquestrador (fluxo da etapa concluído): Em andamento → Revisando'
+    'Orquestrador (fluxo da etapa concluído): Em andamento → Revisando',
+    'Revisor saiu da tarefa (etapa sem agente do orquestrador)'
   )
   expect(git(origin(), 'branch', '--list').trim()).toBe('* main')
   expect(await cspViolations(page)).toEqual([])

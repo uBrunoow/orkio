@@ -68,6 +68,14 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Corrigido
 
+- O agente consegue ler a PR (revisões, comentários, threads e CI) com o GitHub CLI fora do passo de
+  entrega: `gh pr view`, `gh api` só leitura e GraphQL sem mutation, só no repositório do projeto.
+  Publicar, comentar, resolver threads e fazer merge continuam só no passo com modo entrega.
+- Revisão do orkio[bot] com comentário por linha sai como "Pedir alterações" (antes podia sair como
+  comentário e a tarefa não ia para Revisado).
+- Depois da revisão, o fluxo "Alva: comentários da PR" começa sozinho em Revisado. Antes, o Revisor
+  continuava atribuído e, como ele não entrega, o fluxo era recusado; e, se a revisão movia a
+  tarefa antes de o fluxo dela terminar, Revisado não começava o fluxo dele.
 - Contas do GitHub conectadas pelo login (OAuth) voltam a ver revisões, comentários e CI das PRs
   (o Orkio pedia uma permissão de organização que essas contas não têm); se faltar permissão, o
   Quadro avisa.

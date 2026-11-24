@@ -543,11 +543,17 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   A pasta principal do usuário nunca é tocada. "Limpar ambiente" remove só o worktree (a branch
   fica); com mudanças pendentes exige confirmação (`force`).
 - **Permissões em camadas:** `--permission-mode acceptEdits`, `--settings` (bloqueio de escrita fora
-  do diretório + deny de push/`gh pr`/`gh api`) e `--permission-prompt-tool mcp__orkio__approve`.
+  do diretório + deny de push e das formas do `gh` que escrevem: `gh pr create|comment|merge…`,
+  `gh api` com `-X`/`--method`/`--input`/`mutation` ou campos em `repos/…`, para valer mesmo com
+  "permitir" no `~/.claude` do usuário) e `--permission-prompt-tool mcp__orkio__approve`.
   A ponte (`bridge/permission-mcp.ts`, roda no Node do Electron com `ELECTRON_RUN_AS_NODE`) fala com
   o main por socket local (0600, token aleatório no mcp-config 0600 apagado no fim).
   `policy.ts`: push (qualquer forma, inclusive `env X=1 git push`), `gh pr|api|release` e caminhos
-  fora do worktree → bloqueio sem perguntar (evento `run_blocked`); shell → pergunta (uma vez /
+  fora do worktree → bloqueio sem perguntar (evento `run_blocked`), **menos a leitura da PR**
+  (`isGhRead` em `delivery-policy.ts`: `gh pr view|diff|checks|list|status`, `gh run view|list|
+watch`, `gh api` GET/HEAD em `repos/<owner>/<repo>/…` ou GraphQL sem mutation, só no repositório
+  do projeto, `RunInput.githubRead`), que passa sem perguntar; sem repositório verificado, segue
+  bloqueado. Escrever no GitHub continua só no modo entrega; shell → pergunta (uma vez /
   sempre neste projeto por prefixo em `permission_rules` / negar), com notificação; 10 min sem
   resposta → nega. `AskUserQuestion` → card de pergunta; respostas voltam em `updatedInput.answers`.
   A mensagem do bloqueio de push/`gh` termina com "Para publicar, use “Abrir PR” …" (o briefing
@@ -869,7 +875,11 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   `requestedReviewer` (GraphQL, só em memória; o snapshot da 3B continua só com ids).
   `TaskSignalsService.prForBranch` (sem rede) dá o número da PR para o histórico.
 - **Etapa:** automação que move a tarefa durante um passo de entrega (a PR aberta pelo `/pr`) não
-  interrompe o fluxo: ele deixa de acompanhar a etapa e segue.
+  interrompe o fluxo: ele deixa de acompanhar a etapa e segue. Se quem moveu foi o
+  `publish_review` (`Persisted.detachedFrom`), ao terminar `done` a entrada na etapa nova passa pelo
+  caminho de sempre (`FlowRunnerDeps.stageEntered`: orquestrador → regra da coluna → fluxo da
+  coluna), para o "comentários da PR" começar em Revisado; os outros passos de entrega (ex.: `/pr`
+  → Revisando) continuam com o orquestrador (`carried_in`).
 - **Histórico:** evento `delivery` (`action`: push, pr_create, pr_edit, pr_comment, pr_ready,
   thread_reply, thread_resolve, review_request, review_post; `by`: orkio/claude) com owner/repo/branch
   e PR; link para a PR (`review_post` com `reviewId` → `#pullrequestreview-<id>`) ou
@@ -892,7 +902,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   o Revisor `delivery: false` roda, mas o `FlowRunner` a trata como passo que publica para a etapa
   mudar sem interromper): o `confirm` lê o texto final da execução mais recente do fluxo
   (`ActionContext.lastRunId` → `claude.readLog` → `finalText`, `shared/review-publish.ts`), valida o
-  JSON (`parseReviewAnswer`; inválido = passo falha, nada é postado), redige (`prepareReview`), acha a
+  JSON (`parseReviewAnswer`; inválido = passo falha, nada é postado; com algum comentário por linha o
+  evento vira `REQUEST_CHANGES`, mesmo se o agente disse `COMMENT`), redige (`prepareReview`), acha a
   PR aberta e marca os comentários fora do diff (`diffLines`). O texto passa por
   `sanitizeReviewText` (sem comentários/tags HTML nem imagens markdown, que viram `[imagem: alt]`;
   o `![` que sobrar vira `!\[`; sem `\p{Cf}` menos o ZWJ; links ficam) antes e depois da redação, de modo que aplicar de novo não muda nada. O gate
@@ -1032,7 +1043,10 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   projetos) + tarefas recém-movidas sem fluxo ainda (memória, até 2 min).
 - **Entrada por outro caminho** (`onStageChanged`, chamado antes da regra da coluna da 8A): você ou
   uma automação move para uma etapa de trabalho → agente da etapa (menos ocupado), a não ser que o
-  atual seja dela ou tenha sido escolhido à mão.
+  atual seja dela ou tenha sido escolhido à mão. Etapa **sem raia** (ex.: Revisado): o agente de
+  uma raia que não foi escolhido à mão sai (`releaseByOrchestrator`, evento `agent_unassigned` com
+  `by: 'orchestrator'`), para o fluxo da coluna não herdar as restrições da etapa anterior (o
+  Revisor, sem entrega, recusava o "comentários da PR").
 - **UI:** seção "Orquestrador" na tela Agentes (`OrchestratorSection`): frase do caminho, última
   rodada, carga de cada agente, o que ficou esperando, "Rodar agora" e o editor ("Configurar
   orquestrador", com a sugestão). IPC `agents.orchestrator|saveOrchestrator|runOrchestrator`.

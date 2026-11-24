@@ -207,6 +207,12 @@ export interface FlowRunnerDeps {
   emit(ref: { projectId: string; taskId: string }): void
   /** 8B: um fluxo terminou (o orquestrador decide se a tarefa segue). */
   onFinished?: (ref: { projectId: string; taskId: string; result: RunRow['result'] }) => void
+  /**
+   * Um fluxo que o `publish_review` tirou da etapa (a revisão publicada moveu a tarefa) terminou: a entrada na etapa onde a tarefa está agora passa pelo caminho de sempre
+   * (orquestrador, regra da coluna, fluxo da coluna). Sem isso, o fluxo da coluna nova nunca
+   * começaria, porque ela foi alcançada com outro fluxo ainda ativo.
+   */
+  stageEntered?: (change: StageChange) => void
   now?: () => Date
   newId?: () => string
 }
@@ -268,6 +274,8 @@ interface Persisted {
   pendingConfirm?: ActionConfirm | null
   /** 8A: você retomou depois do limite diário do agente; vale para o próximo comando. */
   limitBypass?: boolean
+  /** Etapa de onde o `publish_review` tirou o fluxo (ver `stageEntered`). */
+  detachedFrom?: string | null
   /** Resposta ao Claude no passo parado; o próximo início desse passo a manda na mesma sessão. */
   pendingReply?: { stepId: string; text: string } | null
 }
@@ -365,6 +373,16 @@ export class FlowRunner {
         // Isso é consequência do passo, não uma decisão sua: o fluxo segue sem acompanhar a etapa.
         if (change.source === 'automation' && this.inDeliveryStep(active)) {
           this.deps.db.run(`UPDATE flow_runs SET stage_id = NULL WHERE id = ?`, active.id)
+          // Revisão publicada: mover a tarefa (ex.: "Pedir alterações" → Revisado) é o objetivo do
+          // passo, e a coluna nova tem que começar o fluxo dela quando este terminar. Os outros
+          // passos de entrega (ex.: /pr → Revisando) ficam com o orquestrador, como antes.
+          const step = this.flow(active).steps.find((s) => s.id === active.current_step)
+          if (step?.type === 'orkio_action' && step.action === 'publish_review') {
+            this.savePersisted(active.id, {
+              ...this.persisted(active),
+              detachedFrom: active.stage_id
+            })
+          }
           this.deps.emit({ projectId: active.project_id, taskId: active.task_page_id })
           return
         }
@@ -1493,6 +1511,23 @@ export class FlowRunner {
     this.briefings.delete(row.id)
     this.promoteWaiting()
     this.deps.onFinished?.({ projectId: row.project_id, taskId: row.task_page_id, result })
+    // Concluído depois de a entrega mudar a etapa: a coluna onde a tarefa está agora começa o
+    // fluxo dela (ex.: revisão publicada com "Pedir alterações" → Revisado → comentários da PR).
+    const from = p.detachedFrom ?? null
+    if (status === 'finished' && result === 'done' && from) {
+      const to = this.deps.currentStage(row.project_id, row.task_page_id)
+      if (to && to !== from) {
+        const change: StageChange = {
+          projectId: row.project_id,
+          taskId: row.task_page_id,
+          from,
+          to,
+          source: 'automation'
+        }
+        if (this.deps.stageEntered) this.deps.stageEntered(change)
+        else this.onStageChanged(change)
+      }
+    }
   }
 
   private closeStep(

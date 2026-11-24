@@ -65,7 +65,12 @@ export interface OrchestratorDeps {
   board: Pick<BoardService, 'get' | 'applyAutomationMove' | 'flushWrites'>
   agents: Pick<
     AgentsService,
-    'list' | 'assignment' | 'assignments' | 'assignByOrchestrator' | 'limitProblem'
+    | 'list'
+    | 'assignment'
+    | 'assignments'
+    | 'assignByOrchestrator'
+    | 'releaseByOrchestrator'
+    | 'limitProblem'
   >
   flows: {
     hasActive(taskId: string): boolean
@@ -230,6 +235,16 @@ export class OrchestratorService {
     const config = this.configFor(change.projectId)
     if (!config.enabled || this.deps.flows.hasActive(change.taskId)) return
     const agents = this.agentCache.get(change.projectId) ?? new Map()
+    // Etapa sem raia (ex.: Revisado): o agente de uma raia não acompanha a tarefa até lá.
+    if (!config.lanes.some((l) => l.stageId === change.to)) {
+      const current = this.deps.agents.assignment(change.taskId)
+      if (current && !current.manual && config.lanes.some((l) => l.agents.includes(current.key))) {
+        const name = agents.get(current.key)?.name ?? agentNameFallback(current.key)
+        this.deps.agents.releaseByOrchestrator(change.projectId, change.taskId, name)
+        this.dispatched.delete(change.taskId)
+      }
+      return
+    }
     const key = laneAgentOnEnter(
       config,
       change.to,

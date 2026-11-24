@@ -123,10 +123,45 @@ export interface RunnerOptions {
   spawn?: SpawnFn
 }
 
+/**
+ * Fora do modo entrega: o CLI nega o que escreve no GitHub mesmo se o usuário tiver uma regra de
+ * "permitir" no `~/.claude`. Ler a PR (`gh pr view`, `gh api` GET/GraphQL sem mutation) passa pela
+ * política do Orkio (`isGhRead`, só o repositório do projeto).
+ */
 export const RUN_SETTINGS = {
   permissions: {
     blockWritesOutsideWorkingDirectories: true,
-    deny: ['Bash(git push *)', 'Bash(gh pr *)', 'Bash(gh api *)']
+    deny: [
+      'Bash(git push *)',
+      ...[
+        'create',
+        'edit',
+        'comment',
+        'merge',
+        'close',
+        'reopen',
+        'ready',
+        'review',
+        'checkout',
+        'lock',
+        'unlock',
+        'revert',
+        'update-branch'
+      ].map((a) => `Bash(gh pr ${a}*)`),
+      'Bash(gh release *)',
+      'Bash(gh api *-X*)',
+      'Bash(gh api *--method*)',
+      'Bash(gh api *--input*)',
+      'Bash(gh api *mutation*)',
+      'Bash(gh api repos/* -f *)',
+      'Bash(gh api repos/* -F *)',
+      'Bash(gh api repos/* --field*)',
+      'Bash(gh api repos/* --raw-field*)',
+      'Bash(gh api /repos/* -f *)',
+      'Bash(gh api /repos/* -F *)',
+      'Bash(gh api /repos/* --field*)',
+      'Bash(gh api /repos/* --raw-field*)'
+    ]
   }
 }
 
