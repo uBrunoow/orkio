@@ -4,26 +4,43 @@
  * a seguir (como a lista de tarefas do Claude Code); `flowStepIndex` diz de que passo de que fluxo
  * veio cada execução, para a conversa mostrar quem "mandou" o comando.
  */
+import { ALVA_COMMAND_PHASE, alvaCommandOf, alvaWaitsForCi } from '../../../../shared/alva'
 import { isProblem, needsYou } from '../../../../shared/flow-run-state'
+import { orkioAction } from '../../../../shared/orkio-actions'
 import {
   isPromptStep,
   type FlowRunView,
   type FlowStepStatus,
   type Step
 } from '../../../../shared/task-flow'
+import type { TaskPhaseId } from '../../../../shared/task-phase'
+import { stepDetail } from './step-text'
 
 export type PlanState = 'done' | 'current' | 'waiting' | 'failed' | 'skipped' | 'next' | 'unreached'
 
 export interface PlanStep {
   id: string
   name: string
-  /** O que o passo faz, curto: `/alva-flow:spec`, "Sua aprovação", "Ação do Orkio: push". */
-  detail: string
   kind: Exclude<Step['type'], 'branch'>
+  /** Comando do catálogo (`null` = pedido em texto, gate ou ação). */
+  command: string | null
+  /** Ação do Orkio (`null` nos outros tipos). */
+  action: string | null
+  /** Passo só de leitura (pedido ao Claude Code sem editar). */
+  readOnly: boolean
+  /** Fase da tarefa em que o passo entra: conhecida, de um comando qualquer, ou `null` (a anterior). */
+  phase: PlanPhase | null
+  /** Enquanto roda, espera o CI do GitHub (o `/pr` do alva-flow). */
+  waitsForCi: boolean
+  /** O que o passo faz, curto, para ler: `/alva-flow:spec`, "Sua aprovação", a ação. */
+  detail: string
   state: PlanState
   /** Quantas vezes rodou (voltas de um loop). */
   visits: number
 }
+
+/** Fase de um passo: uma das fases da tarefa ou, para outro comando, o nome dele. */
+export type PlanPhase = { id: TaskPhaseId } | { command: string }
 
 /** Passo visível no plano: saltos (`branch`) são decisões internas, não trabalho. */
 type VisibleStep = Exclude<Step, { type: 'branch' }>
@@ -32,14 +49,15 @@ function visible(steps: readonly Step[]): VisibleStep[] {
   return steps.filter((s): s is VisibleStep => s.type !== 'branch')
 }
 
-function detailOf(step: VisibleStep): string {
-  if (step.type === 'claude_command') {
-    if (isPromptStep(step))
-      return step.readOnly ? 'Pedido ao Claude Code (só leitura)' : 'Pedido ao Claude Code'
-    return `/${step.command}`
+function phaseOf(step: VisibleStep): PlanPhase | null {
+  if (step.type === 'orkio_action') {
+    const phase = orkioAction(step.action)?.phase ?? null
+    return phase ? { id: phase } : null
   }
-  if (step.type === 'gate') return 'Sua aprovação'
-  return `Ação do Orkio: ${step.action}`
+  if (step.type !== 'claude_command' || isPromptStep(step) || !step.command) return null
+  const alva = alvaCommandOf(step.command)
+  if (alva) return { id: ALVA_COMMAND_PHASE[alva] }
+  return { command: step.command.slice(step.command.lastIndexOf(':') + 1) }
 }
 
 const DONE: ReadonlySet<FlowStepStatus> = new Set(['ok', 'approved'])
@@ -91,11 +109,18 @@ export function flowPlan(run: FlowRunView): PlanStep[] {
       // Rodando/esperando sem ser o atual (não deveria acontecer): conta como o que vem.
       state = 'next'
     }
+    const command = step.type === 'claude_command' && !isPromptStep(step) ? step.command : null
     return {
       id: step.id,
       name: step.name,
-      detail: detailOf(step),
       kind: step.type,
+      command,
+      action: step.type === 'orkio_action' ? step.action : null,
+      readOnly: step.type === 'claude_command' && step.readOnly === true,
+      phase: phaseOf(step),
+      waitsForCi:
+        step.type === 'claude_command' && command !== null && alvaWaitsForCi(command, step.args),
+      detail: stepDetail(step),
       state,
       visits: visits.get(step.id) ?? 0
     }
@@ -180,6 +205,3 @@ export function gateResultRunId(run: FlowRunView): string | null {
   }
   return null
 }
-
-/** Texto final de uma execução (o mesmo que o main lê para publicar a revisão). */
-export { finalText } from '../../../../shared/review-publish'

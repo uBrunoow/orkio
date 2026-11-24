@@ -33,20 +33,12 @@ export function BoardColumns({
   stages,
   cards,
   signals,
-  selectedTaskId,
-  actions,
-  endInset = null
+  actions
 }: {
   stages: readonly BoardStage[]
   cards: readonly BoardCard[]
   signals: Record<string, TaskSignals>
-  selectedTaskId: string | null
   actions: CardActions
-  /**
-   * Largura da folha da tarefa aberta sobre as colunas: um espaço no fim do quadro, para dar para
-   * rolar as últimas colunas (e a "Sem etapa") para fora de baixo da folha.
-   */
-  endInset?: string | null
 }): React.JSX.Element {
   const [drag, setDrag] = useState<DragState | null>(null)
   // Colunas recolhidas (só nesta sessão da tela): viram uma faixa estreita com nome e contagem.
@@ -145,7 +137,7 @@ export function BoardColumns({
     const taskId = el.dataset['taskId'] ?? ''
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
-      actions.onExpand?.(taskId)
+      actions.onOpen(taskId)
       return
     }
     if (e.ctrlKey || e.metaKey) return
@@ -292,7 +284,6 @@ export function BoardColumns({
                     stages={stages}
                     signals={signals[card.taskId]}
                     actions={actions}
-                    isSelected={selectedTaskId === card.taskId}
                     cardRef={(el) => {
                       if (el) cardEls.current.set(card.taskId, el)
                       else cardEls.current.delete(card.taskId)
@@ -314,7 +305,6 @@ export function BoardColumns({
             </div>
           )
         })}
-        {endInset && <div aria-hidden="true" className="shrink-0" style={{ width: endInset }} />}
       </div>
       {drag && dragged && (
         <div

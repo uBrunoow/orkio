@@ -230,12 +230,15 @@ src/
                            # passos) e connection-ui.tsx (conectado, erro, token, desconectar)
       projects/            # tela Projetos (useProjects, AddProjectPanel, ActionLink)
       notion-workspace/    # card "Bancos do Notion" (assistente) e seção Notion de cada projeto
-      board/               # Quadro, miolo da tarefa (TaskPanel, TaskSession, TaskDetails,
-                           # task-session.ts, task-progress.ts), ProjectPages (Quadro e automações),
-                           # FlowPage (abas Colunas/Automações/Fluxos/Entrega)
-      task/                # 9: TaskScreen (fases + conversa + painel), task-phases, panel-tab,
-                           # reply-chips, task-layout, environment (puros), EnvironmentPanel,
-                           # ReviewPanel (aba Revisão)
+      board/               # Quadro, ProjectPages (Quadro e automações), FlowPage (abas
+                           # Colunas/Automações/Fluxos/Entrega)
+      task/                # 9: tela da tarefa: TaskScreen, TaskPanel, TaskSession, TaskDetails,
+                           # TaskTimeline, OpenPrButton, EnvironmentPanel, ReviewPanel; dados num
+                           # dono só (`task-view.tsx`: useTaskViewState + useTaskView/useTaskDiff/
+                           # useTaskDocument); puros: task-phases, panel-tab, task-session,
+                           # task-layout, environment
+      task-flows/          # fluxos de tarefa: editor, bloco do fluxo, plano (`flow-plan.ts`,
+                           # PlanStep com tipo/comando/ação/fase) e textos dos passos (`step-text.ts`)
       setup/               # 9: Primeiros passos (SetupPage, setup-steps puro)
       settings/            # Configurações (SettingsNav, seções), UpdateBanner, WhatsNewPanel
     components/ui/         # shadcn/ui (copiados pelo CLI e ajustados: Select próprio, Dialog/Menu não modais)
@@ -529,7 +532,7 @@ text-muted-foreground / text-subtle-foreground`, `border-border` (controles) e `
 - UI: na lista de tarefas, branch (mono, local/remota) e chip da PR (#n abre no GitHub; estado,
   revisão, comentários, CI). Atualiza com "Atualizar" (força), a cada 60 s com a janela visível e
   em foco, e quando a branch atual muda. Allowlist: `github.com/<owner>/<repo>/pull/<n>`.
-- **Cartão da PR** (`board/PrHoverCard.tsx`, `components/ui/hover-card.tsx`: HoverCard do Radix,
+- **Cartão da PR** (`components/PrHoverCard.tsx`, `components/ui/hover-card.tsx`: HoverCard do Radix,
   sem animação, sem `<style>`): ao passar o mouse ou focar o chip da PR (card do quadro,
   `TaskSignalsLine`, painel Ambiente): título, autor (login da REST, validado, só em memória e
   fora do snapshot da 3B; avatar = inicial, sem imagem de rede), há quanto tempo, +/− e arquivos
@@ -740,12 +743,14 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
 
 ## Sessão da tarefa (fase 8)
 
-- **Tela** (`task/TaskScreen.tsx` com o miolo em `board/TaskPanel.tsx`): fases no topo
+- **Tela** (`task/TaskScreen.tsx` com o miolo em `task/TaskPanel.tsx`; dados em `task/task-view.tsx`,
+  uma carga e uma assinatura de `onRunEvent`/`taskFlows.onChanged` para a tela toda): fases no topo
   (`TaskPhaseBar`, puro em `task/task-phases.ts`), "Esperando você" no topo, a conversa (`TaskSession`, puro em
   `task-session.ts`: `task_events` + execuções em ordem, sem os eventos com `inSession: false` no
   catálogo `shared/task-events.ts`, que a execução já conta) e, no fim, o fluxo, os pedidos de permissão/pergunta,
   "Trabalhando há…" e o campo (`claude/SessionComposer.tsx`). Estado em `TaskDetails.tsx`
-  (etapa, Mudanças, GitHub, Documentos, Agente, Opções, "Histórico completo" recolhido). Painel da
+  (Mudanças, GitHub, Documentos, Agente, Opções, "Histórico completo" recolhido; a etapa fica na
+  barra). Painel da
   fase (`complementary "Detalhes de <ID>"`) em abas Spec · Plano · Mudanças · PR & CI · Revisão ·
   Detalhes (Spec/Plano só com task do Backlog.md, Revisão só com PR; aba inicial pela fase atual,
   `task/panel-tab.ts`); abaixo de 1200 px vai para cima da conversa (`task/task-layout.ts`). Abaixo
@@ -807,8 +812,9 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   popover da barra de fases (`TaskPhaseBar` vira botão "Plano do fluxo <nome>" com fluxo vivo;
   conteúdo em `FlowPlanPanel`: estado, `AutopilotPlan`, "Cancelar fluxo"); o bloco "Fluxo da tarefa"
   guarda só uma linha compacta com "Ver plano" e o "Histórico do fluxo" (lista "Linha do tempo do
-  fluxo", que o E2E usa). `taskPhases` mostra cada rótulo de fase uma vez (a primeira posição). O
-  `TaskFlowSection` repassa as execuções (`onRunsChange`) ao `TaskPanel`.
+  fluxo", que o E2E usa). `taskPhases` agrupa pela fase que o passo declara (`shared/task-phase.ts`:
+  `spec|plan|implement|review|pr`, dos comandos do alva-flow em `ALVA_COMMAND_PHASE` e do `phase` das
+  ações) e mostra cada fase uma vez (a primeira posição); a aba inicial sai da fase, não do rótulo.
 - "Nova sessão…" abre o formulário completo da 4A (`claude/session-parts.tsx`: briefing editável,
   modo, catálogo, rodar como agente); "Rodar de novo" em cada execução terminada o abre preenchido.
 - E2E: `expectTaskHistory(scope, ...textos)` e `taskTab(panel, nome)` (fixtures). O Claude simulado
@@ -1100,9 +1106,9 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   no main; allowlist `/<o>/<r>/compare/<base>...<branch>`; segmentos codificados, inclusive
   `!'()*~`). Branch já enviada (`DeliveryService.alreadyPushed`: remoto == HEAD): com alva-flow, só o
   `/pr` (`alvaOpenPrFlow({ push: false })`); sem, nenhum fluxo e "Criar a PR no GitHub"
-  (`{ started: false, mode: 'push', compareUrl }`). Botão em `board/OpenPrButton.tsx` (`useOpenPr`,
-  `canOpenPr`: sem PR aberta), também no painel Ambiente e no recibo do bloqueio de push;
-  desabilitado com fluxo ativo ("Espere o fluxo atual terminar").
+  (`{ started: false, mode: 'push', compareUrl }`). Botão em `task/OpenPrButton.tsx` (estado único por tarefa: `useOpenPr`
+  em `task/open-pr.ts`, `canOpenPr`: sem PR aberta), também no painel Ambiente e no recibo do
+  bloqueio de push; desabilitado com fluxo ativo ("Espere o fluxo atual terminar").
 - **Ajuste por projeto:** `orkio-config` v8 → `delivery[projectId].requirePushApproval` (padrão
   sim), na aba "Entrega" de Quadro e automações (`DeliverySection`), com histórico de configuração.
 - **CI:** token do CI da PR no painel (sinais 2D) e "Rodar fluxo CI vermelho" (`startById`) quando
@@ -1151,8 +1157,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   `board:sync-changed` e `claude:run-event` de status/permissão/pergunta. O mesmo total vai para o ícone: `app.setBadgeCount` (Dock/launcher do
   Linux) e, no Windows, `setOverlayIcon` com um ponto laranja (`overlayDotBitmap`) e descrição.
 - **Clique:** `routeForTaskRef(ref)` abre a tela da tarefa (troca o projeto atual se preciso);
-  `BoardTaskRef.section` (`flow`/`claude`/`history`) → `TaskPanel focusSection` rola até a seção
-  (`data-panel-section`).
+  `BoardTaskRef.section` (`flow`/`claude`/`history`) → `focusSection` da tela: a seção (`sectionRef`)
+  rola para a vista quando aparece (sem espera fixa; o histórico já abre).
 
 ## Agentes (Etapa 8A)
 

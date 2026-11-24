@@ -1,4 +1,4 @@
-import { PrHoverCard } from '../board/PrHoverCard'
+import { PrHoverCard } from '../../components/PrHoverCard'
 import { Button } from '@/components/ui/button'
 import type { TaskSignals } from '../../../../shared/task-signals'
 import { StatusToken } from '../../components/StatusToken'

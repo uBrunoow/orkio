@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 import { AgentsIcon } from '../../components/icons'
 import { StatusToken, type StatusTone } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
-import { CollapsibleHeader } from '../board/TaskDetails'
+import { CollapsibleHeader } from '../../components/CollapsibleHeader'
 import type { SubagentRow, SubagentState } from './run-transcript'
 
 const STATE: Record<SubagentState, { tone: StatusTone; label: string }> = {

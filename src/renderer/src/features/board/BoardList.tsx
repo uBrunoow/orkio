@@ -17,13 +17,11 @@ export function BoardList({
   stages,
   cards,
   signals,
-  selectedTaskId,
   actions
 }: {
   stages: readonly BoardStage[]
   cards: readonly BoardCard[]
   signals: Record<string, TaskSignals>
-  selectedTaskId: string | null
   actions: CardActions
 }): React.JSX.Element {
   const order = new Map(stages.map((s, i) => [s.id, i]))
@@ -52,7 +50,6 @@ export function BoardList({
               stages={stages}
               signals={signals[card.taskId]}
               actions={actions}
-              isSelected={selectedTaskId === card.taskId}
             />
           ))}
         </ul>
@@ -65,14 +62,12 @@ function BoardListRow({
   card,
   stages,
   signals,
-  actions,
-  isSelected
+  actions
 }: {
   card: BoardCard
   stages: readonly BoardStage[]
   signals: TaskSignals | undefined
   actions: CardActions
-  isSelected: boolean
 }): React.JSX.Element {
   const flow = useTaskFlowState(card.taskId)
   const agent = useAgentBadge(card.taskId)
@@ -82,12 +77,10 @@ function BoardListRow({
     <li
       tabIndex={0}
       aria-label={`${card.displayId ?? ''} ${card.title}`.trim()}
-      aria-current={isSelected ? 'true' : undefined}
       data-task-id={card.taskId}
       data-sync={card.sync.state}
       className={cn(
-        'flex cursor-pointer items-center gap-3 border-b border-border-soft px-4 py-2.5 outline-none last:border-b-0 hover:bg-muted focus-visible:bg-muted',
-        isSelected && 'bg-muted'
+        'flex cursor-pointer items-center gap-3 border-b border-border-soft px-4 py-2.5 outline-none last:border-b-0 hover:bg-muted focus-visible:bg-muted'
       )}
       onClick={(e) => {
         if (!(e.target as HTMLElement).closest('button, a, [role="menu"]'))

@@ -4,7 +4,7 @@ import { StatusDot, type StatusTone } from '@/components/StatusToken'
 import { Timestamp } from '@/components/Timestamp'
 import { plural } from '@/lib/format'
 import { CI_STATUS, isPrOpen, PR_STATE, REVIEW_DECISION, type StatusText } from '@/lib/status-text'
-import type { TaskSignals } from '../../../../shared/task-signals'
+import type { TaskSignals } from '../../../shared/task-signals'
 
 type TaskPullRequest = NonNullable<TaskSignals['pr']>
 

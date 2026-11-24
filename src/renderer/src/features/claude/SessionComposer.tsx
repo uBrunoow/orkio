@@ -12,6 +12,7 @@ import { ATTACHMENT_ACCEPT } from '../../../../shared/attachments'
 import { checkNewAttachments, type PendingAttachment } from './attachments-ui'
 import { RuntimePicker, useSupportsEffort } from './RuntimePicker'
 import { isMac } from '../../lib/platform'
+import { useTaskView } from '../task/task-view'
 
 const SEND_KEY = `${isMac() ? '⌘' : 'Ctrl'} ⏎ enviar`
 
@@ -68,6 +69,8 @@ export function SessionComposer({
   const [attachError, setAttachError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  // O campo é da tela da tarefa: "Pedir ajuste…" no gate leva até ele.
+  const { setComposer } = useTaskView()
   const fileInput = useRef<HTMLInputElement>(null)
   const nextKey = useRef(0)
 
@@ -81,9 +84,13 @@ export function SessionComposer({
   useEffect(() => {
     if (typed === null || catalog !== null) return
     let active = true
-    void window.orkio.claude.catalog(projectId, taskId).then((r) => {
-      if (active) setCatalog(r.ok ? r.value.flatMap((g) => g.commands) : [])
-    })
+    void window.orkio.claude
+      .catalog(projectId, taskId)
+      .then((r) => (r.ok ? r.value.flatMap((g) => g.commands) : []))
+      .catch(() => [])
+      .then((commands) => {
+        if (active) setCatalog(commands)
+      })
     return () => {
       active = false
     }
@@ -227,7 +234,10 @@ export function SessionComposer({
         )}
         <div className="flex items-end gap-2">
           <textarea
-            ref={ref}
+            ref={(el) => {
+              ref.current = el
+              setComposer(el)
+            }}
             aria-label={`Mensagem para ${who}`}
             placeholder={
               working

@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils'
 import type { CatalogGroup } from '../../../../shared/agent-run'
 import { DECLARED_FLOW_VARS } from '../../../../shared/flow-outputs'
 import {
+  GATE_SHOWS,
   MAX_REVISE,
   STEP_TYPE_LABEL,
   newStepId,
@@ -37,6 +38,9 @@ import { SaveBar } from '../../components/SaveBar'
 import { plural } from '../../lib/format'
 import { RuntimePicker, useSupportsEffort } from '../claude/RuntimePicker'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { GATE_SHOW_TEXT, stepSummary } from './step-text'
+import { IPC_FAILURE, ipcCall, ipcResult, useIpcResource } from '../../lib/ipc'
+import { useBoard } from '../board/useBoard'
 
 /** Chip mono (categoria do passo, contagem de erros). */
 function Chip({
@@ -111,17 +115,15 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
   // Última versão salva: base do contador de alterações e do "Descartar".
   const [saved, setSaved] = useState<Flow[]>([])
   const [selected, setSelected] = useState<string | null>(null)
-  const [catalog, setCatalog] = useState<CatalogGroup[] | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   // Fluxo aberto no editor (os outros aparecem em frase, fase 6). Novo fluxo já abre editando.
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [stageNames, setStageNames] = useState<Record<string, string>>({})
   const flowActivity = useProjectActivity(projectId, 'flow')
 
   useEffect(() => {
     let active = true
-    void window.orkio.taskFlows.getProject(projectId).then((r) => {
+    void ipcResult(() => window.orkio.taskFlows.getProject(projectId)).then((r) => {
       if (!active) return
       if (r.ok) {
         setProject(r.value)
@@ -130,23 +132,23 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
         setSelected(r.value.flows[0]?.id ?? null)
       } else setMessage({ tone: 'error', text: r.error.message })
     })
-    // Nomes das colunas para a frase "Quando a tarefa entra em…".
-    void window.orkio.board
-      .get(projectId)
-      .then((r) => {
-        if (active && r.ok)
-          setStageNames(
-            Object.fromEntries((r.value.config?.stages ?? []).map((st) => [st.id, st.name]))
-          )
-      })
-      .catch(() => undefined)
-    void window.orkio.claude.catalog(projectId, null).then((r) => {
-      if (active) setCatalog(r.ok ? r.value : [])
-    })
     return () => {
       active = false
     }
   }, [projectId])
+  // Nomes das colunas para a frase "Quando a tarefa entra em…" (o quadro que a tela já leu).
+  const board = useBoard(projectId).view
+  const stageNames = useMemo(
+    () => Object.fromEntries((board?.config?.stages ?? []).map((st) => [st.id, st.name])),
+    [board]
+  )
+  // Catálogo do Claude Code no projeto (sem tarefa: a pasta do projeto); falha = vazio.
+  const catalogResource = useIpcResource(projectId, (id) =>
+    ipcCall(() => window.orkio.claude.catalog(id, null), { ok: false, error: IPC_FAILURE }).then(
+      (r) => (r.ok ? r.value : [])
+    )
+  )
+  const catalog: CatalogGroup[] | null = catalogResource.value
 
   const commands = useMemo(
     () => (catalog ? new Set(catalog.flatMap((g) => g.commands.map((c) => c.name))) : null),
@@ -263,7 +265,6 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
                 flow={flow}
                 bindings={project.bindings.filter((b) => b.flowId === flow.id && b.enabled)}
                 stageName={(id) => stageNames[id] ?? 'coluna removida'}
-                actionLabel={(id) => project.actions.find((a) => a.id === id)?.label ?? id}
                 activity={flowActivity}
                 onEdit={() => setEditingId(flow.id)}
               />
@@ -320,42 +321,6 @@ function countFlowChanges(saved: readonly Flow[], current: readonly Flow[]): num
   for (const f of current) if (before.get(f.id) !== JSON.stringify(f)) n++
   for (const id of before.keys()) if (!now.has(id)) n++
   return n
-}
-
-/** Uma linha que resume o passo (lista de passos). */
-function stepSummary(step: Step): string {
-  switch (step.type) {
-    case 'claude_command':
-      return [
-        step.prompt !== undefined
-          ? `pedido: “${step.prompt.trim() || '…'}”`
-          : `/${step.command || '…'} ${step.args}`.trim(),
-        `${step.timeoutMin} min`,
-        ...(step.readOnly ? ['só leitura'] : []),
-        ...(step.delivery ? ['modo entrega'] : [])
-      ].join(' · ')
-    case 'gate':
-      return [
-        `“${step.message}”`,
-        step.show === 'diff'
-          ? 'mostra o diff'
-          : step.show === 'summary'
-            ? 'mostra o resumo'
-            : step.show === 'backlog'
-              ? 'mostra a spec e o plano'
-              : step.show === 'result'
-                ? 'mostra o resultado'
-                : null,
-        `recusar → ${step.onReject === 'stop' ? 'encerra' : step.onReject}`,
-        step.revise ? `ajustes → ${step.revise.step} (até ${step.revise.max})` : null
-      ]
-        .filter(Boolean)
-        .join(' · ')
-    case 'orkio_action':
-      return step.action
-    case 'branch':
-      return `ir para ${step.then}${step.else ? ` · senão ${step.else}` : ' · senão segue'}`
-  }
 }
 
 function FlowEditor({
@@ -737,13 +702,7 @@ function StepForm({
           <div className="grid gap-3 sm:grid-cols-3">
             <SelectField
               label="Mostrar ao aprovar"
-              options={[
-                { value: 'diff', label: 'Diff da pasta de trabalho' },
-                { value: 'summary', label: 'Resumo da última execução' },
-                { value: 'backlog', label: 'Spec e plano (task do Backlog)' },
-                { value: 'result', label: 'Resultado do Claude Code (texto final)' },
-                { value: 'none', label: 'Nada' }
-              ]}
+              options={GATE_SHOWS.map((value) => ({ value, label: GATE_SHOW_TEXT[value].option }))}
               value={step.show}
               onChange={(v: string) => onChange({ ...step, show: v as typeof step.show })}
             />

@@ -1,4 +1,6 @@
 /** Abas do painel da fase (direita da tela da tarefa) e qual abre primeiro. */
+import type { TaskPhaseId } from '../../../../shared/task-phase'
+
 export type PanelTab = 'spec' | 'plan' | 'changes' | 'pr' | 'review' | 'details'
 
 export const PANEL_TAB_LABEL: Record<PanelTab, string> = {
@@ -25,24 +27,24 @@ export function availableTabs(hasBacklogDoc: boolean, hasPr = false): PanelTab[]
 }
 
 export function defaultPanelTab(input: {
-  currentPhase: string | null
+  currentPhase: TaskPhaseId | null
   hasBacklogDoc: boolean
   hasDiff: boolean
   hasPr: boolean
 }): PanelTab {
   const fallback: PanelTab = input.hasDiff ? 'changes' : 'details'
   switch (input.currentPhase) {
-    case 'Spec':
+    case 'spec':
       return input.hasBacklogDoc ? 'spec' : fallback
-    case 'Plano':
+    case 'plan':
       return input.hasBacklogDoc ? 'plan' : fallback
-    case 'Implementar':
+    case 'implement':
       return 'changes'
-    case 'Revisão':
+    case 'review':
       return input.hasPr ? 'review' : 'changes'
-    case 'PR':
+    case 'pr':
       return 'pr'
-    default:
+    case null:
       return fallback
   }
 }

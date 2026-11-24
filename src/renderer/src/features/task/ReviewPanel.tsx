@@ -11,7 +11,8 @@ import { Alert } from '../../components/Alert'
 import { ExternalLinkIcon } from '../../components/icons'
 import { MarkdownText } from '../../components/MarkdownText'
 import { plural } from '../../lib/format'
-import { CollapsibleHeader } from '../board/TaskDetails'
+import { CollapsibleHeader } from '../../components/CollapsibleHeader'
+import { useTaskView } from './task-view'
 
 type State =
   | { phase: 'loading' }
@@ -19,7 +20,7 @@ type State =
   | { phase: 'ready'; data: ReviewThreadsResult }
 
 /** Texto de onde o comentário está: `arquivo:linha` ou "geral". */
-export function threadWhere(t: Pick<ReviewThread, 'path' | 'line'>): string {
+function threadWhere(t: Pick<ReviewThread, 'path' | 'line'>): string {
   return t.path ? `${t.path}${t.line ? `:${t.line}` : ''}` : 'geral'
 }
 
@@ -57,17 +58,8 @@ function ThreadCard({ thread }: { thread: ReviewThread }): React.JSX.Element {
  * Aba "Revisão": comentários não resolvidos da PR da tarefa (texto lido pelo main, só em
  * memória), depois os resolvidos recolhidos. `active` evita ler enquanto a aba está escondida.
  */
-export function ReviewPanel({
-  projectId,
-  taskId,
-  active,
-  refreshKey = 0
-}: {
-  projectId: string
-  taskId: string
-  active: boolean
-  refreshKey?: number
-}): React.JSX.Element | null {
+export function ReviewPanel({ active }: { active: boolean }): React.JSX.Element | null {
+  const { projectId, taskId, version } = useTaskView()
   const [state, setState] = useState<State>({ phase: 'loading' })
   const [showResolved, setShowResolved] = useState(false)
   const [nonce, setNonce] = useState(0)
@@ -89,7 +81,7 @@ export function ReviewPanel({
     return () => {
       live = false
     }
-  }, [projectId, taskId, active, refreshKey, nonce])
+  }, [projectId, taskId, active, version, nonce])
 
   if (state.phase === 'loading') {
     return <Skeleton className="h-20" aria-label="Carregando os comentários da PR" />

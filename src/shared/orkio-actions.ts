@@ -5,6 +5,7 @@
  * leem daqui. Ação nova = entrada nova (e a implementação no main com o mesmo id).
  */
 import { FLOW_NO, FLOW_YES } from './task-flow'
+import type { TaskPhaseId } from './task-phase'
 
 /**
  * Se uma automação move a tarefa de etapa enquanto o passo roda:
@@ -31,7 +32,7 @@ export interface OrkioActionDescriptor {
   delivers: boolean
   onStageMoved: StageMoveBehavior
   /** Fase da tarefa (barra do topo) em que o passo entra; `null` = a fase anterior. */
-  phase: 'PR' | 'Revisão' | null
+  phase: TaskPhaseId | null
   /** Variáveis gravadas ao terminar bem (API para os fluxos, inclusive os do usuário). */
   outputs: readonly FlowOutput[]
 }
@@ -61,7 +62,7 @@ export const ORKIO_ACTIONS = {
     label: 'Push da branch da tarefa',
     delivers: true,
     onStageMoved: 'detach',
-    phase: 'PR',
+    phase: 'pr',
     outputs: []
   },
   verify_pushed: {
@@ -69,7 +70,7 @@ export const ORKIO_ACTIONS = {
     label: 'Conferir se a PR tem o commit atual',
     delivers: true,
     onStageMoved: 'detach',
-    phase: 'PR',
+    phase: 'pr',
     outputs: [
       { key: ACTION_VARS.prExists, values: YES_NO, about: 'a tarefa tem PR aberta' },
       { key: ACTION_VARS.prNumber, about: 'número da PR aberta (vazio sem PR)' },
@@ -81,7 +82,7 @@ export const ORKIO_ACTIONS = {
     label: 'Pedir review',
     delivers: true,
     onStageMoved: 'detach',
-    phase: 'PR',
+    phase: 'pr',
     outputs: []
   },
   review_snapshot: {
@@ -89,7 +90,7 @@ export const ORKIO_ACTIONS = {
     label: 'Ler os comentários da PR',
     delivers: false,
     onStageMoved: 'ask',
-    phase: 'Revisão',
+    phase: 'review',
     outputs: [
       { key: ACTION_VARS.reviewCount, about: 'comentários pendentes (abertos + não lidos)' },
       { key: ACTION_VARS.reviewPr, about: 'número da PR' }
@@ -101,7 +102,7 @@ export const ORKIO_ACTIONS = {
     label: 'Publicar revisão na PR (orkio[bot])',
     delivers: false,
     onStageMoved: 'detach_and_reenter',
-    phase: 'Revisão',
+    phase: 'review',
     outputs: []
   }
 } as const satisfies Record<string, OrkioActionDescriptor>

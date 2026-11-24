@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Command,
@@ -15,7 +15,6 @@ import { cn } from '@/lib/utils'
 import { StatusToken } from '../../components/StatusToken'
 import type { CatalogGroup, EditorId, RunMode, RunPreparation } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
-import { DiffView } from '../../components/DiffView'
 import {
   CheckIcon,
   CleanIcon,
@@ -33,6 +32,8 @@ import {
   type BranchKind
 } from '../../../../shared/slug'
 import type { PendingPermission, useTaskRuns } from './useTaskRuns'
+import { TaskDiffView } from '../task/TaskDiffView'
+import { useIpcResource } from '../../lib/ipc'
 
 export interface RunInitial {
   mode: RunMode
@@ -241,29 +242,13 @@ export function Workspace({
   suggestCleanup: boolean
   onChanged(): void
 }): React.JSX.Element {
-  const [diff, setDiff] = useState<{
-    diff: string
-    truncated: boolean
-    untracked: string[]
-  } | null>(null)
+  const [showDiff, setShowDiff] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmFiles, setConfirmFiles] = useState<string[] | null>(null)
 
   const openEditor = async (editor: EditorId): Promise<void> => {
     const r = await window.orkio.claude.openEditor(projectId, taskId, editor)
     setError(r.ok ? null : r.error.message)
-  }
-  const loadDiff = async (): Promise<void> => {
-    if (diff !== null) {
-      setDiff(null)
-      return
-    }
-    const r = await window.orkio.claude.diff(projectId, taskId)
-    if (!r.ok) {
-      setError(r.error.message)
-      return
-    }
-    setDiff(r.value)
   }
   const cleanup = async (force: boolean): Promise<void> => {
     const r = await window.orkio.claude.cleanup(projectId, taskId, force)
@@ -301,9 +286,9 @@ export function Workspace({
           <EditorIcon />
           Abrir no VS Code
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void loadDiff()}>
+        <Button size="sm" variant="outline" onClick={() => setShowDiff((v) => !v)}>
           <DiffIcon />
-          {diff === null ? 'Ver diff' : 'Esconder diff'}
+          {showDiff ? 'Esconder diff' : 'Ver diff'}
         </Button>
         {!isBusy && (
           <Button
@@ -345,14 +330,7 @@ export function Workspace({
           </div>
         </div>
       )}
-      {diff !== null && (
-        <DiffView
-          label="Diff da pasta de trabalho"
-          diff={diff.diff}
-          truncated={diff.truncated}
-          untracked={diff.untracked}
-        />
-      )}
+      {showDiff && <TaskDiffView label="Diff da pasta de trabalho" />}
     </div>
   )
 }
@@ -371,26 +349,17 @@ function CommandPicker({
   value: string
   onChange(value: string): void
 }): React.JSX.Element {
-  const [groups, setGroups] = useState<CatalogGroup[] | null>(null)
-  const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
-
-  const load = async (): Promise<void> => {
-    setLoading(true)
-    const r = await window.orkio.claude.catalog(projectId, taskId)
-    setLoading(false)
-    setGroups(r.ok ? r.value : [])
-  }
-  // Carrega ao abrir (efeito assíncrono: o setState acontece depois do await).
-  useEffect(() => {
-    let active = true
-    void window.orkio.claude.catalog(projectId, taskId).then((r) => {
-      if (active) setGroups(r.ok ? r.value : [])
-    })
-    return () => {
-      active = false
-    }
-  }, [projectId, taskId])
+  // Catálogo da tarefa ("Recarregar" lê de novo); falha = vazio (cai na lista de reserva).
+  const catalog = useIpcResource(`${projectId}:${taskId}`, () =>
+    window.orkio.claude
+      .catalog(projectId, taskId)
+      .then((r) => (r.ok ? r.value : []))
+      .catch((): CatalogGroup[] => [])
+  )
+  const groups = catalog.value
+  const loading = catalog.loading && groups !== null
+  const load = catalog.reload
 
   const options: { title: string | null; commands: { name: string; description?: string }[] }[] =
     groups && groups.length > 0

@@ -6,6 +6,7 @@
  */
 import type { FlowOutput } from './orkio-actions'
 import { FLOW_NO, FLOW_YES } from './task-flow'
+import type { TaskPhaseId } from './task-phase'
 
 export const ALVA_PLUGIN = 'alva-flow'
 export const ALVA_COMMANDS = ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr'] as const
@@ -25,14 +26,28 @@ export function alvaCommandOf(command: string): AlvaCommand | null {
 }
 
 /** Fase da tarefa (barra do topo) de cada comando do plugin. */
-export const ALVA_COMMAND_PHASE: Record<AlvaCommand, string> = {
-  spec: 'Spec',
-  plan: 'Plano',
-  implement: 'Implementar',
-  review: 'Revisão',
-  fix: 'Revisão',
-  commit: 'PR',
-  pr: 'PR'
+export const ALVA_COMMAND_PHASE: Record<AlvaCommand, TaskPhaseId> = {
+  spec: 'spec',
+  plan: 'plan',
+  implement: 'implement',
+  review: 'review',
+  fix: 'review',
+  commit: 'pr',
+  pr: 'pr'
+}
+
+/** Documento do Backlog.md que o comando escreve: a spec (`/spec`) ou o plano (`/plan`). */
+export function backlogDocumentOf(command: string | null): 'spec' | 'plan' | null {
+  const c = command ? alvaCommandOf(command) : null
+  return c === 'spec' || c === 'plan' ? c : null
+}
+
+/** Opção do `/pr` que trata os comentários da PR (sem ela, o `/pr` abre a PR e acompanha o CI). */
+export const ALVA_PR_COMMENTS_FLAG = '--comments'
+
+/** O passo espera o CI do GitHub: o `/pr` do plugin sem `--comments` acompanha os checks até o fim. */
+export function alvaWaitsForCi(command: string, args: string): boolean {
+  return alvaCommandOf(command) === 'pr' && !args.split(/\s+/).includes(ALVA_PR_COMMENTS_FLAG)
 }
 
 /** Marcador (`Flow.tags`) dos fluxos que usam o plugin: pré-checagem, variáveis e limite. */

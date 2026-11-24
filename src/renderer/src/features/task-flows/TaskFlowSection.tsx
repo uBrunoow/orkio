@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Textarea } from '@/components/ui/textarea'
@@ -8,18 +8,16 @@ import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
 import { StatusDot, StatusToken } from '../../components/StatusToken'
 import type { RunSummary } from '../../../../shared/agent-run'
-import { ALVA_TEMPLATE_IDS } from '../../../../shared/alva-templates'
-import type { TaskPullRequest } from '../../../../shared/task-signals'
+import type { Result } from '../../../../shared/result'
+import { finalText } from '../../../../shared/review-publish'
 import { isReviewer } from '../../../../shared/github-names'
 import {
-  isPromptStep,
   MAX_PROMPT_CHARS,
   type ActionConfirm,
   type ConfirmReview,
   type FlowRunView,
   type FlowStepStatus,
-  type GateShow,
-  type StageFlow
+  type GateShow
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
 import {
@@ -28,16 +26,18 @@ import {
   ExternalLinkIcon,
   PlayIcon
 } from '../../components/icons'
-import { DiffView } from '../../components/DiffView'
 import { describeFlowProblem } from '../../../../shared/flow-problem'
-import { isLive, waitingKind } from '../../../../shared/flow-run-state'
+import { waitingKind } from '../../../../shared/flow-run-state'
 import { FlowProblemCard } from './FlowProblemCard'
+import { AUTOPILOT_TEXT } from './AutopilotPlan'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
-import { replyChips } from '../task/reply-chips'
-import { finalText, flowPlan, gateOutcomes, gateResultRunId, planProgress } from './flow-plan'
+import { gateOutcomes, gateResultRunId, planProgress, type PlanStep } from './flow-plan'
 import { MarkdownText } from '../../components/MarkdownText'
-import { formatUsd, plural } from '../../lib/format'
-import { CI_STATUS, FLOW_RUN_STATUS } from '../../lib/status-text'
+import { formatDuration, formatUsd, plural } from '../../lib/format'
+import { ipcResult } from '../../lib/ipc'
+import { TaskDiffView } from '../task/TaskDiffView'
+import { useTaskView } from '../task/task-view'
+import { CI_STATUS, FLOW_RUN_STATUS, isPrOpen } from '../../lib/status-text'
 import { PLAN_TRIGGER_ATTR } from '../task/task-phases'
 
 const STEP_STATUS: Record<FlowStepStatus, string> = {
@@ -53,17 +53,8 @@ const STEP_STATUS: Record<FlowStepStatus, string> = {
   revised: 'ajustes pedidos'
 }
 
-/** O que está trabalhando agora na tarefa (rodapé "Trabalhando há…" do painel). */
-export interface TaskActivity {
-  who: string
-  what: string | null
-  /** ISO 8601: quando o passo atual começou. */
-  since: string
-}
-
 /** "passo 3 de 7": o passo atual entre os que contam (sem os que o fluxo não precisou). */
-function progressText(run: FlowRunView): string {
-  const plan = flowPlan(run)
+function progressText(plan: readonly PlanStep[]): string {
   const counted = plan.filter((p) => p.state !== 'unreached')
   const index = counted.findIndex(
     (p) => p.state === 'current' || p.state === 'waiting' || p.state === 'failed'
@@ -88,108 +79,39 @@ function stepSummary(history: FlowRunView['history']): string {
  */
 
 export function TaskFlowSection({
-  projectId,
-  taskId,
-  stageId,
-  pr = null,
-  onActivityChange,
   onOpenRun,
-  onLiveChange,
-  onRunsChange,
   onShowPlan
 }: {
-  projectId: string
-  taskId: string
-  stageId: string | null
-  /** PR da tarefa (sinais da 2D): estado do CI e botão do fluxo de CI vermelho. */
-  pr?: TaskPullRequest | null
-  /** Passo rodando agora (ou null): o painel mostra "Trabalhando há…". */
-  onActivityChange?: (activity: TaskActivity | null) => void
   /** Abre a sessão (log) de uma execução do Claude Code desta tarefa. */
   onOpenRun?: (runId: string) => void
-  /** O fluxo da tarefa está em andamento (o Claude Code manual fica bloqueado). */
-  onLiveChange?: (live: boolean) => void
-  /** Execuções do fluxo da tarefa (mais nova primeiro): a sessão mostra de que passo veio cada turno. */
-  onRunsChange?: (runs: readonly FlowRunView[]) => void
   /** Abre o plano do piloto automático (popover da barra de fases, no topo da tela). */
   onShowPlan?: () => void
 }): React.JSX.Element | null {
+  const view = useTaskView()
+  const { projectId, taskId, flow } = view
+  const { run, plan, binding, ciFlow } = flow
+  const pr = view.signals?.pr ?? null
   // Passos recolhidos enquanto o fluxo roda ou espera você (a decisão vem primeiro); abertos no
   // fim. Clicar no resumo vale até a tarefa mudar.
   const [stepsOpen, setStepsOpen] = useState<boolean | null>(null)
-  const [runs, setRuns] = useState<FlowRunView[] | null>(null)
-  const [binding, setBinding] = useState<(StageFlow & { flowName: string }) | null>(null)
-  const [ciFlow, setCiFlow] = useState<{ id: string; name: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [tick, setTick] = useState(0)
 
-  useEffect(() => {
-    let active = true
-    void window.orkio.taskFlows.runs(taskId).then((r) => {
-      if (active) setRuns(r)
-    })
-    void window.orkio.taskFlows.getProject(projectId).then((r) => {
-      if (!active || !r.ok) return
-      const b = r.value.bindings.find((x) => x.stageId === stageId && x.enabled)
-      const flow = b ? r.value.flows.find((f) => f.id === b.flowId) : null
-      setBinding(b && flow ? { ...b, flowName: flow.name } : null)
-      const ci = r.value.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.ci)
-      setCiFlow(ci ? { id: ci.id, name: ci.name } : null)
-    })
-    return () => {
-      active = false
-    }
-  }, [projectId, taskId, stageId, tick])
+  const act = async (fn: () => Promise<Result<unknown>>): Promise<void> => {
+    setBusy(true)
+    const r = await ipcResult(fn)
+    setBusy(false)
+    setError(r.ok ? null : r.error.message)
+    flow.reload()
+  }
 
-  useEffect(
-    () =>
-      window.orkio.taskFlows.onChanged((e) => {
-        if (e.taskId === taskId) setTick((n) => n + 1)
-      }),
-    [taskId]
-  )
-
-  const act = useCallback(
-    async (fn: () => Promise<{ ok: boolean; error?: { message: string } }>) => {
-      setBusy(true)
-      const r = await fn()
-      setBusy(false)
-      setError(r.ok ? null : (r.error?.message ?? 'Algo deu errado.'))
-      setTick((n) => n + 1)
-    },
-    []
-  )
-
-  const run = runs?.[0] ?? null
-  const currentStepView = run
-    ? [...run.history].reverse().find((h) => h.stepId === run.currentStep && !h.endedAt)
-    : undefined
-  const activeWho = run?.status === 'running' ? (run.agent?.name ?? 'Fluxo') : null
-  const activeWhat = run?.steps.find((s) => s.id === run.currentStep)?.name ?? null
-  const activeSince = run ? (currentStepView?.startedAt ?? run.startedAt) : null
-  useEffect(() => {
-    onActivityChange?.(
-      activeWho && activeSince ? { who: activeWho, what: activeWhat, since: activeSince } : null
-    )
-  }, [activeWho, activeWhat, activeSince, onActivityChange])
-  useEffect(() => () => onActivityChange?.(null), [onActivityChange])
-  // Fluxo em andamento (rodando, esperando ou pausado): o Claude Code roda pelos passos dele.
-  const liveNow = !!run && isLive(run.status)
-  useEffect(() => {
-    onLiveChange?.(liveNow)
-  }, [liveNow, onLiveChange])
-  useEffect(() => () => onLiveChange?.(false), [onLiveChange])
-  useEffect(() => {
-    if (runs) onRunsChange?.(runs)
-  }, [runs, onRunsChange])
-
-  const openPr = pr && (pr.state === 'open' || pr.state === 'draft') ? pr : null
+  const openPr = isPrOpen(pr) ? pr : null
   if (!run && !binding && !openPr?.checks) return null
-  const live = run && isLive(run.status)
+  const live = flow.live
   const stepName = (id: string | null): string =>
     run?.steps.find((s) => s.id === id)?.name ?? id ?? ''
   const current = run?.steps.find((s) => s.id === run.currentStep) ?? null
+  const currentPlan = plan?.find((p) => p.id === run?.currentStep) ?? null
   const problem = run ? describeFlowProblem(run) : null
 
   return (
@@ -210,10 +132,7 @@ export function TaskFlowSection({
               <AutomationIcon className="text-muted-foreground" />
             </span>
           </TooltipTrigger>
-          <TooltipContent className="max-w-64">
-            Piloto automático: o Orkio manda cada passo para o Claude Code e segue sozinho. Ele para
-            quando precisar de você.
-          </TooltipContent>
+          <TooltipContent className="max-w-64">{AUTOPILOT_TEXT}</TooltipContent>
         </Tooltip>
         <h3 className="text-sm font-medium">
           {run ? `Fluxo: ${run.flowName}${run.agent ? ` · ${run.agent.name}` : ''}` : 'Fluxo'}
@@ -239,7 +158,7 @@ export function TaskFlowSection({
               className="tabular text-xs text-muted-foreground"
               data-testid="autopilot-progress"
             >
-              {progressText(run)}
+              {progressText(plan ?? [])}
             </span>
             {onShowPlan && (
               <Button
@@ -318,7 +237,9 @@ export function TaskFlowSection({
                   <span className="text-xs text-muted-foreground">
                     {[
                       STEP_STATUS[h.status],
-                      duration(h.startedAt, h.endedAt),
+                      h.endedAt
+                        ? formatDuration(Date.parse(h.endedAt) - Date.parse(h.startedAt))
+                        : '',
                       h.costUsd !== null ? formatUsd(h.costUsd) : '',
                       h.message ?? ''
                     ]
@@ -334,11 +255,11 @@ export function TaskFlowSection({
 
       {run?.status === 'running' && current?.type === 'claude_command' && (
         <p className="text-xs text-muted-foreground" data-testid="flow-running-step">
-          {isPromptStep(current)
-            ? `Rodando “${current.name}”${current.readOnly ? ' (só leitura)' : ''}. A conversa deste passo está logo acima.`
-            : /:pr$/.test(current.command) && !/--comments/.test(current.args)
-              ? 'Aguardando CI do GitHub: o /pr acompanha os checks até terminar (pode levar vários minutos).'
-              : `Rodando /${current.command}. A conversa deste passo está logo acima.`}
+          {currentPlan?.waitsForCi
+            ? 'Aguardando CI do GitHub: o /pr acompanha os checks até terminar (pode levar vários minutos).'
+            : currentPlan?.command
+              ? `Rodando /${currentPlan.command}. A conversa deste passo está logo acima.`
+              : `Rodando “${current.name}”${currentPlan?.readOnly ? ' (só leitura)' : ''}. A conversa deste passo está logo acima.`}
         </p>
       )}
 
@@ -367,8 +288,6 @@ export function TaskFlowSection({
       {run?.status === 'waiting_gate' && current?.type === 'gate' && (
         <GateCard
           key={`${run.id}:${run.history.length}`}
-          projectId={projectId}
-          taskId={taskId}
           message={current.message}
           show={current.show}
           resultRunId={current.show === 'result' ? gateResultRunId(run) : null}
@@ -403,8 +322,6 @@ export function TaskFlowSection({
 
       {run && problem && (
         <FlowProblemCard
-          projectId={projectId}
-          taskId={taskId}
           problem={problem}
           busy={busy}
           onResume={() => void act(() => window.orkio.taskFlows.resume(run.id))}
@@ -700,8 +617,6 @@ function ChoiceCard({
 }
 
 function GateCard({
-  projectId,
-  taskId,
   message,
   show,
   resultRunId,
@@ -713,8 +628,6 @@ function GateCard({
   onReject,
   onRevise
 }: {
-  projectId: string
-  taskId: string
   message: string
   show: GateShow
   /** `show: 'result'`: a execução do Claude Code cujo texto final o gate mostra. */
@@ -730,63 +643,35 @@ function GateCard({
   onReject(): void
   onRevise(text: string): void
 }): React.JSX.Element {
-  const [detail, setDetail] = useState<string | null>(null)
+  const view = useTaskView()
   const [result, setResult] = useState<string | null>(null)
   const [revising, setRevising] = useState(false)
   const [adjust, setAdjust] = useState('')
   const limitReached = revise !== null && revise.used >= revise.max
-  const [diffData, setDiffData] = useState<
-    | { diff: string; truncated: boolean; untracked: string[]; secrets: string[] }
-    | { error: string }
-    | null
-  >(null)
+  const summary = view.runs.state?.runs.find((x) => x.summary)?.summary ?? null
+  const detail = view.runs.state
+    ? summary
+      ? describeSummary(summary)
+      : 'Sem resumo de execução.'
+    : null
 
   useEffect(() => {
+    if (show !== 'result') return
     let active = true
-    if (show === 'diff') {
-      void window.orkio.claude.diff(projectId, taskId).then((r) => {
-        if (active) setDiffData(r.ok ? r.value : { error: r.error.message })
+    void (resultRunId ? window.orkio.claude.readLog(resultRunId) : Promise.resolve([]))
+      .catch(() => [])
+      .then((events) => {
+        if (active) setResult(finalText(events) ?? '')
       })
-    } else if (show === 'summary') {
-      void window.orkio.claude.state(projectId, taskId).then((r) => {
-        if (!active) return
-        const summary = r.ok ? r.value.runs.find((x) => x.summary)?.summary : null
-        setDetail(summary ? describeSummary(summary) : 'Sem resumo de execução.')
-      })
-    } else if (show === 'result') {
-      void (resultRunId ? window.orkio.claude.readLog(resultRunId) : Promise.resolve([])).then(
-        (events) => {
-          if (active) setResult(finalText(events) ?? '')
-        }
-      )
-    }
     return () => {
       active = false
     }
-  }, [projectId, taskId, show, resultRunId])
+  }, [show, resultRunId])
 
   return (
     <WaitCard label="Aprovação do fluxo" title={message}>
-      {show === 'backlog' && <BacklogDocumentView projectId={projectId} taskId={taskId} />}
-      {show === 'diff' &&
-        diffData &&
-        ('error' in diffData ? (
-          <Alert tone="danger">{diffData.error}</Alert>
-        ) : (
-          <>
-            {diffData.secrets.length > 0 && (
-              <Alert tone="danger">
-                {`Parece haver um segredo (token, chave ou senha) em ${diffData.secrets.join(', ')}. O valor está escondido abaixo, mas aprovar segue com ele no código. Recuse e peça para remover, se não for de propósito.`}
-              </Alert>
-            )}
-            <DiffView
-              label="Diff para aprovar"
-              diff={diffData.diff}
-              truncated={diffData.truncated}
-              untracked={diffData.untracked}
-            />
-          </>
-        ))}
+      {show === 'backlog' && <BacklogDocumentView />}
+      {show === 'diff' && <TaskDiffView label="Diff para aprovar" secrets />}
       {show === 'result' && result !== null && (
         <section
           role="region"
@@ -843,27 +728,24 @@ function GateCard({
       )}
       {!revising && (
         <div className="flex flex-wrap gap-2">
-          {replyChips('gate').map((chip) =>
-            chip.action === 'approve' ? (
-              <Button key={chip.label} size="sm" disabled={busy} onClick={onApprove}>
-                {busy && <Spinner />}
-                {chip.label}
-              </Button>
-            ) : revise ? (
-              <Button
-                key={chip.label}
-                size="sm"
-                variant="outline"
-                disabled={busy || limitReached}
-                onClick={() => setRevising(true)}
-              >
-                {limitReached ? `Limite de ajustes atingido (${revise.max})` : 'Pedir ajustes…'}
-              </Button>
-            ) : (
-              <Button key={chip.label} size="sm" variant="outline" onClick={focusComposer}>
-                {chip.label}
-              </Button>
-            )
+          <Button size="sm" disabled={busy} onClick={onApprove}>
+            {busy && <Spinner />}
+            Aprovar
+          </Button>
+          {revise ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || limitReached}
+              onClick={() => setRevising(true)}
+            >
+              {limitReached ? `Limite de ajustes atingido (${revise.max})` : 'Pedir ajustes…'}
+            </Button>
+          ) : (
+            // Sem ajuste pelo gate: o pedido vai pelo campo da sessão (o texto chega ao Claude).
+            <Button size="sm" variant="outline" onClick={view.focusComposer}>
+              Pedir ajuste…
+            </Button>
           )}
           <Button size="sm" variant="ghost" onClick={onReject}>
             Recusar
@@ -888,21 +770,4 @@ function describeSummary(s: RunSummary): string {
   ]
     .filter(Boolean)
     .join('\n')
-}
-
-function duration(start: string, end: string | null): string {
-  if (!end) return ''
-  const ms = Date.parse(end) - Date.parse(start)
-  if (!Number.isFinite(ms) || ms < 0) return ''
-  if (ms < 60_000) return `${Math.max(1, Math.round(ms / 1000))} s`
-  return `${Math.round(ms / 60_000)} min`
-}
-
-/** "Pedir ajuste…": leva ao campo de mensagem da sessão (o texto vai para o Claude). */
-function focusComposer(): void {
-  const field = document.querySelector<HTMLTextAreaElement>(
-    '[aria-label="Mensagem para a sessão"] textarea'
-  )
-  field?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  field?.focus()
 }

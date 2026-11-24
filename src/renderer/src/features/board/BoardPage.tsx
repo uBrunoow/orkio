@@ -173,8 +173,7 @@ function Board({
     onMove: (taskId: string, stageId: string) => void board.move(taskId, stageId),
     onToggleBlocked: (taskId: string, blocked: boolean) => void board.setBlocked(taskId, blocked),
     onToggleAutomation: (taskId: string, paused: boolean) =>
-      void board.setAutomationPaused(taskId, paused),
-    onExpand: onOpenTask
+      void board.setAutomationPaused(taskId, paused)
   }
   const refreshing = board.loading || automation.running
 
@@ -329,7 +328,6 @@ function Board({
                     stages={view.config.stages}
                     cards={cards}
                     signals={signals.result?.signals ?? {}}
-                    selectedTaskId={null}
                     actions={actions}
                   />
                 ) : (
@@ -337,9 +335,7 @@ function Board({
                     stages={view.config.stages}
                     cards={cards}
                     signals={signals.result?.signals ?? {}}
-                    selectedTaskId={null}
                     actions={actions}
-                    endInset={null}
                   />
                 )}
               </AgentBadgesProvider>

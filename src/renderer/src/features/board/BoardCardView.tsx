@@ -1,4 +1,4 @@
-import { PrHoverCard } from './PrHoverCard'
+import { PrHoverCard } from '../../components/PrHoverCard'
 import { Fragment } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -30,8 +30,6 @@ export interface CardActions {
   onMove(taskId: string, stageId: string): void
   onToggleBlocked(taskId: string, blocked: boolean): void
   onToggleAutomation(taskId: string, paused: boolean): void
-  /** Abre a tarefa em tela cheia (Ctrl/Cmd+Enter no card). */
-  onExpand?(taskId: string): void
 }
 
 export type CardMenuItem = { label: string; onClick(): void } | { type: 'divider' }
@@ -213,7 +211,6 @@ export function BoardCardItem({
   stages,
   signals,
   actions,
-  isSelected,
   cardRef,
   onPointerDown
 }: {
@@ -221,7 +218,6 @@ export function BoardCardItem({
   stages: readonly BoardStage[]
   signals: TaskSignals | undefined
   actions: CardActions
-  isSelected: boolean
   cardRef: (el: HTMLDivElement | null) => void
   onPointerDown: (e: React.PointerEvent, taskId: string) => void
 }): React.JSX.Element {
@@ -231,13 +227,11 @@ export function BoardCardItem({
       role="listitem"
       tabIndex={0}
       aria-label={`${card.displayId ?? ''} ${card.title}`.trim()}
-      aria-current={isSelected ? 'true' : undefined}
       data-task-id={card.taskId}
       data-sync={card.sync.state}
       className={cn(
         CARD_CLASS,
-        'group shrink-0 cursor-grab touch-none transition-colors outline-none select-none hover:border-border focus-visible:ring-2 focus-visible:ring-ring/40',
-        isSelected && 'border-brand'
+        'group shrink-0 cursor-grab touch-none transition-colors outline-none select-none hover:border-border focus-visible:ring-2 focus-visible:ring-ring/40'
       )}
       onPointerDown={(e) => onPointerDown(e, card.taskId)}
       onKeyDown={(e) => {

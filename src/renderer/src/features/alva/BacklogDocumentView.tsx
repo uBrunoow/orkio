@@ -1,58 +1,31 @@
-import { useEffect, useState } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { BacklogTaskDocument } from '../../../../shared/alva'
 import { Alert } from '../../components/Alert'
 import { MarkdownText } from '../../components/MarkdownText'
 import { StatusToken } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
 import { splitBacklogBody } from '../task/backlog-sections'
-
-type State =
-  | { phase: 'loading' }
-  | { phase: 'error'; message: string }
-  | { phase: 'ready'; linked: string | null; doc: BacklogTaskDocument | null }
+import { useTaskDocument } from '../task/task-view'
 
 /**
  * Spec, critérios e plano da task do Backlog.md vinculada, para ler antes de aprovar (só leitura;
- * o texto vem do arquivo no ambiente da tarefa, com segredos ocultados). `refreshKey` recarrega
- * (o fluxo muda o arquivo a cada passo).
+ * o texto vem do arquivo no ambiente da tarefa, com segredos ocultados). Um texto só por tarefa
+ * (`useTaskDocument`), relido quando o fluxo ou o Claude mexem na tarefa.
  */
 export function BacklogDocumentView({
-  projectId,
-  taskId,
-  refreshKey = 0,
   part = 'all'
 }: {
-  projectId: string
-  taskId: string
-  refreshKey?: number
   /** Só a spec ou só o plano (abas da tela da tarefa); `all` = o texto inteiro. */
   part?: 'all' | 'spec' | 'plan'
 }): React.JSX.Element {
-  const [state, setState] = useState<State>({ phase: 'loading' })
-
-  useEffect(() => {
-    let active = true
-    void window.orkio.alva
-      .taskDocument(projectId, taskId)
-      .then((r) => {
-        if (!active) return
-        setState(
-          r.ok ? { phase: 'ready', ...r.value } : { phase: 'error', message: r.error.message }
-        )
-      })
-      .catch(() => {
-        if (active) setState({ phase: 'error', message: 'Não deu para ler a task do Backlog.' })
-      })
-    return () => {
-      active = false
-    }
-  }, [projectId, taskId, refreshKey])
-
-  if (state.phase === 'loading') {
-    return <Skeleton className="h-20" aria-label="Carregando a task" />
+  const { value, error } = useTaskDocument()
+  if (!value) {
+    return error ? (
+      <Alert tone="danger">{error.message}</Alert>
+    ) : (
+      <Skeleton className="h-20" aria-label="Carregando a task" />
+    )
   }
-  if (state.phase === 'error') return <Alert tone="danger">{state.message}</Alert>
+  const state = value
   if (!state.doc) {
     return (
       <p className="text-xs text-muted-foreground">

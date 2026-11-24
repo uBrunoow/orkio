@@ -23,30 +23,30 @@ describe('availableTabs', () => {
 describe('defaultPanelTab', () => {
   const base = { hasBacklogDoc: true, hasDiff: false, hasPr: false }
   it.each([
-    ['Spec', 'spec'],
-    ['Plano', 'plan'],
-    ['Implementar', 'changes'],
-    ['PR', 'pr']
+    ['spec', 'spec'],
+    ['plan', 'plan'],
+    ['implement', 'changes'],
+    ['pr', 'pr']
   ] as const)('fase %s → aba %s', (phase, tab) => {
     expect(defaultPanelTab({ ...base, currentPhase: phase })).toBe(tab)
   })
 
   it('fase Revisão abre a aba Revisão com PR e Mudanças sem PR', () => {
-    expect(defaultPanelTab({ ...base, currentPhase: 'Revisão', hasPr: true })).toBe('review')
-    expect(defaultPanelTab({ ...base, currentPhase: 'Revisão' })).toBe('changes')
+    expect(defaultPanelTab({ ...base, currentPhase: 'review', hasPr: true })).toBe('review')
+    expect(defaultPanelTab({ ...base, currentPhase: 'review' })).toBe('changes')
   })
 
   it('Plano sem documento cai em Mudanças ou Detalhes', () => {
     expect(
-      defaultPanelTab({ currentPhase: 'Plano', hasBacklogDoc: false, hasDiff: true, hasPr: false })
+      defaultPanelTab({ currentPhase: 'plan', hasBacklogDoc: false, hasDiff: true, hasPr: false })
     ).toBe('changes')
     expect(
-      defaultPanelTab({ currentPhase: 'Plano', hasBacklogDoc: false, hasDiff: false, hasPr: false })
+      defaultPanelTab({ currentPhase: 'plan', hasBacklogDoc: false, hasDiff: false, hasPr: false })
     ).toBe('details')
   })
 
   it('sem fase conhecida', () => {
     expect(defaultPanelTab({ ...base, currentPhase: null, hasDiff: true })).toBe('changes')
-    expect(defaultPanelTab({ ...base, currentPhase: 'deploy' })).toBe('details')
+    expect(defaultPanelTab({ ...base, currentPhase: null })).toBe('details')
   })
 })

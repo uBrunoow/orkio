@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Spinner } from '@/components/Spinner'
-import { StatusToken, type StatusTone } from '@/components/StatusToken'
+import { StatusToken } from '@/components/StatusToken'
 import { cn } from '@/lib/utils'
-import type { AgentRunView, TaskWorkspace } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import { EditorIcon, GitBranchIcon, PullRequestIcon, TerminalIcon } from '../../components/icons'
-import { OpenPrFeedback, canOpenPr, useOpenPr } from '../board/OpenPrButton'
-import { PrHoverCard } from '../board/PrHoverCard'
+import { OpenPrButton, OpenPrFeedback } from './OpenPrButton'
+import { canOpenPr } from './open-pr'
+import { PrHoverCard } from '../../components/PrHoverCard'
+import { CI_STATUS, isPrOpen } from '../../lib/status-text'
+import { useTaskDiff, useTaskView } from './task-view'
 import { contextTone, folderName, latestContextPercent } from './environment'
-import type { TaskSignals } from '../../../../shared/task-signals'
 
 const TITLE = 'text-2xs font-medium tracking-wider text-subtle-foreground uppercase'
 const BAR: Record<'ok' | 'warn' | 'danger', string> = {
@@ -18,100 +18,24 @@ const BAR: Record<'ok' | 'warn' | 'danger', string> = {
   danger: 'bg-danger'
 }
 
-/** Contexto (%) da execução mais recente: lê o log e acompanha os eventos ao vivo. */
-function useContextPercent(run: AgentRunView | null): number | null {
-  const runId = run?.id ?? null
-  const [known, setKnown] = useState<{ runId: string; percent: number } | null>(null)
-  useEffect(() => {
-    let active = true
-    if (!runId) return
-    void window.orkio.claude
-      .readLog(runId)
-      .then((log) => {
-        const next = latestContextPercent(log)
-        if (active && next !== null)
-          setKnown((now) => (now && now.runId === runId ? now : { runId, percent: next }))
-      })
-      .catch(() => undefined)
-    const off = window.orkio.claude.onRunEvent((m) => {
-      if (m.runId === runId && m.event.kind === 'usage') {
-        const next = latestContextPercent([m.event])
-        if (next !== null) setKnown({ runId, percent: next })
-      }
-    })
-    return () => {
-      active = false
-      off()
-    }
-  }, [runId])
-  // Valor de outra execução (a tarefa ganhou uma nova) não vale: some até o primeiro uso.
-  return known && known.runId === runId ? known.percent : null
-}
-
-/** `+N −M` da branch contra a base, pelo `git diff` do ambiente (sem ler o diff inteiro aqui). */
-function useShortstat(
-  projectId: string,
-  taskId: string,
-  enabled: boolean,
-  refreshKey: number
-): { added: number; removed: number } | null {
-  const [stat, setStat] = useState<{ added: number; removed: number } | null>(null)
-  useEffect(() => {
-    if (!enabled) return
-    let active = true
-    void window.orkio.claude
-      .diff(projectId, taskId)
-      .then((r) => {
-        if (active) setStat(r.ok ? r.value.shortstat : null)
-      })
-      .catch(() => undefined)
-    return () => {
-      active = false
-    }
-  }, [projectId, taskId, enabled, refreshKey])
-  return stat
-}
-
-const CI_LABEL: Record<
-  NonNullable<NonNullable<TaskSignals['pr']>['checks']>,
-  [string, StatusTone]
-> = {
-  success: ['CI ok', 'success'],
-  failure: ['CI falhou', 'danger'],
-  pending: ['CI rodando', 'running']
-}
-
 /**
  * "Ambiente" (topo da aba Detalhes), como a coluna do Claude Desktop: onde o agente trabalha
  * (projeto, pasta, branch, editor/terminal), quanto do contexto da conversa já foi usado e o que
  * mudou na branch, com a PR (ou "Abrir PR").
  */
-export function EnvironmentPanel({
-  projectId,
-  taskId,
-  projectName,
-  workspace,
-  latestRun,
-  signals,
-  flowActive,
-  refreshKey
-}: {
-  projectId: string
-  taskId: string
-  projectName: string | null
-  workspace: TaskWorkspace | null
-  latestRun: AgentRunView | null
-  signals: TaskSignals | undefined
-  flowActive: boolean
-  refreshKey: number
-}): React.JSX.Element {
+export function EnvironmentPanel(): React.JSX.Element {
+  const view = useTaskView()
+  const { projectId, taskId, projectName, signals, runs } = view
+  const workspace = runs.state?.workspace ?? null
   const [error, setError] = useState<string | null>(null)
-  const context = useContextPercent(latestRun)
-  const stat = useShortstat(projectId, taskId, workspace !== null, refreshKey)
-  const openPr = useOpenPr(projectId, taskId)
+  // Contexto (%) da execução mais recente: o log ao vivo dela (a conversa já o acompanha).
+  const latestId = runs.state?.runs[0]?.id ?? null
+  const context =
+    latestId && runs.selectedRunId === latestId ? latestContextPercent(runs.log) : null
+  // `+N −M` da branch contra a base: o mesmo diff da tela (sem ler de novo).
+  const stat = useTaskDiff(workspace !== null).value?.shortstat ?? null
   const pr = signals?.pr ?? null
-  const prOpen = pr !== null && (pr.state === 'open' || pr.state === 'draft')
-  const ci = prOpen && pr.checks ? CI_LABEL[pr.checks] : null
+  const ci = isPrOpen(pr) && pr?.checks ? CI_STATUS[pr.checks] : null
 
   async function open(kind: 'cursor' | 'code' | 'terminal'): Promise<void> {
     const r =
@@ -227,24 +151,15 @@ export function EnvironmentPanel({
                     +{pr.additions} −{pr.deletions}
                   </span>
                 )}
-                {ci && <StatusToken label={ci[0]} tone={ci[1]} />}
+                {ci && <StatusToken {...ci} />}
               </>
             )}
-            {canOpenPr(pr) && (
-              <Button
-                size="sm"
-                disabled={openPr.busy || flowActive}
-                onClick={() => void openPr.start()}
-              >
-                {openPr.busy ? <Spinner /> : <PullRequestIcon />}
-                Abrir PR
-              </Button>
-            )}
+            {canOpenPr(pr) && <OpenPrButton size="sm" hint={false} />}
           </div>
-          {canOpenPr(pr) && flowActive && (
+          {canOpenPr(pr) && view.openPr.blocked && (
             <span className="text-xs text-muted-foreground">Espere o fluxo atual terminar</span>
           )}
-          <OpenPrFeedback state={openPr} />
+          <OpenPrFeedback />
         </div>
       )}
     </section>
