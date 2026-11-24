@@ -62,6 +62,8 @@ export interface FakeServices {
   githubPulls: FakePull[]
   /** Task 18: arquivos da PR (`GET /pulls/{n}/files`), por número: `filename` + `patch`. */
   githubPrFiles?: Record<string, { filename: string; patch?: string }[]>
+  /** Repositórios (`owner/repo`) com o orkio[bot] instalado (`POST <site>/github/installation`). */
+  orkioBotInstalled?: string[]
   /** 'no_scope': todo GraphQL falha com INSUFFICIENT_SCOPES (`data: null`), como um token sem permissão. */
   githubGraphql?: 'ok' | 'no_scope'
   /** Detalhes via GraphQL por número da PR. */
@@ -357,6 +359,17 @@ export async function launchOrkio(
         }
         // Task 18: site do Orkio (mesma origem do intermediário no build de E2E) posta a revisão
         // como orkio[bot]. Como o GitHub: a revisão entra nos detalhes da PR e `updated_at` muda.
+        // Site do Orkio: o orkio[bot] está instalado no repositório? (Integrações › Orkio bot)
+        if (url === `${brokerUrl}/github/installation` && init?.method === 'POST') {
+          const body = JSON.parse(call.body ?? '{}') as { owner: string; repo: string }
+          const installed = (g.__fakes.orkioBotInstalled ?? []).includes(
+            `${body.owner}/${body.repo}`
+          )
+          return json({
+            installed,
+            installUrl: 'https://github.com/apps/orkio/installations/new'
+          })
+        }
         if (url === `${brokerUrl}/github/review` && init?.method === 'POST') {
           const body = JSON.parse(call.body ?? '{}') as {
             owner: string
@@ -1099,7 +1112,7 @@ export async function expandIntegrations(page: Page): Promise<void> {
 /** Abre o painel de configuração de um card de Integrações (se já não estiver aberto). */
 export async function openIntegration(
   page: Page,
-  name: 'Notion' | 'Bancos e campos' | 'GitHub' | 'Claude Code'
+  name: 'Notion' | 'Bancos e campos' | 'GitHub' | 'Claude Code' | 'Orkio bot'
 ): Promise<void> {
   await expandIntegrations(page)
   const card = page.getByRole('article', { name, exact: true })

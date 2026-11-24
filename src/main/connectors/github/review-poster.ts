@@ -114,7 +114,8 @@ export const REVIEW_MESSAGES = {
 /** Login de usuário/organização: letras, dígitos, `-` e `_` (contas gerenciadas), até 100. */
 const OWNER_SLUG = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,99}$/
 const REPO_SLUG = /^[A-Za-z0-9._-]{1,100}$/
-const INSTALL_URL = /^https:\/\/github\.com\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new$/
+export const INSTALL_URL =
+  /^https:\/\/github\.com\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new$/
 const MAX_PR_NUMBER = 2 ** 31
 
 export function isValidOwner(owner: string): boolean {

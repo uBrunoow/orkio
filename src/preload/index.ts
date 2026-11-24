@@ -50,7 +50,8 @@ const api: OrkioApi = {
     getAuthOptions: () => ipcRenderer.invoke(github.getAuthOptions),
     startDeviceFlow: () => ipcRenderer.invoke(github.startDeviceFlow),
     waitDeviceFlow: () => ipcRenderer.invoke(github.waitDeviceFlow),
-    cancelDeviceFlow: () => ipcRenderer.invoke(github.cancelDeviceFlow)
+    cancelDeviceFlow: () => ipcRenderer.invoke(github.cancelDeviceFlow),
+    orkioBot: (options) => ipcRenderer.invoke(github.orkioBot, { force: options?.force === true })
   },
   notionWorkspace: {
     getStatus: () => ipcRenderer.invoke(notionWorkspace.getStatus),

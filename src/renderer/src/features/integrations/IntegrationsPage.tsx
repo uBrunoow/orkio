@@ -5,6 +5,7 @@ import type { AlvaPrecheck } from '../../../../shared/alva'
 import type { ConnectionStatus, NotionWorkspaceStatus } from '../../../../shared/ipc-contract'
 import type { StatusTone } from '../../components/StatusToken'
 import {
+  AgentsIcon,
   ClaudeLogo,
   DatabaseIcon,
   GitHubLogo,
@@ -24,7 +25,13 @@ import { NotionConnectionCard } from './NotionConnectionCard'
 import { useGitHubConnection } from './useGitHubConnection'
 import { useNotionConnection } from './useNotionConnection'
 import { IntegrationCard } from './IntegrationCard'
-import { effectiveOpenId, firstPendingId, matchesQuery } from './integrations-logic'
+import {
+  effectiveOpenId,
+  firstPendingId,
+  matchesQuery,
+  orkioBotSummary
+} from './integrations-logic'
+import { OrkioBotPanel, useOrkioBot } from './OrkioBotCard'
 import { PAGE_WIDTH } from '../../components/page-width'
 
 export function IntegrationsPage({
@@ -44,6 +51,9 @@ export function IntegrationsPage({
   const workspaceReady =
     notionReady && workspace.status?.config != null && workspace.status.health === 'ok'
   const githubReady = github.status?.state === 'connected'
+  // Consulta o orkio[bot] quando o estado do GitHub já é conhecido (e de novo se ele mudar).
+  const bot = useOrkioBot(github.status !== null && github.status.state !== 'connecting')
+  const botStatus = orkioBotSummary(bot.status)
   const claudeReady = claudeStatus(claude).tone === 'success'
 
   const gh = precheck?.items.find((i) => i.id === 'gh') ?? null
@@ -118,6 +128,18 @@ export function IntegrationsPage({
       action: githubReady ? 'Gerenciar' : 'Conectar',
       ready: githubReady,
       panel: <GitHubConnectionCard github={github} />
+    },
+    {
+      id: 'orkio-bot',
+      section: 'Código',
+      logo: AgentsIcon,
+      logoClassName: 'bg-brand text-primary-foreground',
+      name: 'Orkio bot',
+      category: 'github app · revisões',
+      status: botStatus,
+      action: botStatus.tone === 'warning' ? 'Instalar' : 'Ver repositórios',
+      ready: botStatus.tone === 'success',
+      panel: <OrkioBotPanel bot={bot} />
     },
     {
       id: 'gh',
