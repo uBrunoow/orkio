@@ -17,6 +17,7 @@ import {
 } from './fixtures'
 import { ORKIO_API } from '../src/shared/ipc/api'
 import { isCallSpec, isEventSpec } from '../src/shared/ipc/define'
+import { NOTION_VERSION } from '../src/shared/site-contract'
 
 const TOKEN = 'ntn_E2E_SECRET_TOKEN_abcdef123456'
 
@@ -191,11 +192,11 @@ test('token válido → conectado, salvo criptografado, token fora do renderer',
   // Depois de conectar, o assistente dos bancos também consulta o Notion (/search).
   const calls = await externalCalls(app)
   expect(calls.filter((c) => c.url === 'https://api.notion.com/v1/users/me').at(-1)).toMatchObject({
-    version: '2026-03-11',
+    version: NOTION_VERSION,
     auth: `Bearer ${TOKEN}`
   })
   expect(
-    calls.every((c) => !c.url.startsWith('https://api.notion.com') || c.version === '2026-03-11')
+    calls.every((c) => !c.url.startsWith('https://api.notion.com') || c.version === NOTION_VERSION)
   ).toBe(true)
 
   expect(secretFiles()).toEqual(['notion.bin'])

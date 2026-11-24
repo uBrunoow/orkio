@@ -1,10 +1,12 @@
 # Mostra, na PR, a versão que sai ao mergear (patch sem rótulo; `release:minor|major|beta` escolhe;
-# `release:none` não lança) e falha cedo se houver rótulos em conflito. Ver docs/releases.md.
+# `release:none` não lança) e falha cedo se houver rótulos em conflito. PR só fora do app (mesma
+# lista `paths-ignore` do release-on-merge.yml) não lança nada, então não roda. Ver docs/releases.md.
 name: Release (rótulo da PR)
 
 on:
   pull_request:
     types: [opened, reopened, synchronize, labeled, unlabeled]
+    paths-ignore: ['site/**', 'docs/**', 'README.md', '.github/ISSUE_TEMPLATE/**']
 
 permissions:
   contents: read

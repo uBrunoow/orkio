@@ -51,7 +51,8 @@ O caminho do dia a dia: **todo merge na `main` lança uma versão**. O rótulo d
    `release:beta` escolhem outro; **`release:none`** não lança (PR só de CI, testes, refatoração).
    O check **Release (rótulo da PR)** mostra na hora a versão que vai sair (ex.: "Ao mergear, sai a
    versão v0.2.2") e falha se houver rótulos em conflito.
-   Mudanças só em `site/`, `docs/`, `broker/` ou no `README.md` não disparam o workflow.
+   Mudanças só em `site/`, `docs/`, `.github/ISSUE_TEMPLATE/` ou no `README.md` não disparam o
+   workflow nem o check do rótulo (a mesma lista no `ci.yml`; `test/workflows.test.ts` confere).
 3. Mergeie. O workflow **Release ao mergear** (`release-on-merge.yml`), na `main`:
    1. acha a PR do commit e lê o rótulo e o título (num push direto, a 1ª linha do commit);
    2. roda `node scripts/release.mjs <tipo>`: sobe o `package.json`, move "Não lançado" para

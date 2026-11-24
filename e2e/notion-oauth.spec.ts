@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import {
-  E2E_BROKER_URL,
+  E2E_SITE_URL,
   createUserDataDir,
   cspViolations,
   externalCalls,
@@ -16,8 +16,7 @@ import {
   type OrkioApp,
   alerts
 } from './fixtures'
-
-const REDIRECT_URI = 'http://localhost:47821/oauth/notion/callback'
+import { NOTION_OAUTH_REDIRECT_URI as REDIRECT_URI } from '../src/shared/site-contract'
 
 // Compartilham o mesmo userData: rodam em ordem.
 test.describe.configure({ mode: 'serial' })
@@ -91,10 +90,10 @@ test('"Conectar com Notion" autoriza no navegador e conecta via intermediário',
   expect(url.searchParams.get('state')?.length).toBeGreaterThanOrEqual(32)
 
   // O code foi trocado no intermediário, sem nenhum segredo saindo do app.
-  const brokerCall = (await externalCalls(app)).find((c) => c.url.startsWith(E2E_BROKER_URL))
-  expect(brokerCall?.url).toBe(`${E2E_BROKER_URL}/notion/token`)
-  expect(brokerCall?.auth).toBeUndefined()
-  expect(JSON.parse(brokerCall!.body!)).toEqual({
+  const siteCall = (await externalCalls(app)).find((c) => c.url.startsWith(E2E_SITE_URL))
+  expect(siteCall?.url).toBe(`${E2E_SITE_URL}/notion/token`)
+  expect(siteCall?.auth).toBeUndefined()
+  expect(JSON.parse(siteCall!.body!)).toEqual({
     code: 'e2e-auth-code',
     redirect_uri: REDIRECT_URI
   })
@@ -130,14 +129,14 @@ test('token de acesso expirado → renova pelo intermediário automaticamente', 
 
 test('autorização revogada → erro com "Reconectar com Notion"', async () => {
   const { app, page } = orkio!
-  await setFakes(app, { validTokens: [], broker: 'invalid_grant' })
+  await setFakes(app, { validTokens: [], notionOAuth: 'invalid_grant' })
   await notionCard(page).getByRole('button', { name: 'Testar conexão' }).click()
 
   await expect(alerts(notionCard(page))).toContainText('expirou ou foi revogada')
   await shot(page, 'oauth-3-revogado')
   expect(secretFiles()).toEqual(['notion.bin'])
 
-  await setFakes(app, { validTokens: null, broker: 'ok' })
+  await setFakes(app, { validTokens: null, notionOAuth: 'ok' })
   await notionCard(page).getByRole('button', { name: 'Reconectar com Notion' }).click()
   await openConnectedNotion(page)
   await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()

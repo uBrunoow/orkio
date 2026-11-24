@@ -15,7 +15,7 @@
     "start": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "pnpm typecheck:node && pnpm typecheck:web && pnpm typecheck:e2e && pnpm typecheck:broker",
+    "typecheck": "pnpm typecheck:node && pnpm typecheck:web && pnpm typecheck:e2e",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -25,9 +25,9 @@
     "dist:dir": "electron-vite build && electron-builder --dir",
     "e2e": "electron-vite build --mode e2e && playwright test",
     "typecheck:e2e": "tsc --noEmit -p tsconfig.e2e.json",
-    "typecheck:broker": "tsc --noEmit -p tsconfig.broker.json",
     "release": "node scripts/release.mjs",
-    "smoke:packaged": "playwright test -c e2e-packaged/playwright.config.ts"
+    "smoke:packaged": "playwright test -c e2e-packaged/playwright.config.ts",
+    "preview:shots": "electron-vite build --mode e2e && playwright test -c scripts/preview/playwright.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

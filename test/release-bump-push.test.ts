@@ -10,7 +10,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
  * derrubou o release da v0.2.1) e o push recusado uma vez. Precisa de bash e git.
  */
 const ROOT = join(import.meta.dirname, '..')
-const SCRIPTS = ['release.mjs', 'release-lib.mjs', 'release-bump-push.sh']
+const FILES = [
+  'scripts/release.mjs',
+  'scripts/release-lib.mjs',
+  'scripts/release-bump-push.sh',
+  'src/shared/changelog.mts'
+]
 const CHANGELOG = '# Changelog\n\n## [Não lançado]\n\n### Corrigido\n\n- Algo corrigido.\n'
 const ENV = {
   ...process.env,
@@ -54,7 +59,8 @@ beforeEach(() => {
   writeFileSync(join(work, 'package.json'), '{\n  "name": "x",\n  "version": "0.1.0"\n}\n')
   writeFileSync(join(work, 'CHANGELOG.md'), CHANGELOG)
   mkdirSync(join(work, 'scripts'))
-  for (const f of SCRIPTS) copyFileSync(join(ROOT, 'scripts', f), join(work, 'scripts', f))
+  mkdirSync(join(work, 'src', 'shared'), { recursive: true })
+  for (const f of FILES) copyFileSync(join(ROOT, f), join(work, f))
   chmodSync(join(work, 'scripts', 'release-bump-push.sh'), 0o755)
   git(work, 'add', '-A')
   git(work, 'commit', '-q', '-m', 'inicial')

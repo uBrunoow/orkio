@@ -24,7 +24,8 @@ export interface PublishReviewAnswer {
 
 /**
  * Limites da revisão publicada: o parser (antes do gate), o `GitHubReviewPoster` (main, antes do
- * site) e o prompt de conversão usam estes. O site revalida com os próprios limites.
+ * site) e o prompt de conversão usam estes. O site revalida com os mesmos (`site/lib/contract.ts`;
+ * `test/site-contract.test.ts` confere).
  */
 export const REVIEW_SUMMARY_MAX = 20_000
 export const REVIEW_COMMENTS_MAX = 50

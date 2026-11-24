@@ -22,14 +22,10 @@ export default tseslint.config(
       '*.config.ts',
       'e2e/**/*.ts',
       'e2e-packaged/**/*.ts',
+      'scripts/preview/**/*.ts',
       'test/**/*.ts'
     ],
     languageOptions: { globals: globals.node }
-  },
-  {
-    // Cloudflare Worker: APIs web padrão (fetch, Request, btoa).
-    files: ['broker/**/*.ts'],
-    languageOptions: { globals: { ...globals.browser, ...globals.serviceworker } }
   },
   {
     files: ['src/renderer/**/*.{ts,tsx}'],

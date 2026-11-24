@@ -1,7 +1,8 @@
 # Release ao mergear: todo merge na main sobe a versão (patch por padrão; `release:minor|major|beta`
 # escolhe outro tipo e `release:none` não lança), move o CHANGELOG (vazio → o título da PR vira o
 # item), cria o commit `chore(release): vX.Y.Z` e a tag, e dispara o Release.
-# Mudanças só no site, na documentação ou no broker não lançam o app. Ver docs/releases.md.
+# Mudanças só no site, na documentação ou no README não lançam o app (mesma lista do ci.yml e do
+# release-label.yml). Ver docs/releases.md.
 #
 # Por que dispara o Release à mão: tags empurradas com o GITHUB_TOKEN não disparam workflows
 # (regra do GitHub, para evitar laços); `workflow_dispatch` é a exceção.
@@ -10,12 +11,7 @@ name: Release ao mergear
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'site/**'
-      - 'docs/**'
-      - 'broker/**'
-      - 'README.md'
-      - '.github/ISSUE_TEMPLATE/**'
+    paths-ignore: ['site/**', 'docs/**', 'README.md', '.github/ISSUE_TEMPLATE/**']
 
 permissions:
   contents: read

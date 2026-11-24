@@ -31,6 +31,7 @@ import {
   type OrkioSiteReviewPayload
 } from './github.connector'
 import { parseOrkioSiteResponse } from './orkio-site'
+import { reviewUrlOrNull } from '../../../shared/site-contract'
 
 /** Páginas de `GET /pulls/{n}/files` (100 por página; o GitHub para em 3000 arquivos). */
 const PR_FILES_MAX_PAGES = 30
@@ -389,30 +390,5 @@ export function parseSiteResponse(
       throw invalid(REVIEW_MESSAGES.badRequest)
     case 'upstream':
       throw new ReviewPostError('upstream', REVIEW_MESSAGES.upstream)
-  }
-}
-
-/** Só o link de revisão de uma PR em github.com. */
-function reviewUrlOrNull(
-  value: unknown,
-  owner: string,
-  repo: string,
-  number: number
-): string | null {
-  if (typeof value !== 'string') return null
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' &&
-      url.hostname === 'github.com' &&
-      !url.port &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      url.pathname.toLowerCase() === `/${owner}/${repo}/pull/${number}`.toLowerCase() &&
-      /^(#pullrequestreview-\d+)?$/.test(url.hash)
-      ? url.toString()
-      : null
-  } catch {
-    return null
   }
 }

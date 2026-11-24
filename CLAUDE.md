@@ -3,7 +3,7 @@
 App Electron (electron-vite + React + TypeScript strict). Orquestra Notion, GitHub e
 Claude Code. Hoje existem:
 
-- **Conectores:** Notion (OAuth via `broker/` + token) e GitHub (OAuth Device Flow + fine-grained PAT).
+- **Conectores:** Notion (OAuth pelo intermediário do site, `site/app/notion/*`, + token) e GitHub (OAuth Device Flow + fine-grained PAT).
 - **Projetos:** pasta local → repositório GitHub detectado (git local + API), saúde do projeto e
   branch atual ao vivo. Config não secreta em `userData/orkio-config.json` (`ConfigStore`).
 - **Bancos do Notion:** assistente (Integrações) escolhe os data sources de Projetos e Tarefas e
@@ -36,8 +36,7 @@ Claude Code. Hoje existem:
   lateral; de todos os projetos (com PRs com atenção) no sino; contador no ícone do app. Só dados
   locais e caches.
 - **Site (6A):** `site/` (Next.js na Vercel): landing, /privacidade, /termos, o intermediário OAuth
-  do Notion (`/notion/token`, `/notion/refresh`), que substitui o `broker/` (mantido até o login
-  real ser confirmado), e `POST /github/review` (posta a revisão como `orkio[bot]` pelo GitHub App).
+  do Notion (`/notion/token`, `/notion/refresh`) e `POST /github/review` (posta a revisão como `orkio[bot]` pelo GitHub App).
 - **Atualizações (6C):** electron-updater lendo o repo público de releases; banner, Configurações
   (Atualizações + Sobre), "O que há de novo"; nunca reinicia por cima de trabalho em andamento.
 - **Diagnóstico:** Configurações > Sobre > "Copiar diagnóstico" (`main/diagnostics/diagnostics.ts`,
@@ -83,13 +82,14 @@ pnpm install      # postinstall baixa o binário do Electron
 pnpm dev          # app em modo dev
 pnpm test         # Vitest (src/**/*.test.ts e test/**/*.test.ts, inclui build real p/ checar a CSP)
 pnpm e2e          # build (--mode e2e) + Playwright no app Electron (Notion/GitHub simulados, git real). Linux headless: xvfb-run -a pnpm e2e
-pnpm typecheck    # tsc em todos os projetos (node, web, e2e, broker)
+pnpm typecheck    # tsc em todos os projetos (node, web, e2e)
 pnpm lint         # ESLint
 pnpm build        # build em out/
 pnpm icons        # regenera ícones a partir de brand/orkio-app-icon-1024.png
 pnpm dist         # empacota (electron-builder.ts)
 pnpm dist:dir     # só a pasta do app em dist/ (sem instalador)
 pnpm smoke:packaged  # smoke do app empacotado (dist/): tela inicial + ponte MCP. Linux: xvfb-run -a
+pnpm preview:shots   # prints para revisão visual (specs em scripts/preview/, SHOT_DIR), fora do E2E
 pnpm release <patch|minor|major|beta> [--beta]  # versão + CHANGELOG + commit + tag (sem push)
 pnpm --dir site install|dev|test|typecheck|lint|build   # site (package próprio, ver site/README.md)
 ```
@@ -287,8 +287,8 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - OAuth com redirect: use `authorizeViaLoopback` (`src/main/oauth/loopback.ts`, RFC 8252):
   servidor em `127.0.0.1` só durante o login, `state` aleatório, checagem de `Host`, porta fixa
   registrada no provedor.
-- Provedor que exige client secret (Notion): a troca/renovação passa pelo intermediário em
-  `broker/`. Nunca coloque client secret no app nem em `.env` do app.
+- Provedor que exige client secret (Notion): a troca/renovação passa pelo intermediário do site
+  (`site/app/notion/*`). Nunca coloque client secret no app nem em `.env` do app.
 - Tokens rotativos: renovações serializadas por conexão (uma promise em andamento);
   `invalid_grant` é terminal (erro com `hasStoredCredentials` + "Reconectar").
 - Separe **client** (HTTP puro, timeout, retry, mapeamento de erros para mensagens) de
@@ -358,11 +358,11 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 
 ## Notion
 
-- Versão da API centralizada em `NOTION_VERSION` (`notion.client.ts`), hoje `2026-03-11`.
+- Versão da API em `NOTION_VERSION` (`shared/site-contract.ts`, igual à do site), hoje `2026-03-11`.
 - Usamos `fetch` nativo (não o SDK). Timeout de 10 s; 429 respeita `Retry-After` (uma
   nova tentativa se a espera for de até 5 s).
 - Conexão principal: OAuth (`notion.oauth.ts`): `owner=user`, redirect
-  `http://localhost:47821/oauth/notion/callback`, troca/renovação via `broker/`.
+  `http://localhost:47821/oauth/notion/callback`, troca/renovação pelo intermediário do site (`<MAIN_VITE_SITE_URL>/notion/*`).
   Token colado continua como alternativa ("Usar token").
 - Registro salvo (`secrets/notion.bin`, cifrado) é versionado: `v: 2` com
   `method: 'token' | 'oauth'`. Registros `v: 1` (Etapa 1) são lidos como `token`.
@@ -412,7 +412,7 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - Rate limits: primário (403/429 + `x-ratelimit-remaining: 0` → `x-ratelimit-reset`) e
   secundário (403/429 + `Retry-After`, ou 1 min). Uma nova tentativa se a espera for ≤ 5 s.
 - Conexão principal: OAuth App com **Device Flow** (`github.oauth.ts`), escopo `repo`, sem
-  client secret e **sem** `broker/`. Config: `MAIN_VITE_GITHUB_CLIENT_ID`.
+  client secret e **sem** o intermediário do site. Config: `MAIN_VITE_GITHUB_CLIENT_ID`.
 - O conector implementa `DeviceFlowConnector` (`startDeviceFlow` → código; `waitDeviceFlow`
   → resultado; `cancelDeviceFlow`). Um fluxo por vez; `startDeviceFlow` repetido devolve o mesmo
   código. Tokens de OAuth App não expiram: 401 → "Reconectar com GitHub".
@@ -1243,10 +1243,25 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 
 - `site/`: Next.js App Router + TS strict, **package e lockfile próprios** (sem workspace pnpm: o
   install/empacotamento do app não muda). ESLint/tsc/Vitest da raiz ignoram `site/**`; o site tem os
-  dele. CI: `.github/workflows/ci.yml` (ignora `site/**`) e `site.yml` (lint, typecheck, test,
-  build e o E2E `@site`). Deploy pela Vercel (Root Directory `site`, Ignored Build Step).
-- **Intermediário OAuth** (`site/lib/notion-broker.ts`, rotas em `site/app/notion/*`, runtime Node):
-  mesmo contrato do `broker/` (o app usa `<MAIN_VITE_SITE_URL>/notion/*`). Nada de
+  dele. CI: `.github/workflows/ci.yml` (ignora o que não é app: `site/**`, `docs/**`, `README.md`,
+  `.github/ISSUE_TEMPLATE/**`, a mesma lista do `release-on-merge`/`release-label`) e `site.yml`
+  (lint, typecheck, test, build, `test/site-contract.test.ts` e o E2E `@site`), que dispara também
+  com o lado app do contrato (`src/main/connectors/**`, `shared/site-contract.ts`,
+  `github-names.ts`, `review-publish.ts`, `release-artifacts.mts`, `updates.ts`, o fixture e o spec
+  `@site`); `test/workflows.test.ts` confere as listas. Deploy pela Vercel (Root Directory `site`,
+  Ignored Build Step).
+- **Contrato app ↔ site:** o que os dois lados repetem (versões das APIs do GitHub e do Notion,
+  owner/repo, link de instalação, limites da revisão (20 mil no resumo, os mesmos nos dois),
+  códigos/status de erro de `/github/*`, `reviewUrlOrNull`, redirect URI do Notion,
+  `RELEASES_REPO`, nomes dos arquivos de download) mora num módulo só de cada lado:
+  `site/lib/contract.ts` (o resto do site importa dele) e, no app, `shared/site-contract.ts` (+
+  `github-names.ts`, `review-publish.ts`, `updates.ts`, `release-artifacts.mts`).
+  `test/site-contract.test.ts` exige igualdade e passa a maior revisão do app pelo validador do site
+  e cada código do site pelo `parseOrkioSiteResponse`. Peças HTTP das rotas (`json`, 405,
+  `readJsonBody`, `withRateLimit`, `loopbackOverride` = override só fora da Vercel e em
+  `http://127.0.0.1`) em `site/lib/http.ts`; nenhuma rota do GitHub depende do intermediário do Notion.
+- **Intermediário OAuth** (`site/lib/notion-broker.ts`, rotas em `site/app/notion/*`, runtime Node;
+  o app usa `<MAIN_VITE_SITE_URL>/notion/*`). `GET /health` fica como checagem de deploy. Nada de
   `console.*` (ESLint + teste). Limitador em memória por IP (20/min) só como defesa mínima; a regra
   real é o Rate Limiting do Firewall da Vercel. `NOTION_TOKEN_URL` só vale fora da Vercel e em
   `http://127.0.0.1` (E2E).
@@ -1258,7 +1273,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   a pedido de @login" do `GET /user`); devolve só `{ url }`. O token do
   App **nunca sai do site** (`pull_requests: write` também aprova). Erros por código
   (`not_configured`/`bad_request` (+ `reason: rejected|pr_not_found`)/`forbidden`/`not_installed`
-  412 + `installUrl`/`upstream`); try/catch no topo; timeouts cobrem a leitura do corpo; prazo total
+  412 + `installUrl`/`upstream`; `GITHUB_ERROR_STATUS` em `contract.ts`); `requireAppKey` e
+  `canonicalRepo` (o repo que o usuário enxerga, nome canônico) servem às duas rotas; try/catch no topo; timeouts cobrem a leitura do corpo; prazo total
   de 15 s no site, 25 s no app (timeout = "a revisão pode ter sido publicada").
   `GITHUB_API_URL` só fora da Vercel e em `http://127.0.0.1`. No app:
   `connectors/github/review-poster.ts` (`GitHubReviewPoster`: APPROVE nunca, redação, limites,
@@ -1275,11 +1291,13 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - **Landing:** textos em `site/i18n/pt-BR.ts` (só o que o app faz hoje; ver `site/PRODUCT.md`),
   visual em `site/DESIGN.md` (tokens da marca, Jost só em títulos/wordmark, fontes locais, sem
   terceiros). Download pelo último release de `RELEASES_REPO` (ISR 15 min), sugestão por SO no
-  cliente (`site/lib/releases.ts`).
+  cliente (`site/lib/releases.ts`); os arquivos são reconhecidos pelo nome exato
+  (`DOWNLOAD_FILES` em `contract.ts`, conferido contra o manifesto dos releases), sem heurística.
 - E2E `e2e/site-oauth.spec.ts` (`@site`): `next start` do site + Notion e GitHub simulados em HTTP
   local (inclui a revisão como `orkio[bot]`: o site confere o push e posta; o token do App não sai);
-  o fixture (`brokerTarget`) manda as chamadas do app ao intermediário para o site de verdade. Pula
-  com aviso se não houver `site/.next` (rode `pnpm --dir site build`).
+  o fixture (`siteTarget`) manda as chamadas do app ao site (`E2E_SITE_URL`, lido do `.env.e2e`)
+  para o site de verdade. Sem `site/.next` (rode `pnpm --dir site build`): local pula com aviso; no
+  CI (`CI=true`) falha.
 
 ## Atualizações automáticas (Etapa 6C)
 
@@ -1321,11 +1339,17 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 
 ## Empacotamento e releases (Etapa 6B)
 
-- **Config:** `electron-builder.ts` (TypeScript, achado pelo nome; `builderConfig(env)` é pura e
-  testada em `test/electron-builder-config.test.ts`). Nomes com a arquitetura
+- **Config:** `electron-builder.ts` (TypeScript, achado pelo nome; `builderConfig(env)` é pura).
+  **Manifesto dos arquivos** em `src/shared/release-artifacts.mts` (alvo, sistema, arquitetura,
+  extensão, botão do site; `artifactFileName`, `builderTargets`, `channelFiles`, `macDmg`): o
+  `electron-builder.ts` monta targets e `artifactName` dele; `scripts/release-assets.mjs <versão>`
+  lista os pacotes e os `.yml` do canal que o `release.yml` confere; o DMG do auto-update manual
+  (6C) e os botões do site (`DOWNLOAD_FILES`, comparado no teste de contrato) usam os mesmos nomes
   (`Orkio-<v>-mac-<arch>.dmg|zip`, `Orkio-<v>-win-<arch>-setup.exe`,
-  `Orkio-<v>-linux-x86_64.AppImage`, `Orkio-<v>-linux-amd64.deb`): o site (`site/lib/releases.ts`)
-  e o auto-update (6C) dependem deles; o `release.yml` confere cada um e o `latest-linux.yml`.
+  `Orkio-<v>-linux-x86_64.AppImage`, `Orkio-<v>-linux-amd64.deb`). Alvo novo = uma linha no
+  manifesto + o rótulo no site. `test/electron-builder-config.test.ts` confere config × manifesto.
+  Módulos `.mts` em `shared/` são lidos também pelos scripts com o Node direto (só tipos, nada que
+  o Node não consiga tirar); quem importa usa `.mjs` no caminho.
 - **Assinatura pelo ambiente:** mac assinado só com `CSC_LINK`/`CSC_NAME` (hardened runtime,
   `build/entitlements.mac.plist` só com `allow-jit`, notarização se houver `APPLE_*`); senão ad-hoc
   (`identity: '-'`) **sem** hardened runtime. Windows só com `WIN_SIGNING=azure` + `AZURE_SIGNING_*`.
@@ -1341,8 +1365,9 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   `ELECTRON_RUN_AS_NODE` contra um socket simulado.
 - **Versões:** `version` do `package.json` + tag `vX.Y.Z` (beta: `X.Y.Z-beta.N` → pre-release).
   `pnpm release` (`scripts/release.mjs`, lógica pura em `release-lib.mjs`) exige `main` limpa e
-  itens em `## [Não lançado]`; move para `## [X.Y.Z] - AAAA-MM-DD` (formato lido pelo release e
-  pela 6C). Não faz push.
+  itens em `## [Não lançado]`; move para `## [X.Y.Z] - AAAA-MM-DD`. Leitor único do CHANGELOG em
+  `src/shared/changelog.mts` (release, notas do GitHub e "O que há de novo" da 6C;
+  `test/changelog.test.ts` compara os dois lados em toda versão do CHANGELOG real). Não faz push.
 - **Workflows:** `ci.yml` (PR/push na main, sem `site/**`; lint, typecheck, test, e2e Linux,
   `package-smoke` Linux; E2E no macOS só por dispatch). `package.yml` (dispatch = empacota sem
   publicar e sobe artefatos; `workflow_call` com `publish`). `release.yml` (tag): `release-check` →
@@ -1350,8 +1375,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   jobs que publicam) → `package.yml` com
   `--publish always` → confere arquivos e publica. Segredos só no `env` do passo; sem `set -x`.
 - **Release ao mergear:** todo merge na `main` = versão (sem rótulo = `patch`; `release:minor|
-major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`, `README.md` não
-  disparam). "[Não lançado]" vazio → o título da PR vira o item (`fillUnreleased`, `RELEASE_NOTE`).
+major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.md`,
+  `.github/ISSUE_TEMPLATE/` não disparam, nem o `release-label`). "[Não lançado]" vazio → o título da PR vira o item (`fillUnreleased`, `RELEASE_NOTE`).
   `release-label.yml` (na PR) mostra a versão que sairá; `release-on-merge.yml` (push na main) acha a
   PR do commit, roda `scripts/release.mjs <tipo>`, empurra o commit `chore(release): vX.Y.Z` e a tag
   (`--atomic`) e dispara o `release.yml` com `--ref vX.Y.Z` (tags empurradas com o `GITHUB_TOKEN` não
@@ -1368,6 +1393,10 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
   (ex.: `test/csp-build.test.ts` faz um build real do renderer e falha se a CSP de produção
   ganhar `'unsafe-inline'`/`'unsafe-eval'`, scripts/estilos inline ou fontes em `data:`).
+- Prints de revisão visual não são testes: ficam em `scripts/preview/` (config própria,
+  `pnpm preview:shots`, `SHOT_DIR`), fora do `pnpm e2e` e do CI.
+- Constantes do contrato com o site nos specs vêm de `src/shared` (`NOTION_VERSION`,
+  `NOTION_OAUTH_REDIRECT_URI`, `GITHUB_API_VERSION`), nunca o literal.
 - E2E (Playwright + Electron): `e2e/`. `e2e/fixtures.ts` abre o build de `out/` com
   `--user-data-dir` temporário e, **via `app.evaluate` no teste**, substitui `fetch`
   (API simulada) e `shell.openExternal`. Nunca adicione hooks/variáveis de teste ao código
@@ -1454,10 +1483,10 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`
 | React e `@fontsource/*` em `devDependencies`                                                                | O Vite já os embute no bundle do renderer; assim o pacote do electron-builder não leva `node_modules` desnecessários.                                                                                                                                       |
 | Não definir `productName` no `package.json`                                                                 | Mudaria a pasta `userData` (`orkio` → `Orkio`) e "desconectaria" quem já tem credenciais salvas. O nome do app empacotado fica no `electron-builder.ts`.                                                                                                    |
 | Fontes nunca viram `data:` URI                                                                              | A CSP só permite `font-src 'self'` (`assetsInlineLimit` no `electron.vite.config.ts`).                                                                                                                                                                      |
-| Notion via OAuth com intermediário (`broker/`, Cloudflare Worker)                                           | O Notion exige client secret na troca do código/renovação e a API REST não aceita PKCE. O secret fica só no Worker, que é stateless e não loga. O MCP do Notion aceita PKCE, mas trocaria a API REST pelas ferramentas MCP (decisão da Etapa 1.5).          |
+| Notion via OAuth com intermediário (rotas `/notion/*` do site)                                              | O Notion exige client secret na troca do código/renovação e a API REST não aceita PKCE. O secret fica só no site, que é stateless e não loga (o antigo Worker `broker/` foi apagado). O MCP do Notion aceita PKCE, mas trocaria a API REST pelas ferramentas MCP (decisão da Etapa 1.5).          |
 | Redirect em loopback com porta fixa `47821`                                                                 | O Notion exige redirect URI exato e registrado. `127.0.0.1` (não `localhost`) evita ambiguidade IPv4/IPv6 (RFC 8252). Porta ocupada → mensagem clara.                                                                                                       |
 | `startOAuth()` é uma chamada IPC que só resolve no fim                                                      | O OAuth do Notion não tem estado intermediário para mostrar (diferente do Device Flow do GitHub, que exibe um código). Evita um canal de eventos.                                                                                                           |
-| GitHub via OAuth App + Device Flow, escopo `repo`, sem `broker/`                                            | Device Flow não exige client secret. `repo` é o único escopo de OAuth App que cobre privados, PRs e comentários (não há só-leitura). GitHub App teria permissões finas, mas tokens de 8 h cuja renovação exige secret (→ broker) e instalação por org/repo. |
+| GitHub via OAuth App + Device Flow, escopo `repo`, sem intermediário                                        | Device Flow não exige client secret. `repo` é o único escopo de OAuth App que cobre privados, PRs e comentários (não há só-leitura). GitHub App teria permissões finas, mas tokens de 8 h cuja renovação exige secret (→ intermediário) e instalação por org/repo. |
 | Device Flow com duas chamadas (`startDeviceFlow` + `waitDeviceFlow`) em vez de canal de eventos             | O único dado intermediário (código, URL, expiração) chega no início. Evita expor `ipcRenderer.on`/gerenciar inscrições no preload e não exige polling do renderer.                                                                                          |
 | Permissão `clipboard-sanitized-write` liberada                                                              | Botão "Copiar" do código do GitHub. Leitura da área de transferência e demais permissões continuam negadas.                                                                                                                                                 |
 | Projetos: seletor de pasta no main + `selectionId`                                                          | O renderer nunca escolhe caminhos arbitrários para o main operar (git, fs).                                                                                                                                                                                 |

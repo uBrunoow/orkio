@@ -14,6 +14,7 @@ export declare function nextVersion(
   options?: { beta?: boolean }
 ): string
 export declare function isPrerelease(version: string): boolean
+export declare function releaseDate(now: Date): string
 export declare function extractNotes(changelog: string, version: string): string | null
 export declare function releaseChangelog(changelog: string, version: string, date: string): string
 export declare function parseReleaseArgs(argv: string[]): { kind: BumpKind; beta: boolean }

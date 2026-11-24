@@ -2,7 +2,7 @@
  * Nomes do GitHub (owner, repositório, login, revisor, branch, link de instalação do App) e a
  * versão da API: uma regra só, usada pelo main (conectores, IPC, allowlist de links, git) e pelo
  * renderer. As checagens repetidas em cada camada (defesa em profundidade) chamam estas funções.
- * O site (`site/lib/github-app.ts`) tem package próprio e mantém as mesmas regras;
+ * O site (`site/lib/contract.ts`) tem package próprio e mantém as mesmas regras;
  * `test/site-contract.test.ts` exige que os dois lados batam.
  */
 

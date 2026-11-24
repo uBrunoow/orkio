@@ -8,7 +8,7 @@
  */
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { planRelease } from './release-lib.mjs'
+import { planRelease, releaseDate } from './release-lib.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
 
@@ -33,13 +33,11 @@ function parseLabels(raw) {
 let plan
 try {
   const { version } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
-  const now = new Date()
-  const pad = (n) => String(n).padStart(2, '0')
   plan = planRelease({
     labels: parseLabels(process.env['LABELS']),
     currentVersion: version,
     changelog: readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'),
-    today: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    today: releaseDate(new Date()),
     note: process.env['RELEASE_NOTE'] ?? null
   })
 } catch (e) {

@@ -99,25 +99,18 @@ jobs:
           tag="$GITHUB_REF_NAME"
           node scripts/changelog-notes.mjs "$tag" > "$RUNNER_TEMP/notes.md"
           assets=$(gh release view "$tag" -R "$RELEASES_REPO" --json assets --jq '[.assets[].name] | join(" ")')
-          for pattern in '-mac-arm64.dmg' '-mac-x64.dmg' '-mac-arm64.zip' '-mac-x64.zip' '-win-x64-setup.exe' \
-            '-linux-x86_64.AppImage' '-linux-amd64.deb'; do
-            case " $assets " in
-              *"$pattern"*) ;;
-              *) echo "::error::Falta o arquivo *$pattern no rascunho $tag."; exit 1 ;;
-            esac
-          done
-          if [ "$PRERELEASE" = "true" ]; then
-            channel_files=('beta-mac.yml' 'beta.yml' 'beta-linux.yml')
-            flags=(--prerelease --latest=false)
-          else
-            channel_files=('latest-mac.yml' 'latest.yml' 'latest-linux.yml')
-            flags=(--prerelease=false --latest)
-          fi
-          for f in "${channel_files[@]}"; do
+          # Pacotes e .yml do canal: a lista sai do manifesto (src/shared/release-artifacts.mts).
+          expected=$(node scripts/release-assets.mjs "$tag")
+          while IFS= read -r f; do
             case " $assets " in
               *" $f "*) ;;
-              *) echo "::error::Falta o $f no rascunho $tag (auto-update)."; exit 1 ;;
+              *) echo "::error::Falta o $f no rascunho $tag."; exit 1 ;;
             esac
-          done
+          done <<< "$expected"
+          if [ "$PRERELEASE" = "true" ]; then
+            flags=(--prerelease --latest=false)
+          else
+            flags=(--prerelease=false --latest)
+          fi
           gh release edit "$tag" -R "$RELEASES_REPO" --draft=false --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
           echo "Publicado: https://github.com/$RELEASES_REPO/releases/tag/$tag"

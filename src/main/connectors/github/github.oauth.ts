@@ -3,7 +3,7 @@
  *
  * Não precisa de client secret nem de redirect: o app pede um código, o usuário o digita em
  * github.com/login/device e o app consulta o endpoint de token até a autorização. Por isso o
- * GitHub NÃO usa o intermediário (broker/) do Notion.
+ * GitHub NÃO usa o intermediário do Notion (rotas /notion/* do site).
  */
 import { ApiError, genericStatusError, requestJson, unexpectedError } from '../../net/http'
 import { isRecord, stringOrNull } from '../../net/parse'

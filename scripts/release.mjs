@@ -8,7 +8,13 @@
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { fillUnreleased, nextVersion, parseReleaseArgs, releaseChangelog } from './release-lib.mjs'
+import {
+  fillUnreleased,
+  nextVersion,
+  parseReleaseArgs,
+  releaseChangelog,
+  releaseDate
+} from './release-lib.mjs'
 
 const ROOT = join(import.meta.dirname, '..')
 const git = (...args) =>
@@ -44,10 +50,7 @@ let version
 let changelog
 try {
   version = nextVersion(pkg.version, opts.kind, { beta: opts.beta })
-  // Data local (não UTC): à noite no Brasil o UTC já é o dia seguinte.
-  const now = new Date()
-  const pad = (n) => String(n).padStart(2, '0')
-  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  const today = releaseDate(new Date())
   // RELEASE_NOTE (título da PR, no release ao mergear) preenche um "[Não lançado]" vazio.
   const current = fillUnreleased(readFileSync(changelogPath, 'utf8'), process.env['RELEASE_NOTE'])
   changelog = releaseChangelog(current, version, today)

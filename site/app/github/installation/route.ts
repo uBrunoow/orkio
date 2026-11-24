@@ -1,5 +1,5 @@
 import { installationPost } from '@/lib/github-app'
-import { methodNotAllowed } from '@/lib/notion-broker'
+import { methodNotAllowed } from '@/lib/http'
 
 // O orkio[bot] está instalado no repositório? Node, sempre dinâmico, nunca em cache.
 export const runtime = 'nodejs'

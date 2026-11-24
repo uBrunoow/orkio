@@ -1,13 +1,15 @@
-# CI do app desktop (Electron). Mudanças só no site/ não rodam este workflow (o site tem o site.yml).
+# CI do app desktop (Electron). Mudanças só fora do app (site, docs, README) não rodam este workflow:
+# a mesma lista `paths-ignore` do release-on-merge.yml e do release-label.yml (test/workflows.test.ts
+# confere). O site tem o site.yml, que também roda quando muda o lado app do contrato.
 # Também é chamado pelo release.yml (workflow_call) antes de empacotar.
 name: CI
 
 on:
   push:
     branches: [main]
-    paths-ignore: ['site/**']
+    paths-ignore: ['site/**', 'docs/**', 'README.md', '.github/ISSUE_TEMPLATE/**']
   pull_request:
-    paths-ignore: ['site/**']
+    paths-ignore: ['site/**', 'docs/**', 'README.md', '.github/ISSUE_TEMPLATE/**']
   workflow_dispatch:
     inputs:
       macos:
@@ -54,7 +56,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install-deps
-      # O E2E "app ↔ site" (@site) roda no workflow do site.
+      # O E2E "app ↔ site" (@site) roda no site.yml (que dispara também com o lado app do contrato).
       - run: xvfb-run -a pnpm e2e --trace off --grep-invert @site
 
   # App empacotado (Linux, só pasta): abre na tela inicial e a ponte MCP roda de dentro do asar.

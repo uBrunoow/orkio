@@ -18,10 +18,12 @@ import {
 } from '../../net/http'
 import { httpsUrlOrNull, isRecord, parseRetryAfterMs, stringOrNull } from '../../net/parse'
 import { RateQueue, backoffMs } from '../../net/rate-queue'
+import { NOTION_VERSION } from '../../../shared/site-contract'
+
+/** Versão da API do Notion: a mesma do site (contrato em `shared/site-contract.ts`). */
+export { NOTION_VERSION }
 
 export const NOTION_API_BASE_URL = 'https://api.notion.com/v1'
-/** Versão da API do Notion (header Notion-Version). Atualize só aqui. */
-export const NOTION_VERSION = '2026-03-11'
 export const NOTION_REQUEST_TIMEOUT_MS = 10_000
 /** Leituras de dados (bancos/tarefas): até 3 novas tentativas em 429, esperando até 30 s. */
 export const NOTION_DATA_MAX_RETRIES = 3

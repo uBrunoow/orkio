@@ -25,8 +25,7 @@ Orkio (main) ──abre navegador──▶ api.notion.com/v1/oauth/authorize?…
 O Notion exige o **client secret** para trocar o código e renovar tokens, e a API REST não
 aceita PKCE. Um app desktop não consegue esconder um segredo, então essa etapa passa pelo
 intermediário: as rotas `/notion/token` e `/notion/refresh` do site do Orkio
-([`site/`](../site/README.md), na Vercel). O antigo Worker em [`broker/`](../broker/README.md) fica
-até o login real ser confirmado pelo site. Os tokens ficam só no computador da pessoa,
+([`site/`](../site/README.md), na Vercel). Os tokens ficam só no computador da pessoa,
 criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo intermediário.
 
 ### Configuração (uma vez, por quem mantém o Orkio)
@@ -95,7 +94,7 @@ A pessoa clica em **Copiar** e **Abrir GitHub**, cola o código em github.com/lo
 clica em **Authorize**. O Orkio conecta sozinho, sem precisar voltar e clicar em nada.
 
 O Device Flow **não usa client secret** nem redirect, então o GitHub **não** passa pelo
-intermediário (`broker/`): o app fala direto com o GitHub e guarda o token cifrado.
+intermediário do site: o app fala direto com o GitHub e guarda o token cifrado.
 
 **Escopo pedido: `repo`.** Para OAuth Apps é o único escopo que dá acesso a repositórios
 privados, PRs e comentários e, depois, permite abrir PRs. O GitHub não oferece uma versão

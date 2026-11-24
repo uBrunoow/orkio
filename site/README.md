@@ -1,7 +1,9 @@
 # Site do Orkio
 
-Landing page, páginas legais (/privacidade, /termos) e o **intermediário OAuth do Notion**
-(substitui o antigo `broker/` da Cloudflare, com o mesmo contrato).
+Landing page, páginas legais (/privacidade, /termos), o **intermediário OAuth do Notion**
+(`/notion/*`) e a revisão como `orkio[bot]` (`/github/*`). O que o app também tem escrito (versões
+das APIs, nomes do GitHub, limites e códigos de erro, redirect URI, repositório e nomes dos
+releases) fica em `lib/contract.ts`; `test/site-contract.test.ts`, na raiz, confere com o app.
 
 Next.js (App Router) + TypeScript, com package e lockfile próprios: o `pnpm install` do app
 (raiz) não instala nada daqui.

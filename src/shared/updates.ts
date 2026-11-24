@@ -2,6 +2,8 @@
  * Atualizações automáticas (Etapa 6C): tipos do status mostrado ao renderer e funções puras
  * (versões, recorte do CHANGELOG, notas em blocos simples, URL do DMG). Sem Node/DOM.
  */
+import { changelogNotes } from './changelog.mjs'
+import { artifactFileName, macDmg } from './release-artifacts.mjs'
 
 /** Repositório público do Orkio, onde ficam os releases (6B); o `publish` do `electron-builder.ts` lê daqui. */
 export const RELEASES_REPO = { owner: 'uBrunoow', repo: 'orkio' } as const
@@ -105,20 +107,11 @@ export function isPrerelease(version: string): boolean {
 // ---------- CHANGELOG ----------
 
 /**
- * Seção de uma versão num CHANGELOG no formato Keep a Changelog (`## [X.Y.Z] - AAAA-MM-DD`).
- * Devolve o texto entre o título da versão e o próximo `## `, sem espaços nas pontas.
+ * Seção de uma versão no CHANGELOG (`## [X.Y.Z] - AAAA-MM-DD`; leitor único em `changelog.ts`, o
+ * mesmo das notas do release). Seção vazia ou ausente → `null`.
  */
 export function changelogSection(markdown: string, version: string): string | null {
-  const wanted = version.replace(/^v/, '')
-  const lines = markdown.split(/\r?\n/)
-  let start = -1
-  for (let i = 0; i < lines.length; i++) {
-    const m = /^##\s+\[?v?([^\]\s]+)\]?/.exec(lines[i]!)
-    if (!m) continue
-    if (start >= 0) return lines.slice(start, i).join('\n').trim() || null
-    if (m[1] === wanted) start = i + 1
-  }
-  return start >= 0 ? lines.slice(start).join('\n').trim() || null : null
+  return changelogNotes(markdown, version.replace(/^v/, '')) || null
 }
 
 /** Blocos simples para mostrar as notas com componentes (nada de HTML). */
@@ -168,26 +161,21 @@ function plainInline(text: string): string {
 
 // ---------- Download manual (macOS sem assinatura) ----------
 
-const RELEASE_FILE = /^[A-Za-z0-9._-]+$/
-
 /**
- * URL do DMG da arquitetura no repo de releases. `files` vem do `latest-mac.yml`
- * (`Orkio-X.Y.Z-mac-arm64.dmg`). Sem DMG da arquitetura: a página do release.
+ * URL do DMG da arquitetura no repo de releases: o nome vem do manifesto (`release-artifacts.mts`)
+ * e precisa estar em `files` (do `latest-mac.yml`). Sem ele: a página do release.
  */
 export function macDownloadUrl(version: string, files: readonly string[], arch: string): string {
   const { owner, repo } = RELEASES_REPO
   const tag = `v${version.replace(/^v/, '')}`
   const base = `https://github.com/${owner}/${repo}/releases`
-  const names = files.map((f) => f.split('/').pop() ?? '').filter((f) => RELEASE_FILE.test(f))
-  const dmgs = names.filter((f) => f.toLowerCase().endsWith('.dmg'))
-  const archName = arch === 'arm64' ? 'arm64' : 'x64'
-  const match =
-    dmgs.find((f) => f.includes(`-mac-${archName}.`)) ??
-    dmgs.find((f) => f.includes(`-${archName}.`)) ??
-    // Só há um DMG (universal ou sem arch no nome): serve para as duas.
-    (dmgs.length === 1 ? dmgs[0] : undefined)
-  if (!match || !parseVersion(tag)) return `${base}/tag/${encodeURIComponent(tag)}`
-  return `${base}/download/${tag}/${match}`
+  const dmg = macDmg(arch)
+  const name = dmg ? artifactFileName(dmg, version) : null
+  const names = files.map((f) => f.split('/').pop() ?? '')
+  if (!name || !names.includes(name) || !parseVersion(tag)) {
+    return `${base}/tag/${encodeURIComponent(tag)}`
+  }
+  return `${base}/download/${tag}/${name}`
 }
 
 /** Allowlist do shell: só downloads e páginas de versão do repo público de releases. */

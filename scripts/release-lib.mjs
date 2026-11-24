@@ -5,10 +5,17 @@
  * CHANGELOG no formato Keep a Changelog, em pt-BR:
  *   ## [Não lançado]
  *   ## [X.Y.Z] - AAAA-MM-DD
- * O auto-update (6C) e o release.yml leem as seções nesse formato.
+ * O formato e o leitor das seções ficam em src/shared/changelog.ts (o mesmo do "O que há de novo"
+ * do app); o Node roda o .ts direto (só tipos para tirar).
  */
+import {
+  CHANGELOG_UNRELEASED,
+  changelogLines,
+  changelogNotes,
+  changelogSectionRange as sectionRange
+} from '../src/shared/changelog.mts'
 
-export const UNRELEASED = 'Não lançado'
+export const UNRELEASED = CHANGELOG_UNRELEASED
 export const BUMP_KINDS = ['patch', 'minor', 'major', 'beta']
 
 const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/
@@ -67,33 +74,24 @@ function nextStable(v, kind) {
   return pre ? `${v.major}.${v.minor}.${v.patch}` : `${v.major}.${v.minor}.${v.patch + 1}`
 }
 
+/**
+ * Data da versão no CHANGELOG (AAAA-MM-DD), no fuso local (não UTC: à noite no Brasil o UTC já é o
+ * dia seguinte). A mesma no plano mostrado na PR e na versão gravada.
+ * @param {Date} now
+ */
+export function releaseDate(now) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
 /** @param {string} version */
 export function isPrerelease(version) {
   return parseVersion(version).beta !== null
 }
 
-const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-
-/** Linhas de uma seção `## [titulo]` até a próxima `## `. `null` se não existir. */
-function sectionRange(lines, title) {
-  const head = new RegExp(`^## \\[${escape(title)}\\](\\s|$)`)
-  const start = lines.findIndex((l) => head.test(l))
-  if (start < 0) return null
-  let end = lines.findIndex((l, i) => i > start && /^## /.test(l))
-  if (end < 0) end = lines.length
-  return { start, end }
-}
-
 /** Conteúdo (sem o título) da seção da versão, aparado. `null` se não existir. */
 export function extractNotes(changelog, version) {
-  const lines = changelog.replace(/\r\n/g, '\n').split('\n')
-  const range = sectionRange(lines, version)
-  if (!range) return null
-  const body = lines
-    .slice(range.start + 1, range.end)
-    .join('\n')
-    .trim()
-  return body
+  return changelogNotes(changelog, version)
 }
 
 /** A seção tem pelo menos um item de lista? (subtítulos vazios não contam) */
@@ -109,7 +107,7 @@ function hasEntries(body) {
  * @param {string} date AAAA-MM-DD
  */
 export function releaseChangelog(changelog, version, date) {
-  const lines = changelog.replace(/\r\n/g, '\n').split('\n')
+  const lines = changelogLines(changelog)
   if (sectionRange(lines, version)) {
     throw new Error(`O CHANGELOG já tem a seção [${version}].`)
   }
@@ -204,7 +202,7 @@ export function releaseKindFromLabels(labels) {
 export function fillUnreleased(changelog, note) {
   const text = (note ?? '').replace(/\s+/g, ' ').trim()
   if (text === '') return changelog
-  const lines = changelog.replace(/\r\n/g, '\n').split('\n')
+  const lines = changelogLines(changelog)
   const range = sectionRange(lines, UNRELEASED)
   if (!range) return changelog
   const body = lines.slice(range.start + 1, range.end).join('\n')

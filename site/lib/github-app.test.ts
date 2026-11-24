@@ -9,9 +9,9 @@ import {
   handleReview,
   parsePrivateKey,
   reviewPost,
-  reviewUrlOrNull,
   type GitHubAppEnv
 } from './github-app'
+import { REVIEW_BODY_MAX, REVIEW_COMMENT_MAX, REVIEW_PATH_MAX, reviewUrlOrNull } from './contract'
 import { createRateLimiter } from './rate-limit'
 
 const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
@@ -255,7 +255,7 @@ describe('POST /github/review', () => {
       { ...VALID, review: 'texto' },
       withReview({ body: '' }),
       withReview({ body: '   ' }),
-      withReview({ body: 'x'.repeat(60_001) }),
+      withReview({ body: 'x'.repeat(REVIEW_BODY_MAX + 1) }),
       withReview({ comments: 'x' }),
       withReview({
         comments: Array.from({ length: 51 }, (_, i) => ({ path: 'a.ts', line: i + 1, body: 'x' }))
@@ -263,12 +263,12 @@ describe('POST /github/review', () => {
       comment({ path: '' }),
       comment({ path: 'a/../b' }),
       comment({ path: 'a\u0000b' }),
-      comment({ path: 'p'.repeat(1001) }),
+      comment({ path: 'p'.repeat(REVIEW_PATH_MAX + 1) }),
       comment({ line: 0 }),
       comment({ line: 2.5 }),
       comment({ side: 'LEFT' }),
       comment({ body: '' }),
-      comment({ body: 'x'.repeat(4001) }),
+      comment({ body: 'x'.repeat(REVIEW_COMMENT_MAX + 1) }),
       ['acme', 'orkio']
     ]
     for (const body of bad) {

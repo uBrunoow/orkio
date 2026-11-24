@@ -2,13 +2,14 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { brokerPost } from './broker-route'
+import { NOTION_OAUTH_REDIRECT_URI } from './contract'
 import { NOTION_TOKEN_URL, tokenUrlFrom, type BrokerEnv } from './notion-broker'
 import { clientIp, createRateLimiter } from './rate-limit'
 
 const ENV: BrokerEnv = {
   NOTION_CLIENT_ID: 'id',
   NOTION_CLIENT_SECRET: 'secret_NUNCA_NA_RESPOSTA',
-  ALLOWED_REDIRECT_URIS: 'http://localhost:47821/oauth/notion/callback'
+  ALLOWED_REDIRECT_URIS: NOTION_OAUTH_REDIRECT_URI
 }
 
 afterEach(() => {

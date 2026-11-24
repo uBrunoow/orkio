@@ -10,10 +10,11 @@
  *   (com ad-hoc ele faria a validação de bibliotecas recusar o Electron Framework).
  * - Windows: sem assinatura, a menos que `WIN_SIGNING=azure` (Artifact Signing, ver docs/releases.md).
  *
- * Os nomes dos arquivos seguem o que o site (site/lib/releases.ts) e o auto-update (6C) esperam:
- * arquitetura no nome do dmg/zip do mac e do instalador do Windows.
+ * Alvos e nomes dos arquivos vêm do manifesto `src/shared/release-artifacts.mts`, o mesmo que o
+ * release.yml, o auto-update (6C) e o site usam.
  */
 import type { Configuration } from 'electron-builder'
+import { ARTIFACT_NAME, PRODUCT_NAME, builderTargets } from './src/shared/release-artifacts.mjs'
 import { RELEASES_REPO } from './src/shared/updates'
 
 type Env = Readonly<Record<string, string | undefined>>
@@ -39,7 +40,7 @@ export function builderConfig(env: Env): Configuration {
   const macSigned = isMacSigned(env)
   return {
     appId: 'com.orkio.app',
-    productName: 'Orkio',
+    productName: PRODUCT_NAME,
     directories: { buildResources: 'build', output: 'dist' },
     // Sem dependências de runtime hoje (tudo vai no bundle do Vite). Não excluímos node_modules:
     // o electron-updater (6C) entra em "dependencies" e precisa ir no pacote.
@@ -66,12 +67,8 @@ export function builderConfig(env: Env): Configuration {
     mac: {
       icon: 'build/icon.icns',
       category: 'public.app-category.developer-tools',
-      target: [
-        { target: 'dmg', arch: ['arm64', 'x64'] },
-        // O zip é o que o auto-update do mac baixa.
-        { target: 'zip', arch: ['arm64', 'x64'] }
-      ],
-      artifactName: '${productName}-${version}-mac-${arch}.${ext}',
+      target: builderTargets('mac'),
+      artifactName: ARTIFACT_NAME.mac,
       // Ad-hoc sem Developer ID (no Apple Silicon todo binário precisa de assinatura).
       ...(macSigned ? {} : { identity: '-' }),
       hardenedRuntime: macSigned,
@@ -79,11 +76,10 @@ export function builderConfig(env: Env): Configuration {
       entitlementsInherit: 'build/entitlements.mac.plist',
       notarize: macSigned
     },
-    dmg: { artifactName: '${productName}-${version}-mac-${arch}.${ext}' },
+    dmg: { artifactName: ARTIFACT_NAME.mac },
     win: {
       icon: 'build/icon.ico',
-      // arm64 opcional: acrescente 'arm64' em arch.
-      target: [{ target: 'nsis', arch: ['x64'] }],
+      target: builderTargets('windows'),
       ...(isWinSigned(env)
         ? {
             azureSignOptions: {
@@ -96,7 +92,7 @@ export function builderConfig(env: Env): Configuration {
         : {})
     },
     nsis: {
-      artifactName: '${productName}-${version}-win-${arch}-setup.${ext}',
+      artifactName: ARTIFACT_NAME.windows,
       // Instalação por usuário, sem pedir administrador.
       oneClick: true,
       perMachine: false,
@@ -105,7 +101,7 @@ export function builderConfig(env: Env): Configuration {
       deleteAppDataOnUninstall: false
     },
     // Linux: AppImage (roda em qualquer distro e se atualiza sozinho pelo electron-updater, que lê o
-    // latest-linux.yml) e .deb (instala no Ubuntu/Debian; atualização à mão). Só x64 por enquanto.
+    // latest-linux.yml) e .deb (instala no Ubuntu/Debian; atualização à mão).
     linux: {
       // Pasta com um PNG por tamanho (gerada por `pnpm icons`): o tema hicolor do GNOME só procura
       // até 512×512, então só o 1024 deixava o atalho sem ícone.
@@ -114,14 +110,10 @@ export function builderConfig(env: Env): Configuration {
       executableName: 'orkio',
       synopsis: 'Orquestração de desenvolvimento com IA (Notion, GitHub, Claude Code)',
       maintainer: 'uBrunoow <uBrunoow@users.noreply.github.com>',
-      target: [
-        { target: 'AppImage', arch: ['x64'] },
-        { target: 'deb', arch: ['x64'] }
-      ]
+      target: builderTargets('linux')
     },
-    // ${arch} vira x86_64 no AppImage e amd64 no .deb (nomes de cada formato).
-    appImage: { artifactName: '${productName}-${version}-linux-${arch}.${ext}' },
-    deb: { artifactName: '${productName}-${version}-linux-${arch}.${ext}' }
+    appImage: { artifactName: ARTIFACT_NAME.linux },
+    deb: { artifactName: ARTIFACT_NAME.linux }
   }
 }
 

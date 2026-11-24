@@ -17,28 +17,36 @@ import {
   type Locator,
   type Page
 } from '@playwright/test'
+import { isInstallUrl } from '../src/shared/github-names'
 
 export const ROOT = resolve(__dirname, '..')
-/** Mesmo valor de .env.e2e (o build de E2E usa --mode e2e). */
-export const E2E_BROKER_URL = 'https://orkio-oauth-broker.e2e.invalid'
+/** Endereço do site no build de E2E (`MAIN_VITE_SITE_URL` do `.env.e2e`; `--mode e2e`). */
+export const E2E_SITE_URL = (() => {
+  const line = /^MAIN_VITE_SITE_URL=(.+)$/m.exec(readFileSync(join(ROOT, '.env.e2e'), 'utf8'))
+  if (!line) throw new Error('.env.e2e sem MAIN_VITE_SITE_URL')
+  return line[1]!.trim()
+})()
+/** Link de instalação do App que o site simulado devolve: no formato que o app aceita. */
+const E2E_INSTALL_URL = 'https://github.com/apps/orkio/installations/new'
+if (!isInstallUrl(E2E_INSTALL_URL)) throw new Error('E2E_INSTALL_URL fora do formato do app')
 
 /**
  * Simulação dos serviços externos, dentro do processo main:
  * - `notion`: resposta de GET /v1/users/me ('ok' | '401' | '503'). Em 'ok', só aceita os
  *   tokens listados em `validTokens` (se houver) — o resto recebe 401.
  * - `browser`: o que o "usuário" faz na página de autorização do Notion.
- * - `broker`: resposta do intermediário OAuth.
+ * - `notionOAuth`: resposta do intermediário OAuth do Notion (`<site>/notion/*`).
  */
 export interface FakeServices {
   notion: 'ok' | '401' | '503'
   validTokens: string[] | null
   browser: 'approve' | 'deny' | 'ignore'
-  broker: 'ok' | 'invalid_grant' | 'down'
+  notionOAuth: 'ok' | 'invalid_grant' | 'down'
   /**
-   * 6A: base de um intermediário DE VERDADE (o site local, `next start`). Com ela, as chamadas do
-   * app ao intermediário do build E2E vão por HTTP real para lá, em vez da simulação.
+   * 6A: base de um site DE VERDADE (o site local, `next start`). Com ela, as chamadas do app ao
+   * site do build E2E (`/notion/*`, `/github/*`) vão por HTTP real para lá, em vez da simulação.
    */
-  brokerTarget: string | null
+  siteTarget: string | null
   /** GitHub Device Flow: o que o "usuário" faz em github.com/login/device. */
   githubDevice: 'approve' | 'pending' | 'deny' | 'expire'
   /** GET api.github.com/user. */
@@ -126,8 +134,8 @@ export const DEFAULT_FAKES: FakeServices = {
   notion: 'ok',
   validTokens: null,
   browser: 'approve',
-  broker: 'ok',
-  brokerTarget: null,
+  notionOAuth: 'ok',
+  siteTarget: null,
   githubDevice: 'approve',
   githubUser: 'ok',
   githubRepos: {},
@@ -288,7 +296,7 @@ export async function launchOrkio(
   app.process().stderr?.on('data', (d: Buffer) => logs.push(String(d)))
 
   await app.evaluate(
-    ({ safeStorage, shell, dialog }, { initial, brokerUrl, ids }) => {
+    ({ safeStorage, shell, dialog }, { initial, siteUrl, ids, contract }) => {
       const g = globalThis as unknown as FakeGlobals
       if (process.platform === 'linux' && !safeStorage.isEncryptionAvailable()) {
         safeStorage.setUsePlainTextEncryption(true)
@@ -350,27 +358,25 @@ export async function launchOrkio(
         } as FakeGlobals['__calls'][number]
         g.__calls.push(call)
 
-        // Intermediário OAuth.
-        if (url.startsWith(brokerUrl) && g.__fakes.brokerTarget) {
-          const target = `${g.__fakes.brokerTarget}${url.slice(brokerUrl.length)}`
+        // Site de verdade (E2E @site): tudo o que vai para o site.
+        if (url.startsWith(siteUrl) && g.__fakes.siteTarget) {
+          const target = `${g.__fakes.siteTarget}${url.slice(siteUrl.length)}`
           const response = await realFetch(target, init)
           call.status = response.status
           return response
         }
-        // Task 18: site do Orkio (mesma origem do intermediário no build de E2E) posta a revisão
-        // como orkio[bot]. Como o GitHub: a revisão entra nos detalhes da PR e `updated_at` muda.
-        // Site do Orkio: o orkio[bot] está instalado no repositório? (Integrações › Orkio bot)
-        if (url === `${brokerUrl}/github/installation` && init?.method === 'POST') {
+        // Site do Orkio simulado: o orkio[bot] está instalado no repositório? (Integrações ›
+        // Orkio bot). Formato de `site/lib/github-app.ts` (o E2E @site usa o site de verdade).
+        if (url === `${siteUrl}/github/installation` && init?.method === 'POST') {
           const body = JSON.parse(call.body ?? '{}') as { owner: string; repo: string }
           const installed = (g.__fakes.orkioBotInstalled ?? []).includes(
             `${body.owner}/${body.repo}`
           )
-          return json({
-            installed,
-            installUrl: 'https://github.com/apps/orkio/installations/new'
-          })
+          return json({ installed, installUrl: contract.installUrl })
         }
-        if (url === `${brokerUrl}/github/review` && init?.method === 'POST') {
+        // Task 18: o site posta a revisão como orkio[bot]. Como o GitHub: a revisão entra nos
+        // detalhes da PR e `updated_at` muda.
+        if (url === `${siteUrl}/github/review` && init?.method === 'POST') {
           const body = JSON.parse(call.body ?? '{}') as {
             owner: string
             repo: string
@@ -412,9 +418,11 @@ export async function launchOrkio(
             url: `https://github.com/${body.owner}/${body.repo}/pull/${body.number}#pullrequestreview-${id}`
           })
         }
-        if (url.startsWith(brokerUrl)) {
-          if (g.__fakes.broker === 'down') throw new TypeError('fetch failed')
-          if (g.__fakes.broker === 'invalid_grant') return json({ error: 'invalid_grant' }, 400)
+        // Intermediário OAuth do Notion (`site/lib/notion-broker.ts`).
+        if (url.startsWith(`${siteUrl}/notion/`)) {
+          if (g.__fakes.notionOAuth === 'down') throw new TypeError('fetch failed')
+          if (g.__fakes.notionOAuth === 'invalid_grant')
+            return json({ error: 'invalid_grant' }, 400)
           // Geração do token: na renovação, a seguinte à do refresh token recebido.
           const previous = /nrt_E2E_OAUTH_REFRESH_(\d+)/.exec(call.body ?? '')
           g.__tokenSeq = previous ? Number(previous[1]) + 1 : g.__tokenSeq + 1
@@ -1055,7 +1063,12 @@ export async function launchOrkio(
         return json({ object: 'error', code: 'not_found' }, 404)
       }
     },
-    { initial: { ...DEFAULT_FAKES, ...fakes }, brokerUrl: E2E_BROKER_URL, ids: NOTION_FAKE }
+    {
+      initial: { ...DEFAULT_FAKES, ...fakes },
+      siteUrl: E2E_SITE_URL,
+      ids: NOTION_FAKE,
+      contract: { installUrl: E2E_INSTALL_URL }
+    }
   )
 
   const page = await app.firstWindow()

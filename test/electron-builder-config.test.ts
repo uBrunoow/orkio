@@ -1,21 +1,100 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { MacConfiguration, NsisOptions, WindowsConfiguration } from 'electron-builder'
+import type {
+  Configuration,
+  MacConfiguration,
+  NsisOptions,
+  WindowsConfiguration
+} from 'electron-builder'
 import { builderConfig, isMacSigned } from '../electron-builder'
+import { releaseAssets } from '../scripts/release-assets.mjs'
+import {
+  RELEASE_ARTIFACTS,
+  artifactFileName,
+  type ReleaseOs
+} from '../src/shared/release-artifacts.mjs'
+import { RELEASES_REPO, macDownloadUrl } from '../src/shared/updates'
 
 const ROOT = join(import.meta.dirname, '..')
 
-describe('electron-builder.ts', () => {
-  it('publica nos releases do próprio repositório (público), como rascunho', () => {
-    expect(builderConfig({}).publish).toEqual({
+/** Pares alvo × arquitetura que a config manda o electron-builder gerar, por sistema. */
+function configuredTargets(c: Configuration): Set<string> {
+  const out = new Set<string>()
+  const bySystem: [ReleaseOs, unknown][] = [
+    ['mac', c.mac?.target],
+    ['windows', c.win?.target],
+    ['linux', c.linux?.target]
+  ]
+  for (const [os, targets] of bySystem) {
+    for (const t of targets as { target: string; arch: string[] }[]) {
+      for (const arch of t.arch) out.add(`${os}:${t.target}:${arch}`)
+    }
+  }
+  return out
+}
+
+describe('electron-builder.ts × manifesto dos releases', () => {
+  it('gera exatamente os alvos do manifesto, com o nome de cada sistema', () => {
+    const c = builderConfig({})
+    expect(configuredTargets(c)).toEqual(
+      new Set(RELEASE_ARTIFACTS.map((a) => `${a.os}:${a.target}:${a.arch}`))
+    )
+    // O que o electron-builder escreve: o artifactName do formato, com ${arch} = x86_64 no
+    // AppImage e amd64 no .deb.
+    const pattern = {
+      dmg: c.dmg?.artifactName,
+      zip: (c.mac as MacConfiguration).artifactName,
+      nsis: (c.nsis as NsisOptions).artifactName,
+      AppImage: c.appImage?.artifactName,
+      deb: c.deb?.artifactName
+    }
+    const builderArch = (target: string, arch: string): string =>
+      arch !== 'x64' ? arch : target === 'AppImage' ? 'x86_64' : target === 'deb' ? 'amd64' : arch
+    for (const a of RELEASE_ARTIFACTS) {
+      const rendered = (pattern[a.target] ?? '')
+        .replace('${productName}', c.productName ?? '')
+        .replace('${version}', '1.2.3')
+        .replace('${arch}', builderArch(a.target, a.arch))
+        .replace('${ext}', a.ext)
+      expect(rendered, `${a.os} ${a.target} ${a.arch}`).toBe(artifactFileName(a, '1.2.3'))
+    }
+  })
+
+  it('o release confere todos os pacotes e os .yml do canal', () => {
+    const files = releaseAssets('v1.2.3')
+    for (const a of RELEASE_ARTIFACTS) expect(files).toContain(artifactFileName(a, '1.2.3'))
+    expect(files).toEqual(
+      expect.arrayContaining(['latest-mac.yml', 'latest.yml', 'latest-linux.yml'])
+    )
+    expect(releaseAssets('1.3.0-beta.1')).toEqual(
+      expect.arrayContaining(['beta-mac.yml', 'beta.yml', 'beta-linux.yml'])
+    )
+  })
+
+  it('o auto-update manual do mac acha o DMG de cada arquitetura nos arquivos do release', () => {
+    const files = RELEASE_ARTIFACTS.filter((a) => a.os === 'mac').map((a) =>
+      artifactFileName(a, '1.2.3')
+    )
+    for (const arch of ['arm64', 'x64']) {
+      const url = macDownloadUrl('1.2.3', files, arch)
+      expect(url).toBe(
+        `https://github.com/${RELEASES_REPO.owner}/${RELEASES_REPO.repo}/releases/download/v1.2.3/Orkio-1.2.3-mac-${arch}.dmg`
+      )
+    }
+  })
+
+  it('publica nos releases do repositório do app, como rascunho', () => {
+    expect(builderConfig({}).publish).toMatchObject({
       provider: 'github',
-      owner: 'uBrunoow',
-      repo: 'orkio',
+      owner: RELEASES_REPO.owner,
+      repo: RELEASES_REPO.repo,
       releaseType: 'draft'
     })
   })
+})
 
+describe('electron-builder.ts', () => {
   it('mantém RunAsNode ligado (ponte MCP) e não recompila nada nativo', () => {
     const c = builderConfig({})
     expect(c.electronFuses?.runAsNode).toBe(true)
@@ -24,18 +103,6 @@ describe('electron-builder.ts', () => {
     // O main e a ponte (out/main/permission-mcp.js) vão no asar; node_modules não é excluído.
     expect(c.files).toContain('out/**')
     expect(JSON.stringify(c.files)).not.toContain('!node_modules')
-  })
-
-  it('nomes com a arquitetura (site e auto-update dependem disso)', () => {
-    const c = builderConfig({})
-    expect((c.mac as MacConfiguration).artifactName).toBe(
-      '${productName}-${version}-mac-${arch}.${ext}'
-    )
-    expect(c.dmg?.artifactName).toBe('${productName}-${version}-mac-${arch}.${ext}')
-    expect((c.nsis as NsisOptions).artifactName).toBe(
-      '${productName}-${version}-win-${arch}-setup.${ext}'
-    )
-    expect(JSON.stringify((c.mac as MacConfiguration).target)).toContain('"zip"')
   })
 
   it('sem Developer ID: ad-hoc e sem hardened runtime', () => {
@@ -69,22 +136,12 @@ describe('electron-builder.ts', () => {
     }).win as WindowsConfiguration
     expect(signed.azureSignOptions?.codeSigningAccountName).toBe('conta')
   })
-})
 
-describe('Linux', () => {
-  it('gera AppImage (atualiza sozinho) e .deb, x64, com nomes que o release confere', () => {
+  it('Linux: os ícones por tamanho que a config aponta existem', () => {
     const c = builderConfig({})
-    expect(c.linux?.target).toEqual([
-      { target: 'AppImage', arch: ['x64'] },
-      { target: 'deb', arch: ['x64'] }
-    ])
-    expect(c.linux?.executableName).toBe('orkio')
     // Um PNG por tamanho: o tema hicolor só procura até 512×512 (só o 1024 = atalho sem ícone).
-    expect(c.linux?.icon).toBe('build/icons')
     for (const size of [16, 32, 48, 128, 256, 512]) {
-      expect(existsSync(join(ROOT, 'build/icons', `${size}x${size}.png`))).toBe(true)
+      expect(existsSync(join(ROOT, String(c.linux?.icon), `${size}x${size}.png`))).toBe(true)
     }
-    expect(c.appImage?.artifactName).toBe('${productName}-${version}-linux-${arch}.${ext}')
-    expect(c.deb?.artifactName).toBe('${productName}-${version}-linux-${arch}.${ext}')
   })
 })

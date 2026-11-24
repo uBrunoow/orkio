@@ -27,12 +27,26 @@
  * 15 s (`REVIEW_DEADLINE_MS`), menos que os 25 s do app.
  *
  * Regras: sem estado, sem logs (nada de console.*, ESLint e teste), nunca repassa corpos do GitHub;
- * erros só por código: `not_configured | bad_request | forbidden | not_installed | upstream` (e
- * `rate_limited` do limitador da rota). O texto da revisão só passa por aqui (não é gravado).
+ * erros só por código (`GITHUB_ERROR_STATUS` em `contract.ts`, com o status de cada um). O texto da
+ * revisão só passa por aqui (não é gravado).
  */
 import { createPrivateKey, sign, type KeyObject } from 'node:crypto'
-import { json, readLimited } from './notion-broker'
-import { clientIp, installationLimiter, reviewLimiter, type RateLimiter } from './rate-limit'
+import {
+  GITHUB_API_VERSION,
+  GITHUB_ERROR_STATUS,
+  OWNER_SLUG,
+  REVIEW_BODY_MAX,
+  REVIEW_COMMENTS_MAX,
+  REVIEW_COMMENT_MAX,
+  REVIEW_PATH_MAX,
+  installUrl,
+  isRepoName,
+  reviewUrlOrNull,
+  type GitHubRouteError,
+  type ReviewRejectReason
+} from './contract'
+import { isRecord, json, loopbackOverride, readJsonBody, withRateLimit } from './http'
+import { installationLimiter, reviewLimiter, type RateLimiter } from './rate-limit'
 
 export interface GitHubAppEnv {
   /** App ID (numérico) do GitHub App: vai no `iss` do JWT. */
@@ -60,51 +74,26 @@ export interface ReviewDeps {
 
 export const GITHUB_API_URL = 'https://api.github.com'
 /**
- * Mesma versão da API do app (`GITHUB_API_VERSION` em `src/shared/github-names.ts`); o teste
- * `test/site-contract.test.ts` da raiz confere, junto com owner, repositório e link de instalação.
+ * Corpo da requisição: o maior pedido válido (20 mil + 50 × (4 mil + 1 mil) caracteres) com até
+ * 3 bytes por caractere em UTF-8, mais o JSON em volta.
  */
-export const GITHUB_API_VERSION = '2026-03-10'
-export const REVIEW_BODY_MAX = 60_000
-export const REVIEW_COMMENTS_MAX = 50
-export const REVIEW_COMMENT_MAX = 4_000
-export const REVIEW_PATH_MAX = 1_000
-/** Corpo da requisição: cabe o maior pedido válido (60 mil + 50 × (4 mil + 1 mil)) em UTF-8. */
 export const REVIEW_REQUEST_MAX_BYTES = 1024 * 1024
+/** Corpo de `/github/installation` (`{ owner, repo, userToken }`). */
+const INSTALLATION_REQUEST_MAX_BYTES = 4096
 /** Respostas do GitHub lidas até este tamanho (as que usamos são pequenas). */
 const RESPONSE_MAX_BYTES = 256 * 1024
 const UPSTREAM_TIMEOUT_MS = 10_000
 export const REVIEW_DEADLINE_MS = 15_000
 const USER_AGENT = 'Orkio-Site'
 
-/** Login de usuário/organização: letras, dígitos, `-` e `_` (contas gerenciadas), até 100. */
-export const OWNER_SLUG = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,99}$/
 /**
  * Login de quem pediu (atribuição no fim da revisão): começa com letra/dígito, depois letras,
  * dígitos, `_` (contas gerenciadas) e hífens simples, até 39. Seguro dentro de markdown.
  */
 export const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9_]|-(?=[A-Za-z0-9_])){0,38}$/
-/** Nome de repositório: letras, dígitos, `.`, `_`, `-`, até 100 (nunca `.`/`..`). */
-const REPO_SLUG = /^[A-Za-z0-9._-]{1,100}$/
 /** Token do usuário: só caracteres de token (vai num header). */
 const TOKEN_CHARS = /^[A-Za-z0-9_.-]{1,1024}$/
-const APP_SLUG = /^[a-z0-9][a-z0-9-]{0,99}$/
 const MAX_PR_NUMBER = 2 ** 31
-
-export function isRepoName(value: string): boolean {
-  return REPO_SLUG.test(value) && value !== '.' && value !== '..'
-}
-
-export type ReviewError =
-  'not_configured' | 'bad_request' | 'forbidden' | 'not_installed' | 'upstream'
-
-const STATUS: Record<ReviewError, number> = {
-  not_configured: 503,
-  bad_request: 400,
-  forbidden: 403,
-  // 412 e não 404: o app distingue "App não instalado" de "site sem a rota".
-  not_installed: 412,
-  upstream: 502
-}
 
 export interface ValidReview {
   owner: string
@@ -129,14 +118,7 @@ export function githubAppEnv(): GitHubAppEnv {
 
 /** Base da API: a do GitHub; fora da Vercel, um loopback explícito (E2E). */
 export function apiBaseFrom(env: GitHubAppEnv): string {
-  const override = env.GITHUB_API_URL?.trim()
-  if (!override || env.VERCEL) return GITHUB_API_URL
-  try {
-    const url = new URL(override)
-    return url.protocol === 'http:' && url.hostname === '127.0.0.1' ? url.origin : GITHUB_API_URL
-  } catch {
-    return GITHUB_API_URL
-  }
+  return new URL(loopbackOverride(env, env.GITHUB_API_URL, GITHUB_API_URL)).origin
 }
 
 /** PEM da env (com `\n` literais ou quebras reais) → chave RSA. `null` se inválida. */
@@ -166,7 +148,7 @@ export function createAppJwt(appId: string, key: KeyObject, nowMs: number): stri
 
 export function installUrlFrom(env: GitHubAppEnv): string | null {
   const slug = env.GITHUB_APP_SLUG?.trim()
-  return slug && APP_SLUG.test(slug) ? `https://github.com/apps/${slug}/installations/new` : null
+  return slug ? installUrl(slug) : null
 }
 
 function isRepoPath(path: unknown): path is string {
@@ -228,8 +210,57 @@ export function validateReviewRequest(body: unknown): ValidReview | null {
   return { owner, repo, number, userToken, event, body: text, comments }
 }
 
-function fail(error: ReviewError, extra: Record<string, string> = {}): Response {
-  return json(STATUS[error], { error, ...extra })
+function fail(
+  error: GitHubRouteError,
+  extra: { reason?: ReviewRejectReason; installUrl?: string } = {}
+): Response {
+  return json(GITHUB_ERROR_STATUS[error], { error, ...extra })
+}
+
+/** App ID + chave privada válidos; `null` = a rota responde `not_configured`. */
+export function requireAppKey(env: GitHubAppEnv): { appId: string; key: KeyObject } | null {
+  const appId = env.GITHUB_APP_ID?.trim() ?? ''
+  const key = /^\d{1,20}$/.test(appId) ? parsePrivateKey(env.GITHUB_APP_PRIVATE_KEY) : null
+  return key ? { appId, key } : null
+}
+
+/** Corpo JSON do pedido; tipo, tamanho ou JSON errado = `bad_request` com o status do problema. */
+async function readRequest(request: Request, max: number): Promise<{ value: unknown } | Response> {
+  const read = await readJsonBody(request, max)
+  return read.ok ? { value: read.value } : json(read.status, { error: 'bad_request' })
+}
+
+type Call = (path: string, token: string, body?: unknown) => Promise<GitHubResult | null>
+
+/**
+ * `GET /repos/{owner}/{repo}` com o token do usuário: o repositório que ele enxerga, com o nome
+ * canônico (owner/repo da resposta) e as permissões. 401/403/404 → `forbidden`.
+ */
+async function canonicalRepo(
+  call: Call,
+  owner: string,
+  repo: string,
+  userToken: string
+): Promise<{ owner: string; repo: string; permissions: Record<string, unknown> } | Response> {
+  const res = await call(`/repos/${owner}/${repo}`, userToken)
+  if (!res || isRateLimited(res)) return fail('upstream')
+  if (res.status === 401 || res.status === 403 || res.status === 404) return fail('forbidden')
+  if (!res.ok || !isRecord(res.body)) return fail('upstream')
+  const name = res.body['name']
+  const ownerObj = res.body['owner']
+  const login = isRecord(ownerObj) ? ownerObj['login'] : null
+  if (typeof login !== 'string' || !OWNER_SLUG.test(login)) return fail('upstream')
+  if (typeof name !== 'string' || !isRepoName(name)) return fail('upstream')
+  const permissions = isRecord(res.body['permissions']) ? res.body['permissions'] : {}
+  return { owner: login, repo: name, permissions }
+}
+
+/** Chamadas ao GitHub de um pedido: base da API e prazo total compartilhado entre elas. */
+function callerFor(env: GitHubAppEnv, deps: ReviewDeps): Call {
+  const api = apiBaseFrom(env)
+  const deadline = AbortSignal.timeout(deps.deadlineMs ?? REVIEW_DEADLINE_MS)
+  return (path, token, body) =>
+    githubCall(deps.fetch ?? fetch, `${api}${path}`, token, body, deadline, deps.timeoutMs)
 }
 
 function notInstalled(env: GitHubAppEnv): Response {
@@ -238,15 +269,11 @@ function notInstalled(env: GitHubAppEnv): Response {
 }
 
 /** POST da rota: limitador por IP e depois a lógica abaixo, com as variáveis do processo. */
-export async function reviewPost(
+export function reviewPost(
   request: Request,
   limiter: RateLimiter = reviewLimiter
 ): Promise<Response> {
-  const wait = limiter.check(clientIp(request))
-  if (wait !== null) {
-    return json(429, { error: 'rate_limited' }, { 'Retry-After': String(wait) })
-  }
-  return handleReview(request, githubAppEnv())
+  return withRateLimit(limiter, request, () => handleReview(request, githubAppEnv()))
 }
 
 export async function handleReview(
@@ -263,45 +290,23 @@ export async function handleReview(
 }
 
 async function review(request: Request, env: GitHubAppEnv, deps: ReviewDeps): Promise<Response> {
-  const appId = env.GITHUB_APP_ID?.trim() ?? ''
-  const key = /^\d{1,20}$/.test(appId) ? parsePrivateKey(env.GITHUB_APP_PRIVATE_KEY) : null
-  if (!key) return fail('not_configured')
+  const app = requireAppKey(env)
+  if (!app) return fail('not_configured')
+  const { appId, key } = app
 
-  if (!(request.headers.get('content-type') ?? '').toLowerCase().includes('application/json')) {
-    return json(415, { error: 'bad_request' })
-  }
-  const text = await readLimited(request, REVIEW_REQUEST_MAX_BYTES)
-  if (text === null) return json(413, { error: 'bad_request' })
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return fail('bad_request')
-  }
-  const input = validateReviewRequest(parsed)
+  const read = await readRequest(request, REVIEW_REQUEST_MAX_BYTES)
+  if (read instanceof Response) return read
+  const input = validateReviewRequest(read.value)
   if (!input) return fail('bad_request')
 
-  const api = apiBaseFrom(env)
+  const call = callerFor(env, deps)
   const now = deps.now ?? Date.now
-  // Prazo total compartilhado por todas as chamadas (cada uma tem também o próprio limite).
-  const deadline = AbortSignal.timeout(deps.deadlineMs ?? REVIEW_DEADLINE_MS)
-  const call = (path: string, token: string, body?: unknown): Promise<GitHubResult | null> =>
-    githubCall(deps.fetch ?? fetch, `${api}${path}`, token, body, deadline, deps.timeoutMs)
 
   // 1. O usuário pode dar push? (com o token dele; o nome canônico vem da resposta)
-  const repoRes = await call(`/repos/${input.owner}/${input.repo}`, input.userToken)
-  if (!repoRes || isRateLimited(repoRes)) return fail('upstream')
-  if (repoRes.status === 401 || repoRes.status === 403 || repoRes.status === 404) {
-    return fail('forbidden')
-  }
-  if (!repoRes.ok || !isRecord(repoRes.body)) return fail('upstream')
-  const permissions = isRecord(repoRes.body['permissions']) ? repoRes.body['permissions'] : {}
-  if (permissions['push'] !== true) return fail('forbidden')
-  const repo = repoRes.body['name']
-  const ownerObj = repoRes.body['owner']
-  const owner = isRecord(ownerObj) ? ownerObj['login'] : null
-  if (typeof owner !== 'string' || !OWNER_SLUG.test(owner)) return fail('upstream')
-  if (typeof repo !== 'string' || !isRepoName(repo)) return fail('upstream')
+  const target = await canonicalRepo(call, input.owner, input.repo, input.userToken)
+  if (target instanceof Response) return target
+  if (target.permissions['push'] !== true) return fail('forbidden')
+  const { owner, repo } = target
 
   // Quem pediu: a revisão sai como orkio[bot], então o corpo diz a pedido de quem (responsável).
   const userRes = await call('/user', input.userToken)
@@ -400,15 +405,11 @@ export function validateInstallationRequest(body: unknown): ValidInstallationQue
 }
 
 /** POST da rota: limitador por IP e depois a consulta, com as variáveis do processo. */
-export async function installationPost(
+export function installationPost(
   request: Request,
   limiter: RateLimiter = installationLimiter
 ): Promise<Response> {
-  const wait = limiter.check(clientIp(request))
-  if (wait !== null) {
-    return json(429, { error: 'rate_limited' }, { 'Retry-After': String(wait) })
-  }
-  return handleInstallation(request, githubAppEnv())
+  return withRateLimit(limiter, request, () => handleInstallation(request, githubAppEnv()))
 }
 
 export async function handleInstallation(
@@ -428,45 +429,25 @@ async function installation(
   env: GitHubAppEnv,
   deps: ReviewDeps
 ): Promise<Response> {
-  const appId = env.GITHUB_APP_ID?.trim() ?? ''
-  const key = /^\d{1,20}$/.test(appId) ? parsePrivateKey(env.GITHUB_APP_PRIVATE_KEY) : null
-  if (!key) return fail('not_configured')
+  const app = requireAppKey(env)
+  if (!app) return fail('not_configured')
 
-  if (!(request.headers.get('content-type') ?? '').toLowerCase().includes('application/json')) {
-    return json(415, { error: 'bad_request' })
-  }
-  const text = await readLimited(request, 4096)
-  if (text === null) return json(413, { error: 'bad_request' })
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return fail('bad_request')
-  }
-  const input = validateInstallationRequest(parsed)
+  const read = await readRequest(request, INSTALLATION_REQUEST_MAX_BYTES)
+  if (read instanceof Response) return read
+  const input = validateInstallationRequest(read.value)
   if (!input) return fail('bad_request')
 
-  const api = apiBaseFrom(env)
+  const call = callerFor(env, deps)
   const now = deps.now ?? Date.now
-  const deadline = AbortSignal.timeout(deps.deadlineMs ?? REVIEW_DEADLINE_MS)
-  const call = (path: string, token: string): Promise<GitHubResult | null> =>
-    githubCall(deps.fetch ?? fetch, `${api}${path}`, token, undefined, deadline, deps.timeoutMs)
 
   // 1. A pessoa enxerga o repositório? (o nome canônico vem da resposta)
-  const repoRes = await call(`/repos/${input.owner}/${input.repo}`, input.userToken)
-  if (!repoRes || isRateLimited(repoRes)) return fail('upstream')
-  if (repoRes.status === 401 || repoRes.status === 403 || repoRes.status === 404) {
-    return fail('forbidden')
-  }
-  if (!repoRes.ok || !isRecord(repoRes.body)) return fail('upstream')
-  const repo = repoRes.body['name']
-  const ownerObj = repoRes.body['owner']
-  const owner = isRecord(ownerObj) ? ownerObj['login'] : null
-  if (typeof owner !== 'string' || !OWNER_SLUG.test(owner)) return fail('upstream')
-  if (typeof repo !== 'string' || !isRepoName(repo)) return fail('upstream')
+  const target = await canonicalRepo(call, input.owner, input.repo, input.userToken)
+  if (target instanceof Response) return target
+  const { owner, repo } = target
 
   // 2. Instalação do App neste repositório (só a consulta; nada de token de instalação).
-  const inst = await call(`/repos/${owner}/${repo}/installation`, createAppJwt(appId, key, now()))
+  const jwt = createAppJwt(app.appId, app.key, now())
+  const inst = await call(`/repos/${owner}/${repo}/installation`, jwt)
   if (!inst) return fail('upstream')
   if (inst.status === 401) return fail('not_configured')
   const installUrl = installUrlFrom(env)
@@ -478,35 +459,6 @@ async function installation(
 /** Linha acrescentada ao fim de toda revisão: quem pediu ao Orkio. */
 export function attribution(login: string): string {
   return `\n\n---\n_Publicado pelo Orkio a pedido de @${login}._`
-}
-
-/**
- * Só `https://github.com/<o>/<r>/pull/<n>` (com `#pullrequestreview-<id>` opcional), sem porta,
- * usuário/senha nem query.
- */
-export function reviewUrlOrNull(
-  value: unknown,
-  owner: string,
-  repo: string,
-  number: number
-): string | null {
-  if (typeof value !== 'string') return null
-  try {
-    const url = new URL(value)
-    const expected = `/${owner}/${repo}/pull/${number}`.toLowerCase()
-    return url.protocol === 'https:' &&
-      url.hostname === 'github.com' &&
-      !url.port &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      url.pathname.toLowerCase() === expected &&
-      /^(#pullrequestreview-\d+)?$/.test(url.hash)
-      ? url.toString()
-      : null
-  } catch {
-    return null
-  }
 }
 
 interface GitHubResult {
@@ -601,8 +553,4 @@ function isRateLimited(result: GitHubResult): boolean {
     (result.headers.get('retry-after') !== null ||
       result.headers.get('x-ratelimit-remaining') === '0')
   )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
