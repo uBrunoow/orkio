@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import type { Dictionary } from '@/i18n/pt-BR'
+
+type DownloadCopy = Dictionary['download']
 import {
   detectPlatform,
   suggestDownload,
@@ -10,36 +12,17 @@ import {
   type DownloadKind,
   type LatestRelease
 } from '@/lib/releases'
-import styles from '@/app/home.module.css'
+import { DownloadIcon } from './Icons'
+import styles from './download.module.css'
 
 type UAData = {
   platform?: string
   getHighEntropyValues?: (hints: string[]) => Promise<{ architecture?: string }>
 }
 
-const ORDER: DownloadKind[] = ['mac-arm64', 'mac-x64', 'windows', 'linux-appimage', 'linux-deb']
-
-function size(bytes: number): string {
-  return bytes > 0 ? ` · ${(bytes / 1024 / 1024).toFixed(0)} MB` : ''
-}
-
-/**
- * Botão de download com o arquivo sugerido para este computador. Sem JavaScript (ou antes de
- * detectar), mostra todos os arquivos; sem release, leva à página de releases.
- */
-export function Download({
-  t,
-  release,
-  releasesUrl,
-  variant = 'full'
-}: {
-  t: Dictionary
-  release: LatestRelease | null
-  releasesUrl: string | null
-  variant?: 'full' | 'hero'
-}) {
+/** Sistema deste computador (só no navegador; `null` antes de detectar ou sem JavaScript). */
+function usePlatform(): ClientPlatform | null {
   const [platform, setPlatform] = useState<ClientPlatform | null>(null)
-
   useEffect(() => {
     const nav = navigator as Navigator & { userAgentData?: UAData }
     const ua = nav.userAgentData
@@ -64,76 +47,146 @@ export function Download({
       active = false
     }
   }, [])
+  return platform
+}
 
-  const files = ORDER.map((k) => release?.files[k]).filter((f): f is DownloadFile => !!f)
+function megabytes(bytes: number): string | null {
+  return bytes > 0 ? `${Math.round(bytes / 1024 / 1024)} MB` : null
+}
+
+function publishedDate(iso: string | null): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? null
+    : d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
+/**
+ * Botão principal (hero e fechamento): o arquivo deste computador, direto do último release. Sem
+ * release ou sem sistema conhecido, leva aos cartões de download.
+ */
+export function DownloadButton({
+  d,
+  release,
+  className,
+  showVersion = true
+}: {
+  d: DownloadCopy
+  release: LatestRelease | null
+  className?: string | undefined
+  showVersion?: boolean
+}) {
+  const platform = usePlatform()
   const suggested = platform && release ? suggestDownload(platform, release.files) : null
+  return (
+    <div className={`${styles.button} ${className ?? ''}`}>
+      {suggested ? (
+        <a className={styles.primary} href={suggested.url} data-testid="download-suggested">
+          <DownloadIcon />
+          {d.suggested} {d.labels[suggested.kind]}
+        </a>
+      ) : (
+        <a className={styles.primary} href="#download">
+          <DownloadIcon />
+          {d.hero}
+        </a>
+      )}
+      {release && showVersion && (
+        <p className={styles.version}>
+          {d.version} {release.version}
+        </p>
+      )}
+    </div>
+  )
+}
 
-  if (!release || files.length === 0) {
+const SYSTEMS: { id: 'mac' | 'windows' | 'linux'; kinds: DownloadKind[] }[] = [
+  { id: 'mac', kinds: ['mac-arm64', 'mac-x64'] },
+  { id: 'windows', kinds: ['windows'] },
+  { id: 'linux', kinds: ['linux-appimage', 'linux-deb'] }
+]
+
+/** Um cartão por sistema, com cada arquivo do release (o deste computador em destaque). */
+export function DownloadCards({
+  d,
+  release,
+  releasesUrl
+}: {
+  d: DownloadCopy
+  release: LatestRelease | null
+  releasesUrl: string | null
+}) {
+  const platform = usePlatform()
+  const files = release?.files ?? {}
+  const suggested = platform && release ? suggestDownload(platform, files) : null
+  const any = SYSTEMS.some((sys) => sys.kinds.some((k) => files[k]))
+
+  if (!release || !any) {
     return (
-      <div className={styles.downloadBox}>
-        {variant === 'hero' ? (
-          <a className={styles.primary} href="#download">
-            {t.download.title}
-          </a>
-        ) : releasesUrl ? (
+      <div className={styles.empty}>
+        <p>{releasesUrl ? d.unavailable : d.soon}</p>
+        {releasesUrl && (
           <a className={styles.primary} href={releasesUrl}>
-            {t.download.all}
+            {d.all}
           </a>
-        ) : (
-          <span className={styles.primaryDisabled}>{t.download.title}</span>
-        )}
-        {variant === 'full' && (
-          <p className={styles.note}>{releasesUrl ? t.download.unavailable : t.download.soon}</p>
         )}
       </div>
     )
   }
 
-  const label = (f: DownloadFile) => t.download.labels[f.kind]
+  const date = publishedDate(release.publishedAt)
   return (
-    <div className={styles.downloadBox}>
-      {suggested ? (
-        <a className={styles.primary} href={suggested.url} data-testid="download-suggested">
-          {t.download.suggested} {label(suggested)}
-        </a>
-      ) : (
-        <a className={styles.primary} href="#download">
-          {t.download.title}
-        </a>
-      )}
-      <p className={styles.note}>
-        {t.download.version} {release.version}
-        {platform?.os === 'linux' && !release.files['linux-appimage'] && !release.files['linux-deb']
-          ? ` · ${t.download.linux}`
-          : ''}
+    <div className={styles.cardsWrap}>
+      <ul className={styles.cards} aria-label={d.others}>
+        {SYSTEMS.map((sys) => {
+          const copy = d.systems[sys.id]
+          const list = sys.kinds.map((k) => files[k]).filter((f): f is DownloadFile => !!f)
+          const mine = !!suggested && sys.kinds.includes(suggested.kind)
+          return (
+            <li key={sys.id} className={styles.card} data-mine={mine || undefined}>
+              <div className={styles.cardHead}>
+                <h3 className={styles.system}>{copy.name}</h3>
+                {mine && <span className={styles.mine}>{d.forYou}</span>}
+              </div>
+              {list.length === 0 ? (
+                <p className={styles.note}>{sys.id === 'linux' ? d.linux : ''}</p>
+              ) : (
+                <ul className={styles.files}>
+                  {list.map((f) => {
+                    const size = megabytes(f.size)
+                    const primary = mine && f === suggested
+                    return (
+                      <li key={f.kind}>
+                        <a
+                          className={styles.file}
+                          data-primary={primary || undefined}
+                          href={f.url}
+                          aria-label={`${d.suggested} ${d.labels[f.kind]}${size ? `, ${size}` : ''}`}
+                        >
+                          <span className={styles.fileName}>
+                            {(copy.files as Record<string, string>)[f.kind]}
+                          </span>
+                          <span className={styles.fileMeta}>
+                            {f.name}
+                            {size && <span className={styles.size}>{size}</span>}
+                          </span>
+                          <DownloadIcon className={styles.fileIcon} />
+                        </a>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              <p className={styles.note}>{copy.note}</p>
+            </li>
+          )
+        })}
+      </ul>
+      <p className={styles.release}>
+        {d.version} {release.version}
+        {date ? `, ${d.published} ${date}.` : '.'} <a href={release.url}>{d.all}</a>
       </p>
-      {variant === 'full' && (
-        <>
-          <ul className={styles.fileList} aria-label={t.download.others}>
-            {files
-              .filter((f) => f !== suggested)
-              .map((f) => (
-                <li key={f.kind}>
-                  <a href={f.url}>
-                    {label(f)}
-                    <span className={styles.fileMeta}>
-                      {f.name}
-                      {size(f.size)}
-                    </span>
-                  </a>
-                </li>
-              ))}
-          </ul>
-          {platform?.os === 'linux' ? (
-            <p className={styles.note}>{t.download.linuxNote}</p>
-          ) : (
-            platform?.os !== 'windows' && <p className={styles.note}>{t.download.macNote}</p>
-          )}
-          <a className={styles.textLink} href={release.url}>
-            {t.download.all}
-          </a>
-        </>
-      )}
     </div>
   )
 }

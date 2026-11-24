@@ -35,19 +35,27 @@ Laranja com parcimônia: um CTA primário por seção, o símbolo, o ponto "hub"
 
 ## Forma e composição
 
-- Raio `8px` (controles) e `12px` (cartões). Bordas de 1px em `--border`; sem sombras pesadas.
-- Grade de fundo em linhas de 1px com máscara radial (some nas bordas). Sem gradiente no símbolo.
-- Seções com título curto em Jost + subtítulo em Inter `--muted`.
-- "Como funciona": cinco passos numerados em linha (Notion → Quadro → Claude Code → PR →
-  Finalizada), com chips de status.
-- Automações: frases de regra ("Quando a PR abrir → Revisando") como linhas de uma lista densa.
-- Segurança: mockup de gate (commits, `diff --stat`, destino) com "Fazer push" e "Recusar".
-- Download: um botão principal com o arquivo sugerido para o sistema e os outros como links.
+- Raio `8px` (controles), `12px` (cartões) e `14px` (janelas do app). Bordas de 1px em `--border`;
+  divisórias internas em `--border-soft`. Sombra só nas janelas do app, com deslocamento e blur.
+- Grade de fundo só no hero, em linhas de 1px com máscara radial. Sem gradiente no símbolo.
+- **Hero:** título em Jost à esquerda; texto, "Baixar para <sistema>" (arquivo do último release) e
+  "Ver no GitHub" à direita; abaixo, a **prévia viva** (`components/AppPreview.tsx`): uma janela
+  do Orkio em HTML com dados de exemplo, quatro momentos (Quadro, Sessão, Push, Revisão) em abas
+  com barra de progresso; "Fazer push" e "Aprovar correções" respondem ao clique. Para com mouse
+  ou foco em cima, fora da tela e com movimento reduzido. É o elemento memorável da página: o resto
+  fica quieto.
+- "Como funciona": trilho de cinco paradas (a do Claude Code em laranja) + lista de regras
+  ("Quando: PR aberta → Revisando") numa caixa só com divisórias.
+- Recursos: texto e recorte do app alternados (`components/Crops.tsx`), nunca grade de cards iguais.
+- Segurança: comandos bloqueados riscados em vermelho + lista de garantias com divisórias.
+- Download: um cartão por sistema com cada arquivo do release; laranja só no arquivo deste
+  computador. Versão e data abaixo, com o link para todos os arquivos no GitHub.
+- Sem rótulos acima dos títulos, sem "01/02" fora do trilho, sem "→" pendurado em link.
 
 ## Movimento
 
-Pouco e com propósito: o ponto "hub" do símbolo pulsa devagar; chips de status mudam de estado no
-mockup do quadro. Tudo desliga com `prefers-reduced-motion: reduce`.
+Um momento orquestrado: a prévia do hero (o card anda de coluna, as linhas da conversa entram em
+sequência, o gate entra e confirma). O ponto "hub" do símbolo pulsa devagar no fechamento. Tudo desliga com `prefers-reduced-motion: reduce`.
 
 ## Acessibilidade
 

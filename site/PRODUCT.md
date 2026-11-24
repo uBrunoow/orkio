@@ -21,9 +21,17 @@ ambiente isolado e vira PR, sempre com você aprovando o que importa.
    do Notion, permissões decididas pelo Orkio e log ao vivo. Usa o CLI `claude` e o login da pessoa.
 3. **Claude Code → PR.** Fluxos de tarefa por coluna (implementar, revisar, commitar, abrir PR) com
    gates de aprovação. Push só da branch da tarefa, nunca com força, nunca na main.
-4. **PR → Finalizada.** Sinais do GitHub (branch, PR, revisão, CI) movem a tarefa sozinhos por
+4. **Revisão → correção.** O agente revisa a PR e a revisão sai como `orkio[bot]` depois que a
+   pessoa aprova o texto; os comentários (do bot ou do time) viram um plano de correção que a
+   pessoa aprova antes de o código mudar.
+5. **PR → Finalizada.** Sinais do GitHub (branch, PR, revisão, CI) movem a tarefa sozinhos por
    automações declarativas: PR aberta → Revisando; alterações pedidas → Revisado; merge →
    Finalizada.
+
+Também existem e podem aparecer: agentes (perfis `.md`, embutidos Implementador/Revisor/Corretor
+de PR) e o orquestrador que passa a tarefa adiante; sessão da tarefa com modelo e raciocínio por
+mensagem, anexos, subagentes visíveis, custo por mensagem e painel Ambiente; downloads para macOS
+(Apple Silicon e Intel), Windows e Linux (AppImage e .deb), lidos do último release do GitHub.
 
 ## Promessas (o que o site pode afirmar)
 
@@ -40,7 +48,8 @@ ambiente isolado e vira PR, sempre com você aprovando o que importa.
 - Que o Orkio "faz tudo sozinho" ou "substitui o dev".
 - Integrações que não existem (Jira, Linear, GitLab, Slack…), login no app, webhooks, nuvem.
 - Números de produtividade, clientes ou depoimentos.
-- Que é open source (até decisão contrária).
+- Que é open source ou a licença (até decisão contrária). O repositório é público: o link "Ver no
+  GitHub" pode aparecer, e as estrelas só a partir de 25.
 
 ## Tom
 
