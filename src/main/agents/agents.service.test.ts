@@ -22,6 +22,7 @@ let localDir: string
 let db: Db
 let store: BoardStore
 let service: AgentsService
+let config: ReturnType<typeof createOrkioConfigStore>
 let activeFlows: Set<string>
 let emitted: string[]
 let now: Date
@@ -42,7 +43,7 @@ beforeEach(async () => {
   projectDir = join(dir, 'projeto')
   localDir = join(dir, 'userData', 'agents')
   await mkdir(projectDir, { recursive: true })
-  const config = createOrkioConfigStore(join(dir, 'orkio-config.json'))
+  config = createOrkioConfigStore(join(dir, 'orkio-config.json'))
   await config.load()
   await config.update((c) => ({
     ...c,
@@ -406,7 +407,7 @@ describe('agentes embutidos (8B)', () => {
     const fresh = new AgentsService({
       db,
       store,
-      config: (service as unknown as { deps: { config: never } }).deps.config,
+      config,
       localDir,
       hasActiveFlow: () => false,
       agentRuns,

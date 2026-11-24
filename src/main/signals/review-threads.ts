@@ -31,7 +31,7 @@ export const REVIEW_LIMITS = {
 } as const
 
 export const REVIEW_QUERY =
-  'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { ' +
+  'query ReviewThreads($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { ' +
   'pullRequest(number: $number) { ' +
   `reviewThreads(first: ${REVIEW_LIMITS.threads}) { totalCount pageInfo { hasNextPage } nodes { id isResolved isOutdated path line ` +
   `comments(first: ${REVIEW_LIMITS.commentsPerThread}) { totalCount nodes { author { login } body createdAt url } } } } ` +

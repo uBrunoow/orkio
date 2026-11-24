@@ -30,6 +30,7 @@ describe('RunService', () => {
   let messages: { runId: string; event: RunLogEvent }[]
   let notifications: string[]
   let service: RunService
+  let deps: RunServiceDeps
 
   const project = {
     id: 'p1',
@@ -58,7 +59,7 @@ describe('RunService', () => {
     messages = []
     notifications = []
     for (const n of [1, 2, 3]) register(n)
-    service = new RunService({
+    deps = {
       db,
       store,
       worktrees,
@@ -94,7 +95,8 @@ describe('RunService', () => {
         let n = 0
         return () => `run-${++n}`
       })()
-    })
+    }
+    service = new RunService(deps)
   })
 
   afterEach(async () => {
@@ -410,7 +412,7 @@ describe('RunService', () => {
     }
     const currentBranch = vi.fn(async () => 'ORK-1/tarefa')
     const svc = new RunService({
-      ...(service as unknown as { deps: RunServiceDeps }).deps,
+      ...deps,
       newId: () => 'run-alias',
       policyInputs: async () => ({ aliases: { git: { p: 'push' } }, pushDefault: null }),
       currentBranch

@@ -49,6 +49,11 @@ describe('REVIEW_QUERY', () => {
   it('só usa campos do escopo repo (nada de Team/organização)', () => {
     expect(REVIEW_QUERY).not.toMatch(/on Team|organization|requestedReviewer/)
   })
+
+  it('as queries têm nome (o GitHub simulado do E2E responde pelo nome da operação)', () => {
+    expect(REVIEW_QUERY).toMatch(/^query ReviewThreads\(/)
+    expect(detailsQuery([7])).toMatch(/^query PullRequestDetails\(/)
+  })
 })
 
 describe('parseReviewData', () => {

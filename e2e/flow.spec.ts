@@ -2,7 +2,6 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
-  NOTION_FAKE,
   createUserDataDir,
   enterApp,
   cspViolations,
@@ -12,7 +11,8 @@ import {
   removeDir,
   type OrkioApp,
   navTo,
-  boardSettingsTab
+  boardSettingsTab,
+  seedConfig
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_FLOW_TOKEN_abcdef123456'
@@ -62,36 +62,12 @@ async function choose(page: Page, scope: Locator, label: string, option: string)
 
 test.beforeAll(() => {
   userDataDir = createUserDataDir()
-  writeFileSync(
-    join(userDataDir, 'orkio-config.json'),
-    JSON.stringify({
-      schemaVersion: 2,
-      notion: {
-        projectsDataSource: { id: NOTION_FAKE.projectsDs, name: 'Projetos' },
-        tasksDataSource: { id: NOTION_FAKE.tasksDs, name: 'Tarefas' },
-        mapping: {
-          title: { id: 'title', name: 'Nome', type: 'title' },
-          status: { id: 'st%3A', name: 'Status', type: 'status' },
-          uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
-          project: { id: 'rel', name: 'Projeto', type: 'relation' },
-          priority: { id: 'pri', name: 'Prioridade', type: 'select' },
-          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
-        },
-        updatedAt: '2026-11-19T00:00:00.000Z'
-      },
-      projects: [
-        {
-          id: 'proj-flow',
-          name: 'orkio',
-          localPath: join(userDataDir, 'nao-existe'),
-          repo: null,
-          createdAt: '2026-11-01T00:00:00.000Z',
-          updatedAt: '2026-11-01T00:00:00.000Z',
-          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
-        }
-      ]
-    })
-  )
+  seedConfig(userDataDir, {
+    id: 'proj-flow',
+    name: 'orkio',
+    localPath: join(userDataDir, 'nao-existe'),
+    repo: null
+  })
 })
 
 test.afterAll(async () => {

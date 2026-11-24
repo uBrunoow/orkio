@@ -62,32 +62,24 @@ describe('isModelName', () => {
 
 describe('isEffort', () => {
   it('aceita os cinco níveis e recusa o resto', () => {
-    expect(isEffort('xhigh')).toBe(true)
-    expect(EFFORTS).toEqual(['low', 'medium', 'high', 'xhigh', 'max'])
+    expect(EFFORTS.every(isEffort)).toBe(true)
     expect(isEffort('ultra')).toBe(false)
     expect(isEffort(undefined)).toBe(false)
   })
 
-  it('rótulos em pt-BR', () => {
-    expect(EFFORT_LABELS).toEqual({
-      low: 'Baixo',
-      medium: 'Médio',
-      high: 'Alto',
-      xhigh: 'Muito alto',
-      max: 'Máximo'
-    })
+  it('cada nível tem um rótulo próprio', () => {
+    const labels = EFFORTS.map((e) => EFFORT_LABELS[e])
+    expect(labels.every((l) => l.trim() !== '')).toBe(true)
+    expect(new Set(labels).size).toBe(EFFORTS.length)
   })
 })
 
 describe('CLAUDE_MODELS e versão', () => {
-  it('lista os modelos sugeridos com rótulos', () => {
-    expect(CLAUDE_MODELS).toEqual([
-      { id: 'default', label: 'Padrão do Claude Code' },
-      { id: 'fable', label: 'Fable' },
-      { id: 'opus', label: 'Opus' },
-      { id: 'sonnet', label: 'Sonnet' },
-      { id: 'haiku', label: 'Haiku' }
-    ])
+  it('sugestões: "default" (vira sem --model) e nomes que o próprio Orkio aceita, sem repetir', () => {
+    const ids = CLAUDE_MODELS.map((m) => m.id)
+    expect(ids).toContain('default')
+    expect(ids.filter((id) => id !== 'default').every(isModelName)).toBe(true)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })
 

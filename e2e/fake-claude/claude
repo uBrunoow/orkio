@@ -21,9 +21,13 @@ const readline = require('node:readline')
 
 const args = process.argv.slice(2)
 const authFile = join(__dirname, 'auth.json')
+/** Versão e trechos dos pedidos do Orkio que escolhem o cenário (`FAKE_CLAUDE` em e2e/fixtures.ts). */
+const { version: VERSION, markers: MARK } = JSON.parse(
+  readFileSync(join(__dirname, 'fake-claude.json'), 'utf8')
+)
 
 if (args[0] === '--version') {
-  process.stdout.write('2.1.331 (Claude Code)\n')
+  process.stdout.write(`${VERSION} (Claude Code)\n`)
   process.exit(0)
 }
 if (args[0] === 'mcp' && args[1] === 'list') {
@@ -130,7 +134,7 @@ async function main() {
         appendSystemPrompt: flag('--append-system-prompt'),
         model: flag('--model'),
         effort: flag('--effort'),
-        briefingInPrompt: prompt.includes('Briefing da tarefa'),
+        briefingInPrompt: prompt.includes(MARK.briefing),
         attachmentsNote: (/Anexos \(leia com a ferramenta Read\): [^\n]*/.exec(prompt) ?? [
           null
         ])[0],
@@ -159,7 +163,7 @@ async function main() {
         ? `VAZOU: ${leaked.join(',')}`
         : args.includes('--resume')
           ? `Continuei a sessão: ${prompt.slice(0, 80)}`
-          : `Li o briefing (${prompt.includes('Critérios de aceite') ? 'com critérios' : 'sem critérios'}).`
+          : `Li o briefing (${prompt.includes(MARK.criteria) ? 'com critérios' : 'sem critérios'}).`
     }
   ])
 
@@ -179,7 +183,7 @@ async function main() {
 
   // Task 18: revisão em JSON (passo só leitura do "Alva: revisão publicada"). Um comentário no
   // diff da PR e outro fora dele (o Orkio mostra como aviso e não publica).
-  if (prompt.includes('Converta a revisão acima')) {
+  if (prompt.includes(MARK.reviewJson)) {
     const review = {
       event: 'REQUEST_CHANGES',
       // HTML e imagem (o Orkio tira antes do gate: nada carrega na PR sem você ver).
@@ -200,8 +204,8 @@ async function main() {
   const denied = args.includes('--disallowedTools')
     ? args[args.indexOf('--disallowedTools') + 1].split(',')
     : []
-  if (prompt.includes('revisao.md') || denied.includes('Write')) {
-    const adjust = prompt.includes('revisao.md') ? null : prompt.split('\n')[0].trim()
+  if (prompt.includes(MARK.reviewFile) || denied.includes('Write')) {
+    const adjust = prompt.includes(MARK.reviewFile) ? null : prompt.split('\n')[0].trim()
     const plan = [
       '1. src/exportar.ts — validar a entrada antes de exportar (comentário da Ana).',
       ...(adjust ? [`2. Ajuste pedido: ${adjust}`] : [])
@@ -210,7 +214,7 @@ async function main() {
     finishRun(mcp, plan, 0.01)
     return
   }
-  if (prompt.includes('Plano aprovado')) {
+  if (prompt.includes(MARK.reviewApply)) {
     await treatComments(mcp)
     finishRun(mcp, 'Correções aplicadas e threads respondidas.', 0.02)
     return

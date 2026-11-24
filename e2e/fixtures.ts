@@ -18,6 +18,7 @@ import {
   type Page
 } from '@playwright/test'
 import { isInstallUrl } from '../src/shared/github-names'
+import { REVIEW_APPLY_PROMPT, REVIEW_JSON_PROMPT } from '../src/shared/alva-templates'
 
 export const ROOT = resolve(__dirname, '..')
 /** Endereço do site no build de E2E (`MAIN_VITE_SITE_URL` do `.env.e2e`; `--mode e2e`). */
@@ -234,6 +235,59 @@ export function removeDir(dir: string): void {
   rmSync(`${dir}-home`, { recursive: true, force: true })
 }
 
+/** Mapeamento das propriedades do Notion simulado (ids das propriedades de `NOTION_FAKE.tasksDs`). */
+export const NOTION_MAPPING = {
+  title: { id: 'title', name: 'Nome', type: 'title' },
+  status: { id: 'st%3A', name: 'Status', type: 'status' },
+  uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
+  project: { id: 'rel', name: 'Projeto', type: 'relation' },
+  priority: { id: 'pri', name: 'Prioridade', type: 'select' },
+  assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
+} as const
+
+/** Repositório `acme/orkio-app` do GitHub simulado, como o Orkio grava no projeto. */
+export const FAKE_REPO = {
+  host: 'github.com',
+  owner: 'acme',
+  name: 'orkio-app',
+  remoteName: 'origin',
+  defaultBranch: 'main',
+  visibility: 'private',
+  canPush: true,
+  archived: false,
+  verified: true
+} as const
+
+/**
+ * Grava em `userDataDir` a config v2 (da 2C) com os bancos do Notion já escolhidos e um projeto
+ * vinculado à página "Orkio Desktop": o ponto de partida dos specs a partir do quadro.
+ */
+export function seedConfig(
+  userDataDir: string,
+  project: { id: string; name: string; localPath: string; repo: typeof FAKE_REPO | null }
+): void {
+  writeFileSync(
+    join(userDataDir, 'orkio-config.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      notion: {
+        projectsDataSource: { id: NOTION_FAKE.projectsDs, name: 'Projetos' },
+        tasksDataSource: { id: NOTION_FAKE.tasksDs, name: 'Tarefas' },
+        mapping: NOTION_MAPPING,
+        updatedAt: '2026-11-19T00:00:00.000Z'
+      },
+      projects: [
+        {
+          ...project,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
+        }
+      ]
+    })
+  )
+}
+
 /**
  * Abre o app (out/) com um userData isolado e substitui, no processo main, `fetch` e
  * `shell.openExternal` pelos simuladores acima. O código do app não tem modo de teste.
@@ -340,8 +394,11 @@ export async function launchOrkio(
         if (g.__fakes.browser === 'ignore') return
         if (g.__fakes.browser === 'deny') redirect.searchParams.set('error', 'access_denied')
         else redirect.searchParams.set('code', 'e2e-auth-code')
-        // Redirect de verdade para o servidor local do app.
-        setTimeout(() => void realFetch(redirect.toString()).catch(() => {}), 50)
+        // Redirect de verdade para o servidor local do app (já escutando: ele só abre o navegador
+        // depois do listen). Como um navegador, não espera a resposta; uma falha vai para o log.
+        void realFetch(redirect.toString()).catch((e: unknown) =>
+          console.error('[e2e] redirect do OAuth falhou:', e)
+        )
       }
 
       globalThis.fetch = async (input, init) => {
@@ -542,6 +599,8 @@ export async function launchOrkio(
         }
         if (url === 'https://api.github.com/graphql') {
           const query = String((JSON.parse(call.body ?? '{}') as { query?: string }).query)
+          // Cada query do Orkio tem nome (`query ReviewThreads(...)`): o simulado responde por ele.
+          const operation = /^\s*query\s+(\w+)/.exec(query)?.[1]
           // Reproduz o OAuth sem read:org: o GitHub valida o escopo antes de executar.
           if (query.includes('on Team') || g.__fakes.githubGraphql === 'no_scope') {
             return json({
@@ -554,8 +613,8 @@ export async function launchOrkio(
               ]
             })
           }
-          // Task 15: texto das threads de uma PR (a query do Orkio pede `pullRequest(number: $number)`).
-          if (query.includes('pullRequest(number: $number)')) {
+          // Task 15: texto das threads de uma PR.
+          if (operation === 'ReviewThreads') {
             const vars = (JSON.parse(call.body ?? '{}') as { variables?: { number?: number } })
               .variables
             const d = g.__fakes.githubPrDetails[String(vars?.number)]
@@ -580,6 +639,13 @@ export async function launchOrkio(
               }
             })
           }
+          if (operation !== 'PullRequestDetails') {
+            return json({
+              data: null,
+              errors: [{ message: `operação desconhecida: ${operation}` }]
+            })
+          }
+          // Sinais: detalhes de várias PRs numa query só, uma por alias (`pr12: pullRequest(...)`).
           const repository: Record<string, unknown> = {}
           for (const match of query.matchAll(/pr(\d+): pullRequest/g)) {
             const d = g.__fakes.githubPrDetails[match[1]!]
@@ -1236,6 +1302,24 @@ export async function queueSavePaths(app: ElectronApplication, paths: string[]):
   }, paths)
 }
 
+/**
+ * Versão do `claude` simulado (`--version`; aceita `--effort`) e os trechos dos pedidos do Orkio
+ * que escolhem o cenário dele. Vão para `fake-claude.json` ao lado da cópia do script.
+ */
+export const FAKE_CLAUDE = {
+  version: '2.1.331',
+  markers: {
+    /** Cabeçalho do briefing no prompt (`run.service`). */
+    briefing: 'Briefing da tarefa',
+    /** Seção do briefing (`shared/briefing`). */
+    criteria: 'Critérios de aceite',
+    /** Passo de plano da revisão da PR (cita o arquivo da revisão). */
+    reviewFile: 'revisao.md',
+    reviewApply: REVIEW_APPLY_PROMPT.split('.')[0]!,
+    reviewJson: REVIEW_JSON_PROMPT.split(' no JSON')[0]!
+  }
+} as const
+
 /** Pasta com o `claude` simulado (e2e/fake-claude) e o estado de login dele. */
 function fakeClaudeBin(
   userDataDir: string,
@@ -1257,6 +1341,7 @@ function fakeClaudeBin(
       )
     )
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ backlog: alva?.mcpBacklog === true }))
+    writeFileSync(join(dir, 'fake-claude.json'), JSON.stringify(FAKE_CLAUDE))
   }
   writeFileSync(
     join(dir, 'x-terminal-emulator'),

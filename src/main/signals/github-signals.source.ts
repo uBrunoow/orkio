@@ -213,7 +213,7 @@ export function detailsQuery(numbers: readonly number[]): string {
         `reviews(last: 20, states: [APPROVED, CHANGES_REQUESTED]) { nodes { id state submittedAt author { login } } } }`
     )
     .join(' ')
-  return `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`
+  return `query PullRequestDetails($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`
 }
 
 const REVIEW: Record<string, ReviewDecision> = {

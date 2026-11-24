@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `node scripts/release-assets.mjs <versão>`: um arquivo por linha, os que o release da versão
+ * `node scripts/release-assets.mts <versão>`: um arquivo por linha, os que o release da versão
  * precisa ter (pacotes do manifesto `src/shared/release-artifacts.mts` + os `.yml` do canal do
  * auto-update; beta → `beta*.yml`). O release.yml confere o rascunho com esta lista.
  */
@@ -9,9 +9,9 @@ import {
   artifactFileName,
   channelFiles
 } from '../src/shared/release-artifacts.mts'
-import { isPrerelease } from './release-lib.mjs'
+import { isPrerelease } from './release-lib.mts'
 
-export function releaseAssets(version) {
+export function releaseAssets(version: string): string[] {
   const v = version.replace(/^v/, '')
   return [...RELEASE_ARTIFACTS.map((a) => artifactFileName(a, v)), ...channelFiles(isPrerelease(v))]
 }

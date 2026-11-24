@@ -22,7 +22,6 @@ export default tseslint.config(
       '*.config.ts',
       'e2e/**/*.ts',
       'e2e-packaged/**/*.ts',
-      'scripts/preview/**/*.ts',
       'test/**/*.ts'
     ],
     languageOptions: { globals: globals.node }

@@ -2,13 +2,8 @@
  * Download: último release do repositório público do Orkio (Etapa 6B), lido no servidor com ISR.
  * A sugestão do arquivo certo (SO/arquitetura) acontece no cliente (`suggestDownload`).
  */
-import {
-  DOWNLOAD_FILES,
-  GITHUB_API_VERSION,
-  RELEASES_REPO,
-  isRepoPath,
-  type DownloadKind
-} from './contract'
+import { DOWNLOAD_FILES, RELEASES_REPO, isRepoPath, type DownloadKind } from './contract'
+import { githubHeaders } from './http'
 
 export type { DownloadKind }
 
@@ -89,11 +84,7 @@ export async function getLatestRelease(
   if (!repo) return null
   try {
     const res = await fetchImpl(`https://api.github.com/repos/${repo}/releases/latest`, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': GITHUB_API_VERSION,
-        'User-Agent': 'orkio-site'
-      },
+      headers: githubHeaders(),
       next: { revalidate: RELEASE_REVALIDATE_SECONDS }
     } as RequestInit)
     if (!res.ok) return null

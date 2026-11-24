@@ -89,7 +89,6 @@ pnpm icons        # regenera ícones a partir de brand/orkio-app-icon-1024.png
 pnpm dist         # empacota (electron-builder.ts)
 pnpm dist:dir     # só a pasta do app em dist/ (sem instalador)
 pnpm smoke:packaged  # smoke do app empacotado (dist/): tela inicial + ponte MCP. Linux: xvfb-run -a
-pnpm preview:shots   # prints para revisão visual (specs em scripts/preview/, SHOT_DIR), fora do E2E
 pnpm release <patch|minor|major|beta> [--beta]  # versão + CHANGELOG + commit + tag (sem push)
 pnpm --dir site install|dev|test|typecheck|lint|build   # site (package próprio, ver site/README.md)
 ```
@@ -1359,7 +1358,7 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - **Config:** `electron-builder.ts` (TypeScript, achado pelo nome; `builderConfig(env)` é pura).
   **Manifesto dos arquivos** em `src/shared/release-artifacts.mts` (alvo, sistema, arquitetura,
   extensão, botão do site; `artifactFileName`, `builderTargets`, `channelFiles`, `macDmg`): o
-  `electron-builder.ts` monta targets e `artifactName` dele; `scripts/release-assets.mjs <versão>`
+  `electron-builder.ts` monta targets e `artifactName` dele; `scripts/release-assets.mts <versão>`
   lista os pacotes e os `.yml` do canal que o `release.yml` confere; o DMG do auto-update manual
   (6C) e os botões do site (`DOWNLOAD_FILES`, comparado no teste de contrato) usam os mesmos nomes
   (`Orkio-<v>-mac-<arch>.dmg|zip`, `Orkio-<v>-win-<arch>-setup.exe`,
@@ -1381,7 +1380,7 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   desligado pelo fuse), confere tela inicial/CSP, e roda `app.asar/out/main/permission-mcp.js` com
   `ELECTRON_RUN_AS_NODE` contra um socket simulado.
 - **Versões:** `version` do `package.json` + tag `vX.Y.Z` (beta: `X.Y.Z-beta.N` → pre-release).
-  `pnpm release` (`scripts/release.mjs`, lógica pura em `release-lib.mjs`) exige `main` limpa e
+  `pnpm release` (`scripts/release.mjs`, lógica pura e tipada em `release-lib.mts`, que o Node roda direto) exige `main` limpa e
   itens em `## [Não lançado]`; move para `## [X.Y.Z] - AAAA-MM-DD`. Leitor único do CHANGELOG em
   `src/shared/changelog.mts` (release, notas do GitHub e "O que há de novo" da 6C;
   `test/changelog.test.ts` compara os dois lados em toda versão do CHANGELOG real). Não faz push.
@@ -1398,7 +1397,7 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
   PR do commit, roda `scripts/release.mjs <tipo>`, empurra o commit `chore(release): vX.Y.Z` e a tag
   (`--atomic`) e dispara o `release.yml` com `--ref vX.Y.Z` (tags empurradas com o `GITHUB_TOKEN` não
   disparam workflows; `workflow_dispatch` é a exceção). A lógica é pura e testada
-  (`releaseKindFromLabels`/`planRelease`/`fillUnreleased` em `scripts/release-lib.mjs`). Nunca empurre a
+  (`releaseKindFromLabels`/`planRelease`/`fillUnreleased` em `scripts/release-lib.mts`). Nunca empurre a
   tag com um token pessoal (dispararia duas vezes). O workflow faz checkout da `main` de agora e
   `scripts/release-bump-push.sh` refaz o commit de versão se o push for recusado (até 3 tentativas,
   testado em `test/release-bump-push.test.ts`). O "Empacotar" do `package.yml` remove variáveis de
@@ -1410,8 +1409,6 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
 - Unitários (Vitest): `src/**/*.test.ts` ao lado do código; `test/` para testes de projeto
   (ex.: `test/csp-build.test.ts` faz um build real do renderer e falha se a CSP de produção
   ganhar `'unsafe-inline'`/`'unsafe-eval'`, scripts/estilos inline ou fontes em `data:`).
-- Prints de revisão visual não são testes: ficam em `scripts/preview/` (config própria,
-  `pnpm preview:shots`, `SHOT_DIR`), fora do `pnpm e2e` e do CI.
 - Constantes do contrato com o site nos specs vêm de `src/shared` (`NOTION_VERSION`,
   `NOTION_OAUTH_REDIRECT_URI`, `GITHUB_API_VERSION`), nunca o literal.
 - E2E (Playwright + Electron): `e2e/`. `e2e/fixtures.ts` abre o build de `out/` com
@@ -1423,7 +1420,12 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
 - Claude Code simulado (4A): `e2e/fake-claude/claude` (script Node) é copiado para uma pasta
   temporária e posto **primeiro no PATH** em todo E2E (o CLI real nunca roda). Login por
   `launchOrkio(..., { claude: { loggedIn, installed } })`. Cenário por palavras no prompt
-  (`pedir-shell`, `perguntar`, `tentar-push`, `ler-env`, `demorar`); usa a ponte MCP real.
+  (`pedir-shell`, `perguntar`, `tentar-push`, `ler-env`, `demorar`); usa a ponte MCP real. A versão
+  e os trechos dos pedidos do Orkio que ele reconhece (briefing, plano/revisão) ficam em
+  `FAKE_CLAUDE` (`e2e/fixtures.ts`, vindos de `src/shared` quando existem), gravados em
+  `fake-claude.json` ao lado da cópia: nunca repita a string no script.
+- Config inicial dos specs: `seedConfig(userDataDir, projeto)` (config v2 com os bancos e o
+  mapeamento `NOTION_MAPPING` do Notion simulado; `FAKE_REPO` = `acme/orkio-app`).
   O fixture põe uma `ANTHROPIC_API_KEY` falsa no ambiente para provar o filtro.
 - 5B: `launchOrkio(..., { alva: { plugin, mcpBacklog, gh, blockers } })` instala o plugin
   simulado no HOME de teste, controla `claude mcp list` e um `gh` simulado no PATH. O Claude simulado
@@ -1443,12 +1445,14 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
 - Revisão publicada: "Converta a revisão acima" no prompt → o Claude simulado responde só com a
   revisão em JSON; `e2e/alva.spec.ts` (teste "… revisão publicada (padrão da coluna) …") vê o fluxo
   começar sozinho em Revisando, o gate, o POST simulado ao site e a regra mover para Revisado.
+- GraphQL simulado responde pelo nome da operação (`query ReviewThreads`, `query PullRequestDetails`):
+  toda query nova do Orkio tem nome e um ramo no fixture.
 - Aba Revisão: `githubPrDetails[n].threads` (texto, autor, `isOutdated`) respondem à query de threads
   do GraphQL simulado; `githubPrFiles` dá o diff da PR (comentários fora do diff);
   `githubGraphql: 'no_scope'` (ou uma query com `on Team`) devolve `INSUFFICIENT_SCOPES` (aviso no
   Quadro, `e2e/automation.spec.ts`); `e2e/review.spec.ts` cobre a aba, os links e as imagens como
   texto.
-- Claude simulado (sessão): versão `2.1.331` (`supportsEffort`), grava `model`/`effort` e a nota dos
+- Claude simulado (sessão): versão `FAKE_CLAUDE.version` (`supportsEffort`), grava `model`/`effort` e a nota dos
   anexos (`attachmentsNote`) no `agent-args.log`, manda `usage` em toda mensagem (contexto %) e tem
   os cenários `subagentes` (dois `Task` com ferramentas filhas) e `subagentes-parcial` (o segundo
   fica rodando). Um `x-terminal-emulator` simulado no PATH registra cada "Abrir terminal aqui"

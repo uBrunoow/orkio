@@ -3,7 +3,9 @@
   "compilerOptions": {
     "composite": true,
     "lib": ["ES2023"],
-    "types": ["node"]
+    "types": ["node"],
+    // scripts/*.mts rodam direto no Node (só tipos para tirar): importam outros .mts pelo nome real.
+    "allowImportingTsExtensions": true
   },
   "include": [
     "electron.vite.config.ts",
@@ -12,6 +14,7 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*",
+    "scripts/**/*.mts",
     "test/**/*"
   ]
 }

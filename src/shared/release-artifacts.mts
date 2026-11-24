@@ -2,7 +2,7 @@
  * Manifesto dos arquivos de cada release (Etapa 6B): os alvos do empacotador e o nome de cada
  * arquivo. Uma fonte só para quem gera e quem lê os nomes:
  * - `electron-builder.ts` monta `target`/`artifactName` daqui;
- * - `scripts/release-assets.mjs` lista os arquivos que o `release.yml` confere no rascunho;
+ * - `scripts/release-assets.mts` lista os arquivos que o `release.yml` confere no rascunho;
  * - `updates.ts` acha o DMG do mac (auto-update manual);
  * - o site (`site/lib/releases.ts`) classifica pelos mesmos nomes (`test/site-contract.test.ts`).
  * Sem Node/DOM e só com sintaxe que o Node tira sozinho (os scripts rodam este arquivo direto).

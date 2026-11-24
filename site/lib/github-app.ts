@@ -32,7 +32,6 @@
  */
 import { createPrivateKey, sign, type KeyObject } from 'node:crypto'
 import {
-  GITHUB_API_VERSION,
   GITHUB_ERROR_STATUS,
   OWNER_SLUG,
   REVIEW_BODY_MAX,
@@ -45,7 +44,15 @@ import {
   type GitHubRouteError,
   type ReviewRejectReason
 } from './contract'
-import { isRecord, json, loopbackOverride, readJsonBody, withRateLimit } from './http'
+import {
+  githubHeaders,
+  isRecord,
+  json,
+  loopbackOverride,
+  readJsonBody,
+  readStreamLimited,
+  withRateLimit
+} from './http'
 import { installationLimiter, reviewLimiter, type RateLimiter } from './rate-limit'
 
 export interface GitHubAppEnv {
@@ -83,7 +90,6 @@ const INSTALLATION_REQUEST_MAX_BYTES = 4096
 const RESPONSE_MAX_BYTES = 256 * 1024
 const UPSTREAM_TIMEOUT_MS = 10_000
 export const REVIEW_DEADLINE_MS = 15_000
-const USER_AGENT = 'Orkio-Site'
 
 /**
  * Login de quem pediu (atribuição no fim da revisão): começa com letra/dígito, depois letras,
@@ -465,10 +471,7 @@ async function githubCall(
     const response = await fetchImpl(url, {
       method: post ? 'POST' : 'GET',
       headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': GITHUB_API_VERSION,
-        'User-Agent': USER_AGENT,
+        ...githubHeaders(token),
         ...(post ? { 'Content-Type': 'application/json' } : {})
       },
       ...(post ? { body: JSON.stringify(body) } : {}),
@@ -496,27 +499,9 @@ async function githubCall(
 
 async function readBody(response: Response, signal: AbortSignal): Promise<string | undefined> {
   if (!response.body) return ''
-  const reader = response.body.getReader()
-  const onAbort = (): void => void reader.cancel().catch(() => undefined)
-  signal.addEventListener('abort', onAbort, { once: true })
-  try {
-    const chunks: Uint8Array[] = []
-    let size = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (signal.aborted) return undefined
-      if (done) break
-      size += value.byteLength
-      if (size > RESPONSE_MAX_BYTES) {
-        await reader.cancel().catch(() => undefined)
-        return ''
-      }
-      chunks.push(value)
-    }
-    return new TextDecoder().decode(Buffer.concat(chunks))
-  } finally {
-    signal.removeEventListener('abort', onAbort)
-  }
+  // Grande demais vira corpo vazio (o chamador trata como resposta sem JSON).
+  const text = await readStreamLimited(response.body, RESPONSE_MAX_BYTES, signal)
+  return text === null ? '' : text
 }
 
 /** 429, ou 403 de rate limit (Retry-After / x-ratelimit-remaining: 0): não é falta de permissão. */

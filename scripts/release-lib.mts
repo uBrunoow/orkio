@@ -6,22 +6,30 @@
  *   ## [Não lançado]
  *   ## [X.Y.Z] - AAAA-MM-DD
  * O formato e o leitor das seções ficam em src/shared/changelog.mts (o mesmo do "O que há de novo"
- * do app); o Node roda o .mts direto (só tipos para tirar).
+ * do app); o Node roda os .mts direto (só tipos para tirar: nada de enum/namespace).
  */
 import {
-  CHANGELOG_UNRELEASED,
+  CHANGELOG_UNRELEASED as UNRELEASED,
   changelogLines,
-  changelogNotes,
   changelogSectionRange as sectionRange
 } from '../src/shared/changelog.mts'
 
-export const UNRELEASED = CHANGELOG_UNRELEASED
-export const BUMP_KINDS = ['patch', 'minor', 'major', 'beta']
+export const BUMP_KINDS = ['patch', 'minor', 'major', 'beta'] as const
+export type BumpKind = (typeof BUMP_KINDS)[number]
+
+export interface Version {
+  major: number
+  minor: number
+  patch: number
+  beta: number | null
+}
+
+const isBumpKind = (v: string | undefined): v is BumpKind =>
+  (BUMP_KINDS as readonly (string | undefined)[]).includes(v)
 
 const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/
 
-/** @param {string} version */
-export function parseVersion(version) {
+export function parseVersion(version: string): Version {
   const m = VERSION.exec(version)
   if (!m) throw new Error(`Versão inválida: "${version}" (esperado X.Y.Z ou X.Y.Z-beta.N).`)
   return {
@@ -39,12 +47,13 @@ export function parseVersion(version) {
  * - beta: se já é beta, incrementa N; senão, próximo patch com -beta.1.
  * - `{ beta: true }` com patch/minor/major: a versão estável seguinte com -beta.1
  *   (ou N+1 se o beta atual já é dela).
- * @param {string} current
- * @param {'patch'|'minor'|'major'|'beta'} kind
- * @param {{ beta?: boolean }} [options]
  */
-export function nextVersion(current, kind, options = {}) {
-  if (!BUMP_KINDS.includes(kind)) {
+export function nextVersion(
+  current: string,
+  kind: BumpKind,
+  options: { beta?: boolean } = {}
+): string {
+  if (!isBumpKind(kind)) {
     throw new Error(`Tipo inválido: "${kind}". Use patch, minor, major ou beta.`)
   }
   const v = parseVersion(current)
@@ -59,11 +68,7 @@ export function nextVersion(current, kind, options = {}) {
   return `${stable}-beta.1`
 }
 
-/**
- * @param {{ major: number, minor: number, patch: number, beta: number | null }} v
- * @param {'patch'|'minor'|'major'} kind
- */
-function nextStable(v, kind) {
+function nextStable(v: Version, kind: Exclude<BumpKind, 'beta'>): string {
   const pre = v.beta !== null
   if (kind === 'major') {
     return pre && v.minor === 0 && v.patch === 0 ? `${v.major}.0.0` : `${v.major + 1}.0.0`
@@ -77,35 +82,26 @@ function nextStable(v, kind) {
 /**
  * Data da versão no CHANGELOG (AAAA-MM-DD), no fuso local (não UTC: à noite no Brasil o UTC já é o
  * dia seguinte). A mesma no plano mostrado na PR e na versão gravada.
- * @param {Date} now
  */
-export function releaseDate(now) {
-  const pad = (n) => String(n).padStart(2, '0')
+export function releaseDate(now: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, '0')
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
-/** @param {string} version */
-export function isPrerelease(version) {
+export function isPrerelease(version: string): boolean {
   return parseVersion(version).beta !== null
 }
 
-/** Conteúdo (sem o título) da seção da versão, aparado. `null` se não existir. */
-export function extractNotes(changelog, version) {
-  return changelogNotes(changelog, version)
-}
-
-function hasEntries(body) {
+function hasEntries(body: string): boolean {
   return body.split('\n').some((l) => /^\s*[-*]\s+\S/.test(l))
 }
 
 /**
  * Move o conteúdo de "[Não lançado]" para "## [versão] - data" e deixa "[Não lançado]" vazio.
  * Lança erro (pt-BR) se a seção não existir, estiver vazia ou a versão já tiver seção.
- * @param {string} changelog
- * @param {string} version
- * @param {string} date AAAA-MM-DD
+ * `date` em AAAA-MM-DD.
  */
-export function releaseChangelog(changelog, version, date) {
+export function releaseChangelog(changelog: string, version: string, date: string): string {
   const lines = changelogLines(changelog)
   if (sectionRange(lines, version)) {
     throw new Error(`O CHANGELOG já tem a seção [${version}].`)
@@ -132,35 +128,31 @@ export function releaseChangelog(changelog, version, date) {
   return next.join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
-/**
- * @param {string[]} argv
- */
-export function parseReleaseArgs(argv) {
+export function parseReleaseArgs(argv: readonly string[]): { kind: BumpKind; beta: boolean } {
   const args = argv.filter((a) => a !== '--')
   const beta = args.includes('--beta')
   const kinds = args.filter((a) => !a.startsWith('--'))
   const unknown = args.filter((a) => a.startsWith('--') && a !== '--beta')
   if (unknown.length > 0) throw new Error(`Opção desconhecida: ${unknown.join(', ')}`)
-  if (kinds.length !== 1 || !BUMP_KINDS.includes(kinds[0])) {
+  const kind = kinds[0]
+  if (kinds.length !== 1 || !isBumpKind(kind)) {
     throw new Error('Uso: pnpm release <patch|minor|major|beta> [--beta]')
   }
-  return { kind: /** @type {'patch'|'minor'|'major'|'beta'} */ (kinds[0]), beta }
+  return { kind, beta }
 }
 
 export const RELEASE_LABEL_PREFIX = 'release:'
 /** Rótulo que impede o release de uma PR (docs, CI, ajustes que não vão para o app). */
 export const NO_RELEASE_LABEL = 'release:none'
 /** Tipo usado quando a PR não tem rótulo `release:*`: todo merge na main vira versão. */
-export const DEFAULT_RELEASE_KIND = 'patch'
+export const DEFAULT_RELEASE_KIND: BumpKind = 'patch'
 
 /**
  * Rótulos de uma PR → tipo de release (`release:patch|minor|major|beta`).
  * Sem rótulo de release: `DEFAULT_RELEASE_KIND` (patch). `release:none`: `null` (não lança).
  * Mais de um tipo, um desconhecido, ou `release:none` junto de um tipo: erro.
- * @param {readonly string[]} labels
- * @returns {'patch'|'minor'|'major'|'beta' | null}
  */
-export function releaseKindFromLabels(labels) {
+export function releaseKindFromLabels(labels: readonly string[]): BumpKind | null {
   const none = labels.includes(NO_RELEASE_LABEL)
   const kinds = [
     ...new Set(
@@ -175,29 +167,27 @@ export function releaseKindFromLabels(labels) {
     )
   }
   if (none) return null
-  if (kinds.length === 0) return /** @type {'patch'} */ (DEFAULT_RELEASE_KIND)
+  if (kinds.length === 0) return DEFAULT_RELEASE_KIND
   if (kinds.length > 1) {
     throw new Error(
       `A PR tem mais de um rótulo de release (${kinds.map((k) => RELEASE_LABEL_PREFIX + k).join(', ')}). Deixe só um.`
     )
   }
   const kind = kinds[0]
-  if (!BUMP_KINDS.includes(kind)) {
+  if (!isBumpKind(kind)) {
     throw new Error(
       `Rótulo desconhecido: ${RELEASE_LABEL_PREFIX}${kind}. Use ${BUMP_KINDS.map((k) => RELEASE_LABEL_PREFIX + k).join(', ')} ou ${NO_RELEASE_LABEL}.`
     )
   }
-  return /** @type {'patch'|'minor'|'major'|'beta'} */ (kind)
+  return kind
 }
 
 /**
  * "[Não lançado]" vazio + nota (título da PR) → a nota vira o item da seção, em "### Mudado".
  * Com itens, ou sem nota, devolve o CHANGELOG como está. Assim um merge sem CHANGELOG escrito
  * ainda lança uma versão com uma linha que diz o que entrou.
- * @param {string} changelog
- * @param {string | undefined | null} note
  */
-export function fillUnreleased(changelog, note) {
+export function fillUnreleased(changelog: string, note: string | undefined | null): string {
   const text = (note ?? '').replace(/\s+/g, ' ').trim()
   if (text === '') return changelog
   const lines = changelogLines(changelog)
@@ -219,13 +209,27 @@ export function fillUnreleased(changelog, note) {
   return next.join('\n').replace(/\n{3,}/g, '\n\n')
 }
 
+export type ReleasePlan =
+  { release: false } | { release: true; kind: BumpKind; version: string; prerelease: boolean }
+
 /**
  * O que a PR pede: `release:none` → `{ release: false }`; senão o tipo (patch por padrão), a versão
  * que vai sair e a conferência do CHANGELOG (com `note` preenchendo um "[Não lançado]" vazio).
  * Erro em pt-BR se não houver o que lançar. Não escreve nada.
- * @param {{ labels: readonly string[], currentVersion: string, changelog: string, today: string, note?: string | null }} input
  */
-export function planRelease({ labels, currentVersion, changelog, today, note }) {
+export function planRelease({
+  labels,
+  currentVersion,
+  changelog,
+  today,
+  note
+}: {
+  labels: readonly string[]
+  currentVersion: string
+  changelog: string
+  today: string
+  note?: string | null | undefined
+}): ReleasePlan {
   const kind = releaseKindFromLabels(labels)
   if (kind === null) return { release: false }
   const version = nextVersion(currentVersion, kind)

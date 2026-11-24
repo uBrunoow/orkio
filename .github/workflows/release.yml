@@ -100,7 +100,7 @@ jobs:
           node scripts/changelog-notes.mjs "$tag" > "$RUNNER_TEMP/notes.md"
           assets=$(gh release view "$tag" -R "$RELEASES_REPO" --json assets --jq '[.assets[].name] | join(" ")')
           # Pacotes e .yml do canal: a lista sai do manifesto (src/shared/release-artifacts.mts).
-          expected=$(node scripts/release-assets.mjs "$tag")
+          expected=$(node scripts/release-assets.mts "$tag")
           while IFS= read -r f; do
             case " $assets " in
               *" $f "*) ;;

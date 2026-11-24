@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 const ROOT = join(import.meta.dirname, '..')
 const FILES = [
   'scripts/release.mjs',
-  'scripts/release-lib.mjs',
+  'scripts/release-lib.mts',
   'scripts/release-bump-push.sh',
   'src/shared/changelog.mts'
 ]

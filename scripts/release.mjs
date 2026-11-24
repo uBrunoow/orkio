@@ -14,7 +14,7 @@ import {
   parseReleaseArgs,
   releaseChangelog,
   releaseDate
-} from './release-lib.mjs'
+} from './release-lib.mts'
 
 const ROOT = join(import.meta.dirname, '..')
 const git = (...args) =>

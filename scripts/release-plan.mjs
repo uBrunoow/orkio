@@ -8,7 +8,7 @@
  */
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { planRelease, releaseDate } from './release-lib.mjs'
+import { planRelease, releaseDate } from './release-lib.mts'
 
 const ROOT = join(import.meta.dirname, '..')
 

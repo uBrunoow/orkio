@@ -1,8 +1,6 @@
-import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
-  NOTION_FAKE,
   NOTION_TASK_IDS,
   alerts,
   createUserDataDir,
@@ -17,7 +15,9 @@ import {
   type FakeServices,
   type OrkioApp,
   expectTaskHistory,
-  taskScreen
+  taskScreen,
+  seedConfig,
+  NOTION_MAPPING
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_BOARD_TOKEN_abcdef123456'
@@ -64,36 +64,12 @@ const pagePatches = async (app: OrkioApp['app']) =>
 
 test.beforeAll(() => {
   userDataDir = createUserDataDir()
-  writeFileSync(
-    join(userDataDir, 'orkio-config.json'),
-    JSON.stringify({
-      schemaVersion: 2,
-      notion: {
-        projectsDataSource: { id: NOTION_FAKE.projectsDs, name: 'Projetos' },
-        tasksDataSource: { id: NOTION_FAKE.tasksDs, name: 'Tarefas' },
-        mapping: {
-          title: { id: 'title', name: 'Nome', type: 'title' },
-          status: { id: 'st%3A', name: 'Status', type: 'status' },
-          uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
-          project: { id: 'rel', name: 'Projeto', type: 'relation' },
-          priority: { id: 'pri', name: 'Prioridade', type: 'select' },
-          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
-        },
-        updatedAt: '2026-11-19T00:00:00.000Z'
-      },
-      projects: [
-        {
-          id: 'proj-board',
-          name: 'orkio',
-          localPath: join(userDataDir, 'nao-existe'),
-          repo: null,
-          createdAt: '2026-11-01T00:00:00.000Z',
-          updatedAt: '2026-11-01T00:00:00.000Z',
-          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
-        }
-      ]
-    })
-  )
+  seedConfig(userDataDir, {
+    id: 'proj-board',
+    name: 'orkio',
+    localPath: join(userDataDir, 'nao-existe'),
+    repo: null
+  })
 })
 
 test.afterAll(async () => {
@@ -169,7 +145,7 @@ test('critério 3: arrastar para Finalizada muda o Notion para "Finalizadas"', a
   const patch = (await pagePatches(app)).at(-1)!
   expect(patch.url).toBe(`https://api.notion.com/v1/pages/${NOTION_TASK_IDS.ork2}`)
   expect(JSON.parse(patch.body!)).toEqual({
-    properties: { 'st%3A': { status: { name: 'Finalizadas' } } }
+    properties: { [NOTION_MAPPING.status.id]: { status: { name: 'Finalizadas' } } }
   })
   await expect(card(page)).toHaveAttribute('data-sync', 'synced')
 })

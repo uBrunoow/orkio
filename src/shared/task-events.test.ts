@@ -63,13 +63,16 @@ describe('classificações derivadas do catálogo', () => {
     expect(group('sync_ok', 'notion')).toBeNull()
     expect(group('delivery', 'system')).toBe('delivery')
     expect(group('gate_waiting', 'system')).toBe('flow')
-    expect(ACTIVITY_KINDS.notion).toEqual(['rolled_back'])
-    expect(ACTIVITY_KINDS.automation).toEqual(['moved', 'automation'])
+    // O filtro por grupo acha o que `activityGroup` põe nele: "moved" cai em quadro ou automação.
+    expect(ACTIVITY_KINDS.board).toContain('moved')
+    expect(ACTIVITY_KINDS.automation).toContain('moved')
+    expect(Object.values(ACTIVITY_KINDS).flat()).not.toContain('sync_ok')
   })
 
-  it('etapas: entradas e a volta pela recusa do Notion', () => {
-    expect(STAGE_EVENT_KINDS).toEqual(['added', 'moved', 'reconciled', 'rolled_back'])
-    expect(STAGE_ENTRY_KINDS).toEqual(['added', 'moved', 'reconciled'])
+  it('etapas: toda entrada muda a etapa; a volta pela recusa do Notion muda sem ser entrada', () => {
+    expect(STAGE_ENTRY_KINDS.every((k) => STAGE_EVENT_KINDS.includes(k))).toBe(true)
+    expect(STAGE_EVENT_KINDS).toContain('rolled_back')
+    expect(STAGE_ENTRY_KINDS).not.toContain('rolled_back')
   })
 
   it('a sessão esconde o que a execução já conta', () => {

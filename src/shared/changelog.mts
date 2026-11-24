@@ -1,7 +1,7 @@
 /**
  * Formato do `CHANGELOG.md` (Keep a Changelog, pt-BR): seções `## [Não lançado]` e
- * `## [X.Y.Z] - AAAA-MM-DD`. Leitor único: o `pnpm release`/`release.yml` (`scripts/release-lib.mjs`,
- * que importa este arquivo pelo Node) e o "O que há de novo" do app (`updates.ts`). Sem Node/DOM e
+ * `## [X.Y.Z] - AAAA-MM-DD`. Leitor único: o `pnpm release`/`release.yml` (`scripts/release-lib.mts`
+ * e `changelog-notes.mjs`, que importam este arquivo pelo Node) e o "O que há de novo" do app (`updates.ts`). Sem Node/DOM e
  * sem sintaxe que o Node não consiga tirar (só tipos): os scripts rodam este arquivo direto.
  */
 

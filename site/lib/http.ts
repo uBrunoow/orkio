@@ -1,3 +1,4 @@
+import { GITHUB_API_VERSION } from './contract'
 import { clientIp, type RateLimiter } from './rate-limit'
 
 export function json(
@@ -24,25 +25,54 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Lê o corpo até `max` bytes; passou disso → `null` (sem confiar no Content-Length). */
+/**
+ * Lê o stream até `max` bytes, sem confiar no Content-Length. Passou do limite → `null` (e cancela
+ * o stream); `signal` abortado → `undefined`.
+ */
+export async function readStreamLimited(
+  stream: ReadableStream<Uint8Array>,
+  max: number,
+  signal?: AbortSignal
+): Promise<string | null | undefined> {
+  const reader = stream.getReader()
+  const onAbort = (): void => void reader.cancel().catch(() => undefined)
+  signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    const chunks: Uint8Array[] = []
+    let size = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (signal?.aborted) return undefined
+      if (done) break
+      size += value.byteLength
+      if (size > max) {
+        await reader.cancel().catch(() => undefined)
+        return null
+      }
+      chunks.push(value)
+    }
+    return new TextDecoder().decode(Buffer.concat(chunks))
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
+  }
+}
+
+/** Lê o corpo até `max` bytes; passou disso → `null`. */
 export async function readLimited(request: Request, max: number): Promise<string | null> {
   const declared = Number(request.headers.get('content-length') ?? '0')
   if (Number.isFinite(declared) && declared > max) return null
   if (!request.body) return ''
-  const reader = request.body.getReader()
-  const chunks: Uint8Array[] = []
-  let size = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > max) {
-      await reader.cancel().catch(() => undefined)
-      return null
-    }
-    chunks.push(value)
+  return (await readStreamLimited(request.body, max)) ?? null
+}
+
+/** Cabeçalhos de toda chamada do site à API do GitHub (com `token`, autenticada). */
+export function githubHeaders(token?: string): Record<string, string> {
+  return {
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': GITHUB_API_VERSION,
+    'User-Agent': 'Orkio-Site',
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
   }
-  return new TextDecoder().decode(Buffer.concat(chunks))
 }
 
 export type JsonBody =

@@ -3,7 +3,6 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
-  NOTION_FAKE,
   createUserDataDir,
   cspViolations,
   launchOrkio,
@@ -11,7 +10,9 @@ import {
   type OrkioApp,
   navTo,
   expectTaskHistory,
-  taskScreen
+  taskScreen,
+  FAKE_REPO,
+  seedConfig
 } from './fixtures'
 
 /**
@@ -89,46 +90,12 @@ test.beforeAll(() => {
   git(repoDir(), 'commit', '-q', '-m', 'init')
   git(repoDir(), 'remote', 'add', 'origin', join(work, 'origin.git'))
   git(repoDir(), 'push', '-q', 'origin', 'main')
-  writeFileSync(
-    join(userDataDir, 'orkio-config.json'),
-    JSON.stringify({
-      schemaVersion: 2,
-      notion: {
-        projectsDataSource: { id: NOTION_FAKE.projectsDs, name: 'Projetos' },
-        tasksDataSource: { id: NOTION_FAKE.tasksDs, name: 'Tarefas' },
-        mapping: {
-          title: { id: 'title', name: 'Nome', type: 'title' },
-          status: { id: 'st%3A', name: 'Status', type: 'status' },
-          uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
-          project: { id: 'rel', name: 'Projeto', type: 'relation' },
-          priority: { id: 'pri', name: 'Prioridade', type: 'select' },
-          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
-        },
-        updatedAt: '2026-11-19T00:00:00.000Z'
-      },
-      projects: [
-        {
-          id: 'proj-flows',
-          name: 'orkio-app',
-          localPath: repoDir(),
-          repo: {
-            host: 'github.com',
-            owner: 'acme',
-            name: 'orkio-app',
-            remoteName: 'origin',
-            defaultBranch: 'main',
-            visibility: 'private',
-            canPush: true,
-            archived: false,
-            verified: true
-          },
-          createdAt: '2026-11-01T00:00:00.000Z',
-          updatedAt: '2026-11-01T00:00:00.000Z',
-          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
-        }
-      ]
-    })
-  )
+  seedConfig(userDataDir, {
+    id: 'proj-flows',
+    name: 'orkio-app',
+    localPath: repoDir(),
+    repo: FAKE_REPO
+  })
 })
 
 test.afterAll(async () => {
