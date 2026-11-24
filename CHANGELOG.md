@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.11] - 2026-11-24
+
 ### Alterado
 
 - "O que há de novo" abre num modal (depois de atualizar e em Configurações › Atualizações), em vez
