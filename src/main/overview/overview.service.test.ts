@@ -6,7 +6,6 @@ import { emptyConfig, type OrkioConfig } from '../config/orkio-config'
 import { openDatabase, type Db } from '../db/database'
 import { applyWaitingBadge, overlayDotBitmap, waitingDescription } from './badge'
 import { OverviewService, type OverviewDeps } from './overview.service'
-import { parseActivityQuery } from '../ipc/overview.ipc'
 import type { NotionTask } from '../../shared/notion'
 import type { ProjectView } from '../../shared/projects'
 
@@ -451,23 +450,5 @@ describe('badge do ícone', () => {
     expect(buf.length).toBe(16 * 16 * 4)
     expect(buf[(8 * 16 + 8) * 4 + 3]).toBe(255)
     expect(buf[3]).toBe(0)
-  })
-})
-
-describe('filtro da atividade (IPC)', () => {
-  it('aceita só campos válidos', () => {
-    expect(parseActivityQuery(undefined)).toEqual({})
-    expect(
-      parseActivityQuery({ projectId: 'p1', group: 'flow', beforeId: 10, limit: 999 })
-    ).toEqual({
-      projectId: 'p1',
-      group: 'flow',
-      beforeId: 10,
-      limit: 200
-    })
-    expect(parseActivityQuery({ group: 'hack' })).toBeNull()
-    expect(parseActivityQuery({ projectId: '../x' })).toBeNull()
-    expect(parseActivityQuery({ beforeId: -1 })).toBeNull()
-    expect(parseActivityQuery('x')).toBeNull()
   })
 })

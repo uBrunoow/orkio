@@ -16,24 +16,27 @@ import {
 import type { StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
 import { GitError } from '../git/git'
+import { DomainError } from '../errors'
 import type { WorktreeRecord } from '../claude/worktree.service'
 
-export class DeliveryError extends Error {
+export type DeliveryErrorCode =
+  | 'no_project'
+  | 'no_repo'
+  | 'no_worktree'
+  | 'branch'
+  | 'dirty'
+  | 'nothing'
+  | 'credentials'
+  | 'rejected'
+  | 'git'
+
+export class DeliveryError extends DomainError {
+  override name = 'DeliveryError'
   constructor(
-    readonly code:
-      | 'no_project'
-      | 'no_repo'
-      | 'no_worktree'
-      | 'branch'
-      | 'dirty'
-      | 'nothing'
-      | 'credentials'
-      | 'rejected'
-      | 'git',
+    override readonly code: DeliveryErrorCode,
     message: string
   ) {
-    super(message)
-    this.name = 'DeliveryError'
+    super(code, message)
   }
 }
 

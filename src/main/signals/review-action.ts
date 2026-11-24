@@ -6,7 +6,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { OrkioAction } from '../flows/flow-runner'
-import { errorName } from '../ipc/payload'
+import { errorName } from '../errors'
 import {
   buildReviewMarkdown,
   pendingCount,

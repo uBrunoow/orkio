@@ -139,7 +139,7 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
           )
       })
       .catch(() => undefined)
-    void window.orkio.claude.catalog(projectId, 'projeto').then((r) => {
+    void window.orkio.claude.catalog(projectId, null).then((r) => {
       if (active) setCatalog(r.ok ? r.value : [])
     })
     return () => {

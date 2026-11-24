@@ -11,6 +11,7 @@
  * - Tarefa que entra numa etapa de trabalho por outro caminho (você, automação) ganha um agente da
  *   etapa (`onStageChanged`), a não ser que você tenha escolhido o agente à mão.
  */
+import { DomainError } from '../errors'
 import {
   ORCHESTRATOR_LIMITS,
   defaultOrchestrator,
@@ -44,14 +45,8 @@ export const ORCHESTRATOR_MESSAGES = {
   startFailed: 'o fluxo da etapa não começou'
 } as const
 
-export class OrchestratorError extends Error {
-  constructor(
-    readonly code: string,
-    message: string
-  ) {
-    super(message)
-    this.name = 'OrchestratorError'
-  }
+export class OrchestratorError extends DomainError {
+  override name = 'OrchestratorError'
 }
 
 /** Status de fluxo que ocupam o agente (inclui esperas e pausas: o trabalho é dele). */

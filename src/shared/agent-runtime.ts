@@ -32,7 +32,12 @@ export const CLAUDE_MODELS: readonly { id: string; label: string }[] = [
 /** Versão mínima do CLI `claude` que aceita `--effort`. */
 export const CLAUDE_EFFORT_VERSION = '2.1.300'
 
-const MODEL_NAME = /^[a-z][a-z0-9.\-[\]]{0,60}$/
+/** Tamanho máximo do nome do modelo (a regex e o IPC usam o mesmo número). */
+export const MODEL_NAME_MAX = 61
+const MODEL_NAME = new RegExp(`^[a-z][a-z0-9.\\-[\\]]{0,${MODEL_NAME_MAX - 1}}$`)
+
+/** Maior nome de raciocínio (o IPC confere a forma antes do `validateAgent`). */
+export const EFFORT_NAME_MAX = Math.max(...EFFORTS.map((e) => e.length))
 
 export interface RuntimeChoice {
   /** `null` = não passa `--model`. */

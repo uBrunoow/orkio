@@ -28,7 +28,7 @@ import {
   type GitHubReviewPoster
 } from '../connectors/github/review-poster'
 import type { OrkioAction } from '../flows/flow-runner'
-import { errorName } from '../ipc/payload'
+import { errorName } from '../errors'
 import type { Result } from '../../shared/result'
 import type { TaskSignalsResult } from '../../shared/task-signals'
 

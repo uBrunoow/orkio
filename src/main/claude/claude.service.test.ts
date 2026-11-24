@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ClaudeCodeStatus } from '../../shared/agent-run'
-import { isSendMessageRequest, isStartRunRequest } from '../ipc/claude.ipc'
 import { CLAUDE_MESSAGES, ClaudeService, type ClaudeServiceDeps } from './claude.service'
 import { WorktreeError } from './worktree.service'
 import type { NotionTask } from '../../shared/notion'
@@ -264,21 +263,6 @@ describe('ClaudeService', () => {
   it('cancelar execução que já terminou não lança', () => {
     const { service } = setup()
     expect(() => service.cancel('run-x')).not.toThrow()
-  })
-
-  it('valida o payload de start vindo do renderer', () => {
-    const base = {
-      projectId: 'p1',
-      taskId: 'task-1',
-      mode: 'prompt',
-      command: null,
-      text: 'x',
-      briefing: 'b'
-    }
-    expect(isStartRunRequest(base)).toBe(true)
-    expect(isStartRunRequest({ ...base, projectId: '../x' })).toBe(false)
-    expect(isStartRunRequest({ ...base, mode: 'shell' })).toBe(false)
-    expect(isStartRunRequest({ ...base, briefing: 'x'.repeat(300_000) })).toBe(false)
   })
 
   it('briefing ignora o contexto do projeto salvo na config', async () => {
@@ -650,34 +634,5 @@ describe('ClaudeService', () => {
       expect(r).toMatchObject({ ok: false, error: { code: 'flow_running' } })
       expect(await readdir(join(wt, '.orkio', 'attachments'))).toEqual([])
     })
-
-    it('valida o payload dos anexos no IPC', () => {
-      const base = { projectId: 'p1', taskId: 'task-1', text: 'x' }
-      const ok = { name: 'a.md', mime: 'text/markdown', data: new Uint8Array(3) }
-      expect(isSendMessageRequest({ ...base, attachments: [ok] })).toBe(true)
-      expect(isSendMessageRequest({ ...base, attachments: Array(6).fill(ok) })).toBe(false)
-      expect(
-        isSendMessageRequest({ ...base, attachments: [{ ...ok, name: 'a'.repeat(121) }] })
-      ).toBe(false)
-      expect(isSendMessageRequest({ ...base, attachments: [{ ...ok, data: 'abc' }] })).toBe(false)
-      expect(
-        isSendMessageRequest({
-          ...base,
-          attachments: [{ ...ok, data: new Uint8Array(11 * 1024 * 1024) }]
-        })
-      ).toBe(false)
-      expect(isSendMessageRequest({ ...base, attachments: [{ ...ok, path: '/etc/passwd' }] })).toBe(
-        false
-      )
-    })
-  })
-
-  it('valida o payload da mensagem vinda do renderer', () => {
-    const base = { projectId: 'p1', taskId: 'task-1', text: 'x' }
-    expect(isSendMessageRequest(base)).toBe(true)
-    expect(isSendMessageRequest({ ...base, fresh: true, asAgent: false })).toBe(true)
-    expect(isSendMessageRequest({ ...base, taskId: '../x' })).toBe(false)
-    expect(isSendMessageRequest({ ...base, fresh: 'sim' })).toBe(false)
-    expect(isSendMessageRequest({ ...base, text: 'x'.repeat(300_000) })).toBe(false)
   })
 })

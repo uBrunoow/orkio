@@ -9,7 +9,6 @@ import {
 } from './policy'
 import { isEnvFile, redactSecrets, sanitizeEnv } from './redact'
 import { parseStreamLine } from './stream'
-import { isSendMessageRequest } from '../ipc/claude.ipc'
 
 const WT = '/home/u/.config/orkio/worktrees/p1/ORK-7'
 const rt = (
@@ -435,19 +434,6 @@ describe('briefing', () => {
         '/wt'
       )
     ).toEqual([{ kind: 'info', text: 'Hook do projeto rodou: PostToolUse' }])
-  })
-})
-
-describe('IPC: runtime da mensagem', () => {
-  const base = { projectId: 'p1', taskId: 't1', text: 'oi' }
-  it('valida modelo e raciocínio', () => {
-    expect(isSendMessageRequest({ ...base, runtime: { effort: 'low' } })).toBe(true)
-    expect(isSendMessageRequest({ ...base, runtime: { model: 'opus', effort: null } })).toBe(true)
-    expect(isSendMessageRequest({ ...base, runtime: { model: 'a b' } })).toBe(false)
-    expect(isSendMessageRequest({ ...base, runtime: { model: '--dangerously-x' } })).toBe(false)
-    expect(isSendMessageRequest({ ...base, runtime: { effort: 'ultra' } })).toBe(false)
-    expect(isSendMessageRequest({ ...base, runtime: { cmd: 'x' } })).toBe(false)
-    expect(isSendMessageRequest({ ...base, runtime: 'opus' })).toBe(false)
   })
 })
 

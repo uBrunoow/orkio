@@ -32,7 +32,7 @@ import { taskBranchName } from '../../shared/slug'
 import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
-import { errorName } from '../ipc/payload'
+import { errorName } from '../errors'
 import { NotionApiError } from '../connectors/notion/notion.client'
 import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
@@ -696,10 +696,11 @@ export class ClaudeService {
   }
 
   /** Catálogo de comandos; usa a pasta do worktree da tarefa (ou do projeto) para os do projeto. */
-  catalog(projectId: string, taskId: string): Promise<Result<CatalogGroup[]>> {
+  /** `taskId` `null` = catálogo da pasta do projeto (editor de fluxos, sem tarefa). */
+  catalog(projectId: string, taskId: string | null): Promise<Result<CatalogGroup[]>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
-      const dir = this.deps.worktrees.get(taskId)?.path ?? project.localPath
+      const dir = (taskId && this.deps.worktrees.get(taskId)?.path) || project.localPath
       return ok(await buildCatalog({ projectDir: dir }))
     })
   }

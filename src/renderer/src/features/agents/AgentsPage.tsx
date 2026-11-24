@@ -156,7 +156,7 @@ export function AgentsPage({
       })
     }
     load()
-    void window.orkio.claude.catalog(projectId, 'agentes').then((r) => {
+    void window.orkio.claude.catalog(projectId, null).then((r) => {
       if (alive && r.ok) {
         setCommands([...new Set(r.value.flatMap((g) => g.commands.map((c) => c.name)))])
       }

@@ -7,12 +7,8 @@ import {
   alvaReviewedFlow,
   alvaReviewPublishFlow
 } from '../../shared/alva-templates'
-import {
-  ORKIO_CONFIG_VERSION,
-  createOrkioConfigStore,
-  parseStep,
-  validateConfig
-} from './orkio-config'
+import { parseStep } from '../../shared/task-flow'
+import { ORKIO_CONFIG_VERSION, createOrkioConfigStore, validateConfig } from './orkio-config'
 
 const PROJECT = {
   id: 'p1',

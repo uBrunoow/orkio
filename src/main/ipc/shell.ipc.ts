@@ -1,8 +1,5 @@
-import type { IpcMain } from 'electron'
-import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import { GITHUB_NAME_SOURCES as GH } from '../../shared/github-names'
 import { RELEASES_PATH_PATTERN } from '../../shared/updates'
-import type { SenderGuard } from './trusted-sender'
 
 /**
  * O que o renderer pode abrir no navegador externo: só https, sem porta/credenciais, e só
@@ -87,16 +84,14 @@ export function isAllowedExternalUrl(
   )
 }
 
-export function registerShellIpc(
-  ipc: Pick<IpcMain, 'handle'>,
+/** "Abrir no navegador": só URLs da allowlist; o resto responde `false` sem abrir. */
+export function openExternalHandler(
   openExternal: (url: string) => Promise<void>,
-  isTrustedSender: SenderGuard,
-  extraRules: readonly ExternalUrlRule[] = []
-): void {
-  ipc.handle(IPC_CHANNELS.shell.openExternal, async (event, url: unknown) => {
-    if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
+  extraRules: readonly ExternalUrlRule[]
+): (url: string) => Promise<boolean> {
+  return async (url) => {
     if (!isAllowedExternalUrl(url, extraRules)) return false
     await openExternal(url)
     return true
-  })
+  }
 }

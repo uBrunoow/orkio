@@ -12,6 +12,18 @@ export function isCommandName(value: unknown): value is string {
   return typeof value === 'string' && COMMAND_NAME.test(value)
 }
 
+/** Versão mínima testada com as flags usadas (stream-json in/out, --permission-prompt-tool, --settings). */
+export const CLAUDE_MIN_VERSION = '2.1.0'
+
+/**
+ * Teto de um texto que vai para a sessão da tarefa (mensagem do campo, resposta ao Claude, pedido
+ * de ajuste do gate, respostas a perguntas): todos seguem no mesmo `--resume`. Regras mais
+ * estreitas (ex.: `MAX_PROMPT_CHARS` do ajuste) ficam no serviço, com a mensagem delas.
+ */
+export const MESSAGE_MAX = 200_000
+/** Teto do briefing editável antes de rodar. */
+export const BRIEFING_MAX = 200_000
+
 /** Ferramentas do Claude Code que editam arquivos (política, log, passo só de leitura, tela). */
 export const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
 
@@ -112,7 +124,8 @@ export interface RunEventMessage {
   event: RunLogEvent
 }
 
-export type PermissionAnswer = 'allow_once' | 'allow_always' | 'deny'
+export const PERMISSION_ANSWERS = ['allow_once', 'allow_always', 'deny'] as const
+export type PermissionAnswer = (typeof PERMISSION_ANSWERS)[number]
 
 /** Card "Claude Code" em Integrações. Nunca contém e-mail, token ou credenciais. */
 export interface ClaudeCodeStatus {
@@ -201,7 +214,8 @@ export interface SendMessageRequest {
   attachments?: { name: string; mime: string; data: Uint8Array }[]
 }
 
-export type EditorId = 'cursor' | 'code'
+export const EDITOR_IDS = ['cursor', 'code'] as const
+export type EditorId = (typeof EDITOR_IDS)[number]
 
 export type UncommittedStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked'
 
@@ -274,7 +288,8 @@ export function isDocFile(path: string): boolean {
   return /\.(md|mdx|markdown|txt|adoc|rst)$/i.test(path)
 }
 
-export type ArtifactPublishMode = 'section' | 'child_page'
+export const ARTIFACT_PUBLISH_MODES = ['section', 'child_page'] as const
+export type ArtifactPublishMode = (typeof ARTIFACT_PUBLISH_MODES)[number]
 
 /** Documento candidato a artefato (alterado desde a base). */
 export interface ArtifactCandidate {

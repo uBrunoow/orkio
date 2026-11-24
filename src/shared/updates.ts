@@ -6,7 +6,8 @@
 /** Repositório público do Orkio, onde ficam os releases (6B). Precisa bater com o `publish` do electron-builder. */
 export const RELEASES_REPO = { owner: 'uBrunoow', repo: 'orkio' } as const
 
-export type UpdateChannel = 'stable' | 'beta'
+export const UPDATE_CHANNELS = ['stable', 'beta'] as const
+export type UpdateChannel = (typeof UPDATE_CHANNELS)[number]
 
 /**
  * - `auto`: Windows e macOS assinado (baixa em segundo plano, instala ao sair ou ao reiniciar).
@@ -43,7 +44,8 @@ export interface UpdateStatus {
   channelNote: string | null
 }
 
-export type UpdateInstallMode = 'if_idle' | 'now' | 'when_idle' | 'cancel_wait'
+export const UPDATE_INSTALL_MODES = ['if_idle', 'now', 'when_idle', 'cancel_wait'] as const
+export type UpdateInstallMode = (typeof UPDATE_INSTALL_MODES)[number]
 
 export type UpdateInstallResult =
   | { state: 'installing' }

@@ -391,6 +391,3 @@ export function nameSimilarity(a: string, b: string): number {
   }
   return (2 * overlap) / (bx.length + by.length)
 }
-
-export const NOTION_ID_PATTERN =
-  /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i

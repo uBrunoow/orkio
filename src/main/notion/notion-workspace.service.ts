@@ -325,20 +325,6 @@ export class NotionWorkspaceService {
     })
   }
 
-  /** Remove a configuração dos bancos e os vínculos (nada é apagado no Notion). */
-  async clearConfig(): Promise<Result<NotionWorkspaceStatus>> {
-    return this.wrap(async () => {
-      await this.save((c) => ({
-        ...c,
-        notion: null,
-        projects: c.projects.map((p) => ({ ...p, notionProject: null }))
-      }))
-      this.invalidate()
-      const connection = await this.deps.notion.connectionMethod().catch(() => null)
-      return this.setStatus({ config: null, health: 'ok', messages: [], connection })
-    })
-  }
-
   // ---------- Vínculo projeto local ↔ Notion ----------
 
   /** Páginas do banco de Projetos, ordenadas pela semelhança com o projeto local. */

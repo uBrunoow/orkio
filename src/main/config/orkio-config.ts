@@ -5,12 +5,7 @@
 import type { DeliverySettings } from '../../shared/delivery'
 import { parseProjectAgents, type ProjectAgents } from '../../shared/agent'
 import { parseOrchestrator, type OrchestratorConfig } from '../../shared/orchestrator'
-import {
-  EVENT_KINDS,
-  defaultRules,
-  type AutomationRule,
-  type EventKind
-} from '../../shared/automation'
+import { defaultRules, parseRule, type AutomationRule } from '../../shared/automation'
 import type { BoardConfig, BoardStage } from '../../shared/board'
 import { ConfigStore } from '../storage/config-store'
 
@@ -23,15 +18,7 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  */
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
 import { upgradeAlvaFlows } from '../../shared/alva-templates'
-import { isEffort, isModelName } from '../../shared/agent-runtime'
-import {
-  GATE_SHOWS,
-  type Condition,
-  type Flow,
-  type ProjectFlows,
-  type StageFlow,
-  type Step
-} from '../../shared/task-flow'
+import { parseFlowDef, type Flow, type ProjectFlows, type StageFlow } from '../../shared/task-flow'
 import type { UpdateChannel } from '../../shared/updates'
 import type {
   NotionColor,
@@ -408,43 +395,6 @@ export function parseBoard(value: unknown): BoardConfig | null {
   }
 }
 
-function stringList(value: unknown): string[] | undefined {
-  return Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : undefined
-}
-
-/** Regra inválida é descartada (as outras continuam). */
-export function parseRule(value: unknown): AutomationRule | null {
-  if (!isRecord(value)) return null
-  const { id, name, trigger } = value
-  if (typeof id !== 'string' || !id || typeof name !== 'string') return null
-  if (typeof trigger !== 'string' || !(EVENT_KINDS as readonly string[]).includes(trigger))
-    return null
-  const action = value['action']
-  if (!isRecord(action)) return null
-  let parsedAction: AutomationRule['action']
-  if (action['type'] === 'move_to_stage' && typeof action['stageId'] === 'string') {
-    parsedAction = { type: 'move_to_stage', stageId: action['stageId'] }
-  } else if (action['type'] === 'notify' && typeof action['message'] === 'string') {
-    parsedAction = { type: 'notify', message: action['message'] }
-  } else return null
-  const c = isRecord(value['conditions']) ? value['conditions'] : {}
-  const fromStages = stringList(c['fromStages'])
-  const rule: AutomationRule = {
-    id,
-    name,
-    enabled: value['enabled'] === true,
-    trigger: trigger as EventKind,
-    conditions: {
-      ...(fromStages ? { fromStages } : {}),
-      ...(c['notBlocked'] === true ? { notBlocked: true } : {}),
-      ...(c['onlyForward'] === true ? { onlyForward: true } : {})
-    },
-    action: parsedAction
-  }
-  if (value['notify'] === true) rule.notify = true
-  return rule
-}
-
 export function parseClaudeContext(value: unknown): ProjectClaudeContext | null {
   if (!isRecord(value) || typeof value['instructions'] !== 'string') return null
   const pages = Array.isArray(value['notionPages'])
@@ -459,103 +409,6 @@ export function parseClaudeContext(value: unknown): ProjectClaudeContext | null 
 // ---------- Fluxos de tarefa (5A) ----------
 
 const str = (v: unknown): v is string => typeof v === 'string'
-
-export function parseCondition(v: unknown, depth = 0): Condition | null {
-  if (!isRecord(v) || depth > 5) return null
-  switch (v['type']) {
-    case 'step':
-      return str(v['step']) && (v['is'] === 'ok' || v['is'] === 'failed' || v['is'] === 'cancelled')
-        ? { type: 'step', step: v['step'], is: v['is'] }
-        : null
-    case 'var': {
-      const op = v['op']
-      if (!str(v['key']) || (op !== 'eq' && op !== 'neq' && op !== 'exists')) return null
-      return { type: 'var', key: v['key'], op, ...(str(v['value']) ? { value: v['value'] } : {}) }
-    }
-    case 'visits':
-      return str(v['step']) && typeof v['lt'] === 'number' && v['lt'] >= 1
-        ? { type: 'visits', step: v['step'], lt: Math.floor(v['lt']) }
-        : null
-    case 'all':
-    case 'any': {
-      if (!Array.isArray(v['of'])) return null
-      const of = v['of'].map((c) => parseCondition(c, depth + 1))
-      return of.every((c): c is Condition => c !== null) ? { type: v['type'], of } : null
-    }
-    default:
-      return null
-  }
-}
-
-export function parseStep(v: unknown): Step | null {
-  if (!isRecord(v) || !str(v['id']) || !str(v['name'])) return null
-  const base = { id: v['id'], name: v['name'] }
-  switch (v['type']) {
-    case 'claude_command':
-      if (!str(v['command']) || !str(v['args']) || typeof v['timeoutMin'] !== 'number') return null
-      return {
-        ...base,
-        type: 'claude_command',
-        command: v['command'],
-        args: v['args'],
-        ...(str(v['prompt']) ? { prompt: v['prompt'] } : {}),
-        ...(v['readOnly'] === true ? { readOnly: true } : {}),
-        timeoutMin: v['timeoutMin'],
-        ...(isRecord(v['extract']) && str(v['extract']['extractor'])
-          ? { extract: { extractor: v['extract']['extractor'] } }
-          : {}),
-        ...(v['delivery'] === true ? { delivery: true } : {}),
-        ...(typeof v['includeBriefing'] === 'boolean'
-          ? { includeBriefing: v['includeBriefing'] }
-          : {}),
-        ...(isModelName(v['model']) ? { model: v['model'] } : {}),
-        ...(isEffort(v['effort']) ? { effort: v['effort'] } : {})
-      }
-    case 'gate': {
-      const show = GATE_SHOWS.find((x) => x === v['show'])
-      if (!str(v['message']) || !show) return null
-      const revise = v['revise']
-      return {
-        ...base,
-        type: 'gate',
-        message: v['message'],
-        show,
-        onReject: str(v['onReject']) ? v['onReject'] : 'stop',
-        timeoutMin: typeof v['timeoutMin'] === 'number' ? v['timeoutMin'] : null,
-        ...(isRecord(revise) && str(revise['step']) && typeof revise['max'] === 'number'
-          ? { revise: { step: revise['step'], max: revise['max'] } }
-          : {})
-      }
-    }
-    case 'orkio_action':
-      return str(v['action']) ? { ...base, type: 'orkio_action', action: v['action'] } : null
-    case 'branch': {
-      const when = parseCondition(v['when'])
-      if (!when || !str(v['then'])) return null
-      return {
-        ...base,
-        type: 'branch',
-        when,
-        then: v['then'],
-        ...(str(v['else']) ? { else: v['else'] } : {})
-      }
-    }
-    default:
-      return null
-  }
-}
-
-export function parseFlowDef(v: unknown): Flow | null {
-  if (!isRecord(v) || !str(v['id']) || !v['id'] || !str(v['name']) || !Array.isArray(v['steps'])) {
-    return null
-  }
-  const steps = v['steps'].map(parseStep)
-  if (!steps.every((s): s is Step => s !== null)) return null
-  const tags = Array.isArray(v['tags'])
-    ? v['tags'].filter((t): t is string => str(t) && /^[a-z0-9_-]{1,20}$/.test(t)).slice(0, 5)
-    : []
-  return { id: v['id'], name: v['name'], steps, ...(tags.length > 0 ? { tags } : {}) }
-}
 
 function parseBinding(v: unknown): StageFlow | null {
   if (!isRecord(v) || !str(v['stageId']) || !str(v['flowId'])) return null

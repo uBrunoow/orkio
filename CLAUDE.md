@@ -101,7 +101,10 @@ Mudou UI, IPC, preload, segurança ou build? Rode também `pnpm e2e`.
 
 ```
 src/
-  shared/ipc-contract.ts   # só canais IPC (`IPC_CHANNELS`) e o tipo da API (`OrkioApi`). Sem Node/DOM.
+  shared/ipc/api.ts        # IPC declarado uma vez (`ORKIO_API`, `IPC_EVENTS`); `OrkioApi` sai daqui. Sem Node/DOM.
+  shared/ipc/define.ts     # peças da declaração (`call`, `event`, `group`, `buildApi`, `toPlain`)
+  shared/ipc/validate.ts   # validadores por conceito (isProjectId, isTaskId, isStageId, isAgentKey...)
+  shared/ipc/payloads.ts   # validadores dos objetos do renderer (devolvem a cópia normalizada)
                            # Tipos de domínio ficam no módulo do assunto (importe de lá, não do contrato):
   shared/result.ts         # `Result<T>` único ({ok,value} | {ok:false,error}) das chamadas do renderer
   shared/connection.ts     # ConnectionStatus, credenciais, Device Flow, links de docs dos tokens
@@ -141,7 +144,8 @@ src/
     oauth/                 # fluxos genéricos: loopback.ts (redirect, RFC 8252), device-flow.ts (RFC 8628)
     net/parse.ts           # helpers puros de parsing (isRecord, Retry-After, ...)
     net/rate-queue.ts      # fila de rate limit (concorrência, intervalo mínimo, pausa) + backoff
-    ipc/                   # handlers finos: validam origem e payload, delegam ao conector/serviço
+    errors.ts              # errorName (só o nome vai ao log) e DomainError (código + mensagem pt-BR)
+    ipc/                   # register.ts (registro único), emit.ts (eventos), <grupo>.ipc.ts (handlers)
     storage/secure-store.ts  # SEGREDOS (safeStorage)
     storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações)
     config/orkio-config.ts   # orkio-config.json (schema v12; migrações v → v+1)
@@ -168,7 +172,7 @@ src/
                            # attachments.ts (anexos), terminal.ts (terminal externo);
                            # bridge/permission-mcp.ts
                            # (servidor MCP stdio → out/main/permission-mcp.js)
-  preload/index.ts         # contextBridge → window.orkio (API mínima e tipada)
+  preload/index.ts         # contextBridge → window.orkio, gerado de `ORKIO_API` (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
     app/routes.ts          # 6E: rotas tipadas + routerReducer (chave nova a cada navegação)
     app/shortcuts.ts       # 6E: atalhos globais (puro) e isTextField
@@ -245,24 +249,36 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - Erros esperados viram `{ state: 'error', message }`, sem lançar exceção. Falhas
   transitórias (rede, 5xx, 429) em conexão já salva viram `connected` com `warning`.
 - Injete dependências (`fetch`, `sleep`, `store`, `now`) para testar sem rede.
-- Para adicionar um conector: `ConnectorId` em `shared/connection.ts`, canais em `shared/ipc-contract.ts`,
-  `connectors/<id>/`, `ipc/<id>.ipc.ts`, exposição no preload e feature no renderer.
+- Para adicionar um conector: `ConnectorId` em `shared/connection.ts`, métodos em `shared/ipc/api.ts`,
+  `connectors/<id>/`, `ipc/<id>.ipc.ts` (handlers) e feature no renderer (o preload sai da declaração).
 
 ## IPC
 
-- Canais definidos em `IPC_CHANNELS` (`shared/ipc-contract.ts`). Use `ipcMain.handle`/`invoke`.
-- O contrato só tem canais e `OrkioApi`; tipo novo de domínio vai para o módulo do assunto em
-  `shared/` (ex.: `shared/projects.ts`), e o resultado das chamadas é `Result<T>` (`shared/result.ts`).
+- **Um método = uma entrada em `ORKIO_API`** (`shared/ipc/api.ts`): `call<assinatura>()({ channel,
+  args, fallback?, invalid?, needs? })` dentro de um `group({ needs, unexpected }, …)`. `args` tem um
+  validador por argumento (`shared/ipc/validate.ts`/`payloads.ts`; o tipo confere com a assinatura);
+  quem devolve `Result<T>` não declara `fallback` (erro inesperado = `unexpected` do grupo; argumento
+  recusado = "Pedido inválido"); os outros declaram (`sameAs('status')` = a resposta de outro método).
+  `needs`: `config` espera a config carregar; `db` responde `db_unavailable`/o fallback sem o banco.
+- O preload é gerado (`buildApi`): invoca o canal com os argumentos copiados por `toPlain` (só dados
+  e bytes; funções e protótipos não passam) e valida cada evento antes do listener. Nunca remonte
+  objetos campo a campo no preload: o validador do main devolve a cópia só com os campos conhecidos.
+- O main registra tudo com `registerHandlers` (`ipc/register.ts`): origem (`createSenderGuard`),
+  `ready`, validação, `DomainError` → `Result` de falha (só em métodos com `Result`), log só com
+  `errorName` (`main/errors.ts`) e o fallback. Handler faltando fora do banco = erro ao abrir o app.
+  Cada `ipc/<grupo>.ipc.ts` só liga os argumentos validados ao serviço.
+- Eventos main → renderer: `IPC_EVENTS` (canal, validação, `affects: ['overview','keepAwake']`);
+  no main, `emit(nome, payload)` (`ipc/emit.ts`); em `window.orkio`, `on*(listener) → unsubscribe`.
+- Tipo novo de domínio vai para o módulo do assunto em `shared/` (ex.: `shared/projects.ts`), e o
+  resultado das chamadas é `Result<T>` (`shared/result.ts`).
 - Regras que o renderer e o main checam (defesa em profundidade) moram em `shared/` e os dois lados
   importam: nomes do GitHub (`github-names.ts`), anexos (`attachments.ts`), nome de comando
   (`isCommandName`) e ferramentas de edição (`EDIT_TOOLS`) em `agent-run.ts`, tipos de branch
   (`BRANCH_KINDS`/`withBranchKind` em `slug.ts`), limites da revisão publicada (`review-publish.ts`).
   Comparar rótulos (etapas, status, busca) sempre com `normalizeLabel` (`shared/text.ts`).
-- Todo handler checa a origem com `createSenderGuard` e valida o payload (`unknown`).
-- O preload expõe funções específicas, nunca `ipcRenderer` cru.
+- O preload expõe só as funções declaradas, nunca `ipcRenderer` cru.
 - Links externos: `window.orkio.openExternal`, com allowlist em `ipc/shell.ipc.ts`
   (`EXTERNAL_URL_RULES`: host + prefixo de caminho opcional). Adicione só o necessário.
-- Validação de payload e log de erro: `ipc/payload.ts` (`isTokenCredentials`, `errorName`).
 - Fluxos longos (OAuth/Device Flow): uma chamada `invoke` que só resolve no fim
   (`startOAuth`, `waitDeviceFlow`). Não exponha `ipcRenderer.on` sem necessidade.
 
@@ -552,7 +568,7 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   "Médio", "Alto", "Muito alto", "Máximo"). Precedência (`resolveRuntime`): mensagem ou passo do
   fluxo > agente > padrão do CLI; `default`/`null` = sem flag. O `runner` só passa `--model` com
   `isModelName` (nunca `default`) e `--effort` com `isEffort`, revalidados no IPC
-  (`isSendMessageRequest`), no perfil do agente e na config do passo: nada vira argumento sem passar
+  (`parseSendMessageRequest`), no perfil do agente e na config do passo: nada vira argumento sem passar
   pela regex. O log da execução ganha uma linha `info` "Modelo: Opus · Raciocínio: Alto" (sem coluna
   nova em `agent_runs`).
 - **Worktree** (`worktree.service.ts`): `<userData>/worktrees/<projectId>/<ID>` (sem ID: 12
@@ -989,9 +1005,9 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   tempo médio em "Revisado" (etapa com esse nome) por passagem que terminou na semana.
 - **Atividade:** `task_events` dos 7 dias, sem `sync_ok` e sem automação sem efeito; filtro por
   projeto e grupo (`ACTIVITY_KINDS`), paginação por `beforeId`; texto de `shared/task-history.ts`.
-- **Evento `overview:changed { waiting }`:** o `send` do main chama `overview.touch()` (debounce
-  300 ms) em `taskFlows.changed`, `board.changed`, `board:sync-changed` e `claude:run-event` de
-  status/permissão/pergunta. O mesmo total vai para o ícone: `app.setBadgeCount` (Dock/launcher do
+- **Evento `overview:changed { waiting }`:** os eventos com `affects: ['overview']` em
+  `IPC_EVENTS` chamam `overview.touch()` (debounce 300 ms): `task-flows:changed`, `board:changed`,
+  `board:sync-changed` e `claude:run-event` de status/permissão/pergunta. O mesmo total vai para o ícone: `app.setBadgeCount` (Dock/launcher do
   Linux) e, no Windows, `setOverlayIcon` com um ponto laranja (`overlayDotBitmap`) e descrição.
 - **Clique:** `routeForTaskRef(ref)` abre a tela da tarefa (troca o projeto atual se preciso);
   `BoardTaskRef.section` (`flow`/`claude`/`history`) → `TaskPanel focusSection` rola até a seção
@@ -1010,7 +1026,7 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   aprova; mudou fora (pull, editor) → `needs_review`: não roda até "Revisar" e "Aprovar este perfil".
 - **Modelo e raciocínio:** `model` (string: id de `CLAUDE_MODELS` ou nome livre que passe em
   `isModelName`; "Modelo inválido") e `effort` opcional (`EFFORTS`; "Raciocínio inválido"),
-  validados no `parseAgentFile`, no IPC (`agents.ipc` `toProfile`: modelo ≤ 61, forma do `effort`) e no
+  validados no `parseAgentFile`, no IPC (`parseAgentProfile`: modelo ≤ `MODEL_NAME_MAX`, forma do `effort`) e no
   `validateAgent` do serviço. `serializeAgent` só escreve `effort` quando há: perfil antigo (sem
   `effort`, `model: sonnet`) lê e grava igual. No editor, o mesmo `RuntimePicker` do campo da sessão;
   `AgentBadge` traz `model`/`effort` para o "Do agente: …" do campo.
@@ -1242,8 +1258,8 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `broker/`
   fica rodando). Um `x-terminal-emulator` simulado no PATH registra cada "Abrir terminal aqui"
   (`terminalCalls`).
 - Integrações: a grade abre sozinha o primeiro cartão pendente; `openIntegration(page, nome)` abre o
-  painel de um cartão (`expandIntegrations` só espera os estados). `e2e/notion.spec.ts` confere as
-  chaves de `window.orkio` (todo canal novo no preload entra na lista de propósito).
+  painel de um cartão (`expandIntegrations` só espera os estados). `e2e/notion.spec.ts` confere que
+  `window.orkio` é exatamente a forma declarada em `ORKIO_API` (e que não há `require`/`process`).
 - 6D/9: `e2e/overview.spec.ts` cria o quadro pela tela, salva um fluxo só com gate e o inicia com
   `startById` (via `window.orkio` no teste); confere o sino ("1 esperando você"), a lista lateral,
   "Abrir" na tela da tarefa e o sumiço ao aprovar. `enterApp(page)` (fixtures) sai dos Primeiros

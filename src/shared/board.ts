@@ -313,6 +313,9 @@ export type OrkioStageChoice =
   /** Cria a propriedade select "Etapa Orkio" no banco de Tarefas (só com confirmação). */
   | { mode: 'create' }
 
+/** Limites do editor de etapas (quadro e fluxo do projeto; o IPC confere os mesmos). */
+export const STAGE_LIMITS = { stages: 30, name: 60 } as const
+
 export interface BoardSaveInput {
   stages: { id: string | null; name: string; notionStatusId: string }[]
   orkioStage: OrkioStageChoice

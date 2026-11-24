@@ -13,8 +13,8 @@ import { DEFAULT_DELIVERY_SETTINGS, type DeliverySettings } from '../../shared/d
 import type { BoardStore } from '../board/board.store'
 import type { ConfigStore } from '../storage/config-store'
 import type { OrkioConfig } from '../config/orkio-config'
-import { errorName } from '../ipc/payload'
-import { FlowError, type FlowExtractor, type FlowRunner, type OrkioAction } from './flow-runner'
+import { errorName } from '../errors'
+import type { FlowExtractor, FlowRunner, OrkioAction } from './flow-runner'
 import type { Result } from '../../shared/result'
 
 export class FlowsService {
@@ -136,17 +136,6 @@ export class FlowsService {
 
   active(projectId: string): Record<string, TaskFlowActivity> {
     return this.deps.runner.activeForProject(projectId)
-  }
-
-  act(fn: () => Promise<FlowRunView>): Promise<Result<FlowRunView>> {
-    return fn().then(
-      (value) => ({ ok: true as const, value }),
-      (error: unknown) => {
-        if (error instanceof FlowError) return fail<FlowRunView>(error.code, error.message)
-        console.error(`[orkio] fluxo: ${errorName(error)}`)
-        return fail<FlowRunView>('unexpected', 'Algo deu errado no fluxo. Tente novamente.')
-      }
-    )
   }
 }
 

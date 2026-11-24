@@ -1,70 +1,21 @@
-import type { IpcMain } from 'electron'
-import { IPC_CHANNELS } from '../../shared/ipc-contract'
+import type { ORKIO_API } from '../../shared/ipc/api'
 import type { ReviewThreadsService } from '../signals/review-threads'
 import type { TaskSignalsService } from '../signals/task-signals.service'
-import { errorName } from './payload'
-import { isId } from './projects.ipc'
-import type { SenderGuard } from './trusted-sender'
-import type { Result } from '../../shared/result'
+import type { Impl } from './register'
 
-const GENERIC: Result<never> = {
-  ok: false,
-  error: { code: 'unexpected', message: 'Algo deu errado ao ler branches e PRs. Tente novamente.' }
-}
-const INVALID: Result<never> = {
-  ok: false,
-  error: { code: 'invalid', message: 'Projeto inválido. Atualize a tela e tente de novo.' }
-}
-
-/** Sinais das tarefas (branches/PRs). O renderer manda só o id do projeto. */
-export function registerSignalsIpc(
-  ipc: Pick<IpcMain, 'handle'>,
+/** Sinais das tarefas (branches/PRs) e threads da PR. O renderer manda só ids. */
+export function signalsHandlers(
   service: Pick<TaskSignalsService, 'get'>,
-  isTrustedSender: SenderGuard,
-  ready: Promise<void> = Promise.resolve(),
-  reviews?: Pick<ReviewThreadsService, 'get'>
-): void {
-  ipc.handle(IPC_CHANNELS.signals.get, async (event, projectId: unknown, options: unknown) => {
-    if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
-    try {
-      await ready
-      if (!isId(projectId)) return INVALID
-      const force =
-        typeof options === 'object' &&
-        options !== null &&
-        (options as { force?: unknown }).force === true
-      return await service.get(projectId, { force })
-    } catch (error) {
-      console.error(`[orkio] falha inesperada em ${IPC_CHANNELS.signals.get}: ${errorName(error)}`)
-      return GENERIC
+  reviews: Pick<ReviewThreadsService, 'get'>
+): Impl<typeof ORKIO_API.signals> {
+  return {
+    get: (projectId, options) => service.get(projectId, options),
+    // O main acha a PR pelos sinais em cache; o texto vem do GraphQL.
+    reviewThreads: async (projectId, taskId, options) => {
+      const r = await reviews.get(projectId, taskId, options.force)
+      return r.ok
+        ? { ok: true, value: r.value }
+        : { ok: false, error: { code: r.code, message: r.message } }
     }
-  })
-
-  // Threads da PR da tarefa (Task 15): o renderer manda só ids; o main acha a PR pelos sinais.
-  ipc.handle(
-    IPC_CHANNELS.signals.reviewThreads,
-    async (event, projectId: unknown, taskId: unknown, options: unknown) => {
-      if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
-      try {
-        await ready
-        if (!isId(projectId) || !isId(taskId) || !reviews) return INVALID
-        const force =
-          typeof options === 'object' &&
-          options !== null &&
-          (options as { force?: unknown }).force === true
-        const r = await reviews.get(projectId, taskId, force)
-        return r.ok
-          ? ({ ok: true, value: r.value } satisfies Result<unknown>)
-          : ({
-              ok: false,
-              error: { code: r.code, message: r.message }
-            } satisfies Result<never>)
-      } catch (error) {
-        console.error(
-          `[orkio] falha inesperada em ${IPC_CHANNELS.signals.reviewThreads}: ${errorName(error)}`
-        )
-        return GENERIC
-      }
-    }
-  )
+  }
 }

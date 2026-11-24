@@ -130,3 +130,7 @@ export interface NotionTasksResult {
   fetchedAt: string
   fromCache: boolean
 }
+
+/** Id de página/banco do Notion (UUID com ou sem hífens). Uma tarefa do quadro é uma página. */
+export const NOTION_ID_PATTERN =
+  /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i

@@ -10,6 +10,7 @@ import { isEffort, isModelName, type Effort } from './agent-runtime'
 import { EDIT_TOOLS } from './agent-run'
 import type { DeliverySettings } from './delivery'
 import type { PublishReviewEvent } from './review-publish'
+import { isRecord } from './guards'
 import { normalizeLabel } from './text'
 
 export type StepId = string
@@ -722,4 +723,105 @@ export interface OpenPrResult {
   started: boolean
   mode: 'pr' | 'push'
   compareUrl: string | null
+}
+
+// ---------- Leitura (config e IPC) ----------
+
+const str = (v: unknown): v is string => typeof v === 'string'
+
+export function parseCondition(v: unknown, depth = 0): Condition | null {
+  if (!isRecord(v) || depth > 5) return null
+  switch (v['type']) {
+    case 'step':
+      return str(v['step']) && (v['is'] === 'ok' || v['is'] === 'failed' || v['is'] === 'cancelled')
+        ? { type: 'step', step: v['step'], is: v['is'] }
+        : null
+    case 'var': {
+      const op = v['op']
+      if (!str(v['key']) || (op !== 'eq' && op !== 'neq' && op !== 'exists')) return null
+      return { type: 'var', key: v['key'], op, ...(str(v['value']) ? { value: v['value'] } : {}) }
+    }
+    case 'visits':
+      return str(v['step']) && typeof v['lt'] === 'number' && v['lt'] >= 1
+        ? { type: 'visits', step: v['step'], lt: Math.floor(v['lt']) }
+        : null
+    case 'all':
+    case 'any': {
+      if (!Array.isArray(v['of'])) return null
+      const of = v['of'].map((c) => parseCondition(c, depth + 1))
+      return of.every((c): c is Condition => c !== null) ? { type: v['type'], of } : null
+    }
+    default:
+      return null
+  }
+}
+
+export function parseStep(v: unknown): Step | null {
+  if (!isRecord(v) || !str(v['id']) || !str(v['name'])) return null
+  const base = { id: v['id'], name: v['name'] }
+  switch (v['type']) {
+    case 'claude_command':
+      if (!str(v['command']) || !str(v['args']) || typeof v['timeoutMin'] !== 'number') return null
+      return {
+        ...base,
+        type: 'claude_command',
+        command: v['command'],
+        args: v['args'],
+        ...(str(v['prompt']) ? { prompt: v['prompt'] } : {}),
+        ...(v['readOnly'] === true ? { readOnly: true } : {}),
+        timeoutMin: v['timeoutMin'],
+        ...(isRecord(v['extract']) && str(v['extract']['extractor'])
+          ? { extract: { extractor: v['extract']['extractor'] } }
+          : {}),
+        ...(v['delivery'] === true ? { delivery: true } : {}),
+        ...(typeof v['includeBriefing'] === 'boolean'
+          ? { includeBriefing: v['includeBriefing'] }
+          : {}),
+        ...(isModelName(v['model']) ? { model: v['model'] } : {}),
+        ...(isEffort(v['effort']) ? { effort: v['effort'] } : {})
+      }
+    case 'gate': {
+      const show = GATE_SHOWS.find((x) => x === v['show'])
+      if (!str(v['message']) || !show) return null
+      const revise = v['revise']
+      return {
+        ...base,
+        type: 'gate',
+        message: v['message'],
+        show,
+        onReject: str(v['onReject']) ? v['onReject'] : 'stop',
+        timeoutMin: typeof v['timeoutMin'] === 'number' ? v['timeoutMin'] : null,
+        ...(isRecord(revise) && str(revise['step']) && typeof revise['max'] === 'number'
+          ? { revise: { step: revise['step'], max: revise['max'] } }
+          : {})
+      }
+    }
+    case 'orkio_action':
+      return str(v['action']) ? { ...base, type: 'orkio_action', action: v['action'] } : null
+    case 'branch': {
+      const when = parseCondition(v['when'])
+      if (!when || !str(v['then'])) return null
+      return {
+        ...base,
+        type: 'branch',
+        when,
+        then: v['then'],
+        ...(str(v['else']) ? { else: v['else'] } : {})
+      }
+    }
+    default:
+      return null
+  }
+}
+
+export function parseFlowDef(v: unknown): Flow | null {
+  if (!isRecord(v) || !str(v['id']) || !v['id'] || !str(v['name']) || !Array.isArray(v['steps'])) {
+    return null
+  }
+  const steps = v['steps'].map(parseStep)
+  if (!steps.every((s): s is Step => s !== null)) return null
+  const tags = Array.isArray(v['tags'])
+    ? v['tags'].filter((t): t is string => str(t) && /^[a-z0-9_-]{1,20}$/.test(t)).slice(0, 5)
+    : []
+  return { id: v['id'], name: v['name'], steps, ...(tags.length > 0 ? { tags } : {}) }
 }

@@ -11,7 +11,8 @@ import type { ProjectView } from './projects'
 import { normalizeLabel } from './text'
 
 /** Seção do painel da tarefa que o clique abre. */
-export type TaskSection = 'flow' | 'claude' | 'history'
+export const TASK_SECTIONS = ['flow', 'claude', 'history'] as const
+export type TaskSection = (typeof TASK_SECTIONS)[number]
 
 export interface OverviewTask {
   projectId: string

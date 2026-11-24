@@ -9,6 +9,7 @@
  */
 import type { BoardStage } from './board'
 import type { SignalsGitHubState, TaskSignals } from './task-signals'
+import { isRecord } from './guards'
 import { normalizeLabel } from './text'
 
 export type EventKind =
@@ -523,4 +524,43 @@ export interface AutomationStatus {
   lastRunAt: string | null
   nextRunAt: string | null
   error: string | null
+}
+
+// ---------- Leitura (config e IPC) ----------
+
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : undefined
+}
+
+/** Regra inválida é descartada (as outras continuam). */
+export function parseRule(value: unknown): AutomationRule | null {
+  if (!isRecord(value)) return null
+  const { id, name, trigger } = value
+  if (typeof id !== 'string' || !id || typeof name !== 'string') return null
+  if (typeof trigger !== 'string' || !(EVENT_KINDS as readonly string[]).includes(trigger))
+    return null
+  const action = value['action']
+  if (!isRecord(action)) return null
+  let parsedAction: AutomationRule['action']
+  if (action['type'] === 'move_to_stage' && typeof action['stageId'] === 'string') {
+    parsedAction = { type: 'move_to_stage', stageId: action['stageId'] }
+  } else if (action['type'] === 'notify' && typeof action['message'] === 'string') {
+    parsedAction = { type: 'notify', message: action['message'] }
+  } else return null
+  const c = isRecord(value['conditions']) ? value['conditions'] : {}
+  const fromStages = stringList(c['fromStages'])
+  const rule: AutomationRule = {
+    id,
+    name,
+    enabled: value['enabled'] === true,
+    trigger: trigger as EventKind,
+    conditions: {
+      ...(fromStages ? { fromStages } : {}),
+      ...(c['notBlocked'] === true ? { notBlocked: true } : {}),
+      ...(c['onlyForward'] === true ? { onlyForward: true } : {})
+    },
+    action: parsedAction
+  }
+  if (value['notify'] === true) rule.notify = true
+  return rule
 }

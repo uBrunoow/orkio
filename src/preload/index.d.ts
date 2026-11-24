@@ -1,4 +1,4 @@
-import type { OrkioApi } from '../shared/ipc-contract'
+import type { OrkioApi } from '../shared/ipc/api'
 
 declare global {
   interface Window {

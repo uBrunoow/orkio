@@ -47,7 +47,7 @@ import type { RunAgent } from '../claude/run.service'
 import { buildAgentPrompt, checkAgentFlow, type AgentProfile } from '../../shared/agent'
 import type { RuntimeChoice } from '../../shared/agent-runtime'
 import type { Db } from '../db/database'
-import { errorName } from '../ipc/payload'
+import { DomainError, errorName } from '../errors'
 
 export const FLOW_MESSAGES = {
   noBinding: 'A etapa atual da tarefa não tem fluxo ligado (ou ele está desligado).',
@@ -68,14 +68,8 @@ export const FLOW_MESSAGES = {
     `Limite de ajustes atingido (${max}). Aprove ou recuse no cartão.`
 } as const
 
-export class FlowError extends Error {
-  constructor(
-    readonly code: string,
-    message: string
-  ) {
-    super(message)
-    this.name = 'FlowError'
-  }
+export class FlowError extends DomainError {
+  override name = 'FlowError'
 }
 
 /** Extrator: grava variáveis do fluxo a partir do resultado de um comando. */

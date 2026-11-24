@@ -4,12 +4,9 @@
  */
 import { execFile as nodeExecFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { ClaudeCodeStatus } from '../../shared/agent-run'
+import { CLAUDE_MIN_VERSION, type ClaudeCodeStatus } from '../../shared/agent-run'
 import { CLAUDE_EFFORT_VERSION } from '../../shared/agent-runtime'
 import { sanitizeEnv } from './redact'
-
-/** Versão mínima testada com as flags usadas (stream-json in/out, --permission-prompt-tool, --settings). */
-export const CLAUDE_MIN_VERSION = '2.1.0'
 
 export type ExecFileFn = (
   file: string,

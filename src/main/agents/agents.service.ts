@@ -13,6 +13,7 @@
  *   aprovados; valem em todos os projetos. Para mudar, duplique (vira um perfil comum).
  */
 import { createHash, randomBytes } from 'node:crypto'
+import { DomainError } from '../errors'
 import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 import {
@@ -62,14 +63,8 @@ export const AGENT_MESSAGES = {
   badStage: 'Etapa não encontrada no quadro deste projeto.'
 } as const
 
-export class AgentError extends Error {
-  constructor(
-    readonly code: string,
-    message: string
-  ) {
-    super(message)
-    this.name = 'AgentError'
-  }
+export class AgentError extends DomainError {
+  override name = 'AgentError'
 }
 
 /** Agente pronto para uma execução (a cópia do perfil vai junto com o fluxo). */

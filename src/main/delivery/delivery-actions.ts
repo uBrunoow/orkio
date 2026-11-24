@@ -13,7 +13,7 @@
 import type { ActionConfirm } from '../../shared/task-flow'
 import type { BoardStore } from '../board/board.store'
 import { GitHubApiError } from '../connectors/github/github.client'
-import { errorName } from '../ipc/payload'
+import { errorName } from '../errors'
 import type { OrkioAction } from '../flows/flow-runner'
 import { DeliveryError, type DeliveryService } from './delivery.service'
 import type { Result } from '../../shared/result'
