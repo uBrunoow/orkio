@@ -224,6 +224,45 @@ describe('GitHubRepoSignals', () => {
     expect(api.graphql).toHaveBeenCalledTimes(2)
   })
 
+  it('a query não pede times (exigiria read:org, que o OAuth não tem)', () => {
+    expect(detailsQuery([1])).not.toContain('on Team')
+  })
+
+  it('detalhes: dados parciais com erros ainda devolvem o que veio, com aviso', async () => {
+    const { api } = fakeApi()
+    api.graphql.mockImplementation(async () => ({
+      data: {
+        repository: {
+          pr1: {
+            reviewDecision: null,
+            reviewThreads: { nodes: [{ id: 't1', isResolved: false }] },
+            commits: null
+          },
+          pr2: null
+        }
+      },
+      errors: [{ type: 'FORBIDDEN', path: ['repository', 'pr2'] }]
+    }))
+    const repo = new GitHubRepoSignals(api, 'acme', 'app', () => NOW)
+    const details = await repo.pullDetails([parsePullItem(pull(1))!, parsePullItem(pull(2))!])
+    expect(details.get(1)).toMatchObject({ unresolvedComments: 1 })
+    expect(details.has(2)).toBe(false)
+    expect(repo.detailsWarning).toMatch(/Parte dos detalhes/)
+  })
+
+  it('detalhes: sem dados por falta de escopo explica o escopo', async () => {
+    const { api } = fakeApi()
+    api.graphql.mockRejectedValue(
+      new GitHubApiError(
+        'forbidden',
+        'A conexão do GitHub não tem permissão (revisões, comentários ou checks).'
+      )
+    )
+    const repo = new GitHubRepoSignals(api, 'acme', 'app', () => NOW)
+    await repo.pullDetails([parsePullItem(pull(1))!])
+    expect(repo.detailsWarning).toMatch(/não tem permissão/)
+  })
+
   it('query em lote só com números inteiros; parse tolera campos nulos', () => {
     const q = detailsQuery([1, 22, -3, 1.5])
     expect(q).toContain('pr1: pullRequest(number: 1)')
@@ -250,6 +289,23 @@ describe('GitHubRepoSignals', () => {
         ]
       ])
     )
+  })
+
+  it('cartão da PR: tamanho vem do GraphQL (sem escopo extra) e o autor da REST', () => {
+    const q = detailsQuery([3])
+    expect(q).toContain('additions deletions changedFiles')
+    expect(q).not.toContain('on Team')
+    const parsed = parseDetails(
+      { repository: { pr3: { additions: 4579, deletions: 1099, changedFiles: 127 } } },
+      [3]
+    )
+    expect(parsed.get(3)).toMatchObject({ additions: 4579, deletions: 1099, changedFiles: 127 })
+    const bad = parseDetails({ repository: { pr4: { additions: 'x', deletions: -1 } } }, [4])
+    expect(bad.get(4)).not.toHaveProperty('additions')
+    expect(bad.get(4)).not.toHaveProperty('deletions')
+    expect(parsePullItem(pull(1, { user: { login: 'uBrunoow' } }))?.author).toBe('uBrunoow')
+    expect(parsePullItem(pull(2, { user: { login: 'bad login!' } }))?.author).toBeNull()
+    expect(parsePullItem(pull(3))?.author).toBeNull()
   })
 
   it('3B: ids de pedidos de review, reviews com decisão e threads não resolvidas', () => {

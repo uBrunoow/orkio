@@ -172,6 +172,29 @@ test('Configurações: versão, canal e "Procurar atualizações"; banner com a 
   expect(await cspViolations(page)).toEqual([])
 })
 
+test('Configurações: "Manter o computador acordado" liga e fica salvo (desligado por padrão)', async () => {
+  const { page } = orkio!
+  await goTo(page, 'Atualizações')
+  const toggle = page.getByRole('switch', {
+    name: 'Manter o computador acordado enquanto agentes trabalham'
+  })
+  await expect(toggle).not.toBeChecked()
+  await toggle.click()
+  await expect(toggle).toBeChecked()
+  await expect
+    .poll(
+      () => (JSON.parse(readFileSync(configFile(), 'utf8')) as { keepAwake?: boolean }).keepAwake
+    )
+    .toBe(true)
+  await toggle.click()
+  await expect(toggle).not.toBeChecked()
+  await expect
+    .poll(
+      () => (JSON.parse(readFileSync(configFile(), 'utf8')) as { keepAwake?: boolean }).keepAwake
+    )
+    .toBeUndefined()
+})
+
 test('"Atualizar quando terminar" espera a execução do Claude acabar', async () => {
   await close()
   const { app, page } = await open()

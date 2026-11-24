@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SelectField } from '@/components/form'
@@ -10,6 +10,7 @@ import type { AlvaStatusView, BoardView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { CopyIcon, RefreshIcon } from '../../components/icons'
 import { PAGE_WIDTH } from '../../components/page-width'
+import { suggestAlvaTargets, type AlvaTargets } from './alva-targets'
 
 const STATE: Record<AlvaCheckItem['state'], { label: string; color: 'green' | 'red' | 'yellow' }> =
   {
@@ -18,9 +19,6 @@ const STATE: Record<AlvaCheckItem['state'], { label: string; color: 'green' | 'r
     missing: { label: 'Falta', color: 'yellow' },
     warning: { label: 'Atenção', color: 'yellow' }
   }
-
-const byName = (view: BoardView, re: RegExp): string | null =>
-  view.config?.stages.find((s) => re.test(s.name))?.id ?? null
 
 /**
  * Tela "alva-flow" (5B): pré-checagem do projeto, criação dos fluxos Alva (templates editáveis no
@@ -43,11 +41,18 @@ export function AlvaPage({
   const [planStatus, setPlanStatus] = useState<string>(
     view.statusOptions.find((o) => /andamento/i.test(o.name))?.id ?? view.statusOptions[0]?.id ?? ''
   )
-  const [targets, setTargets] = useState({
-    plan: byName(view, /planejando/i),
-    deliver: byName(view, /em andamento/i),
-    reviewed: byName(view, /^revisado$/i)
+  // Sugestão só depois de saber o que já está ligado (nunca aponta para a coluna de outro fluxo).
+  const [targets, setTargets] = useState<AlvaTargets>({
+    plan: null,
+    deliver: null,
+    review: null,
+    reviewed: null
   })
+  const touched = useRef(false)
+  const choose = (patch: Partial<AlvaTargets>): void => {
+    touched.current = true
+    setTargets((t) => ({ ...t, ...patch }))
+  }
 
   useEffect(() => {
     let active = true
@@ -61,6 +66,11 @@ export function AlvaPage({
       active = false
     }
   }, [projectId])
+
+  const stages = view.config?.stages
+  useEffect(() => {
+    if (status && !touched.current) setTargets(suggestAlvaTargets(stages ?? [], status))
+  }, [status, stages])
 
   const recheck = async (): Promise<void> => {
     setChecking(true)
@@ -93,7 +103,7 @@ export function AlvaPage({
     const r = await window.orkio.alva.addPlanningStage(projectId, planStatus)
     setBusy(false)
     if (r.ok) {
-      setTargets((t) => ({ ...t, plan: r.value }))
+      choose({ plan: r.value })
       setMessage({ tone: 'ok', text: 'Coluna “Planejando” criada.' })
       onBoardChanged()
     } else setMessage({ tone: 'error', text: r.error.message })
@@ -225,29 +235,36 @@ export function AlvaPage({
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <SelectField
             label="Coluna do “Alva: planejar”"
             options={stageOptions}
             value={targets.plan ?? ''}
-            onChange={(v: string) => setTargets((t) => ({ ...t, plan: v || null }))}
+            onChange={(v: string) => choose({ plan: v || null })}
           />
           <SelectField
             label="Coluna do “Alva: implementar e entregar”"
             options={stageOptions}
             value={targets.deliver ?? ''}
-            onChange={(v: string) => setTargets((t) => ({ ...t, deliver: v || null }))}
+            onChange={(v: string) => choose({ deliver: v || null })}
+          />
+          <SelectField
+            label="Coluna do “Alva: revisão publicada”"
+            options={stageOptions}
+            value={targets.review ?? ''}
+            onChange={(v: string) => choose({ review: v || null })}
           />
           <SelectField
             label="Coluna do “Alva: comentários da PR”"
             options={stageOptions}
             value={targets.reviewed ?? ''}
-            onChange={(v: string) => setTargets((t) => ({ ...t, reviewed: v || null }))}
+            onChange={(v: string) => choose({ reviewed: v || null })}
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          O “Alva: CI vermelho” fica sem coluna (rode à mão). Push e pedir review chegam na 5C: até
-          lá, o fluxo para e pede para você fazer à mão.
+          O “Alva: CI vermelho” fica sem coluna (rode à mão). O “Alva: revisão publicada” publica a
+          revisão do agente na PR como orkio[bot] depois da sua aprovação (precisa do GitHub App do
+          Orkio instalado no repositório).
         </p>
         <div className="flex">
           <Button disabled={busy} onClick={() => void create()}>

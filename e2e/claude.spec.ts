@@ -8,8 +8,10 @@ import {
   cspViolations,
   NOTION_TASK_IDS,
   launchOrkio,
+  openIntegration,
   notionState,
   removeDir,
+  terminalCalls,
   type OrkioApp,
   navTo,
   taskScreen,
@@ -161,8 +163,9 @@ test.afterAll(async () => {
 
 test('card do Claude Code: versão e login, sem e-mail nem credenciais', async () => {
   const { page } = await open()
+  await openIntegration(page, 'Claude Code')
   const claudeCard = page.getByRole('region', { name: 'Claude Code' })
-  await expect(claudeCard.getByTestId('claude-version')).toHaveText('2.1.9')
+  await expect(claudeCard.getByTestId('claude-version')).toHaveText('2.1.331')
   await expect(claudeCard).toContainText('Logado (assinatura)')
   await expect(page.locator('body')).not.toContainText('nao-mostrar@example.com')
 
@@ -225,6 +228,9 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   await expect(log).toContainText('shell: allow')
   await expect(log).toContainText('resposta: Ponto e vírgula')
   await expect(log).toContainText('Bloqueado: git push origin HEAD')
+  await expect(log).toContainText('Para publicar, use “Abrir PR” na aba PR & CI da tarefa.')
+  // O recibo do push bloqueado traz o caminho: o mesmo "Abrir PR" da aba PR & CI.
+  await expect(log.getByRole('button', { name: 'Abrir PR' })).toBeVisible()
   await expect(log).not.toContainText('VAZOU')
   await expect(log).not.toContainText('valor-super-secreto')
   await expect(log).not.toContainText('abcdefghijklmnop')
@@ -247,6 +253,25 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   await expect(changes.getByTestId('workspace-branch')).toHaveText(
     'feat/ORK-2-listar-tarefas-do-notion'
   )
+  await tab(page, 'Sessão')
+
+  // Ambiente (topo de Detalhes): branch, pasta, "+N −M" do git, contexto do último turno e
+  // terminal na pasta do worktree.
+  const env = (await tab(page, 'Detalhes')).getByTestId('environment-panel')
+  await expect(env.getByTestId('environment-branch')).toHaveText(
+    'feat/ORK-2-listar-tarefas-do-notion'
+  )
+  await expect(env.getByTestId('environment-folder')).toHaveText('ORK-2')
+  await expect(env.getByTestId('environment-shortstat')).toContainText(/\+\d+\s+−\d+/)
+  await expect(env.getByTestId('environment-context')).toContainText('41%')
+  await expect(env.getByRole('progressbar', { name: 'Contexto usado' })).toHaveAttribute(
+    'aria-valuenow',
+    '41'
+  )
+  await env.getByRole('button', { name: 'Abrir terminal aqui' }).click()
+  await expect.poll(() => terminalCalls(userDataDir).length).toBe(1)
+  expect(terminalCalls(userDataDir)[0]).toContain('/worktrees/')
+  expect(terminalCalls(userDataDir)[0]).toMatch(/ORK-2/)
   await tab(page, 'Sessão')
 
   // Pasta principal intocada: mesma branch, mesma mudança não commitada, nenhum arquivo novo.
@@ -395,6 +420,121 @@ test('"Rodar de novo" reabre com o mesmo comando; artefato anexado e publicado n
   for (const p of published) expect(p.markdown).not.toContain('ghp_abcdef')
 })
 
+test('seletor de modelo e raciocínio: vale só para a mensagem enviada', async () => {
+  const { page } = orkio!
+  const section = session(page)
+  const field = section.getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+  const trigger = section.getByRole('button', { name: /^Modelo e raciocínio: / })
+  await expect(trigger).toHaveAccessibleName('Modelo e raciocínio: Padrão do Claude Code')
+  await trigger.click()
+  await page.getByRole('option', { name: 'Opus' }).click()
+  await page.getByRole('radio', { name: 'Alto', exact: true }).click()
+  // Nome livre inválido: erro inline, nada aplicado.
+  await page.getByRole('option', { name: 'Outro…' }).click()
+  await page.getByRole('textbox', { name: 'Nome do modelo' }).fill('--perigoso x')
+  await page.getByRole('button', { name: 'Usar' }).click()
+  await expect(page.getByText('Use letras minúsculas, números, ponto e hífen.')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(trigger).toHaveAccessibleName('Modelo e raciocínio: Opus · Alto')
+
+  const before = await section.getByTestId('session-run').count()
+  await field.fill('oi')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(section.getByTestId('session-run')).toHaveCount(before + 1)
+  await expect(lastRun(section).getByTestId('run-status')).toHaveText('Concluída', {
+    timeout: 30_000
+  })
+  const sent = argsLog().at(-1)!
+  expect(sent['model']).toBe('opus')
+  expect(sent['effort']).toBe('high')
+  await expect(trigger).toHaveAccessibleName('Modelo e raciocínio: Padrão do Claude Code')
+
+  await field.fill('outra')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(section.getByTestId('session-run')).toHaveCount(before + 2)
+  await expect(section.getByTestId('session-run').last().getByTestId('run-status')).toHaveText(
+    'Concluída',
+    { timeout: 30_000 }
+  )
+  const next = argsLog().at(-1)!
+  expect(next['model']).toBeNull()
+  expect(next['effort']).toBeNull()
+})
+
+test('anexo no campo: o arquivo vai para .orkio/attachments do worktree e o prompt cita o caminho', async () => {
+  const { page } = orkio!
+  const section = session(page)
+  await section.getByTestId('attach-input').setInputFiles({
+    name: 'nota.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# Nota\n\nUse vírgula.')
+  })
+  const chip = section.getByRole('list', { name: 'Anexos da mensagem' })
+  await expect(chip).toContainText('nota.md')
+  await expect(chip).toContainText('21 B')
+  await section.getByRole('textbox', { name: 'Mensagem para o Claude Code' }).fill('leia a nota')
+  const before = await section.getByTestId('session-run').count()
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(section.getByTestId('session-run')).toHaveCount(before + 1)
+  const run = lastRun(section)
+  await expect(run.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  await expect(section.getByRole('list', { name: 'Anexos da mensagem' })).toHaveCount(0)
+  const dir = join(userDataDir, 'worktrees', 'proj-claude', 'ORK-2', '.orkio', 'attachments')
+  const files = readdirSync(dir)
+  expect(files).toHaveLength(1)
+  expect(files[0]).toMatch(/^[0-9a-f]{8}-nota\.md$/)
+  expect(readFileSync(join(dir, files[0]!), 'utf8')).toContain('Use vírgula.')
+  expect(argsLog().at(-1)!['attachmentsNote']).toBe(
+    `Anexos (leia com a ferramenta Read): .orkio/attachments/${files[0]}`
+  )
+})
+
+test('anexo inválido é recusado antes de enviar', async () => {
+  const { page } = orkio!
+  const section = session(page)
+  await section.getByTestId('attach-input').setInputFiles({
+    name: 'programa.exe',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from('MZ')
+  })
+  await expect(section.getByRole('alert')).toContainText(
+    'Tipo de arquivo não aceito: programa.exe.'
+  )
+})
+
+test('subagentes do Claude aparecem na conversa e a linha "Esperando" some ao terminar', async () => {
+  const { page } = orkio!
+  const section = session(page)
+  const field = section.getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+  await field.fill('subagentes-parcial')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  const group = lastRun(section).getByTestId('subagent-group')
+  await expect(group).toContainText('2 subagentes · 1 trabalhando', { timeout: 30_000 })
+  await expect(group).toContainText('Revisar API')
+  await expect(group).toContainText('Escrever testes')
+  await expect(group).toContainText('review-agent')
+  await expect(group).toContainText('2 ferramentas')
+  await expect(group).toContainText('Concluído')
+  await expect(section.getByTestId('waiting-subagents')).toHaveText(
+    'Esperando 1 subagente: Escrever testes'
+  )
+  await section.getByRole('button', { name: 'Parar' }).click()
+  await expect(lastRun(section).getByTestId('run-status')).toHaveText('Cancelada', {
+    timeout: 20_000
+  })
+  await expect(section.getByTestId('waiting-subagents')).toHaveCount(0)
+  await expect(lastRun(section).getByTestId('subagent-group')).toContainText(
+    '2 subagentes · 1 interrompido'
+  )
+
+  await field.fill('subagentes')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  const run = lastRun(section)
+  await expect(run.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  await expect(run.getByTestId('subagent-group')).toContainText('2 subagentes · concluídos')
+  await expect(section.getByTestId('waiting-subagents')).toHaveCount(0)
+})
+
 test('ver diff e limpar ambiente (a branch fica)', async () => {
   const { page } = orkio!
   const changes = await tab(page, 'Mudanças')
@@ -415,6 +555,7 @@ test('ver diff e limpar ambiente (a branch fica)', async () => {
 test('sem login no Claude Code: card avisa e mandar mensagem mostra erro claro', async () => {
   await close()
   const { page } = await open({ loggedIn: false })
+  await openIntegration(page, 'Claude Code')
   const claudeCard = page.getByRole('region', { name: 'Claude Code' })
   await expect(claudeCard).toContainText('Não logado')
   const section = await openPanel(page)

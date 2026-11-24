@@ -3,6 +3,7 @@
  * O log é normalizado a partir do `stream-json` do CLI (ver main/claude/stream.ts).
  */
 import type { BranchKind } from './slug'
+import type { RuntimeChoice } from './agent-runtime'
 
 export type RunMode = 'prompt' | 'command'
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
@@ -11,7 +12,25 @@ export type RunLogEvent =
   | { kind: 'status'; status: RunStatus; message?: string }
   | { kind: 'init'; model: string | null; plugins: string[]; commands: string[] }
   | { kind: 'text'; text: string }
-  | { kind: 'tool'; id: string; tool: string; summary: string; file?: string }
+  /** Uso do contexto na mensagem principal (só números; ver `shared/context-usage.ts`). */
+  | { kind: 'usage'; inputTokens: number; contextWindow: number }
+  | {
+      kind: 'tool'
+      id: string
+      tool: string
+      summary: string
+      file?: string
+      /** Id do `Task`/`Agent` que lançou esta chamada (ferramenta de um subagente). */
+      parent?: string
+    }
+  | {
+      kind: 'subagent'
+      id: string
+      title: string
+      agentType: string | null
+      background: boolean
+      at: string
+    }
   | { kind: 'tool_result'; id: string; error: boolean }
   | {
       kind: 'permission'
@@ -91,6 +110,8 @@ export interface ClaudeCodeStatus {
   authMethod: string | null
   meetsMinimum: boolean
   minimumVersion: string
+  /** O CLI aceita `--effort` (versão ≥ `CLAUDE_EFFORT_VERSION`). */
+  supportsEffort: boolean
 }
 
 /** Resultado das operações do Claude Code no renderer (erros já em pt-BR). */
@@ -129,6 +150,8 @@ export interface RunPreparation extends TaskRunsState {
   commands: string[]
   /** Agente da tarefa (8A): "Rodar como <nome>"; `problem` = não pode rodar agora (e por quê). */
   agent: { name: string; problem: string | null } | null
+  /** A página da tarefa no Notion foi lida e está vazia (fluxos não rodam assim). */
+  descriptionEmpty: boolean
 }
 
 export interface StartRunRequest {
@@ -162,6 +185,10 @@ export interface SendMessageRequest {
   fresh?: boolean
   /** 8A: rodar com as instruções do agente da tarefa (padrão: sim, se houver agente). */
   asAgent?: boolean
+  /** Modelo e/ou raciocínio só desta mensagem (vence o passo e o agente). */
+  runtime?: Partial<RuntimeChoice>
+  /** Arquivos anexados (imagem, PDF, md, txt): o main valida pelo conteúdo e grava no worktree. */
+  attachments?: { name: string; mime: string; data: Uint8Array }[]
 }
 
 export type EditorId = 'cursor' | 'code'
@@ -185,6 +212,8 @@ export interface ClaudeDiff {
   uncommitted: UncommittedFile[]
   /** Arquivos com linha adicionada que parece segredo (o valor já vem escondido em `diff`). */
   secrets: string[]
+  /** Linhas adicionadas/removidas contra a base (tudo que o git diff vê); `null` = não deu para ler. */
+  shortstat: { added: number; removed: number } | null
 }
 
 /**

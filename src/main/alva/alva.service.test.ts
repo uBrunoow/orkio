@@ -191,6 +191,79 @@ describe('alva-flow: vínculo e extratores', () => {
     expect(await service.taskDocument('p1', 'notion-1')).toBeNull()
   })
 
+  it('taskDocument sem vínculo: o rascunho que o /spec está escrevendo no worktree', async () => {
+    const project = await mkdtemp(join(tmpdir(), 'orkio-alva-proj-'))
+    try {
+      await mkdir(join(project, 'backlog', 'tasks'), { recursive: true })
+      // A task-1 é igual na pasta do projeto: não é desta tarefa.
+      await writeFile(
+        join(project, 'backlog', 'tasks', 'task-1 - Antiga.md'),
+        task('TASK-1', 'Done', { title: 'Antiga' })
+      )
+      const svc = new AlvaService({
+        db,
+        worktreePath: () => wt,
+        projectDir: () => project,
+        taskInfo: async () => null
+      })
+      expect(await svc.taskDocument('p1', 'notion-1')).toBeNull()
+      await write(
+        'task-7 - Pipeline.md',
+        task('TASK-7', 'Requirements Defined', { title: 'Pipeline', ac: ['- [ ] #1 CA: roda'] })
+      )
+      const doc = await svc.taskDocument('p1', 'notion-1')
+      expect(doc).toMatchObject({ draft: true, info: { id: 'TASK-7', title: 'Pipeline' } })
+      expect(doc?.body).toContain('CA: roda')
+      expect(await svc.taskSummary('p1', 'notion-1')).toMatchObject({ id: 'TASK-7' })
+      // Vinculada, deixa de ser rascunho.
+      svc.setLink('p1', 'notion-1', 'TASK-7')
+      expect((await svc.taskDocument('p1', 'notion-1'))?.draft).toBeUndefined()
+    } finally {
+      await rm(project, { recursive: true, force: true })
+    }
+  })
+
+  it('primeira rodada (sem worktree na hora da foto): compara com a pasta do projeto', async () => {
+    // O worktree nasce no passo: antes dele, a foto vem da pasta do projeto (com as tasks antigas).
+    const project = await mkdtemp(join(tmpdir(), 'orkio-alva-proj-'))
+    const fresh = join(tmpdir(), `orkio-alva-novo-${Date.now()}`)
+    try {
+      await mkdir(join(project, 'backlog', 'tasks'), { recursive: true })
+      for (const n of [1, 2, 3]) {
+        await writeFile(
+          join(project, 'backlog', 'tasks', `task-${n} - Velha-${n}.md`),
+          task(`TASK-${n}`, 'Done', { title: `Velha ${n}` })
+        )
+      }
+      const svc = new AlvaService({
+        db,
+        worktreePath: () => fresh,
+        projectDir: () => project,
+        taskInfo: async () => null
+      })
+      const c: ExtractContext = { ...ctx('alva-flow:spec'), worktreePath: fresh }
+      const snap = await svc.extractor.snapshot!(c)
+      // O passo cria o worktree (cópia da branch padrão) e escreve a task nova.
+      await mkdir(join(fresh, 'backlog', 'tasks'), { recursive: true })
+      for (const n of [1, 2, 3]) {
+        await writeFile(
+          join(fresh, 'backlog', 'tasks', `task-${n} - Velha-${n}.md`),
+          task(`TASK-${n}`, 'Done', { title: `Velha ${n}` })
+        )
+      }
+      await writeFile(
+        join(fresh, 'backlog', 'tasks', 'task-4 - Nova.md'),
+        task('TASK-4', 'Requirements Defined', { title: 'Nova' })
+      )
+      const r = await svc.extractor.extract({ resultText: '', ctx: c, snapshot: snap })
+      expect(r.choose).toBeUndefined()
+      expect(svc.getLink('notion-1')).toBe('TASK-4')
+    } finally {
+      await rm(project, { recursive: true, force: true })
+      await rm(fresh, { recursive: true, force: true })
+    }
+  })
+
   it('/spec atualiza uma task que já existia no repositório: vincula a ela (não é "sem task")', async () => {
     // A task-38 já estava no git (de outra rodada ou de outra pessoa); o /spec a reescreve.
     await write('task-5 - Existente.md', task('TASK-5', 'To Do', { title: 'Existente' }))

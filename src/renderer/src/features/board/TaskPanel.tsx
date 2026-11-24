@@ -12,15 +12,19 @@ import type { FlowRunView } from '../../../../shared/task-flow'
 import type { AgentBadge } from '../../../../shared/agent'
 import { useTaskRuns } from '../claude/useTaskRuns'
 import { TaskFlowSection, type TaskActivity } from '../task-flows/TaskFlowSection'
+import { FlowPlanPanel } from '../task-flows/FlowPlanPanel'
 import { flowPlan, flowStepIndex } from '../task-flows/flow-plan'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
+import { ReviewPanel } from '../task/ReviewPanel'
 import { availableTabs, defaultPanelTab, PANEL_TAB_LABEL, type PanelTab } from '../task/panel-tab'
-import { taskLayout } from '../task/task-layout'
+import { compactPhaseBar, taskLayout } from '../task/task-layout'
 import { taskPhases } from '../task/task-phases'
 import { TaskPhaseBar } from '../task/TaskPhaseBar'
-import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
+import { CrumbLink, ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
 import { useWindowWidth } from '../task/useWindowWidth'
 import { StageSelector, TaskChanges, TaskDetails, useBacklogSummary } from './TaskDetails'
+import { OpenPrButton, canOpenPr } from './OpenPrButton'
+import { EnvironmentPanel } from '../task/EnvironmentPanel'
 import { TaskSession } from './TaskSession'
 
 /**
@@ -41,7 +45,8 @@ export function TaskPanel({
   onToggleAutomation,
   onBranchesChanged,
   focusSection = null,
-  projectName = null
+  projectName = null,
+  onOpenBoard
 }: {
   projectId: string
   /** Agente da tarefa (8A). */
@@ -58,12 +63,15 @@ export function TaskPanel({
   focusSection?: TaskSection | null
   /** Projeto no caminho da barra ("orkio › ORK-142 · título"). */
   projectName?: string | null
+  /** Clique no projeto do caminho: volta ao quadro. */
+  onOpenBoard?: () => void
 }): React.JSX.Element {
   // Aba escolhida pela pessoa; até lá, a aba da fase atual (`defaultPanelTab`).
   const [chosenTab, setTab] = useState<PanelTab | null>(
     focusSection === 'history' ? 'details' : null
   )
-  const layout = taskLayout(useWindowWidth())
+  const windowWidth = useWindowWidth()
+  const layout = taskLayout(windowWidth)
   // Vindo do sino ou de uma notificação: rola até a seção certa quando a tarefa abre.
   useEffect(() => {
     if (!focusSection) return
@@ -79,6 +87,7 @@ export function TaskPanel({
   const runs = useTaskRuns(projectId, card.taskId)
   const [history, setHistory] = useState<BoardHistoryEntry[] | null>(null)
   const [flowLive, setFlowLive] = useState(false)
+  const [planOpen, setPlanOpen] = useState(false)
   const [focusRun, setFocusRun] = useState<{ runId: string; nonce: number } | null>(null)
   // Execuções do fluxo: cada turno do Claude Code disparado por um passo mostra de onde veio.
   const [flowRuns, setFlowRuns] = useState<readonly FlowRunView[]>([])
@@ -91,6 +100,8 @@ export function TaskPanel({
         if (
           m.taskId === card.taskId &&
           (m.event.kind === 'status' ||
+            // Pergunta do Claude (ex.: "Aprova a spec?"): relê a spec/plano para aprovar vendo.
+            m.event.kind === 'question' ||
             (m.event.kind === 'permission' && m.event.state === 'blocked'))
         ) {
           setTick((n) => n + 1)
@@ -162,6 +173,7 @@ export function TaskPanel({
         onOpenRun={(runId) => setFocusRun({ runId, nonce: Date.now() })}
         onLiveChange={setFlowLive}
         onRunsChange={setFlowRuns}
+        onShowPlan={() => setPlanOpen(true)}
       />
     </div>
   )
@@ -182,6 +194,7 @@ export function TaskPanel({
         focusRun={focusRun}
         backlogLinked={!!backlog?.linked}
         flowOrigins={flowOrigins}
+        canOpenPr={canOpenPr(signals?.pr) && !!state?.workspace}
       />
     </div>
   )
@@ -218,12 +231,16 @@ export function TaskPanel({
   )
 
   const hasBacklogDoc = !!backlog?.task
-  const tabs = availableTabs(hasBacklogDoc)
+  const tabs = availableTabs(hasBacklogDoc, !!signals?.pr)
   const phases = taskPhases({
     plan: flowRuns[0] ? flowPlan(flowRuns[0]) : null,
     stages,
     stageId: card.stageId
   })
+  const liveRun =
+    flowRuns[0] && flowRuns[0].status !== 'finished' && flowRuns[0].status !== 'cancelled'
+      ? flowRuns[0]
+      : null
   const currentPhase =
     phases.find((p) => p.state === 'waiting' || p.state === 'current' || p.state === 'failed')
       ?.label ?? null
@@ -252,8 +269,47 @@ export function TaskPanel({
       />
     ),
     changes,
-    pr: details(false, null, 'pr'),
-    details: details(false, null, 'details')
+    pr: (
+      <div className="flex flex-col gap-6">
+        {/* Sem PR aberta e com ambiente: "commits à frente" não é lido aqui (o push recusa se não
+            houver nada novo). */}
+        {canOpenPr(signals?.pr) && state?.workspace && (
+          <OpenPrButton
+            projectId={projectId}
+            taskId={card.taskId}
+            flowActive={flowRuns.some((r) =>
+              ['running', 'waiting_gate', 'paused', 'awaiting_decision'].includes(r.status)
+            )}
+          />
+        )}
+        {details(false, null, 'pr')}
+      </div>
+    ),
+    review: (
+      <ReviewPanel
+        projectId={projectId}
+        taskId={card.taskId}
+        active={tab === 'review'}
+        refreshKey={tick}
+      />
+    ),
+    details: (
+      <div className="flex flex-col gap-5">
+        <EnvironmentPanel
+          projectId={projectId}
+          taskId={card.taskId}
+          projectName={projectName}
+          workspace={state?.workspace ?? null}
+          latestRun={state?.runs[0] ?? null}
+          signals={signals}
+          flowActive={flowRuns.some((r) =>
+            ['running', 'waiting_gate', 'paused', 'awaiting_decision'].includes(r.status)
+          )}
+          refreshKey={tick}
+        />
+        {details(false, null, 'details')}
+      </div>
+    )
   }
 
   const sidePanel = (
@@ -301,9 +357,13 @@ export function TaskPanel({
     <section aria-label={`Tarefa ${label}`} className="flex h-full min-h-0 flex-col">
       <ScreenBarStart>
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex min-w-0 items-center gap-1 text-sm">
+          {/* Sem min-w-0: o título não encolhe abaixo do mínimo dele (sobreporia a branch). */}
+          <div className="flex items-center gap-1 text-sm">
             {projectName && (
-              <span className="shrink-0 text-muted-foreground">{`${projectName} ›`}</span>
+              <span className="shrink-0 text-muted-foreground">
+                <CrumbLink label={projectName} onClick={onOpenBoard} />
+                <span aria-hidden="true"> ›</span>
+              </span>
             )}
             {card.displayId && (
               <span className="shrink-0 font-medium text-foreground">{`${card.displayId} ·`}</span>
@@ -312,15 +372,29 @@ export function TaskPanel({
               {card.title}
             </ScreenTitle>
           </div>
-          {branch && (
-            <span className="min-w-0 truncate font-mono text-2xs text-subtle-foreground">
+          {/* Janela estreita: a branch sai da barra (fica na aba PR & CI e no Ambiente). */}
+          {branch && !compactPhaseBar(windowWidth) && (
+            <span className="min-w-0 shrink-[4] truncate font-mono text-2xs text-subtle-foreground">
               {branch}
             </span>
           )}
         </div>
       </ScreenBarStart>
       <ScreenBarEnd>
-        <TaskPhaseBar phases={phases} />
+        <TaskPhaseBar
+          phases={phases}
+          compact={compactPhaseBar(windowWidth)}
+          plan={
+            liveRun
+              ? {
+                  label: `Plano do fluxo ${liveRun.flowName}`,
+                  open: planOpen,
+                  onOpenChange: setPlanOpen,
+                  children: <FlowPlanPanel run={liveRun} onCancelled={() => setPlanOpen(false)} />
+                }
+              : null
+          }
+        />
         <StageSelector card={card} stages={stages} onMove={onMove} compact />
       </ScreenBarEnd>
       {layout === 'columns' ? (

@@ -10,6 +10,7 @@
  * - O parser aceita só um subconjunto estrito de YAML (escalares, listas `[a, b]` e um nível de
  *   mapa em `limits`); qualquer outra coisa vira erro ou aviso, nunca execução.
  */
+import { CLAUDE_MODELS, isEffort, isModelName, type Effort } from './agent-runtime'
 import type { Flow } from './task-flow'
 
 export const AGENT_FORMAT = 'agent/v1'
@@ -37,16 +38,12 @@ export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
 export const AGENT_COLORS = ['orange', 'blue', 'green', 'purple', 'pink', 'teal', 'yellow'] as const
 export type AgentColor = (typeof AGENT_COLORS)[number]
 
-/** Aliases aceitos pelo `--model` do CLI; `default` = não passa a flag (o padrão do usuário). */
-export const AGENT_MODELS = ['default', 'sonnet', 'opus', 'haiku'] as const
-export type AgentModel = (typeof AGENT_MODELS)[number]
+/** Modelos sugeridos no editor; qualquer nome que passe `isModelName` também vale. */
+export const AGENT_MODELS: readonly string[] = CLAUDE_MODELS.map((m) => m.id)
 
-export const AGENT_MODEL_LABELS: Record<AgentModel, string> = {
-  default: 'Padrão do Claude Code',
-  sonnet: 'Sonnet',
-  opus: 'Opus',
-  haiku: 'Haiku'
-}
+export const AGENT_MODEL_LABELS: Record<string, string> = Object.fromEntries(
+  CLAUDE_MODELS.map((m) => [m.id, m.label])
+)
 
 export const AGENT_LIMITS = {
   /** Tamanho máximo do arquivo do perfil (bytes). */
@@ -77,7 +74,10 @@ export interface AgentProfile {
   name: string
   role: AgentRole
   color: AgentColor
-  model: AgentModel
+  /** `default` (padrão do Claude Code) ou um nome de modelo (`isModelName`). */
+  model: string
+  /** Raciocínio (`--effort`); `null` = padrão do Claude Code. */
+  effort: Effort | null
   /** Fluxo de tarefa preferido (id no projeto); `null` = usa o fluxo da coluna. */
   flow: string | null
   /** Comandos/skills do catálogo que o agente pode rodar; vazio = todos. */
@@ -123,6 +123,7 @@ export function defaultAgent(partial: Partial<AgentProfile> = {}): AgentProfile 
     role: 'implementer',
     color: 'orange',
     model: 'default',
+    effort: null,
     flow: null,
     commands: [],
     delivery: true,
@@ -168,6 +169,7 @@ const KNOWN_KEYS = new Set([
   'role',
   'color',
   'model',
+  'effort',
   'flow',
   'commands',
   'delivery',
@@ -216,7 +218,8 @@ export function parseAgentFile(text: string): AgentParse {
     name: str('name') ?? '',
     role: (str('role') ?? base.role) as AgentRole,
     color: (str('color') ?? base.color) as AgentColor,
-    model: (str('model') ?? base.model) as AgentModel,
+    model: str('model') ?? base.model,
+    effort: v['effort'] === undefined || v['effort'] === null ? null : (v['effort'] as Effort),
     flow: v['flow'] === null || v['flow'] === undefined ? null : (str('flow') ?? '\u0000'),
     commands: Array.isArray(commandsRaw) ? commandsRaw : [],
     delivery: v['delivery'] === undefined ? base.delivery : (v['delivery'] as boolean),
@@ -243,8 +246,8 @@ export function validateAgent(p: AgentProfile): string[] {
   else if (/[\n\r]/.test(p.name)) errors.push('O nome não pode ter quebras de linha.')
   if (!AGENT_ROLES.includes(p.role)) errors.push('Papel desconhecido.')
   if (!AGENT_COLORS.includes(p.color)) errors.push('Cor desconhecida.')
-  if (!AGENT_MODELS.includes(p.model))
-    errors.push('Modelo desconhecido (default, sonnet, opus, haiku).')
+  if (!isModelName(p.model)) errors.push('Modelo inválido')
+  if (p.effort !== null && !isEffort(p.effort)) errors.push('Raciocínio inválido')
   if (p.flow !== null && (typeof p.flow !== 'string' || !FLOW_ID.test(p.flow))) {
     errors.push('Fluxo preferido inválido.')
   }
@@ -294,6 +297,7 @@ export function serializeAgent(p: AgentProfile): string {
     `role: ${p.role}`,
     `color: ${p.color}`,
     `model: ${p.model}`,
+    ...(p.effort ? [`effort: ${p.effort}`] : []),
     `flow: ${p.flow === null ? 'null' : quote(p.flow)}`,
     `commands: [${p.commands.map(quote).join(', ')}]`,
     `delivery: ${p.delivery}`,
@@ -343,7 +347,10 @@ export function checkAgentFlow(p: AgentProfile, flow: Flow): string | null {
     (s) => s.type === 'claude_command' && !commandAllowed(p, s.command)
   )
   if (denied && denied.type === 'claude_command') {
-    return `${p.name} não tem permissão para o comando /${denied.command} (passo “${denied.name}”).`
+    // Com lista de comandos, um pedido em texto (sem comando) também fica de fora.
+    return denied.command
+      ? `${p.name} não tem permissão para o comando /${denied.command} (passo “${denied.name}”).`
+      : `${p.name} só roda os comandos da lista, e o passo “${denied.name}” é um pedido em texto.`
   }
   return null
 }
@@ -528,6 +535,9 @@ export interface AgentBadge {
   name: string
   color: AgentColor
   initials: string
+  /** Modelo/raciocínio do perfil (rótulo "Do agente: …" no seletor); ausente = perfil indisponível. */
+  model?: string
+  effort?: Effort | null
   /** Perfil apagado, inválido ou sem aprovação: o card avisa. */
   problem: string | null
 }

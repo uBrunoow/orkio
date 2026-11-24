@@ -16,7 +16,7 @@ import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
 import { registerAgentsIpc, toProfile } from './agents.ipc'
 import type { AgentsService } from '../agents/agents.service'
 import { AgentError } from '../agents/agents.service'
-import { defaultAgent } from '../../shared/agent'
+import { defaultAgent, validateAgent } from '../../shared/agent'
 
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>
 
@@ -355,6 +355,15 @@ describe('shell.openExternal', () => {
     expect(isAllowedExternalUrl('https://github.com/uBrunoow/orkio/settings')).toBe(false)
   })
 
+  it('instalação do GitHub App do Orkio: só a página de instalação do App', () => {
+    expect(isAllowedExternalUrl('https://github.com/apps/orkio/installations/new')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/apps/orkio-dev/installations/new')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/apps/orkio')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/apps/orkio/installations/new/x')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/apps/Orkio/installations/new')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/settings/apps/orkio')).toBe(false)
+  })
+
   it('site do Orkio só com https e sem porta (Configurações > Sobre)', () => {
     const rules = siteUrlRules('https://orkio.example')
     expect(isAllowedExternalUrl('https://orkio.example/privacidade', rules)).toBe(true)
@@ -528,12 +537,61 @@ describe('registerSignalsIpc', () => {
   })
 })
 
+describe('registerSignalsIpc: reviewThreads', () => {
+  it('valida os ids, normaliza force e não vaza erro', async () => {
+    const ipc = fakeIpc()
+    const reviews = {
+      get: vi
+        .fn()
+        .mockResolvedValueOnce({ ok: false, code: 'no_pr', message: 'Sem PR.' })
+        .mockRejectedValueOnce(new Error('gho_SECRET'))
+    }
+    registerSignalsIpc(ipc, { get: vi.fn() } as never, guard, Promise.resolve(), reviews as never)
+    const ch = IPC_CHANNELS.signals.reviewThreads
+    expect(await ipc.invoke(ch, '../x', 'task')).toMatchObject({ ok: false })
+    expect(await ipc.invoke(ch, 'proj-1', { id: 1 })).toMatchObject({ ok: false })
+    expect(reviews.get).not.toHaveBeenCalled()
+    expect(await ipc.invoke(ch, 'proj-1', 'task-1', { force: 1 })).toEqual({
+      ok: false,
+      error: { code: 'no_pr', message: 'Sem PR.' }
+    })
+    expect(reviews.get).toHaveBeenCalledWith('proj-1', 'task-1', false)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const failed = await ipc.invoke(ch, 'proj-1', 'task-1', { force: true })
+    expect(reviews.get).toHaveBeenLastCalledWith('proj-1', 'task-1', true)
+    expect(JSON.stringify(failed)).not.toContain('SECRET')
+    expect(errors.mock.calls.flat().join(' ')).not.toContain('SECRET')
+    errors.mockRestore()
+    ipc.trusted = false
+    await expect(ipc.invoke(ch, 'proj-1', 'task-1')).rejects.toThrow('não autorizada')
+  })
+})
+
 describe('allowlist: PRs do GitHub', () => {
   it('aceita só /<owner>/<repo>/pull/<n>', () => {
     expect(isAllowedExternalUrl('https://github.com/acme/app.js/pull/12')).toBe(true)
     expect(isAllowedExternalUrl('https://github.com/acme/app/pull/12/files')).toBe(false)
     expect(isAllowedExternalUrl('https://github.com/acme/app/issues/12')).toBe(false)
     expect(isAllowedExternalUrl('https://gist.github.com/acme/app/pull/12')).toBe(false)
+  })
+
+  it('owner com "_" (conta gerenciada) e link da revisão com âncora', () => {
+    expect(isAllowedExternalUrl('https://github.com/ana_acme/app/pull/12')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/pull/12#pullrequestreview-99')).toBe(
+      true
+    )
+    expect(isAllowedExternalUrl('https://github.com/ana.acme/app/pull/12')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com:8443/acme/app/pull/12')).toBe(false)
+  })
+
+  it('Abrir PR: aceita só a comparação do GitHub (base...branch) de um repositório', () => {
+    expect(
+      isAllowedExternalUrl('https://github.com/acme/app/compare/main...feat/ORK-7-x?expand=1')
+    ).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/compare/feat%2Fx')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/compare/')).toBe(false)
+    expect(isAllowedExternalUrl('https://github.com/acme/app/compare/a/../../settings')).toBe(false)
+    expect(isAllowedExternalUrl('https://evil.com/acme/app/compare/main...x')).toBe(false)
   })
 
   it('5C: aceita a branch da tarefa em /<owner>/<repo>/tree/<branch>', () => {
@@ -744,11 +802,22 @@ describe('registerAgentsIpc', () => {
     expect(JSON.stringify(r)).not.toContain('ghp_')
   })
 
+  it('payload com modelo/raciocínio inválido não vira agente válido; nome longo vale', () => {
+    const bad = toProfile({ ...ANA, model: '--x' })
+    expect(bad && validateAgent(bad)).toContain('Modelo inválido')
+    const ultra = toProfile({ ...ANA, effort: 'ultra' })
+    expect(ultra && validateAgent(ultra)).toContain('Raciocínio inválido')
+    const long = toProfile({ ...ANA, model: 'claude-sonnet-4-5-20250929', effort: 'high' })
+    expect(long).not.toBeNull()
+    expect(long && validateAgent(long)).toEqual([])
+  })
+
   it('toProfile só aceita a forma certa', () => {
     expect(toProfile(ANA)).toEqual(ANA)
     expect(toProfile({ ...ANA, commands: 'tudo' })).toBeNull()
     expect(toProfile({ ...ANA, limits: null })).toBeNull()
     expect(toProfile([])).toBeNull()
+    expect(toProfile({ ...ANA, effort: 7 })).toBeNull()
   })
 })
 

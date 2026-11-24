@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import {
   createUserDataDir,
   cspViolations,
   externalCalls,
   launchOrkio,
+  openIntegration,
   notionCard,
   openedUrls,
   removeDir,
@@ -29,6 +30,7 @@ const secretFiles = (): string[] => (existsSync(secretsDir()) ? readdirSync(secr
 
 async function open(notion: FakeServices['notion']): Promise<OrkioApp> {
   orkio = await launchOrkio(userDataDir, { notion })
+  await openIntegration(orkio.page, 'Notion')
   return orkio
 }
 
@@ -66,7 +68,8 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
     board: Object.keys(window.orkio.board),
     automation: Object.keys(window.orkio.automation),
     flow: Object.keys(window.orkio.flow),
-    overview: Object.keys(window.orkio.overview)
+    overview: Object.keys(window.orkio.overview),
+    power: Object.keys(window.orkio.power)
   }))
   expect(isolation).toEqual({
     require: 'undefined',
@@ -84,11 +87,13 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'claude',
       'signals',
       'projects',
+      'power',
       'updates',
       'overview',
       'openExternal'
     ],
     overview: ['get', 'refresh', 'activity', 'onChanged'],
+    power: ['keepAwake', 'setKeepAwake'],
     notion: [
       'getStatus',
       'connect',
@@ -130,7 +135,7 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'listTasks',
       'searchTasks'
     ],
-    signals: ['get'],
+    signals: ['get', 'reviewThreads'],
     board: [
       'get',
       'save',
@@ -215,6 +220,7 @@ test('build de produção carrega a CSP estrita, sem violações', async () => {
 
 test('link "Como criar um token" usa openExternal com allowlist', async () => {
   const { app, page } = orkio!
+  await openIntegration(page, 'Notion')
   await notionCard(page)
     .getByRole('button', { name: /Como criar um token/ })
     .click()
@@ -241,7 +247,9 @@ test('token válido → conectado, salvo criptografado, token fora do renderer',
   await setFakes(app, { notion: 'ok' })
   await notionCard(page).getByRole('button', { name: 'Tentar novamente' }).click()
 
-  await expect(notionCard(page).getByText('Ada Lovelace', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('article', { name: 'Notion', exact: true })).toContainText(
+    'Ada Lovelace'
+  )
   await expect(notionCard(page).getByLabel('Token do Notion')).toHaveCount(0)
 
   // Depois de conectar, o assistente dos bancos também consulta o Notion (/search).
@@ -305,6 +313,35 @@ test('desconectar pede confirmação e apaga o token do disco', async () => {
   expect(secretFiles()).toEqual([])
   expect(await cspViolations(page)).toEqual([])
   await close()
+})
+
+test('grade de integrações: busca filtra, "/" foca e "Plugins e comandos" abre o Claude Code', async () => {
+  const { page } = await open('401')
+  const search = page.getByRole('searchbox', { name: 'Buscar integração' })
+  const article = (name: string): Locator => page.getByRole('article', { name, exact: true })
+
+  // "/" foca a busca (fora de campos de texto).
+  await page.getByRole('heading', { name: 'Integrações', level: 1 }).click()
+  await page.keyboard.press('/')
+  await expect(search).toBeFocused()
+
+  await search.fill('git')
+  await expect(article('GitHub')).toBeVisible()
+  await expect(article('GitHub CLI')).toBeVisible()
+  await expect(article('Notion')).toHaveCount(0)
+  await expect(article('Claude Code')).toHaveCount(0)
+
+  // Com o Claude Code escondido pela busca, o botão dos plugins limpa a busca e o abre.
+  await search.fill('plugin')
+  await expect(article('Claude Code')).toHaveCount(0)
+  const plugins = article('Plugins e comandos')
+  await expect(plugins.getByRole('button')).not.toHaveAttribute('aria-expanded', /.*/)
+  await plugins.getByRole('button', { name: /^Ver no Claude Code/ }).click()
+  await expect(search).toHaveValue('')
+  await expect(page.getByRole('region', { name: 'Claude Code' })).toBeVisible()
+  // De novo: continua aberto (não alterna).
+  await plugins.getByRole('button', { name: /^Ver no Claude Code/ }).click()
+  await expect(page.getByRole('region', { name: 'Claude Code' })).toBeVisible()
 })
 
 test('nenhum token aparece em logs do processo ou do console', () => {

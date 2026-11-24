@@ -69,7 +69,6 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
       ['builtin:implementador', 'repo:ana', 'builtin:revisor'].map((k) => [k, agent(k)])
     ),
     load: new Map(),
-    activeTotal: 0,
     busy: new Set(),
     finishedHere: new Set(),
     carriedIn: new Set(),
@@ -140,7 +139,7 @@ describe('validateOrchestrator', () => {
     expect(validateOrchestrator(draft, STAGES, READY, BINDINGS).errors).toEqual([])
   })
 
-  it('erros: sem fila, etapa removida, fila como trabalho, sem agentes, agente inválido', () => {
+  it('erros: etapa removida, sem agentes, agente inválido (a fila não é mais exigida)', () => {
     const { errors } = validateOrchestrator(
       {
         ...CONFIG,
@@ -156,7 +155,6 @@ describe('validateOrchestrator', () => {
       BINDINGS
     )
     expect(errors).toEqual([
-      'Escolha a coluna de fila (de onde puxar tarefas).',
       'A etapa de trabalho 1 não existe mais no quadro.',
       'Escolha ao menos um agente para “Em andamento”.',
       'Depois de “Em andamento”: escolha outra etapa.',
@@ -219,75 +217,31 @@ describe('planTick', () => {
     expect(planTick(input({ config: { ...CONFIG, lanes: [] } }))).toEqual([])
   })
 
-  it('puxa da fila por prioridade e depois a mais antiga, até o teto, dividindo entre agentes', () => {
+  it('nunca puxa da fila: quem começa uma tarefa é você', () => {
     const decisions = planTick(
       input({
         cards: [
           card('nova', 'fila', { index: 0 }),
-          card('antiga', 'fila', { index: 5 }),
           card('urgente', 'fila', { index: 1, priority: 'Urgente' })
         ]
       })
     )
-    expect(decisions).toEqual([
-      { kind: 'pull', taskId: 'urgente', from: 'fila', to: 'dev', agent: 'builtin:implementador' },
-      { kind: 'pull', taskId: 'antiga', from: 'fila', to: 'dev', agent: 'repo:ana' },
-      { kind: 'wait', taskId: 'nova', reason: 'teto de tarefas ao mesmo tempo' }
-    ])
-  })
-
-  it('respeita a capacidade e o limite do dia de cada agente', () => {
-    const decisions = planTick(
-      input({
-        config: { ...CONFIG, maxActive: 5 },
-        cards: [card('a', 'fila'), card('b', 'fila')],
-        load: new Map([['builtin:implementador', 1]]),
-        agents: new Map([
-          ['builtin:implementador', agent('builtin:implementador')],
-          ['repo:ana', agent('repo:ana', { limitProblem: 'Ana atingiu o limite de hoje.' })]
-        ])
-      })
-    )
-    expect(decisions).toEqual([
-      { kind: 'wait', taskId: 'a', reason: 'nenhum agente livre' },
-      { kind: 'wait', taskId: 'b', reason: 'nenhum agente livre' }
-    ])
-  })
-
-  it('o teto conta o que já está em andamento no projeto', () => {
-    const decisions = planTick(input({ cards: [card('a', 'fila')], activeTotal: 2 }))
-    expect(decisions).toEqual([
-      { kind: 'wait', taskId: 'a', reason: 'teto de tarefas ao mesmo tempo' }
-    ])
+    expect(decisions).toEqual([])
   })
 
   it('não toca em tarefa bloqueada, pausada ou com fluxo ativo', () => {
     const decisions = planTick(
       input({
         cards: [
-          card('b', 'fila', { blocked: true }),
-          card('p', 'fila', { automationPaused: true }),
-          card('f', 'fila')
+          card('b', 'dev', { blocked: true }),
+          card('p', 'dev', { automationPaused: true }),
+          card('f', 'dev')
         ],
+        finishedHere: new Set(['b', 'p', 'f']),
         busy: new Set(['f'])
       })
     )
     expect(decisions).toEqual([])
-  })
-
-  it('atribuição à mão a alguém de fora da etapa é respeitada (espera esse agente)', () => {
-    const assignments = new Map([['a', { key: 'repo:bob', manual: true }]])
-    const agents = new Map([
-      ['builtin:implementador', agent('builtin:implementador')],
-      ['repo:bob', agent('repo:bob')]
-    ])
-    expect(planTick(input({ cards: [card('a', 'fila')], assignments, agents }))).toEqual([
-      { kind: 'pull', taskId: 'a', from: 'fila', to: 'dev', agent: 'repo:bob' }
-    ])
-    const busy = new Map([['repo:bob', 1]])
-    expect(
-      planTick(input({ cards: [card('a', 'fila')], assignments, agents, load: busy }))
-    ).toEqual([{ kind: 'wait', taskId: 'a', reason: 'nenhum agente livre' }])
   })
 
   it('fluxo concluído na etapa passa adiante: para outra etapa de agentes, com agente dela', () => {

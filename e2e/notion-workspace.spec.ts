@@ -15,7 +15,8 @@ import {
   type FakeServices,
   type OrkioApp,
   navTo,
-  expandIntegrations
+  expandIntegrations,
+  openIntegration
 } from './fixtures'
 
 const TOKEN = 'ntn_E2E_WORKSPACE_TOKEN_abcdef123456'
@@ -97,22 +98,26 @@ test.afterAll(async () => {
 test('sem Notion conectado, o card dos bancos só orienta', async () => {
   const { page } = await open({ notionTasks: 'no_unique_id' })
   // Sem Notion, a linha dos bancos só orienta (o card abre quando o Notion conecta).
-  await expect(page.getByRole('listitem', { name: 'Bancos e campos', exact: true })).toContainText(
+  await expect(page.getByRole('article', { name: 'Bancos e campos', exact: true })).toContainText(
     'Conecte o Notion antes'
   )
   // Migração v1 → … → v4 gravada no disco.
   const saved = JSON.parse(readFileSync(configFile(), 'utf8')) as Record<string, unknown>
-  expect(saved['schemaVersion']).toBe(11)
+  expect(saved['schemaVersion']).toBe(12)
   expect(saved['notion']).toBeNull()
 })
 
 test('assistente: escolhe os bancos e, sem propriedade de ID, só orienta', async () => {
   const { page } = orkio!
+  await openIntegration(page, 'Notion')
   await notionCard(page).getByRole('button', { name: 'Usar token' }).click()
   await notionCard(page).getByLabel('Token do Notion').fill(TOKEN)
   await notionCard(page).getByRole('button', { name: 'Conectar', exact: true }).click()
-  await expect(notionCard(page).getByText('Ada Lovelace', { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('article', { name: 'Notion', exact: true })).toContainText(
+    'Ada Lovelace'
+  )
 
+  await openIntegration(page, 'Bancos e campos')
   const card = workspaceCard(page)
   await choose(page, card, 'Banco de Projetos', 'Projetos')
   await card.getByRole('button', { name: 'Continuar' }).click()
@@ -146,6 +151,11 @@ test('com a propriedade criada no Notion, sugere o mapeamento e salva só ids e 
   await expect(card.getByLabel('Opções de status')).toContainText('Em andamento')
 
   await card.getByRole('button', { name: 'Salvar' }).click()
+  // Pronto: a abertura automática passa para o próximo card pendente; reabre os bancos.
+  await expect(page.getByRole('article', { name: 'Bancos e campos', exact: true })).toContainText(
+    'Pronto'
+  )
+  await openIntegration(page, 'Bancos e campos')
   await expect(card.getByTestId('workspace-health')).toHaveText('OK')
   await expect(
     card.getByRole('group', { name: 'Configuração dos bancos do Notion' })
@@ -237,6 +247,7 @@ test('vincula o projeto local (com sugestão pelo nome) e lista as tarefas certa
 
 test('propriedade renomeada no Notion → aviso claro ao reabrir', async () => {
   const { page } = await open({ notionTasks: 'renamed' })
+  await openIntegration(page, 'Bancos e campos')
   const card = workspaceCard(page)
   await expect(card.getByTestId('workspace-health')).toHaveText('Atenção')
   await expect(card.getByRole('status').filter({ hasText: 'renomeada' })).toContainText(
@@ -247,6 +258,7 @@ test('propriedade renomeada no Notion → aviso claro ao reabrir', async () => {
 
 test('propriedade apagada no Notion → erro ao reabrir e tarefas bloqueadas', async () => {
   const { page } = await open({ notionTasks: 'status_deleted' })
+  await openIntegration(page, 'Bancos e campos')
   const card = workspaceCard(page)
   await expect(card.getByTestId('workspace-health')).toHaveText('Revisar mapeamento')
   await expect(alerts(card)).toContainText('não existe mais nas Tarefas do Notion')

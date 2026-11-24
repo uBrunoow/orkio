@@ -25,7 +25,7 @@ export function eventActor(e: BoardHistoryEntry): Actor {
   const agent = e.detail?.['agent']
   if (typeof agent === 'string' && agent) return { name: agent, agent: true }
   if (e.kind.startsWith('run_')) return { name: 'Claude Code', icon: ClaudeLogo }
-  if (e.kind === 'gate_approved' || e.kind === 'gate_rejected')
+  if (e.kind === 'gate_approved' || e.kind === 'gate_rejected' || e.kind === 'gate_revised')
     return { name: 'Você', icon: UserIcon }
   if (e.kind === 'delivery' || e.kind === 'artifact_published')
     return { name: 'GitHub', icon: GitHubLogo }

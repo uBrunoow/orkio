@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ALVA_TEMPLATE_IDS, alvaDeliverFlow, alvaTemplates } from '../../shared/alva-templates'
 import type { StatusOption } from '../../shared/board'
 import type {
   BoardSaveInput,
@@ -256,6 +257,43 @@ describe('BoardService', () => {
       ['Revisado', 'Em andamento', 'o-and'],
       ['Finalizada', 'Finalizadas', 'o-fin']
     ])
+  })
+
+  it('Task 18: quadro novo num projeto com modelos Alva liga Revisando/Revisado (só colunas vazias)', async () => {
+    await config.update((c) => ({
+      ...c,
+      flows: { p1: { flows: [alvaDeliverFlow()], bindings: [] } }
+    }))
+    const view = await createBoard()
+    const pf = config.get().flows['p1']!
+    expect(pf.flows.map((f) => f.id).sort()).toEqual(
+      alvaTemplates()
+        .map((f) => f.id)
+        .sort()
+    )
+    expect(pf.bindings).toEqual([
+      {
+        stageId: stageId(view, 'Revisando'),
+        flowId: ALVA_TEMPLATE_IDS.review,
+        enabled: true,
+        mode: 'on_enter'
+      },
+      {
+        stageId: stageId(view, 'Revisado'),
+        flowId: ALVA_TEMPLATE_IDS.reviewed,
+        enabled: true,
+        mode: 'on_enter'
+      }
+    ])
+    const history = await service.configEvents('p1')
+    expect(history.at(-1)!.changes).toContain(
+      'Coluna “Revisando” ganhou o fluxo “Alva: revisão publicada” (ao entrar)'
+    )
+  })
+
+  it('quadro novo sem modelos Alva: nenhum fluxo é criado', async () => {
+    await createBoard()
+    expect(config.get().flows['p1']).toBeUndefined()
   })
 
   it('salvar etapa com opção inexistente é recusado', async () => {

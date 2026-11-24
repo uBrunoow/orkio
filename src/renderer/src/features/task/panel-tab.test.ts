@@ -6,6 +6,18 @@ describe('availableTabs', () => {
     expect(availableTabs(false)).toEqual(['changes', 'pr', 'details'])
     expect(availableTabs(true)).toEqual(['spec', 'plan', 'changes', 'pr', 'details'])
   })
+
+  it('Revisão aparece depois de PR & CI quando a tarefa tem PR', () => {
+    expect(availableTabs(false, true)).toEqual(['changes', 'pr', 'review', 'details'])
+    expect(availableTabs(true, true)).toEqual([
+      'spec',
+      'plan',
+      'changes',
+      'pr',
+      'review',
+      'details'
+    ])
+  })
 })
 
 describe('defaultPanelTab', () => {
@@ -14,10 +26,14 @@ describe('defaultPanelTab', () => {
     ['Spec', 'spec'],
     ['Plano', 'plan'],
     ['Implementar', 'changes'],
-    ['Revisão', 'changes'],
     ['PR', 'pr']
   ] as const)('fase %s → aba %s', (phase, tab) => {
     expect(defaultPanelTab({ ...base, currentPhase: phase })).toBe(tab)
+  })
+
+  it('fase Revisão abre a aba Revisão com PR e Mudanças sem PR', () => {
+    expect(defaultPanelTab({ ...base, currentPhase: 'Revisão', hasPr: true })).toBe('review')
+    expect(defaultPanelTab({ ...base, currentPhase: 'Revisão' })).toBe('changes')
   })
 
   it('Plano sem documento cai em Mudanças ou Detalhes', () => {

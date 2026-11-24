@@ -85,6 +85,7 @@ export function TaskScreen({
       onBranchesChanged={() => void refreshSignals(true)}
       focusSection={section}
       projectName={project.name}
+      onOpenBoard={onBackToBoard}
     />
   )
 }

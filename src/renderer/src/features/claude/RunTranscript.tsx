@@ -18,7 +18,11 @@ import {
 } from '../../components/icons'
 import { StatusToken } from '../../components/StatusToken'
 import { formatDuration, formatUsd, plural } from '../../lib/format'
+import { Spinner } from '@/components/Spinner'
+import { PullRequestIcon } from '../../components/icons'
 import { CollapsibleHeader } from '../board/TaskDetails'
+import { OpenPrFeedback, useOpenPr } from '../board/OpenPrButton'
+import { SubagentGroup } from './SubagentGroup'
 import {
   failedLabel,
   summarizeSteps,
@@ -130,11 +134,14 @@ function WorkGroup({
 function Receipt({
   tone,
   text,
-  count
+  count,
+  openPr
 }: {
   tone: 'info' | 'problem'
   text: string
   count: number
+  /** "Abrir PR" no recibo de push/gh bloqueado (só quando a tarefa pode abrir PR). */
+  openPr?: { projectId: string; taskId: string }
 }): React.JSX.Element {
   const problem = tone === 'problem'
   const ReceiptIcon = problem ? PermissionIcon : InfoIcon
@@ -152,6 +159,26 @@ function Receipt({
         {text}
         {count > 1 ? ` (×${count})` : ''}
       </p>
+      {openPr && <ReceiptOpenPr {...openPr} />}
+    </div>
+  )
+}
+
+function ReceiptOpenPr({
+  projectId,
+  taskId
+}: {
+  projectId: string
+  taskId: string
+}): React.JSX.Element {
+  const pr = useOpenPr(projectId, taskId)
+  return (
+    <div className="flex shrink-0 flex-col items-end gap-1">
+      <Button size="sm" variant="outline" disabled={pr.busy} onClick={() => void pr.start()}>
+        {pr.busy ? <Spinner /> : <PullRequestIcon />}
+        Abrir PR
+      </Button>
+      <OpenPrFeedback state={pr} />
     </div>
   )
 }
@@ -190,10 +217,13 @@ function ResultFooter({
  */
 export function RunTranscript({
   items,
-  tail = TAIL
+  tail = TAIL,
+  openPr
 }: {
   items: readonly TranscriptItem[]
   tail?: number
+  /** Tarefa que pode abrir PR agora (sem PR aberta, com ambiente): recibos de push/gh ganham o botão. */
+  openPr?: { projectId: string; taskId: string }
 }): React.JSX.Element {
   const [showAll, setShowAll] = useState(false)
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -226,8 +256,20 @@ export function RunTranscript({
                 onToggle={(next) => setOpen((o) => ({ ...o, [item.key]: next }))}
               />
             )}
+            {item.kind === 'subagents' && (
+              <SubagentGroup
+                agents={item.agents}
+                open={open[item.key] ?? item.agents.some((a) => a.state === 'running')}
+                onToggle={(next) => setOpen((o) => ({ ...o, [item.key]: next }))}
+              />
+            )}
             {item.kind === 'receipt' && (
-              <Receipt tone={item.tone} text={item.text} count={item.count} />
+              <Receipt
+                tone={item.tone}
+                text={item.text}
+                count={item.count}
+                {...(item.action === 'open-pr' && openPr ? { openPr } : {})}
+              />
             )}
             {item.kind === 'notice' &&
               (item.tone === 'danger' ? (

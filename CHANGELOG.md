@@ -6,10 +6,82 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Modelo e raciocínio: escolha o modelo do Claude Code (padrão, Fable, Opus, Sonnet, Haiku ou
+  outro nome) e o raciocínio (Baixo a Máximo) no campo da sessão, só para a próxima mensagem, no
+  perfil de cada agente e em cada passo dos fluxos. O raciocínio aparece com o Claude Code 2.1.300
+  ou mais novo. A conversa mostra o modelo e o raciocínio usados.
+- Anexos no campo da sessão: até 5 arquivos por mensagem (imagens, PDF, Markdown e texto, até
+  10 MB cada), lidos pelo Claude Code dentro da pasta da tarefa.
+- Subagentes visíveis: quando o Claude Code delega trabalho, a conversa mostra cada subagente,
+  o estado dele e as ferramentas que usou; acima do campo, "Esperando N subagentes".
+- Custo por mensagem: cada execução mostra o que ela custou, não o total da sessão. Na primeira
+  vez que uma sessão antiga é retomada, o custo mostrado é o acumulado da sessão (uma vez).
+- Botão "Abrir PR" na aba PR & CI (e no painel Ambiente): envia a branch da tarefa (com a sua
+  aprovação) e roda o /alva-flow:pr; sem o alva-flow, envia a branch e abre a página para criar a
+  PR no GitHub. Quando o Claude tenta fazer push e o Orkio bloqueia, o aviso na conversa já traz o
+  "Abrir PR".
+- Cartão da PR ao passar o mouse no chip da PR: título, autor, há quanto tempo, linhas e arquivos
+  alterados, revisão e CI.
+- Painel "Ambiente" na tarefa: projeto, pasta e branch, "Abrir terminal aqui" (terminal do
+  sistema na pasta da tarefa), editores, quanto do contexto do Claude a conversa já usa e as
+  mudanças (+N −M) com a PR ou o "Abrir PR".
+- "Manter o computador acordado enquanto agentes trabalham" (Configurações › Atualizações ›
+  Energia): impede a suspensão só enquanto o Claude Code ou um fluxo roda.
+- Aba "Revisão" na tarefa com os comentários da PR (texto, autor, arquivo e linha, resolvidos ou
+  não) e as revisões; imagens dos comentários aparecem como texto, sem carregar nada.
+- Revisão publicada como orkio[bot]: o fluxo "Alva: revisão publicada" roda o /review, o agente
+  resume a revisão (sem mexer no código) e o Orkio mostra o tipo ("Pedir alterações" ou
+  "Comentar"), o resumo e os comentários por linha, como texto exato (sem HTML nem imagens);
+  aprovado, publica na PR pelo site do Orkio
+  (precisa do GitHub App do Orkio instalado no repositório). Comentários fora do diff aparecem
+  como aviso e não são publicados. O Orkio nunca aprova PRs.
+- Sem configurar nada: em projetos com os fluxos Alva, a coluna Revisando ganha o "Alva: revisão
+  publicada" e a Revisado o "Alva: comentários da PR" (só colunas sem fluxo; seus fluxos não
+  mudam). As cópias antigas dos fluxos Alva passam para a versão nova; se a cópia tinha mudanças,
+  ela fica guardada como "<nome> (cópia anterior)", sem coluna. Tudo fica no histórico de
+  configuração.
+
 ### Mudado
 
+- Integrações em grade de cartões, por seção (Tarefas, Código, Agentes de código), com busca
+  (atalho "/"), "N de M prontas" e o próximo passo pendente já aberto.
+- Piloto automático na barra de fases: clicar nas fases abre o plano do fluxo (passos feitos, o de
+  agora e os próximos) e "Cancelar fluxo"; no fim da conversa fica só uma linha com "Ver plano".
+  Cada fase aparece uma vez. Em janelas estreitas, só a fase de agora mostra o nome (as feitas
+  ficam com ✓).
+- Comentários da PR: na coluna Revisado, o agente lê os comentários e propõe um plano de correção
+  (sem mexer no código); você aprova, pede ajustes (até 3 vezes, pelo cartão ou pelo campo da
+  sessão) ou recusa, e só então ele corrige, commita e responde as threads. Para usar nos fluxos já
+  criados, "Recriar fluxos Alva" na tela alva-flow.
+- Fluxos de tarefa: passo com pedido em texto (em vez de um comando), opção "Só leitura" e gate
+  que mostra o resultado do Claude Code com "Pedir ajustes…".
+- O orquestrador não puxa mais tarefas de Prioridades sozinho: a tarefa só começa quando você a
+  move para a primeira etapa de trabalho; dali ele continua passando a tarefa adiante.
+- Mensagens na sessão da tarefa não esperam o piloto automático: escrever enquanto um passo roda
+  interrompe e ele continua com a sua mensagem; com o fluxo pedindo uma escolha, citar a opção
+  (ex.: "é a task-5") escolhe.
+- Os trechos do caminho na barra do topo são clicáveis.
 - Atualizações: o Orkio procura a versão nova logo ao abrir e, quando termina de baixar com nada
   rodando, pergunta "Reiniciar agora?" para já abrir na versão nova (antes só instalava ao fechar).
+
+### Corrigido
+
+- Contas do GitHub conectadas pelo login (OAuth) voltam a ver revisões, comentários e CI das PRs
+  (o Orkio pedia uma permissão de organização que essas contas não têm); se faltar permissão, o
+  Quadro avisa.
+- Configurações › Projetos em janelas estreitas: o estado e as ações descem para baixo do nome do
+  projeto, em vez de espremer o texto até quebrar letra por letra.
+- Publicar a revisão como orkio[bot] num app sem o endereço do site (ex.: `pnpm dev` aberto antes
+  de definir `MAIN_VITE_SITE_URL`) agora diz isso, em vez de culpar o GitHub App do site.
+- O histórico da tarefa mostra o nome do agente que o orquestrador atribuiu ("Implementador"), e
+  não o identificador dele.
+- Cancelar o fluxo pelo plano da barra de fases mostra o erro se não der certo, em vez de fechar
+  sem dizer nada.
+- O /spec de uma tarefa nova não pede mais para escolher entre todas as tasks do Backlog.md.
+- A spec e o plano aparecem nas abas Spec/Plano enquanto o Claude pede a aprovação.
+- Fluxos não rodam em tarefa sem descrição no Notion (o passo para e explica o que fazer).
 
 ## [0.2.8] - 2026-11-23
 

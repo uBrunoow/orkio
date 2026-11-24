@@ -34,6 +34,7 @@ import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
 import { TaskActivityProvider, type TaskActivityMap } from './task-activity'
+import { ActionLink } from '../projects/ActionLink'
 import { useOverview } from '../overview/useOverview'
 import { useBoard, type BoardError } from './useBoard'
 
@@ -272,6 +273,20 @@ function Board({
             ? '1 alteração aguardando o Notion.'
             : `${view.pendingCount} alterações aguardando o Notion.`}{' '}
           Elas são enviadas sozinhas quando a conexão voltar, mesmo depois de fechar o Orkio.
+        </Alert>
+      )}
+      {signals.result && signals.result.messages.length > 0 && (
+        <Alert
+          tone="warning"
+          {...(signals.result.action
+            ? { action: <ActionLink action={signals.result.action} /> }
+            : {})}
+        >
+          <div className="flex flex-col gap-1">
+            {signals.result.messages.map((m) => (
+              <p key={m}>{m}</p>
+            ))}
+          </div>
         </Alert>
       )}
       {board.error && (

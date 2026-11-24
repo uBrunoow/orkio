@@ -59,8 +59,8 @@ const HARMLESS = new Set([
 
 export const POLICY_MESSAGES = {
   outside: 'Bloqueado pelo Orkio: fora do ambiente desta tarefa (worktree).',
-  push: 'Bloqueado pelo Orkio: git push só é permitido em um passo de fluxo com “modo entrega”.',
-  gh: 'Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo de fluxo com “modo entrega”.',
+  push: 'Bloqueado pelo Orkio: git push só é permitido em um passo de fluxo com “modo entrega”. Para publicar, use “Abrir PR” na aba PR & CI da tarefa.',
+  gh: 'Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo de fluxo com “modo entrega”. Para publicar, use “Abrir PR” na aba PR & CI da tarefa.',
   alias:
     'Bloqueado pelo Orkio: alias definido na própria linha de comando (git -c alias.…) ou aninhado demais.'
 } as const

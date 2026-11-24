@@ -19,6 +19,8 @@ export interface AlvaStatus {
   precheck: AlvaPrecheck | null
   /** Templates já criados neste projeto (ids presentes na config). */
   templates: { id: string; name: string; stageId: string | null; mode: StageFlow['mode'] | null }[]
+  /** Colunas com algum fluxo ligado (para a tela não sugerir trocar a ligação de alguém). */
+  boundStages: string[]
   maxParallel: number
 }
 
@@ -26,6 +28,8 @@ export interface AlvaTemplateBindings {
   /** Etapa de cada template (null = sem coluna, roda à mão). */
   plan: string | null
   deliver: string | null
+  /** "Alva: revisão publicada" (padrão na tela: coluna "Revisando"). */
+  review: string | null
   reviewed: string | null
 }
 
@@ -86,12 +90,13 @@ export class AlvaFlowsService {
           const b = pf.bindings.find((x) => x.flowId === f.id)
           return { id: f.id, name: f.name, stageId: b?.stageId ?? null, mode: b?.mode ?? null }
         }),
+      boundStages: [...new Set(pf.bindings.map((b) => b.stageId))],
       maxParallel: pf.alva?.maxParallel ?? 1
     }
   }
 
   /**
-   * Cria (ou recria) os 4 templates e liga nas colunas escolhidas (ao entrar). Fluxos com o
+   * Cria (ou recria) os templates e liga nas colunas escolhidas (ao entrar). Fluxos com o
    * mesmo id são substituídos; os demais fluxos e ligações do projeto ficam.
    */
   async createTemplates(projectId: string, bindings: AlvaTemplateBindings): Promise<AlvaStatus> {
@@ -103,6 +108,7 @@ export class AlvaFlowsService {
       [
         [bindings.plan, ALVA_TEMPLATE_IDS.plan],
         [bindings.deliver, ALVA_TEMPLATE_IDS.deliver],
+        [bindings.review, ALVA_TEMPLATE_IDS.review],
         [bindings.reviewed, ALVA_TEMPLATE_IDS.reviewed]
       ] as const
     )

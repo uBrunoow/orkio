@@ -42,7 +42,8 @@ export function RunBlock({
   projectId,
   showDocument = false,
   changesOpen = false,
-  origin = null
+  origin = null,
+  canOpenPr = false
 }: {
   run: AgentRunView
   /**
@@ -66,6 +67,8 @@ export function RunBlock({
   showDocument?: boolean | 'open'
   /** Mudanças (arquivos, commits, diff) abertas por padrão (a execução mais recente que mudou código). */
   changesOpen?: boolean
+  /** A tarefa pode abrir PR agora (sem PR aberta): recibos de push/gh bloqueado ganham "Abrir PR". */
+  canOpenPr?: boolean
 }): React.JSX.Element {
   const [loaded, setLoaded] = useState<RunLogEvent[] | null>(null)
   const ref = useRef<HTMLElement>(null)
@@ -85,8 +88,8 @@ export function RunBlock({
     }
   }, [run.id, liveLog, run.status])
   const items = useMemo(
-    () => buildTranscript(liveLog ?? loaded ?? [], live),
-    [liveLog, loaded, live]
+    () => buildTranscript(liveLog ?? loaded ?? [], live, run.status),
+    [liveLog, loaded, live, run.status]
   )
   const byAgent = !!agent && !!run.agentKey && run.agentKey === agent.key
   const who = byAgent ? agent.name : 'Claude Code'
@@ -167,7 +170,10 @@ export function RunBlock({
             </span>
           </div>
 
-          <RunTranscript items={items} />
+          <RunTranscript
+            items={items}
+            {...(canOpenPr ? { openPr: { projectId, taskId: run.taskId } } : {})}
+          />
 
           {showDocument && !live && (
             <RunDocument

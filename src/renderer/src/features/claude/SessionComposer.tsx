@@ -4,8 +4,12 @@ import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
 import type { AgentBadge } from '../../../../shared/agent'
 import type { CatalogCommand, TaskRunsState } from '../../../../shared/agent-run'
+import { runtimeLabel, type RuntimeChoice } from '../../../../shared/agent-runtime'
 import { Alert } from '../../components/Alert'
-import { SendIcon, StopIcon } from '../../components/icons'
+import { CloseIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/icons'
+import { formatBytes } from '../../lib/format'
+import { ATTACH_ACCEPT, checkNewAttachments, type PendingAttachment } from './attachments-ui'
+import { RuntimePicker, useSupportsEffort } from './RuntimePicker'
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
 const SEND_KEY = `${IS_MAC ? '⌘' : 'Ctrl'} ⏎ enviar`
@@ -27,7 +31,9 @@ export function matchCommands(
 /**
  * Campo de mensagem da sessão da tarefa: continua a última sessão do Claude Code (`--resume`) ou
  * começa uma com o briefing do Notion. `/` sugere comandos do catálogo; Ctrl/Cmd+Enter envia.
- * Enquanto o Claude trabalha, o botão vira "Parar"; com um passo de fluxo rodando, fica bloqueado.
+ * Como no Claude Code, a mensagem nunca espera: com o Claude ou o piloto automático trabalhando,
+ * ela interrompe o turno e a sessão continua com ela; com o fluxo esperando uma escolha, citar a
+ * opção (ex.: TASK-5) escolhe. Sem texto, o botão é "Parar".
  */
 export function SessionComposer({
   projectId,
@@ -43,7 +49,7 @@ export function SessionComposer({
   taskId: string
   agent: AgentBadge | null
   state: TaskRunsState | null
-  /** Um passo de fluxo está rodando (ou vai começar sozinho): não dá para mandar mensagem. */
+  /** Um passo de fluxo está rodando (ou vai começar sozinho): a mensagem interrompe e segue. */
   flowRunning: boolean
   /** Passo que o piloto automático (fluxo) está rodando agora. */
   autopilotStep?: string | null
@@ -55,7 +61,14 @@ export function SessionComposer({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [catalog, setCatalog] = useState<CatalogCommand[] | null>(null)
+  const [runtime, setRuntime] = useState<Partial<RuntimeChoice>>({})
+  const supportsEffort = useSupportsEffort()
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const nextKey = useRef(0)
 
   const activeRunId = state?.activeRunId ?? null
   const latest = state?.runs[0] ?? null
@@ -79,21 +92,55 @@ export function SessionComposer({
     [typed, catalog]
   )
 
-  const blocked = flowRunning
-    ? `O piloto automático está rodando${autopilotStep ? ` “${autopilotStep}”` : ' um passo'}. Ele para quando precisar de você; aí você responde aqui.`
-    : activeRunId
-      ? 'Espere o Claude terminar o turno ou pare a execução.'
-      : null
+  const working = flowRunning || !!activeRunId
+
+  const addFiles = (list: FileList | null): void => {
+    const files = list ? Array.from(list) : []
+    if (files.length === 0) return
+    const problem = checkNewAttachments(
+      attachments.map((a) => a.file),
+      files
+    )
+    setAttachError(problem)
+    if (problem) return
+    setAttachments((cur) => [
+      ...cur,
+      ...files.map((file) => ({ key: `a${nextKey.current++}`, file }))
+    ])
+  }
 
   const send = async (): Promise<void> => {
     const message = text.trim()
-    if (!message || blocked || sending) return
+    if (!message || sending) return
     setSending(true)
     setError(null)
-    const r = await window.orkio.claude.send({ projectId, taskId, text: message })
+    const sentAttachments: { name: string; mime: string; data: Uint8Array }[] = []
+    for (const { file } of attachments) {
+      try {
+        sentAttachments.push({
+          name: file.name,
+          mime: file.type,
+          data: new Uint8Array(await file.arrayBuffer())
+        })
+      } catch {
+        setError(`Não foi possível ler o arquivo ${file.name}.`)
+        setSending(false)
+        return
+      }
+    }
+    const r = await window.orkio.claude.send({
+      projectId,
+      taskId,
+      text: message,
+      ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
+      ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {})
+    })
     setSending(false)
     if (r.ok) {
       setText('')
+      setRuntime({})
+      setAttachments([])
+      setAttachError(null)
       onSent(r.value)
     } else {
       setError(r.error.message)
@@ -105,7 +152,6 @@ export function SessionComposer({
       void send()
     }
   }
-  const disabled = !!blocked && !activeRunId
 
   return (
     <div role="group" aria-label="Mensagem para a sessão" className="flex flex-col gap-2">
@@ -137,53 +183,129 @@ export function SessionComposer({
       )}
       <div
         className={cn(
-          'flex items-end gap-2 rounded-[10px] border border-border bg-card py-1.5 pr-1.5 pl-3 focus-within:border-ring',
-          disabled && 'opacity-60'
+          'flex flex-col gap-1.5 rounded-[10px] border border-border bg-card py-1.5 pr-1.5 pl-3 focus-within:border-ring',
+          dragging && 'border-brand bg-brand-tint'
         )}
+        onDragOver={(e) => {
+          if (!e.dataTransfer.types.includes('Files')) return
+          e.preventDefault()
+          setDragging(true)
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          setDragging(false)
+          addFiles(e.dataTransfer.files)
+        }}
       >
-        <textarea
-          ref={ref}
-          aria-label={`Mensagem para ${who}`}
-          placeholder={`Escreva para ${who}… ( / para comandos)`}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          disabled={disabled}
-          {...(disabled && blocked ? { title: blocked } : {})}
-          className="field-sizing-content max-h-48 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm outline-none placeholder:text-subtle-foreground disabled:cursor-not-allowed"
-        />
-        {!activeRunId && !disabled && (
-          <span className="mb-2 shrink-0 font-mono text-2xs text-subtle-foreground">
-            {SEND_KEY}
-          </span>
+        {attachments.length > 0 && (
+          <ul aria-label="Anexos da mensagem" className="flex flex-wrap gap-1.5 pr-1.5">
+            {attachments.map((a) => (
+              <li
+                key={a.key}
+                className="flex max-w-full items-center gap-1.5 rounded-md border border-border-soft bg-muted py-0.5 pr-0.5 pl-2 text-xs"
+              >
+                <span className="min-w-0 truncate text-foreground">{a.file.name}</span>
+                <span className="shrink-0 text-subtle-foreground">{formatBytes(a.file.size)}</span>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Remover ${a.file.name}`}
+                  onClick={() => {
+                    setAttachments((cur) => cur.filter((x) => x.key !== a.key))
+                    setAttachError(null)
+                  }}
+                >
+                  <CloseIcon className="size-3" />
+                </Button>
+              </li>
+            ))}
+          </ul>
         )}
-        {activeRunId ? (
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={ref}
+            aria-label={`Mensagem para ${who}`}
+            placeholder={
+              working
+                ? `Escreva para interromper e mudar o rumo de ${who}…`
+                : `Escreva para ${who}… ( / para comandos)`
+            }
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={1}
+            className="field-sizing-content max-h-48 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm outline-none placeholder:text-subtle-foreground disabled:cursor-not-allowed"
+          />
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            hidden
+            accept={ATTACH_ACCEPT}
+            data-testid="attach-input"
+            onChange={(e) => {
+              addFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
           <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => void window.orkio.claude.cancel(activeRunId)}
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Anexar arquivo"
+            title="Anexar imagem, PDF, Markdown ou texto"
+            className="mb-0.5 shrink-0"
+            onClick={() => fileInput.current?.click()}
           >
-            <StopIcon />
-            Parar
+            <PaperclipIcon />
           </Button>
-        ) : (
-          <Button
-            size="sm"
-            disabled={!text.trim() || !!blocked || sending}
-            onClick={() => void send()}
-          >
-            {sending ? <Spinner /> : <SendIcon />}
-            Enviar
-          </Button>
-        )}
+          <RuntimePicker
+            value={runtime}
+            onChange={setRuntime}
+            supportsEffort={supportsEffort}
+            inheritLabel={
+              agent
+                ? agent.model !== undefined
+                  ? `Do agente: ${runtimeLabel({
+                      model: agent.model === 'default' ? null : agent.model,
+                      effort: agent.effort ?? null
+                    })}`
+                  : 'Do agente'
+                : 'Padrão do Claude Code'
+            }
+            {...(flowRunning ? { title: 'No piloto automático vale o modelo do passo.' } : {})}
+            className="mb-1 shrink-0"
+          />
+          {(!activeRunId || text.trim()) && (
+            <span className="mb-2 shrink-0 font-mono text-2xs text-subtle-foreground">
+              {SEND_KEY}
+            </span>
+          )}
+          {activeRunId && !text.trim() ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void window.orkio.claude.cancel(activeRunId)}
+            >
+              <StopIcon />
+              Parar
+            </Button>
+          ) : (
+            <Button size="sm" disabled={!text.trim() || sending} onClick={() => void send()}>
+              {sending ? <Spinner /> : <SendIcon />}
+              Enviar
+            </Button>
+          )}
+        </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 text-xs text-subtle-foreground" data-testid="session-context">
           {flowRunning
-            ? `Piloto automático${autopilotStep ? `: ${autopilotStep}` : ''}. Quando ele parar ou pedir algo, responda aqui.`
+            ? `Piloto automático${autopilotStep ? `: ${autopilotStep}` : ''}. Uma mensagem aqui interrompe o passo e ele continua com ela.`
             : activeRunId
-              ? 'O Claude está trabalhando. A próxima mensagem continua desta sessão.'
+              ? 'O Claude está trabalhando. Uma mensagem aqui interrompe o turno e a sessão continua com ela.'
               : resumes
                 ? `Continua a sessão${latest?.command ? ` de /${latest.command}` : ''} na pasta de trabalho da tarefa.`
                 : 'Começa uma sessão nova com o resumo da tarefa no Notion.'}
@@ -194,6 +316,7 @@ export function SessionComposer({
           </Button>
         )}
       </div>
+      {attachError && <Alert tone="danger">{attachError}</Alert>}
       {error && <Alert tone="danger">{error}</Alert>}
     </div>
   )

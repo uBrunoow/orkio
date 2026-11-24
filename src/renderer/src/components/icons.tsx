@@ -9,6 +9,9 @@ import {
   IconCircleCheck,
   IconCircleDashed,
   IconSend,
+  IconPaperclip,
+  IconBrain,
+  IconCheck,
   IconBrandGithub,
   IconBrandNotion,
   IconDatabase,
@@ -42,6 +45,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconPlugConnected,
+  IconPuzzle,
   IconRefresh,
   IconTrash,
   IconTerminal2,
@@ -87,6 +91,7 @@ export const FolderPlusIcon = adapt(IconFolderPlus)
 export const FolderSearchIcon = adapt(IconFolderSearch)
 export const ProjectsIcon = adapt(IconFolders)
 export const IntegrationsIcon = adapt(IconPlugConnected)
+export const PluginIcon = adapt(IconPuzzle)
 export const TrashIcon = adapt(IconTrash)
 export const DatabaseIcon = adapt(IconDatabase)
 export const LinkIcon = adapt(IconLink)
@@ -146,6 +151,7 @@ export const ClaudeLogo: SvgIcon = (props) => (
 ClaudeLogo.displayName = 'ClaudeLogo'
 export const SearchIcon = adapt(IconSearch)
 export const SendIcon = adapt(IconSend)
+export const PaperclipIcon = adapt(IconPaperclip)
 export const DoneIcon = adapt(IconCircleCheck)
 export const TodoIcon = adapt(IconCircleDashed)
 export const ProblemIcon = adapt(IconAlertCircle)
@@ -176,3 +182,5 @@ export const TONE_DOT_ICONS = {
   running: toneDot('var(--brand)', 'RunningDot'),
   neutral: toneDot('var(--subtle-foreground)', 'NeutralDot')
 } as const
+export const BrainIcon = adapt(IconBrain)
+export const CheckIcon = adapt(IconCheck)

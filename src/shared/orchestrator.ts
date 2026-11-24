@@ -1,14 +1,15 @@
 /**
- * Orquestrador de tarefas (Etapa 8B): puxa tarefas da coluna de fila para os agentes e passa cada
- * uma para a etapa seguinte quando o fluxo da etapa termina bem. Puro: usado no main (decidir a
+ * Orquestrador de tarefas (Etapa 8B): passa cada tarefa para a etapa seguinte quando o fluxo da
+ * etapa termina bem, com o agente da etapa. NÃO puxa tarefas da fila: quem decide começar é você
+ * (mover para a primeira etapa de trabalho), depois de entender a tarefa. Puro: usado no main (decidir a
  * cada rodada) e no renderer (editor e validação).
  *
  * Regras:
  * - O orquestrador só ATRIBUI e MOVE (o mesmo caminho das automações da 3B). Quem trabalha é o
  *   fluxo ligado à coluna (5A), com o agente (8A): gates, push e falhas continuam parando em você.
- * - Puxar da fila respeita o teto do projeto (`maxActive`) e a capacidade de cada agente
- *   (paralelo e limite do dia). Passar adiante não espera vaga: o fluxo da etapa seguinte fica na
- *   fila do agente (`waiting_agent`) e começa sozinho.
+ * - Passar adiante não espera vaga: o fluxo da etapa seguinte fica na fila do agente
+ *   (`waiting_agent`) e começa sozinho. `queueStageId`/`maxActive` ficam na config por
+ *   compatibilidade (versões antigas puxavam da fila) e não são mais usados.
  * - Tarefa bloqueada, com automações pausadas ou com fluxo ativo nunca é tocada.
  */
 import { parseAgentKey, type AgentKey } from './agent'
@@ -162,7 +163,6 @@ export function validateOrchestrator(
   }
   if (!config.enabled) return { errors, warnings }
 
-  if (!has(config.queueStageId)) errors.push('Escolha a coluna de fila (de onde puxar tarefas).')
   if (config.lanes.length === 0) errors.push('Adicione ao menos uma etapa de trabalho.')
   const laneIds = new Set<string>()
   for (const [i, lane] of config.lanes.entries()) {
@@ -170,9 +170,6 @@ export function validateOrchestrator(
     if (!has(lane.stageId)) errors.push(`A etapa de trabalho ${label} não existe mais no quadro.`)
     if (laneIds.has(lane.stageId)) errors.push(`A etapa ${label} aparece duas vezes.`)
     laneIds.add(lane.stageId)
-    if (lane.stageId === config.queueStageId) {
-      errors.push(`A etapa ${label} não pode ser a fila e uma etapa de trabalho.`)
-    }
     if (lane.agents.length === 0) errors.push(`Escolha ao menos um agente para ${label}.`)
     if (lane.agents.length > ORCHESTRATOR_LIMITS.agentsPerLane) {
       errors.push(`No máximo ${ORCHESTRATOR_LIMITS.agentsPerLane} agentes por etapa.`)
@@ -181,11 +178,6 @@ export function validateOrchestrator(
       errors.push(`Depois de ${label}: a etapa escolhida não existe mais.`)
     }
     if (lane.next === lane.stageId) errors.push(`Depois de ${label}: escolha outra etapa.`)
-    if (lane.next !== null && lane.next === config.queueStageId) {
-      warnings.push(
-        `Depois de ${label} a tarefa volta para a fila e pode ser puxada de novo sem parar.`
-      )
-    }
     const bound = bindings.find((b) => b.stageId === lane.stageId && b.enabled)
     if (has(lane.stageId) && (!bound || bound.mode !== 'on_enter')) {
       warnings.push(
@@ -273,8 +265,6 @@ export interface PlanInput {
   agents: ReadonlyMap<AgentKey, PlanAgent>
   /** Fluxos ativos (ou começando) por agente, em todos os projetos. */
   load: ReadonlyMap<AgentKey, number>
-  /** Tarefas deste projeto com agente trabalhando agora (fluxo ativo ou começando). */
-  activeTotal: number
   /** Tarefas com fluxo ativo (ou começando): o orquestrador não toca. */
   busy: ReadonlySet<string>
   /** Último fluxo terminou bem DEPOIS de a tarefa entrar na etapa atual (pronta para seguir). */
@@ -288,7 +278,7 @@ export interface PlanInput {
 
 export type PlanDecision =
   | {
-      kind: 'pull' | 'handoff'
+      kind: 'handoff'
       taskId: string
       from: string | null
       to: string
@@ -301,7 +291,7 @@ export type PlanDecision =
 /** O que fazer nesta rodada. Puro e determinístico (mesma entrada, mesmas decisões). */
 export function planTick(input: PlanInput): PlanDecision[] {
   const { config } = input
-  if (!config.enabled || !config.queueStageId || config.lanes.length === 0) return []
+  if (!config.enabled || config.lanes.length === 0) return []
   const lanes = new Map(config.lanes.map((l) => [l.stageId, l]))
   const load = new Map(input.load)
   const out: PlanDecision[] = []
@@ -375,33 +365,6 @@ export function planTick(input: PlanInput): PlanDecision[] {
     }
   }
 
-  // 2. Puxar da fila: prioridade do Notion, depois a mais antiga.
-  const first = config.lanes[0]!
-  let slots = config.maxActive - input.activeTotal
-  const queue = input.cards
-    .filter((c) => c.stageId === config.queueStageId && usable(c))
-    .sort((a, b) => priorityRank(a.priority) - priorityRank(b.priority) || b.index - a.index)
-  for (const c of queue) {
-    if (slots <= 0) {
-      out.push({ kind: 'wait', taskId: c.taskId, reason: 'teto de tarefas ao mesmo tempo' })
-      continue
-    }
-    const current = input.assignments.get(c.taskId)
-    // Atribuída à mão a alguém de fora da etapa: a escolha é sua; espera esse agente.
-    const agent =
-      current?.manual && !first.agents.includes(current.key)
-        ? available(current.key)
-          ? current.key
-          : null
-        : agentFor(c.taskId, first, true)
-    if (!agent) {
-      out.push({ kind: 'wait', taskId: c.taskId, reason: 'nenhum agente livre' })
-      continue
-    }
-    take(agent)
-    slots--
-    out.push({ kind: 'pull', taskId: c.taskId, from: c.stageId, to: first.stageId, agent })
-  }
   return out
 }
 
@@ -438,6 +401,7 @@ export function laneAgentOnEnter(
 
 /** Rótulos curtos das decisões (histórico e tela). */
 export const ORCHESTRATOR_REASONS = {
+  /** Só em eventos antigos (o orquestrador puxava da fila). */
   pull: 'puxada da fila',
   handoff: 'fluxo da etapa concluído',
   start: 'entrou na etapa durante a entrega'
@@ -458,8 +422,6 @@ export interface OrchestratorStatus {
   lastRunAt: string | null
   /** Por que a última rodada não aconteceu (ex.: Notion fora). */
   error: string | null
-  /** Tarefas na fila que podem ser puxadas. */
-  queued: number
   /** Tarefas deste projeto com agente trabalhando agora. */
   working: number
   /** O que ficou esperando na última rodada (até 20). */

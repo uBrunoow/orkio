@@ -10,6 +10,7 @@
 import { WEEK_MS } from '../../shared/overview'
 import type { StageFlow } from '../../shared/task-flow'
 import { defaultRules } from '../../shared/automation'
+import { upgradeAlvaFlows } from '../../shared/alva-templates'
 import { diffFlow, toBoardStages, validateFlow, type FlowDraft } from '../../shared/flow'
 import {
   findOption,
@@ -862,11 +863,20 @@ export class BoardService {
         rules: previous?.rules ?? defaultRules(stages).rules,
         updatedAt: this.now().toISOString()
       }
+      // Quadro novo num projeto que já usa os modelos Alva: Revisando/Revisado ganham os fluxos
+      // padrão (só colunas sem fluxo; fluxos do usuário não mudam). Calculado dentro da escrita,
+      // sobre a config do momento (nenhuma escrita de fluxos no meio se perde).
+      let alvaChanges: string[] = []
       try {
-        await this.deps.config.update((c) => ({
-          ...c,
-          boards: { ...c.boards, [projectId]: board }
-        }))
+        await this.deps.config.update((c) => {
+          alvaChanges = []
+          const next = { ...c, boards: { ...c.boards, [projectId]: board } }
+          if (previous) return next
+          const alva = upgradeAlvaFlows(c.flows[projectId] ?? { flows: [], bindings: [] }, stages)
+          if (alva.changes.length === 0) return next
+          alvaChanges = alva.changes
+          return { ...next, flows: { ...c.flows, [projectId]: alva.flows } }
+        })
       } catch (e) {
         throw new BoardError({
           code: 'storage',
@@ -876,7 +886,10 @@ export class BoardService {
       }
       const changes = previous
         ? diffFlow(previous, board)
-        : [`Quadro criado com ${stages.length} etapas e ${board.rules.length} automações`]
+        : [
+            `Quadro criado com ${stages.length} etapas e ${board.rules.length} automações`,
+            ...alvaChanges
+          ]
       if (changes.length > 0) {
         this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
       }

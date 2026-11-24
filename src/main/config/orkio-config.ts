@@ -29,10 +29,19 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
  */
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
-import type { Condition, Flow, ProjectFlows, StageFlow, Step } from '../../shared/task-flow'
+import { upgradeAlvaFlows } from '../../shared/alva-templates'
+import { isEffort, isModelName } from '../../shared/agent-runtime'
+import {
+  GATE_SHOWS,
+  type Condition,
+  type Flow,
+  type ProjectFlows,
+  type StageFlow,
+  type Step
+} from '../../shared/task-flow'
 import type { UpdateChannel } from '../../shared/updates'
 
-export const ORKIO_CONFIG_VERSION = 11
+export const ORKIO_CONFIG_VERSION = 12
 
 export interface StoredProject {
   id: string
@@ -64,6 +73,8 @@ export interface OrkioConfig {
   orchestrator: Record<string, OrchestratorConfig>
   /** Atualizações (6C): canal, última versão vista ("O que há de novo") e última verificação. */
   updates: UpdatesConfig
+  /** Manter o computador acordado enquanto agentes trabalham. Ausente = desligado. */
+  keepAwake?: boolean
 }
 
 export interface UpdatesConfig {
@@ -88,7 +99,19 @@ export function emptyConfig(): OrkioConfig {
   }
 }
 
-export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
+/**
+ * Mudanças feitas por uma migração num projeto, para o histórico de configuração (`config_events`).
+ * A migração roda no `ConfigStore` (sem banco): o main recebe as notas e grava quando o banco abre.
+ */
+export interface ConfigMigrationNote {
+  projectId: string
+  changes: string[]
+}
+
+export function createOrkioConfigStore(
+  file: string,
+  options: { onMigrationNote?: (note: ConfigMigrationNote) => void } = {}
+): ConfigStore<OrkioConfig> {
   return new ConfigStore<OrkioConfig>({
     file,
     currentVersion: ORKIO_CONFIG_VERSION,
@@ -136,7 +159,12 @@ export function createOrkioConfigStore(file: string): ConfigStore<OrkioConfig> {
       // v9 → v10 (8A): nenhuma regra de atribuição de agentes ainda.
       9: (data) => ({ ...data, agents: {} }),
       // v10 → v11 (8B): orquestrador desligado em todos os projetos.
-      10: (data) => ({ ...data, orchestrator: {} })
+      10: (data) => ({ ...data, orchestrator: {} }),
+      // v11 → v12 (Task 18): projetos com os modelos Alva ganham os modelos novos ("Alva: revisão
+      // publicada"), as cópias antigas dos modelos (mesmo id) viram a versão nova e Revisando/
+      // Revisado ganham os fluxos padrão só se a coluna não tiver fluxo ligado. Fluxos e ligações
+      // do usuário nunca mudam.
+      11: (data) => migrateAlvaDefaults(data, options.onMigrationNote)
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -227,7 +255,8 @@ export function validateConfig(
     delivery,
     agents,
     orchestrator,
-    updates: parseUpdates(data['updates'])
+    updates: parseUpdates(data['updates']),
+    ...(data['keepAwake'] === true ? { keepAwake: true } : {})
   }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
 }
@@ -469,6 +498,8 @@ export function parseStep(v: unknown): Step | null {
         type: 'claude_command',
         command: v['command'],
         args: v['args'],
+        ...(str(v['prompt']) ? { prompt: v['prompt'] } : {}),
+        ...(v['readOnly'] === true ? { readOnly: true } : {}),
         timeoutMin: v['timeoutMin'],
         ...(isRecord(v['extract']) && str(v['extract']['extractor'])
           ? { extract: { extractor: v['extract']['extractor'] } }
@@ -476,23 +507,24 @@ export function parseStep(v: unknown): Step | null {
         ...(v['delivery'] === true ? { delivery: true } : {}),
         ...(typeof v['includeBriefing'] === 'boolean'
           ? { includeBriefing: v['includeBriefing'] }
-          : {})
+          : {}),
+        ...(isModelName(v['model']) ? { model: v['model'] } : {}),
+        ...(isEffort(v['effort']) ? { effort: v['effort'] } : {})
       }
     case 'gate': {
-      const show = v['show']
-      if (
-        !str(v['message']) ||
-        (show !== 'diff' && show !== 'summary' && show !== 'backlog' && show !== 'none')
-      ) {
-        return null
-      }
+      const show = GATE_SHOWS.find((x) => x === v['show'])
+      if (!str(v['message']) || !show) return null
+      const revise = v['revise']
       return {
         ...base,
         type: 'gate',
         message: v['message'],
         show,
         onReject: str(v['onReject']) ? v['onReject'] : 'stop',
-        timeoutMin: typeof v['timeoutMin'] === 'number' ? v['timeoutMin'] : null
+        timeoutMin: typeof v['timeoutMin'] === 'number' ? v['timeoutMin'] : null,
+        ...(isRecord(revise) && str(revise['step']) && typeof revise['max'] === 'number'
+          ? { revise: { step: revise['step'], max: revise['max'] } }
+          : {})
       }
     }
     case 'orkio_action':
@@ -551,4 +583,44 @@ export function parseProjectFlows(v: unknown): { value: ProjectFlows; dropped: n
     value: { flows, bindings, ...(maxParallel !== null ? { alva: { maxParallel } } : {}) },
     dropped: rawFlows.length - flows.length
   }
+}
+
+/** v11 → v12: `upgradeAlvaFlows` sobre os dados crus (o `validateConfig` normaliza depois). */
+export function migrateAlvaDefaults(
+  data: Record<string, unknown>,
+  onNote?: (note: ConfigMigrationNote) => void
+): Record<string, unknown> {
+  const rawFlows = data['flows']
+  if (!isRecord(rawFlows)) return data
+  const boards = isRecord(data['boards']) ? data['boards'] : {}
+  const flows: Record<string, unknown> = {}
+  for (const [projectId, raw] of Object.entries(rawFlows)) {
+    flows[projectId] = raw
+    if (!isRecord(raw) || !Array.isArray(raw['flows']) || !Array.isArray(raw['bindings'])) continue
+    const pf = {
+      ...raw,
+      flows: raw['flows'].filter((f): f is Flow => isRecord(f) && typeof f['id'] === 'string'),
+      bindings: raw['bindings'].filter(
+        (b): b is StageFlow =>
+          isRecord(b) && typeof b['stageId'] === 'string' && typeof b['flowId'] === 'string'
+      )
+    } as ProjectFlows
+    // Itens sem id ficam como estavam (o validateConfig decide); só os reconhecíveis mudam.
+    if (pf.flows.length !== raw['flows'].length || pf.bindings.length !== raw['bindings'].length) {
+      continue
+    }
+    const board = boards[projectId]
+    const stages =
+      isRecord(board) && Array.isArray(board['stages'])
+        ? board['stages'].filter(
+            (st): st is { id: string; name: string } =>
+              isRecord(st) && typeof st['id'] === 'string' && typeof st['name'] === 'string'
+          )
+        : []
+    const r = upgradeAlvaFlows(pf, stages)
+    if (r.changes.length === 0) continue
+    flows[projectId] = r.flows
+    onNote?.({ projectId, changes: r.changes })
+  }
+  return { ...data, flows }
 }

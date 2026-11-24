@@ -5,6 +5,7 @@
 
 import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
 import type { FlowDraft } from './flow'
+import type { ReviewThreadsResult } from './review'
 import type { TaskSignals } from './task-signals'
 import type { Flow, FlowRunView, ProjectFlows } from './task-flow'
 import type { AlvaPrecheck, BacklogTaskDocument, BacklogTaskInfo } from './alva'
@@ -35,6 +36,8 @@ export interface AlvaStatusView {
     stageId: string | null
     mode: 'on_enter' | 'manual' | null
   }[]
+  /** Colunas que já têm algum fluxo ligado (ids das etapas): a tela não sugere trocar. */
+  boundStages: string[]
   maxParallel: number
 }
 import type {
@@ -89,7 +92,8 @@ export const IPC_CHANNELS = {
     cancelDeviceFlow: 'github:device-flow-cancel'
   },
   signals: {
-    get: 'signals:get'
+    get: 'signals:get',
+    reviewThreads: 'signals:review-threads'
   },
   alva: {
     precheck: 'alva:precheck',
@@ -123,10 +127,12 @@ export const IPC_CHANNELS = {
     approve: 'task-flows:approve',
     setDelivery: 'task-flows:set-delivery',
     startById: 'task-flows:start-by-id',
+    openPr: 'task-flows:open-pr',
     reject: 'task-flows:reject',
     resume: 'task-flows:resume',
     rerunFrom: 'task-flows:rerun-from',
     resumeWithReply: 'task-flows:resume-reply',
+    reviseGate: 'task-flows:revise-gate',
     skip: 'task-flows:skip',
     cancel: 'task-flows:cancel',
     decideLeft: 'task-flows:decide-left',
@@ -146,6 +152,7 @@ export const IPC_CHANNELS = {
     readLog: 'claude:read-log',
     cleanup: 'claude:cleanup',
     openEditor: 'claude:open-editor',
+    openTerminal: 'claude:open-terminal',
     diff: 'claude:diff',
     branches: 'claude:branches',
     linkBranch: 'claude:link-branch',
@@ -222,6 +229,11 @@ export const IPC_CHANNELS = {
     diagnostics: 'updates:diagnostics',
     /** Evento main → renderer: o status das atualizações mudou. */
     statusChanged: 'updates:status-changed'
+  },
+  /** Energia: manter o computador acordado enquanto agentes trabalham. */
+  power: {
+    get: 'power:get',
+    setKeepAwake: 'power:set-keep-awake'
   },
   /** Visão geral (6D): agregação de todos os projetos, só dados locais e caches. */
   overview: {
@@ -707,6 +719,18 @@ export interface BranchChangedEvent {
 }
 
 /** API exposta pelo preload em `window.orkio`. */
+/**
+ * Resultado de "Abrir PR". `mode: 'pr'` = push + /alva-flow:pr (a PR sai do fluxo). `mode: 'push'` =
+ * só o push (sem task do Backlog.md vinculada): `compareUrl` abre "Criar a PR" no GitHub (o
+ * link é montado no main). Em ambos o fluxo começou; o gate do push aparece na conversa.
+ */
+export interface OpenPrResult {
+  /** `false`: nada a enviar e sem alva-flow, então não há fluxo; só o `compareUrl`. */
+  started: boolean
+  mode: 'pr' | 'push'
+  compareUrl: string | null
+}
+
 export interface OrkioApi {
   notion: {
     getStatus(): Promise<ConnectionStatus>
@@ -786,7 +810,12 @@ export interface OrkioApi {
     /** Cria os templates "Fluxo Alva" e liga nas colunas escolhidas (ao entrar). */
     createTemplates(
       projectId: string,
-      bindings: { plan: string | null; deliver: string | null; reviewed: string | null }
+      bindings: {
+        plan: string | null
+        deliver: string | null
+        review: string | null
+        reviewed: string | null
+      }
     ): Promise<ClaudeResult<AlvaStatusView>>
     /** Coluna "Planejando" (entre Prioridades e Em andamento) com o status do Notion escolhido. */
     addPlanningStage(projectId: string, notionStatusId: string): Promise<ClaudeResult<string>>
@@ -855,12 +884,19 @@ export interface OrkioApi {
     ): Promise<ClaudeResult<TaskFlowsProject>>
     /** Rodar um fluxo específico à mão (ex.: "Alva: CI vermelho"). */
     startById(projectId: string, taskId: string, flowId: string): Promise<ClaudeResult<FlowRunView>>
+    /** "Abrir PR": push (com o gate) e /alva-flow:pr em modo entrega, ou só o push (sem vínculo). */
+    openPr(projectId: string, taskId: string): Promise<ClaudeResult<OpenPrResult>>
     reject(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     resume(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     /** Volta a um comando anterior ao passo parado (ex.: /commit antes do push) e segue dali. */
     rerunFrom(flowRunId: string, stepId: string): Promise<ClaudeResult<FlowRunView>>
     /** Responde ao Claude no passo parado e segue na mesma sessão. */
     resumeWithReply(flowRunId: string, text: string): Promise<ClaudeResult<FlowRunView>>
+    /**
+     * "Pedir ajustes…" no gate que espera você: o texto volta ao passo de ajustes (mesma sessão do
+     * Claude Code) e o gate aparece de novo. Recusado depois do limite de voltas.
+     */
+    reviseGate(projectId: string, taskId: string, text: string): Promise<ClaudeResult<FlowRunView>>
     skip(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     cancel(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
     decideLeft(flowRunId: string, choice: 'cancel' | 'continue'): Promise<ClaudeResult<FlowRunView>>
@@ -887,6 +923,8 @@ export interface OrkioApi {
     /** Remove o worktree (a branch fica). Com mudanças pendentes, exige `force`. */
     cleanup(projectId: string, taskId: string, force: boolean): Promise<ClaudeResult<TaskRunsState>>
     openEditor(projectId: string, taskId: string, editor: EditorId): Promise<ClaudeResult<null>>
+    /** Abre o terminal do sistema na pasta de trabalho da tarefa (o main resolve a pasta). */
+    openTerminal(projectId: string, taskId: string): Promise<ClaudeResult<null>>
     diff(projectId: string, taskId: string): Promise<ClaudeResult<ClaudeDiff>>
     /** Branches ligadas à tarefa e as do projeto ("Vincular branch"). */
     branches(projectId: string, taskId: string): Promise<ClaudeResult<TaskBranchesView>>
@@ -926,6 +964,12 @@ export interface OrkioApi {
   /** Branches e PRs ligadas às tarefas de um projeto pelo ID (só leitura). */
   signals: {
     get(projectId: string, options?: { force?: boolean }): Promise<NotionResult<TaskSignalsResult>>
+    /** Threads de review da PR da tarefa (texto lido pelo main; Task 15). */
+    reviewThreads(
+      projectId: string,
+      taskId: string,
+      options?: { force?: boolean }
+    ): Promise<NotionResult<ReviewThreadsResult>>
   }
   /** Bancos do Notion (Projetos/Tarefas), vínculo com projetos locais e tarefas (só leitura). */
   notionWorkspace: {
@@ -990,6 +1034,11 @@ export interface OrkioApi {
     /** Diagnóstico sem segredos (versões, banco, filas, conexões) para copiar e pedir ajuda. */
     diagnostics(): Promise<string>
     onStatus(listener: (status: UpdateStatus) => void): () => void
+  }
+  /** Energia: "Manter o computador acordado enquanto agentes trabalham" (desligado por padrão). */
+  power: {
+    keepAwake(): Promise<boolean>
+    setKeepAwake(enabled: boolean): Promise<boolean>
   }
   /** Visão geral (6D): tudo de todos os projetos, sem chamar APIs ao abrir. */
   overview: {

@@ -4,6 +4,7 @@
  */
 import { isAbsolute, relative } from 'node:path'
 import type { RunLogEvent } from '../../shared/agent-run'
+import { contextWindowFor, inputTokensOf } from '../../shared/context-usage'
 import { redactSecrets } from './redact'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -62,7 +63,13 @@ export function summarizeTool(
 }
 
 /** Uma linha do stream → zero ou mais eventos do log. Linha inválida vira `info`. */
-export function parseStreamLine(line: string, worktree: string): RunLogEvent[] {
+export function parseStreamLine(
+  line: string,
+  worktree: string,
+  now: () => Date = () => new Date(),
+  /** Modelo do `init` da execução (define a janela do contexto). */
+  model: string | null = null
+): RunLogEvent[] {
   const trimmed = line.trim()
   if (!trimmed) return []
   let msg: unknown
@@ -88,10 +95,15 @@ export function parseStreamLine(line: string, worktree: string): RunLogEvent[] {
 
   if (type === 'assistant' && isRecord(msg['message'])) {
     // Mensagens de subagentes também chegam; mostramos só as da conversa principal como texto.
+    const parent = str(msg['parent_tool_use_id'])
     const main = msg['parent_tool_use_id'] === null || msg['parent_tool_use_id'] === undefined
     const content = msg['message']['content']
     if (!Array.isArray(content)) return []
     const events: RunLogEvent[] = []
+    const inputTokens = main ? inputTokensOf(msg['message']['usage']) : null
+    if (inputTokens !== null) {
+      events.push({ kind: 'usage', inputTokens, contextWindow: contextWindowFor(model) })
+    }
     for (const block of content) {
       if (!isRecord(block)) continue
       if (
@@ -107,8 +119,24 @@ export function parseStreamLine(line: string, worktree: string): RunLogEvent[] {
           kind: 'tool',
           id: block['id'],
           tool,
-          ...summarizeTool(tool, block['input'], worktree)
+          ...summarizeTool(tool, block['input'], worktree),
+          ...(parent ? { parent } : {})
         })
+        if (main && (tool === 'Task' || tool === 'Agent')) {
+          const input = isRecord(block['input']) ? block['input'] : {}
+          const type = str(input['subagent_type'])
+          events.push({
+            kind: 'subagent',
+            id: block['id'],
+            title: short(
+              redactSecrets(str(input['description']) ?? str(input['prompt']) ?? ''),
+              80
+            ),
+            agentType: type ? short(type, 60) : null,
+            background: input['run_in_background'] === true,
+            at: now().toISOString()
+          })
+        }
       }
     }
     return events

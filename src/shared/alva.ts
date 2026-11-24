@@ -53,6 +53,8 @@ export interface BacklogTaskDocument {
   body: string
   /** O texto passou do limite e foi cortado. */
   truncated: boolean
+  /** Ainda não vinculada: o rascunho que o `/spec` desta tarefa está escrevendo no worktree. */
+  draft?: boolean
 }
 
 /**

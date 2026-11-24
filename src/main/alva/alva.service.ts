@@ -7,6 +7,7 @@
  * - resumo para o painel (id, título, status, critérios) lido do arquivo, nunca guardado.
  */
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -137,10 +138,39 @@ export class AlvaService {
     )
   }
 
-  /** Lê a task vinculada (worktree primeiro, depois a pasta do projeto). */
+  /**
+   * Task do Backlog.md que o `/spec` desta tarefa está escrevendo, antes do vínculo (o extrator só
+   * vincula quando o passo termina, mas o Claude pede a aprovação da spec no meio dele). É a task
+   * do worktree que não existe na pasta do projeto ou difere dela; várias → a mais recente.
+   */
+  private async draftTaskFile(
+    projectId: string,
+    taskId: string
+  ): Promise<{ info: BacklogTaskInfo; markdown: string } | null> {
+    const worktree = this.deps.worktreePath(taskId)
+    if (!worktree) return null
+    // Sem a pasta do projeto não dá para saber o que é desta tarefa: nada de rascunho.
+    const project = this.deps.projectDir(projectId)
+    if (!project) return null
+    const [mine, base] = await Promise.all([taskSignatures(worktree), taskSignatures(project)])
+    let best: { file: string; mtime: number } | null = null
+    for (const [file, sig] of Object.entries(mine)) {
+      if (base[file] === sig) continue
+      const mtime = await stat(join(worktree, 'backlog', 'tasks', file))
+        .then((s) => s.mtimeMs)
+        .catch(() => 0)
+      if (!best || mtime > best.mtime) best = { file, mtime }
+    }
+    return best ? readTaskFile(worktree, best.file) : null
+  }
+
+  /**
+   * Lê a task vinculada (worktree primeiro, depois a pasta do projeto). Sem vínculo, o rascunho que
+   * o `/spec` está escrevendo no worktree (para aprovar vendo a spec).
+   */
   async taskSummary(projectId: string, taskId: string): Promise<BacklogTaskInfo | null> {
     const id = this.getLink(taskId)
-    if (!id) return null
+    if (!id) return (await this.draftTaskFile(projectId, taskId))?.info ?? null
     for (const dir of [this.deps.worktreePath(taskId), this.deps.projectDir(projectId)]) {
       if (!dir) continue
       const info = await this.findTask(dir, id)
@@ -155,7 +185,12 @@ export class AlvaService {
    */
   async taskDocument(projectId: string, taskId: string): Promise<BacklogTaskDocument | null> {
     const id = this.getLink(taskId)
-    if (!id) return null
+    if (!id) {
+      const draft = await this.draftTaskFile(projectId, taskId)
+      if (!draft) return null
+      const { body, truncated } = backlogTaskBody(draft.markdown)
+      return { info: draft.info, body: redactSecrets(body), truncated, draft: true }
+    }
     for (const dir of [this.deps.worktreePath(taskId), this.deps.projectDir(projectId)]) {
       if (!dir) continue
       const found = await this.findTaskFile(dir, id)
@@ -201,7 +236,16 @@ export class AlvaService {
   readonly extractor: FlowExtractor = {
     id: 'alva',
     label: 'alva-flow: task do Backlog.md (status, perguntas, blocker)',
-    snapshot: async (ctx) => (ctx.worktreePath ? await taskSignatures(ctx.worktreePath) : {}),
+    // Antes do passo. Na primeira rodada da tarefa o worktree ainda não existe (o passo o cria a
+    // partir da branch padrão): a foto vem da pasta do projeto. Foto vazia faria todas as tasks
+    // do repositório parecerem "criadas pelo /spec".
+    snapshot: async (ctx) => {
+      if (ctx.worktreePath && existsSync(join(ctx.worktreePath, 'backlog'))) {
+        return taskSignatures(ctx.worktreePath)
+      }
+      const project = this.deps.projectDir(ctx.projectId)
+      return project ? taskSignatures(project) : {}
+    },
     extract: ({ resultText, ctx, snapshot }) => this.extract(ctx, resultText, snapshot),
     resolveChoice: async ({ ctx, value }) => {
       this.setLink(ctx.projectId, ctx.taskId, value)

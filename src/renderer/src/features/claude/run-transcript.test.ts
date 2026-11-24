@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { RunLogEvent } from '../../../../shared/agent-run'
 import {
   buildTranscript,
+  runningSubagents,
   categoryOf,
   failedLabel,
   summarizeSteps,
@@ -133,6 +134,36 @@ describe('buildTranscript', () => {
     })
   })
 
+  it('recibo de push/gh bloqueado carrega a ação "Abrir PR"; outros bloqueios não', () => {
+    const blocked = (summary: string, reason: string): RunLogEvent => ({
+      kind: 'permission',
+      requestId: summary,
+      tool: 'Bash',
+      summary,
+      state: 'blocked',
+      reason
+    })
+    const items = buildTranscript(
+      [
+        blocked(
+          'git push origin HEAD',
+          'Bloqueado pelo Orkio: git push só é permitido em um passo de fluxo com “modo entrega”. Para publicar, use “Abrir PR” na aba PR & CI da tarefa.'
+        ),
+        blocked(
+          'gh pr create',
+          'Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo.'
+        ),
+        blocked('cat /etc/x', 'Bloqueado pelo Orkio: fora do ambiente desta tarefa (worktree).')
+      ],
+      false
+    )
+    expect(items.map((i) => (i.kind === 'receipt' ? (i.action ?? null) : 'x'))).toEqual([
+      'open-pr',
+      'open-pr',
+      null
+    ])
+  })
+
   it('pedidos pendentes não aparecem (têm cartão próprio)', () => {
     const items = buildTranscript(
       [
@@ -236,5 +267,76 @@ describe('buildTranscript', () => {
     const done = buildTranscript(events, false)
     expect(done[0]).toMatchObject({ kind: 'work', live: false })
     expect(done[0]?.kind === 'work' && done[0].steps[0]?.state).toBe('ok')
+  })
+})
+
+describe('subagentes', () => {
+  const sub = (id: string, title: string, background = false): RunLogEvent => ({
+    kind: 'subagent',
+    id,
+    title,
+    agentType: 'review-agent',
+    background,
+    at: '2026-11-23T10:00:00.000Z'
+  })
+  const child = (id: string, parent: string): RunLogEvent => ({
+    kind: 'tool',
+    id,
+    tool: 'Read',
+    summary: 'a.ts',
+    parent
+  })
+
+  it('agrupa subagentes seguidos e conta as ferramentas de cada um', () => {
+    const events: RunLogEvent[] = [
+      tool('A', 'Task', 'Revisar API'),
+      sub('A', 'Revisar API'),
+      tool('B', 'Task', 'Escrever testes'),
+      sub('B', 'Escrever testes'),
+      child('c1', 'A'),
+      child('c2', 'A'),
+      child('c3', 'B'),
+      ok('A')
+    ]
+    const items = buildTranscript(events, true)
+    expect(kinds(items)).toEqual(['subagents'])
+    const g = items[0]
+    expect(g?.kind === 'subagents' && g.agents.map((a) => [a.state, a.tools])).toEqual([
+      ['done', 2],
+      ['running', 1]
+    ])
+    expect(runningSubagents(items).map((a) => a.title)).toEqual(['Escrever testes'])
+    expect(runningSubagents(buildTranscript(events, false))).toEqual([])
+  })
+
+  it('segundo plano, falha e texto entre lançamentos', () => {
+    const items = buildTranscript(
+      [sub('A', 'x', true), ok('A'), sub('B', 'y'), bad('B'), text('ok'), sub('C', 'z')],
+      true
+    )
+    expect(kinds(items)).toEqual(['subagents', 'message', 'subagents'])
+    const g = items[0]
+    expect(g?.kind === 'subagents' && g.agents.map((a) => a.state)).toEqual([
+      'background',
+      'failed'
+    ])
+  })
+
+  it('execução cancelada/falha com subagente pendente: interrompido, não concluído', () => {
+    const events: RunLogEvent[] = [sub('A', 'x'), sub('B', 'y'), ok('A')]
+    for (const status of ['cancelled', 'failed'] as const) {
+      const g = buildTranscript(events, false, status)[0]
+      expect(g?.kind === 'subagents' && g.agents.map((a) => a.state)).toEqual([
+        'done',
+        'interrupted'
+      ])
+    }
+    const done = buildTranscript(events, false, 'succeeded')[0]
+    expect(done?.kind === 'subagents' && done.agents.map((a) => a.state)).toEqual(['done', 'done'])
+  })
+
+  it('log antigo (Task sem evento subagent) continua um passo de delegação', () => {
+    const items = buildTranscript([tool('A', 'Task', 'Revisar API'), ok('A')], false)
+    expect(kinds(items)).toEqual(['work'])
   })
 })

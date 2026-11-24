@@ -12,6 +12,8 @@ import {
   type AgentProfile
 } from './agent'
 import type { Flow } from './task-flow'
+import { builtinAgent } from './agent-presets'
+import { alvaReviewPublishFlow } from './alva-templates'
 
 const ANA: AgentProfile = defaultAgent({
   id: 'ana',
@@ -107,7 +109,7 @@ describe('parseAgentFile', () => {
     const cases: [string, string][] = [
       ['id: ana', 'id: Ana Maria'],
       ['role: implementer', 'role: hacker'],
-      ['model: sonnet', 'model: gpt-4'],
+      ['model: sonnet', 'model: GPT-4'],
       ['delivery: true', 'delivery: sim'],
       ['  parallel: 1', '  parallel: 50'],
       ['  stepsPerDay: 40', '  stepsPerDay: 0'],
@@ -189,5 +191,40 @@ describe('checkAgentFlow', () => {
       /alva-flow:implement/
     )
     expect(checkAgentFlow({ ...ANA, commands: [] }, flow)).toBeNull()
+  })
+
+  it('Revisor embutido (sem entrega) roda a "revisão publicada": publish_review não é entrega', () => {
+    const revisor = builtinAgent('revisor')!
+    expect(revisor.delivery).toBe(false)
+    expect(checkAgentFlow(revisor, alvaReviewPublishFlow())).toBeNull()
+    // O mesmo agente continua barrado num fluxo que entrega.
+    expect(checkAgentFlow(revisor, flow)).toMatch(/não pode entregar/)
+  })
+})
+
+describe('modelo livre e raciocínio', () => {
+  const withKeys = (model: string, effort?: string): string =>
+    FILE.replace('model: sonnet', `model: ${model}${effort ? `\neffort: ${effort}` : ''}`)
+
+  it('lê e grava model e effort', () => {
+    const r = parseAgentFile(withKeys('claude-opus-5-5', 'high'))
+    expect(r.ok && r.profile.model).toBe('claude-opus-5-5')
+    expect(r.ok && r.profile.effort).toBe('high')
+    const text = serializeAgent(r.ok ? r.profile : ANA)
+    expect(text).toContain('model: claude-opus-5-5\n')
+    expect(text).toContain('effort: high\n')
+  })
+
+  it('perfil antigo: effort nulo e nenhuma linha effort ao gravar', () => {
+    const r = parseAgentFile(FILE)
+    expect(r.ok && r.profile.effort).toBeNull()
+    expect(serializeAgent(ANA)).not.toContain('effort')
+  })
+
+  it('recusa modelo e raciocínio inválidos', () => {
+    const m = parseAgentFile(withKeys('"--x"'))
+    expect(!m.ok && m.errors).toContain('Modelo inválido')
+    const e = parseAgentFile(withKeys('sonnet', 'ultra'))
+    expect(!e.ok && e.errors).toContain('Raciocínio inválido')
   })
 })

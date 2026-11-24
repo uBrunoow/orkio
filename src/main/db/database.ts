@@ -214,6 +214,12 @@ export const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (project_id, branch)
   );
   CREATE INDEX task_branches_task ON task_branches (task_page_id);
+  `,
+  // v11: total acumulado da sessão do Claude Code (`result.total_cost_usd` bruto). `cost` passa a
+  // guardar só o custo da execução (total - total anterior da sessão). Linhas antigas ficam como
+  // estão (sem total bruto; o `cost` delas é o acumulado de então).
+  `
+  ALTER TABLE agent_runs ADD COLUMN session_cost_total REAL;
   `
 ]
 

@@ -104,6 +104,27 @@ export class DeliveryService {
       .join('/')}`
   }
 
+  /**
+   * Página "Comparar e criar PR" do GitHub (`<base>...<branch>`), só do repositório do projeto e
+   * da branch da tarefa. Sem branch padrão conhecida, o GitHub escolhe a base (`compare/<branch>`).
+   */
+  compareUrl(projectId: string, taskId: string): string {
+    const t = this.target(projectId, taskId)
+    const enc = (name: string): string =>
+      name
+        .split('/')
+        // `encodeURIComponent` deixa passar `!'()*~`, que a allowlist do shell não aceita.
+        .map((part) =>
+          encodeURIComponent(part).replace(
+            /[!'()*~]/g,
+            (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`
+          )
+        )
+        .join('/')
+    const range = t.defaultBranch ? `${enc(t.defaultBranch)}...${enc(t.branch)}` : enc(t.branch)
+    return `https://github.com/${t.owner}/${t.repo}/compare/${range}?expand=1`
+  }
+
   /** O que o push enviaria (para o gate) e se pode. */
   async preview(projectId: string, taskId: string): Promise<PushPreview> {
     const t = this.target(projectId, taskId)
@@ -142,6 +163,12 @@ export class DeliveryService {
       problem,
       branchUrl: this.branchUrl(t)
     }
+  }
+
+  /** A branch da tarefa já está no GitHub com o mesmo conteúdo (nada novo para enviar)? */
+  async alreadyPushed(projectId: string, taskId: string): Promise<boolean> {
+    const p = await this.preview(projectId, taskId)
+    return p.remoteExists && p.commits.length === 0
   }
 
   /** Faz o push (revalida tudo na hora: o gate pode ter ficado aberto por um tempo). */

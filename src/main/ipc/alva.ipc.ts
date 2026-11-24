@@ -53,11 +53,13 @@ export function registerAlvaIpc(
       v &&
       stageOrNull(v['plan']) &&
       stageOrNull(v['deliver']) &&
+      stageOrNull(v['review'] ?? null) &&
       stageOrNull(v['reviewed'])
       ? ok(
           await service.createTemplates(projectId, {
             plan: v['plan'] as string | null,
             deliver: v['deliver'] as string | null,
+            review: (v['review'] ?? null) as string | null,
             reviewed: v['reviewed'] as string | null
           })
         )

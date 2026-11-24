@@ -187,7 +187,7 @@ async function exchangeWithNotion(
 }
 
 /** Lê o corpo até `max` bytes; passou disso → `null` (sem confiar no Content-Length). */
-async function readLimited(request: Request, max: number): Promise<string | null> {
+export async function readLimited(request: Request, max: number): Promise<string | null> {
   const declared = Number(request.headers.get('content-length') ?? '0')
   if (Number.isFinite(declared) && declared > max) return null
   if (!request.body) return ''

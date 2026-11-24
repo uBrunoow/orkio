@@ -7,7 +7,9 @@ import {
   initialState,
   newStepId,
   renderArgs,
+  renderMessage,
   retryStep,
+  reviseGate,
   skipStep,
   startFlow,
   validateTaskFlow,
@@ -237,5 +239,132 @@ describe('motor de fluxos', () => {
     const d = afterStep(flow, startFlow(flow).state, 'a', { outcome: 'ok' })
     expect(d).toMatchObject({ kind: 'finished', result: 'done' })
     expect(validateTaskFlow(flow, { commands: null, extractors: [], actions: [] })).toEqual([])
+  })
+})
+
+describe('validateTaskFlow: modelo e raciocínio do passo', () => {
+  const ctx = { commands: null, extractors: [], actions: [] }
+  const flowWith = (extra: Record<string, unknown>): Flow => ({
+    id: 'f',
+    name: 'f',
+    steps: [
+      {
+        id: 'a',
+        name: 'A',
+        type: 'claude_command',
+        command: 'x',
+        args: '',
+        timeoutMin: 5,
+        ...extra
+      } as Step
+    ]
+  })
+  it('aceita modelo e raciocínio válidos e recusa modelo inválido', () => {
+    expect(validateTaskFlow(flowWith({ model: 'opus', effort: 'low' }), ctx)).toEqual([])
+    const bad = validateTaskFlow(flowWith({ model: '--x' }), ctx)
+    expect(bad).toHaveLength(1)
+    expect(bad[0]).toMatchObject({ level: 'error', stepId: 'a' })
+    expect(bad[0]!.message).toContain('modelo inválido')
+    expect(validateTaskFlow(flowWith({ effort: 'ultra' }), ctx)[0]?.level).toBe('error')
+  })
+})
+
+describe('pedido em texto, só leitura e "Pedir ajustes"', () => {
+  const ctx = { commands: new Set(['revisar']), extractors: [], actions: [] }
+  const prompt = (id: string, extra: Record<string, unknown> = {}): Step =>
+    ({
+      id,
+      name: id,
+      type: 'claude_command',
+      command: '',
+      args: '',
+      prompt: 'Leia .orkio/revisao.md da PR #{{review.pr}}.',
+      timeoutMin: 30,
+      ...extra
+    }) as Step
+  const reviseGateStep = (extra: Record<string, unknown> = {}): Step =>
+    ({
+      id: 'ok',
+      name: 'ok',
+      type: 'gate',
+      message: 'Aprovar correções da PR #{{review.pr}}',
+      show: 'result',
+      onReject: 'stop',
+      timeoutMin: null,
+      revise: { step: 'plano', max: 3 },
+      ...extra
+    }) as Step
+  const flowOf = (...steps: Step[]): Flow => ({ id: 'f', name: 'f', steps })
+  const errors = (flow: Flow): string[] =>
+    validateTaskFlow(flow, ctx)
+      .filter((i) => i.level === 'error')
+      .map((i) => i.message)
+
+  it('exatamente um de comando ou pedido; só leitura não combina com entrega', () => {
+    expect(validateTaskFlow(flowOf(prompt('plano', { readOnly: true })), ctx)).toEqual([])
+    expect(errors(flowOf(prompt('a', { command: 'revisar' })))).toEqual([
+      'Passo “a”: use um comando ou um pedido em texto, não os dois.'
+    ])
+    expect(errors(flowOf(prompt('a', { prompt: '  ' })))).toEqual([
+      'Passo “a”: escreva o pedido para o Claude Code.'
+    ])
+    expect(errors(flowOf(cmd('a', '')))).toEqual(['Passo “a”: escolha o comando.'])
+    expect(errors(flowOf(prompt('a', { readOnly: true, delivery: true })))).toEqual([
+      'Passo “a”: um passo só de leitura não pode estar em modo entrega.'
+    ])
+    expect(errors(flowOf(prompt('a', { prompt: 'x'.repeat(8001) })))[0]).toContain('8000')
+    // Variável desconhecida no pedido avisa, como nos argumentos.
+    expect(validateTaskFlow(flowOf(prompt('a', { prompt: '{{nada}}' })), ctx)).toMatchObject([
+      { level: 'warning', stepId: 'a' }
+    ])
+  })
+
+  it('"Pedir ajustes" precisa voltar a um passo do Claude Code antes do gate, com limite 1..10', () => {
+    expect(validateTaskFlow(flowOf(prompt('plano'), reviseGateStep()), ctx)).toEqual([])
+    expect(errors(flowOf(reviseGateStep(), prompt('plano')))).toEqual([
+      'Passo “ok”: “pedir ajustes” precisa voltar a um passo do Claude Code antes do gate.'
+    ])
+    expect(
+      errors(flowOf(prompt('plano'), reviseGateStep({ revise: { step: 'nada', max: 3 } })))
+    ).toEqual(['Passo “ok”: “pedir ajustes” aponta para um passo que não existe (nada).'])
+    expect(
+      errors(flowOf(prompt('plano'), reviseGateStep({ revise: { step: 'plano', max: 0 } })))
+    ).toEqual(['Passo “ok”: o limite de ajustes deve ficar entre 1 e 10.'])
+    // Mostrar o resultado sem um passo do Claude Code antes: aviso.
+    expect(
+      validateTaskFlow(flowOf(reviseGateStep({ revise: undefined }), prompt('plano')), ctx)
+    ).toMatchObject([{ level: 'warning', stepId: 'ok' }])
+  })
+
+  it('reviseGate conta as voltas, volta ao passo e recusa depois do limite', () => {
+    const flow = flowOf(prompt('plano'), reviseGateStep({ revise: { step: 'plano', max: 2 } }))
+    let d = startFlow(flow)
+    d = afterStep(flow, d.state, 'plano', { outcome: 'ok' })
+    expect(runId(d)).toBe('ok')
+    for (let i = 1; i <= 2; i++) {
+      const r = reviseGate(flow, d.state, 'ok')
+      if (r.kind === 'refused') throw new Error('recusou cedo')
+      expect(runId(r)).toBe('plano')
+      expect(r.state.revisions).toEqual({ ok: i })
+      d = afterStep(flow, r.state, 'plano', { outcome: 'ok' })
+    }
+    expect(reviseGate(flow, d.state, 'ok')).toEqual({ kind: 'refused', reason: 'limit', max: 2 })
+    // Gate sem ajustes (ou passo que não é gate): recusado.
+    expect(reviseGate(flowOf(gate('g')), initialState(), 'g')).toMatchObject({
+      kind: 'refused',
+      reason: 'not_revisable'
+    })
+    // Aprovar segue normalmente depois das voltas.
+    expect(afterStep(flow, d.state, 'ok', { outcome: 'approved' })).toMatchObject({
+      kind: 'finished',
+      result: 'done'
+    })
+  })
+
+  it('renderMessage troca as variáveis do fluxo; sem valor vira …', () => {
+    expect(renderMessage('PR #{{review.pr}} · {{flow.x}}', { 'review.pr': '13', x: 'a' })).toBe(
+      'PR #13 · a'
+    )
+    expect(renderMessage('PR #{{review.pr}} {{task_id}}', {})).toBe('PR #… …')
   })
 })

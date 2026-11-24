@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
@@ -17,8 +17,9 @@ import {
 /**
  * Etapa 8B: orquestrador + agentes embutidos. Sem criar agente nenhum: liga o orquestrador pela
  * tela com a sugestão (Prioridades → Em andamento com o Implementador → Revisando com o Revisor →
- * Revisado) e confere que a ORK-2 sai da fila e anda sozinha até "Revisado", com o fluxo de cada
- * coluna rodando como o agente certo (o Claude simulado registra o --append-system-prompt).
+ * Revisado) e confere que ele NÃO puxa a ORK-2 da fila (quem começa é você) e que, movida à mão para
+ * "Em andamento", ela anda sozinha até "Revisado", com o fluxo de cada coluna rodando como o agente
+ * certo (o Claude simulado registra o --append-system-prompt).
  */
 const NOTION_TOKEN = 'ntn_E2E_ORCH_TOKEN_abcdef123456'
 const ORK2 = 'ORK-2 Listar tarefas do Notion'
@@ -145,7 +146,7 @@ test('prepara o quadro e um fluxo por coluna de trabalho', async () => {
     boards: Record<string, { stages: { id: string; name: string }[] }>
     flows: Record<string, unknown>
   }
-  expect(config.schemaVersion).toBe(11)
+  expect(config.schemaVersion).toBe(12)
   const stage = (name: string): string =>
     config.boards[PROJECT]!.stages.find((st) => st.name === name)!.id
   const oneStep = (id: string, name: string): unknown => ({
@@ -172,7 +173,7 @@ test('prepara o quadro e um fluxo por coluna de trabalho', async () => {
   writeFileSync(configFile(), JSON.stringify(config))
 })
 
-test('liga o orquestrador com a sugestão: a tarefa sai da fila e chega a Revisado sozinha', async () => {
+test('orquestrador não puxa da fila; movida à mão, a tarefa chega a Revisado sozinha', async () => {
   const { page } = await open()
   // A ORK-2 vai para a fila (Prioridades) antes de ligar o orquestrador. Nesta abertura: o Notion
   // simulado recomeça a cada abertura e a reconciliação a devolveria para "Em andamento".
@@ -209,7 +210,7 @@ test('liga o orquestrador com a sugestão: a tarefa sai da fila e chega a Revisa
   await form.getByRole('checkbox', { name: /^Ligar o orquestrador/ }).check()
   await form.getByRole('button', { name: 'Salvar orquestrador' }).click()
   await expect(orch.getByTestId('orchestrator-summary')).toHaveText(
-    'Puxa de Prioridades → Em andamento (Implementador) → Revisando (Revisor) → Revisado.'
+    'Em andamento (Implementador) → Revisando (Revisor) → Revisado.'
   )
 
   // A config guarda quando ligou (só fluxos que terminarem depois disso fazem a tarefa seguir).
@@ -219,8 +220,20 @@ test('liga o orquestrador com a sugestão: a tarefa sai da fila e chega a Revisa
   expect(saved.orchestrator[PROJECT]?.enabled).toBe(true)
   expect(saved.orchestrator[PROJECT]?.enabledSince).toMatch(/^\d{4}-/)
 
-  // Puxada da fila → Implementador → fluxo conclui → Revisando com o Revisor → Revisado.
+  // Uma rodada não puxa a tarefa da fila: ela fica em Prioridades até você mover.
+  await orch.getByRole('button', { name: 'Rodar agora' }).click()
   await goTo(page, 'Quadro')
+  await page.waitForTimeout(1500)
+  await expect(
+    page
+      .getByRole('list', { name: 'Tarefas em Prioridades' })
+      .getByRole('listitem', { name: /ORK-2/ })
+  ).toBeVisible()
+  expect(existsSync(join(worktree(), '.orkio', 'agent-args.log'))).toBe(false)
+
+  // Você move para Em andamento → Implementador → fluxo conclui → Revisando (Revisor) → Revisado.
+  await card(page).getByRole('button', { name: 'Ações de ORK-2' }).click()
+  await page.getByRole('menuitem', { name: 'Mover para Em andamento' }).click()
   await expect(
     page.getByRole('list', { name: 'Tarefas em Revisado' }).getByRole('listitem', { name: /ORK-2/ })
   ).toBeVisible({ timeout: 60_000 })
@@ -241,7 +254,6 @@ test('liga o orquestrador com a sugestão: a tarefa sai da fila e chega a Revisa
   await expectTaskHistory(
     panel,
     'Atribuída a Implementador pelo orquestrador',
-    'Orquestrador (puxada da fila): Prioridades → Em andamento',
     'Atribuída a Revisor pelo orquestrador',
     'Orquestrador (fluxo da etapa concluído): Em andamento → Revisando'
   )

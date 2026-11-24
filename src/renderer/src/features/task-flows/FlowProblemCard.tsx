@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { TextAreaField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
-import { ProblemIcon } from '@/components/icons'
+import { ExternalLinkIcon, ProblemIcon } from '@/components/icons'
 import type { ClaudeDiff } from '../../../../shared/agent-run'
 import type { FlowProblem } from '../../../../shared/flow-problem'
 import { Alert } from '../../components/Alert'
@@ -109,6 +109,16 @@ export function FlowProblemCard({
           {busy && <Spinner />}
           Retomar deste passo
         </Button>
+        {problem.link && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void window.orkio.openExternal(problem.link!.url)}
+          >
+            <ExternalLinkIcon />
+            {problem.link.label}
+          </Button>
+        )}
         {problem.kind === 'uncommitted' && (
           <Button size="sm" variant="outline" onClick={() => void toggleChanges()}>
             {showChanges ? 'Esconder o que falta commitar' : 'Ver o que falta commitar'}

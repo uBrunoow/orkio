@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DeviceAuthorization, DevicePollResult } from '../../oauth/device-flow'
 import { SecureStore, type SafeStorageLike } from '../../storage/secure-store'
 import { GitHubApiError, createGitHubClient, type GitHubClient } from './github.client'
-import { GITHUB_MESSAGES, GitHubConnector } from './github.connector'
+import { GITHUB_MESSAGES, GitHubConnector, ORKIO_SITE_TIMEOUT_MS } from './github.connector'
 import type { GitHubDeviceApi, GitHubOAuthToken } from './github.oauth'
 
 const PAT = 'github_pat_CONNECTOR_TOKEN_SHOULD_NEVER_LEAK'
@@ -379,6 +379,128 @@ describe('GitHubConnector', () => {
       archived: false,
       permissions: { admin: true, maintain: true, push: true, triage: true, pull: true }
     }
+
+    describe('postReviewViaOrkioSite (revisão como orkio[bot])', () => {
+      const SITE = 'https://orkio.example'
+      const PAYLOAD = {
+        owner: 'acme',
+        repo: 'orkio',
+        number: 7,
+        review: { event: 'COMMENT' as const, body: 'ok', comments: [] }
+      }
+
+      function withSite(
+        siteFetch: typeof fetch,
+        extra: {
+          siteTimeoutMs?: number
+          allowLoopbackSite?: boolean
+          siteOrigin?: string | null
+        } = {}
+      ): GitHubConnector {
+        return new GitHubConnector({
+          store,
+          client,
+          now: () => NOW,
+          fetch: siteFetch,
+          siteOrigin: SITE,
+          ...extra
+        })
+      }
+
+      it('sem conta conectada → not_connected, sem chamar o site', async () => {
+        const site = vi.fn<typeof fetch>()
+        await expect(withSite(site).postReviewViaOrkioSite(PAYLOAD)).rejects.toMatchObject({
+          code: 'not_connected'
+        })
+        expect(site).not.toHaveBeenCalled()
+      })
+
+      it('o token só vai para a origem fixada na construção; devolve só status e JSON', async () => {
+        const site = vi.fn<typeof fetch>(async () =>
+          json({ url: 'https://github.com/acme/orkio/pull/7' })
+        )
+        const connector = withSite(site)
+        await connector.connect({ kind: 'token', token: PAT })
+        expect(connector.hasOrkioSite()).toBe(true)
+        const result = await connector.postReviewViaOrkioSite(PAYLOAD)
+        expect(result).toEqual({
+          status: 200,
+          body: { url: 'https://github.com/acme/orkio/pull/7' }
+        })
+        expectNoTokens(result)
+        expect(site).toHaveBeenCalledTimes(1)
+        const [url, init] = site.mock.calls[0]!
+        expect(url).toBe(`${SITE}/github/review`)
+        expect(init?.method).toBe('POST')
+        expect(init?.redirect).toBe('error')
+        expect(JSON.parse(String(init?.body))).toEqual({ ...PAYLOAD, userToken: PAT })
+        expect(JSON.stringify(init?.headers)).not.toContain(PAT)
+      })
+
+      it('sem origem ou origem fora das regras → not_configured, sem rede', async () => {
+        const site = vi.fn<typeof fetch>(async () => json({}))
+        await withSite(site).connect({ kind: 'token', token: PAT })
+        for (const siteOrigin of [
+          null,
+          undefined,
+          'http://orkio.example',
+          'http://127.0.0.1:3000',
+          'http://localhost:3000',
+          'https://orkio.example/outro',
+          'lixo'
+        ]) {
+          const connector = withSite(site, { siteOrigin: siteOrigin ?? null })
+          expect(connector.hasOrkioSite()).toBe(false)
+          await expect(connector.postReviewViaOrkioSite(PAYLOAD)).rejects.toMatchObject({
+            code: 'not_configured'
+          })
+        }
+        expect(site).not.toHaveBeenCalled()
+        await withSite(site, {
+          siteOrigin: 'http://127.0.0.1:3000',
+          allowLoopbackSite: true
+        }).postReviewViaOrkioSite(PAYLOAD)
+        expect(site.mock.calls[0]![0]).toBe('http://127.0.0.1:3000/github/review')
+      })
+
+      it('falha de rede → mensagem com o host, sem o token nem a exceção', async () => {
+        const site = vi.fn<typeof fetch>(async () => {
+          throw new TypeError(`fetch failed ${PAT}`)
+        })
+        const connector = withSite(site)
+        await connector.connect({ kind: 'token', token: PAT })
+        const error = await connector.postReviewViaOrkioSite(PAYLOAD).catch((e: unknown) => e)
+        expect(error).toMatchObject({ code: 'network' })
+        expect((error as Error).message).toContain('orkio.example')
+        expectNoTokens((error as Error).message)
+        expect((error as Error).message).not.toContain('fetch failed')
+      })
+
+      it('timeout (também durante a leitura do corpo) avisa que a revisão pode ter saído', async () => {
+        const site = vi.fn<typeof fetch>(
+          async () =>
+            new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.enqueue(new TextEncoder().encode('{"url":'))
+                }
+              })
+            )
+        )
+        const connector = withSite(site, { siteTimeoutMs: 30 })
+        await connector.connect({ kind: 'token', token: PAT })
+        await expect(connector.postReviewViaOrkioSite(PAYLOAD)).rejects.toMatchObject({
+          code: 'timeout',
+          message:
+            'O site do Orkio demorou para responder. Confira a PR antes de tentar de novo: a ' +
+            'revisão pode ter sido publicada.'
+        })
+      })
+
+      it('o timeout do app (25 s) é maior que o prazo total do site (15 s)', () => {
+        expect(ORKIO_SITE_TIMEOUT_MS).toBe(25_000)
+      })
+    })
 
     it('sem conta conectada → not_connected, sem chamar a API', async () => {
       const connector = makeConnector()

@@ -254,4 +254,23 @@ describe('migração v4 (4A)', () => {
     db.close()
     await rm(dir, { recursive: true, force: true })
   })
+
+  it('v10 → v11 acrescenta session_cost_total sem mexer nas execuções antigas', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v11-'))
+    const file = join(dir, 'orkio.db')
+    const old = openDatabase(file, MIGRATIONS.slice(0, 10))
+    old.run(
+      "INSERT INTO agent_runs (id, task_page_id, project_id, mode, status, started_at, cost) VALUES ('r', 't', 'p', 'prompt', 'succeeded', 'x', 8.5)"
+    )
+    old.close()
+    const db = openDatabase(file, MIGRATIONS.slice(0, 11))
+    expect(db.version).toBe(11)
+    expect(
+      db.get<{ cost: number; session_cost_total: number | null }>(
+        "SELECT cost, session_cost_total FROM agent_runs WHERE id = 'r'"
+      )
+    ).toEqual({ cost: 8.5, session_cost_total: null })
+    db.close()
+    await rm(dir, { recursive: true, force: true })
+  })
 })

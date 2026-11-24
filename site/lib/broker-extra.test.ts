@@ -105,6 +105,7 @@ describe('sem logs', () => {
     walk(join(import.meta.dirname))
     walk(join(import.meta.dirname, '..', 'app', 'notion'))
     walk(join(import.meta.dirname, '..', 'app', 'health'))
+    walk(join(import.meta.dirname, '..', 'app', 'github'))
     for (const f of files) expect(readFileSync(f, 'utf8'), f).not.toMatch(/console\.\w+\s*\(/)
   })
 })

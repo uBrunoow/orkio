@@ -6,6 +6,8 @@
  * template dos argumentos e validação. Quem executa os passos é o `FlowRunner` no main.
  */
 
+import { isEffort, isModelName, type Effort } from './agent-runtime'
+
 export type StepId = string
 
 /** Resultado de um passo visto pelas condições. */
@@ -26,10 +28,25 @@ interface StepBase {
 
 export type ClaudeCommandStep = StepBase & {
   type: 'claude_command'
-  /** Comando do catálogo (sem a barra), ex.: `revisar` ou `plugin:comando`. */
+  /**
+   * Comando do catálogo (sem a barra), ex.: `revisar` ou `plugin:comando`. Vazio quando o passo é
+   * um pedido em texto (`prompt`): exatamente um dos dois.
+   */
   command: string
   /** Template: {{briefing_path}}, {{task_id}}, {{notion_url}}, {{flow.<chave>}}. */
   args: string
+  /**
+   * Pedido em texto (template, mesmas variáveis dos argumentos) em vez de um comando. Roda na
+   * sessão mais recente do Claude Code da tarefa (`--resume`) quando existe; senão começa uma com
+   * o briefing.
+   */
+  prompt?: string
+  /**
+   * Só leitura: o Claude Code não recebe as ferramentas de edição (Edit, Write, MultiEdit,
+   * NotebookEdit) e roda em `--permission-mode manual`: nada é aprovado sozinho, todo comando passa
+   * pela aprovação do Orkio. Não combina com entrega.
+   */
+  readOnly?: boolean
   timeoutMin: number
   /** Extrator registrado em código que grava variáveis do fluxo a partir do resultado. */
   extract?: { extractor: string }
@@ -43,18 +60,40 @@ export type ClaudeCommandStep = StepBase & {
    * da branch da tarefa, com aprovação na primeira vez. Merge, força e outras branches, nunca.
    */
   delivery?: boolean
+  /** Modelo só deste passo (vence o do agente); ausente = o do agente ou o padrão do Claude Code. */
+  model?: string
+  /** Raciocínio só deste passo (vence o do agente). */
+  effort?: Effort
 }
 
 export type GateStep = StepBase & {
   type: 'gate'
+  /** Aceita variáveis do fluxo (ex.: `Aprovar correções da PR #{{review.pr}}`). */
   message: string
-  /** `backlog`: a spec/o plano da task do Backlog.md (alva-flow). */
-  show: 'diff' | 'summary' | 'backlog' | 'none'
+  /**
+   * `backlog`: a spec/o plano da task do Backlog.md (alva-flow). `result`: o texto final da última
+   * execução do Claude Code deste fluxo (ex.: o plano de correções).
+   */
+  show: GateShow
   /** Recusar: vai para este passo (ex.: corrigir) ou encerra o fluxo como recusado. */
   onReject: StepId | 'stop'
   /** `null` = espera sem limite. */
   timeoutMin: number | null
+  /**
+   * "Pedir ajustes…": o seu texto volta para `step` (um passo do Claude Code antes do gate), que
+   * continua a mesma sessão com ele; depois o gate aparece de novo. No máximo `max` voltas.
+   */
+  revise?: { step: StepId; max: number }
 }
+
+export type GateShow = 'diff' | 'summary' | 'backlog' | 'result' | 'none'
+export const GATE_SHOWS: readonly GateShow[] = ['diff', 'summary', 'backlog', 'result', 'none']
+/** Limite de voltas de "Pedir ajustes" num gate. */
+export const MAX_REVISE = 10
+/** Ferramentas que um passo só de leitura não recebe (`--disallowedTools`). */
+export const READ_ONLY_DENIED_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
+/** Tamanho máximo do pedido em texto de um passo e do texto de "Pedir ajustes". */
+export const MAX_PROMPT_CHARS = 8000
 
 export type OrkioActionStep = StepBase & { type: 'orkio_action'; action: string }
 
@@ -107,6 +146,8 @@ export interface FlowState {
   /** Último resultado de cada passo, como as condições o enxergam. */
   outcomes: Record<StepId, ConditionOutcome>
   executed: number
+  /** "Pedir ajustes" já usados em cada gate (ausente em fluxos anteriores = nenhum). */
+  revisions?: Record<StepId, number>
 }
 
 export type FlowDecision =
@@ -241,6 +282,44 @@ export function retryStep(flow: Flow, state: FlowState, stepId: StepId): FlowDec
   return { kind: 'run', stepId, state: visit(state, stepId) }
 }
 
+/** O passo roda um pedido em texto (`prompt`) em vez de um comando do catálogo? */
+export function isPromptStep(step: ClaudeCommandStep): boolean {
+  return (step.prompt ?? '').trim() !== ''
+}
+
+/** Voltas de "Pedir ajustes" já usadas e o limite do gate (`null` = o gate não aceita ajustes). */
+export function gateRevisions(
+  step: Step | undefined,
+  state: FlowState
+): { used: number; max: number } | null {
+  if (step?.type !== 'gate' || !step.revise) return null
+  return { used: state.revisions?.[step.id] ?? 0, max: step.revise.max }
+}
+
+export type ReviseDecision =
+  FlowDecision | { kind: 'refused'; reason: 'not_revisable' | 'limit'; max: number }
+
+/**
+ * "Pedir ajustes" no gate: conta uma volta e roda de novo o passo `revise.step` (que continua a
+ * sessão com o seu texto); depois o fluxo segue normalmente e chega ao gate outra vez. Passou do
+ * limite → recusado.
+ */
+export function reviseGate(flow: Flow, state: FlowState, gateId: StepId): ReviseDecision {
+  const gate = flow.steps.find((s) => s.id === gateId)
+  const r = gateRevisions(gate, state)
+  if (!r || gate?.type !== 'gate' || !gate.revise) {
+    return { kind: 'refused', reason: 'not_revisable', max: 0 }
+  }
+  if (r.used >= r.max) return { kind: 'refused', reason: 'limit', max: r.max }
+  const target = indexOf(flow, gate.revise.step)
+  if (target < 0) return { kind: 'refused', reason: 'not_revisable', max: r.max }
+  const s: FlowState = {
+    ...state,
+    revisions: { ...state.revisions, [gateId]: r.used + 1 }
+  }
+  return resolveFrom(flow, target, s)
+}
+
 // ---------- Template dos argumentos ----------
 
 export interface TemplateContext {
@@ -284,6 +363,21 @@ export function renderArgs(
     return ''
   })
   return { text, missing }
+}
+
+/**
+ * Texto para a tela (ex.: mensagem do gate): troca `{{flow.<chave>}}` e variáveis com namespace
+ * (`{{review.pr}}`) pelos valores do fluxo; o que não tem valor vira `…`.
+ */
+export function renderMessage(template: string, vars: Record<string, string>): string {
+  return template.replace(TEMPLATE_VAR, (_m, name: string) => {
+    const v = name.startsWith('flow.')
+      ? vars[name.slice(5)]
+      : NAMESPACED_VAR.test(name)
+        ? vars[name]
+        : undefined
+    return v !== undefined && v !== '' ? v : '…'
+  })
 }
 
 function templateVars(template: string): string[] {
@@ -353,30 +447,82 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
 
     switch (step.type) {
       case 'claude_command': {
-        if (!step.command.trim()) err(step.id, `${label}: escolha o comando.`)
-        else if (ctx.commands && !ctx.commands.has(step.command)) {
+        const hasCommand = step.command.trim() !== ''
+        const hasPrompt = isPromptStep(step)
+        if (hasCommand && hasPrompt) {
+          err(step.id, `${label}: use um comando ou um pedido em texto, não os dois.`)
+        } else if (!hasCommand && !hasPrompt) {
+          err(
+            step.id,
+            step.prompt !== undefined
+              ? `${label}: escreva o pedido para o Claude Code.`
+              : `${label}: escolha o comando.`
+          )
+        } else if (hasCommand && ctx.commands && !ctx.commands.has(step.command)) {
           warn(step.id, `${label}: o comando /${step.command} não está instalado no Claude Code.`)
+        }
+        if ((step.prompt ?? '').length > MAX_PROMPT_CHARS) {
+          err(step.id, `${label}: o pedido passa de ${MAX_PROMPT_CHARS} caracteres.`)
+        }
+        if (step.readOnly === true && step.delivery === true) {
+          err(step.id, `${label}: um passo só de leitura não pode estar em modo entrega.`)
         }
         if (!(step.timeoutMin >= 1 && step.timeoutMin <= 720)) {
           err(step.id, `${label}: o tempo limite deve ficar entre 1 e 720 minutos.`)
         }
-        for (const v of templateVars(step.args)) {
+        for (const v of [...templateVars(step.args), ...templateVars(step.prompt ?? '')]) {
           if (!KNOWN_VARS.has(v) && !v.startsWith('flow.') && !NAMESPACED_VAR.test(v)) {
             warn(step.id, `${label}: variável desconhecida {{${v}}} (fica vazia).`)
           }
+        }
+        if (step.model !== undefined && !isModelName(step.model)) {
+          err(step.id, `${label}: modelo inválido (use letras minúsculas, números, ponto e hífen).`)
+        }
+        if (step.effort !== undefined && !isEffort(step.effort)) {
+          err(step.id, `${label}: raciocínio inválido.`)
         }
         if (step.extract && !ctx.extractors.includes(step.extract.extractor)) {
           err(step.id, `${label}: extrator desconhecido (${step.extract.extractor}).`)
         }
         break
       }
-      case 'gate':
+      case 'gate': {
         if (!step.message.trim()) err(step.id, `${label}: escreva a mensagem do gate.`)
+        for (const v of templateVars(step.message)) {
+          if (!v.startsWith('flow.') && !NAMESPACED_VAR.test(v)) {
+            warn(step.id, `${label}: a mensagem cita {{${v}}}, que o gate não conhece.`)
+          }
+        }
         if (step.onReject !== 'stop') target(step.onReject, 'recusar')
         if (step.timeoutMin !== null && !(step.timeoutMin >= 1 && step.timeoutMin <= 43_200)) {
           err(step.id, `${label}: o tempo limite do gate deve ficar entre 1 minuto e 30 dias.`)
         }
+        const earlierClaude = flow.steps.slice(0, i).some((s) => s.type === 'claude_command')
+        if (step.show === 'result' && !earlierClaude) {
+          warn(
+            step.id,
+            `${label}: mostra o resultado do Claude Code, mas nenhum passo antes dele roda o Claude Code.`
+          )
+        }
+        if (step.revise) {
+          const at = target(step.revise.step, '“pedir ajustes”')
+          const back = at === null ? undefined : flow.steps[at]
+          if (at !== null && (back?.type !== 'claude_command' || at >= i)) {
+            err(
+              step.id,
+              `${label}: “pedir ajustes” precisa voltar a um passo do Claude Code antes do gate.`
+            )
+          }
+          if (
+            !Number.isInteger(step.revise.max) ||
+            step.revise.max < 1 ||
+            step.revise.max > MAX_REVISE
+          ) {
+            err(step.id, `${label}: o limite de ajustes deve ficar entre 1 e ${MAX_REVISE}.`)
+          }
+        }
         break
+      }
       case 'orkio_action':
         if (!ctx.actions.includes(step.action)) {
           err(step.id, `${label}: ação do Orkio desconhecida (${step.action}).`)
@@ -446,6 +592,11 @@ export type FlowStepStatus =
   | 'interrupted'
   | 'approved'
   | 'rejected'
+  /**
+   * Gate: você pediu ajustes (o passo de ajustes rodou de novo e o gate volta depois). No banco é
+   * `skipped` com a marca `revised` no resultado; só a visão usa este estado.
+   */
+  | 'revised'
 
 /** Por que o fluxo parou e espera você. */
 export type FlowPauseReason =
@@ -497,6 +648,8 @@ export interface FlowRunView {
   confirm: ActionConfirm | null
   /** Agente que roda o fluxo (8A; cópia do perfil feita no início). */
   agent: { key: string; name: string; color: string } | null
+  /** Gate atual com "Pedir ajustes": voltas usadas e o limite (`null` = sem ajustes). */
+  revise: { used: number; max: number } | null
 }
 
 /** O que uma ação do Orkio mostra antes de agir (gate da ação). */
@@ -514,6 +667,19 @@ export interface ActionConfirm {
   approveLabel: string
   /** Link do GitHub (branch ou PR). */
   link?: { label: string; url: string } | null
+  /** Revisão a publicar como `orkio[bot]` (Task 18): o que vai para a PR ao aprovar. */
+  review?: ConfirmReview
+  /** Aviso em destaque (ex.: a tentativa anterior demorou e pode ter publicado). */
+  warning?: string
+}
+
+/** Revisão mostrada no gate do `publish_review` (já redigida; aprovar posta exatamente isto). */
+export interface ConfirmReview {
+  event: 'COMMENT' | 'REQUEST_CHANGES'
+  summary: string
+  /** `inDiff: false` = fora do diff da PR: não é publicado. */
+  comments: { path: string; line: number; body: string; inDiff: boolean }[]
+  pr: { owner: string; repo: string; number: number }
 }
 
 export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {

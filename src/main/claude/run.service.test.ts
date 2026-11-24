@@ -181,9 +181,80 @@ describe('RunService', () => {
     expect(service.lastSession('task-2')).toBeNull()
   })
 
+  it('custo: sessão nova guarda o total; --resume guarda só a diferença; total menor = reinício', async () => {
+    const costOf = (id: string) =>
+      db.get<{ cost: number; session_cost_total: number }>(
+        'SELECT cost, session_cost_total FROM agent_runs WHERE id = ?',
+        id
+      )!
+    const resultCosts = async (id: string) =>
+      (await service.readLog(id)).flatMap((e) => (e.kind === 'result' ? [e.costUsd] : []))
+    const result = (costUsd: number) =>
+      ({ kind: 'result', ok: true, durationMs: 1, costUsd, turns: 1, text: '' }) as const
+
+    const first = await start(1)
+    await spawned(1)
+    const sessionId = runs[0]!.opts.sessionId
+    runs[0]!.emit(result(7.56))
+    runs[0]!.exit(0)
+    await finished(first.id)
+    expect(costOf(first.id)).toEqual({ cost: 7.56, session_cost_total: 7.56 })
+    expect(await resultCosts(first.id)).toEqual([7.56])
+
+    const second = await start(1, { text: 'mais', resumeSessionId: sessionId })
+    await spawned(2)
+    runs[1]!.emit(result(7.83))
+    runs[1]!.exit(0)
+    await finished(second.id)
+    expect(costOf(second.id).cost).toBeCloseTo(0.27, 10)
+    expect(costOf(second.id).session_cost_total).toBe(7.83)
+    expect((await resultCosts(second.id))[0]).toBeCloseTo(0.27, 10)
+    expect(service.view(second.id)?.costUsd).toBeCloseTo(0.27, 10)
+
+    const third = await start(1, { text: 'de novo', resumeSessionId: sessionId })
+    await spawned(3)
+    runs[2]!.emit(result(1.5))
+    runs[2]!.exit(0)
+    await finished(third.id)
+    expect(costOf(third.id)).toEqual({ cost: 1.5, session_cost_total: 1.5 })
+  })
+
+  it('runtime da mensagem vence o agente; null do agente não bloqueia; log "Modelo · Raciocínio"', async () => {
+    const view = await start(1, {
+      agent: { key: 'repo:ana', name: 'Ana', prompt: 'x', model: 'sonnet', effort: null },
+      runtime: { effort: 'max' }
+    })
+    await spawned(1)
+    expect(runs[0]!.opts).toMatchObject({ model: 'sonnet', effort: 'max' })
+    const log = await service.readLog(view.id)
+    expect(log).toContainEqual({ kind: 'info', text: 'Modelo: Sonnet · Raciocínio: Máximo' })
+    runs[0]!.exit(0)
+    await finished(view.id)
+
+    // Mensagem/passo com null = padrão de propósito; agente com valor define o resto.
+    const second = await start(1, {
+      agent: { key: 'repo:ana', name: 'Ana', prompt: 'x', model: 'sonnet', effort: 'low' },
+      runtime: { model: null }
+    })
+    await spawned(2)
+    expect(runs[1]!.opts).toMatchObject({ model: null, effort: 'low' })
+    expect(await service.readLog(second.id)).toContainEqual({
+      kind: 'info',
+      text: 'Raciocínio: Baixo'
+    })
+    runs[1]!.exit(0)
+    await finished(second.id)
+
+    // Valor inválido (defesa em profundidade) nem chega ao CLI; sem nada definido, sem linha info.
+    const third = await start(1, { runtime: { model: '--x', effort: 'ultra' as never } })
+    await spawned(3)
+    expect(runs[2]!.opts).toMatchObject({ model: null, effort: null })
+    expect((await service.readLog(third.id)).some((e) => e.kind === 'info')).toBe(false)
+  })
+
   it('agente (8A): instruções e modelo vão para o CLI; execução fica com o agente; política igual', async () => {
     const view = await start(1, {
-      agent: { key: 'repo:ana', name: 'Ana', prompt: 'Você é Ana.', model: 'sonnet' }
+      agent: { key: 'repo:ana', name: 'Ana', prompt: 'Você é Ana.', model: 'sonnet', effort: null }
     })
     await spawned(1)
     const run = runs[0]!

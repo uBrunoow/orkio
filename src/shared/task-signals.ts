@@ -24,6 +24,8 @@ export interface PullRequestSummary {
   createdAt?: string | null
   /** Quando foi fechada/mergeada (REST `closed_at`); `null` se aberta. */
   closedAt?: string | null
+  /** Login de quem abriu (REST); só para o cartão da PR, nunca vai ao snapshot da 3B. */
+  author?: string | null
   /** Páginas do Notion citadas no corpo da PR (ids normalizados): ligam a PR à tarefa sem ID. */
   notionPageIds?: string[]
 }
@@ -46,6 +48,10 @@ export interface PullRequestDetails {
   }[]
   /** Ids das threads de review não resolvidas. */
   unresolvedThreadIds?: string[]
+  /** Tamanho da PR (GraphQL); só para o cartão. Ausente = desconhecido. */
+  additions?: number
+  deletions?: number
+  changedFiles?: number
 }
 
 export interface TaskPullRequest extends PullRequestSummary, PullRequestDetails {}
@@ -184,6 +190,9 @@ export function buildTaskSignals(
             reviewDecision: details?.reviewDecision ?? null,
             unresolvedComments: details?.unresolvedComments ?? null,
             checks: details?.checks ?? null,
+            ...(details?.additions !== undefined ? { additions: details.additions } : {}),
+            ...(details?.deletions !== undefined ? { deletions: details.deletions } : {}),
+            ...(details?.changedFiles !== undefined ? { changedFiles: details.changedFiles } : {}),
             ...(details?.reviewRequests ? { reviewRequests: details.reviewRequests } : {}),
             ...(details?.reviews ? { reviews: details.reviews } : {}),
             ...(details?.unresolvedThreadIds

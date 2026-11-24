@@ -92,6 +92,8 @@ export interface Git {
   fileAtCommit(root: string, commit: string, path: string): Promise<string>
   /** `git diff <base>` (commits + mudanças no worktree), texto puro, sem cor. */
   diffText(dir: string, base: string): Promise<string>
+  /** Linhas adicionadas/removidas contra a base (`git diff --numstat`; binários não contam). */
+  diffShortstat(dir: string, base: string): Promise<{ added: number; removed: number }>
   // ---------- Entrega (5C) ----------
   /**
    * `git push --porcelain -u <remote> refs/heads/<b>:refs/heads/<b>`. Nunca força. Sem prompts
@@ -242,6 +244,9 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
     async diffText(dir, base) {
       return git(dir, ['diff', '--no-color', '--no-ext-diff', base])
     },
+    async diffShortstat(dir, base) {
+      return parseNumstat(await git(dir, ['diff', '--numstat', '--no-ext-diff', base]))
+    },
     async headCommit(dir) {
       return (await git(dir, ['rev-parse', 'HEAD'])).trim()
     },
@@ -368,4 +373,16 @@ export function isSafeRefName(name: string): boolean {
     !name.endsWith('.lock') &&
     !name.includes('//')
   )
+}
+
+/** Soma de `git diff --numstat` (linhas `adicionadas<TAB>removidas<TAB>arquivo`; binário = `-`). */
+export function parseNumstat(text: string): { added: number; removed: number } {
+  let added = 0
+  let removed = 0
+  for (const line of text.split('\n')) {
+    const [a, r] = line.split('\t')
+    if (a && /^\d+$/.test(a)) added += Number(a)
+    if (r && /^\d+$/.test(r)) removed += Number(r)
+  }
+  return { added, removed }
 }

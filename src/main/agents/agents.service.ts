@@ -273,6 +273,7 @@ export class AgentsService {
         name,
         color: view?.profile?.color ?? 'yellow',
         initials: agentInitials(name),
+        ...(view?.profile ? { model: view.profile.model, effort: view.profile.effort } : {}),
         problem: !view
           ? 'O agente desta tarefa não existe mais.'
           : view.status === 'ready'

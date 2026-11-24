@@ -4,11 +4,12 @@
  * a seguir (como a lista de tarefas do Claude Code); `flowStepIndex` diz de que passo de que fluxo
  * veio cada execução, para a conversa mostrar quem "mandou" o comando.
  */
-import type {
-  FlowPauseReason,
-  FlowRunView,
-  FlowStepStatus,
-  Step
+import {
+  isPromptStep,
+  type FlowPauseReason,
+  type FlowRunView,
+  type FlowStepStatus,
+  type Step
 } from '../../../../shared/task-flow'
 
 export type PlanState = 'done' | 'current' | 'waiting' | 'failed' | 'skipped' | 'next' | 'unreached'
@@ -32,7 +33,11 @@ function visible(steps: readonly Step[]): VisibleStep[] {
 }
 
 function detailOf(step: VisibleStep): string {
-  if (step.type === 'claude_command') return `/${step.command}`
+  if (step.type === 'claude_command') {
+    if (isPromptStep(step))
+      return step.readOnly ? 'Pedido ao Claude Code (só leitura)' : 'Pedido ao Claude Code'
+    return `/${step.command}`
+  }
   if (step.type === 'gate') return 'Sua aprovação'
   return `Ação do Orkio: ${step.action}`
 }
@@ -169,3 +174,18 @@ export function gateOutcomes(run: FlowRunView): { approve: string; reject: strin
   const reject = back ? `Recusar volta para “${back.name}”.` : 'Recusar encerra o fluxo.'
   return { approve, reject }
 }
+
+/**
+ * Execução do Claude Code cujo resultado o gate atual mostra (`show: 'result'`): a mais recente
+ * do fluxo antes do gate. `null` = nenhuma (o gate fica só com a mensagem).
+ */
+export function gateResultRunId(run: FlowRunView): string | null {
+  for (let i = run.history.length - 1; i >= 0; i--) {
+    const runId = run.history[i]!.runId
+    if (runId) return runId
+  }
+  return null
+}
+
+/** Texto final de uma execução (o mesmo que o main lê para publicar a revisão). */
+export { finalText } from '../../../../shared/review-publish'

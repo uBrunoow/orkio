@@ -53,6 +53,27 @@ Com o site rodando local, o app em dev usa `MAIN_VITE_NOTION_OAUTH_BROKER_URL=ht
 O E2E `@site` (`pnpm e2e --grep @site`, depois de `pnpm --dir site build`) sobe o `next start`, um
 Notion simulado em HTTP local e faz o login e a renovação pelo app.
 
+## Revisão como `orkio[bot]` (GitHub App)
+
+`POST /github/review` `{ owner, repo, number, userToken, review: { event, body, comments } }` →
+`{ url }` (`lib/github-app.ts`). Valida o pedido inteiro antes de falar com o GitHub (evento só
+`COMMENT` ou `REQUEST_CHANGES`; APPROVE → 400), confere com o token do usuário se ele tem push no
+repositório e lê o login dele (`GET /user`), assina o JWT do App (RS256, `node:crypto`), pede um
+token de instalação restrito ao repositório e a `pull_requests: write` e **posta a revisão aqui
+mesmo**, com o corpo montado só com os campos permitidos e a linha "Publicado pelo Orkio a pedido de
+@login" no fim. Prazo total de 15 s (o app espera 25 s). O token do App nunca sai do site: `pull_requests: write` também permite
+APPROVE, e devolvê-lo deixaria quem tem push aprovar a própria PR como `orkio[bot]`.
+
+Erros só por código: `not_configured` (503), `bad_request` (400/413/415; 422 do GitHub vira
+`reason: "rejected"`), `forbidden` (403), `not_installed` (412, com `installUrl`), `upstream`
+(502), `rate_limited` (429). Mesmas regras do intermediário: sem estado, sem logs, limitador por IP,
+`no-store`, timeouts que cobrem a leitura do corpo.
+
+Variáveis: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY` (**Sensitive**; aceita `\n` literais),
+`GITHUB_APP_SLUG`. `GITHUB_API_URL` é só para o E2E local (ignorada na Vercel; só
+`http://127.0.0.1`). Passo a passo para criar e instalar o App e testar com curl (token pelo
+stdin): `docs/github-app.md`.
+
 ## Landing e páginas legais
 
 - Conteúdo em `i18n/pt-BR.ts` (o inglês entra depois com o mesmo formato); o que o site pode

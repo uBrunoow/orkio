@@ -27,6 +27,15 @@ import type { Git } from '../git/git'
 import type { DeliveryTarget } from '../../shared/delivery'
 import type { DeliveryEvent, DeliveryKind } from './delivery-policy'
 import {
+  CLAUDE_MODELS,
+  EFFORT_LABELS,
+  isEffort,
+  isModelName,
+  resolveRuntime,
+  type Effort,
+  type RuntimeChoice
+} from '../../shared/agent-runtime'
+import {
   DELIVERY_ALLOWED,
   evaluatePermission,
   isInside,
@@ -66,6 +75,10 @@ export interface RunServiceDeps {
     /** Agente (8A): `--append-system-prompt` e `--model`. */
     appendSystemPrompt: string | null
     model: string | null
+    /** Raciocínio (`--effort`); `null` = padrão. */
+    effort: Effort | null
+    /** Passo só de leitura: sem as ferramentas de edição (`--disallowedTools`). */
+    readOnly: boolean
     onEvent(event: RunLogEvent): void
     onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   }): RunHandle
@@ -109,10 +122,20 @@ export interface StartRunInput {
    */
   agent?: RunAgent | null
   /**
+   * Modelo/raciocínio da mensagem ou do passo: vencem os do agente. `null` num campo = padrão do
+   * Claude Code de propósito; campo ausente = vale o do agente.
+   */
+  runtime?: Partial<RuntimeChoice> | null
+  /**
    * Continua a conversa desta sessão do Claude Code (`--resume`), no mesmo worktree. O prompt
    * vai como está (sem o briefing, que a sessão já leu).
    */
   resumeSessionId?: string | null
+  /**
+   * Passo só de leitura de um fluxo: o Claude Code não recebe as ferramentas de edição. A política
+   * do Orkio (shell pergunta, push bloqueado) continua a mesma.
+   */
+  readOnly?: boolean
 }
 
 export interface RunAgent {
@@ -122,6 +145,8 @@ export interface RunAgent {
   prompt: string
   /** Alias do modelo; `null` = padrão do usuário. */
   model: string | null
+  /** Raciocínio (`--effort`); `null` = padrão. */
+  effort: Effort | null
 }
 
 /** Fim de uma execução, para quem a pediu (5A: fluxos). */
@@ -162,6 +187,10 @@ interface ActiveRun {
   pending: Map<string, Pending>
   tests: Set<string>
   costUsd: number | null
+  /** Total bruto da sessão no `result` (acumulado no --resume). */
+  sessionCostTotal: number | null
+  /** Sessão continuada por esta execução (`--resume`), se houver. */
+  resumedSession: string | null
   ok: boolean | null
   resultText: string
   timer: NodeJS.Timeout | null
@@ -303,6 +332,21 @@ export class RunService {
     const startedAt = this.now().toISOString()
     const resume = !!input.resumeSessionId
     const sessionId = input.resumeSessionId || randomUUID()
+    // Mensagem/passo > agente > padrão. No agente, `null` = sem preferência (não bloqueia).
+    const resolved = resolveRuntime(
+      input.runtime ?? undefined,
+      input.agent
+        ? {
+            ...(input.agent.model !== null ? { model: input.agent.model } : {}),
+            ...(input.agent.effort !== null ? { effort: input.agent.effort } : {})
+          }
+        : undefined
+    )
+    // De novo, antes de chegar ao CLI: nome fora do padrão ou raciocínio desconhecido some.
+    const runtime: RuntimeChoice = {
+      model: isModelName(resolved.model) ? resolved.model : null,
+      effort: isEffort(resolved.effort) ? resolved.effort : null
+    }
     this.deps.db.run(
       `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text, agent_key, session_id)
        VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
@@ -329,6 +373,8 @@ export class RunService {
       pending: new Map(),
       tests: new Set(),
       costUsd: null,
+      sessionCostTotal: null,
+      resumedSession: input.resumeSessionId || null,
       ok: null,
       resultText: '',
       timer: null,
@@ -362,11 +408,26 @@ export class RunService {
             text: `Modo entrega ligado neste passo: push só de ${t.branch} (${t.remote}) e GitHub CLI só em ${t.owner}/${t.repo}.`
           })
         }
+        if (input.readOnly) {
+          this.log(run, {
+            kind: 'info',
+            text: 'Só leitura neste passo: o Claude Code não pode editar arquivos e todo comando pede sua aprovação.'
+          })
+        }
         if (input.agent) {
           this.log(run, {
             kind: 'text',
-            text: `Rodando como ${input.agent.name}: instruções do agente no início da conversa${input.agent.model ? `, modelo ${input.agent.model}` : ''}. As permissões são as mesmas do Orkio.`
+            text: `Rodando como ${input.agent.name}: instruções do agente no início da conversa. As permissões são as mesmas do Orkio.`
           })
+        }
+        if (runtime.model || runtime.effort) {
+          const parts: string[] = []
+          if (runtime.model) {
+            const label = CLAUDE_MODELS.find((m) => m.id === runtime.model)?.label ?? runtime.model
+            parts.push(`Modelo: ${label}`)
+          }
+          if (runtime.effort) parts.push(`Raciocínio: ${EFFORT_LABELS[runtime.effort]}`)
+          this.log(run, { kind: 'info', text: parts.join(' · ') })
         }
         const broker = new PermissionBroker((req) => this.onPermission(run, req))
         await broker.open()
@@ -384,7 +445,9 @@ export class RunService {
           broker,
           delivery: !!run.delivery,
           appendSystemPrompt: input.agent?.prompt ?? null,
-          model: input.agent?.model ?? null,
+          model: runtime.model,
+          effort: runtime.effort,
+          readOnly: input.readOnly === true,
           onEvent: (event) => this.onEvent(run, event),
           onExit: (result) => void this.onExit(run, result)
         })
@@ -718,11 +781,26 @@ export class RunService {
       run.tests.add(event.summary.slice(0, 120))
     }
     if (event.kind === 'result') {
-      run.costUsd = event.costUsd
+      // `total_cost_usd` é o acumulado da sessão: no --resume, o custo desta execução é a diferença.
+      const raw = event.costUsd
+      run.sessionCostTotal = raw
+      run.costUsd = raw === null ? null : this.runCost(run, raw)
+      event = { ...event, costUsd: run.costUsd }
       run.ok = event.ok
       run.resultText = event.text.slice(0, 20_000)
     }
     this.log(run, event)
+  }
+
+  private runCost(run: ActiveRun, raw: number): number {
+    if (!run.resumedSession) return raw
+    const prev = this.deps.db.get<{ total: number | null }>(
+      'SELECT MAX(session_cost_total) AS total FROM agent_runs WHERE session_id = ? AND id != ?',
+      run.resumedSession,
+      run.id
+    )?.total
+    if (prev === null || prev === undefined || raw < prev) return raw
+    return raw - prev
   }
 
   private async onExit(
@@ -772,10 +850,11 @@ export class RunService {
       // Worktree removido ou git indisponível: sem resumo.
     }
     this.deps.db.run(
-      'UPDATE agent_runs SET status = ?, ended_at = ?, cost = ?, summary = ? WHERE id = ?',
+      'UPDATE agent_runs SET status = ?, ended_at = ?, cost = ?, session_cost_total = ?, summary = ? WHERE id = ?',
       status,
       this.now().toISOString(),
       run.costUsd,
+      run.sessionCostTotal,
       summary ? JSON.stringify(summary) : null,
       run.id
     )

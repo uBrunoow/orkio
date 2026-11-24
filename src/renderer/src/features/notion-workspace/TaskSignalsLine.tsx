@@ -1,3 +1,4 @@
+import { PrHoverCard } from '../board/PrHoverCard'
 import { Button } from '@/components/ui/button'
 import type { TaskSignals } from '../../../../shared/ipc-contract'
 import type { ChecksState, PullRequestState, ReviewDecision } from '../../../../shared/task-signals'
@@ -52,15 +53,17 @@ export function TaskSignalsLine({
       )}
       {pr && (
         <div className="flex flex-wrap items-center gap-2" data-testid="task-pr">
-          <Button
-            size="xs"
-            variant="ghost"
-            className="font-mono"
-            aria-label={`Abrir a PR #${pr.number} no GitHub`}
-            onClick={() => void window.orkio.openExternal(pr.url)}
-          >
-            <PullRequestIcon />#{pr.number}
-          </Button>
+          <PrHoverCard pr={pr}>
+            <Button
+              size="xs"
+              variant="ghost"
+              className="font-mono"
+              aria-label={`Abrir a PR #${pr.number} no GitHub`}
+              onClick={() => void window.orkio.openExternal(pr.url)}
+            >
+              <PullRequestIcon />#{pr.number}
+            </Button>
+          </PrHoverCard>
           <StatusToken
             label={PR_STATE[pr.state].label}
             tone={toneOf(PR_STATE[pr.state].color)}

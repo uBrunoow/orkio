@@ -8,7 +8,11 @@
  *   e pede permissões pela ponte MCP REAL do Orkio (o mesmo `permission-mcp.js` do app).
  *
  * O cenário vem de palavras no prompt: "pedir-shell", "tentar-push", "perguntar", "demorar", "demorar-uma-vez",
- * "ler-env".
+ * "ler-env", "subagentes" (dois `Task` com ferramentas filhas; `subagentes-parcial` deixa o segundo rodando).
+ * Plano de correções (Task 16): prompt com "revisao.md" ou passo só de leitura (`--disallowedTools`
+ * com Write) responde só com o plano, sem editar; "Plano aprovado" aplica, commita e trata as
+ * threads como o `/alva-flow:pr --comments`. "Converta a revisão acima" (Task 18) responde só com a
+ * revisão em JSON (bloco ```json).
  */
 const { spawn, execFileSync } = require('node:child_process')
 const { mkdirSync, readFileSync, writeFileSync, existsSync } = require('node:fs')
@@ -19,7 +23,7 @@ const args = process.argv.slice(2)
 const authFile = join(__dirname, 'auth.json')
 
 if (args[0] === '--version') {
-  process.stdout.write('2.1.9 (Claude Code)\n')
+  process.stdout.write('2.1.331 (Claude Code)\n')
   process.exit(0)
 }
 if (args[0] === 'mcp' && args[1] === 'list') {
@@ -44,7 +48,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 let turns = 0
 const assistant = (content) => {
   turns++
-  out({ type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content } })
+  // 82 000 tokens de entrada (cache incluso) = 41% da janela de 200 000.
+  out({
+    type: 'assistant',
+    parent_tool_use_id: null,
+    message: {
+      role: 'assistant',
+      content,
+      usage: {
+        input_tokens: 1000,
+        cache_read_input_tokens: 80000,
+        cache_creation_input_tokens: 1000,
+        output_tokens: 50
+      }
+    }
+  })
 }
 const toolResult = (id, isError) =>
   out({
@@ -112,11 +130,16 @@ async function main() {
       JSON.stringify({
         appendSystemPrompt: flag('--append-system-prompt'),
         model: flag('--model'),
+        effort: flag('--effort'),
         briefingInPrompt: prompt.includes('Briefing da tarefa'),
+        attachmentsNote: (/Anexos \(leia com a ferramenta Read\): [^\n]*/.exec(prompt) ?? [
+          null
+        ])[0],
         resume: flag('--resume'),
         sessionId: flag('--session-id'),
         permissionTool: flag('--permission-prompt-tool'),
-        permissionMode: flag('--permission-mode')
+        permissionMode: flag('--permission-mode'),
+        disallowedTools: flag('--disallowedTools')
       }) + '\n'
     )
   }
@@ -153,6 +176,46 @@ async function main() {
   const alvaMatch = /^\/alva-flow:(\w+)\s*([^\n]*)/.exec(prompt)
   if (alvaMatch) {
     await alvaCommand(alvaMatch[1], alvaMatch[2].trim(), mcp, prompt)
+    return
+  }
+
+  // Task 18: revisão em JSON (passo só leitura do "Alva: revisão publicada"). Um comentário no
+  // diff da PR e outro fora dele (o Orkio mostra como aviso e não publica).
+  if (prompt.includes('Converta a revisão acima')) {
+    const review = {
+      event: 'REQUEST_CHANGES',
+      // HTML e imagem (o Orkio tira antes do gate: nada carrega na PR sem você ver).
+      summary:
+        '## Revisão do agente\n\nFalta **validar a entrada** antes de exportar. ' +
+        '<img src="https://evil.example/p.png"> ![grafico](https://evil.example/g.png)',
+      comments: [
+        { path: 'src/exportar.ts', line: 1, body: 'Valide a entrada aqui.' },
+        { path: 'README.md', line: 40, body: 'Comentário fora do diff.' }
+      ]
+    }
+    const text = '```json\n' + JSON.stringify(review, null, 2) + '\n```'
+    assistant([{ type: 'text', text }])
+    finishRun(mcp, text, 0.01)
+    return
+  }
+
+  // Plano de correções (só leitura): responde com o plano, sem tocar em arquivos.
+  const denied = args.includes('--disallowedTools')
+    ? args[args.indexOf('--disallowedTools') + 1].split(',')
+    : []
+  if (prompt.includes('revisao.md') || denied.includes('Write')) {
+    const adjust = prompt.includes('revisao.md') ? null : prompt.split('\n')[0].trim()
+    const plan = [
+      '1. src/exportar.ts — validar a entrada antes de exportar (comentário da Ana).',
+      ...(adjust ? [`2. Ajuste pedido: ${adjust}`] : [])
+    ].join('\n')
+    assistant([{ type: 'text', text: plan }])
+    finishRun(mcp, plan, 0.01)
+    return
+  }
+  if (prompt.includes('Plano aprovado')) {
+    await treatComments(mcp)
+    finishRun(mcp, 'Correções aplicadas e threads respondidas.', 0.02)
     return
   }
 
@@ -240,6 +303,33 @@ async function main() {
     assistant([{ type: 'text', text: `resposta: ${answer}` }])
   }
 
+  if (prompt.includes('subagentes')) {
+    const task = (id, description, subagent_type) => ({
+      type: 'tool_use',
+      id,
+      name: 'Task',
+      input: { description, subagent_type, prompt: `Faça: ${description}` }
+    })
+    const child = (parent, id, name, input) =>
+      out({
+        type: 'assistant',
+        parent_tool_use_id: parent,
+        message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] }
+      })
+    assistant([
+      task('toolu_sub1', 'Revisar API', 'review-agent'),
+      task('toolu_sub2', 'Escrever testes', 'qa-agent')
+    ])
+    child('toolu_sub1', 'toolu_c1', 'Read', { file_path: 'src/api.ts' })
+    child('toolu_sub1', 'toolu_c2', 'Grep', { pattern: 'export' })
+    child('toolu_sub2', 'toolu_c3', 'Bash', { command: 'npm test' })
+    toolResult('toolu_sub1', false)
+    if (prompt.includes('subagentes-parcial')) {
+      while (!killed) await sleep(200)
+    }
+    toolResult('toolu_sub2', false)
+  }
+
   if (prompt.includes('demorar-uma-vez')) {
     // Espera só na primeira vez (marcador no worktree): para testar fechar o app e retomar.
     const marker = join(process.cwd(), '.orkio', 'demorou')
@@ -283,6 +373,68 @@ async function main() {
   // O Orkio fecha a entrada após o result; o CLI termina.
   process.stdin.on('end', () => process.exit(0))
   setTimeout(() => process.exit(0), 2000)
+}
+
+function finishRun(mcp, result, cost) {
+  mcp.close()
+  out({
+    type: 'result',
+    subtype: 'success',
+    is_error: false,
+    duration_ms: 500,
+    total_cost_usd: cost,
+    num_turns: turns,
+    result
+  })
+  process.stdin.on('end', () => process.exit(0))
+  setTimeout(() => process.exit(0), 2000)
+}
+
+/**
+ * Tratar comentários da PR (como o `/alva-flow:pr --comments`): corrige, commita, tenta o push e
+ * resolve a thread pelo gh api, pedindo cada comando pela ponte de permissões do Orkio.
+ */
+async function treatComments(mcp) {
+  const cwd = process.cwd()
+  const orkioDir = join(cwd, '.orkio')
+  mkdirSync(orkioDir, { recursive: true })
+  const fs = require('node:fs')
+  const log = (line) => fs.appendFileSync(join(orkioDir, 'alva-args.log'), `${line}\n`)
+  writeFileSync(join(orkioDir, 'env.txt'), Object.values(process.env).join('\n'))
+  const branch = execFileSync('git', ['branch', '--show-current'], { cwd }).toString().trim()
+  let n = 0
+  const tryCmd = async (command, argv) => {
+    const r = await mcp.approve('Bash', { command }, `toolu_cm_${++n}`)
+    log(`${r.behavior}:${command}`)
+    if (r.behavior === 'allow') {
+      execFileSync(argv[0], argv.slice(1), { cwd, stdio: 'ignore', env: process.env })
+    }
+    return r.behavior
+  }
+  mkdirSync(join(cwd, 'src'), { recursive: true })
+  writeFileSync(
+    join(cwd, 'src', 'exportar.ts'),
+    'export const exportar = true // corrigido, comentário tratado\n'
+  )
+  execFileSync('git', ['add', '-A'], { cwd })
+  execFileSync(
+    'git',
+    [
+      '-c',
+      'user.name=Fake',
+      '-c',
+      'user.email=fake@example.com',
+      'commit',
+      '-q',
+      '-m',
+      'fix: comentários da revisão'
+    ],
+    { cwd }
+  )
+  await tryCmd(`git push origin ${branch}`, ['git', 'push', '-q', 'origin', branch])
+  const query =
+    'mutation { resolveReviewThread(input: {threadId: "thread-7-0"}) { thread { isResolved } } }'
+  await tryCmd(`gh api graphql -f query='${query}'`, ['gh', 'api', 'graphql', '-f', `query=${query}`])
 }
 
 /** Imitação mínima do plugin alva-flow para o E2E (nunca o plugin real). */
@@ -400,35 +552,7 @@ async function alvaCommand(cmd, argsText, mcp, prompt) {
       return r.behavior
     }
     if (argsText.includes('--comments')) {
-      writeFileSync(
-        join(cwd, 'src', 'exportar.ts'),
-        'export const exportar = true // corrigido, comentário tratado\n'
-      )
-      execFileSync('git', ['add', '-A'], { cwd })
-      execFileSync(
-        'git',
-        [
-          '-c',
-          'user.name=Fake',
-          '-c',
-          'user.email=fake@example.com',
-          'commit',
-          '-q',
-          '-m',
-          'fix: comentários da revisão'
-        ],
-        { cwd }
-      )
-      await tryCmd(`git push origin ${branch}`, ['git', 'push', '-q', 'origin', branch])
-      const query =
-        'mutation { resolveReviewThread(input: {threadId: "thread-7-0"}) { thread { isResolved } } }'
-      await tryCmd(`gh api graphql -f query='${query}'`, [
-        'gh',
-        'api',
-        'graphql',
-        '-f',
-        `query=${query}`
-      ])
+      await treatComments(mcp)
       result = 'Comentários tratados.'
     } else {
       let ahead = 1

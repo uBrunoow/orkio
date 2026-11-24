@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { parseRemoteUrl } from '../projects/remote-url'
-import { GitError, createGit, parseRemotes, type ExecFileFn } from './git'
+import { GitError, createGit, parseNumstat, parseRemotes, type ExecFileFn } from './git'
 
 function execError(props: Record<string, unknown>): Error {
   return Object.assign(new Error('exec failed'), props)
@@ -193,5 +193,15 @@ describe('createGit com git real', () => {
     run(repo, 'checkout', '-q', '--detach')
     expect(await git.currentBranch(repo)).toBeNull()
     run(repo, 'checkout', '-q', 'main')
+  })
+})
+
+describe('parseNumstat', () => {
+  it('soma linhas adicionadas e removidas; binário (-) não conta', () => {
+    expect(parseNumstat('10\t2\tsrc/a.ts\n-\t-\timg.png\n5\t0\tb.md\n')).toEqual({
+      added: 15,
+      removed: 2
+    })
+    expect(parseNumstat('')).toEqual({ added: 0, removed: 0 })
   })
 })
