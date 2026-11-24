@@ -118,6 +118,8 @@ export function createSource<T, A = never>(spec: SourceSpec<T, A>): Source<T, A>
 
   const set: SourceControl<T, A>['set'] = (key, update) => {
     const current = get(key)
+    // Ajuste sobre nada carregado ainda: nada a ajustar, e a carga em andamento traz o estado novo.
+    if (typeof update === 'function' && current.value === null) return
     const value =
       typeof update === 'function' ? (update as (c: T | null) => T | null)(current.value) : update
     // Valor vindo de fora vence uma carga em andamento (que traria o estado de antes).

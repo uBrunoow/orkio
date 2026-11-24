@@ -43,8 +43,13 @@ function git(cwd: string, ...args: string[]): string {
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
   }).toString()
 }
-async function open(): Promise<OrkioApp> {
-  orkio = await launchOrkio(userDataDir, { validTokens: [NOTION_TOKEN] })
+/** `stay`: fica na tela inicial (o modal "O que há de novo" cobre a navegação até ser fechado). */
+async function open(stay = false): Promise<OrkioApp> {
+  orkio = await launchOrkio(
+    userDataDir,
+    { validTokens: [NOTION_TOKEN] },
+    stay ? { startPage: 'setup' } : {}
+  )
   return orkio
 }
 async function close(): Promise<void> {
@@ -256,7 +261,7 @@ test('"O que há de novo" aparece uma vez depois de atualizar', async () => {
   config.updates.lastSeenVersion = '0.0.1'
   writeFileSync(configFile(), JSON.stringify(config))
 
-  let { page } = await open()
+  let { page } = await open(true)
   const panel = page.getByRole('dialog', { name: `O que há de novo na versão ${APP_VERSION}` })
   await expect(panel).toBeVisible()
   await panel.getByRole('button', { name: 'Entendi' }).click()

@@ -83,6 +83,16 @@ describe('createSource (uma carga, uma assinatura, um poll por fonte)', () => {
     expect(src.get('').value).toBe(7)
   })
 
+  it('ajuste de um evento antes da primeira carga não a cancela', async () => {
+    const pending = deferred<number>()
+    const src = createSource({ load: () => pending.promise })
+    src.subscribe('', () => undefined)
+    src.set('', (n) => (n === null ? null : n + 1))
+    pending.resolve(1)
+    await flush()
+    expect(src.get('')).toEqual({ value: 1, error: null, loading: false })
+  })
+
   it('falha: guarda o erro (do Result ou de IPC) e mantém o último valor', async () => {
     let call = 0
     const src = createSource({

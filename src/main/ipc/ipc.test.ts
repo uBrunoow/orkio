@@ -76,9 +76,18 @@ function fakeConnector(overrides: Partial<OAuthConnector> = {}): OAuthConnector 
   }
 }
 
-function notionIpc(connector: OAuthConnector, onOAuthFinished = vi.fn()): FakeIpc {
+function notionIpc(
+  connector: OAuthConnector,
+  onOAuthFinished = vi.fn(),
+  onChanged = vi.fn()
+): FakeIpc {
   const ipc = fakeIpc()
-  registerGroup(ipc, options(), ORKIO_API.notion, notionHandlers(connector, onOAuthFinished))
+  registerGroup(
+    ipc,
+    options(),
+    ORKIO_API.notion,
+    notionHandlers(connector, onOAuthFinished, onChanged)
+  )
   return ipc
 }
 
@@ -135,7 +144,7 @@ describe('registro único (registerHandlers)', () => {
     const ipc = fakeIpc()
     expect(() =>
       registerGroup(ipc, options(), ORKIO_API.notion, {
-        ...notionHandlers(fakeConnector(), vi.fn()),
+        ...notionHandlers(fakeConnector(), vi.fn(), vi.fn()),
         getStatus: undefined as never
       })
     ).toThrow('IPC sem handler: notion:get-status')
@@ -228,6 +237,17 @@ describe('notion', () => {
     const ipc = notionIpc(connector)
     await ipc.invoke(ORKIO_API.notion.connect.channel, { kind: 'token', token: 'ntn_x', extra: 1 })
     expect(connector.connect).toHaveBeenCalledWith({ kind: 'token', token: 'ntn_x' })
+  })
+
+  it('conectar, desconectar e conferir avisam as janelas; ler o status não', async () => {
+    const onChanged = vi.fn()
+    const ipc = notionIpc(fakeConnector(), vi.fn(), onChanged)
+    await ipc.invoke(ORKIO_API.notion.getStatus.channel)
+    expect(onChanged).not.toHaveBeenCalled()
+    await ipc.invoke(ORKIO_API.notion.connect.channel, { kind: 'token', token: 'ntn_x' })
+    await ipc.invoke(ORKIO_API.notion.testConnection.channel)
+    await ipc.invoke(ORKIO_API.notion.disconnect.channel)
+    expect(onChanged).toHaveBeenCalledTimes(3)
   })
 
   it('payload inválido não chega ao conector', async () => {
@@ -353,7 +373,7 @@ function githubIpc(
     ipc,
     options(),
     ORKIO_API.github,
-    githubHandlers(connector, { onDeviceFlowFinished, orkioBot })
+    githubHandlers(connector, { onDeviceFlowFinished, orkioBot, onChanged: vi.fn() })
   )
   return ipc
 }

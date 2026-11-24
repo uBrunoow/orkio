@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { NOTION_COLOR_TONE, WORKSPACE_HEALTH } from './status-text'
+import {
+  accountName,
+  connectionStatusText,
+  NOTION_COLOR_TONE,
+  WORKSPACE_HEALTH
+} from './status-text'
 
 describe('cores do Notion → tom', () => {
   it('nenhuma cor do Notion vira o tom de agente rodando (marrom/laranja viravam "running")', () => {
@@ -30,5 +35,14 @@ describe('saúde dos bancos do Notion', () => {
     expect(new Set(labels).size).toBe(labels.length)
     expect(WORKSPACE_HEALTH.broken).toEqual({ label: 'Tarefas bloqueadas', tone: 'danger' })
     expect(WORKSPACE_HEALTH.warning.tone).toBe('warning')
+  })
+})
+
+describe('conta conectada', () => {
+  const notion = { userName: 'Grace Hopper', workspaceName: 'Acme Labs' }
+  it('o card diz quem conectou; os Primeiros passos, onde', () => {
+    const s = { state: 'connected', account: notion, connectedAt: '2026-11-24T00:00:00Z' } as const
+    expect(connectionStatusText(s).label).toBe('Conectado como Grace Hopper')
+    expect(accountName(notion)).toBe('Acme Labs')
   })
 })

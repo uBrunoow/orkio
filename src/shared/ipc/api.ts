@@ -153,6 +153,9 @@ const optionalString = (v: unknown): v is string | undefined =>
 
 /** Eventos que o main manda ao renderer (`emit` no main, `on*` em `window.orkio`). */
 export const IPC_EVENTS = {
+  /** A conta do Notion conectou, desconectou ou foi conferida (o renderer relê o que depende dela). */
+  notionChanged: event<Record<string, never>>({ channel: 'notion:changed', parse: () => ({}) }),
+  githubChanged: event<Record<string, never>>({ channel: 'github:changed', parse: () => ({}) }),
   branchChanged: event<BranchChangedEvent>({
     channel: 'projects:branch-changed',
     parse: (v) =>
@@ -368,7 +371,8 @@ export const ORKIO_API = {
         channel: 'notion:oauth-cancel',
         args: [],
         fallback: undefined
-      })
+      }),
+      onChanged: IPC_EVENTS.notionChanged
     }
   ),
   github: group(
@@ -425,7 +429,8 @@ export const ORKIO_API = {
         channel: 'github:orkio-bot',
         args: [forceOption],
         fallback: { github: 'connected', repos: [], checkedAt: null }
-      })
+      }),
+      onChanged: IPC_EVENTS.githubChanged
     }
   ),
   /** Bancos do Notion (Projetos/Tarefas), vínculo com projetos locais e tarefas (só leitura). */

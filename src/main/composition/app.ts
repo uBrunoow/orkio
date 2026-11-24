@@ -316,9 +316,10 @@ export function createApp(): OrkioApp {
   }
 
   const handlers: Handlers = {
-    notion: notionHandlers(notion, focusSender),
+    notion: notionHandlers(notion, focusSender, () => emit('notionChanged', {})),
     github: githubHandlers(github, {
       onDeviceFlowFinished: focusSender,
+      onChanged: () => emit('githubChanged', {}),
       orkioBot: (force) => orkioBot.status(force)
     }),
     projects: projectsHandlers(projects),

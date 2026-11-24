@@ -5,7 +5,14 @@
  * eventos e um poll, por mais telas que a leiam ao mesmo tempo.
  */
 import { createContext, useContext, useState } from 'react'
-import { createSource, ipcCall, IPC_FAILURE_MESSAGE, unwrap, type Source } from '../lib/ipc'
+import {
+  createSource,
+  ipcCall,
+  IPC_FAILURE_MESSAGE,
+  unwrap,
+  type Source,
+  type SourceControl
+} from '../lib/ipc'
 import type { ClaudeCodeStatus } from '../../../shared/agent-run'
 import type { BoardCard, BoardView } from '../../../shared/board'
 import type { AuthOptions, ConnectionStatus } from '../../../shared/connection'
@@ -77,6 +84,19 @@ function patchCard(
 
 export { patchCard as patchBoardCard }
 
+/** Relê todas as chaves lidas quando a conta de um serviço muda (conectou, desconectou...). */
+function reloadOnConnection<T, A>(
+  src: SourceControl<T, A>,
+  ...services: ('notion' | 'github')[]
+): () => void {
+  const offs = services.map((kind) =>
+    connectorApi(kind).onChanged(() => {
+      for (const key of src.keys()) void src.reload(key)
+    })
+  )
+  return () => offs.forEach((off) => off())
+}
+
 export function createAppSources(): AppSources {
   return {
     overview: createSource({
@@ -129,9 +149,11 @@ export function createAppSources(): AppSources {
             }
           })
         })
+        const offConnection = reloadOnConnection(src, 'notion', 'github')
         return () => {
           offChanged()
           offSync()
+          offConnection()
         }
       }
     }),
@@ -140,8 +162,9 @@ export function createAppSources(): AppSources {
         const r = await window.orkio.projects[arg === 'revalidate' ? 'revalidate' : 'list']()
         return { projects: r.projects, warning: r.warning ?? null }
       },
-      listen: (src) =>
-        window.orkio.projects.onBranchChanged(({ projectId, branch }) =>
+      listen: (src) => {
+        const offConnection = reloadOnConnection(src, 'github')
+        const offBranch = window.orkio.projects.onBranchChanged(({ projectId, branch }) =>
           src.set('', (s) =>
             s
               ? {
@@ -152,12 +175,18 @@ export function createAppSources(): AppSources {
                 }
               : s
           )
-        ),
+        )
+        return () => {
+          offConnection()
+          offBranch()
+        }
+      },
       refreshOnFocus: true
     }),
     connections: createSource({
       // Status salvo (local, sem rede); relido ao voltar para a janela.
       load: (kind) => ipcCall(() => connectorApi(kind).getStatus(), CONNECTION_IPC_FAILURE),
+      listen: (src) => reloadOnConnection(src, 'notion', 'github'),
       refreshOnFocus: true
     }),
     verifiedAt: createSource<Date | null>({ load: () => Promise.resolve(null) }),
@@ -173,6 +202,7 @@ export function createAppSources(): AppSources {
           messages: [IPC_FAILURE_MESSAGE],
           connection: null
         }),
+      listen: (src) => reloadOnConnection(src, 'notion'),
       refreshOnFocus: true
     }),
     claude: createSource({

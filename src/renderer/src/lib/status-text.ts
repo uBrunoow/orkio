@@ -26,8 +26,14 @@ export interface StatusText {
 
 const CHECKING: StatusText = { label: 'Verificando', tone: 'neutral' }
 
+/** Onde a conta está (workspace do Notion; no GitHub, o login). */
 export function accountName(account: ConnectedAccount): string {
   return account.handle ?? account.workspaceName ?? account.userName
+}
+
+/** Quem conectou (login do GitHub; no Notion, a pessoa, não o workspace). */
+function personName(account: ConnectedAccount): string {
+  return account.handle ?? account.userName
 }
 
 export function connectionStatusText(s: ConnectionStatus | null): StatusText {
@@ -36,7 +42,7 @@ export function connectionStatusText(s: ConnectionStatus | null): StatusText {
     case 'connected':
       return s.warning
         ? { label: 'Conectado, sem verificação', tone: 'warning' }
-        : { label: `Conectado como ${accountName(s.account)}`, tone: 'success' }
+        : { label: `Conectado como ${personName(s.account)}`, tone: 'success' }
     case 'connecting':
       return { label: 'Conectando…', tone: 'neutral' }
     case 'error':
