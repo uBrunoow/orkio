@@ -144,7 +144,7 @@ export function DownloadCards({
           const list = sys.kinds.map((k) => files[k]).filter((f): f is DownloadFile => !!f)
           const mine = !!suggested && sys.kinds.includes(suggested.kind)
           return (
-            <li key={sys.id} className={styles.card} data-mine={mine || undefined}>
+            <li key={sys.id} className={styles.card} data-mine={mine || undefined} data-glow="fill">
               <div className={styles.cardHead}>
                 <h3 className={styles.system}>{copy.name}</h3>
                 {mine && <span className={styles.mine}>{d.forYou}</span>}

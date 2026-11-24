@@ -22,14 +22,19 @@ export function Symbol({
       <g
         fill="none"
         stroke="currentColor"
-        strokeWidth={size < 48 ? 5 : 2.6}
+        strokeWidth={size < 48 ? 7 : 2.6}
         strokeLinejoin="round"
         strokeLinecap="round"
       >
         <path d="M30 28 L62 10 L94 26 L106 60 L82 98 L40 106 L16 72 Z" />
-        {size >= 48 && (
-          <path d="M106 60 L30 28 M106 60 L62 10 M106 60 L16 72 M106 60 L40 106 M62 10 L16 72 M30 28 L40 106" />
-        )}
+        {/* Abaixo de 48 px, a versão simple da marca (brand/orkio-symbol-simple.svg): três raios. */}
+        <path
+          d={
+            size >= 48
+              ? 'M106 60 L30 28 M106 60 L62 10 M106 60 L16 72 M106 60 L40 106 M62 10 L16 72 M30 28 L40 106'
+              : 'M106 60 L30 28 M106 60 L16 72 M106 60 L40 106'
+          }
+        />
       </g>
       <circle
         cx="106"

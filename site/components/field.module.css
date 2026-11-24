@@ -1,0 +1,20 @@
+/* Grade do hero com os sinais (components/HeroField.tsx): as linhas são fundo de CSS, desenhadas
+   uma vez; o canvas por cima só pinta os sinais. Célula = CELL do componente (56 px), linhas em 0
+   de cada célula, como os sinais. Some embaixo, onde a janela do app começa. */
+.field {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: -1;
+  width: 100%;
+  height: min(100%, 1100px);
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--border) 55%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 80% 75% at 50% 30%, black 35%, transparent 80%);
+}

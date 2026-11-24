@@ -126,6 +126,67 @@ kbd {
   white-space: nowrap;
 }
 
+/* Moldura que acende onde o cursor está (posição em --gx/--gy, de components/Ambient.tsx).
+   Anel de 1px por máscara; com data-glow="fill", também um halo fraco por dentro. Só com mouse. */
+[data-glow] {
+  position: relative;
+  isolation: isolate;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  [data-glow]::after,
+  [data-glow='fill']::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 350ms ease;
+  }
+  [data-glow]::after {
+    padding: 1px;
+    background: radial-gradient(
+      260px circle at var(--gx, 50%) var(--gy, 0%),
+      color-mix(in srgb, var(--accent) 80%, transparent),
+      transparent 70%
+    );
+    mask:
+      linear-gradient(#000 0 0) content-box exclude,
+      linear-gradient(#000 0 0);
+  }
+  [data-glow='fill']::before {
+    z-index: -1;
+    background: radial-gradient(
+      380px circle at var(--gx, 50%) var(--gy, 0%),
+      color-mix(in srgb, var(--accent) 7%, transparent),
+      transparent 70%
+    );
+  }
+  [data-glow]:hover::after,
+  [data-glow='fill']:hover::before {
+    opacity: 1;
+  }
+}
+
+/* Revelação na rolagem: cada bloco sobe e aparece quando entra na tela (sem suporte, já visível).
+   --reveal escalona irmãos (0, 1, 2…). */
+@supports (animation-timeline: view()) {
+  [data-reveal] {
+    animation: reveal linear both;
+    animation-timeline: view();
+    animation-range: entry calc(var(--reveal, 0) * 6%) entry calc(55% + var(--reveal, 0) * 6%);
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

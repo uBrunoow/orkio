@@ -1,57 +1,101 @@
-/* Landing. Só tokens de globals.css; medidas em rem/clamp. */
+/* Landing (direção "control plane"). Só tokens de globals.css; medidas em rem/clamp. */
 
 .muted {
   color: var(--muted);
 }
 
-/* ---------- hero: texto à esquerda, a janela do app logo abaixo ---------- */
+/* Segundo da dupla a aparecer na rolagem (ver [data-reveal] em globals.css). */
+.later {
+  --reveal: 1;
+}
+
+.safetyList > div:nth-child(2) {
+  --reveal: 1;
+}
+
+.safetyList > div:nth-child(3) {
+  --reveal: 2;
+}
+
+/* ---------- hero: grade com sinais correndo, título centrado, luz e a janela em perspectiva ---------- */
 
 .hero {
   position: relative;
-  padding-block: clamp(2.75rem, 6vw, 4.5rem) clamp(4rem, 8vw, 7rem);
+  padding-top: clamp(3.5rem, 8vw, 6rem);
   overflow: hidden;
   isolation: isolate;
 }
 
-/* Grade técnica discreta, some nas bordas. */
-.hero::before {
+/* Luz atrás do título: laranja no centro, um vermelho mais fundo por fora. Anda ao contrário do
+   cursor (parallax, components/Ambient.tsx). */
+.heroGlow {
+  position: absolute;
+  will-change: translate;
+  top: -12rem;
+  left: 50%;
+  z-index: -2;
+  width: min(1100px, 140vw);
+  height: 52rem;
+  margin-left: calc(min(1100px, 140vw) / -2);
+  pointer-events: none;
+  background:
+    radial-gradient(
+      ellipse 38% 30% at 50% 42%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 60% 45% at 50% 40%,
+      color-mix(in srgb, var(--danger) 9%, transparent),
+      transparent 72%
+    );
+  animation: glowIn 1600ms 120ms ease-out both;
+}
+
+/* Grão: ruído fixo por cima do fundo, bem fraco, para o preto não ficar chapado. */
+.hero::after {
   content: '';
   position: absolute;
   inset: 0;
   z-index: -1;
-  background-image:
-    linear-gradient(var(--border) 1px, transparent 1px),
-    linear-gradient(90deg, var(--border) 1px, transparent 1px);
-  background-size: 56px 56px;
-  opacity: 0.32;
-  mask-image: radial-gradient(ellipse 75% 55% at 30% 20%, black 15%, transparent 70%);
+  pointer-events: none;
+  opacity: 0.06;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mask-image: linear-gradient(black, transparent 85%);
+}
+
+@keyframes glowIn {
+  from {
+    opacity: 0;
+    scale: 0.85;
+  }
 }
 
 .heroText {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  align-items: end;
-  gap: 1.5rem clamp(2rem, 5vw, 4.5rem);
+  justify-items: center;
+  gap: 1.5rem;
+  text-align: center;
 }
 
 .heroSide {
   display: grid;
-  justify-items: start;
-  gap: 1.25rem;
+  justify-items: center;
+  gap: 1.75rem;
 }
 
 .heroTitle {
-  max-width: 15ch;
-  font-family: var(--font-brand), system-ui, sans-serif;
-  font-weight: 400;
-  font-size: clamp(2.5rem, 5.2vw, 4.25rem);
-  line-height: 1.02;
-  letter-spacing: -0.02em;
+  max-width: 16ch;
+  font-family: var(--font-display), var(--font-ui), sans-serif;
+  font-weight: 560;
+  font-size: clamp(2.6rem, 6.4vw, 5.25rem);
+  line-height: 0.98;
+  letter-spacing: -0.045em;
   text-wrap: balance;
 }
 
 .lead {
-  max-width: 58ch;
+  max-width: 52ch;
   color: var(--muted);
   font-size: clamp(1.05rem, 1.5vw, 1.2rem);
   text-wrap: pretty;
@@ -60,6 +104,7 @@
 .heroActions {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   align-items: flex-start;
   gap: 0.75rem;
 }
@@ -72,14 +117,26 @@
   padding: 0 1.15rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  background: var(--raised);
   color: var(--text);
   font-weight: 500;
   text-decoration: none;
-  transition: border-color 150ms ease;
+  transition:
+    border-color 200ms ease,
+    background-color 200ms ease,
+    box-shadow 200ms ease,
+    translate 200ms ease;
 }
 
 .ghost:hover {
-  border-color: var(--muted);
+  border-color: color-mix(in srgb, var(--text) 35%, var(--border));
+  background: var(--border);
+  box-shadow: 0 6px 24px -10px color-mix(in srgb, var(--text) 30%, transparent);
+  translate: 0 -1px;
+}
+
+.ghost:active {
+  translate: 0;
 }
 
 .note {
@@ -87,41 +144,194 @@
   font-size: 0.9375rem;
 }
 
+/* Palco: uma luz difusa (sem arco) e a janela do app saindo dela. */
+.stage {
+  position: relative;
+  margin-top: clamp(3rem, 7vw, 5rem);
+  padding-bottom: clamp(4rem, 8vw, 6rem);
+  animation: rise 1000ms 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.horizon {
+  position: absolute;
+  inset: -4rem -20% auto;
+  height: 46rem;
+  z-index: -1;
+  pointer-events: none;
+  /* Só luz, sem arco: um brilho que nasce atrás do topo da janela e se espalha. */
+  background:
+    radial-gradient(
+      ellipse 40% 14% at 50% 20%,
+      color-mix(in srgb, var(--accent) 32%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 70% 38% at 50% 24%,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      transparent 75%
+    );
+  mask-image: linear-gradient(black 40%, transparent 90%);
+  animation: breathe 9s ease-in-out infinite;
+}
+
 .previewContainer {
-  max-width: 1280px;
-  margin-top: clamp(2.5rem, 5vw, 3.5rem);
+  position: relative;
+  max-width: 1240px;
+  perspective: 1800px;
+}
+
+/* Sombra laranja difusa por baixo da janela, como luz do horizonte refletida. */
+.previewContainer::before {
+  content: '';
+  position: absolute;
+  inset: 4% 10% -6%;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at 50% 20%,
+    color-mix(in srgb, var(--accent) 26%, transparent),
+    color-mix(in srgb, var(--accent) 8%, transparent) 40%,
+    transparent 70%
+  );
+  opacity: 0.5;
+}
+
+.previewContainer > * {
+  transform-origin: 50% 0;
+}
+
+/* A janela fica inclinada no topo e assenta conforme a página rola. */
+@supports (animation-timeline: view()) {
+  .previewContainer > * {
+    animation: settle linear both;
+    animation-timeline: view();
+    animation-range: entry 10% cover 50%;
+  }
+}
+
+/* Entrada do hero, uma vez: sobe e perde o desfoque. */
+.heroTitle,
+.heroSide {
+  animation: heroIn 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.heroSide {
+  animation: none;
+}
+
+.heroSide > * {
+  animation: heroIn 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.heroSide > :nth-child(1) {
+  animation-delay: 140ms;
+}
+
+.heroSide > :nth-child(2) {
+  animation-delay: 240ms;
+}
+
+.heroSide > :nth-child(3) {
+  animation-delay: 340ms;
+}
+
+@keyframes heroIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(5px);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+@keyframes settle {
+  from {
+    transform: rotateX(22deg) scale(0.92);
+  }
+  to {
+    transform: none;
+  }
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.82;
+  }
 }
 
 /* ---------- seções ---------- */
 
 .section {
-  padding-block: clamp(4.5rem, 9vw, 7.5rem);
-  border-top: 1px solid var(--border-soft);
+  position: relative;
+  padding-block: clamp(5rem, 10vw, 8rem);
+}
+
+/* Passagem entre seções: um fio de luz no topo e uma claridade que desce dele. */
+.section:not(.band)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(720px, 80%);
+  height: 8rem;
+  translate: -50% 0;
+  pointer-events: none;
+  border-top: 1px solid transparent;
+  border-image: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--accent) 45%, transparent),
+      transparent
+    )
+    1;
+  background: radial-gradient(
+    ellipse 50% 100% at 50% 0%,
+    color-mix(in srgb, var(--accent) 6%, transparent),
+    transparent 70%
+  );
+}
+
+.band {
+  border-block: 1px solid var(--border-soft);
+  background:
+    radial-gradient(
+      ellipse 60% 50% at 15% 0%,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      transparent 70%
+    ),
+    var(--surface);
 }
 
 .head {
   display: grid;
   gap: 1rem;
-  max-width: 44rem;
-  margin-bottom: clamp(2.5rem, 5vw, 3.75rem);
+  max-width: 46rem;
+  margin-bottom: clamp(2.75rem, 5vw, 4rem);
 }
 
 .headAlone {
-  margin-bottom: clamp(2.5rem, 5vw, 3.75rem);
+  margin-bottom: clamp(2.75rem, 5vw, 4rem);
 }
 
 .h2 {
-  max-width: 22ch;
-  font-family: var(--font-brand), system-ui, sans-serif;
-  font-weight: 400;
-  font-size: clamp(1.9rem, 3.8vw, 2.9rem);
-  line-height: 1.1;
-  letter-spacing: -0.015em;
+  max-width: 20ch;
+  font-family: var(--font-display), var(--font-ui), sans-serif;
+  font-weight: 560;
+  font-size: clamp(2rem, 4.2vw, 3.25rem);
+  line-height: 1.02;
+  letter-spacing: -0.04em;
   text-wrap: balance;
 }
 
 .sectionLead {
-  max-width: 60ch;
+  max-width: 58ch;
   color: var(--muted);
   font-size: 1.0625rem;
   text-wrap: pretty;
@@ -133,42 +343,64 @@
   line-height: 1.35;
 }
 
-/* ---------- caminho da tarefa ---------- */
+/* ---------- caminho da tarefa: pipeline com nós ---------- */
+
+.railWrap {
+  position: relative;
+  /* O chip anda dentro do trilho; nada passa da largura da página. */
+  overflow-x: clip;
+  overflow-clip-margin: 0;
+  padding-top: 6px;
+}
 
 .rail {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 1.5rem;
-  counter-reset: stop;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* Nome, dado, texto e "via" alinhados entre as colunas (subgrid). */
+  grid-template-rows: repeat(4, auto);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--surface) 60%, var(--bg));
 }
 
 .stop {
   position: relative;
   display: grid;
+  grid-row: span 4;
+  grid-template-rows: subgrid;
   align-content: start;
   gap: 0.6rem;
-  padding-top: 1.75rem;
+  padding: 2.25rem 1.25rem 1.25rem;
 }
 
-/* A linha liga as paradas; o laranja marca onde o agente trabalha. */
+.stop + .stop {
+  border-left: 1px solid var(--border-soft);
+}
+
+/* A linha do pipeline atravessa os nós no alto de cada coluna. */
 .stop::before {
   content: '';
   position: absolute;
-  top: 5px;
-  left: 0;
-  right: -1.5rem;
+  top: 1.05rem;
+  left: 1.25rem;
+  right: 0;
   height: 1px;
   background: var(--border);
 }
 
+.stop + .stop::before {
+  left: 0;
+}
+
 .stop:last-child::before {
-  right: 0;
+  right: auto;
+  width: 1.25rem;
 }
 
 .stopDot {
   position: absolute;
-  top: 0;
-  left: 0;
+  top: calc(1.05rem - 5px);
+  left: 1.25rem;
   width: 11px;
   height: 11px;
   border: 1.5px solid var(--muted);
@@ -181,87 +413,321 @@
   background: var(--accent);
 }
 
+/* Onda que sai do nó ativo: anel em scale/opacity (compositor), não box-shadow. */
+.stop:nth-child(3) .stopDot::after,
+.liveDot::after {
+  content: '';
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  animation: ping 2.4s ease-out infinite;
+}
+
+@keyframes ping {
+  from {
+    opacity: 0.8;
+    transform: scale(1);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+/* Os nós acendem em sequência quando o trilho entra na tela. */
+@supports (animation-timeline: view()) {
+  .railWrap {
+    view-timeline: --rail block;
+  }
+  .stopDot {
+    animation: dotOn linear both;
+    animation-timeline: --rail;
+    animation-range: entry 30% entry 60%;
+  }
+  .stop:nth-child(2) .stopDot {
+    animation-range: entry 38% entry 68%;
+  }
+  .stop:nth-child(3) .stopDot {
+    animation:
+      dotOn linear both,
+      ping 2.4s ease-out infinite;
+    animation-timeline: --rail, auto;
+    animation-range:
+      entry 46% entry 76%,
+      normal;
+  }
+  .stop:nth-child(4) .stopDot {
+    animation-range: entry 54% entry 84%;
+  }
+  .stop:nth-child(5) .stopDot {
+    animation-range: entry 62% entry 92%;
+  }
+}
+
+@keyframes dotOn {
+  from {
+    scale: 0.3;
+    opacity: 0;
+  }
+}
+
 .stop:last-child .stopDot {
   border-color: var(--success);
 }
 
 .stopName {
-  font-family: var(--font-brand), system-ui, sans-serif;
-  font-size: 1.35rem;
-  font-weight: 500;
+  font-family: var(--font-display), var(--font-ui), sans-serif;
+  font-size: 1.3rem;
+  font-weight: 560;
+  letter-spacing: -0.02em;
 }
 
-.stop p {
+.stopArtifact {
+  justify-self: start;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.stop:nth-child(3) .stopArtifact {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  color: var(--accent-tint-text);
+}
+
+.stopText {
+  color: var(--muted);
   font-size: 0.9375rem;
+  line-height: 1.5;
 }
 
+.stopVia {
+  align-self: end;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+/* A tarefa viaja pelo trilho: para em cada nó e acende no Claude Code. */
+.packet {
+  position: absolute;
+  top: calc(1.05rem + 6px);
+  left: 0;
+  right: 0;
+  z-index: 1;
+  height: 0;
+  pointer-events: none;
+  animation: travel 11s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+.packetChip {
+  position: absolute;
+  top: -10px;
+  left: calc(1.25rem + 14px);
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--text);
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  white-space: nowrap;
+  animation: chipTone 11s linear infinite;
+}
+
+@keyframes travel {
+  0%,
+  12% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  20%,
+  32% {
+    transform: translateX(20%);
+  }
+  40%,
+  54% {
+    transform: translateX(40%);
+  }
+  62%,
+  74% {
+    transform: translateX(60%);
+  }
+  82%,
+  94% {
+    transform: translateX(80%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(80%);
+    opacity: 0;
+  }
+}
+
+@keyframes chipTone {
+  0%,
+  38% {
+    border-color: var(--border);
+    background: var(--raised);
+    color: var(--text);
+  }
+  41%,
+  55% {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  58%,
+  80% {
+    border-color: var(--border);
+    background: var(--raised);
+    color: var(--text);
+  }
+  84%,
+  100% {
+    border-color: var(--success);
+    background: var(--raised);
+    color: var(--success);
+  }
+}
+
+/* Regras: tabela de verdade, com cabeçalho e o tom do status no destino. */
 .rules {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  align-items: start;
   gap: 2rem 4rem;
   margin-top: clamp(3.5rem, 7vw, 5rem);
-  padding-top: clamp(2.5rem, 5vw, 3.5rem);
-  border-top: 1px solid var(--border-soft);
 }
 
-.rules .h3 {
-  max-width: 24ch;
-  font-family: var(--font-brand), system-ui, sans-serif;
-  font-size: 1.5rem;
-  font-weight: 400;
-  line-height: 1.25;
+.rulesTitle {
+  max-width: 22ch;
+  font-family: var(--font-display), var(--font-ui), sans-serif;
+  font-size: clamp(1.4rem, 2.4vw, 1.75rem);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
 }
 
-.ruleList {
+.ruleTable {
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
 }
 
-.rule {
-  display: grid;
-  grid-template-columns: 1fr auto 9rem;
-  align-items: center;
-  gap: 1rem;
-  padding: 0.85rem 1.1rem;
+.ruleTable th {
+  padding: 0.6rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-align: left;
 }
 
-.rule + .rule {
+.ruleTable td {
+  padding: 0.8rem 1.1rem;
+  vertical-align: middle;
+}
+
+.ruleTable tbody tr + tr td {
   border-top: 1px solid var(--border-soft);
 }
 
-.ruleWhen {
+.ruleWhen code {
   color: var(--text);
-}
-
-.ruleArrow {
-  color: var(--muted);
+  font-size: 0.875rem;
+  white-space: nowrap;
 }
 
 .ruleThen {
-  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
   padding: 0.15rem 0.65rem;
   border-radius: 999px;
   background: var(--raised);
   color: var(--text);
   font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.ruleThen::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.ruleThen[data-tone='warn']::before {
+  background: var(--warning);
+}
+
+.ruleThen[data-tone='ok']::before {
+  background: var(--success);
+}
+
+.ruleHint {
+  margin-left: 0.6rem;
+  color: var(--muted);
+  font-size: 0.8125rem;
 }
 
 /* ---------- recursos: texto e recorte alternados ---------- */
 
 .features {
   display: grid;
-  gap: clamp(4rem, 9vw, 7rem);
+  gap: clamp(3.5rem, 7vw, 5.5rem);
 }
 
 .feature {
+  position: relative;
+  isolation: isolate;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.25fr);
   align-items: center;
-  gap: clamp(2rem, 6vw, 5rem);
+  gap: clamp(2rem, 5vw, 4.5rem);
+}
+
+.feature[data-flip] {
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.85fr);
 }
 
 .feature[data-flip] .featureText {
   order: 2;
+}
+
+/* Luz baixa atrás do recorte, do lado em que ele está. */
+.feature::before {
+  content: '';
+  position: absolute;
+  top: 10%;
+  bottom: 10%;
+  right: -6%;
+  width: 60%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    color-mix(in srgb, var(--accent) 9%, transparent),
+    transparent 65%
+  );
+}
+
+.feature[data-flip]::before {
+  right: auto;
+  left: -6%;
 }
 
 .featureText {
@@ -270,16 +736,17 @@
 }
 
 .featureTitle {
-  max-width: 20ch;
-  font-family: var(--font-brand), system-ui, sans-serif;
-  font-size: clamp(1.5rem, 2.6vw, 2rem);
-  font-weight: 400;
-  line-height: 1.15;
+  max-width: 18ch;
+  font-family: var(--font-display), var(--font-ui), sans-serif;
+  font-size: clamp(1.6rem, 2.8vw, 2.15rem);
+  font-weight: 560;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
   text-wrap: balance;
 }
 
 .featureText p {
-  max-width: 54ch;
+  max-width: 52ch;
 }
 
 .points {
@@ -301,56 +768,137 @@
   transform: translateY(2px);
 }
 
-/* ---------- segurança ---------- */
+/* ---------- segurança: faixa com terminal ---------- */
 
 .safety {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
   gap: clamp(2.5rem, 6vw, 5rem);
 }
 
-.safety > div {
+.safetyHead {
   display: grid;
   align-content: start;
   gap: 1rem;
 }
 
-.blocked {
+.terminal {
   margin-top: 1.5rem;
-  padding: 1rem 1.1rem;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--surface);
+  background: var(--bg);
 }
 
-.blockedTitle {
-  margin-bottom: 0.75rem;
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-
-.blocked ul {
-  display: grid;
-  gap: 0.55rem;
-}
-
-.blocked li {
+.terminalBar {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.85rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--border-soft);
+  color: var(--muted);
+  font-size: 0.8125rem;
 }
 
-.blocked code {
+.dots {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.dots i {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.terminal ul {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.85rem 0.9rem 1rem;
+}
+
+/* Os comandos chegam um a um, como num log ao vivo; a última linha espera o próximo. */
+@supports (animation-timeline: view()) {
+  .terminal li {
+    animation: lineIn linear both;
+    animation-timeline: view();
+    animation-range: entry 40% entry 90%;
+  }
+}
+
+@keyframes lineIn {
+  from {
+    opacity: 0;
+    translate: -8px 0;
+  }
+}
+
+.cursorLine {
+  color: var(--muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+.cursorLine::after {
+  content: '';
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 0.6rem;
+  vertical-align: -0.2em;
+  background: var(--muted);
+  animation: caret 1.6s ease-in-out infinite;
+}
+
+@keyframes caret {
+  50% {
+    opacity: 0.15;
+  }
+}
+
+.liveDot {
+  position: relative;
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.liveDot::after {
+  border-color: var(--success);
+}
+
+.terminal li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+}
+
+.prompt {
+  color: var(--muted);
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+.terminal code {
   color: var(--text);
   text-decoration: line-through;
   text-decoration-color: var(--danger);
-  text-decoration-thickness: 1px;
   overflow-wrap: anywhere;
+}
+
+.blockedTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--danger);
+  font-size: 0.8125rem;
 }
 
 .blockedIcon {
   flex: none;
-  color: var(--danger);
 }
 
 .safetyList {
@@ -362,7 +910,7 @@
 .safetyList > div {
   display: grid;
   gap: 0.4rem;
-  padding-block: 1.25rem;
+  padding-block: 1.35rem;
 }
 
 .safetyList > div + div {
@@ -373,31 +921,15 @@
   padding-top: 0;
 }
 
-/* ---------- ferramentas ---------- */
-
-.tools {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  margin: 0;
-  border-top: 1px solid var(--border);
+.safetyList dt {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
 }
 
-.tools > div {
-  display: grid;
-  align-content: start;
-  gap: 0.5rem;
-  padding: 1.5rem 1.5rem 0 0;
-}
-
-.tools > div + div {
-  padding-left: 1.5rem;
-  border-left: 1px solid var(--border-soft);
-}
-
-.toolName {
-  font-family: var(--font-brand), system-ui, sans-serif;
-  font-size: 1.5rem;
-  font-weight: 400;
+.pointShield {
+  flex: none;
+  color: var(--muted);
 }
 
 /* ---------- perguntas ---------- */
@@ -447,20 +979,32 @@
   transform: rotate(-135deg);
 }
 
-.faqItem summary:hover {
-  color: var(--text);
-}
-
 .faqItem p {
   max-width: 64ch;
   padding-bottom: 1.25rem;
 }
 
-/* ---------- fechamento ---------- */
+/* ---------- fechamento: a mesma luz difusa, por baixo ---------- */
 
 .close {
+  position: relative;
   padding-block: clamp(5rem, 10vw, 8rem);
+  overflow: hidden;
+  isolation: isolate;
   border-top: 1px solid var(--border-soft);
+}
+
+.close::before {
+  content: '';
+  position: absolute;
+  inset: auto -20% -40%;
+  height: 100%;
+  z-index: -1;
+  background: radial-gradient(
+    ellipse 45% 40% at 50% 60%,
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    transparent 70%
+  );
 }
 
 .closeInner {
@@ -475,10 +1019,10 @@
 }
 
 .closeTitle {
-  font-family: var(--font-brand), system-ui, sans-serif;
-  font-weight: 300;
-  font-size: clamp(2.2rem, 5vw, 3.6rem);
-  letter-spacing: -0.01em;
+  font-family: var(--font-display), var(--font-ui), sans-serif;
+  font-weight: 560;
+  font-size: clamp(2.4rem, 5.5vw, 4rem);
+  letter-spacing: -0.045em;
 }
 
 .closeButton {
@@ -489,32 +1033,36 @@
 /* ---------- telas menores ---------- */
 
 @media (max-width: 1000px) {
-  .heroText {
-    grid-template-columns: 1fr;
+  .packet {
+    display: none;
   }
   .rail {
     grid-template-columns: 1fr;
-    gap: 0;
+  }
+  .rail {
+    grid-template-rows: none;
   }
   .stop {
-    padding: 0 0 2rem 2rem;
+    grid-row: auto;
+    grid-template-rows: none;
+    padding: 1.25rem 1.25rem 1.25rem 3rem;
   }
-  .stop::before {
-    top: 6px;
-    left: 5px;
-    right: auto;
-    bottom: 0;
-    width: 1px;
-    height: auto;
+  .stop + .stop {
+    border-left: 0;
+    border-top: 1px solid var(--border-soft);
   }
-  .stop:last-child {
-    padding-bottom: 0;
-  }
+  .stop::before,
+  .stop + .stop::before,
   .stop:last-child::before {
     display: none;
   }
+  .stopDot {
+    top: 1.65rem;
+    left: 1.25rem;
+  }
   .rules,
   .feature,
+  .feature[data-flip],
   .safety,
   .faqWrap {
     grid-template-columns: 1fr;
@@ -522,24 +1070,41 @@
   .feature[data-flip] .featureText {
     order: 0;
   }
+  .feature::before,
+  .feature[data-flip]::before {
+    top: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    height: 60%;
+  }
 }
 
-@media (max-width: 760px) {
-  .tools {
-    grid-template-columns: 1fr;
+@media (max-width: 640px) {
+  .ruleTable th,
+  .ruleTable td {
+    padding-inline: 0.75rem;
   }
-  .tools > div,
-  .tools > div + div {
-    padding: 1.25rem 0;
-    border-left: 0;
+  .ruleWhen code {
+    white-space: normal;
   }
-  .tools > div + div {
-    border-top: 1px solid var(--border-soft);
+  .ruleHint {
+    display: none;
   }
-  .rule {
-    grid-template-columns: 1fr auto;
+  .terminal li {
+    grid-template-columns: auto 1fr;
   }
-  .ruleArrow {
+  .blockedTag {
+    grid-column: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .packet {
+    display: none;
+  }
+  .stop:nth-child(3) .stopDot::after,
+  .liveDot::after {
     display: none;
   }
 }

@@ -16,16 +16,22 @@
   font-weight: 600;
   text-decoration: none;
   transition:
-    background-color 150ms ease,
-    transform 150ms ease;
+    background-color 220ms ease,
+    box-shadow 220ms ease,
+    translate 220ms ease;
 }
 
 .primary:hover {
   background: var(--accent-hover);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-hover) 60%, transparent),
+    0 10px 32px -8px color-mix(in srgb, var(--accent) 65%, transparent);
+  translate: 0 -1px;
 }
 
 .primary:active {
-  transform: translateY(1px);
+  translate: 0 1px;
+  box-shadow: none;
 }
 
 .version {
@@ -59,7 +65,7 @@
   padding: 1.25rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
 }
 
 .card[data-mine] {
