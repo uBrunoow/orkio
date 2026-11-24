@@ -4,13 +4,6 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
-import type {
-  NotionProjectChoice,
-  NotionResult,
-  NotionTasksResult,
-  NotionWorkspaceStatus,
-  ProjectView
-} from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { StatusToken, toneOf } from '../../components/StatusToken'
 import {
@@ -26,8 +19,15 @@ import { call } from './NotionWorkspaceCard'
 import { TaskSignalsLine } from './TaskSignalsLine'
 import { useTaskSignals } from './useTaskSignals'
 import { tokenColor } from './notion-colors'
+import type {
+  NotionProjectChoice,
+  NotionTasksResult,
+  NotionWorkspaceStatus
+} from '../../../../shared/notion'
+import type { Result } from '../../../../shared/result'
+import type { ProjectView } from '../../../../shared/projects'
 
-type NotionError = Extract<NotionResult<never>, { ok: false }>['error']
+type NotionError = Extract<Result<never>, { ok: false }>['error']
 
 /** A sugestão automática só é pré-selecionada a partir desta semelhança de nome. */
 const SUGGESTION_THRESHOLD = 0.5

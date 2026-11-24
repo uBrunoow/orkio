@@ -5,12 +5,12 @@ import { SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
 import { StatusToken, toneOf } from '../../components/StatusToken'
-import type { AlvaCheckItem, AlvaPrecheck } from '../../../../shared/alva'
-import type { AlvaStatusView, BoardView } from '../../../../shared/ipc-contract'
+import type { AlvaCheckItem, AlvaPrecheck, AlvaStatusView } from '../../../../shared/alva'
 import { Alert } from '../../components/Alert'
 import { CopyIcon, RefreshIcon } from '../../components/icons'
 import { PAGE_WIDTH } from '../../components/page-width'
 import { suggestAlvaTargets, type AlvaTargets } from './alva-targets'
+import type { BoardView } from '../../../../shared/board'
 
 const STATE: Record<AlvaCheckItem['state'], { label: string; color: 'green' | 'red' | 'yellow' }> =
   {

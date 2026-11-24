@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { BoardView } from '../../../shared/ipc-contract'
 import type { OverviewSnapshot } from '../../../shared/overview'
 import { useOverview } from '../features/overview/useOverview'
 import { taskGroups, type TaskGroups } from './task-groups'
+import type { BoardView } from '../../../shared/board'
 
 /**
  * Dados da lista lateral: a Visão geral (todos os projetos, só dados locais) e o quadro do projeto

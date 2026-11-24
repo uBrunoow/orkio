@@ -13,6 +13,8 @@
  * Qualquer outra coisa (caminho local, file://, git://, http sem dono/repo) → null.
  */
 
+import { isOwner, isRepo } from '../../shared/github-names'
+
 export type RemoteHostKind = 'github' | 'ssh-alias' | 'enterprise'
 
 export interface ParsedRemote {
@@ -24,8 +26,6 @@ export interface ParsedRemote {
 }
 
 const GITHUB_HOSTS = new Set(['github.com', 'www.github.com', 'ssh.github.com'])
-/** Nomes válidos no GitHub: letras, números, hífen, ponto e sublinhado. */
-const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
 const HOST = /^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$/
 
 export function parseRemoteUrl(raw: string): ParsedRemote | null {
@@ -61,7 +61,7 @@ function build(hostRaw: string, pathRaw: string): ParsedRemote | null {
   if (segments.length !== 2) return null
   const owner = segments[0]!
   const name = segments[1]!.replace(/\.git$/i, '')
-  if (!SEGMENT.test(owner) || !SEGMENT.test(name) || name === '.' || name === '..') return null
+  if (!isOwner(owner) || !isRepo(name)) return null
 
   const kind: RemoteHostKind = GITHUB_HOSTS.has(host)
     ? 'github'

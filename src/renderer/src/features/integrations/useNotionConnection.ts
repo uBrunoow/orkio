@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AuthOptions, ConnectionStatus } from '../../../../shared/ipc-contract'
 import type { ConnectionActivity } from './connection-ui'
+import type { AuthOptions, ConnectionStatus } from '../../../../shared/connection'
 
 export type NotionActivity = ConnectionActivity
 

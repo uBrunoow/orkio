@@ -4,6 +4,7 @@
  */
 import { execFile as nodeExecFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { isBranchName } from '../../shared/github-names'
 
 export const GIT_TIMEOUT_MS = 10_000
 
@@ -251,7 +252,7 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
       return (await git(dir, ['rev-parse', 'HEAD'])).trim()
     },
     async push(dir, remote, branch) {
-      if (!isSafeRefName(branch) || !/^[A-Za-z0-9._-]+$/.test(remote)) {
+      if (!isBranchName(branch) || !/^[A-Za-z0-9._-]+$/.test(remote)) {
         throw new GitError('failed', 'Branch ou remote inválido para o push.')
       }
       const ref = `refs/heads/${branch}`
@@ -362,17 +363,6 @@ export function toGitError(error: unknown): GitError {
     )
   }
   return new GitError('failed', 'O git retornou um erro ao ler esta pasta.')
-}
-
-/** Nome de branch seguro para usar como argumento (sem opções, refspec, `..` nem espaços). */
-export function isSafeRefName(name: string): boolean {
-  return (
-    /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(name) &&
-    !name.includes('..') &&
-    !name.endsWith('/') &&
-    !name.endsWith('.lock') &&
-    !name.includes('//')
-  )
 }
 
 /** Soma de `git diff --numstat` (linhas `adicionadas<TAB>removidas<TAB>arquivo`; binário = `-`). */

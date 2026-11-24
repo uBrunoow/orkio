@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AlvaPrecheck } from '../../../../shared/alva'
-import type { ProjectView } from '../../../../shared/ipc-contract'
 import { missingSteps, projectChecks } from './project-checks'
+import type { ProjectView } from '../../../../shared/projects'
 
 const project = (patch: Partial<ProjectView> = {}): ProjectView => ({
   id: 'p1',

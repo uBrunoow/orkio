@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { BoardCard, BoardView } from '../../../shared/ipc-contract'
 import type {
   OverviewSnapshot,
   OverviewTask,
@@ -7,6 +6,7 @@ import type {
   WaitingItem
 } from '../../../shared/overview'
 import { taskGroups, TODO_LIMIT } from './task-groups'
+import type { BoardCard, BoardView } from '../../../shared/board'
 
 const task = (taskId: string, projectId = 'p1'): OverviewTask => ({
   projectId,

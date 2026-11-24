@@ -4,7 +4,7 @@ import type {
   PickFolderResult,
   ProjectMutationResult,
   ProjectView
-} from '../../../../shared/ipc-contract'
+} from '../../../../shared/projects'
 
 export interface UseProjects {
   /** `null` enquanto carrega pela primeira vez. */

@@ -1,5 +1,4 @@
 import { cn } from '@/lib/utils'
-import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import { StatusToken } from '../../components/StatusToken'
 import { useTaskFlowState } from '../task-flows/active-flows'
 import { useAgentBadge } from '../agents/agent-badges'
@@ -7,6 +6,8 @@ import { AgentAvatar } from '../agents/AgentAvatar'
 import { CardActionsMenu, cardMenuItems, type CardActions } from './BoardCardView'
 import { stageDotClass } from './BoardColumns'
 import { cardStatus } from './card-status'
+import type { BoardCard, BoardStage } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 /**
  * Visão em lista do quadro: uma linha por tarefa, na ordem das etapas. Mesmos dados do Kanban

@@ -3,7 +3,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { StatusDot, type StatusTone } from '@/components/StatusToken'
 import { Timestamp } from '@/components/Timestamp'
 import { plural } from '@/lib/format'
-import type { TaskSignals } from '../../../../shared/ipc-contract'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 type TaskPullRequest = NonNullable<TaskSignals['pr']>
 

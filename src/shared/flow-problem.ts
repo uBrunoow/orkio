@@ -3,6 +3,7 @@
  * A causa vem da mensagem que o Orkio guardou no passo; as mensagens são textos fixos do próprio
  * app, então o reconhecimento é por trechos (e o teste confere os textos reais).
  */
+import { findInstallUrl } from './github-names'
 import { FLOW_PAUSE_LABEL, type FlowRunView, type Step } from './task-flow'
 
 export type ProblemKind =
@@ -98,10 +99,6 @@ export interface FlowProblem {
   link: { label: string; url: string } | null
 }
 
-/** Página de instalação do GitHub App (mesmo formato aceito pelo poster e pela allowlist). */
-const INSTALL_URL =
-  /https:\/\/github\.com\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new(?![\w/-])/
-
 /** Passos que não são "problema" (esperam outro fluxo ou uma escolha, que têm tela própria). */
 const NOT_A_PROBLEM = new Set(['waiting_slot', 'waiting_agent', 'needs_choice'])
 
@@ -179,6 +176,6 @@ export function describeFlowProblem(run: FlowRunView): FlowProblem | null {
 
 function installLink(kind: ProblemKind, reason: string | null): FlowProblem['link'] {
   if (kind !== 'review_not_installed' || !reason) return null
-  const url = INSTALL_URL.exec(reason)?.[0]
+  const url = findInstallUrl(reason)
   return url ? { label: 'Instalar o GitHub App do Orkio', url } : null
 }

@@ -1,8 +1,9 @@
 import type { IpcMain } from 'electron'
-import { IPC_CHANNELS, type AutomationStatus } from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { AutomationStatus } from '../../shared/automation'
 
 export interface AutomationIpcService {
   status(projectId: string): AutomationStatus

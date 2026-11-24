@@ -36,7 +36,8 @@ import {
   type FlowStepView,
   type ProjectFlows,
   type Step,
-  type StepEnd
+  type StepEnd,
+  type TaskFlowActivity
 } from '../../shared/task-flow'
 import type { BoardStore, TaskEventKind } from '../board/board.store'
 import type { StageChange } from '../board/board.service'
@@ -1076,8 +1077,8 @@ export class FlowRunner {
   }
 
   /** Para o card do quadro: tarefas com fluxo ativo e se ele espera você. */
-  activeForProject(projectId: string): Record<string, 'running' | 'needs_you'> {
-    const out: Record<string, 'running' | 'needs_you'> = {}
+  activeForProject(projectId: string): Record<string, TaskFlowActivity> {
+    const out: Record<string, TaskFlowActivity> = {}
     for (const r of this.deps.db.all<{ task_page_id: string; status: FlowRunStatus }>(
       `SELECT task_page_id, status FROM flow_runs WHERE project_id = ? AND status IN ('running', 'waiting_gate', 'paused', 'awaiting_decision')`,
       projectId

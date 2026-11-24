@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { NotionWorkspaceStatus } from '../../../../shared/ipc-contract'
+import type { NotionWorkspaceStatus } from '../../../../shared/notion'
 
 const IPC_FAILURE: NotionWorkspaceStatus = {
   config: null,

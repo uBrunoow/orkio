@@ -15,13 +15,13 @@ import {
 import {
   DEFAULT_STAGE_TEMPLATE,
   findOption,
-  normalizeOptionName,
   stageMatchesStatus,
   type BoardStage,
   type StatusOption
 } from './board'
 import type { StageFlow } from './task-flow'
-import type { NotionColor } from './ipc-contract'
+import type { NotionColor } from './notion'
+import { normalizeLabel } from './text'
 
 export const EVENT_DESCRIPTIONS: Record<EventKind, string> = {
   'branch.created': 'Uma branch com o ID da tarefa foi criada (local ou no GitHub).',
@@ -168,7 +168,7 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
         stageId: stage.id,
         message: 'Dê um nome a cada etapa.'
       })
-    } else if (seen.has(normalizeOptionName(name))) {
+    } else if (seen.has(normalizeLabel(name))) {
       issues.push({
         level: 'error',
         kind: 'stage_name',
@@ -176,7 +176,7 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
         message: `Há duas etapas chamadas “${name}”.`
       })
     }
-    seen.add(normalizeOptionName(name))
+    seen.add(normalizeLabel(name))
     if (!stage.notionStatusId || !ctx.statusOptions.some((o) => o.id === stage.notionStatusId)) {
       issues.push({
         level: 'error',
@@ -482,9 +482,7 @@ export function restoreDefaultFlow(
   newId: () => string
 ): Pick<FlowDraft, 'stages' | 'rules'> {
   const stages: FlowStageDraft[] = DEFAULT_STAGE_TEMPLATE.map((t) => {
-    const existing = current.find(
-      (s) => normalizeOptionName(s.name) === normalizeOptionName(t.name)
-    )
+    const existing = current.find((s) => normalizeLabel(s.name) === normalizeLabel(t.name))
     const option = findOption(options, { name: t.notionStatus })
     return {
       id: existing?.id ?? newId(),
@@ -677,3 +675,16 @@ export function importFlow(
 }
 
 export { EVENT_KINDS, EVENT_LABELS }
+
+// ---------- Fluxo do projeto (Etapa 3C) ----------
+
+export interface ConfigEvent {
+  id: number
+  at: string
+  /** Usuário do sistema operacional. */
+  actor: string
+  changes: string[]
+}
+
+export type FlowFileResult =
+  { ok: true; content: unknown } | { ok: false; cancelled: boolean; message?: string }

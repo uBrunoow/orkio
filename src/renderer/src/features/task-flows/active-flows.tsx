@@ -1,13 +1,14 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import type { TaskFlowActivity } from '../../../../shared/task-flow'
 
-export type ActiveFlows = Record<string, 'running' | 'needs_you'>
+export type ActiveFlows = Record<string, TaskFlowActivity>
 
 const ActiveFlowsContext = createContext<ActiveFlows>({})
 
 export const ActiveFlowsProvider = ActiveFlowsContext.Provider
 
 /** Estado do fluxo de uma tarefa para o card (indicador discreto). */
-export function useTaskFlowState(taskId: string): 'running' | 'needs_you' | null {
+export function useTaskFlowState(taskId: string): TaskFlowActivity | null {
   return useContext(ActiveFlowsContext)[taskId] ?? null
 }
 

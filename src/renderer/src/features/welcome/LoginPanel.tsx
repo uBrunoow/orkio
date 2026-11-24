@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import type { ConnectionStatus, DeviceFlowInfo } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { GitHubLogo } from '../../components/icons'
 import { DeviceFlowView } from '../integrations/GitHubConnectionCard'
+import type { ConnectionStatus, DeviceFlowInfo } from '../../../../shared/connection'
 
 /**
  * Entrada do app: login com a conta do GitHub pelo Device Flow que Integrações já usa (o token

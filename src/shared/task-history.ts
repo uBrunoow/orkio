@@ -3,7 +3,7 @@
  * tarefa (quadro) e na atividade recente da Visão geral (6D).
  */
 import { EVENT_LABELS, type EventKind } from './automation'
-import type { BoardHistoryEntry } from './ipc-contract'
+import type { BoardHistoryEntry } from './board'
 
 type HistoryEvent = Pick<BoardHistoryEntry, 'kind' | 'source' | 'fromStage' | 'toStage' | 'detail'>
 

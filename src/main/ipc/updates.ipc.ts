@@ -1,11 +1,12 @@
 import type { IpcMain } from 'electron'
-import { IPC_CHANNELS, type AboutInfo } from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type {
   ReleaseNotes,
   UpdateChannel,
   UpdateInstallMode,
   UpdateInstallResult,
-  UpdateStatus
+  UpdateStatus,
+  AboutInfo
 } from '../../shared/updates'
 import { errorName } from './payload'
 import type { SenderGuard } from './trusted-sender'

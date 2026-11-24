@@ -3,13 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { StatusOption } from '../../shared/board'
-import type {
-  NotionMapping,
-  NotionPropertySummary,
-  NotionTask,
-  TaskSignalsResult
-} from '../../shared/ipc-contract'
-import type { TaskPullRequest, TaskSignals } from '../../shared/task-signals'
+import type { TaskPullRequest, TaskSignals, TaskSignalsResult } from '../../shared/task-signals'
 import { BoardService, type BoardNotion } from '../board/board.service'
 import { BoardStore } from '../board/board.store'
 import { NotionWriteQueue } from '../board/write-queue'
@@ -19,6 +13,7 @@ import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import { AutomationService, type AutomationNotification } from './automation.service'
+import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
 
 const OPTIONS: StatusOption[] = [
   { id: 'o-prio', name: 'Prioridades', color: 'gray' },

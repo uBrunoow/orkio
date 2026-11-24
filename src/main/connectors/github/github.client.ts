@@ -4,10 +4,9 @@
  */
 import { httpsUrlOrNull, isRecord, parseRetryAfterMs, stringOrNull } from '../../net/parse'
 import { notionPageIdsIn } from '../../../shared/slug'
+import { GITHUB_API_VERSION, isAuthorLogin, isLogin } from '../../../shared/github-names'
 
 export const GITHUB_API_BASE_URL = 'https://api.github.com'
-/** Versão da API REST (header X-GitHub-Api-Version). Atualize só aqui. */
-export const GITHUB_API_VERSION = '2026-03-10'
 export const GITHUB_REQUEST_TIMEOUT_MS = 10_000
 /** Esperamos e repetimos uma vez se o GitHub pedir até este tempo; acima disso, erro. */
 export const GITHUB_MAX_RETRY_WAIT_MS = 5_000
@@ -245,11 +244,7 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
       const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators?per_page=100`
       const body = await json(await request(path, token))
       return Array.isArray(body)
-        ? body.flatMap((u) =>
-            isRecord(u) && typeof u['login'] === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(u['login'])
-              ? [u['login']]
-              : []
-          )
+        ? body.flatMap((u) => (isRecord(u) && isLogin(u['login']) ? [u['login']] : []))
         : []
     }
   }
@@ -527,9 +522,7 @@ export interface GitHubPullItem {
 }
 
 function loginOrNull(value: unknown): string | null {
-  return typeof value === 'string' && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(\[bot\])?$/.test(value)
-    ? value
-    : null
+  return isAuthorLogin(value) ? value : null
 }
 
 /** Item de GET /repos/{o}/{r}/pulls. URL só se for uma PR em github.com. */

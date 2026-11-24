@@ -19,7 +19,12 @@ import { Alert } from '../../components/Alert'
 import { DiffView } from '../../components/DiffView'
 import { CleanIcon, DiffIcon, EditorIcon, PlayIcon, RefreshIcon } from '../../components/icons'
 import { plural } from '../../lib/format'
-import { isBranchKind, type BranchKind } from '../../../../shared/slug'
+import {
+  BRANCH_KINDS,
+  isBranchKind,
+  withBranchKind,
+  type BranchKind
+} from '../../../../shared/slug'
 import type { PendingPermission, useTaskRuns } from './useTaskRuns'
 
 export interface RunInitial {
@@ -53,7 +58,7 @@ export function Composer({
   const [asAgent, setAsAgent] = useState(prep.agent !== null)
   // Branch nova: o tipo (feat/fix/hotfix) troca só o começo do nome sugerido.
   const [kind, setKind] = useState<BranchKind>('feat')
-  const branch = prep.branchIsNew ? prep.branch.replace(/^[a-z]+\//, `${kind}/`) : prep.branch
+  const branch = prep.branchIsNew ? withBranchKind(prep.branch, kind) : prep.branch
 
   const start = async (): Promise<void> => {
     setStarting(true)
@@ -94,11 +99,7 @@ export function Composer({
             onChange={(v) => {
               if (isBranchKind(v)) setKind(v)
             }}
-            options={[
-              { value: 'feat', label: 'feat/' },
-              { value: 'fix', label: 'fix/' },
-              { value: 'hotfix', label: 'hotfix/' }
-            ]}
+            options={BRANCH_KINDS.map((k) => ({ value: k, label: `${k}/` }))}
           />
         )}
         <SegmentedControl

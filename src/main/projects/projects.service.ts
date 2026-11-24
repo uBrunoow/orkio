@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
+import type { OrkioConfig, StoredProject } from '../config/orkio-config'
+import { GitHubApiError, type GitHubRepo } from '../connectors/github/github.client'
+import { GitError, type Git } from '../git/git'
+import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
+import { HeadWatcher } from './head-watcher'
+import { parseRemoteUrl, sameRepo } from './remote-url'
 import type {
   BranchChangedEvent,
   CreateProjectInput,
@@ -15,13 +21,7 @@ import type {
   ProjectView,
   ProjectsListResult,
   RemoteCandidate
-} from '../../shared/ipc-contract'
-import type { OrkioConfig, StoredProject } from '../config/orkio-config'
-import { GitHubApiError, type GitHubRepo } from '../connectors/github/github.client'
-import { GitError, type Git } from '../git/git'
-import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
-import { HeadWatcher } from './head-watcher'
-import { parseRemoteUrl, sameRepo } from './remote-url'
+} from '../../shared/projects'
 
 /** O que o serviço precisa do conector do GitHub (o token nunca sai de lá). */
 export interface ProjectsGitHub {

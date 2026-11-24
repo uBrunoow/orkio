@@ -1,21 +1,18 @@
 import type { IpcMain } from 'electron'
-import {
-  IPC_CHANNELS,
-  type BoardSaveInput,
-  type NotionResult,
-  type OrkioStageChoice
-} from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { BoardService } from '../board/board.service'
 import { isNotionId } from './notion-workspace.ipc'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { BoardSaveInput, OrkioStageChoice } from '../../shared/board'
+import type { Result } from '../../shared/result'
 
-const GENERIC: NotionResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Algo deu errado no quadro. Tente novamente.' }
 }
-const INVALID: NotionResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Dados inválidos. Atualize a tela e tente de novo.' }
 }

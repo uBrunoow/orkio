@@ -4,11 +4,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/Spinner'
 import { ExternalLinkIcon, GitHubLogo } from '../../components/icons'
 import {
-  GITHUB_TOKEN_DOCS_URL,
-  type ConnectionStatus,
-  type DeviceFlowInfo
-} from '../../../../shared/ipc-contract'
-import {
   Alert,
   CardHeader,
   CONNECTION_CARD_CLASS,
@@ -20,6 +15,11 @@ import {
   type TokenFormCopy
 } from './connection-ui'
 import type { UseGitHubConnection } from './useGitHubConnection'
+import {
+  GITHUB_TOKEN_DOCS_URL,
+  type ConnectionStatus,
+  type DeviceFlowInfo
+} from '../../../../shared/connection'
 
 const TOKEN_COPY: TokenFormCopy = {
   description:

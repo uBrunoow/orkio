@@ -3,14 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ALVA_TEMPLATE_IDS, alvaDeliverFlow, alvaTemplates } from '../../shared/alva-templates'
-import type { StatusOption } from '../../shared/board'
-import type {
-  BoardSaveInput,
-  BoardSyncEvent,
-  NotionMapping,
-  NotionPropertySummary,
-  NotionTask
-} from '../../shared/ipc-contract'
+import type { StatusOption, BoardSaveInput, BoardSyncEvent } from '../../shared/board'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
 import { NotionApiError } from '../connectors/notion/notion.client'
 import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
@@ -19,6 +12,7 @@ import type { ConfigStore } from '../storage/config-store'
 import { BoardService, type StageChange, type BoardNotion } from './board.service'
 import { BoardStore } from './board.store'
 import { NotionWriteQueue } from './write-queue'
+import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
 
 const OPTIONS: StatusOption[] = [
   { id: 'o-prio', name: 'Prioridades', color: 'gray' },

@@ -15,7 +15,6 @@ import {
   type AgentsState,
   type AgentView
 } from '../../../../shared/agent'
-import type { ProjectView } from '../../../../shared/ipc-contract'
 import type { OrchestratorAgentLoad, OrchestratorState } from '../../../../shared/orchestrator'
 import { Button } from '@/components/ui/button'
 import {
@@ -63,6 +62,7 @@ import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
 import { MultiSelectField } from './MultiSelectField'
 import { Sparkline } from './Sparkline'
 import { RuntimePicker, useSupportsEffort } from '../claude/RuntimePicker'
+import type { ProjectView } from '../../../../shared/projects'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',

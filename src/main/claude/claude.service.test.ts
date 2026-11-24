@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ClaudeCodeStatus } from '../../shared/agent-run'
-import type { NotionTask } from '../../shared/ipc-contract'
 import { isSendMessageRequest, isStartRunRequest } from '../ipc/claude.ipc'
 import { CLAUDE_MESSAGES, ClaudeService, type ClaudeServiceDeps } from './claude.service'
 import { WorktreeError } from './worktree.service'
+import type { NotionTask } from '../../shared/notion'
 
 const TASK: NotionTask = {
   id: 'task-1',

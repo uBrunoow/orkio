@@ -22,8 +22,14 @@ export interface PublishReviewAnswer {
   comments: PublishReviewComment[]
 }
 
-export const PUBLISH_SUMMARY_MAX = 20_000
-export const PUBLISH_COMMENTS_MAX = 50
+/**
+ * Limites da revisão publicada: o parser (antes do gate), o `GitHubReviewPoster` (main, antes do
+ * site) e o prompt de conversão usam estes. O site revalida com os próprios limites.
+ */
+export const REVIEW_SUMMARY_MAX = 20_000
+export const REVIEW_COMMENTS_MAX = 50
+export const REVIEW_COMMENT_MAX = 4_000
+export const REVIEW_PATH_MAX = 1_000
 /** Texto final lido no máximo (o resto não é JSON de revisão razoável). */
 const ANSWER_MAX = 400_000
 
@@ -35,8 +41,8 @@ export const PUBLISH_REVIEW_MESSAGES = {
     'A revisão em JSON é inválida: a resposta do passo anterior não é um JSON {event, summary, comments}.',
   badEvent:
     'A revisão em JSON é inválida: "event" precisa ser REQUEST_CHANGES ou COMMENT (o Orkio nunca aprova PRs).',
-  badSummary: `A revisão em JSON é inválida: "summary" precisa ser um texto de até ${PUBLISH_SUMMARY_MAX.toLocaleString('pt-BR')} caracteres.`,
-  tooManyComments: `A revisão em JSON é inválida: no máximo ${PUBLISH_COMMENTS_MAX} comentários de linha.`,
+  badSummary: `A revisão em JSON é inválida: "summary" precisa ser um texto de até ${REVIEW_SUMMARY_MAX.toLocaleString('pt-BR')} caracteres.`,
+  tooManyComments: `A revisão em JSON é inválida: no máximo ${REVIEW_COMMENTS_MAX} comentários de linha.`,
   badComment:
     'A revisão em JSON é inválida: cada comentário precisa de "path" (arquivo), "line" (número da linha) e "body" (texto).'
 } as const
@@ -133,12 +139,12 @@ export function parseReviewAnswer(
     return { ok: false, message: PUBLISH_REVIEW_MESSAGES.badEvent }
   }
   const summary = data['summary']
-  if (typeof summary !== 'string' || !summary.trim() || summary.length > PUBLISH_SUMMARY_MAX) {
+  if (typeof summary !== 'string' || !summary.trim() || summary.length > REVIEW_SUMMARY_MAX) {
     return { ok: false, message: PUBLISH_REVIEW_MESSAGES.badSummary }
   }
   const raw = data['comments'] ?? []
   if (!Array.isArray(raw)) return { ok: false, message: PUBLISH_REVIEW_MESSAGES.badComment }
-  if (raw.length > PUBLISH_COMMENTS_MAX) {
+  if (raw.length > REVIEW_COMMENTS_MAX) {
     return { ok: false, message: PUBLISH_REVIEW_MESSAGES.tooManyComments }
   }
   const comments: PublishReviewComment[] = []

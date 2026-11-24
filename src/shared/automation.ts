@@ -8,7 +8,8 @@
  *    resultado (mover, notificar, ignorar), aplicando em sequência.
  */
 import type { BoardStage } from './board'
-import type { TaskSignals } from './task-signals'
+import type { SignalsGitHubState, TaskSignals } from './task-signals'
+import { normalizeLabel } from './text'
 
 export type EventKind =
   | 'branch.created'
@@ -325,8 +326,7 @@ export function defaultRules(stages: readonly BoardStage[]): {
 } {
   const warnings: string[] = []
   const id = (name: string): string | null => {
-    const norm = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-    return stages.find((s) => norm(s.name) === norm(name))?.id ?? null
+    return stages.find((s) => normalizeLabel(s.name) === normalizeLabel(name))?.id ?? null
   }
   const specs: {
     id: string
@@ -511,4 +511,16 @@ export function evaluate(
     current = to
     return { ...base, outcome: 'move', to }
   })
+}
+
+// ---------- Automações (Etapa 3B) ----------
+
+export interface AutomationStatus {
+  /** "Pausar todas" ligado. */
+  paused: boolean
+  /** Situação do GitHub no último ciclo do projeto. */
+  github: SignalsGitHubState | 'unknown'
+  lastRunAt: string | null
+  nextRunAt: string | null
+  error: string | null
 }

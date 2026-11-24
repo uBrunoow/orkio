@@ -19,6 +19,7 @@ import {
   type ConditionalPage
 } from '../connectors/github/github.client'
 import { isRecord } from '../net/parse'
+import { isAuthorLogin, isTeamSlug } from '../../shared/github-names'
 
 export interface GitHubSignalsApi {
   getConditional(path: string, etag: string | null): Promise<ConditionalPage>
@@ -240,14 +241,11 @@ const CHECKS: Record<string, ChecksState> = {
   EXPECTED: 'pending'
 }
 
-const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(\[bot\])?$/
-
 /** Revisor pedido: login de usuário, ou `team:<slug>` para times. */
 function reviewerOf(value: unknown): string | null {
   if (!isRecord(value)) return null
-  if (typeof value['login'] === 'string' && LOGIN.test(value['login'])) return value['login']
-  if (typeof value['slug'] === 'string' && /^[A-Za-z0-9._-]{1,100}$/.test(value['slug']))
-    return `team:${value['slug']}`
+  if (isAuthorLogin(value['login'])) return value['login']
+  if (isTeamSlug(value['slug'])) return `team:${value['slug']}`
   return null
 }
 
@@ -310,7 +308,7 @@ export function parseDetails(
                     id: r['id'],
                     state,
                     at,
-                    author: typeof author === 'string' && LOGIN.test(author) ? author : null
+                    author: isAuthorLogin(author) ? author : null
                   } as const
                 ]
               : []

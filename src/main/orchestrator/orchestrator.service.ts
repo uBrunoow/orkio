@@ -27,13 +27,14 @@ import {
 } from '../../shared/orchestrator'
 import { checkAgentFlow, parseAgentKey, type AgentKey, type AgentsState } from '../../shared/agent'
 import { builtinAgent } from '../../shared/agent-presets'
-import type { BoardView, NotionResult } from '../../shared/ipc-contract'
 import type { BoardService, StageChange } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import type { AgentRuntime, AgentsService } from '../agents/agents.service'
+import type { BoardView } from '../../shared/board'
+import type { Result } from '../../shared/result'
 
 export const ORCHESTRATOR_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista.',
@@ -535,7 +536,7 @@ function agentCount(n: number): string {
   return n === 1 ? '1 agente' : `${n} agentes`
 }
 
-function toPlanCards(view: Extract<NotionResult<BoardView>, { ok: true }>): PlanCard[] {
+function toPlanCards(view: Extract<Result<BoardView>, { ok: true }>): PlanCard[] {
   return view.value.cards.map((c, index) => ({
     taskId: c.taskId,
     displayId: c.displayId ?? 'Tarefa',

@@ -7,6 +7,10 @@
  */
 
 import { isEffort, isModelName, type Effort } from './agent-runtime'
+import { EDIT_TOOLS } from './agent-run'
+import type { DeliverySettings } from './delivery'
+import type { PublishReviewEvent } from './review-publish'
+import { normalizeLabel } from './text'
 
 export type StepId = string
 
@@ -91,7 +95,7 @@ export const GATE_SHOWS: readonly GateShow[] = ['diff', 'summary', 'backlog', 'r
 /** Limite de voltas de "Pedir ajustes" num gate. */
 export const MAX_REVISE = 10
 /** Ferramentas que um passo só de leitura não recebe (`--disallowedTools`). */
-export const READ_ONLY_DENIED_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
+export const READ_ONLY_DENIED_TOOLS = EDIT_TOOLS
 /** Tamanho máximo do pedido em texto de um passo e do texto de "Pedir ajustes". */
 export const MAX_PROMPT_CHARS = 8000
 
@@ -565,10 +569,7 @@ export const STEP_TYPE_LABEL: Record<StepType, string> = {
 
 export function newStepId(flow: Flow, base: string): StepId {
   const clean =
-    base
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
+    normalizeLabel(base)
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 30) || 'passo'
@@ -675,7 +676,7 @@ export interface ActionConfirm {
 
 /** Revisão mostrada no gate do `publish_review` (já redigida; aprovar posta exatamente isto). */
 export interface ConfirmReview {
-  event: 'COMMENT' | 'REQUEST_CHANGES'
+  event: PublishReviewEvent
   summary: string
   /** `inDiff: false` = fora do diff da PR: não é publicado. */
   comments: { path: string; line: number; body: string; inDiff: boolean }[]
@@ -697,4 +698,28 @@ export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {
 /** Fluxo ativo (não terminado) espera uma ação sua? */
 export function needsYou(status: FlowRunStatus): boolean {
   return status === 'waiting_gate' || status === 'paused' || status === 'awaiting_decision'
+}
+
+/** Fluxo ativo numa tarefa, do jeito que o card e a lista mostram. */
+export type TaskFlowActivity = 'running' | 'needs_you'
+
+/** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
+export interface TaskFlowsProject extends ProjectFlows {
+  extractors: { id: string; label: string }[]
+  /** `pending`: ação feita à mão (vira espera que você aprova). */
+  actions: { id: string; label: string; pending?: string }[]
+  /** Ajustes de entrega do projeto (5C). */
+  delivery: DeliverySettings
+}
+
+/**
+ * Resultado de "Abrir PR". `mode: 'pr'` = push + /alva-flow:pr (a PR sai do fluxo). `mode: 'push'` =
+ * só o push (sem task do Backlog.md vinculada): `compareUrl` abre "Criar a PR" no GitHub (o
+ * link é montado no main). Em ambos o fluxo começou; o gate do push aparece na conversa.
+ */
+export interface OpenPrResult {
+  /** `false`: nada a enviar e sem alva-flow, então não há fluxo; só o `compareUrl`. */
+  started: boolean
+  mode: 'pr' | 'push'
+  compareUrl: string | null
 }

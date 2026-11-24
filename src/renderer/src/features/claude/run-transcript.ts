@@ -4,7 +4,7 @@
  * ("Rodou 6 comandos · Editou 2 arquivos"); pedidos pendentes ficam de fora (têm cartão próprio);
  * permissões negadas/bloqueadas e erros continuam visíveis na ordem em que aconteceram.
  */
-import type { RunLogEvent, RunStatus } from '../../../../shared/agent-run'
+import { isEditTool, type RunLogEvent, type RunStatus } from '../../../../shared/agent-run'
 import { plural } from '../../lib/format'
 
 export type StepCategory = 'command' | 'edit' | 'read' | 'search' | 'subagent' | 'tool'
@@ -62,14 +62,10 @@ export type TranscriptItem =
     }
 
 export function categoryOf(tool: string): StepCategory {
+  if (isEditTool(tool)) return 'edit'
   switch (tool) {
     case 'Bash':
       return 'command'
-    case 'Edit':
-    case 'MultiEdit':
-    case 'Write':
-    case 'NotebookEdit':
-      return 'edit'
     case 'Read':
       return 'read'
     case 'Grep':

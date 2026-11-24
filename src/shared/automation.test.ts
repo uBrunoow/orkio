@@ -230,6 +230,13 @@ describe('evaluate (regras padrão)', () => {
     expect(defaultRules(STAGES.filter((s) => s.name !== 'Revisado')).warnings).toHaveLength(3)
   })
 
+  it('regras padrão acham a etapa com espaço duplo no nome, como o quadro', () => {
+    const spaced = STAGES.map((s) => (s.id === AND ? { ...s, name: 'Em  Andamento' } : s))
+    const { rules, warnings } = defaultRules(spaced)
+    expect(warnings).toEqual([])
+    expect(rules.find((r) => r.id === 'default-branch')).toMatchObject({ enabled: true })
+  })
+
   it('branch → Em andamento só a partir de Prioridades', () => {
     expect(evaluate([ev('branch.created')], RULES, state(PRIO), STAGES)[0]).toMatchObject({
       outcome: 'move',

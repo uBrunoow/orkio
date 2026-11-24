@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { TaskSignals } from '../../../../shared/ipc-contract'
 import { cardDetail, cardStatus } from './card-status'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 type Pr = NonNullable<TaskSignals['pr']>
 const synced = { sync: { state: 'synced' as const } }

@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { ClaudeCodeStatus } from '../../../shared/agent-run'
-import type {
-  BoardView,
-  ConnectionStatus,
-  NotionWorkspaceStatus,
-  ProjectView
-} from '../../../shared/ipc-contract'
 import { setupPending, setupSteps } from '../features/setup/setup-steps'
+import type { BoardView } from '../../../shared/board'
+import type { ConnectionStatus } from '../../../shared/connection'
+import type { NotionWorkspaceStatus } from '../../../shared/notion'
+import type { ProjectView } from '../../../shared/projects'
 
 /**
  * Quantos passos dos Primeiros passos faltam para o projeto atual (aviso no topo da lista lateral).

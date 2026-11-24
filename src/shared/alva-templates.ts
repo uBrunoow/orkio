@@ -3,7 +3,9 @@
  * Gerados sob demanda e editáveis depois. Os comandos recebem só os argumentos (sem o briefing,
  * que fica em .orkio/briefing.md), e o extrator `alva` lê a task do Backlog.md depois de cada um.
  */
+import { REVIEW_COMMENTS_MAX } from './review-publish'
 import { FLOW_END, type Flow, type ProjectFlows, type StageFlow, type Step } from './task-flow'
+import { normalizeLabel } from './text'
 
 const P = 'alva-flow'
 
@@ -296,7 +298,7 @@ export const REVIEW_JSON_PROMPT = [
   'Converta a revisão acima no JSON abaixo e responda só com ele, num bloco ```json (sem texto antes ou depois):',
   '{"event": "REQUEST_CHANGES" ou "COMMENT", "summary": "resumo da revisão em markdown", "comments": [{"path": "caminho/do/arquivo", "line": 42, "body": "o problema e a correção sugerida"}]}',
   'Use "REQUEST_CHANGES" se houver qualquer coisa a corrigir (cada item de "comments" é uma correção pedida); "COMMENT" só quando não há nada a corrigir. Nunca aprove.',
-  'Em "comments", só achados com arquivo e linha do diff da PR (a linha no arquivo novo), no máximo 50; os demais vão no "summary". Escreva em pt-BR. Não altere arquivos.'
+  `Em "comments", só achados com arquivo e linha do diff da PR (a linha no arquivo novo), no máximo ${REVIEW_COMMENTS_MAX}; os demais vão no "summary". Escreva em pt-BR. Não altere arquivos.`
 ].join('\n')
 
 /**
@@ -385,19 +387,12 @@ export const ALVA_DEFAULT_STAGES: readonly { flowId: string; stage: string }[] =
   { flowId: ALVA_TEMPLATE_IDS.reviewed, stage: 'Revisado' }
 ]
 
-const normName = (s: string): string =>
-  s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-
 /** Etapa com o nome (sem acento/caixa) ou `null`. */
 export function stageByName(
   stages: readonly { id: string; name: string }[],
   name: string
 ): string | null {
-  return stages.find((s) => normName(s.name) === normName(name))?.id ?? null
+  return stages.find((s) => normalizeLabel(s.name) === normalizeLabel(name))?.id ?? null
 }
 
 /** JSON com as chaves em ordem (comparação que não depende da ordem das chaves). */

@@ -3,16 +3,6 @@
  * validação de mapeamento de propriedades, e leitura de páginas de Projetos/Tarefas.
  * Nada aqui faz rede.
  */
-import type {
-  NotionColor,
-  NotionDataSourceSummary,
-  NotionMapping,
-  NotionMappingField,
-  NotionPropertyRef,
-  NotionPropertySummary,
-  NotionProjectPage,
-  NotionTask
-} from '../../../shared/ipc-contract'
 import {
   FIELD_TYPES,
   MAPPING_FIELDS,
@@ -22,6 +12,17 @@ import {
   sameId
 } from '../../../shared/notion-mapping'
 import { httpsUrlOrNull, isRecord, stringOrNull } from '../../net/parse'
+import type {
+  NotionColor,
+  NotionDataSourceSummary,
+  NotionMapping,
+  NotionMappingField,
+  NotionPropertyRef,
+  NotionPropertySummary,
+  NotionProjectPage,
+  NotionTask
+} from '../../../shared/notion'
+import { normalizeLabel } from '../../../shared/text'
 
 export { FIELD_TYPES, REQUIRED_FIELDS, candidatesFor, fieldLabel, sameId }
 
@@ -119,10 +120,7 @@ export function parseDataSource(body: unknown): NotionDataSourceSchema | null {
 // ---------- Sugestão de mapeamento ----------
 
 export function normalizeName(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
+  return normalizeLabel(value)
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
 }

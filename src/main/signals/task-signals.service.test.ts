@@ -2,12 +2,12 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NotionTask } from '../../shared/ipc-contract'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
 import { GitHubApiError, type ConditionalPage } from '../connectors/github/github.client'
 import { GitError } from '../git/git'
 import type { ConfigStore } from '../storage/config-store'
 import { SIGNALS_MESSAGES, TaskSignalsService, type SignalsGitHub } from './task-signals.service'
+import type { NotionTask } from '../../shared/notion'
 
 const NOW = new Date('2026-11-19T12:00:00Z')
 

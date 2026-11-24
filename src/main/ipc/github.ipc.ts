@@ -1,13 +1,10 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
-import {
-  IPC_CHANNELS,
-  type ConnectionStatus,
-  type DeviceFlowStartResult,
-  type OrkioBotStatus
-} from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { DeviceFlowConnector } from '../connectors/types'
 import { errorName, isTokenCredentials } from './payload'
 import type { SenderGuard } from './trusted-sender'
+import type { ConnectionStatus, DeviceFlowStartResult } from '../../shared/connection'
+import type { OrkioBotStatus } from '../../shared/orkio-bot'
 
 const GENERIC_ERROR: ConnectionStatus = {
   state: 'error',

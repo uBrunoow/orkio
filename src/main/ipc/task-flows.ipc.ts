@@ -1,7 +1,13 @@
 import type { IpcMain } from 'electron'
-import type { ClaudeResult } from '../../shared/agent-run'
-import { IPC_CHANNELS, type OpenPrResult } from '../../shared/ipc-contract'
-import { MAX_PROMPT_CHARS, type Flow, type FlowRunView } from '../../shared/task-flow'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
+import { isReviewer } from '../../shared/github-names'
+import {
+  MAX_PROMPT_CHARS,
+  type Flow,
+  type FlowRunView,
+  type OpenPrResult,
+  type TaskFlowActivity
+} from '../../shared/task-flow'
 import { parseFlowDef } from '../config/orkio-config'
 import { FlowError, type FlowRunner } from '../flows/flow-runner'
 import type { FlowsService } from '../flows/flows.service'
@@ -10,12 +16,13 @@ import { openPr, type OpenPrDeps } from '../flows/open-pr'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { Result } from '../../shared/result'
 
-const INVALID: ClaudeResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Pedido inválido. Atualize a tela e tente de novo.' }
 }
-const GENERIC: ClaudeResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Algo deu errado no fluxo. Tente novamente.' }
 }
@@ -51,7 +58,7 @@ export function registerTaskFlowsIpc(
     })
   }
   const act = (channel: string, fn: (id: string) => Promise<FlowRunView>): void =>
-    guarded<ClaudeResult<FlowRunView>>(channel, GENERIC, async (id) =>
+    guarded<Result<FlowRunView>>(channel, GENERIC, async (id) =>
       isId(id) ? service.act(() => fn(id)) : INVALID
     )
 
@@ -63,7 +70,7 @@ export function registerTaskFlowsIpc(
     return isId(projectId) && parsed ? service.saveFlows(projectId, parsed) : INVALID
   })
   guarded<FlowRunView[]>(ch.runs, [], async (taskId) => (isId(taskId) ? service.runs(taskId) : []))
-  guarded<Record<string, 'running' | 'needs_you'>>(ch.active, {}, async (projectId) =>
+  guarded<Record<string, TaskFlowActivity>>(ch.active, {}, async (projectId) =>
     isId(projectId) ? service.active(projectId) : {}
   )
   guarded(ch.start, GENERIC, async (projectId, taskId) =>
@@ -77,13 +84,7 @@ export function registerTaskFlowsIpc(
       return service.act(() => runner.approveGate(id))
     }
     // Valores de uma escolha (ex.: revisores): logins ou `team:<slug>`, poucos e curtos.
-    if (
-      !Array.isArray(values) ||
-      values.length > 20 ||
-      !values.every(
-        (v) => typeof v === 'string' && /^(team:)?[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(v)
-      )
-    ) {
+    if (!Array.isArray(values) || values.length > 20 || !values.every(isReviewer)) {
       return INVALID
     }
     return service.act(() => runner.approveGate(id, values as string[]))
@@ -103,7 +104,7 @@ export function registerTaskFlowsIpc(
       ? service.act(() => runner.startById(projectId, taskId, flowId))
       : INVALID
   )
-  guarded<ClaudeResult<OpenPrResult>>(ch.openPr, GENERIC, async (projectId, taskId) => {
+  guarded<Result<OpenPrResult>>(ch.openPr, GENERIC, async (projectId, taskId) => {
     if (!openPrDeps || !isId(projectId) || !isId(taskId)) return INVALID
     try {
       return { ok: true, value: await openPr(openPrDeps, projectId, taskId) }

@@ -4,7 +4,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Timestamp } from '@/components/Timestamp'
 import type { AgentBadge } from '../../../../shared/agent'
 import type { AgentRunView } from '../../../../shared/agent-run'
-import type { BoardHistoryEntry } from '../../../../shared/ipc-contract'
 import { branchUrl, describeEvent, prNumber, prUrl } from '../../../../shared/task-history'
 import { StatusToken } from '../../components/StatusToken'
 import { ExternalLinkIcon } from '../../components/icons'
@@ -19,6 +18,7 @@ import type { TaskActivity } from '../task-flows/TaskFlowSection'
 import type { FlowStepOrigin } from '../task-flows/flow-plan'
 import { eventActor } from './TaskTimeline'
 import { buildSession, tailSession, type SessionItem } from './task-session'
+import type { BoardHistoryEntry } from '../../../../shared/board'
 
 /** Comandos que criam ou atualizam a spec/plano no Backlog.md (alva-flow). */
 export function isDocCommand(command: string | null): boolean {

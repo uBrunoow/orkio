@@ -128,3 +128,16 @@ export function sizeFromSpecResult(resultText: string): 'Médio' | 'Grande' | nu
 export function taskFileId(fileName: string): string | null {
   return /^([A-Za-z]+-\d+(?:\.\d+)*) - .*\.md$/.exec(fileName)?.[1]?.toLowerCase() ?? null
 }
+
+export interface AlvaStatusView {
+  precheck: AlvaPrecheck | null
+  templates: {
+    id: string
+    name: string
+    stageId: string | null
+    mode: 'on_enter' | 'manual' | null
+  }[]
+  /** Colunas que já têm algum fluxo ligado (ids das etapas): a tela não sugere trocar. */
+  boundStages: string[]
+  maxParallel: number
+}

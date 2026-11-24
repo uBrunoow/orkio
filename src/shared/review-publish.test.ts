@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  PUBLISH_COMMENTS_MAX,
+  REVIEW_COMMENTS_MAX,
   PUBLISH_REVIEW_MESSAGES as M,
-  PUBLISH_SUMMARY_MAX,
+  REVIEW_SUMMARY_MAX,
   finalText,
   parseReviewAnswer,
   sanitizeReviewText
@@ -61,9 +61,9 @@ describe('parseReviewAnswer', () => {
       message: M.badSummary
     })
     expect(
-      parseReviewAnswer(JSON.stringify({ ...REVIEW, summary: 'x'.repeat(PUBLISH_SUMMARY_MAX + 1) }))
+      parseReviewAnswer(JSON.stringify({ ...REVIEW, summary: 'x'.repeat(REVIEW_SUMMARY_MAX + 1) }))
     ).toEqual({ ok: false, message: M.badSummary })
-    const many = Array.from({ length: PUBLISH_COMMENTS_MAX + 1 }, (_, i) => ({
+    const many = Array.from({ length: REVIEW_COMMENTS_MAX + 1 }, (_, i) => ({
       path: 'a.ts',
       line: i + 1,
       body: 'x'

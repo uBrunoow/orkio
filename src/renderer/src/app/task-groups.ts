@@ -2,10 +2,10 @@
  * Lista lateral (reestruturação): as tarefas do projeto atual agrupadas pelo que fazer agora.
  * Puro: junta o que a Visão geral (6D) já calcula (esperando você, rodando) com o quadro (a fazer).
  */
-import type { BoardCard, BoardView } from '../../../shared/ipc-contract'
 import { priorityRank } from '../../../shared/orchestrator'
 import type { OverviewSnapshot, OverviewTask, TaskSection } from '../../../shared/overview'
 import type { StatusTone } from '../components/StatusToken'
+import type { BoardCard, BoardView } from '../../../shared/board'
 
 export interface SidebarTask {
   taskId: string

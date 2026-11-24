@@ -1,5 +1,4 @@
 import type { IpcMain } from 'electron'
-import type { ClaudeResult } from '../../shared/agent-run'
 import {
   ORCHESTRATOR_LIMITS,
   parseOrchestrator,
@@ -12,12 +11,13 @@ import { OrchestratorError, type OrchestratorService } from '../orchestrator/orc
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { Result } from '../../shared/result'
 
-const INVALID: ClaudeResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Pedido inválido. Atualize a tela e tente de novo.' }
 }
-const GENERIC: ClaudeResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Algo deu errado com o orquestrador. Tente novamente.' }
 }
@@ -70,7 +70,7 @@ export function registerOrchestratorIpc(
   const ch = IPC_CHANNELS.agents
   function guarded(
     channel: string,
-    run: (...args: unknown[]) => Promise<ClaudeResult<OrchestratorState>>
+    run: (...args: unknown[]) => Promise<Result<OrchestratorState>>
   ): void {
     ipc.handle(channel, async (event, ...args: unknown[]) => {
       if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
@@ -86,7 +86,7 @@ export function registerOrchestratorIpc(
       }
     })
   }
-  const ok = (value: OrchestratorState): ClaudeResult<OrchestratorState> => ({ ok: true, value })
+  const ok = (value: OrchestratorState): Result<OrchestratorState> => ({ ok: true, value })
 
   guarded(ch.orchestrator, async (projectId) =>
     isId(projectId) ? ok(await service.state(projectId)) : INVALID

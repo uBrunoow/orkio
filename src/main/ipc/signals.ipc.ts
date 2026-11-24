@@ -1,16 +1,17 @@
 import type { IpcMain } from 'electron'
-import { IPC_CHANNELS, type NotionResult } from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { ReviewThreadsService } from '../signals/review-threads'
 import type { TaskSignalsService } from '../signals/task-signals.service'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { Result } from '../../shared/result'
 
-const GENERIC: NotionResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Algo deu errado ao ler branches e PRs. Tente novamente.' }
 }
-const INVALID: NotionResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Projeto inválido. Atualize a tela e tente de novo.' }
 }
@@ -53,11 +54,11 @@ export function registerSignalsIpc(
           (options as { force?: unknown }).force === true
         const r = await reviews.get(projectId, taskId, force)
         return r.ok
-          ? ({ ok: true, value: r.value } satisfies NotionResult<unknown>)
+          ? ({ ok: true, value: r.value } satisfies Result<unknown>)
           : ({
               ok: false,
               error: { code: r.code, message: r.message }
-            } satisfies NotionResult<never>)
+            } satisfies Result<never>)
       } catch (error) {
         console.error(
           `[orkio] falha inesperada em ${IPC_CHANNELS.signals.reviewThreads}: ${errorName(error)}`

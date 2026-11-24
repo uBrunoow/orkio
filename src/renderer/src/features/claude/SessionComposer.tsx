@@ -8,7 +8,8 @@ import { runtimeLabel, type RuntimeChoice } from '../../../../shared/agent-runti
 import { Alert } from '../../components/Alert'
 import { CloseIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/icons'
 import { formatBytes } from '../../lib/format'
-import { ATTACH_ACCEPT, checkNewAttachments, type PendingAttachment } from './attachments-ui'
+import { ATTACHMENT_ACCEPT } from '../../../../shared/attachments'
+import { checkNewAttachments, type PendingAttachment } from './attachments-ui'
 import { RuntimePicker, useSupportsEffort } from './RuntimePicker'
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
@@ -244,7 +245,7 @@ export function SessionComposer({
             type="file"
             multiple
             hidden
-            accept={ATTACH_ACCEPT}
+            accept={ATTACHMENT_ACCEPT}
             data-testid="attach-input"
             onChange={(e) => {
               addFiles(e.target.files)

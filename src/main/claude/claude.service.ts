@@ -6,8 +6,8 @@
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
 import { isProtectedBranch, type DeliveryTarget } from '../../shared/delivery'
-import { isValidBranchName } from '../branches/task-branches.store'
-import { parsePorcelainLine } from '../../shared/agent-run'
+import { isBranchName } from '../../shared/github-names'
+import { isCommandName, parsePorcelainLine } from '../../shared/agent-run'
 import type {
   ArtifactCandidate,
   ArtifactPublishMode,
@@ -16,7 +16,6 @@ import type {
   ClaudeCodeStatus,
   ClaudeDiff,
   TaskBranchesView,
-  ClaudeResult,
   EditorId,
   PermissionAnswer,
   RunLogEvent,
@@ -29,7 +28,6 @@ import type {
   UncommittedFile
 } from '../../shared/agent-run'
 import { blocksToMarkdown, buildBriefing, type NotionBlock } from '../../shared/briefing'
-import type { NotionResult, NotionTask, TaskSignalsResult } from '../../shared/ipc-contract'
 import { taskBranchName } from '../../shared/slug'
 import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
@@ -45,6 +43,9 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { attachmentNote, checkAttachments, saveAttachments } from './attachments'
 import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
+import type { Result } from '../../shared/result'
+import type { NotionTask } from '../../shared/notion'
+import type { TaskSignalsResult } from '../../shared/task-signals'
 
 export const CLAUDE_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista de projetos.',
@@ -76,7 +77,6 @@ export const CLAUDE_MESSAGES = {
 const MAX_DEPTH = 3
 const MAX_BLOCKS = 400
 const MAX_DIFF_CHARS = 400_000
-const COMMAND_NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
 
 export interface ClaudeServiceDeps {
   /**
@@ -97,8 +97,8 @@ export interface ClaudeServiceDeps {
     Git,
     'statusPorcelain' | 'diffText' | 'diffShortstat' | 'localBranches' | 'remoteBranches'
   >
-  listTasks(projectId: string): Promise<NotionResult<{ tasks: NotionTask[] }>>
-  signals(projectId: string): Promise<NotionResult<TaskSignalsResult>>
+  listTasks(projectId: string): Promise<Result<{ tasks: NotionTask[] }>>
+  signals(projectId: string): Promise<Result<TaskSignalsResult>>
   /** Leitura dos blocos de uma página (o token fica no conector). */
   getBlockChildren(
     id: string,
@@ -154,14 +154,14 @@ export class ClaudeService {
     if (event.kind === 'init' && event.commands.length > 0) this.commands = [...event.commands]
   }
 
-  state(projectId: string, taskId: string): Promise<ClaudeResult<TaskRunsState>> {
+  state(projectId: string, taskId: string): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       this.project(projectId)
       return ok(await this.taskState(taskId))
     })
   }
 
-  prepare(projectId: string, taskId: string): Promise<ClaudeResult<RunPreparation>> {
+  prepare(projectId: string, taskId: string): Promise<Result<RunPreparation>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       const task = await this.task(projectId, taskId)
@@ -227,7 +227,7 @@ export class ClaudeService {
     })
   }
 
-  start(req: StartRunRequest): Promise<ClaudeResult<TaskRunsState>> {
+  start(req: StartRunRequest): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       // 5A: com fluxo ativo, quem roda o Claude Code na tarefa é o fluxo.
       if (this.deps.flowActive?.(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.flowActive)
@@ -254,7 +254,7 @@ export class ClaudeService {
    * mesmo worktree, sem repetir o briefing) ou, sem sessão (ou com `fresh`), começa uma com o
    * briefing do Notion. `/comando args` roda o comando instalado.
    */
-  send(req: SendMessageRequest): Promise<ClaudeResult<TaskRunsState>> {
+  send(req: SendMessageRequest): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       const text = req.text.trim()
       if (!text) return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
@@ -302,7 +302,7 @@ export class ClaudeService {
     })
   }
 
-  private async cliRefusal(): Promise<ClaudeResult<never> | null> {
+  private async cliRefusal(): Promise<Result<never> | null> {
     const status = await this.getStatus(true)
     if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
     if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
@@ -315,7 +315,7 @@ export class ClaudeService {
     userText: string,
     hasFiles: boolean,
     save: () => Promise<string>
-  ): Promise<ClaudeResult<TaskRunsState>> {
+  ): Promise<Result<TaskRunsState>> {
     {
       const text = userText
       // Como no Claude Code: a mensagem não espera o piloto automático; o fluxo a usa (escolha,
@@ -389,7 +389,7 @@ export class ClaudeService {
     readOnly?: boolean
     /** Modelo/raciocínio do passo: vencem os do agente. */
     runtime?: Partial<RuntimeChoice> | null
-  }): Promise<ClaudeResult<string>> {
+  }): Promise<Result<string>> {
     const readOnly = input.readOnly === true
     if (input.reply !== undefined) {
       const session = this.deps.runs.lastSession(input.taskId)
@@ -488,7 +488,7 @@ export class ClaudeService {
     projectId: string,
     taskId: string
   ): Promise<
-    ClaudeResult<{ briefing: string; displayId: string; title: string; notionUrl: string | null }>
+    Result<{ briefing: string; displayId: string; title: string; notionUrl: string | null }>
     // displayId '' = tarefa sem ID do Notion (as variáveis do fluxo ficam vazias).
   > {
     return this.wrap(async () => {
@@ -515,13 +515,13 @@ export class ClaudeService {
     resumeSessionId: string | null = null,
     runtime: Partial<RuntimeChoice> | null = null,
     readOnly = false
-  ): Promise<ClaudeResult<string>> {
+  ): Promise<Result<string>> {
     const project = this.project(req.projectId)
     const status = await this.getStatus(true)
     if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
     if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
     if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
-    if (req.mode === 'command' && !(req.command && COMMAND_NAME.test(req.command))) {
+    if (req.mode === 'command' && !isCommandName(req.command)) {
       return fail('invalid', CLAUDE_MESSAGES.invalidCommand)
     }
     if (req.mode === 'prompt' && !req.text.trim()) {
@@ -612,7 +612,7 @@ export class ClaudeService {
   }
 
   /** "Limpar ambiente": remove o worktree (a branch fica). Mudanças pendentes pedem `force`. */
-  cleanup(projectId: string, taskId: string, force: boolean): Promise<ClaudeResult<TaskRunsState>> {
+  cleanup(projectId: string, taskId: string, force: boolean): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       if (this.deps.runs.isRunning(taskId)) {
@@ -623,7 +623,7 @@ export class ClaudeService {
     })
   }
 
-  openEditor(projectId: string, taskId: string, editor: EditorId): Promise<ClaudeResult<null>> {
+  openEditor(projectId: string, taskId: string, editor: EditorId): Promise<Result<null>> {
     return this.wrap(async () => {
       this.project(projectId)
       const wt = this.deps.worktrees.get(taskId)
@@ -638,7 +638,7 @@ export class ClaudeService {
     })
   }
 
-  openTerminal(projectId: string, taskId: string): Promise<ClaudeResult<null>> {
+  openTerminal(projectId: string, taskId: string): Promise<Result<null>> {
     return this.wrap(async () => {
       this.project(projectId)
       const wt = this.deps.worktrees.get(taskId)
@@ -660,7 +660,7 @@ export class ClaudeService {
   artifacts(
     projectId: string,
     taskId: string
-  ): Promise<ClaudeResult<{ candidates: ArtifactCandidate[]; attached: ArtifactView[] }>> {
+  ): Promise<Result<{ candidates: ArtifactCandidate[]; attached: ArtifactView[] }>> {
     return this.wrap(async () => {
       this.project(projectId)
       const attached = this.deps.artifacts.list(taskId)
@@ -676,7 +676,7 @@ export class ClaudeService {
     taskId: string,
     path: string,
     runId: string | null
-  ): Promise<ClaudeResult<ArtifactView>> {
+  ): Promise<Result<ArtifactView>> {
     return this.wrap(async () => {
       this.project(projectId)
       return ok(await this.deps.artifacts.attach(projectId, taskId, path, runId))
@@ -688,7 +688,7 @@ export class ClaudeService {
     projectId: string,
     artifactId: string,
     mode: ArtifactPublishMode
-  ): Promise<ClaudeResult<{ artifact: ArtifactView; url: string | null }>> {
+  ): Promise<Result<{ artifact: ArtifactView; url: string | null }>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       return ok(await this.deps.artifacts.publish(artifactId, mode, project.localPath))
@@ -696,7 +696,7 @@ export class ClaudeService {
   }
 
   /** Catálogo de comandos; usa a pasta do worktree da tarefa (ou do projeto) para os do projeto. */
-  catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>> {
+  catalog(projectId: string, taskId: string): Promise<Result<CatalogGroup[]>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       const dir = this.deps.worktrees.get(taskId)?.path ?? project.localPath
@@ -705,7 +705,7 @@ export class ClaudeService {
   }
 
   /** Branches ligadas à tarefa e as do projeto para escolher ("Vincular branch"). */
-  branches(projectId: string, taskId: string): Promise<ClaudeResult<TaskBranchesView>> {
+  branches(projectId: string, taskId: string): Promise<Result<TaskBranchesView>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       const linked = this.deps.worktrees
@@ -725,15 +725,11 @@ export class ClaudeService {
   }
 
   /** Liga uma branch existente à tarefa (sinais, PR, automações e a próxima pasta de trabalho). */
-  linkBranch(
-    projectId: string,
-    taskId: string,
-    branch: string
-  ): Promise<ClaudeResult<TaskBranchesView>> {
+  linkBranch(projectId: string, taskId: string, branch: string): Promise<Result<TaskBranchesView>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       const b = branch.trim()
-      if (!isValidBranchName(b)) return fail('invalid', CLAUDE_MESSAGES.invalidBranch)
+      if (!isBranchName(b)) return fail('invalid', CLAUDE_MESSAGES.invalidBranch)
       if (isProtectedBranch(b, project.repo?.defaultBranch ?? null)) {
         return fail('protected', CLAUDE_MESSAGES.protectedBranch(b))
       }
@@ -746,7 +742,7 @@ export class ClaudeService {
     projectId: string,
     taskId: string,
     branch: string
-  ): Promise<ClaudeResult<TaskBranchesView>> {
+  ): Promise<Result<TaskBranchesView>> {
     return this.wrap(async () => {
       this.project(projectId)
       this.deps.worktrees.unlinkBranch(projectId, taskId, branch)
@@ -754,7 +750,7 @@ export class ClaudeService {
     })
   }
 
-  diff(projectId: string, taskId: string): Promise<ClaudeResult<ClaudeDiff>> {
+  diff(projectId: string, taskId: string): Promise<Result<ClaudeDiff>> {
     return this.wrap(async () => {
       this.project(projectId)
       const wt = this.deps.worktrees.get(taskId)
@@ -872,7 +868,7 @@ export class ClaudeService {
     return load(pageId, 0)
   }
 
-  private async wrap<T>(run: () => Promise<ClaudeResult<T>>): Promise<ClaudeResult<T>> {
+  private async wrap<T>(run: () => Promise<Result<T>>): Promise<Result<T>> {
     try {
       return await run()
     } catch (error) {
@@ -903,11 +899,11 @@ class ClaudeFailure extends Error {
   }
 }
 
-function ok<T>(value: T): ClaudeResult<T> {
+function ok<T>(value: T): Result<T> {
   return { ok: true, value }
 }
 
-function fail<T>(code: string, message: string, files?: string[]): ClaudeResult<T> {
+function fail<T>(code: string, message: string, files?: string[]): Result<T> {
   return { ok: false, error: { code, message, ...(files ? { files } : {}) } }
 }
 

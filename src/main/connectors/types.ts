@@ -5,7 +5,7 @@ import type {
   ConnectorId,
   DeviceFlowStartResult,
   TokenCredentials
-} from '../../shared/ipc-contract'
+} from '../../shared/connection'
 
 export type {
   AuthOptions,

@@ -11,7 +11,13 @@ import { WEEK_MS } from '../../shared/overview'
 import type { StageFlow } from '../../shared/task-flow'
 import { defaultRules } from '../../shared/automation'
 import { upgradeAlvaFlows } from '../../shared/alva-templates'
-import { diffFlow, toBoardStages, validateFlow, type FlowDraft } from '../../shared/flow'
+import {
+  diffFlow,
+  toBoardStages,
+  validateFlow,
+  type FlowDraft,
+  type ConfigEvent
+} from '../../shared/flow'
 import {
   findOption,
   reconcile,
@@ -21,19 +27,13 @@ import {
   type BoardConfig,
   type BoardStage,
   type ReconcileTask,
-  type StatusOption
+  type StatusOption,
+  type BoardCard,
+  type BoardHistoryEntry,
+  type BoardSaveInput,
+  type BoardSyncEvent,
+  type BoardView
 } from '../../shared/board'
-import type {
-  BoardCard,
-  BoardHistoryEntry,
-  BoardSaveInput,
-  BoardSyncEvent,
-  BoardView,
-  ConfigEvent,
-  NotionMapping,
-  NotionPropertySummary,
-  NotionResult
-} from '../../shared/ipc-contract'
 import type { OrkioConfig } from '../config/orkio-config'
 import { NotionApiError } from '../connectors/notion/notion.client'
 import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
@@ -41,20 +41,20 @@ import type { CachedTasks } from '../notion/notion-workspace.service'
 import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
 import type { BoardStore, PendingWrite } from './board.store'
 import type { NotionWriteQueue } from './write-queue'
+import type { NotionMapping, NotionPropertySummary } from '../../shared/notion'
+import type { Result } from '../../shared/result'
 
-type Err = Extract<NotionResult<never>, { ok: false }>['error']
+type Err = Extract<Result<never>, { ok: false }>['error']
 
 export interface BoardNotion {
   boardTasks(
     projectId: string,
     options?: { force?: boolean }
   ): Promise<
-    NotionResult<
-      CachedTasks & { fromCache: boolean; mapping: NotionMapping; tasksDataSourceId: string }
-    >
+    Result<CachedTasks & { fromCache: boolean; mapping: NotionMapping; tasksDataSourceId: string }>
   >
   statusOptions(): Promise<
-    NotionResult<{
+    Result<{
       options: StatusOption[]
       statusType: string
       properties: NotionPropertySummary[]
@@ -152,10 +152,7 @@ export class BoardService {
 
   // ---------- Abrir / reconciliar ----------
 
-  async get(
-    projectId: string,
-    options: { force?: boolean } = {}
-  ): Promise<NotionResult<BoardView>> {
+  async get(projectId: string, options: { force?: boolean } = {}): Promise<Result<BoardView>> {
     return this.wrap(() => this.load(projectId, options.force === true))
   }
 
@@ -325,7 +322,7 @@ export class BoardService {
 
   // ---------- Mover / bloquear ----------
 
-  async move(projectId: string, taskId: string, stageId: string): Promise<NotionResult<BoardCard>> {
+  async move(projectId: string, taskId: string, stageId: string): Promise<Result<BoardCard>> {
     return this.wrap(async () => {
       const moved = this.deps.store.transaction(() =>
         this.applyMove(projectId, taskId, stageId, { source: 'manual' })
@@ -423,7 +420,7 @@ export class BoardService {
     projectId: string,
     taskId: string,
     paused: boolean
-  ): Promise<NotionResult<BoardCard>> {
+  ): Promise<Result<BoardCard>> {
     return this.wrap(async () => {
       this.context(projectId, taskId)
       const at = this.now().toISOString()
@@ -448,7 +445,7 @@ export class BoardService {
     projectId: string,
     taskId: string,
     blocked: boolean
-  ): Promise<NotionResult<BoardCard>> {
+  ): Promise<Result<BoardCard>> {
     return this.wrap(async () => {
       const { board, snapshot } = this.context(projectId, taskId)
       const before = this.localState(projectId, taskId)
@@ -480,7 +477,7 @@ export class BoardService {
     })
   }
 
-  async history(projectId: string, taskId: string): Promise<NotionResult<BoardHistoryEntry[]>> {
+  async history(projectId: string, taskId: string): Promise<Result<BoardHistoryEntry[]>> {
     return this.wrap(async () => {
       this.project(projectId)
       return this.deps.store.events(taskId).map((e) => ({
@@ -656,7 +653,7 @@ export class BoardService {
    * move as tarefas das etapas removidas para o destino escolhido (mesmo caminho do movimento
    * manual, com escrita no Notion se o status mudar) e registra o evento de configuração.
    */
-  async saveFlow(projectId: string, draft: FlowDraft): Promise<NotionResult<BoardView>> {
+  async saveFlow(projectId: string, draft: FlowDraft): Promise<Result<BoardView>> {
     return this.wrap(async () => {
       this.project(projectId)
       const previous = this.deps.config.get().boards[projectId]
@@ -763,7 +760,7 @@ export class BoardService {
 
   // ---------- Configuração ----------
 
-  async save(projectId: string, input: BoardSaveInput): Promise<NotionResult<BoardView>> {
+  async save(projectId: string, input: BoardSaveInput): Promise<Result<BoardView>> {
     return this.wrap(async () => {
       this.project(projectId)
       const optionsResult = await this.deps.notion.statusOptions()
@@ -990,7 +987,7 @@ export class BoardService {
     })
   }
 
-  private async wrap<T>(run: () => Promise<T>): Promise<NotionResult<T>> {
+  private async wrap<T>(run: () => Promise<T>): Promise<Result<T>> {
     try {
       return { ok: true, value: await run() }
     } catch (e) {

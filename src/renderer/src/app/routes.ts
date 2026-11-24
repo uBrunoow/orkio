@@ -3,8 +3,7 @@
  * uma rota, e toda navegação gera uma chave nova (clicar no item atual remonta a página e sai de
  * qualquer subtela). Pilha simples para "Voltar".
  */
-import type { BoardTaskRef } from '../../../shared/ipc-contract'
-import type { TaskSection } from '../../../shared/overview'
+import type { TaskSection, BoardTaskRef } from '../../../shared/overview'
 
 /** Seções de Configurações (coluna interna). */
 export type SettingsSection = 'integrations' | 'projects' | 'board' | 'agents' | 'updates' | 'about'

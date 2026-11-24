@@ -1,26 +1,22 @@
 import type { IpcMain } from 'electron'
 import type { AutomationRule } from '../../shared/automation'
-import type { FlowDraft, FlowStageDraft } from '../../shared/flow'
-import {
-  IPC_CHANNELS,
-  type ConfigEvent,
-  type FlowFileResult,
-  type NotionResult
-} from '../../shared/ipc-contract'
+import type { FlowDraft, FlowStageDraft, ConfigEvent, FlowFileResult } from '../../shared/flow'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { BoardService } from '../board/board.service'
 import { parseRule } from '../config/orkio-config'
 import { isStageId } from './board.ipc'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { Result } from '../../shared/result'
 
 const MAX_FILE_BYTES = 1024 * 1024
 
-const GENERIC: NotionResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Algo deu errado ao salvar o fluxo. Tente novamente.' }
 }
-const INVALID: NotionResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Fluxo em formato inválido. Atualize a tela e tente de novo.' }
 }

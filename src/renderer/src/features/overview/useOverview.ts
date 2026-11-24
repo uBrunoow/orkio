@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { OverviewResult } from '../../../../shared/ipc-contract'
 import type { OverviewSnapshot } from '../../../../shared/overview'
+import type { Result } from '../../../../shared/result'
 
 /** Relê a visão (só dados locais) a cada minuto com a janela visível: PRs e saúde mudam sozinhos. */
 const RELOAD_MS = 60_000
@@ -21,7 +21,7 @@ export function useOverview(): OverviewState {
   const [refreshing, setRefreshing] = useState(false)
   const alive = useRef(true)
 
-  const apply = useCallback((result: OverviewResult<OverviewSnapshot> | null) => {
+  const apply = useCallback((result: Result<OverviewSnapshot> | null) => {
     if (!alive.current) return
     if (result?.ok) {
       setSnapshot(result.value)

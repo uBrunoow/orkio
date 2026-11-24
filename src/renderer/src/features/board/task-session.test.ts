@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentRunView } from '../../../../shared/agent-run'
-import type { BoardHistoryEntry } from '../../../../shared/ipc-contract'
 import type { TaskSignals } from '../../../../shared/task-signals'
 import { taskProgress, type ProgressInput } from './task-progress'
 import { buildSession, dayLabel, tailSession } from './task-session'
+import type { BoardHistoryEntry } from '../../../../shared/board'
 
 const NOW = new Date('2026-11-22T15:00:00')
 

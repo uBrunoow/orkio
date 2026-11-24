@@ -1,5 +1,7 @@
-import type { BoardCard, TaskSignals } from '../../../../shared/ipc-contract'
 import type { StatusTone } from '../../components/StatusToken'
+import type { BoardCard } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
+import type { TaskFlowActivity } from '../../../../shared/task-flow'
 
 export interface CardStatus {
   /** Gancho de teste: o fluxo e a sincronização mantêm os ids que o E2E já usa. */
@@ -15,7 +17,7 @@ export interface CardStatus {
  */
 export function cardStatus(
   card: Pick<BoardCard, 'sync'>,
-  flow: 'running' | 'needs_you' | null,
+  flow: TaskFlowActivity | null,
   signals: Pick<TaskSignals, 'pr'> | undefined
 ): CardStatus | null {
   const pr = signals?.pr ?? null

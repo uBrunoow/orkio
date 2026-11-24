@@ -10,8 +10,8 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import type { ConnectionStatus } from '../../../shared/ipc-contract'
 import { SwitchIcon } from '../components/icons'
+import type { ConnectionStatus } from '../../../shared/connection'
 
 /**
  * Quem está usando o Orkio. Não existe login no app: a pessoa é a conta conectada do GitHub (nome,

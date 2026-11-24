@@ -1,16 +1,13 @@
 /** Regras puras da tela de Integrações (busca e qual painel fica aberto). */
-
-export function normalize(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-}
+import { normalizeLabel } from '../../../../shared/text'
 
 /** A busca casa com nome, categoria ou seção (sem acento nem caixa). */
 export function matchesQuery(
   card: { name: string; category: string; section: string },
   query: string
 ): boolean {
-  const needle = normalize(query.trim())
-  return !needle || normalize(`${card.name} ${card.category} ${card.section}`).includes(needle)
+  const needle = normalizeLabel(query)
+  return !needle || normalizeLabel(`${card.name} ${card.category} ${card.section}`).includes(needle)
 }
 
 /** O primeiro card (na ordem da página) que ainda não está pronto. */

@@ -10,17 +10,18 @@
  *
  * Cada ação feita vira um evento `delivery` no histórico, com link (branch ou PR).
  */
-import type { NotionResult, TaskSignalsResult } from '../../shared/ipc-contract'
 import type { ActionConfirm } from '../../shared/task-flow'
 import type { BoardStore } from '../board/board.store'
 import { GitHubApiError } from '../connectors/github/github.client'
 import { errorName } from '../ipc/payload'
 import type { OrkioAction } from '../flows/flow-runner'
 import { DeliveryError, type DeliveryService } from './delivery.service'
+import type { Result } from '../../shared/result'
+import type { TaskSignalsResult } from '../../shared/task-signals'
 
 export interface DeliveryActionsDeps {
   delivery: DeliveryService
-  signals(projectId: string, force: boolean): Promise<NotionResult<TaskSignalsResult>>
+  signals(projectId: string, force: boolean): Promise<Result<TaskSignalsResult>>
   github: {
     requestReviewers(
       owner: string,

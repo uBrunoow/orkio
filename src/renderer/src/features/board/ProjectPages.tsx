@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import type { BoardView, ProjectView } from '../../../../shared/ipc-contract'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
 import type { BoardSettingsTab } from '../../app/routes'
@@ -8,6 +7,8 @@ import { TaskFlowsPage } from '../task-flows/TaskFlowsPage'
 import { BoardSettings } from './BoardSettings'
 import { FlowPage } from './FlowPage'
 import { useBoard, type UseBoard } from './useBoard'
+import type { BoardView } from '../../../../shared/board'
+import type { ProjectView } from '../../../../shared/projects'
 
 type ConfiguredView = BoardView & { config: NonNullable<BoardView['config']> }
 

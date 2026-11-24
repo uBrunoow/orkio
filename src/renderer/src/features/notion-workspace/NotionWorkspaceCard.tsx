@@ -4,14 +4,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
-import type {
-  ConnectionStatus,
-  NotionDataSourceList,
-  NotionMappingField,
-  NotionResult,
-  NotionTasksSchemaInfo,
-  NotionWorkspaceStatus
-} from '../../../../shared/ipc-contract'
 import {
   MAPPING_FIELDS,
   REQUIRED_FIELDS,
@@ -25,10 +17,18 @@ import { CardHeader } from '../integrations/connection-ui'
 import { tokenColor } from './notion-colors'
 import type { UseNotionWorkspace } from './useNotionWorkspace'
 import { StatusToken, toneOf } from '../../components/StatusToken'
+import type { ConnectionStatus } from '../../../../shared/connection'
+import type {
+  NotionDataSourceList,
+  NotionMappingField,
+  NotionTasksSchemaInfo,
+  NotionWorkspaceStatus
+} from '../../../../shared/notion'
+import type { Result } from '../../../../shared/result'
 
 const hint = 'text-xs text-muted-foreground'
 
-type NotionError = Extract<NotionResult<never>, { ok: false }>['error']
+type NotionError = Extract<Result<never>, { ok: false }>['error']
 type MappingDraft = Partial<Record<NotionMappingField, string | null>>
 
 const HEALTH: Record<
@@ -593,7 +593,7 @@ const IPC_FAILURE: NotionError = {
   message: 'Não foi possível falar com o processo principal do Orkio. Reinicie o app.'
 }
 
-export async function call<T>(fn: () => Promise<NotionResult<T>>): Promise<NotionResult<T>> {
+export async function call<T>(fn: () => Promise<Result<T>>): Promise<Result<T>> {
   try {
     return await fn()
   } catch {

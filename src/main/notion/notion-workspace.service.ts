@@ -5,24 +5,6 @@
  * Roda no main. Fala com o Notion só via `NotionWorkspaceApi` (fornecida pelo NotionConnector,
  * que guarda o token). Salva no ConfigStore apenas ids e nomes, nunca conteúdo de páginas.
  */
-import type {
-  NotionDataSourceList,
-  NotionDataSourceSummary,
-  NotionMapping,
-  NotionMappingField,
-  NotionProjectChoice,
-  NotionProjectPage,
-  NotionPropertySummary,
-  NotionResult,
-  NotionTask,
-  NotionTaskHit,
-  NotionTaskSearchResult,
-  NotionTasksResult,
-  NotionTasksSchemaInfo,
-  NotionWorkspaceConfig,
-  NotionWorkspaceInput,
-  NotionWorkspaceStatus
-} from '../../shared/ipc-contract'
 import type { StatusOption } from '../../shared/board'
 import type { OrkioConfig } from '../config/orkio-config'
 import {
@@ -48,6 +30,24 @@ import {
   type NotionDataSourceSchema
 } from '../connectors/notion/notion.schema'
 import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
+import type {
+  NotionDataSourceList,
+  NotionDataSourceSummary,
+  NotionMapping,
+  NotionMappingField,
+  NotionProjectChoice,
+  NotionProjectPage,
+  NotionPropertySummary,
+  NotionTask,
+  NotionTaskHit,
+  NotionTaskSearchResult,
+  NotionTasksResult,
+  NotionTasksSchemaInfo,
+  NotionWorkspaceConfig,
+  NotionWorkspaceInput,
+  NotionWorkspaceStatus
+} from '../../shared/notion'
+import type { Result } from '../../shared/result'
 
 /** O que o serviço precisa do conector do Notion (o token fica lá dentro). */
 export interface NotionWorkspaceApi {
@@ -96,7 +96,7 @@ export const WORKSPACE_MESSAGES = {
     'Conecte com “Entrar com Notion” em Integrações para ver as suas tarefas.'
 } as const
 
-type Err = Extract<NotionResult<never>, { ok: false }>['error']
+type Err = Extract<Result<never>, { ok: false }>['error']
 
 class WorkspaceError extends Error {
   constructor(readonly info: Err) {
@@ -226,7 +226,7 @@ export class NotionWorkspaceService {
   // ---------- Assistente ----------
 
   /** Data sources compartilhados com o Orkio (até NOTION_READ_LIMIT). */
-  async listDataSources(query?: string): Promise<NotionResult<NotionDataSourceList>> {
+  async listDataSources(query?: string): Promise<Result<NotionDataSourceList>> {
     return this.wrap(async () => {
       const connection = await this.deps.notion.connectionMethod()
       const { items, truncated } = await this.paginate((cursor) =>
@@ -245,7 +245,7 @@ export class NotionWorkspaceService {
   async getTasksSchema(
     tasksDataSourceId: string,
     projectsDataSourceId: string
-  ): Promise<NotionResult<NotionTasksSchemaInfo>> {
+  ): Promise<Result<NotionTasksSchemaInfo>> {
     return this.wrap(async () => {
       if (sameId(tasksDataSourceId, projectsDataSourceId)) {
         throw new WorkspaceError({ code: 'invalid', message: WORKSPACE_MESSAGES.sameDataSource })
@@ -257,7 +257,7 @@ export class NotionWorkspaceService {
   }
 
   /** Valida no Notion e salva a configuração. Trocar o banco de Projetos desfaz os vínculos. */
-  async saveConfig(input: NotionWorkspaceInput): Promise<NotionResult<NotionWorkspaceStatus>> {
+  async saveConfig(input: NotionWorkspaceInput): Promise<Result<NotionWorkspaceStatus>> {
     return this.wrap(async () => {
       if (sameId(input.tasksDataSourceId, input.projectsDataSourceId)) {
         throw new WorkspaceError({ code: 'invalid', message: WORKSPACE_MESSAGES.sameDataSource })
@@ -326,7 +326,7 @@ export class NotionWorkspaceService {
   }
 
   /** Remove a configuração dos bancos e os vínculos (nada é apagado no Notion). */
-  async clearConfig(): Promise<NotionResult<NotionWorkspaceStatus>> {
+  async clearConfig(): Promise<Result<NotionWorkspaceStatus>> {
     return this.wrap(async () => {
       await this.save((c) => ({
         ...c,
@@ -345,7 +345,7 @@ export class NotionWorkspaceService {
   async listProjectChoices(
     projectId: string,
     options: { force?: boolean } = {}
-  ): Promise<NotionResult<{ choices: NotionProjectChoice[]; truncated: boolean }>> {
+  ): Promise<Result<{ choices: NotionProjectChoice[]; truncated: boolean }>> {
     return this.wrap(async () => {
       const config = this.requireConfig()
       const project = this.findProject(projectId)
@@ -370,10 +370,7 @@ export class NotionWorkspaceService {
     })
   }
 
-  async link(
-    projectId: string,
-    pageId: string
-  ): Promise<NotionResult<{ id: string; name: string }>> {
+  async link(projectId: string, pageId: string): Promise<Result<{ id: string; name: string }>> {
     return this.wrap(async () => {
       const config = this.requireConfig()
       this.findProject(projectId)
@@ -402,7 +399,7 @@ export class NotionWorkspaceService {
     })
   }
 
-  async unlink(projectId: string): Promise<NotionResult<null>> {
+  async unlink(projectId: string): Promise<Result<null>> {
     return this.wrap(async () => {
       this.findProject(projectId)
       await this.save((c) => ({
@@ -420,7 +417,7 @@ export class NotionWorkspaceService {
   async listTasks(
     projectId: string,
     options: { force?: boolean } = {}
-  ): Promise<NotionResult<NotionTasksResult>> {
+  ): Promise<Result<NotionTasksResult>> {
     return this.wrap(async () => {
       const { value, fromCache } = await this.loadTasks(projectId, options.force === true)
       return {
@@ -437,7 +434,7 @@ export class NotionWorkspaceService {
    * número do ID (ORK-142 / 142). Texto vazio = as 20 editadas mais recentemente. Sem cache: é
    * uma consulta só (20 itens) a cada busca, que passa pela fila de rate limit do conector.
    */
-  async searchTasks(query: string): Promise<NotionResult<NotionTaskSearchResult>> {
+  async searchTasks(query: string): Promise<Result<NotionTaskSearchResult>> {
     return this.wrap(async () => {
       const config = this.requireConfig()
       const status = await this.getStatus()
@@ -483,7 +480,7 @@ export class NotionWorkspaceService {
     projectId: string,
     options: { force?: boolean } = {}
   ): Promise<
-    NotionResult<
+    Result<
       CachedTasks & {
         fromCache: boolean
         mapping: NotionMapping
@@ -501,7 +498,7 @@ export class NotionWorkspaceService {
 
   /** Opções atuais do status mapeado (relê o schema das Tarefas). */
   async statusOptions(): Promise<
-    NotionResult<{
+    Result<{
       options: StatusOption[]
       statusType: string
       properties: NotionPropertySummary[]
@@ -700,7 +697,7 @@ export class NotionWorkspaceService {
     }
   }
 
-  private async wrap<T>(run: () => Promise<T>): Promise<NotionResult<T>> {
+  private async wrap<T>(run: () => Promise<T>): Promise<Result<T>> {
     try {
       return { ok: true, value: await run() }
     } catch (e) {

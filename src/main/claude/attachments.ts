@@ -6,28 +6,22 @@
 import { createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import {
+  ATTACHMENT_LIMITS,
+  ATTACHMENT_MESSAGES,
+  attachmentType,
+  type AttachmentExt
+} from '../../shared/attachments'
+import { stripAccents } from '../../shared/text'
 
-export const ATTACHMENT_LIMITS = { maxFiles: 5, maxBytes: 10 * 1024 * 1024 } as const
-
-export type AttachmentExt = 'png' | 'jpg' | 'webp' | 'gif' | 'pdf' | 'md' | 'txt'
-
-export const ATTACHMENT_MESSAGES = {
-  tooMany: 'Até 5 anexos por mensagem.',
-  tooBig: (name: string): string => `O arquivo ${name} é maior que 10 MB.`,
-  unknownType: (name: string): string =>
-    `Tipo de arquivo não aceito: ${name}. Use imagem (PNG, JPEG, WEBP, GIF), PDF, Markdown ou texto.`,
-  mismatch: (name: string, what: string): string => `O arquivo ${name} não é ${what}.`
+/** O que cada tipo binário precisa ser (mensagem quando o conteúdo não bate). */
+const BINARY_WHAT: Partial<Record<AttachmentExt, string>> = {
+  png: 'uma imagem PNG',
+  jpg: 'uma imagem JPEG',
+  webp: 'uma imagem WEBP',
+  gif: 'uma imagem GIF',
+  pdf: 'um PDF'
 }
-
-const BINARY: Record<string, { ext: AttachmentExt; what: string }> = {
-  png: { ext: 'png', what: 'uma imagem PNG' },
-  jpg: { ext: 'jpg', what: 'uma imagem JPEG' },
-  jpeg: { ext: 'jpg', what: 'uma imagem JPEG' },
-  webp: { ext: 'webp', what: 'uma imagem WEBP' },
-  gif: { ext: 'gif', what: 'uma imagem GIF' },
-  pdf: { ext: 'pdf', what: 'um PDF' }
-}
-const TEXT_EXTS = new Set(['md', 'markdown', 'txt'])
 
 function startsWith(data: Uint8Array, bytes: number[], offset = 0): boolean {
   return bytes.every((b, i) => data[offset + i] === b)
@@ -51,11 +45,6 @@ function matches(ext: AttachmentExt, d: Uint8Array): boolean {
   }
 }
 
-function extensionOf(name: string): string {
-  const i = name.lastIndexOf('.')
-  return i < 0 ? '' : name.slice(i + 1).toLowerCase()
-}
-
 export function sniffAttachment(
   name: string,
   data: Uint8Array
@@ -63,32 +52,29 @@ export function sniffAttachment(
   if (data.byteLength > ATTACHMENT_LIMITS.maxBytes) {
     return { ok: false, message: ATTACHMENT_MESSAGES.tooBig(name) }
   }
-  const raw = extensionOf(name)
-  const bin = BINARY[raw]
-  if (bin) {
-    return matches(bin.ext, data)
-      ? { ok: true, ext: bin.ext }
-      : { ok: false, message: ATTACHMENT_MESSAGES.mismatch(name, bin.what) }
+  const ext = attachmentType(name)
+  if (!ext) return { ok: false, message: ATTACHMENT_MESSAGES.unknownType(name) }
+  const what = BINARY_WHAT[ext]
+  if (what) {
+    return matches(ext, data)
+      ? { ok: true, ext }
+      : { ok: false, message: ATTACHMENT_MESSAGES.mismatch(name, what) }
   }
-  if (TEXT_EXTS.has(raw)) {
-    const notText = ATTACHMENT_MESSAGES.mismatch(name, 'um texto válido')
-    if (data.includes(0)) return { ok: false, message: notText }
-    try {
-      new TextDecoder('utf-8', { fatal: true }).decode(data)
-    } catch {
-      return { ok: false, message: notText }
-    }
-    return { ok: true, ext: raw === 'md' || raw === 'markdown' ? 'md' : 'txt' }
+  // Markdown/texto: UTF-8 válido, sem byte nulo.
+  const notText = ATTACHMENT_MESSAGES.mismatch(name, 'um texto válido')
+  if (data.includes(0)) return { ok: false, message: notText }
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(data)
+  } catch {
+    return { ok: false, message: notText }
   }
-  return { ok: false, message: ATTACHMENT_MESSAGES.unknownType(name) }
+  return { ok: true, ext }
 }
 
 /** Só `[A-Za-z0-9._-]`, sem pontos iniciais, no máximo 80 caracteres, sem pastas. */
 export function safeAttachmentName(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? ''
-  const cleaned = base
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+  const cleaned = stripAccents(base)
     .replace(/[^A-Za-z0-9._-]/g, '_')
     .replace(/^\.+/, '')
   const out = cleaned.slice(-80)

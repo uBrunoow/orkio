@@ -8,15 +8,11 @@
  * Um resultado por repositório (projetos com o mesmo repo se juntam), só github.com (Enterprise
  * não tem o App). Cache em memória de 60 s; `force` ignora.
  */
-import type {
-  OrkioBotRepo,
-  OrkioBotRepoState,
-  OrkioBotStatus,
-  ProjectView
-} from '../../../shared/ipc-contract'
 import { GitHubApiError } from './github.client'
 import type { OrkioSiteResponse } from './github.connector'
-import { INSTALL_URL } from './review-poster'
+import { isInstallUrl } from '../../../shared/github-names'
+import type { OrkioBotRepo, OrkioBotRepoState, OrkioBotStatus } from '../../../shared/orkio-bot'
+import type { ProjectView } from '../../../shared/projects'
 
 export const ORKIO_BOT_CACHE_MS = 60_000
 
@@ -36,7 +32,7 @@ export function parseInstallationResponse(res: OrkioSiteResponse): OrkioBotRepoS
     const url = body['installUrl']
     return {
       state: 'not_installed',
-      installUrl: typeof url === 'string' && INSTALL_URL.test(url) ? url : null
+      installUrl: isInstallUrl(url) ? url : null
     }
   }
   if (res.status === 403) return { state: 'no_access' }

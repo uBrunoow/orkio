@@ -10,12 +10,12 @@ import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '../components/StatusToken'
 import { formatKeys } from './CommandMenu'
-import type { ProjectView } from '../../../shared/ipc-contract'
 import { AgentsIcon, BoardIcon, SearchIcon, SettingsIcon, SwitchIcon } from '../components/icons'
 import { OrkioLogo } from '../components/OrkioLogo/OrkioLogo'
 import { ROUTE_TITLES, type Route } from './routes'
 import { SHORTCUTS } from './shortcuts'
 import type { SidebarTask, TaskGroups } from './task-groups'
+import type { ProjectView } from '../../../shared/projects'
 
 const isMac = (): boolean => navigator.userAgent.includes('Mac')
 

@@ -14,6 +14,7 @@
  */
 import { parseAgentKey, type AgentKey } from './agent'
 import type { StageFlow } from './task-flow'
+import { normalizeLabel } from './text'
 
 export const ORCHESTRATOR_LIMITS = {
   maxActive: 10,
@@ -95,9 +96,8 @@ export function parseOrchestrator(value: unknown): OrchestratorConfig | null {
 export function suggestOrchestrator(
   stages: readonly { id: string; name: string }[]
 ): OrchestratorConfig {
-  const norm = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
   const find = (re: RegExp, fallback: number): string | null =>
-    stages.find((s) => re.test(norm(s.name)))?.id ?? stages[fallback]?.id ?? null
+    stages.find((s) => re.test(normalizeLabel(s.name)))?.id ?? stages[fallback]?.id ?? null
   const queue = find(/prioridade|backlog|a fazer|to ?do|fila/, 0)
   const dev = find(/andamento|progress|fazendo|doing|implement/, 1)
   const rev = find(/revisando|review|revisao/, 2)
@@ -222,7 +222,7 @@ export function validateOrchestrator(
  */
 export function priorityRank(name: string | null | undefined): number {
   if (!name) return 100
-  const n = name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+  const n = normalizeLabel(name)
   const p = /^p\s*(\d)\b/.exec(n) ?? /^(\d+)$/.exec(n)
   if (p) return Number(p[1])
   if (/urgent|critic|blocker|imediat|highest/.test(n)) return 0

@@ -1,19 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  BoardCard,
-  BoardSaveInput,
-  BoardView,
-  NotionResult
-} from '../../../../shared/ipc-contract'
+import type { BoardCard, BoardSaveInput, BoardView } from '../../../../shared/board'
+import type { Result } from '../../../../shared/result'
 
-export type BoardError = Extract<NotionResult<never>, { ok: false }>['error']
+export type BoardError = Extract<Result<never>, { ok: false }>['error']
 
 const IPC_FAILURE: BoardError = {
   code: 'ipc',
   message: 'Não foi possível falar com o processo principal do Orkio. Reinicie o app.'
 }
 
-async function call<T>(fn: () => Promise<NotionResult<T>>): Promise<NotionResult<T>> {
+async function call<T>(fn: () => Promise<Result<T>>): Promise<Result<T>> {
   try {
     return await fn()
   } catch {
@@ -35,7 +31,7 @@ export interface UseBoard {
   move(taskId: string, stageId: string): Promise<void>
   setBlocked(taskId: string, blocked: boolean): Promise<void>
   setAutomationPaused(taskId: string, paused: boolean): Promise<void>
-  save(input: BoardSaveInput): Promise<NotionResult<BoardView>>
+  save(input: BoardSaveInput): Promise<Result<BoardView>>
   retryNow(): Promise<void>
 }
 
@@ -63,7 +59,7 @@ export function useBoard(projectId: string): UseBoard {
     })
   }, [])
 
-  const apply = useCallback((result: NotionResult<BoardView>) => {
+  const apply = useCallback((result: Result<BoardView>) => {
     if (!mounted.current) return
     setLoading(false)
     if (result.ok) {
@@ -121,7 +117,7 @@ export function useBoard(projectId: string): UseBoard {
     async (
       taskId: string,
       optimistic: (card: BoardCard) => BoardCard,
-      run: () => Promise<NotionResult<BoardCard>>
+      run: () => Promise<Result<BoardCard>>
     ) => {
       const before = view?.cards.find((c) => c.taskId === taskId)
       if (!before) return

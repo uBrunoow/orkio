@@ -5,6 +5,7 @@
  * Regra de ouro: só a branch da tarefa (a do worktree, com o ID) vai para o GitHub. Branch
  * padrão, main/master/develop/production/release*, força e remoção nunca.
  */
+import { isBranchName } from './github-names'
 
 /** Destino de uma entrega: o repositório do projeto e a branch da tarefa. */
 export interface DeliveryTarget {
@@ -71,7 +72,7 @@ export const DELIVERY_MESSAGES = {
 /** Pode fazer push desta branch para este destino? `null` = sim; senão, o motivo (pt-BR). */
 export function checkPushBranch(branch: string, target: DeliveryTarget): string | null {
   const b = branch.replace(/^refs\/heads\//, '')
-  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(b) || b.includes('..')) return DELIVERY_MESSAGES.invalid
+  if (!isBranchName(b)) return DELIVERY_MESSAGES.invalid
   if (isProtectedBranch(b, target.defaultBranch)) return DELIVERY_MESSAGES.protected(b)
   // Só a branch da pasta de trabalho da tarefa. O nome não precisa ter o ID do Notion: a branch
   // pode ter sido vinculada à mão (`feat/listar-pedidos`) ou o banco pode não ter ID.

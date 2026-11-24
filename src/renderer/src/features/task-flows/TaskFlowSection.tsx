@@ -10,6 +10,7 @@ import { StatusDot, StatusToken, toneOf } from '../../components/StatusToken'
 import type { RunSummary } from '../../../../shared/agent-run'
 import { ALVA_TEMPLATE_IDS } from '../../../../shared/alva-templates'
 import type { TaskPullRequest } from '../../../../shared/task-signals'
+import { isReviewer } from '../../../../shared/github-names'
 import {
   isPromptStep,
   MAX_PROMPT_CHARS,
@@ -548,7 +549,7 @@ function ConfirmCard({
     .map((v) => v.trim().replace(/^@/, ''))
     .filter(Boolean)
   const values = info.input ? [...new Set([...chosen, ...extra])] : null
-  const invalid = values?.some((v) => !/^(team:)?[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/.test(v)) ?? false
+  const invalid = values?.some((v) => !isReviewer(v)) ?? false
   const none = values !== null && values.length === 0
   return (
     <WaitCard label={info.title} title={info.title}>

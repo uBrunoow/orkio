@@ -12,13 +12,6 @@ import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
 import { BoardIcon, FolderPlusIcon, FolderSearchIcon, MoreIcon } from '../../components/icons'
 import { StatusToken, toneOf } from '../../components/StatusToken'
-import type {
-  ProjectError,
-  ProjectHealthState,
-  ProjectMutationResult,
-  ProjectSelection,
-  ProjectView
-} from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
 import { ProjectNotionSection } from '../notion-workspace/ProjectNotionSection'
@@ -28,6 +21,13 @@ import { missingSteps, projectChecks, type ProjectCheck } from './project-checks
 import { AddProjectPanel } from './AddProjectPanel'
 import { useProjects } from './useProjects'
 import { PAGE_WIDTH } from '../../components/page-width'
+import type {
+  ProjectError,
+  ProjectHealthState,
+  ProjectMutationResult,
+  ProjectSelection,
+  ProjectView
+} from '../../../../shared/projects'
 
 type TokenColor = 'default' | 'green' | 'yellow' | 'red'
 

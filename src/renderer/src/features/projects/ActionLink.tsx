@@ -1,4 +1,4 @@
-import type { ProjectAction } from '../../../../shared/ipc-contract'
+import type { ProjectAction } from '../../../../shared/projects'
 
 /** Link externo sugerido pelo main (ex.: aprovar acesso da organização). Abre no navegador. */
 export function ActionLink({ action }: { action: ProjectAction }): React.JSX.Element {

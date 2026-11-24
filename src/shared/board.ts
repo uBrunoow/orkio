@@ -3,7 +3,8 @@
  * Notion e reconciliação com o status atual das tarefas. Funções puras (main e renderer).
  */
 import type { AutomationRule } from './automation'
-import type { NotionColor } from './ipc-contract'
+import type { NotionColor } from './notion'
+import { normalizeLabel } from './text'
 
 export interface BoardStage {
   id: string
@@ -41,10 +42,6 @@ export const DEFAULT_STAGE_TEMPLATE: readonly { name: string; notionStatus: stri
   { name: 'Finalizada', notionStatus: 'Finalizadas' }
 ]
 
-export function normalizeOptionName(value: string): string {
-  return value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
-}
-
 /** Acha a opção do Notion para um nome: exato normalizado, depois singular/plural simples. */
 export function findOption(
   options: readonly StatusOption[],
@@ -54,11 +51,11 @@ export function findOption(
     const byId = options.find((o) => o.id === wanted.id)
     if (byId) return byId
   }
-  const target = normalizeOptionName(wanted.name)
-  const exact = options.find((o) => normalizeOptionName(o.name) === target)
+  const target = normalizeLabel(wanted.name)
+  const exact = options.find((o) => normalizeLabel(o.name) === target)
   if (exact) return exact
   const stem = (s: string) => s.replace(/s$/, '')
-  return options.find((o) => stem(normalizeOptionName(o.name)) === stem(target)) ?? null
+  return options.find((o) => stem(normalizeLabel(o.name)) === stem(target)) ?? null
 }
 
 /**
@@ -104,10 +101,10 @@ export function validateStages(
     const name = stage.name.trim()
     if (!name) {
       issues.push({ stageId: stage.id, level: 'error', message: 'Dê um nome à etapa.' })
-    } else if (seen.has(normalizeOptionName(name))) {
+    } else if (seen.has(normalizeLabel(name))) {
       issues.push({ stageId: stage.id, level: 'error', message: `Já existe uma etapa “${name}”.` })
     }
-    seen.add(normalizeOptionName(name))
+    seen.add(normalizeLabel(name))
 
     const option = stage.notionStatus.id
       ? options.find((o) => o.id === stage.notionStatus.id)
@@ -181,7 +178,7 @@ export function stageMatchesStatus(
 ): boolean {
   if (!status) return false
   if (stage.notionStatus.id && status.id) return stage.notionStatus.id === status.id
-  return normalizeOptionName(stage.notionStatus.name) === normalizeOptionName(status.name)
+  return normalizeLabel(stage.notionStatus.name) === normalizeLabel(status.name)
 }
 
 /**
@@ -232,9 +229,7 @@ export function reconcile(
 
     const compatible = stages.filter((s) => stageMatchesStatus(s, task.status))
     const hinted = task.orkioStage
-      ? compatible.find(
-          (s) => normalizeOptionName(s.name) === normalizeOptionName(task.orkioStage ?? '')
-        )
+      ? compatible.find((s) => normalizeLabel(s.name) === normalizeLabel(task.orkioStage ?? ''))
       : undefined
     const target = hinted ?? compatible[0] ?? null
     const targetId = target?.id ?? null
@@ -269,4 +264,79 @@ export function moveNeedsStatusWrite(
   currentStatus: { id: string | null; name: string } | null
 ): boolean {
   return !stageMatchesStatus(to, currentStatus)
+}
+
+// ---------- Quadro (Etapa 3A) ----------
+
+export type CardSyncState = 'synced' | 'pending' | 'failed'
+
+export interface BoardCard {
+  taskId: string
+  displayId: string | null
+  title: string
+  url: string | null
+  status: { name: string; color: NotionColor } | null
+  priority: { name: string; color: NotionColor } | null
+  assignees: string[]
+  /** `null` = "Sem etapa" (nenhuma etapa usa o status atual do Notion). */
+  stageId: string | null
+  blocked: boolean
+  /** Automações pausadas nesta tarefa (3B). */
+  automationPaused: boolean
+  sync: { state: CardSyncState; message?: string }
+}
+
+export interface BoardView {
+  projectId: string
+  projectName: string
+  /** `null` = quadro ainda não criado: use `setup`. */
+  config: BoardConfig | null
+  /** Sugestão do template padrão contra as opções reais (só quando `config` é null). */
+  suggestion: BoardStage[] | null
+  /** Opções atuais do status mapeado na 2C. */
+  statusOptions: StatusOption[]
+  /** Propriedades do banco de Tarefas elegíveis para "Etapa Orkio" (select) e "Bloqueada" (checkbox). */
+  selectProperties: { id: string; name: string; options: StatusOption[] }[]
+  checkboxProperties: { id: string; name: string }[]
+  issues: StageIssue[]
+  cards: BoardCard[]
+  truncated: boolean
+  pendingCount: number
+  fetchedAt: string
+  /** Movimentos de cada automação (id da regra) nos últimos 7 dias. */
+  ruleCountsWeek: Record<string, number>
+}
+
+export type OrkioStageChoice =
+  | { mode: 'none' }
+  | { mode: 'existing'; propertyId: string }
+  /** Cria a propriedade select "Etapa Orkio" no banco de Tarefas (só com confirmação). */
+  | { mode: 'create' }
+
+export interface BoardSaveInput {
+  stages: { id: string | null; name: string; notionStatusId: string }[]
+  orkioStage: OrkioStageChoice
+  /** Autoriza adicionar ao select "Etapa Orkio" as opções que faltam. */
+  addMissingOptions: boolean
+  blockedPropertyId: string | null
+}
+
+export interface BoardSyncEvent {
+  projectId: string
+  taskId: string
+  state: CardSyncState
+  stageId: string | null
+  blocked: boolean
+  message?: string
+  canReconnect?: boolean
+}
+
+export interface BoardHistoryEntry {
+  id: number
+  at: string
+  kind: string
+  source: 'manual' | 'notion' | 'automation'
+  fromStage: string | null
+  toStage: string | null
+  detail: Record<string, unknown> | null
 }

@@ -220,3 +220,9 @@ export function friendlyUpdateError(error: unknown): string {
     return 'O arquivo baixado não passou na verificação. O Orkio tenta de novo mais tarde.'
   return 'Não foi possível procurar atualizações agora. O Orkio tenta de novo mais tarde.'
 }
+
+/** Configurações > Sobre. Links do site só se o build souber o endereço. */
+export interface AboutInfo {
+  version: string
+  links: { site: string; privacy: string; terms: string } | null
+}

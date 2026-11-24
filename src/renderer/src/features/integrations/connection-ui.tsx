@@ -9,8 +9,8 @@ import { Input } from '@/components/ui/input'
 import { Field } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { StatusToken, toneOf } from '../../components/StatusToken'
-import type { ConnectedAccount, ConnectionStatus } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
+import type { ConnectedAccount, ConnectionStatus } from '../../../../shared/connection'
 
 export { Alert }
 

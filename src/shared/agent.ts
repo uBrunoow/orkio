@@ -11,7 +11,9 @@
  *   mapa em `limits`); qualquer outra coisa vira erro ou aviso, nunca execução.
  */
 import { CLAUDE_MODELS, isEffort, isModelName, type Effort } from './agent-runtime'
+import { isCommandName } from './agent-run'
 import type { Flow } from './task-flow'
+import { normalizeLabel } from './text'
 
 export const AGENT_FORMAT = 'agent/v1'
 
@@ -57,7 +59,6 @@ export const AGENT_LIMITS = {
 } as const
 
 export const AGENT_ID = /^[a-z0-9][a-z0-9-]{0,39}$/
-const COMMAND = /^[A-Za-z0-9][\w:.-]{0,80}$/
 const FLOW_ID = /^[\w-]{1,80}$/
 
 export interface AgentLimits {
@@ -144,10 +145,7 @@ export function agentInitials(name: string): string {
 
 /** Id a partir do nome: minúsculas, sem acento, hífens. */
 export function agentIdFromName(name: string): string {
-  return name
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
+  return normalizeLabel(name)
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 40)
@@ -253,7 +251,7 @@ export function validateAgent(p: AgentProfile): string[] {
   }
   if (!Array.isArray(p.commands) || p.commands.length > AGENT_LIMITS.commands) {
     errors.push('Lista de comandos inválida (até 50).')
-  } else if (p.commands.some((c) => typeof c !== 'string' || !COMMAND.test(c))) {
+  } else if (p.commands.some((c) => !isCommandName(c))) {
     errors.push('Há um comando com nome inválido na lista.')
   }
   if (typeof p.delivery !== 'boolean') errors.push('“delivery” precisa ser true ou false.')

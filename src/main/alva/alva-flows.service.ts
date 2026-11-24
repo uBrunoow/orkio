@@ -4,7 +4,6 @@
  * da task do Backlog.md para o painel.
  */
 import type { AlvaPrecheck, BacklogTaskDocument, BacklogTaskInfo } from '../../shared/alva'
-import type { ClaudeResult } from '../../shared/agent-run'
 import { ALVA_TEMPLATE_IDS, alvaTemplates } from '../../shared/alva-templates'
 import type { FlowStageDraft } from '../../shared/flow'
 import type { Flow, StageFlow } from '../../shared/task-flow'
@@ -14,6 +13,7 @@ import type { OrkioConfig } from '../config/orkio-config'
 import { errorName } from '../ipc/payload'
 import type { ConfigStore } from '../storage/config-store'
 import type { AlvaService } from './alva.service'
+import type { Result } from '../../shared/result'
 
 export interface AlvaStatus {
   precheck: AlvaPrecheck | null
@@ -151,7 +151,7 @@ export class AlvaFlowsService {
    * Coluna "Planejando" entre Prioridades e Em andamento, com o status do Notion escolhido.
    * Usa o mesmo caminho do "Salvar fluxo" (validação da 3C). Devolve o id da etapa nova.
    */
-  async addPlanningStage(projectId: string, notionStatusId: string): Promise<ClaudeResult<string>> {
+  async addPlanningStage(projectId: string, notionStatusId: string): Promise<Result<string>> {
     const board = this.deps.config.get().boards[projectId]
     if (!board) return fail('no_board', 'Crie o quadro do projeto antes.')
     if (board.stages.some((s) => s.name.trim().toLowerCase() === 'planejando')) {
@@ -217,6 +217,6 @@ export class AlvaFlowsService {
   }
 }
 
-function fail<T>(code: string, message: string): ClaudeResult<T> {
+function fail<T>(code: string, message: string): Result<T> {
   return { ok: false, error: { code, message } }
 }

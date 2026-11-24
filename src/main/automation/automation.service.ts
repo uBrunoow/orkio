@@ -16,11 +16,13 @@ import {
   type AutomationDecision,
   type TaskSnapshot
 } from '../../shared/automation'
-import type { BoardView, NotionResult, TaskSignalsResult } from '../../shared/ipc-contract'
 import type { BoardService } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { ConfigStore } from '../storage/config-store'
+import type { BoardView } from '../../shared/board'
+import type { Result } from '../../shared/result'
+import type { TaskSignalsResult } from '../../shared/task-signals'
 
 export interface AutomationNotification {
   projectId: string
@@ -34,7 +36,7 @@ export interface AutomationServiceDeps {
   store: BoardStore
   board: Pick<BoardService, 'get' | 'applyAutomationMove' | 'flushWrites' | 'hasSnapshot'>
   signals: {
-    get(projectId: string, options?: { force?: boolean }): Promise<NotionResult<TaskSignalsResult>>
+    get(projectId: string, options?: { force?: boolean }): Promise<Result<TaskSignalsResult>>
   }
   notify(notification: AutomationNotification): void
   /** Algo mudou no quadro do projeto (a tela recarrega). */

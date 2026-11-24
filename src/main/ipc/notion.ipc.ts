@@ -1,8 +1,9 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
-import { IPC_CHANNELS, type ConnectionStatus } from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { OAuthConnector } from '../connectors/types'
 import { errorName, isTokenCredentials } from './payload'
 import type { SenderGuard } from './trusted-sender'
+import type { ConnectionStatus } from '../../shared/connection'
 
 export { isTokenCredentials }
 

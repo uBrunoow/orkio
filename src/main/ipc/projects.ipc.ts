@@ -1,14 +1,14 @@
 import type { IpcMain } from 'electron'
-import {
-  IPC_CHANNELS,
-  type CreateProjectInput,
-  type PickFolderResult,
-  type ProjectMutationResult,
-  type ProjectsListResult
-} from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { ProjectsService } from '../projects/projects.service'
 import { errorName } from './payload'
 import type { SenderGuard } from './trusted-sender'
+import type {
+  CreateProjectInput,
+  PickFolderResult,
+  ProjectMutationResult,
+  ProjectsListResult
+} from '../../shared/projects'
 
 const GENERIC_ERROR = {
   code: 'git_error' as const,

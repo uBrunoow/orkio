@@ -1,5 +1,4 @@
 import type { IpcMain } from 'electron'
-import type { ClaudeResult } from '../../shared/agent-run'
 import {
   parseAgentKey,
   type AgentBadge,
@@ -12,12 +11,13 @@ import { AgentError, type AgentsService } from '../agents/agents.service'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { Result } from '../../shared/result'
 
-const INVALID: ClaudeResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Pedido inválido. Atualize a tela e tente de novo.' }
 }
-const GENERIC: ClaudeResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Algo deu errado com os agentes. Tente novamente.' }
 }
@@ -104,12 +104,12 @@ export function registerAgentsIpc(
       }
     })
   }
-  const ok = <T>(value: T): ClaudeResult<T> => ({ ok: true, value })
+  const ok = <T>(value: T): Result<T> => ({ ok: true, value })
 
-  guarded<ClaudeResult<AgentsState>>(ch.list, GENERIC, async (projectId) =>
+  guarded<Result<AgentsState>>(ch.list, GENERIC, async (projectId) =>
     isId(projectId) ? ok(await service.list(projectId)) : INVALID
   )
-  guarded<ClaudeResult<AgentsState>>(ch.save, GENERIC, async (input) => {
+  guarded<Result<AgentsState>>(ch.save, GENERIC, async (input) => {
     if (typeof input !== 'object' || input === null) return INVALID
     const v = input as Record<string, unknown>
     const profile = toProfile(v['profile'])
@@ -129,7 +129,7 @@ export function registerAgentsIpc(
     })
     return ok(await service.list(v['projectId']))
   })
-  guarded<ClaudeResult<AgentsState>>(ch.approve, GENERIC, async (projectId, key, hash) => {
+  guarded<Result<AgentsState>>(ch.approve, GENERIC, async (projectId, key, hash) => {
     if (
       !isId(projectId) ||
       !parseAgentKey(key) ||
@@ -141,12 +141,12 @@ export function registerAgentsIpc(
     await service.approve(projectId, key as string, hash)
     return ok(await service.list(projectId))
   })
-  guarded<ClaudeResult<null>>(ch.assign, GENERIC, async (projectId, taskId, key) => {
+  guarded<Result<null>>(ch.assign, GENERIC, async (projectId, taskId, key) => {
     if (!isId(projectId) || !isId(taskId) || !(key === null || parseAgentKey(key))) return INVALID
     await service.assign(projectId, taskId, key as string | null)
     return ok(null)
   })
-  guarded<ClaudeResult<AgentsState>>(ch.setRules, GENERIC, async (projectId, rules) => {
+  guarded<Result<AgentsState>>(ch.setRules, GENERIC, async (projectId, rules) => {
     const parsed = toRules(rules)
     if (!isId(projectId) || !parsed) return INVALID
     return ok(await service.setRules(projectId, parsed))

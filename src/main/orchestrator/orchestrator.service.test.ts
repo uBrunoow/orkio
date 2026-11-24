@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { BoardCard, BoardView, NotionResult } from '../../shared/ipc-contract'
 import type { OrchestratorConfig } from '../../shared/orchestrator'
 import { AgentsService } from '../agents/agents.service'
 import type { StageChange } from '../board/board.service'
@@ -11,6 +10,8 @@ import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import { OrchestratorService, agentNameFallback } from './orchestrator.service'
+import type { BoardCard, BoardView } from '../../shared/board'
+import type { Result } from '../../shared/result'
 
 const P = 'p1'
 const STAGES = ['fila', 'dev', 'rev', 'ok']
@@ -181,7 +182,7 @@ beforeEach(async () => {
         ({
           ok: true,
           value: { cards, config: {} } as unknown as BoardView
-        }) as NotionResult<BoardView>,
+        }) as Result<BoardView>,
       applyAutomationMove: (projectId, taskId, stageId, event) => {
         const from = cards.find((c) => c.taskId === taskId)?.stageId ?? null
         if (from === stageId) return false

@@ -3,11 +3,6 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  BranchChangedEvent,
-  PickFolderResult,
-  ProjectSelection
-} from '../../shared/ipc-contract'
 import { createOrkioConfigStore } from '../config/orkio-config'
 import { GitHubApiError, type GitHubRepo } from '../connectors/github/github.client'
 import { GitError, type Git, type GitRemote } from '../git/git'
@@ -17,6 +12,7 @@ import {
   type ProjectsGitHub,
   type ProjectsServiceDeps
 } from './projects.service'
+import type { BranchChangedEvent, PickFolderResult, ProjectSelection } from '../../shared/projects'
 
 interface FakeRepo {
   remotes: GitRemote[]

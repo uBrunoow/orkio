@@ -1,16 +1,17 @@
 import type { IpcMain } from 'electron'
-import { IPC_CHANNELS, type OverviewResult } from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import { ACTIVITY_KINDS, type ActivityGroup, type ActivityQuery } from '../../shared/overview'
 import type { OverviewService } from '../overview/overview.service'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { Result } from '../../shared/result'
 
-const GENERIC: OverviewResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Não foi possível montar a Visão geral. Tente atualizar.' }
 }
-const UNAVAILABLE: OverviewResult<never> = {
+const UNAVAILABLE: Result<never> = {
   ok: false,
   error: {
     code: 'db_unavailable',
@@ -18,7 +19,7 @@ const UNAVAILABLE: OverviewResult<never> = {
       'O banco local não pôde ser aberto (pode ser de uma versão mais nova do Orkio). A Visão geral fica indisponível.'
   }
 }
-const INVALID: OverviewResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Filtro inválido. Atualize a tela e tente de novo.' }
 }
@@ -57,10 +58,7 @@ export function registerOverviewIpc(
   ready: Promise<void> = Promise.resolve()
 ): void {
   const ch = IPC_CHANNELS.overview
-  function guarded<T>(
-    channel: string,
-    run: (...args: unknown[]) => Promise<OverviewResult<T>>
-  ): void {
+  function guarded<T>(channel: string, run: (...args: unknown[]) => Promise<Result<T>>): void {
     ipc.handle(channel, async (event, ...args: unknown[]) => {
       if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
       try {

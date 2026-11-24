@@ -1,12 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import {
-  IPC_CHANNELS,
-  type BoardSyncEvent,
-  type BranchChangedEvent,
-  type OrkioApi
-} from '../shared/ipc-contract'
+import { IPC_CHANNELS, type OrkioApi } from '../shared/ipc-contract'
 import type { RunEventMessage } from '../shared/agent-run'
 import type { UpdateStatus } from '../shared/updates'
+import type { BoardSyncEvent } from '../shared/board'
+import type { BranchChangedEvent } from '../shared/projects'
 
 const {
   notion,

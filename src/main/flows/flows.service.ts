@@ -2,12 +2,12 @@
  * Configuração dos fluxos de tarefa (5A) e fachada do FlowRunner para o IPC. O main valida de
  * novo com `validateTaskFlow` (a mesma função do editor); erros bloqueiam, avisos não.
  */
-import type { ClaudeResult } from '../../shared/agent-run'
 import {
   validateTaskFlow,
   type Flow,
   type FlowRunView,
-  type ProjectFlows
+  type TaskFlowActivity,
+  type TaskFlowsProject
 } from '../../shared/task-flow'
 import { DEFAULT_DELIVERY_SETTINGS, type DeliverySettings } from '../../shared/delivery'
 import type { BoardStore } from '../board/board.store'
@@ -15,13 +15,7 @@ import type { ConfigStore } from '../storage/config-store'
 import type { OrkioConfig } from '../config/orkio-config'
 import { errorName } from '../ipc/payload'
 import { FlowError, type FlowExtractor, type FlowRunner, type OrkioAction } from './flow-runner'
-
-export interface FlowsProjectView extends ProjectFlows {
-  extractors: { id: string; label: string }[]
-  actions: { id: string; label: string; pending?: string }[]
-  /** Ajustes de entrega do projeto (5C). */
-  delivery: DeliverySettings
-}
+import type { Result } from '../../shared/result'
 
 export class FlowsService {
   constructor(
@@ -36,7 +30,7 @@ export class FlowsService {
     }
   ) {}
 
-  getProject(projectId: string): ClaudeResult<FlowsProjectView> {
+  getProject(projectId: string): Result<TaskFlowsProject> {
     const pf = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
     return {
       ok: true,
@@ -60,7 +54,7 @@ export class FlowsService {
   async setDelivery(
     projectId: string,
     settings: DeliverySettings
-  ): Promise<ClaudeResult<FlowsProjectView>> {
+  ): Promise<Result<TaskFlowsProject>> {
     if (!this.deps.config.get().projects.some((p) => p.id === projectId)) {
       return fail('not_found', 'Projeto não encontrado. Atualize a lista.')
     }
@@ -92,7 +86,7 @@ export class FlowsService {
     return this.getProject(projectId)
   }
 
-  async saveFlows(projectId: string, flows: Flow[]): Promise<ClaudeResult<FlowsProjectView>> {
+  async saveFlows(projectId: string, flows: Flow[]): Promise<Result<TaskFlowsProject>> {
     if (!this.deps.config.get().projects.some((p) => p.id === projectId)) {
       return fail('not_found', 'Projeto não encontrado. Atualize a lista.')
     }
@@ -140,11 +134,11 @@ export class FlowsService {
     return this.deps.runner.list(taskId)
   }
 
-  active(projectId: string): Record<string, 'running' | 'needs_you'> {
+  active(projectId: string): Record<string, TaskFlowActivity> {
     return this.deps.runner.activeForProject(projectId)
   }
 
-  act(fn: () => Promise<FlowRunView>): Promise<ClaudeResult<FlowRunView>> {
+  act(fn: () => Promise<FlowRunView>): Promise<Result<FlowRunView>> {
     return fn().then(
       (value) => ({ ok: true as const, value }),
       (error: unknown) => {
@@ -156,7 +150,7 @@ export class FlowsService {
   }
 }
 
-function fail<T>(code: string, message: string): ClaudeResult<T> {
+function fail<T>(code: string, message: string): Result<T> {
   return { ok: false, error: { code, message } }
 }
 

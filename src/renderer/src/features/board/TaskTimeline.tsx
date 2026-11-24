@@ -1,7 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { Timestamp } from '../../components/Timestamp'
 import type { AgentBadge } from '../../../../shared/agent'
-import type { BoardHistoryEntry } from '../../../../shared/ipc-contract'
 import { branchUrl, describeEvent, prNumber, prUrl } from '../../../../shared/task-history'
 import {
   AutomationIcon,
@@ -14,6 +13,7 @@ import {
 } from '../../components/icons'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { cn } from '@/lib/utils'
+import type { BoardHistoryEntry } from '../../../../shared/board'
 
 type Actor = { name: string; icon: SvgIcon } | { name: string; agent: true }
 

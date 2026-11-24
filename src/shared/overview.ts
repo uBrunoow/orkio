@@ -4,9 +4,11 @@
  * renderer); o `OverviewService` (main) lê os stores e chama estas funções. Nada de rede.
  */
 import type { BoardStage } from './board'
-import type { NotionColor, NotionWorkspaceStatus, ProjectView } from './ipc-contract'
 import type { TaskSignals } from './task-signals'
 import { FLOW_PAUSE_LABEL, type FlowRunView } from './task-flow'
+import type { NotionColor, NotionWorkspaceStatus } from './notion'
+import type { ProjectView } from './projects'
+import { normalizeLabel } from './text'
 
 /** Seção do painel da tarefa que o clique abre. */
 export type TaskSection = 'flow' | 'claude' | 'history'
@@ -541,8 +543,7 @@ export function stageDwell(
 
 /** Etapa de revisão do projeto: a chamada "Revisado" (do template), sem acento/caixa. */
 export function reviewStageId(stages: readonly BoardStage[]): string | null {
-  const norm = (v: string): string => v.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-  return stages.find((s) => norm(s.name) === 'revisado')?.id ?? null
+  return stages.find((s) => normalizeLabel(s.name) === 'revisado')?.id ?? null
 }
 
 /** Última etapa do quadro (maior `order`). */
@@ -675,4 +676,11 @@ export function formatDuration(ms: number): string {
 /** Rótulo curto da tarefa: "ORK-142 Exportar CSV" ou o que houver. */
 export function taskLabel(task: Pick<OverviewTask, 'displayId' | 'title'>): string {
   return [task.displayId, task.title].filter(Boolean).join(' ') || 'Tarefa do Notion'
+}
+
+export interface BoardTaskRef {
+  projectId: string
+  taskId: string
+  /** Seção do painel da tarefa a mostrar (Visão geral, 6D). */
+  section?: TaskSection
 }

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import type { AlvaPrecheck } from '../../../../shared/alva'
-import type { ConnectionStatus, NotionWorkspaceStatus } from '../../../../shared/ipc-contract'
 import type { StatusTone } from '../../components/StatusToken'
 import {
   AgentsIcon,
@@ -33,6 +32,8 @@ import {
 } from './integrations-logic'
 import { OrkioBotPanel, useOrkioBot } from './OrkioBotCard'
 import { PAGE_WIDTH } from '../../components/page-width'
+import type { ConnectionStatus } from '../../../../shared/connection'
+import type { NotionWorkspaceStatus } from '../../../../shared/notion'
 
 export function IntegrationsPage({
   projectId = null

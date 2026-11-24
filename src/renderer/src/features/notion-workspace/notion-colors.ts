@@ -1,4 +1,4 @@
-import type { NotionColor } from '../../../../shared/ipc-contract'
+import type { NotionColor } from '../../../../shared/notion'
 
 export type TokenColor =
   'default' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'gray'

@@ -458,6 +458,17 @@ describe('GitHubConnector', () => {
         expect(site).toHaveBeenCalledTimes(1)
       })
 
+      it('orkioBotInstallation aceita os mesmos nomes que a revisão (`_` no owner, `.github`)', async () => {
+        const site = vi.fn<typeof fetch>(async () => json({ installed: true }))
+        const connector = withSite(site)
+        await connector.connect({ kind: 'token', token: PAT })
+        await connector.orkioBotInstallation('octocat_acme', '.github')
+        expect(JSON.parse(String(site.mock.calls[0]![1]?.body))).toMatchObject({
+          owner: 'octocat_acme',
+          repo: '.github'
+        })
+      })
+
       it('sem origem ou origem fora das regras → not_configured, sem rede', async () => {
         const site = vi.fn<typeof fetch>(async () => json({}))
         await withSite(site).connect({ kind: 'token', token: PAT })

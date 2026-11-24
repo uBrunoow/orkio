@@ -3,7 +3,6 @@
  * perguntas em memória, fluxos, cache de sinais e o cache em memória das tarefas do Notion).
  * Nunca chama APIs: "Atualizar" pede o ciclo das automações (3B), que relê git/GitHub/Notion.
  */
-import type { NotionTask, NotionWorkspaceStatus, ProjectView } from '../../shared/ipc-contract'
 import {
   ACTIVITY_KINDS,
   NOTION_PENDING_ATTEMPTS,
@@ -39,6 +38,8 @@ import { describeEvent, branchUrl, prUrl } from '../../shared/task-history'
 import type { RunStatus } from '../../shared/agent-run'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { Db, SqlValue } from '../db/database'
+import type { NotionTask, NotionWorkspaceStatus } from '../../shared/notion'
+import type { ProjectView } from '../../shared/projects'
 
 export interface OverviewDeps {
   db: Db

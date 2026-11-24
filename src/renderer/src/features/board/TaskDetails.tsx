@@ -7,12 +7,6 @@ import { CheckboxField, SelectField } from '@/components/form'
 import { cn } from '@/lib/utils'
 import type { AgentBadge } from '../../../../shared/agent'
 import type { BacklogTaskInfo } from '../../../../shared/alva'
-import type {
-  BoardCard,
-  BoardHistoryEntry,
-  BoardStage,
-  TaskSignals
-} from '../../../../shared/ipc-contract'
 import { StatusToken } from '../../components/StatusToken'
 import { ExternalLinkIcon } from '../../components/icons'
 import { plural } from '../../lib/format'
@@ -24,6 +18,8 @@ import type { useTaskRuns } from '../claude/useTaskRuns'
 import { TaskSignalsLine } from '../notion-workspace/TaskSignalsLine'
 import { TaskBranchLinks } from './TaskBranchLinks'
 import { TaskTimeline } from './TaskTimeline'
+import type { BoardCard, BoardHistoryEntry, BoardStage } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 export type BacklogSummary = { linked: string | null; task: BacklogTaskInfo | null }
 

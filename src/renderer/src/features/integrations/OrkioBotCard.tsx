@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import type { OrkioBotRepoState, OrkioBotStatus } from '../../../../shared/ipc-contract'
 import { ExternalLinkIcon, RefreshIcon } from '../../components/icons'
 import { StatusDot, type StatusTone } from '../../components/StatusToken'
+import type { OrkioBotRepoState, OrkioBotStatus } from '../../../../shared/orkio-bot'
 
 /**
  * orkio[bot]: o GitHub App que publica as revisões dos agentes nas PRs. Consulta (só leitura, pelo

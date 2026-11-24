@@ -3,7 +3,7 @@
  * Função pura: linha → eventos do log do Orkio. Nada de conteúdo de arquivos `.env` passa adiante.
  */
 import { isAbsolute, relative } from 'node:path'
-import type { RunLogEvent } from '../../shared/agent-run'
+import { isEditTool, type RunLogEvent } from '../../shared/agent-run'
 import { contextWindowFor, inputTokensOf } from '../../shared/context-usage'
 import { redactSecrets } from './redact'
 
@@ -33,16 +33,13 @@ export function summarizeTool(
 ): { summary: string; file?: string } {
   const i = isRecord(input) ? input : {}
   const path = str(i['file_path']) ?? str(i['notebook_path']) ?? str(i['path'])
+  if (isEditTool(tool)) {
+    const file = path ? displayPath(path, worktree) : '?'
+    return { summary: file, file }
+  }
   switch (tool) {
     case 'Bash':
       return { summary: short(redactSecrets(str(i['command']) ?? '')) }
-    case 'Edit':
-    case 'MultiEdit':
-    case 'Write':
-    case 'NotebookEdit': {
-      const file = path ? displayPath(path, worktree) : '?'
-      return { summary: file, file }
-    }
     case 'Read':
       return { summary: path ? displayPath(path, worktree) : '?' }
     case 'Grep':

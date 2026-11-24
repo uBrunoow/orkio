@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/Spinner'
 import { NotionLogo } from '../../components/icons'
-import { NOTION_TOKEN_DOCS_URL, type ConnectionStatus } from '../../../../shared/ipc-contract'
 import {
   Alert,
   CardHeader,
@@ -16,6 +15,7 @@ import {
   type TokenFormCopy
 } from './connection-ui'
 import type { UseNotionConnection } from './useNotionConnection'
+import { NOTION_TOKEN_DOCS_URL, type ConnectionStatus } from '../../../../shared/connection'
 
 const TOKEN_COPY: TokenFormCopy = {
   description:

@@ -2,13 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
-import type {
-  BoardTaskRef,
-  BoardView,
-  ConnectionStatus,
-  ProjectSelection,
-  ProjectView
-} from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { FolderPlusIcon } from '../../components/icons'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
@@ -26,6 +19,10 @@ import { useProjects } from '../projects/useProjects'
 import { LoginPanel } from '../welcome/LoginPanel'
 import '../welcome/welcome.css'
 import { setupPending, setupSteps, type SetupStep, type SetupStepId } from './setup-steps'
+import type { BoardTaskRef } from '../../../../shared/overview'
+import type { BoardView } from '../../../../shared/board'
+import type { ConnectionStatus } from '../../../../shared/connection'
+import type { ProjectSelection, ProjectView } from '../../../../shared/projects'
 
 const WHY: Record<SetupStepId, string> = {
   github: 'O Orkio confere o repositório do projeto e acompanha branches, PRs e CI das tarefas.',

@@ -11,6 +11,7 @@
  * - `AskUserQuestion`: vira pergunta na tela.
  */
 import { isAbsolute, normalize, relative, resolve, sep } from 'node:path'
+import { isEditTool } from '../../shared/agent-run'
 import type { DeliveryTarget } from '../../shared/delivery'
 import {
   deliveryVerdict,
@@ -44,7 +45,6 @@ export type PolicyDecision =
   | { decision: 'ask'; suggestion: string; delivery?: DeliveryAction[] }
   | { decision: 'question' }
 
-const FILE_WRITE = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
 const FILE_READ = new Set(['Read', 'Grep', 'Glob', 'LS'])
 /** Ferramentas sem efeito fora da sessão (planejamento, subagentes, skills, tarefas). */
 const HARMLESS = new Set([
@@ -375,7 +375,7 @@ export function evaluatePermission(req: PermissionRequest, ctx: PolicyContext): 
     (typeof input['notebook_path'] === 'string' && input['notebook_path']) ||
     (typeof input['path'] === 'string' && input['path']) ||
     null
-  if (FILE_WRITE.has(tool) || FILE_READ.has(tool)) {
+  if (isEditTool(tool) || FILE_READ.has(tool)) {
     if (path && !isInside(path, ctx.worktree))
       return { decision: 'deny', reason: POLICY_MESSAGES.outside }
     return { decision: 'allow' }

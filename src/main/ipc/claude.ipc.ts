@@ -1,7 +1,6 @@
 import type { IpcMain } from 'electron'
 import type {
   ClaudeCodeStatus,
-  ClaudeResult,
   EditorId,
   PermissionAnswer,
   RunLogEvent,
@@ -11,18 +10,19 @@ import type {
 import { isEffort, isModelName } from '../../shared/agent-runtime'
 import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import { isBranchKind } from '../../shared/slug'
-import { ATTACHMENT_LIMITS } from '../claude/attachments'
+import { ATTACHMENT_LIMITS } from '../../shared/attachments'
 import type { ClaudeService } from '../claude/claude.service'
 import { CLAUDE_MIN_VERSION } from '../claude/detect'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { Result } from '../../shared/result'
 
-const GENERIC: ClaudeResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Algo deu errado. Tente novamente.' }
 }
-const INVALID: ClaudeResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Pedido inválido. Atualize a tela e tente de novo.' }
 }

@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScreenTitle } from '../../components/ScreenTitle'
-import type {
-  BoardCard,
-  BoardHistoryEntry,
-  BoardStage,
-  TaskSignals
-} from '../../../../shared/ipc-contract'
 import type { TaskSection } from '../../../../shared/overview'
 import type { FlowRunView } from '../../../../shared/task-flow'
 import type { AgentBadge } from '../../../../shared/agent'
@@ -26,6 +20,8 @@ import { StageSelector, TaskChanges, TaskDetails, useBacklogSummary } from './Ta
 import { OpenPrButton, canOpenPr } from './OpenPrButton'
 import { EnvironmentPanel } from '../task/EnvironmentPanel'
 import { TaskSession } from './TaskSession'
+import type { BoardCard, BoardHistoryEntry, BoardStage } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 /**
  * Tarefa como sessão: no topo, em que pé está (marcos) e o que espera você; no centro, a conversa

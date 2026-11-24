@@ -1,4 +1,4 @@
-import type { ConnectorCredentials } from '../../shared/ipc-contract'
+import type { ConnectorCredentials } from '../../shared/connection'
 
 /** Valida o payload de "conectar com token" vindo do renderer (sempre `unknown`). */
 export function isTokenCredentials(value: unknown): value is ConnectorCredentials {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase, type Db } from '../db/database'
-import { isValidBranchName, TaskBranchesStore } from './task-branches.store'
+import { TaskBranchesStore } from './task-branches.store'
 
 let db: Db
 let store: TaskBranchesStore
@@ -31,13 +31,5 @@ describe('TaskBranchesStore', () => {
     store.link('p1', 't2', 'feat/x', 'manual')
     expect(store.forTask('p1', 't1')).toEqual([])
     expect(store.forTask('p1', 't2')[0]?.source).toBe('manual')
-  })
-
-  it('isValidBranchName recusa nomes que o git não aceita', () => {
-    expect(isValidBranchName('feat/listar-pedidos')).toBe(true)
-    expect(isValidBranchName('')).toBe(false)
-    expect(isValidBranchName('feat/../main')).toBe(false)
-    expect(isValidBranchName('-x')).toBe(false)
-    expect(isValidBranchName('feat x')).toBe(false)
   })
 })

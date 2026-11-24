@@ -5,6 +5,20 @@
 import type { BranchKind } from './slug'
 import type { RuntimeChoice } from './agent-runtime'
 
+/** Nome de comando do Claude Code (`review`, `alva-flow:pr`), sem a barra: catálogo, execução e perfis. */
+const COMMAND_NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
+
+export function isCommandName(value: unknown): value is string {
+  return typeof value === 'string' && COMMAND_NAME.test(value)
+}
+
+/** Ferramentas do Claude Code que editam arquivos (política, log, passo só de leitura, tela). */
+export const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
+
+export function isEditTool(tool: string): boolean {
+  return (EDIT_TOOLS as readonly string[]).includes(tool)
+}
+
 export type RunMode = 'prompt' | 'command'
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -113,10 +127,6 @@ export interface ClaudeCodeStatus {
   /** O CLI aceita `--effort` (versão ≥ `CLAUDE_EFFORT_VERSION`). */
   supportsEffort: boolean
 }
-
-/** Resultado das operações do Claude Code no renderer (erros já em pt-BR). */
-export type ClaudeResult<T> =
-  { ok: true; value: T } | { ok: false; error: { code: string; message: string; files?: string[] } }
 
 /** Ambiente (worktree) da tarefa, para exibição. */
 export interface TaskWorkspace {
@@ -297,3 +307,5 @@ export const CONTEXT_LIMITS = {
   /** Total de contexto (instruções + páginas) no briefing; acima disso corta com aviso. */
   total: 30_000
 } as const
+
+export const CLAUDE_CODE_DOCS_URL = 'https://code.claude.com/docs/en/setup'

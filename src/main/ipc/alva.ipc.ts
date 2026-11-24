@@ -1,16 +1,16 @@
 import type { IpcMain } from 'electron'
-import type { ClaudeResult } from '../../shared/agent-run'
 import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { AlvaFlowsService } from '../alva/alva-flows.service'
 import { errorName } from './payload'
 import { isId } from './projects.ipc'
 import type { SenderGuard } from './trusted-sender'
+import type { Result } from '../../shared/result'
 
-const INVALID: ClaudeResult<never> = {
+const INVALID: Result<never> = {
   ok: false,
   error: { code: 'invalid', message: 'Pedido inválido. Atualize a tela e tente de novo.' }
 }
-const GENERIC: ClaudeResult<never> = {
+const GENERIC: Result<never> = {
   ok: false,
   error: { code: 'unexpected', message: 'Algo deu errado. Tente novamente.' }
 }
@@ -24,10 +24,7 @@ export function registerAlvaIpc(
   ready: Promise<void> = Promise.resolve()
 ): void {
   const ch = IPC_CHANNELS.alva
-  function guarded<T>(
-    channel: string,
-    run: (...args: unknown[]) => Promise<ClaudeResult<T>>
-  ): void {
+  function guarded<T>(channel: string, run: (...args: unknown[]) => Promise<Result<T>>): void {
     ipc.handle(channel, async (event, ...args: unknown[]) => {
       if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
       try {
@@ -39,7 +36,7 @@ export function registerAlvaIpc(
       }
     })
   }
-  const ok = <T>(value: T): ClaudeResult<T> => ({ ok: true, value })
+  const ok = <T>(value: T): Result<T> => ({ ok: true, value })
 
   guarded(ch.precheck, async (projectId, force) =>
     isId(projectId) ? ok(await service.precheck(projectId, force === true)) : INVALID

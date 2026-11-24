@@ -1,4 +1,3 @@
-import type { AuthOptions, ConnectedAccount } from '../../../shared/ipc-contract'
 import { LoopbackAuthError } from '../../oauth/loopback'
 import { EncryptionUnavailableError, type SecretStore } from '../../storage/secure-store'
 import type { ConnectionStatus, OAuthConnector, OAuthCredentials, TokenCredentials } from '../types'
@@ -10,6 +9,7 @@ import {
   type NotionSelf
 } from './notion.client'
 import type { NotionOAuthBroker, NotionTokenSet } from './notion.oauth'
+import type { AuthOptions, ConnectedAccount } from '../../../shared/connection'
 
 const SECRET_KEY = 'notion'
 const MAX_TOKEN_LENGTH = 1024

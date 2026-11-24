@@ -1,4 +1,3 @@
-import type { AuthOptions, ConnectedAccount, DeviceFlowInfo } from '../../../shared/ipc-contract'
 import { DeviceFlowError, pollDeviceToken, type DeviceAuthorization } from '../../oauth/device-flow'
 import { EncryptionUnavailableError, type SecretStore } from '../../storage/secure-store'
 import type {
@@ -18,13 +17,13 @@ import {
 } from './github.client'
 import type { GitHubDeviceApi, GitHubOAuthToken } from './github.oauth'
 import { isAllowedOrkioSiteOrigin } from './orkio-site'
+import type { AuthOptions, ConnectedAccount, DeviceFlowInfo } from '../../../shared/connection'
+import { isLogin, isOwner, isRepo, isTeamSlug } from '../../../shared/github-names'
+import type { PublishReviewEvent } from '../../../shared/review-publish'
 
 const SECRET_KEY = 'github'
 const DISCONNECTED: ConnectionStatus = { state: 'disconnected' }
 const MAX_TOKEN_LENGTH = 512
-
-/** owner, repo, login ou slug de time: sem barras, sem espaços. */
-const SLUG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
 
 export type GitHubCredentials = TokenCredentials | OAuthCredentials<GitHubOAuthToken>
 
@@ -95,7 +94,7 @@ export interface OrkioSiteReviewPayload {
   repo: string
   number: number
   review: {
-    event: 'COMMENT' | 'REQUEST_CHANGES'
+    event: PublishReviewEvent
     body: string
     comments: { path: string; line: number; side: 'RIGHT'; body: string }[]
   }
@@ -286,12 +285,13 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     reviewers: { users: string[]; teams: string[] }
   ): Promise<void> {
     if (
-      !SLUG.test(owner) ||
-      !SLUG.test(repo) ||
+      !isOwner(owner) ||
+      !isRepo(repo) ||
       !Number.isSafeInteger(pull) ||
       pull <= 0 ||
       reviewers.users.length + reviewers.teams.length === 0 ||
-      ![...reviewers.users, ...reviewers.teams].every((r) => SLUG.test(r))
+      !reviewers.users.every(isLogin) ||
+      !reviewers.teams.every(isTeamSlug)
     ) {
       throw new GitHubApiError('unexpected', 'Pedido de review inválido.')
     }
@@ -302,7 +302,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
 
   /** Colaboradores do repositório (sugestão de revisores). */
   async listCollaborators(owner: string, repo: string): Promise<string[]> {
-    if (!SLUG.test(owner) || !SLUG.test(repo)) return []
+    if (!isOwner(owner) || !isRepo(repo)) return []
     return this.withAccessToken((token) => this.deps.client.listCollaborators(token, owner, repo))
   }
 
@@ -345,7 +345,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
    * erros do `postReviewViaOrkioSite`; prazo menor (é só uma consulta).
    */
   async orkioBotInstallation(owner: string, repo: string): Promise<OrkioSiteResponse> {
-    if (!SLUG.test(owner) || !SLUG.test(repo)) {
+    if (!isOwner(owner) || !isRepo(repo)) {
       throw new GitHubApiError('unexpected', 'Repositório inválido.')
     }
     return this.callOrkioSite(

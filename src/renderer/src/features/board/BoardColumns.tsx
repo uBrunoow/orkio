@@ -3,9 +3,10 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { tokenColor } from '../notion-workspace/notion-colors'
-import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import { ColumnCollapseIcon, ColumnExpandIcon } from '../../components/icons'
 import { BoardCardBody, BoardCardItem, CARD_CLASS, type CardActions } from './BoardCardView'
+import type { BoardCard, BoardStage } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 /** Movimento mínimo (px) para virar arrasto: cliques e o menu do card continuam funcionando. */
 const DRAG_THRESHOLD = 5

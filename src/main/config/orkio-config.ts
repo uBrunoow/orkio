@@ -12,13 +12,6 @@ import {
   type EventKind
 } from '../../shared/automation'
 import type { BoardConfig, BoardStage } from '../../shared/board'
-import type {
-  NotionColor,
-  NotionMapping,
-  NotionPropertyRef,
-  NotionWorkspaceConfig,
-  ProjectRepo
-} from '../../shared/ipc-contract'
 import { ConfigStore } from '../storage/config-store'
 
 export const ORKIO_CONFIG_FILE = 'orkio-config.json'
@@ -40,6 +33,13 @@ import {
   type Step
 } from '../../shared/task-flow'
 import type { UpdateChannel } from '../../shared/updates'
+import type {
+  NotionColor,
+  NotionMapping,
+  NotionPropertyRef,
+  NotionWorkspaceConfig
+} from '../../shared/notion'
+import type { ProjectRepo } from '../../shared/projects'
 
 export const ORKIO_CONFIG_VERSION = 12
 

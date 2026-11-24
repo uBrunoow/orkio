@@ -54,6 +54,14 @@ describe('parseRemoteUrl — hosts que pedem confirmação', () => {
     })
   })
 
+  it('owner de conta gerenciada (`_`) e repositório com ponto no início', () => {
+    expect(parseRemoteUrl('https://github.com/octocat_acme/.github.git')).toMatchObject({
+      owner: 'octocat_acme',
+      name: '.github',
+      kind: 'github'
+    })
+  })
+
   it('apiHostFor: alias → github.com; enterprise → o próprio host', () => {
     expect(apiHostFor(parseRemoteUrl('git@github-trabalho:a/b')!)).toBe('github.com')
     expect(apiHostFor(parseRemoteUrl('https://github.acme.com/a/b')!)).toBe('github.acme.com')

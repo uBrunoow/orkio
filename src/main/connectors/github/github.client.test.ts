@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { GITHUB_API_VERSION } from '../../../shared/github-names'
 import {
-  GITHUB_API_VERSION,
   GITHUB_REQUEST_TIMEOUT_MS,
   GitHubApiError,
   createGitHubClient,

@@ -5,9 +5,9 @@
  * logs existem. O texto final passa por `redactSecrets` mesmo assim.
  */
 import { formatDiagnostics, type DiagnosticSection } from '../../shared/diagnostics'
-import type { ConnectionStatus } from '../../shared/ipc-contract'
 import { redactSecrets } from '../claude/redact'
 import type { Db } from '../db/database'
+import type { ConnectionStatus } from '../../shared/connection'
 
 export interface DiagnosticsDeps {
   app: { version: string; packaged: boolean }

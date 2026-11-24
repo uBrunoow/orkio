@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
-import type {
-  ConnectionStatus,
-  NotionWorkspaceStatus,
-  ProjectView
-} from '../../../../shared/ipc-contract'
 import { setupPending, setupSteps, type SetupInput } from './setup-steps'
+import type { ConnectionStatus } from '../../../../shared/connection'
+import type { NotionWorkspaceStatus } from '../../../../shared/notion'
+import type { ProjectView } from '../../../../shared/projects'
 
 const connected = (handle: string): ConnectionStatus => ({
   state: 'connected',

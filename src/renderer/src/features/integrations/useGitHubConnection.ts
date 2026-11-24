@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { AuthOptions, ConnectionStatus, DeviceFlowInfo } from '../../../../shared/ipc-contract'
 import type { ConnectionActivity } from './connection-ui'
+import type { AuthOptions, ConnectionStatus, DeviceFlowInfo } from '../../../../shared/connection'
 
 const IPC_FAILURE: ConnectionStatus = {
   state: 'error',

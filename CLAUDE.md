@@ -101,7 +101,16 @@ Mudou UI, IPC, preload, segurança ou build? Rode também `pnpm e2e`.
 
 ```
 src/
-  shared/ipc-contract.ts   # canais IPC, ConnectionStatus, credenciais, OrkioApi. Sem Node/DOM.
+  shared/ipc-contract.ts   # só canais IPC (`IPC_CHANNELS`) e o tipo da API (`OrkioApi`). Sem Node/DOM.
+                           # Tipos de domínio ficam no módulo do assunto (importe de lá, não do contrato):
+  shared/result.ts         # `Result<T>` único ({ok,value} | {ok:false,error}) das chamadas do renderer
+  shared/connection.ts     # ConnectionStatus, credenciais, Device Flow, links de docs dos tokens
+  shared/notion.ts         # bancos, mapeamento e tarefas do Notion (também o formato salvo em disco)
+  shared/projects.ts       # ProjectView, ProjectRepo, seleção/erros/mutação de projetos
+  shared/orkio-bot.ts      # estado do GitHub App das revisões por repositório
+  shared/github-names.ts   # owner, repo, login, revisor, branch, link de instalação, GITHUB_API_VERSION
+  shared/text.ts           # normalizeLabel (sem acento/caixa, espaços juntados) e stripAccents
+  shared/attachments.ts    # anexos: limites, extensões, mensagens (renderer pré-checa, main confere)
   shared/notion-mapping.ts # regras do mapeamento (tipos por campo, obrigatórios) p/ main e renderer
   shared/task-id-match.ts  # casamento puro de IDs (ORK-142) em branches/títulos
   shared/task-signals.ts   # TaskSignals, buildTaskSignals, diffSignals (base da Etapa 3)
@@ -219,7 +228,7 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 `testConnection()` (revalida na API).
 
 - Credenciais são uniões discriminadas por `kind`. `ConnectorCredentials`
-  (`shared/ipc-contract.ts`) só tem o que o renderer pode mandar (`'token'`).
+  (`shared/connection.ts`) só tem o que o renderer pode mandar (`'token'`).
   `OAuthCredentials<TTokens>` (`kind: 'oauth'`) existe só no main.
 - Conectores com OAuth implementam `OAuthConnector`: `getAuthOptions()`, `startOAuth()`
   (resolve quando o fluxo termina) e `cancelOAuth()`. O fluxo roda inteiro no main; o renderer
@@ -236,12 +245,19 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - Erros esperados viram `{ state: 'error', message }`, sem lançar exceção. Falhas
   transitórias (rede, 5xx, 429) em conexão já salva viram `connected` com `warning`.
 - Injete dependências (`fetch`, `sleep`, `store`, `now`) para testar sem rede.
-- Para adicionar um conector: `ConnectorId` e canais em `shared/ipc-contract.ts`,
+- Para adicionar um conector: `ConnectorId` em `shared/connection.ts`, canais em `shared/ipc-contract.ts`,
   `connectors/<id>/`, `ipc/<id>.ipc.ts`, exposição no preload e feature no renderer.
 
 ## IPC
 
 - Canais definidos em `IPC_CHANNELS` (`shared/ipc-contract.ts`). Use `ipcMain.handle`/`invoke`.
+- O contrato só tem canais e `OrkioApi`; tipo novo de domínio vai para o módulo do assunto em
+  `shared/` (ex.: `shared/projects.ts`), e o resultado das chamadas é `Result<T>` (`shared/result.ts`).
+- Regras que o renderer e o main checam (defesa em profundidade) moram em `shared/` e os dois lados
+  importam: nomes do GitHub (`github-names.ts`), anexos (`attachments.ts`), nome de comando
+  (`isCommandName`) e ferramentas de edição (`EDIT_TOOLS`) em `agent-run.ts`, tipos de branch
+  (`BRANCH_KINDS`/`withBranchKind` em `slug.ts`), limites da revisão publicada (`review-publish.ts`).
+  Comparar rótulos (etapas, status, busca) sempre com `normalizeLabel` (`shared/text.ts`).
 - Todo handler checa a origem com `createSenderGuard` e valida o payload (`unknown`).
 - O preload expõe funções específicas, nunca `ipcRenderer` cru.
 - Links externos: `window.orkio.openExternal`, com allowlist em `ipc/shell.ipc.ts`
@@ -318,7 +334,7 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 
 ## GitHub
 
-- Versão da API em `GITHUB_API_VERSION` (`github.client.ts`), hoje `2026-03-10`; headers em
+- Versão da API em `GITHUB_API_VERSION` (`shared/github-names.ts`), hoje `2026-03-10`; headers em
   `githubHeaders()` (Bearer, `application/vnd.github+json`, `X-GitHub-Api-Version`, User-Agent).
 - Rate limits: primário (403/429 + `x-ratelimit-remaining: 0` → `x-ratelimit-reset`) e
   secundário (403/429 + `Retry-After`, ou 1 min). Uma nova tentativa se a espera for ≤ 5 s.
@@ -634,7 +650,8 @@ watch`, `gh api` GET/HEAD em `repos/<owner>/<repo>/…` ou GraphQL sem mutation,
   sugeridos ou nome livre; raciocínio em grade 3×2, só com `supportsEffort`), vale só para a
   mensagem enviada (`SendMessageRequest.runtime`) e zera depois. Mensagem que vai para o fluxo (passo
   rodando/esperando) não leva o runtime: o passo usa o dele.
-- **Anexos** (`main/claude/attachments.ts`, `features/claude/attachments-ui.ts`): até 5 por
+- **Anexos** (`shared/attachments.ts` com limites/extensões/mensagens; `main/claude/attachments.ts`,
+  `features/claude/attachments-ui.ts`): até 5 por
   mensagem, 10 MB cada, png/jpeg/webp/gif/pdf/md/txt; o tipo vem do conteúdo (`sniffAttachment`, extensão do arquivo
   salvo = tipo detectado; HTML/executável com extensão de imagem é recusado), nome saneado
   (`safeAttachmentName`). O IPC valida a forma (≤ 5, nome ≤ 120, `Uint8Array` ≤ 10 MB); o

@@ -1,63 +1,7 @@
 /**
- * Contrato compartilhado entre main, preload e renderer.
- * Só tipos e constantes — nada aqui pode depender de Node ou do DOM.
+ * Contrato do IPC entre main, preload e renderer: canais e o tipo da API (`window.orkio`).
+ * Os tipos de domínio moram nos módulos de `shared/` de cada assunto. Sem Node nem DOM.
  */
-
-import type { BoardConfig, BoardStage, StageIssue, StatusOption } from './board'
-import type { FlowDraft } from './flow'
-import type { ReviewThreadsResult } from './review'
-import type { TaskSignals } from './task-signals'
-import type { Flow, FlowRunView, ProjectFlows } from './task-flow'
-import type { AlvaPrecheck, BacklogTaskDocument, BacklogTaskInfo } from './alva'
-import type { DeliverySettings } from './delivery'
-import type {
-  ReleaseNotes,
-  UpdateChannel,
-  UpdateInstallMode,
-  UpdateInstallResult,
-  UpdateStatus
-} from './updates'
-import type { ActivityPage, ActivityQuery, OverviewSnapshot, TaskSection } from './overview'
-
-/** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
-export interface TaskFlowsProject extends ProjectFlows {
-  extractors: { id: string; label: string }[]
-  /** `pending`: ação feita à mão (vira espera que você aprova). */
-  actions: { id: string; label: string; pending?: string }[]
-  /** Ajustes de entrega do projeto (5C). */
-  delivery: DeliverySettings
-}
-
-export interface AlvaStatusView {
-  precheck: AlvaPrecheck | null
-  templates: {
-    id: string
-    name: string
-    stageId: string | null
-    mode: 'on_enter' | 'manual' | null
-  }[]
-  /** Colunas que já têm algum fluxo ligado (ids das etapas): a tela não sugere trocar. */
-  boundStages: string[]
-  maxParallel: number
-}
-import type {
-  ArtifactCandidate,
-  ArtifactPublishMode,
-  ArtifactView,
-  CatalogGroup,
-  ClaudeCodeStatus,
-  ClaudeDiff,
-  TaskBranchesView,
-  ClaudeResult,
-  EditorId,
-  PermissionAnswer,
-  RunEventMessage,
-  RunLogEvent,
-  RunPreparation,
-  SendMessageRequest,
-  StartRunRequest,
-  TaskRunsState
-} from './agent-run'
 
 import type {
   AgentBadge,
@@ -67,9 +11,77 @@ import type {
   AgentsState,
   ProjectAgents
 } from './agent'
+import type {
+  ArtifactCandidate,
+  ArtifactPublishMode,
+  ArtifactView,
+  CatalogGroup,
+  ClaudeCodeStatus,
+  ClaudeDiff,
+  EditorId,
+  PermissionAnswer,
+  RunEventMessage,
+  RunLogEvent,
+  RunPreparation,
+  SendMessageRequest,
+  StartRunRequest,
+  TaskBranchesView,
+  TaskRunsState
+} from './agent-run'
+import type { AlvaPrecheck, AlvaStatusView, BacklogTaskDocument, BacklogTaskInfo } from './alva'
+import type { AutomationStatus } from './automation'
+import type {
+  BoardCard,
+  BoardHistoryEntry,
+  BoardSaveInput,
+  BoardSyncEvent,
+  BoardView
+} from './board'
+import type {
+  AuthOptions,
+  ConnectionStatus,
+  ConnectorCredentials,
+  DeviceFlowStartResult
+} from './connection'
+import type { DeliverySettings } from './delivery'
+import type { ConfigEvent, FlowDraft, FlowFileResult } from './flow'
+import type {
+  NotionDataSourceList,
+  NotionProjectChoice,
+  NotionTaskSearchResult,
+  NotionTasksResult,
+  NotionTasksSchemaInfo,
+  NotionWorkspaceInput,
+  NotionWorkspaceStatus
+} from './notion'
 import type { OrchestratorConfig, OrchestratorState } from './orchestrator'
-
-export type { BoardConfig, BoardStage, StageIssue, StatusOption, TaskSignals }
+import type { OrkioBotStatus } from './orkio-bot'
+import type { ActivityPage, ActivityQuery, BoardTaskRef, OverviewSnapshot } from './overview'
+import type {
+  BranchChangedEvent,
+  CreateProjectInput,
+  PickFolderResult,
+  ProjectMutationResult,
+  ProjectsListResult
+} from './projects'
+import type { Result } from './result'
+import type { ReviewThreadsResult } from './review'
+import type {
+  Flow,
+  FlowRunView,
+  OpenPrResult,
+  TaskFlowActivity,
+  TaskFlowsProject
+} from './task-flow'
+import type { TaskSignalsResult } from './task-signals'
+import type {
+  AboutInfo,
+  ReleaseNotes,
+  UpdateChannel,
+  UpdateInstallMode,
+  UpdateInstallResult,
+  UpdateStatus
+} from './updates'
 
 export const IPC_CHANNELS = {
   notion: {
@@ -246,518 +258,7 @@ export const IPC_CHANNELS = {
   }
 } as const
 
-/** Conectores existentes. Depois: 'claude-code'. */
-export type ConnectorId = 'notion' | 'github'
-
-export interface ConnectedAccount {
-  userName: string
-  /** Identificador público da conta (ex.: login do GitHub, sem "@"). */
-  handle?: string
-  workspaceName?: string
-  avatarUrl?: string
-}
-
-export type ConnectionStatus =
-  | { state: 'disconnected' }
-  | { state: 'connecting' }
-  | {
-      state: 'connected'
-      account: ConnectedAccount
-      connectedAt: string
-      /** Conectado, mas a última verificação falhou por motivo transitório (rede, 5xx, 429). */
-      warning?: string
-    }
-  | {
-      state: 'error'
-      message: string
-      /** true quando ainda existe credencial salva (ex.: token revogado). */
-      hasStoredCredentials?: boolean
-    }
-
-/**
- * Credenciais que o RENDERER pode enviar (token colado pelo usuário).
- * Credenciais OAuth nunca passam pelo renderer: o fluxo roda inteiro no main
- * (ver `OAuthCredentials` em src/main/connectors/types.ts).
- */
-export type TokenCredentials = { kind: 'token'; token: string }
-export type ConnectorCredentials = TokenCredentials
-
-/** Métodos de conexão disponíveis neste build. */
-export interface AuthOptions {
-  /** false quando o build não tem a config OAuth do serviço (client ID etc.). */
-  oauth: boolean
-}
-
-/** Dados que o usuário precisa para concluir um Device Flow (nunca inclui tokens). */
-export interface DeviceFlowInfo {
-  /** Código que o usuário digita no navegador (ex.: "WDJB-MJHT"). */
-  userCode: string
-  /** Página onde o código é digitado (ex.: https://github.com/login/device). */
-  verificationUri: string
-  /** Quando o código expira (ISO 8601). */
-  expiresAt: string
-}
-
-export type DeviceFlowStartResult =
-  { ok: true; flow: DeviceFlowInfo } | { ok: false; status: ConnectionStatus }
-
-// ---------- Notion: bancos (data sources), mapeamento e tarefas ----------
-
-export type NotionColor =
-  'default' | 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
-
-export interface NotionDataSourceSummary {
-  id: string
-  title: string
-  url: string | null
-}
-
-export interface NotionPropertySummary {
-  id: string
-  name: string
-  /** Tipo do Notion: title, status, select, unique_id, relation, people, number, ... */
-  type: string
-  options?: { id: string; name: string; color: NotionColor }[]
-  /** Para `relation`: o data source apontado. */
-  relationDataSourceId?: string | null
-  /** Para `unique_id`: o prefixo (ex.: "ORK"). */
-  uniqueIdPrefix?: string | null
-}
-
-/** Referência a uma propriedade: o id é estável a renomeações; o nome serve para exibir. */
-export interface NotionPropertyRef {
-  id: string
-  name: string
-  type: string
-}
-
-export type NotionMappingField =
-  'title' | 'status' | 'uniqueId' | 'project' | 'priority' | 'assignee'
-
-export interface NotionMapping {
-  title: NotionPropertyRef
-  status: NotionPropertyRef
-  /**
-   * Propriedade ID do Notion (ORK-142), opcional: sem ela, a tarefa é identificada pela página e a
-   * branch/PR se liga pelo registro local, pelo link do Notion na PR ou pelo "Vincular branch".
-   */
-  uniqueId?: NotionPropertyRef
-  /** Relação das Tarefas com o banco de Projetos. */
-  project: NotionPropertyRef
-  priority?: NotionPropertyRef
-  assignee?: NotionPropertyRef
-}
-
-export interface NotionWorkspaceConfig {
-  projectsDataSource: { id: string; name: string }
-  tasksDataSource: { id: string; name: string }
-  mapping: NotionMapping
-  updatedAt: string
-}
-
-/** O que o assistente envia ao salvar: ids dos bancos e, por campo, o id da propriedade. */
-export interface NotionWorkspaceInput {
-  projectsDataSourceId: string
-  tasksDataSourceId: string
-  mapping: Partial<Record<NotionMappingField, string | null>>
-}
-
-export interface NotionWorkspaceStatus {
-  /** null = ainda não configurado. */
-  config: NotionWorkspaceConfig | null
-  /** checking (revalidando), ok, warning (avisos), broken (tarefas bloqueadas), unverified (sem rede/Notion). */
-  health: 'checking' | 'ok' | 'warning' | 'broken' | 'unverified'
-  messages: string[]
-  /** Como o Notion está conectado (afeta quais bancos aparecem). */
-  connection: 'oauth' | 'token' | null
-}
-
-export interface NotionDataSourceList {
-  dataSources: NotionDataSourceSummary[]
-  /** Truncado no limite de leitura. */
-  truncated: boolean
-  connection: 'oauth' | 'token' | null
-}
-
-export interface NotionTasksSchemaInfo {
-  schema: { id: string; title: string; properties: NotionPropertySummary[] }
-  /** Sugestão automática (pode faltar campos). */
-  suggestion: Partial<NotionMapping>
-  /** Campos obrigatórios sem nenhuma propriedade possível (ex.: sem `unique_id`). */
-  missing: NotionMappingField[]
-}
-
-export interface NotionProjectPage {
-  id: string
-  title: string
-  url: string | null
-}
-
-export interface NotionProjectChoice extends NotionProjectPage {
-  /** Projeto local que já usa esta página (um projeto do Notion → um projeto local). */
-  linkedTo: { projectId: string; name: string } | null
-  /** Similaridade com o nome do projeto/repositório local (0..1). */
-  similarity: number
-}
-
-export interface NotionTask {
-  id: string
-  url: string | null
-  /** Ex.: "ORK-142". */
-  displayId: string | null
-  title: string
-  /** `id` da opção (estável a renomeações), quando o Notion informa. */
-  status: { id?: string | null; name: string; color: NotionColor } | null
-  priority: { name: string; color: NotionColor } | null
-  /** Nomes dos responsáveis (se mapeado). */
-  assignees: string[]
-}
-
-/** Tarefa achada na busca (banco de Tarefas inteiro): com o projeto local, se vinculado. */
-export interface NotionTaskHit extends NotionTask {
-  /** Projeto do Orkio vinculado à página de Projetos da tarefa; `null` se nenhum. */
-  projectId: string | null
-  projectName: string | null
-}
-
-export interface NotionTaskSearchResult {
-  tasks: NotionTaskHit[]
-}
-
-export interface NotionTasksResult {
-  tasks: NotionTask[]
-  truncated: boolean
-  fetchedAt: string
-  fromCache: boolean
-}
-
-/** Resultado padrão das operações do Notion no renderer. */
-export type NotionResult<T> =
-  | { ok: true; value: T }
-  | {
-      ok: false
-      error: {
-        code: string
-        message: string
-        /** O usuário pode resolver reconectando o Notion (ex.: escolher mais páginas no OAuth). */
-        canReconnect?: boolean
-      }
-    }
-
-// ---------- Sinais das tarefas (Etapa 2D) ----------
-
-/** Situação da parte do GitHub nos sinais. */
-export type SignalsGitHubState =
-  | 'ok'
-  | 'disconnected'
-  | 'no_repo'
-  | 'enterprise'
-  | 'no_access'
-  | 'sso'
-  | 'restricted'
-  | 'rate_limited'
-  | 'unverified'
-
-export interface TaskSignalsResult {
-  /** Por id da página da tarefa no Notion. */
-  signals: Record<string, TaskSignals>
-  github: SignalsGitHubState
-  /** Branches locais lidas? (pasta/git indisponível → false) */
-  local: boolean
-  /** Avisos curtos em pt-BR (sem GitHub, sem acesso, detalhes indisponíveis...). */
-  messages: string[]
-  /** Link sugerido (autorizar SSO, pedir aprovação da organização). */
-  action?: ProjectAction
-  /** Tarefas cujo ID não tem prefixo (não dá para casar com branches/PRs). */
-  tasksWithoutPrefix: number
-  fetchedAt: string
-}
-
-// ---------- Quadro (Etapa 3A) ----------
-
-export type CardSyncState = 'synced' | 'pending' | 'failed'
-
-export interface BoardCard {
-  taskId: string
-  displayId: string | null
-  title: string
-  url: string | null
-  status: { name: string; color: NotionColor } | null
-  priority: { name: string; color: NotionColor } | null
-  assignees: string[]
-  /** `null` = "Sem etapa" (nenhuma etapa usa o status atual do Notion). */
-  stageId: string | null
-  blocked: boolean
-  /** Automações pausadas nesta tarefa (3B). */
-  automationPaused: boolean
-  sync: { state: CardSyncState; message?: string }
-}
-
-export interface BoardView {
-  projectId: string
-  projectName: string
-  /** `null` = quadro ainda não criado: use `setup`. */
-  config: BoardConfig | null
-  /** Sugestão do template padrão contra as opções reais (só quando `config` é null). */
-  suggestion: BoardStage[] | null
-  /** Opções atuais do status mapeado na 2C. */
-  statusOptions: StatusOption[]
-  /** Propriedades do banco de Tarefas elegíveis para "Etapa Orkio" (select) e "Bloqueada" (checkbox). */
-  selectProperties: { id: string; name: string; options: StatusOption[] }[]
-  checkboxProperties: { id: string; name: string }[]
-  issues: StageIssue[]
-  cards: BoardCard[]
-  truncated: boolean
-  pendingCount: number
-  fetchedAt: string
-  /** Movimentos de cada automação (id da regra) nos últimos 7 dias. */
-  ruleCountsWeek: Record<string, number>
-}
-
-export type OrkioStageChoice =
-  | { mode: 'none' }
-  | { mode: 'existing'; propertyId: string }
-  /** Cria a propriedade select "Etapa Orkio" no banco de Tarefas (só com confirmação). */
-  | { mode: 'create' }
-
-export interface BoardSaveInput {
-  stages: { id: string | null; name: string; notionStatusId: string }[]
-  orkioStage: OrkioStageChoice
-  /** Autoriza adicionar ao select "Etapa Orkio" as opções que faltam. */
-  addMissingOptions: boolean
-  blockedPropertyId: string | null
-}
-
-export interface BoardSyncEvent {
-  projectId: string
-  taskId: string
-  state: CardSyncState
-  stageId: string | null
-  blocked: boolean
-  message?: string
-  canReconnect?: boolean
-}
-
-export interface BoardHistoryEntry {
-  id: number
-  at: string
-  kind: string
-  source: 'manual' | 'notion' | 'automation'
-  fromStage: string | null
-  toStage: string | null
-  detail: Record<string, unknown> | null
-}
-
-// ---------- Fluxo do projeto (Etapa 3C) ----------
-
-export interface ConfigEvent {
-  id: number
-  at: string
-  /** Usuário do sistema operacional. */
-  actor: string
-  changes: string[]
-}
-
-export type FlowFileResult =
-  { ok: true; content: unknown } | { ok: false; cancelled: boolean; message?: string }
-
-// ---------- Automações (Etapa 3B) ----------
-
-export interface AutomationStatus {
-  /** "Pausar todas" ligado. */
-  paused: boolean
-  /** Situação do GitHub no último ciclo do projeto. */
-  github: SignalsGitHubState | 'unknown'
-  lastRunAt: string | null
-  nextRunAt: string | null
-  error: string | null
-}
-
-export interface BoardTaskRef {
-  projectId: string
-  taskId: string
-  /** Seção do painel da tarefa a mostrar (Visão geral, 6D). */
-  section?: TaskSection
-}
-
-// ---------- orkio[bot] (GitHub App que publica as revisões) ----------
-
-export type OrkioBotRepoState =
-  | { state: 'installed' }
-  | { state: 'not_installed'; installUrl: string | null }
-  /** A conta conectada não enxerga o repositório. */
-  | { state: 'no_access' }
-  /** Não deu para saber (site sem endereço/configuração, rede, rate limit). */
-  | { state: 'unknown'; message: string }
-
-export interface OrkioBotRepo {
-  owner: string
-  repo: string
-  /** Nomes dos projetos do Orkio com este repositório. */
-  projects: string[]
-  status: OrkioBotRepoState
-}
-
-export interface OrkioBotStatus {
-  /** Sem GitHub conectado não há como consultar (a consulta usa a conta do usuário). */
-  github: 'connected' | 'disconnected'
-  repos: OrkioBotRepo[]
-  /** ISO; `null` sem consulta. */
-  checkedAt: string | null
-}
-
-// ---------- Projetos ----------
-
-export interface ProjectRepo {
-  /** Host da API: github.com (inclusive para aliases de SSH) ou o host do GitHub Enterprise. */
-  host: string
-  owner: string
-  name: string
-  /** Remote local que aponta para este repositório (ex.: origin). */
-  remoteName: string
-  defaultBranch: string | null
-  visibility: 'public' | 'private' | 'internal' | 'unknown'
-  /** `null` quando não foi possível verificar (ex.: GitHub Enterprise). */
-  canPush: boolean | null
-  archived: boolean
-  /** Confirmado na API do GitHub com a conta conectada. */
-  verified: boolean
-}
-
-/** Link externo oferecido junto de um erro/estado (sempre dentro da allowlist do main). */
-export interface ProjectAction {
-  label: string
-  url: string
-}
-
-export type ProjectHealthState =
-  | 'checking'
-  | 'ok'
-  | 'missing_folder'
-  | 'not_a_repo'
-  | 'repo_mismatch'
-  | 'no_access'
-  | 'github_disconnected'
-  | 'unverified'
-  | 'git_error'
-
-export interface ProjectHealth {
-  state: ProjectHealthState
-  message?: string
-  action?: ProjectAction
-}
-
-export interface ProjectNotice {
-  code: 'archived' | 'no_push' | 'enterprise_unverified'
-  message: string
-}
-
-export interface ProjectView {
-  id: string
-  name: string
-  /** Só para exibição: o renderer nunca envia caminhos de volta ao main. */
-  localPath: string
-  repo: ProjectRepo | null
-  createdAt: string
-  updatedAt: string
-  /** Estado local do git; `null` quando a pasta/repositório não está acessível. */
-  local: { branch: string | null; dirty: boolean } | null
-  health: ProjectHealth
-  notices: ProjectNotice[]
-  /** Projeto do Notion vinculado (página do banco de Projetos). */
-  notionProject: { id: string; name: string } | null
-}
-
-export interface ProjectsListResult {
-  projects: ProjectView[]
-  /** Ex.: configuração corrompida recuperada, modo só leitura. */
-  warning?: string
-}
-
-export interface RemoteCandidate {
-  remoteName: string
-  /** Host como aparece no remote. */
-  host: string
-  owner: string
-  name: string
-  /** `ssh-alias` e `enterprise` exigem confirmação do usuário de que é GitHub. */
-  hostKind: 'github' | 'ssh-alias' | 'enterprise'
-}
-
-/** Pasta escolhida no diálogo do main, já analisada. As próximas chamadas usam `selectionId`. */
-export interface ProjectSelection {
-  selectionId: string
-  rootPath: string
-  folderName: string
-  /** A pasta escolhida era uma subpasta; usamos a raiz do repositório. */
-  resolvedFromSubfolder: boolean
-  branch: string | null
-  dirty: boolean
-  candidates: RemoteCandidate[]
-  suggestedRemote: string
-}
-
-export type ProjectErrorCode =
-  | 'not_a_repo'
-  | 'no_remote'
-  | 'not_github'
-  | 'git_not_found'
-  | 'git_error'
-  | 'github_disconnected'
-  | 'no_access'
-  | 'sso_required'
-  | 'oauth_restricted'
-  | 'host_unconfirmed'
-  | 'selection_expired'
-  | 'already_added'
-  | 'repo_mismatch'
-  | 'project_not_found'
-  | 'invalid_name'
-  | 'storage'
-  | 'github_error'
-
-export interface ProjectError {
-  code: ProjectErrorCode
-  message: string
-  action?: ProjectAction
-}
-
-export type PickFolderResult =
-  | { ok: true; selection: ProjectSelection }
-  | { ok: false; cancelled: true }
-  | { ok: false; cancelled: false; error: ProjectError }
-
-export interface CreateProjectInput {
-  selectionId: string
-  remoteName: string
-  /** O usuário confirmou que um host de alias/Enterprise é GitHub. */
-  hostConfirmed: boolean
-  name?: string
-}
-
-export type ProjectMutationResult =
-  | { ok: true; project: ProjectView }
-  | { ok: false; cancelled: true }
-  | { ok: false; cancelled: false; error: ProjectError }
-
-export interface BranchChangedEvent {
-  projectId: string
-  branch: string | null
-}
-
 /** API exposta pelo preload em `window.orkio`. */
-/**
- * Resultado de "Abrir PR". `mode: 'pr'` = push + /alva-flow:pr (a PR sai do fluxo). `mode: 'push'` =
- * só o push (sem task do Backlog.md vinculada): `compareUrl` abre "Criar a PR" no GitHub (o
- * link é montado no main). Em ambos o fluxo começou; o gate do push aparece na conversa.
- */
-export interface OpenPrResult {
-  /** `false`: nada a enviar e sem alva-flow, então não há fluxo; só o `compareUrl`. */
-  started: boolean
-  mode: 'pr' | 'push'
-  compareUrl: string | null
-}
-
 export interface OrkioApi {
   notion: {
     getStatus(): Promise<ConnectionStatus>
@@ -791,15 +292,11 @@ export interface OrkioApi {
   }
   /** Quadro kanban por projeto (Etapa 3A). */
   board: {
-    get(projectId: string, options?: { force?: boolean }): Promise<NotionResult<BoardView>>
-    save(projectId: string, input: BoardSaveInput): Promise<NotionResult<BoardView>>
-    move(projectId: string, taskId: string, stageId: string): Promise<NotionResult<BoardCard>>
-    setBlocked(
-      projectId: string,
-      taskId: string,
-      blocked: boolean
-    ): Promise<NotionResult<BoardCard>>
-    history(projectId: string, taskId: string): Promise<NotionResult<BoardHistoryEntry[]>>
+    get(projectId: string, options?: { force?: boolean }): Promise<Result<BoardView>>
+    save(projectId: string, input: BoardSaveInput): Promise<Result<BoardView>>
+    move(projectId: string, taskId: string, stageId: string): Promise<Result<BoardCard>>
+    setBlocked(projectId: string, taskId: string, blocked: boolean): Promise<Result<BoardCard>>
+    history(projectId: string, taskId: string): Promise<Result<BoardHistoryEntry[]>>
     /** Tenta agora as escritas pendentes. */
     retryNow(): Promise<void>
     onSyncChanged(listener: (event: BoardSyncEvent) => void): () => void
@@ -807,7 +304,7 @@ export interface OrkioApi {
       projectId: string,
       taskId: string,
       paused: boolean
-    ): Promise<NotionResult<BoardCard>>
+    ): Promise<Result<BoardCard>>
     /** O quadro mudou por automação (recarregar). */
     onChanged(listener: (event: { projectId: string }) => void): () => void
     /** Pedido para abrir uma tarefa (clique na notificação). */
@@ -816,7 +313,7 @@ export interface OrkioApi {
   /** Editor do fluxo (3C): etapas + automações. */
   flow: {
     /** Valida de novo no main e salva; tarefas de etapas removidas vão para o destino escolhido. */
-    save(projectId: string, draft: FlowDraft): Promise<NotionResult<BoardView>>
+    save(projectId: string, draft: FlowDraft): Promise<Result<BoardView>>
     events(projectId: string): Promise<ConfigEvent[]>
     /** Abre "Salvar como…" no main e grava o JSON (o renderer nunca escolhe caminhos). */
     exportFile(content: unknown): Promise<FlowFileResult>
@@ -834,8 +331,8 @@ export interface OrkioApi {
   /** Integração com o plugin alva-flow (5B). */
   alva: {
     /** "Pronto para o alva-flow?" (`force` verifica de novo). */
-    precheck(projectId: string, options?: { force?: boolean }): Promise<ClaudeResult<AlvaPrecheck>>
-    status(projectId: string): Promise<ClaudeResult<AlvaStatusView>>
+    precheck(projectId: string, options?: { force?: boolean }): Promise<Result<AlvaPrecheck>>
+    status(projectId: string): Promise<Result<AlvaStatusView>>
     /** Cria os templates "Fluxo Alva" e liga nas colunas escolhidas (ao entrar). */
     createTemplates(
       projectId: string,
@@ -845,92 +342,86 @@ export interface OrkioApi {
         review: string | null
         reviewed: string | null
       }
-    ): Promise<ClaudeResult<AlvaStatusView>>
+    ): Promise<Result<AlvaStatusView>>
     /** Coluna "Planejando" (entre Prioridades e Em andamento) com o status do Notion escolhido. */
-    addPlanningStage(projectId: string, notionStatusId: string): Promise<ClaudeResult<string>>
-    setMaxParallel(projectId: string, value: number): Promise<ClaudeResult<AlvaStatusView>>
+    addPlanningStage(projectId: string, notionStatusId: string): Promise<Result<string>>
+    setMaxParallel(projectId: string, value: number): Promise<Result<AlvaStatusView>>
     /** Task do Backlog.md vinculada (id, título, status, critérios). */
     taskSummary(
       projectId: string,
       taskId: string
-    ): Promise<ClaudeResult<{ linked: string | null; task: BacklogTaskInfo | null }>>
+    ): Promise<Result<{ linked: string | null; task: BacklogTaskInfo | null }>>
     /** Texto da task (spec, critérios, plano) para ler e aprovar; só leitura, segredos ocultados. */
     taskDocument(
       projectId: string,
       taskId: string
-    ): Promise<ClaudeResult<{ linked: string | null; doc: BacklogTaskDocument | null }>>
+    ): Promise<Result<{ linked: string | null; doc: BacklogTaskDocument | null }>>
   }
   /**
    * Agentes (8A): perfis (arquivos `.md`), aprovação dos perfis do repositório e atribuição de
    * tarefas. Agentes não ganham permissões: só instruções, modelo, fluxo preferido e limites.
    */
   agents: {
-    list(projectId: string): Promise<ClaudeResult<AgentsState>>
+    list(projectId: string): Promise<Result<AgentsState>>
     save(input: {
       projectId: string
       scope: AgentScope
       profile: AgentProfile
       isNew: boolean
-    }): Promise<ClaudeResult<AgentsState>>
+    }): Promise<Result<AgentsState>>
     /** Aprova o perfil do repositório exatamente como visto (`hash`). */
-    approve(projectId: string, key: AgentKey, hash: string): Promise<ClaudeResult<AgentsState>>
+    approve(projectId: string, key: AgentKey, hash: string): Promise<Result<AgentsState>>
     /** `key = null` tira a atribuição. */
-    assign(projectId: string, taskId: string, key: AgentKey | null): Promise<ClaudeResult<null>>
-    setRules(
-      projectId: string,
-      rules: ProjectAgents['assignOnEnter']
-    ): Promise<ClaudeResult<AgentsState>>
+    assign(projectId: string, taskId: string, key: AgentKey | null): Promise<Result<null>>
+    setRules(projectId: string, rules: ProjectAgents['assignOnEnter']): Promise<Result<AgentsState>>
     /** Avatar de cada tarefa atribuída (cards do quadro). */
     badges(projectId: string): Promise<Record<string, AgentBadge>>
     /** 8B: orquestrador do projeto (config, validação, carga dos agentes, última rodada). */
-    orchestrator(projectId: string): Promise<ClaudeResult<OrchestratorState>>
+    orchestrator(projectId: string): Promise<Result<OrchestratorState>>
     /** Valida de novo no main; erros bloqueiam. */
     saveOrchestrator(
       projectId: string,
       config: OrchestratorConfig
-    ): Promise<ClaudeResult<OrchestratorState>>
+    ): Promise<Result<OrchestratorState>>
     /** Uma rodada agora (sem esperar o ciclo de ~60 s). */
-    runOrchestrator(projectId: string): Promise<ClaudeResult<OrchestratorState>>
+    runOrchestrator(projectId: string): Promise<Result<OrchestratorState>>
     onChanged(listener: (event: { projectId: string }) => void): () => void
   }
   /** Fluxos de tarefa (5A): sequências de passos ligadas às colunas do quadro. */
   taskFlows: {
-    getProject(projectId: string): Promise<ClaudeResult<TaskFlowsProject>>
+    getProject(projectId: string): Promise<Result<TaskFlowsProject>>
     /** Valida de novo no main; erros bloqueiam. */
-    saveFlows(projectId: string, flows: Flow[]): Promise<ClaudeResult<TaskFlowsProject>>
+    saveFlows(projectId: string, flows: Flow[]): Promise<Result<TaskFlowsProject>>
     /** Execuções da tarefa (a ativa ou a mais recente primeiro). */
     runs(taskId: string): Promise<FlowRunView[]>
     /** Para os cards: tarefas com fluxo ativo e se ele espera você. */
-    active(projectId: string): Promise<Record<string, 'running' | 'needs_you'>>
+    active(projectId: string): Promise<Record<string, TaskFlowActivity>>
     /** "Rodar fluxo": o fluxo ligado à etapa atual da tarefa. */
-    start(projectId: string, taskId: string): Promise<ClaudeResult<FlowRunView>>
+    start(projectId: string, taskId: string): Promise<Result<FlowRunView>>
     /** Aprovar um gate; numa ação com escolha (ex.: revisores), os valores escolhidos. */
-    approve(flowRunId: string, values?: string[]): Promise<ClaudeResult<FlowRunView>>
+    approve(flowRunId: string, values?: string[]): Promise<Result<FlowRunView>>
     /** "Exigir minha aprovação para push" (5C). */
-    setDelivery(
-      projectId: string,
-      settings: DeliverySettings
-    ): Promise<ClaudeResult<TaskFlowsProject>>
+    setDelivery(projectId: string, settings: DeliverySettings): Promise<Result<TaskFlowsProject>>
     /** Rodar um fluxo específico à mão (ex.: "Alva: CI vermelho"). */
-    startById(projectId: string, taskId: string, flowId: string): Promise<ClaudeResult<FlowRunView>>
+    startById(projectId: string, taskId: string, flowId: string): Promise<Result<FlowRunView>>
     /** "Abrir PR": push (com o gate) e /alva-flow:pr em modo entrega, ou só o push (sem vínculo). */
-    openPr(projectId: string, taskId: string): Promise<ClaudeResult<OpenPrResult>>
-    reject(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
-    resume(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
+    openPr(projectId: string, taskId: string): Promise<Result<OpenPrResult>>
+    reject(flowRunId: string): Promise<Result<FlowRunView>>
+    resume(flowRunId: string): Promise<Result<FlowRunView>>
     /** Volta a um comando anterior ao passo parado (ex.: /commit antes do push) e segue dali. */
-    rerunFrom(flowRunId: string, stepId: string): Promise<ClaudeResult<FlowRunView>>
+    rerunFrom(flowRunId: string, stepId: string): Promise<Result<FlowRunView>>
     /** Responde ao Claude no passo parado e segue na mesma sessão. */
-    resumeWithReply(flowRunId: string, text: string): Promise<ClaudeResult<FlowRunView>>
+    resumeWithReply(flowRunId: string, text: string): Promise<Result<FlowRunView>>
     /**
      * "Pedir ajustes…" no gate que espera você: o texto volta ao passo de ajustes (mesma sessão do
      * Claude Code) e o gate aparece de novo. Recusado depois do limite de voltas.
      */
-    reviseGate(projectId: string, taskId: string, text: string): Promise<ClaudeResult<FlowRunView>>
-    skip(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
-    cancel(flowRunId: string): Promise<ClaudeResult<FlowRunView>>
-    decideLeft(flowRunId: string, choice: 'cancel' | 'continue'): Promise<ClaudeResult<FlowRunView>>
+    reviseGate(projectId: string, taskId: string, text: string): Promise<Result<FlowRunView>>
+    skip(flowRunId: string): Promise<Result<FlowRunView>>
+    cancel(flowRunId: string): Promise<Result<FlowRunView>>
+    decideLeft(flowRunId: string, choice: 'cancel' | 'continue'): Promise<Result<FlowRunView>>
     /** Escolha pedida por um extrator (ex.: qual task do Backlog é desta tarefa). */
-    choose(flowRunId: string, value: string): Promise<ClaudeResult<FlowRunView>>
+    choose(flowRunId: string, value: string): Promise<Result<FlowRunView>>
     onChanged(listener: (event: { projectId: string; taskId: string }) => void): () => void
   }
   /** Claude Code (4A): CLI do usuário rodando a tarefa num worktree isolado. */
@@ -938,96 +429,89 @@ export interface OrkioApi {
     /** Instalado, versão e login (nunca credenciais). `force` detecta de novo. */
     status(options?: { force?: boolean }): Promise<ClaudeCodeStatus>
     /** Execuções e ambiente da tarefa (local, sem rede). */
-    state(projectId: string, taskId: string): Promise<ClaudeResult<TaskRunsState>>
+    state(projectId: string, taskId: string): Promise<Result<TaskRunsState>>
     /** Briefing do Notion (editável) e a branch que será usada. Não cria nada. */
-    prepare(projectId: string, taskId: string): Promise<ClaudeResult<RunPreparation>>
+    prepare(projectId: string, taskId: string): Promise<Result<RunPreparation>>
     /** Cria/reutiliza o worktree e inicia (ou enfileira) a execução. */
-    start(request: StartRunRequest): Promise<ClaudeResult<TaskRunsState>>
+    start(request: StartRunRequest): Promise<Result<TaskRunsState>>
     /** Mensagem do campo da sessão: continua a última sessão da tarefa ou começa uma. */
-    send(request: SendMessageRequest): Promise<ClaudeResult<TaskRunsState>>
+    send(request: SendMessageRequest): Promise<Result<TaskRunsState>>
     cancel(runId: string): Promise<void>
     answerPermission(runId: string, requestId: string, answer: PermissionAnswer): Promise<void>
     answerQuestion(runId: string, requestId: string, answers: Record<string, string>): Promise<void>
     readLog(runId: string): Promise<RunLogEvent[]>
     /** Remove o worktree (a branch fica). Com mudanças pendentes, exige `force`. */
-    cleanup(projectId: string, taskId: string, force: boolean): Promise<ClaudeResult<TaskRunsState>>
-    openEditor(projectId: string, taskId: string, editor: EditorId): Promise<ClaudeResult<null>>
+    cleanup(projectId: string, taskId: string, force: boolean): Promise<Result<TaskRunsState>>
+    openEditor(projectId: string, taskId: string, editor: EditorId): Promise<Result<null>>
     /** Abre o terminal do sistema na pasta de trabalho da tarefa (o main resolve a pasta). */
-    openTerminal(projectId: string, taskId: string): Promise<ClaudeResult<null>>
-    diff(projectId: string, taskId: string): Promise<ClaudeResult<ClaudeDiff>>
+    openTerminal(projectId: string, taskId: string): Promise<Result<null>>
+    diff(projectId: string, taskId: string): Promise<Result<ClaudeDiff>>
     /** Branches ligadas à tarefa e as do projeto ("Vincular branch"). */
-    branches(projectId: string, taskId: string): Promise<ClaudeResult<TaskBranchesView>>
-    linkBranch(
-      projectId: string,
-      taskId: string,
-      branch: string
-    ): Promise<ClaudeResult<TaskBranchesView>>
+    branches(projectId: string, taskId: string): Promise<Result<TaskBranchesView>>
+    linkBranch(projectId: string, taskId: string, branch: string): Promise<Result<TaskBranchesView>>
     unlinkBranch(
       projectId: string,
       taskId: string,
       branch: string
-    ): Promise<ClaudeResult<TaskBranchesView>>
+    ): Promise<Result<TaskBranchesView>>
     /** Comandos/skills instalados (usuário, projeto, plugins). Só metadados; recarrega a cada chamada. */
-    catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>>
+    catalog(projectId: string, taskId: string): Promise<Result<CatalogGroup[]>>
     /** Documentos alterados no ambiente (candidatos) e artefatos anexados à tarefa. */
     artifacts(
       projectId: string,
       taskId: string
-    ): Promise<ClaudeResult<{ candidates: ArtifactCandidate[]; attached: ArtifactView[] }>>
+    ): Promise<Result<{ candidates: ArtifactCandidate[]; attached: ArtifactView[] }>>
     /** Anexa um documento commitado (caminho relativo da lista de candidatos). */
     attachArtifact(
       projectId: string,
       taskId: string,
       path: string,
       runId: string | null
-    ): Promise<ClaudeResult<ArtifactView>>
+    ): Promise<Result<ArtifactView>>
     /** Publica no Notion (seção no fim da página da tarefa ou subpágina). */
     publishArtifact(
       projectId: string,
       artifactId: string,
       mode: ArtifactPublishMode
-    ): Promise<ClaudeResult<{ artifact: ArtifactView; url: string | null }>>
+    ): Promise<Result<{ artifact: ArtifactView; url: string | null }>>
     /** Assina os eventos das execuções. Devolve a função para cancelar a inscrição. */
     onRunEvent(listener: (message: RunEventMessage) => void): () => void
   }
   /** Branches e PRs ligadas às tarefas de um projeto pelo ID (só leitura). */
   signals: {
-    get(projectId: string, options?: { force?: boolean }): Promise<NotionResult<TaskSignalsResult>>
+    get(projectId: string, options?: { force?: boolean }): Promise<Result<TaskSignalsResult>>
     /** Threads de review da PR da tarefa (texto lido pelo main; Task 15). */
     reviewThreads(
       projectId: string,
       taskId: string,
       options?: { force?: boolean }
-    ): Promise<NotionResult<ReviewThreadsResult>>
+    ): Promise<Result<ReviewThreadsResult>>
   }
   /** Bancos do Notion (Projetos/Tarefas), vínculo com projetos locais e tarefas (só leitura). */
   notionWorkspace: {
     /** Estado da configuração; na primeira chamada revalida o schema no Notion. */
     getStatus(): Promise<NotionWorkspaceStatus>
     revalidate(): Promise<NotionWorkspaceStatus>
-    listDataSources(query?: string): Promise<NotionResult<NotionDataSourceList>>
+    listDataSources(query?: string): Promise<Result<NotionDataSourceList>>
     getTasksSchema(
       tasksDataSourceId: string,
       projectsDataSourceId: string
-    ): Promise<NotionResult<NotionTasksSchemaInfo>>
-    save(input: NotionWorkspaceInput): Promise<NotionResult<NotionWorkspaceStatus>>
+    ): Promise<Result<NotionTasksSchemaInfo>>
+    save(input: NotionWorkspaceInput): Promise<Result<NotionWorkspaceStatus>>
     /** Esquece os bancos e os vínculos (nada muda no Notion). */
-    clear(): Promise<NotionResult<NotionWorkspaceStatus>>
+    clear(): Promise<Result<NotionWorkspaceStatus>>
     listProjectChoices(
       projectId: string,
       options?: { force?: boolean }
-    ): Promise<NotionResult<{ choices: NotionProjectChoice[]; truncated: boolean }>>
-    link(projectId: string, pageId: string): Promise<NotionResult<{ id: string; name: string }>>
-    unlink(projectId: string): Promise<NotionResult<null>>
-    listTasks(
-      projectId: string,
-      options?: { force?: boolean }
-    ): Promise<NotionResult<NotionTasksResult>>
+    ): Promise<Result<{ choices: NotionProjectChoice[]; truncated: boolean }>>
+    link(projectId: string, pageId: string): Promise<Result<{ id: string; name: string }>>
+    unlink(projectId: string): Promise<Result<null>>
+    listTasks(projectId: string, options?: { force?: boolean }): Promise<Result<NotionTasksResult>>
     /**
      * Busca no banco de Tarefas inteiro (qualquer responsável, qualquer projeto) por título ou ID.
      * Texto vazio = as editadas mais recentemente.
      */
-    searchTasks(query: string): Promise<NotionResult<NotionTaskSearchResult>>
+    searchTasks(query: string): Promise<Result<NotionTaskSearchResult>>
   }
   projects: {
     /** Lista rápida (só checagens locais). */
@@ -1071,30 +555,13 @@ export interface OrkioApi {
   }
   /** Visão geral (6D): tudo de todos os projetos, sem chamar APIs ao abrir. */
   overview: {
-    get(): Promise<OverviewResult<OverviewSnapshot>>
+    get(): Promise<Result<OverviewSnapshot>>
     /** Verifica git/GitHub/Notion agora (ciclo das automações) e devolve a visão nova. */
-    refresh(): Promise<OverviewResult<OverviewSnapshot>>
-    activity(query?: ActivityQuery): Promise<OverviewResult<ActivityPage>>
+    refresh(): Promise<Result<OverviewSnapshot>>
+    activity(query?: ActivityQuery): Promise<Result<ActivityPage>>
     /** Algo mudou (gate, pergunta, execução, automação). Devolve a função para cancelar. */
     onChanged(listener: (event: { waiting: number }) => void): () => void
   }
   /** Abre um link no navegador padrão. Só domínios da allowlist do main são aceitos. */
   openExternal(url: string): Promise<boolean>
 }
-
-/** Configurações > Sobre. Links do site só se o build souber o endereço. */
-export interface AboutInfo {
-  version: string
-  links: { site: string; privacy: string; terms: string } | null
-}
-
-export type OverviewResult<T> =
-  { ok: true; value: T } | { ok: false; error: { code: string; message: string } }
-
-export const NOTION_TOKEN_DOCS_URL =
-  'https://developers.notion.com/guides/get-started/personal-access-tokens'
-
-export const CLAUDE_CODE_DOCS_URL = 'https://code.claude.com/docs/en/setup'
-
-export const GITHUB_TOKEN_DOCS_URL =
-  'https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token'

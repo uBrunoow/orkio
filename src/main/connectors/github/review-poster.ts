@@ -12,20 +12,22 @@
  *
  * Erros viram `ReviewPostError` com mensagem pt-BR (nunca a exceção crua nem corpos de resposta).
  */
-import { sanitizeReviewText } from '../../../shared/review-publish'
+import { isInstallUrl, isOwner, isRepo } from '../../../shared/github-names'
+import {
+  REVIEW_COMMENT_MAX,
+  REVIEW_COMMENTS_MAX,
+  REVIEW_PATH_MAX,
+  REVIEW_SUMMARY_MAX,
+  sanitizeReviewText,
+  type PublishReviewEvent
+} from '../../../shared/review-publish'
 import { redactSecrets } from '../../claude/redact'
 import { isRecord } from '../../net/parse'
 import { GitHubApiError, type ConditionalPage } from './github.client'
 import type { OrkioSiteResponse, OrkioSiteReviewPayload } from './github.connector'
 
-export const REVIEW_BODY_MAX = 20_000
-export const REVIEW_COMMENTS_MAX = 50
-export const REVIEW_COMMENT_MAX = 4_000
-export const REVIEW_PATH_MAX = 1_000
 /** Páginas de `GET /pulls/{n}/files` (100 por página; o GitHub para em 3000 arquivos). */
 const PR_FILES_MAX_PAGES = 30
-
-export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES'
 
 export interface ReviewComment {
   /** Caminho do arquivo no repositório (relativo, como no diff da PR). */
@@ -36,14 +38,14 @@ export interface ReviewComment {
 }
 
 export interface ReviewInput {
-  event: ReviewEvent
+  event: PublishReviewEvent
   body: string
   comments: ReviewComment[]
 }
 
 /** Revisão validada, redigida e pronta para o site. */
 export interface PreparedReview {
-  event: ReviewEvent
+  event: PublishReviewEvent
   body: string
   comments: { path: string; line: number; side: 'RIGHT'; body: string }[]
 }
@@ -101,7 +103,7 @@ export const REVIEW_MESSAGES = {
   approveRefused: 'O Orkio nunca aprova PRs: a revisão só pode comentar ou pedir alterações.',
   invalidTarget: 'Repositório ou número da PR inválido.',
   emptyBody: 'A revisão precisa de um resumo.',
-  bodyTooLong: `O resumo da revisão passa de ${REVIEW_BODY_MAX.toLocaleString('pt-BR')} caracteres.`,
+  bodyTooLong: `O resumo da revisão passa de ${REVIEW_SUMMARY_MAX.toLocaleString('pt-BR')} caracteres.`,
   tooManyComments: `A revisão tem mais de ${REVIEW_COMMENTS_MAX} comentários de linha.`,
   badComment:
     'Um comentário de linha é inválido (arquivo, linha ou texto vazio, ou texto com mais de ' +
@@ -111,20 +113,7 @@ export const REVIEW_MESSAGES = {
   badRequest: 'O site do Orkio recusou a revisão como inválida.'
 } as const
 
-/** Login de usuário/organização: letras, dígitos, `-` e `_` (contas gerenciadas), até 100. */
-const OWNER_SLUG = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,99}$/
-const REPO_SLUG = /^[A-Za-z0-9._-]{1,100}$/
-export const INSTALL_URL =
-  /^https:\/\/github\.com\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new$/
 const MAX_PR_NUMBER = 2 ** 31
-
-export function isValidOwner(owner: string): boolean {
-  return OWNER_SLUG.test(owner)
-}
-
-export function isValidRepo(repo: string): boolean {
-  return REPO_SLUG.test(repo) && repo !== '.' && repo !== '..'
-}
 
 function invalid(message: string): ReviewPostError {
   return new ReviewPostError('invalid', message)
@@ -134,8 +123,8 @@ function checkTarget(owner: unknown, repo: unknown, number: unknown): void {
   if (
     typeof owner !== 'string' ||
     typeof repo !== 'string' ||
-    !isValidOwner(owner) ||
-    !isValidRepo(repo) ||
+    !isOwner(owner) ||
+    !isRepo(repo) ||
     typeof number !== 'number' ||
     !Number.isSafeInteger(number) ||
     number < 1 ||
@@ -185,7 +174,7 @@ export function prepareReview(input: unknown): PreparedReview {
   if (typeof rawBody !== 'string') throw invalid(REVIEW_MESSAGES.emptyBody)
   const body = cleanText(rawBody)
   if (body.length === 0) throw invalid(REVIEW_MESSAGES.emptyBody)
-  if (body.length > REVIEW_BODY_MAX) throw invalid(REVIEW_MESSAGES.bodyTooLong)
+  if (body.length > REVIEW_SUMMARY_MAX) throw invalid(REVIEW_MESSAGES.bodyTooLong)
 
   const rawComments = input['comments'] ?? []
   if (!Array.isArray(rawComments)) throw invalid(REVIEW_MESSAGES.badComment)
@@ -364,7 +353,7 @@ export function parseSiteResponse(
     throw new ReviewPostError(
       'not_installed',
       REVIEW_MESSAGES.notInstalled,
-      typeof installUrl === 'string' && INSTALL_URL.test(installUrl) ? { installUrl } : {}
+      isInstallUrl(installUrl) ? { installUrl } : {}
     )
   }
   if (code === 'forbidden') throw new ReviewPostError('forbidden', REVIEW_MESSAGES.forbidden)

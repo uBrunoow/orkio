@@ -4,9 +4,8 @@
  * em modo entrega". Sem isso, só o push pelo Orkio e o link de comparação do GitHub para criar a
  * PR à mão. Nunca há push fora da branch da tarefa nem força: o gate e as regras são os de sempre.
  */
-import type { OpenPrResult } from '../../shared/ipc-contract'
 import { alvaOpenPrFlow, sendBranchFlow } from '../../shared/alva-templates'
-import type { Flow, FlowRunView } from '../../shared/task-flow'
+import type { Flow, FlowRunView, OpenPrResult } from '../../shared/task-flow'
 
 export interface OpenPrDeps {
   /** A task do Backlog.md está vinculada à tarefa? */

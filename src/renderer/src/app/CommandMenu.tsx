@@ -9,9 +9,11 @@ import {
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
 import { Spinner } from '@/components/Spinner'
-import type { BoardCard, ProjectView } from '../../../shared/ipc-contract'
 import { SETTINGS_TITLES, type Route, type SettingsSection } from './routes'
 import { SHORTCUTS } from './shortcuts'
+import type { BoardCard } from '../../../shared/board'
+import type { ProjectView } from '../../../shared/projects'
+import { normalizeLabel } from '../../../shared/text'
 
 export interface CommandData {
   group: string
@@ -192,9 +194,9 @@ export function CommandMenu({
         return [...items.filter((i) => i.auxiliaryData?.group !== 'Tarefas'), ...tasksOnly]
       },
       search: async (query) => {
-        const q = normalize(query)
+        const q = normalizeLabel(query)
         const items = await all()
-        return items.filter((i) => normalize(i.label).includes(q)).slice(0, 50)
+        return items.filter((i) => normalizeLabel(i.label).includes(q)).slice(0, 50)
       }
     }
     // Recria a fonte (e relê as tarefas) a cada abertura.
@@ -330,9 +332,4 @@ export function formatKeys(keys: string): string {
     .split('+')
     .map((k) => (k === 'mod' ? (mac ? '⌘' : 'Ctrl') : k.length === 1 ? k.toUpperCase() : k))
     .join(' ')
-}
-
-/** Busca sem diferenciar maiúsculas e acentos. */
-function normalize(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 }

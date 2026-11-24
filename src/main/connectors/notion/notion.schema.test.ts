@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import type { NotionMapping } from '../../../shared/ipc-contract'
 import {
   checkMapping,
   nameSimilarity,
@@ -11,6 +10,7 @@ import {
   simplePropertyValues,
   suggestMapping
 } from './notion.schema'
+import type { NotionMapping } from '../../../shared/notion'
 
 const PROJECTS_DS = '11111111-1111-1111-1111-111111111111'
 const OTHER_DS = '99999999-9999-9999-9999-999999999999'

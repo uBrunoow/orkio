@@ -1,15 +1,11 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { CheckboxField, RadioListField, SelectField, TextField } from '@/components/form'
-import type {
-  BoardSaveInput,
-  BoardView,
-  NotionResult,
-  OrkioStageChoice
-} from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { Spinner } from '../../components/Spinner'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import type { BoardSaveInput, BoardView, OrkioStageChoice } from '../../../../shared/board'
+import type { Result } from '../../../../shared/result'
 
 interface DraftStage {
   key: string
@@ -29,7 +25,7 @@ export function BoardSettings({
   onCancel
 }: {
   view: BoardView
-  onSave(input: BoardSaveInput): Promise<NotionResult<BoardView>>
+  onSave(input: BoardSaveInput): Promise<Result<BoardView>>
   onCancel: (() => void) | undefined
 }): React.JSX.Element {
   const source = view.config?.stages ?? view.suggestion ?? []

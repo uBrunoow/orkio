@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import type { BoardTaskRef, ProjectView } from '../../shared/ipc-contract'
 import {
   ROUTE_TITLES,
   SETTINGS_TITLES,
@@ -30,6 +29,8 @@ import { SettingsLayout } from './features/settings/SettingsNav'
 import { PageHeader } from './components/PageHeader'
 import { PAGE_WIDTH } from './components/page-width'
 import { UpdateBanner } from './features/settings/UpdateBanner'
+import type { BoardTaskRef } from '../../shared/overview'
+import type { ProjectView } from '../../shared/projects'
 
 /** Preferência de interface (não secreta): último projeto escolhido no menu. */
 const CURRENT_PROJECT_KEY = 'orkio.currentProject'

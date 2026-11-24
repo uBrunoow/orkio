@@ -9,7 +9,6 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import {
   GitBranchIcon,
   LockIcon,
@@ -23,6 +22,8 @@ import { AgentAvatar } from '../agents/AgentAvatar'
 import { StatusToken } from '../../components/StatusToken'
 import { cardDetail, cardStatus } from './card-status'
 import { useTaskActivity } from './task-activity'
+import type { BoardCard, BoardStage } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 export interface CardActions {
   onOpen(taskId: string): void

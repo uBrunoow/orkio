@@ -59,7 +59,10 @@ export interface ReviewDeps {
 }
 
 export const GITHUB_API_URL = 'https://api.github.com'
-/** Mesma versão da API do app (`GITHUB_API_VERSION` em github.client.ts). */
+/**
+ * Mesma versão da API do app (`GITHUB_API_VERSION` em `src/shared/github-names.ts`); o teste
+ * `test/site-contract.test.ts` da raiz confere, junto com owner, repositório e link de instalação.
+ */
 export const GITHUB_API_VERSION = '2026-03-10'
 export const REVIEW_BODY_MAX = 60_000
 export const REVIEW_COMMENTS_MAX = 50

@@ -37,14 +37,9 @@ import {
   validateFlow,
   type FlowDraft,
   type FlowStageDraft,
-  type SimulationResult
+  type SimulationResult,
+  type ConfigEvent
 } from '../../../../shared/flow'
-import type {
-  BoardView,
-  ConfigEvent,
-  NotionColor,
-  NotionResult
-} from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { SaveBar } from '../../components/SaveBar'
 import { plural } from '../../lib/format'
@@ -60,6 +55,9 @@ import {
 import { useProjectActivity } from '../../components/SentenceDetail'
 import { RuleDetail } from './RuleDetail'
 import type { BoardSettingsTab } from '../../app/routes'
+import type { BoardView } from '../../../../shared/board'
+import type { NotionColor } from '../../../../shared/notion'
+import type { Result } from '../../../../shared/result'
 
 const BOARD_TABS: { id: BoardSettingsTab; label: string }[] = [
   { id: 'columns', label: 'Colunas' },
@@ -364,7 +362,7 @@ export function FlowPage({
   async function save(): Promise<void> {
     setSaving(true)
     setMessage(null)
-    let result: NotionResult<BoardView>
+    let result: Result<BoardView>
     try {
       result = await window.orkio.flow.save(view.projectId, draft)
     } catch {

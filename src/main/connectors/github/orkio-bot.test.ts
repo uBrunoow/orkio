@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ProjectView } from '../../../shared/ipc-contract'
 import { GitHubApiError } from './github.client'
 import {
   ORKIO_BOT_MESSAGES,
@@ -8,6 +7,7 @@ import {
   reposOf,
   stateFromError
 } from './orkio-bot'
+import type { ProjectView } from '../../../shared/projects'
 
 const INSTALL = 'https://github.com/apps/orkio/installations/new'
 

@@ -1,7 +1,11 @@
 import { PrHoverCard } from '../board/PrHoverCard'
 import { Button } from '@/components/ui/button'
-import type { TaskSignals } from '../../../../shared/ipc-contract'
-import type { ChecksState, PullRequestState, ReviewDecision } from '../../../../shared/task-signals'
+import type {
+  ChecksState,
+  PullRequestState,
+  ReviewDecision,
+  TaskSignals
+} from '../../../../shared/task-signals'
 import { StatusToken, toneOf } from '../../components/StatusToken'
 import { GitBranchIcon, PullRequestIcon } from '../../components/icons'
 

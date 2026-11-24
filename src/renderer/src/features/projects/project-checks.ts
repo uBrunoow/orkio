@@ -3,8 +3,8 @@
  * quadro e, com a pré-checagem do alva-flow, plugin e gh. Puro.
  */
 import type { AlvaPrecheck } from '../../../../shared/alva'
-import type { ProjectView } from '../../../../shared/ipc-contract'
 import { plural } from '../../lib/format'
+import type { ProjectView } from '../../../../shared/projects'
 
 export type CheckId = 'folder' | 'github' | 'notion' | 'board' | 'alva' | 'gh'
 

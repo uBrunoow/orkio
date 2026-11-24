@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NotionTask, ProjectView } from '../../shared/ipc-contract'
 import type { FlowRunView } from '../../shared/task-flow'
 import type { TaskSignals } from '../../shared/task-signals'
 import { BoardStore } from '../board/board.store'
@@ -8,6 +7,8 @@ import { openDatabase, type Db } from '../db/database'
 import { applyWaitingBadge, overlayDotBitmap, waitingDescription } from './badge'
 import { OverviewService, type OverviewDeps } from './overview.service'
 import { parseActivityQuery } from '../ipc/overview.ipc'
+import type { NotionTask } from '../../shared/notion'
+import type { ProjectView } from '../../shared/projects'
 
 const NOW = new Date('2026-11-20T12:00:00.000Z')
 

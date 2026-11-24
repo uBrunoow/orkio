@@ -3,11 +3,9 @@
  * O primeiro não feito é o atual. O GitHub é obrigatório (o projeto é verificado no GitHub).
  */
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
-import type {
-  ConnectionStatus,
-  NotionWorkspaceStatus,
-  ProjectView
-} from '../../../../shared/ipc-contract'
+import type { ConnectionStatus } from '../../../../shared/connection'
+import type { NotionWorkspaceStatus } from '../../../../shared/notion'
+import type { ProjectView } from '../../../../shared/projects'
 
 export type SetupStepId =
   'github' | 'notion' | 'claude' | 'folder' | 'notion-data' | 'board' | 'first-task'

@@ -12,7 +12,6 @@ import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CheckboxField, SegmentedControl } from '@/components/form'
 import { cn } from '@/lib/utils'
-import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { ScreenTitle } from '../../components/ScreenTitle'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
@@ -37,6 +36,8 @@ import { TaskActivityProvider, type TaskActivityMap } from './task-activity'
 import { ActionLink } from '../projects/ActionLink'
 import { useOverview } from '../overview/useOverview'
 import { useBoard, type BoardError } from './useBoard'
+import type { AutomationStatus } from '../../../../shared/automation'
+import type { ProjectView } from '../../../../shared/projects'
 
 /**
  * Tela "Quadro" do projeto atual (o projeto vem do menu). Etapas e automações, Fluxos e Contexto

@@ -62,12 +62,7 @@ import { OrkioBotService } from './connectors/github/orkio-bot'
 import { registerNotionIpc } from './ipc/notion.ipc'
 import { isAllowedExternalUrl, registerShellIpc, siteUrlRules } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
-import {
-  IPC_CHANNELS,
-  type AboutInfo,
-  type AutomationStatus,
-  type BoardSyncEvent
-} from '../shared/ipc-contract'
+import { IPC_CHANNELS } from '../shared/ipc-contract'
 import { SecureStore } from './storage/secure-store'
 import { ClaudeService, type ClaudeServiceDeps } from './claude/claude.service'
 import { detectClaude } from './claude/detect'
@@ -109,13 +104,15 @@ import { collectDiagnostics } from './diagnostics/diagnostics'
 import { UpdateService, type UpdaterLike } from './updates/update.service'
 import { busyCount, describeBusy } from './updates/busy'
 import { isMacAppSigned } from './updates/mac-signature'
-import { changelogSection } from '../shared/updates'
+import { changelogSection, type AboutInfo } from '../shared/updates'
 import { autoUpdater } from 'electron-updater'
 import { registerOverviewIpc } from './ipc/overview.ipc'
 import { OverviewService } from './overview/overview.service'
 import { applyWaitingBadge, overlayDotBitmap } from './overview/badge'
 import appIcon from '../../resources/icon.png?asset'
 import changelog from '../../CHANGELOG.md?raw'
+import type { AutomationStatus } from '../shared/automation'
+import type { BoardSyncEvent } from '../shared/board'
 
 const RENDERER_HTML = join(__dirname, '../renderer/index.html')
 const DEV_SERVER_URL = app.isPackaged ? undefined : process.env['ELECTRON_RENDERER_URL']

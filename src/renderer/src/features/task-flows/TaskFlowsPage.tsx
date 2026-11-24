@@ -19,7 +19,6 @@ import {
 } from '@/components/form'
 import { cn } from '@/lib/utils'
 import type { CatalogGroup } from '../../../../shared/agent-run'
-import type { TaskFlowsProject } from '../../../../shared/ipc-contract'
 import {
   MAX_REVISE,
   STEP_TYPE_LABEL,
@@ -28,7 +27,8 @@ import {
   type Condition,
   type Flow,
   type Step,
-  type StepType
+  type StepType,
+  type TaskFlowsProject
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
 import { PageState } from '../../components/PageState'

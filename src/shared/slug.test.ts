@@ -6,7 +6,8 @@ import {
   notionPageIdsIn,
   slugify,
   taskBranchName,
-  uniqueBranchName
+  uniqueBranchName,
+  withBranchKind
 } from './slug'
 
 describe('taskBranchName', () => {
@@ -21,6 +22,12 @@ describe('taskBranchName', () => {
     expect(taskBranchName(null, 'Corrigir login')).toBe('feat/corrigir-login')
     expect(taskBranchName(null, 'Corrigir login', 'hotfix')).toBe('hotfix/corrigir-login')
     expect(slugify('')).toBe('tarefa')
+  })
+
+  it('withBranchKind troca só o tipo do nome sugerido', () => {
+    expect(withBranchKind(taskBranchName('ORK-1', 'Ajustar a/b'), 'hotfix')).toBe(
+      'hotfix/ORK-1-ajustar-a-b'
+    )
   })
 
   it('isBranchKind aceita só feat, fix e hotfix', () => {

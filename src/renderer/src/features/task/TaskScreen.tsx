@@ -1,5 +1,4 @@
 import { useEffect } from 'react'
-import type { ProjectView } from '../../../../shared/ipc-contract'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
 import { useAgentBadges } from '../agents/agent-badges'
@@ -7,6 +6,7 @@ import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import type { TaskSection } from '../../../../shared/overview'
 import { TaskPanel } from '../board/TaskPanel'
 import { useBoard } from '../board/useBoard'
+import type { ProjectView } from '../../../../shared/projects'
 
 /**
  * Tela da tarefa: fases no topo, conversa no meio e o painel da fase à direita. Abre pela lista

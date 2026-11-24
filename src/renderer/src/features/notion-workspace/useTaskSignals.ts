@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { NotionResult, TaskSignalsResult } from '../../../../shared/ipc-contract'
+import type { Result } from '../../../../shared/result'
+import type { TaskSignalsResult } from '../../../../shared/task-signals'
 
-type SignalsError = Extract<NotionResult<never>, { ok: false }>['error']
+type SignalsError = Extract<Result<never>, { ok: false }>['error']
 
 /** Atualização automática leve (o main usa ETag: quase sempre 304). */
 export const SIGNALS_POLL_MS = 60_000
@@ -29,7 +30,7 @@ export function useTaskSignals(projectId: string): UseTaskSignals {
       if (inFlight.current && !force) return
       inFlight.current = true
       setLoading(true)
-      let next: NotionResult<TaskSignalsResult>
+      let next: Result<TaskSignalsResult>
       try {
         next = await window.orkio.signals.get(projectId, { force })
       } catch {

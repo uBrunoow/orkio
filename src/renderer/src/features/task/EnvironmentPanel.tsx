@@ -4,12 +4,12 @@ import { Spinner } from '@/components/Spinner'
 import { StatusToken, type StatusTone } from '@/components/StatusToken'
 import { cn } from '@/lib/utils'
 import type { AgentRunView, TaskWorkspace } from '../../../../shared/agent-run'
-import type { TaskSignals } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { EditorIcon, GitBranchIcon, PullRequestIcon, TerminalIcon } from '../../components/icons'
 import { OpenPrFeedback, canOpenPr, useOpenPr } from '../board/OpenPrButton'
 import { PrHoverCard } from '../board/PrHoverCard'
 import { contextTone, folderName, latestContextPercent } from './environment'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 const TITLE = 'text-2xs font-medium tracking-wider text-subtle-foreground uppercase'
 const BAR: Record<'ok' | 'warn' | 'danger', string> = {

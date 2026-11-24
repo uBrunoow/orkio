@@ -1,6 +1,6 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { IPC_CHANNELS, type ConnectionStatus } from '../../shared/ipc-contract'
+import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import type { DeviceFlowConnector, OAuthConnector } from '../connectors/types'
 import { registerGitHubIpc } from './github.ipc'
 import { registerProjectsIpc } from './projects.ipc'
@@ -17,6 +17,7 @@ import { registerAgentsIpc, toProfile } from './agents.ipc'
 import type { AgentsService } from '../agents/agents.service'
 import { AgentError } from '../agents/agents.service'
 import { defaultAgent, validateAgent } from '../../shared/agent'
+import type { ConnectionStatus } from '../../shared/connection'
 
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>
 
@@ -599,6 +600,12 @@ describe('allowlist: PRs do GitHub', () => {
     expect(isAllowedExternalUrl('https://github.com/acme/app/tree/')).toBe(false)
     expect(isAllowedExternalUrl('https://github.com/acme/app/tree/x/../../settings')).toBe(false)
     expect(isAllowedExternalUrl('https://github.com/acme/app/blob/main/x')).toBe(false)
+  })
+
+  it('branch e "Criar a PR" aceitam o mesmo owner que a PR (conta gerenciada, com `_`)', () => {
+    expect(isAllowedExternalUrl('https://github.com/ana_acme/app/pull/12')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/ana_acme/app/tree/feat/x')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/ana_acme/app/compare/main...feat/x')).toBe(true)
   })
 })
 

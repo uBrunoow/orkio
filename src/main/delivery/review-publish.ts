@@ -14,7 +14,6 @@
  *
  * Não é entrega (push/PR): o agente Revisor (`delivery: false`) pode rodar este passo.
  */
-import type { NotionResult, TaskSignalsResult } from '../../shared/ipc-contract'
 import { parseReviewAnswer } from '../../shared/review-publish'
 import type { ActionConfirm, ConfirmReview } from '../../shared/task-flow'
 import type { BoardStore } from '../board/board.store'
@@ -30,12 +29,14 @@ import {
 } from '../connectors/github/review-poster'
 import type { OrkioAction } from '../flows/flow-runner'
 import { errorName } from '../ipc/payload'
+import type { Result } from '../../shared/result'
+import type { TaskSignalsResult } from '../../shared/task-signals'
 
 export interface PublishReviewDeps {
   poster: Pick<GitHubReviewPoster, 'isConfigured' | 'diffLines' | 'postReview'>
   /** Texto final de uma execução do Claude Code (log normalizado e redigido). */
   finalText(runId: string): Promise<string | null>
-  signals(projectId: string, force: boolean): Promise<NotionResult<TaskSignalsResult>>
+  signals(projectId: string, force: boolean): Promise<Result<TaskSignalsResult>>
   /** Repositório do projeto no github.com (`null` = sem repositório ou outro host). */
   repo(projectId: string): { owner: string; repo: string } | null
   store: Pick<BoardStore, 'addEvent'>

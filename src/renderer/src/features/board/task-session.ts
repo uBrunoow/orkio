@@ -5,7 +5,7 @@
  * como um bloco próprio, com o que o Claude disse.
  */
 import type { AgentRunView } from '../../../../shared/agent-run'
-import type { BoardHistoryEntry } from '../../../../shared/ipc-contract'
+import type { BoardHistoryEntry } from '../../../../shared/board'
 
 export type SessionItem =
   | { kind: 'day'; key: string; label: string }

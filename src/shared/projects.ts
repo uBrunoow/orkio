@@ -1,0 +1,141 @@
+/**
+ * Projetos locais: repositório, saúde, seleção da pasta e erros. `ProjectRepo` também é o formato
+ * salvo em disco (`orkio-config.json`): mudar aqui pede migração.
+ */
+
+export interface ProjectRepo {
+  /** Host da API: github.com (inclusive para aliases de SSH) ou o host do GitHub Enterprise. */
+  host: string
+  owner: string
+  name: string
+  /** Remote local que aponta para este repositório (ex.: origin). */
+  remoteName: string
+  defaultBranch: string | null
+  visibility: 'public' | 'private' | 'internal' | 'unknown'
+  /** `null` quando não foi possível verificar (ex.: GitHub Enterprise). */
+  canPush: boolean | null
+  archived: boolean
+  /** Confirmado na API do GitHub com a conta conectada. */
+  verified: boolean
+}
+
+/** Link externo oferecido junto de um erro/estado (sempre dentro da allowlist do main). */
+export interface ProjectAction {
+  label: string
+  url: string
+}
+
+export type ProjectHealthState =
+  | 'checking'
+  | 'ok'
+  | 'missing_folder'
+  | 'not_a_repo'
+  | 'repo_mismatch'
+  | 'no_access'
+  | 'github_disconnected'
+  | 'unverified'
+  | 'git_error'
+
+export interface ProjectHealth {
+  state: ProjectHealthState
+  message?: string
+  action?: ProjectAction
+}
+
+export interface ProjectNotice {
+  code: 'archived' | 'no_push' | 'enterprise_unverified'
+  message: string
+}
+
+export interface ProjectView {
+  id: string
+  name: string
+  /** Só para exibição: o renderer nunca envia caminhos de volta ao main. */
+  localPath: string
+  repo: ProjectRepo | null
+  createdAt: string
+  updatedAt: string
+  /** Estado local do git; `null` quando a pasta/repositório não está acessível. */
+  local: { branch: string | null; dirty: boolean } | null
+  health: ProjectHealth
+  notices: ProjectNotice[]
+  /** Projeto do Notion vinculado (página do banco de Projetos). */
+  notionProject: { id: string; name: string } | null
+}
+
+export interface ProjectsListResult {
+  projects: ProjectView[]
+  /** Ex.: configuração corrompida recuperada, modo só leitura. */
+  warning?: string
+}
+
+export interface RemoteCandidate {
+  remoteName: string
+  /** Host como aparece no remote. */
+  host: string
+  owner: string
+  name: string
+  /** `ssh-alias` e `enterprise` exigem confirmação do usuário de que é GitHub. */
+  hostKind: 'github' | 'ssh-alias' | 'enterprise'
+}
+
+/** Pasta escolhida no diálogo do main, já analisada. As próximas chamadas usam `selectionId`. */
+export interface ProjectSelection {
+  selectionId: string
+  rootPath: string
+  folderName: string
+  /** A pasta escolhida era uma subpasta; usamos a raiz do repositório. */
+  resolvedFromSubfolder: boolean
+  branch: string | null
+  dirty: boolean
+  candidates: RemoteCandidate[]
+  suggestedRemote: string
+}
+
+export type ProjectErrorCode =
+  | 'not_a_repo'
+  | 'no_remote'
+  | 'not_github'
+  | 'git_not_found'
+  | 'git_error'
+  | 'github_disconnected'
+  | 'no_access'
+  | 'sso_required'
+  | 'oauth_restricted'
+  | 'host_unconfirmed'
+  | 'selection_expired'
+  | 'already_added'
+  | 'repo_mismatch'
+  | 'project_not_found'
+  | 'invalid_name'
+  | 'storage'
+  | 'github_error'
+
+export interface ProjectError {
+  code: ProjectErrorCode
+  message: string
+  action?: ProjectAction
+}
+
+export type PickFolderResult =
+  | { ok: true; selection: ProjectSelection }
+  | { ok: false; cancelled: true }
+  | { ok: false; cancelled: false; error: ProjectError }
+
+export interface CreateProjectInput {
+  selectionId: string
+  remoteName: string
+  /** O usuário confirmou que um host de alias/Enterprise é GitHub. */
+  hostConfirmed: boolean
+  name?: string
+}
+
+export type ProjectMutationResult =
+  | { ok: true; project: ProjectView }
+  | { ok: false; cancelled: true }
+  | { ok: false; cancelled: false; error: ProjectError }
+
+export interface BranchChangedEvent {
+  projectId: string
+  branch: string | null
+}

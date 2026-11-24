@@ -3,6 +3,7 @@
  * Base das automações da Etapa 3: aqui só calculamos (`buildTaskSignals`) e comparamos
  * (`diffSignals`). Funções puras, sem Node/DOM.
  */
+import type { ProjectAction } from './projects'
 import { normalizePageId } from './slug'
 import { extractTaskNumbers, parseDisplayId } from './task-id-match'
 
@@ -294,4 +295,33 @@ export function diffSignals(
     }
   }
   return events
+}
+
+// ---------- Sinais das tarefas (Etapa 2D) ----------
+
+/** Situação da parte do GitHub nos sinais. */
+export type SignalsGitHubState =
+  | 'ok'
+  | 'disconnected'
+  | 'no_repo'
+  | 'enterprise'
+  | 'no_access'
+  | 'sso'
+  | 'restricted'
+  | 'rate_limited'
+  | 'unverified'
+
+export interface TaskSignalsResult {
+  /** Por id da página da tarefa no Notion. */
+  signals: Record<string, TaskSignals>
+  github: SignalsGitHubState
+  /** Branches locais lidas? (pasta/git indisponível → false) */
+  local: boolean
+  /** Avisos curtos em pt-BR (sem GitHub, sem acesso, detalhes indisponíveis...). */
+  messages: string[]
+  /** Link sugerido (autorizar SSO, pedir aprovação da organização). */
+  action?: ProjectAction
+  /** Tarefas cujo ID não tem prefixo (não dá para casar com branches/PRs). */
+  tasksWithoutPrefix: number
+  fetchedAt: string
 }
