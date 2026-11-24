@@ -8,12 +8,12 @@ import { BoardService, type BoardNotion } from '../board/board.service'
 import { BoardStore } from '../board/board.store'
 import type { NotionWriteQueue } from '../board/write-queue'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
-import { NotionApiError } from '../connectors/notion/notion.client'
 import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import { AutomationService, type AutomationNotification } from './automation.service'
 import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
+import { ApiError } from '../net/http'
 
 const OPTIONS: StatusOption[] = [
   { id: 'o-prio', name: 'Prioridades', color: 'gray' },
@@ -78,7 +78,7 @@ class FakeNotion implements BoardNotion {
     return 'oauth' as const
   }
   async updatePage(pageId: string, properties: Record<string, unknown>): Promise<void> {
-    if (this.offline) throw new NotionApiError('network', 'Sem conexão.')
+    if (this.offline) throw new ApiError('notion', 'network', 'Sem conexão.')
     this.writes.push({ pageId, properties })
     const st = properties['st'] as { status?: { name: string } } | undefined
     if (st?.status) this.status[pageId] = st.status.name

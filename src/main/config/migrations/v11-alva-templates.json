@@ -1,0 +1,470 @@
+[
+  {
+    "id": "alva-planejar",
+    "name": "Alva: planejar",
+    "tags": ["alva"],
+    "steps": [
+      {
+        "id": "spec",
+        "name": "Especificar (/spec)",
+        "type": "claude_command",
+        "command": "alva-flow:spec",
+        "args": "{{alva.spec_arg}}",
+        "timeoutMin": 120,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "pequeno",
+        "name": "Caminho Pequeno? (spec já implementou)",
+        "type": "branch",
+        "when": {
+          "type": "var",
+          "key": "alva.status",
+          "op": "eq",
+          "value": "Reviewed"
+        },
+        "then": "$fim"
+      },
+      {
+        "id": "sem-perguntas",
+        "name": "Sem perguntas em aberto?",
+        "type": "branch",
+        "when": {
+          "type": "var",
+          "key": "alva.open_questions",
+          "op": "eq",
+          "value": "0"
+        },
+        "then": "aprovar-spec"
+      },
+      {
+        "id": "perguntas",
+        "name": "Perguntas em aberto",
+        "type": "gate",
+        "message": "A spec ainda tem perguntas em aberto e o /plan não avança assim. Aprovar roda o /spec de novo para responder; recusar encerra.",
+        "show": "none",
+        "onReject": "stop",
+        "timeoutMin": null
+      },
+      {
+        "id": "responder",
+        "name": "Responder no /spec (até 3 vezes)",
+        "type": "branch",
+        "when": {
+          "type": "all",
+          "of": [
+            {
+              "type": "visits",
+              "step": "spec",
+              "lt": 3
+            }
+          ]
+        },
+        "then": "spec",
+        "else": "$fim"
+      },
+      {
+        "id": "aprovar-spec",
+        "name": "Aprovar spec",
+        "type": "gate",
+        "message": "Confira a spec e os critérios de aceite antes de planejar. Recusar encerra o fluxo; ajuste a task e rode de novo.",
+        "show": "backlog",
+        "onReject": "stop",
+        "timeoutMin": null
+      },
+      {
+        "id": "plan",
+        "name": "Planejar (/plan)",
+        "type": "claude_command",
+        "command": "alva-flow:plan",
+        "args": "{{alva.task_id}}",
+        "timeoutMin": 60,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "aprovar-plano",
+        "name": "Aprovar plano",
+        "type": "gate",
+        "message": "Confira o plano (subtarefas e arquivos) antes de implementar. Recusar encerra o fluxo.",
+        "show": "backlog",
+        "onReject": "stop",
+        "timeoutMin": null
+      }
+    ]
+  },
+  {
+    "id": "alva-entregar",
+    "name": "Alva: implementar e entregar",
+    "tags": ["alva"],
+    "steps": [
+      {
+        "id": "tem-vinculo",
+        "name": "Já tem task no Backlog?",
+        "type": "branch",
+        "when": {
+          "type": "var",
+          "key": "alva.linked",
+          "op": "eq",
+          "value": "sim"
+        },
+        "then": "ja-revisado"
+      },
+      {
+        "id": "spec",
+        "name": "Especificar (/spec)",
+        "type": "claude_command",
+        "command": "alva-flow:spec",
+        "args": "{{alva.spec_arg}}",
+        "timeoutMin": 120,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "pequeno",
+        "name": "Caminho Pequeno? (spec já implementou)",
+        "type": "branch",
+        "when": {
+          "type": "var",
+          "key": "alva.status",
+          "op": "eq",
+          "value": "Reviewed"
+        },
+        "then": "ver-diff"
+      },
+      {
+        "id": "aprovar-spec",
+        "name": "Aprovar spec",
+        "type": "gate",
+        "message": "Confira a spec e os critérios de aceite antes de planejar. Recusar encerra o fluxo; ajuste a task e rode de novo.",
+        "show": "backlog",
+        "onReject": "stop",
+        "timeoutMin": null
+      },
+      {
+        "id": "plan",
+        "name": "Planejar (/plan)",
+        "type": "claude_command",
+        "command": "alva-flow:plan",
+        "args": "{{alva.task_id}}",
+        "timeoutMin": 60,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "aprovar-plano",
+        "name": "Aprovar plano",
+        "type": "gate",
+        "message": "Confira o plano (subtarefas e arquivos) antes de implementar. Recusar encerra o fluxo.",
+        "show": "backlog",
+        "onReject": "stop",
+        "timeoutMin": null
+      },
+      {
+        "id": "ja-revisado",
+        "name": "Já revisado (caminho Pequeno)?",
+        "type": "branch",
+        "when": {
+          "type": "var",
+          "key": "alva.status",
+          "op": "eq",
+          "value": "Reviewed"
+        },
+        "then": "ver-diff"
+      },
+      {
+        "id": "implement",
+        "name": "Implementar (/implement)",
+        "type": "claude_command",
+        "command": "alva-flow:implement",
+        "args": "{{alva.task_id}}",
+        "timeoutMin": 120,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "review",
+        "name": "Revisar (/review)",
+        "type": "claude_command",
+        "command": "alva-flow:review",
+        "args": "{{alva.task_id}}",
+        "timeoutMin": 60,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "blocker",
+        "name": "Blocker no review? (corrige até 2 vezes)",
+        "type": "branch",
+        "when": {
+          "type": "all",
+          "of": [
+            {
+              "type": "var",
+              "key": "alva.review_blocker",
+              "op": "eq",
+              "value": "sim"
+            },
+            {
+              "type": "visits",
+              "step": "fix",
+              "lt": 2
+            }
+          ]
+        },
+        "then": "fix"
+      },
+      {
+        "id": "ver-diff",
+        "name": "Ver diff antes do commit",
+        "type": "gate",
+        "message": "Confira o diff antes do commit. Se o review ainda aponta blocker, recuse e corrija à mão.",
+        "show": "diff",
+        "onReject": "stop",
+        "timeoutMin": null
+      },
+      {
+        "id": "commit",
+        "name": "Commit (/commit)",
+        "type": "claude_command",
+        "command": "alva-flow:commit",
+        "args": "{{alva.task_id}}",
+        "timeoutMin": 15,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "push",
+        "name": "Push da branch (Orkio)",
+        "type": "orkio_action",
+        "action": "push"
+      },
+      {
+        "id": "pr",
+        "name": "Pull Request (/pr, modo entrega)",
+        "type": "claude_command",
+        "command": "alva-flow:pr",
+        "args": "{{alva.task_id}}",
+        "timeoutMin": 60,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        },
+        "delivery": true
+      },
+      {
+        "id": "fim",
+        "name": "Fim",
+        "type": "branch",
+        "when": {
+          "type": "all",
+          "of": []
+        },
+        "then": "$fim"
+      },
+      {
+        "id": "fix",
+        "name": "Corrigir blocker (/fix --apply)",
+        "type": "claude_command",
+        "command": "alva-flow:fix",
+        "args": "{{alva.task_id}} --apply",
+        "timeoutMin": 60,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "revisar-de-novo",
+        "name": "Revisar de novo",
+        "type": "branch",
+        "when": {
+          "type": "all",
+          "of": [
+            {
+              "type": "visits",
+              "step": "fix",
+              "lt": 3
+            }
+          ]
+        },
+        "then": "review"
+      }
+    ]
+  },
+  {
+    "id": "alva-revisao",
+    "name": "Alva: revisão publicada",
+    "tags": ["alva"],
+    "steps": [
+      {
+        "id": "review",
+        "name": "Revisar (/review)",
+        "type": "claude_command",
+        "command": "alva-flow:review",
+        "args": "{{alva.task_id}}",
+        "timeoutMin": 60,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "revisao-json",
+        "name": "Converter a revisão em JSON (só leitura)",
+        "type": "claude_command",
+        "command": "",
+        "args": "",
+        "prompt": "Converta a revisão acima no JSON abaixo e responda só com ele, num bloco ```json (sem texto antes ou depois):\n{\"event\": \"REQUEST_CHANGES\" ou \"COMMENT\", \"summary\": \"resumo da revisão em markdown\", \"comments\": [{\"path\": \"caminho/do/arquivo\", \"line\": 42, \"body\": \"o problema e a correção sugerida\"}]}\nUse \"REQUEST_CHANGES\" se houver qualquer coisa a corrigir (cada item de \"comments\" é uma correção pedida); \"COMMENT\" só quando não há nada a corrigir. Nunca aprove.\nEm \"comments\", só achados com arquivo e linha do diff da PR (a linha no arquivo novo), no máximo 50; os demais vão no \"summary\". Escreva em pt-BR. Não altere arquivos.",
+        "readOnly": true,
+        "timeoutMin": 15
+      },
+      {
+        "id": "publicar-revisao",
+        "name": "Publicar revisão na PR (orkio[bot])",
+        "type": "orkio_action",
+        "action": "publish_review"
+      }
+    ]
+  },
+  {
+    "id": "alva-revisado",
+    "name": "Alva: comentários da PR",
+    "tags": ["alva"],
+    "steps": [
+      {
+        "id": "ler-comentarios",
+        "name": "Ler os comentários da PR",
+        "type": "orkio_action",
+        "action": "review_snapshot"
+      },
+      {
+        "id": "sem-comentarios",
+        "name": "Nenhum comentário pendente?",
+        "type": "branch",
+        "when": {
+          "type": "var",
+          "key": "review.count",
+          "op": "eq",
+          "value": "0"
+        },
+        "then": "$fim"
+      },
+      {
+        "id": "plano-correcoes",
+        "name": "Plano de correções (só leitura)",
+        "type": "claude_command",
+        "command": "",
+        "args": "",
+        "prompt": "Leia .orkio/revisao.md (comentários de revisão não resolvidos da PR #{{review.pr}}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.",
+        "readOnly": true,
+        "timeoutMin": 30
+      },
+      {
+        "id": "aprovar-correcoes",
+        "name": "Aprovar correções",
+        "type": "gate",
+        "message": "Aprovar correções da PR #{{review.pr}}",
+        "show": "result",
+        "onReject": "stop",
+        "timeoutMin": null,
+        "revise": {
+          "step": "plano-correcoes",
+          "max": 3
+        }
+      },
+      {
+        "id": "aplicar-correcoes",
+        "name": "Aplicar correções (modo entrega)",
+        "type": "claude_command",
+        "command": "",
+        "args": "",
+        "prompt": "Plano aprovado. Aplique as correções, rode os testes do projeto, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).",
+        "timeoutMin": 60,
+        "delivery": true
+      },
+      {
+        "id": "conferir-push",
+        "name": "A PR já tem o commit atual?",
+        "type": "orkio_action",
+        "action": "verify_pushed"
+      },
+      {
+        "id": "ja-enviado",
+        "name": "Já enviado?",
+        "type": "branch",
+        "when": {
+          "type": "var",
+          "key": "pr.pushed",
+          "op": "eq",
+          "value": "sim"
+        },
+        "then": "pedir-review"
+      },
+      {
+        "id": "push",
+        "name": "Push da branch (Orkio)",
+        "type": "orkio_action",
+        "action": "push"
+      },
+      {
+        "id": "pedir-review",
+        "name": "Pedir review",
+        "type": "orkio_action",
+        "action": "request_review"
+      }
+    ]
+  },
+  {
+    "id": "alva-ci-vermelho",
+    "name": "Alva: CI vermelho",
+    "tags": ["alva"],
+    "steps": [
+      {
+        "id": "fix-ci",
+        "name": "Corrigir CI (/fix --ci --apply)",
+        "type": "claude_command",
+        "command": "alva-flow:fix",
+        "args": "{{alva.task_id}} --ci --apply",
+        "timeoutMin": 60,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "commit",
+        "name": "Commit (/commit)",
+        "type": "claude_command",
+        "command": "alva-flow:commit",
+        "args": "{{alva.task_id}}",
+        "timeoutMin": 15,
+        "includeBriefing": false,
+        "extract": {
+          "extractor": "alva"
+        }
+      },
+      {
+        "id": "push",
+        "name": "Push da branch (Orkio)",
+        "type": "orkio_action",
+        "action": "push"
+      }
+    ]
+  }
+]

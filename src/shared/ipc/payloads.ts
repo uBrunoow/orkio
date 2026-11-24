@@ -163,7 +163,10 @@ function parseBinding(value: unknown): Parsed<StageFlow> {
 /** Valida a forma e devolve o rascunho normalizado; as regras (validateFlow) rodam no serviço. */
 export function parseFlowDraft(value: unknown): Parsed<FlowDraft> {
   if (!isRecord(value)) return INVALID
-  const { stages, rules, removals, bindings } = value
+  const { stages, rules, removals, bindings, queueStageId } = value
+  if (!(queueStageId === undefined || queueStageId === null || isStageId(queueStageId))) {
+    return INVALID
+  }
   if (!Array.isArray(stages) || stages.length > STAGE_LIMITS.stages) return INVALID
   if (!Array.isArray(rules) || rules.length > 100) return INVALID
   if (!isRecord(removals)) return INVALID
@@ -187,7 +190,8 @@ export function parseFlowDraft(value: unknown): Parsed<FlowDraft> {
     stages: parsedStages as FlowStageDraft[],
     rules: parsedRules as AutomationRule[],
     removals: parsedRemovals,
-    ...(parsedBindings ? { bindings: parsedBindings } : {})
+    ...(parsedBindings ? { bindings: parsedBindings } : {}),
+    ...(queueStageId !== undefined ? { queueStageId } : {})
   }
 }
 
@@ -422,8 +426,6 @@ export function parseOrchestratorConfig(value: unknown): Parsed<OrchestratorConf
   const lanes = value['lanes']
   if (
     typeof value['enabled'] !== 'boolean' ||
-    !(value['queueStageId'] === null || isStageId(value['queueStageId'])) ||
-    typeof value['maxActive'] !== 'number' ||
     !Array.isArray(lanes) ||
     lanes.length > ORCHESTRATOR_LIMITS.lanes
   ) {
@@ -446,8 +448,7 @@ export function parseOrchestratorConfig(value: unknown): Parsed<OrchestratorConf
   const parsed = parseOrchestrator({ ...value, enabledSince: null })
   // Etapa repetida seria descartada pela leitura tolerante: aqui é recusada.
   if (!parsed || parsed.lanes.length !== lanes.length) return INVALID
-  // `maxActive` fora da faixa seria ajustado em silêncio: deixa o validador explicar.
-  return { ...parsed, maxActive: value['maxActive'] }
+  return parsed
 }
 
 // ---------- Fluxos de tarefa (5A) e alva-flow (5B) ----------

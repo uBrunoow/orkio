@@ -100,7 +100,7 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
             : REVIEW_MESSAGES.notInstalled
         )
       }
-      case 'not_configured':
+      case 'app_not_configured':
         return fail(PUBLISH_FAILURES.notConfigured, PUBLISH_ACTION_MESSAGES.notConfigured)
       case 'no_site':
         return fail(PUBLISH_FAILURES.noSite, PUBLISH_ACTION_MESSAGES.noSite)

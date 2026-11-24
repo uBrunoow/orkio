@@ -1,5 +1,8 @@
+import { ApiError, isTransientApiError, requestJson } from '../../net/http'
+import { isRecord } from '../../net/parse'
 import { DeviceFlowError, pollDeviceToken, type DeviceAuthorization } from '../../oauth/device-flow'
-import { EncryptionUnavailableError, type SecretStore } from '../../storage/secure-store'
+import type { SecretStore } from '../../storage/secure-store'
+import { StoredConnection, connectionMessages, errorStatus as error } from '../stored-connection'
 import type {
   ConnectionStatus,
   DeviceFlowConnector,
@@ -8,8 +11,6 @@ import type {
   TokenCredentials
 } from '../types'
 import {
-  GitHubApiError,
-  isTransientGitHubError,
   type ConditionalPage,
   type GitHubClient,
   type GitHubRepo,
@@ -21,9 +22,7 @@ import type { AuthOptions, ConnectedAccount, DeviceFlowInfo } from '../../../sha
 import { isLogin, isOwner, isRepo, isTeamSlug } from '../../../shared/github-names'
 import type { PublishReviewEvent } from '../../../shared/review-publish'
 
-const SECRET_KEY = 'github'
 const DISCONNECTED: ConnectionStatus = { state: 'disconnected' }
-const MAX_TOKEN_LENGTH = 512
 
 export type GitHubCredentials = TokenCredentials | OAuthCredentials<GitHubOAuthToken>
 
@@ -39,15 +38,7 @@ interface StoredGitHubConnection {
 }
 
 export const GITHUB_MESSAGES = {
-  emptyToken: 'Cole o token do GitHub para conectar.',
-  malformedToken: 'Esse token não parece válido. Copie o token completo, sem espaços.',
-  encryptionUnavailable:
-    'Seu sistema não oferece armazenamento seguro de credenciais (keychain/keyring). ' +
-    'O token não foi salvo. No Linux, instale e desbloqueie o GNOME Keyring ou o KWallet.',
-  storageReadFailed:
-    'Não foi possível ler a conexão salva com o GitHub. Desconecte e conecte novamente.',
-  storageWriteFailed: 'Não foi possível salvar a conexão com o GitHub. Tente novamente.',
-  unknown: 'Algo deu errado ao falar com o GitHub. Tente novamente.',
+  ...connectionMessages('GitHub'),
   oauthUnavailable: 'O login com GitHub não está disponível nesta versão do Orkio. Use um token.',
   deviceExpired: 'O código expirou antes da autorização. Clique em “Conectar com GitHub” de novo.',
   deviceDenied: 'Você cancelou a autorização no GitHub. Nada foi conectado.',
@@ -66,11 +57,12 @@ export interface GitHubConnectorDeps {
   oauthClientId?: string | null
   /** fetch para o site do Orkio (revisão como orkio[bot]); padrão: o global, na hora da chamada. */
   fetch?: typeof fetch
+  /** Prazo do POST da revisão ao site (padrão `ORKIO_SITE_TIMEOUT_MS`; menor nos testes). */
   siteTimeoutMs?: number
   /**
    * Origem do site do Orkio (`siteOrigin()`, `platform/site.ts`), fixada na construção: é o ÚNICO destino
    * possível do token do usuário fora do GitHub. `null`/ausente → revisão como orkio[bot]
-   * indisponível (`not_configured`).
+   * indisponível (`no_site`).
    */
   siteOrigin?: string | null
   /** `http://127.0.0.1` como site do Orkio: nunca em build de produção (`allowsLoopbackSite`). */
@@ -85,8 +77,9 @@ export const ORKIO_SITE_TIMEOUT_MESSAGE =
 /** Consulta da instalação do orkio[bot]: o site responde em até 15 s; aqui, 20. */
 export const ORKIO_SITE_QUERY_TIMEOUT_MS = 20_000
 const ORKIO_SITE_MAX_RESPONSE_BYTES = 64 * 1024
-/** Começo da mensagem de erro de rede do POST ao site (o passo do fluxo reconhece por ele). */
-export const ORKIO_SITE_NETWORK_PREFIX = 'Não foi possível falar com o site do Orkio'
+export const NO_SITE_MESSAGE =
+  'Este app não sabe o endereço do site do Orkio (MAIN_VITE_SITE_URL não definido no build). ' +
+  'Em dev, defina em .env.development e reinicie o pnpm dev.'
 
 /** O que o `GitHubReviewPoster` manda ao site (o token do usuário é acrescentado pelo conector). */
 export interface OrkioSiteReviewPayload {
@@ -106,39 +99,6 @@ export interface OrkioSiteResponse {
   body: unknown
 }
 
-/**
- * Corpo da resposta até `max` bytes (passou disso → ''). O timeout (`signal`) vale também aqui:
- * abortou durante a leitura → lança.
- */
-async function readLimitedText(
-  response: Response,
-  max: number,
-  signal: AbortSignal
-): Promise<string> {
-  if (!response.body) return ''
-  const reader = response.body.getReader()
-  const onAbort = (): void => void reader.cancel().catch(() => undefined)
-  signal.addEventListener('abort', onAbort, { once: true })
-  try {
-    const chunks: Uint8Array[] = []
-    let size = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (signal.aborted) throw new Error('aborted')
-      if (done) break
-      size += value.byteLength
-      if (size > max) {
-        await reader.cancel().catch(() => undefined)
-        return ''
-      }
-      chunks.push(value)
-    }
-    return new TextDecoder().decode(Buffer.concat(chunks))
-  } finally {
-    signal.removeEventListener('abort', onAbort)
-  }
-}
-
 interface ActiveDeviceFlow {
   info: DeviceFlowInfo
   controller: AbortController
@@ -149,9 +109,17 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
   readonly id = 'github' as const
   private readonly now: () => Date
   private flow: ActiveDeviceFlow | null = null
+  private readonly stored: StoredConnection<StoredGitHubConnection>
 
   constructor(private readonly deps: GitHubConnectorDeps) {
     this.now = deps.now ?? (() => new Date())
+    this.stored = new StoredConnection({
+      store: deps.store,
+      key: 'github',
+      name: 'GitHub',
+      parse: parseStored,
+      maxTokenLength: 512
+    })
   }
 
   getAuthOptions(): AuthOptions {
@@ -169,7 +137,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     if (!device) return { ok: false, status: error(GITHUB_MESSAGES.oauthUnavailable) }
     // Renderer recarregou no meio do fluxo: devolve o mesmo código.
     if (this.flow) return { ok: true, flow: this.flow.info }
-    if (!this.deps.store.isAvailable()) {
+    if (!this.stored.isAvailable()) {
       return { ok: false, status: error(GITHUB_MESSAGES.encryptionUnavailable) }
     }
 
@@ -177,7 +145,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     try {
       authorization = await device.requestCode()
     } catch (e) {
-      return { ok: false, status: await this.errorKeepingStored(messageFor(e)) }
+      return { ok: false, status: await this.stored.errorKeepingStored(this.stored.messageFor(e)) }
     }
     if (this.flow) return { ok: true, flow: (this.flow as ActiveDeviceFlow).info }
 
@@ -207,7 +175,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
       const token = await pollDeviceToken({
         authorization,
         poll: (code) => device.pollToken(code),
-        isTransientError: isTransientGitHubError,
+        isTransientError: (e) => isTransientApiError(e, 'github'),
         signal,
         startedAt,
         now: () => this.now().getTime(),
@@ -218,11 +186,11 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     } catch (e) {
       if (e instanceof DeviceFlowError) {
         if (e.code === 'cancelled') return await this.getStatus()
-        return await this.errorKeepingStored(
+        return await this.stored.errorKeepingStored(
           e.code === 'expired' ? GITHUB_MESSAGES.deviceExpired : GITHUB_MESSAGES.deviceDenied
         )
       }
-      return await this.errorKeepingStored(messageFor(e))
+      return await this.stored.errorKeepingStored(this.stored.messageFor(e))
     } finally {
       if (this.flow === flow) this.flow = null
     }
@@ -244,12 +212,12 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
 
   /** Há conta conectada (credencial salva e legível)? Sem rede. */
   async isConnected(): Promise<boolean> {
-    return (await this.load()).kind === 'ok'
+    return (await this.stored.load()).kind === 'ok'
   }
 
   /**
    * Dados do repositório com a conta conectada (branch padrão, visibilidade, push, arquivado).
-   * Lança GitHubApiError (`not_connected`, `not_found`, `sso_required`, `oauth_restricted`, ...).
+   * Lança `ApiError` do GitHub (`not_connected`, `not_found`, `sso_required`, `oauth_restricted`, ...).
    */
   async getRepository(owner: string, name: string): Promise<GitHubRepo> {
     return this.withAccessToken((token) => this.deps.client.getRepository(token, owner, name))
@@ -261,7 +229,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
    */
   async getConditional(path: string, etag: string | null): Promise<ConditionalPage> {
     if (!/^\/(repos|repositories)\//.test(path)) {
-      throw new GitHubApiError('unexpected', 'Caminho da API do GitHub não permitido.')
+      throw new ApiError('github', 'unexpected', 'Caminho da API do GitHub não permitido.')
     }
     return this.withAccessToken((token) => this.deps.client.getConditional(token, path, etag))
   }
@@ -293,7 +261,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
       !reviewers.users.every(isLogin) ||
       !reviewers.teams.every(isTeamSlug)
     ) {
-      throw new GitHubApiError('unexpected', 'Pedido de review inválido.')
+      throw new ApiError('github', 'unexpected', 'Pedido de review inválido.')
     }
     return this.withAccessToken((token) =>
       this.deps.client.requestReviewers(token, owner, repo, pull, reviewers)
@@ -311,7 +279,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
    * OAuth App → página da autorização do app; token colado → página de fine-grained PATs.
    */
   async accessSettingsUrl(): Promise<string> {
-    const loaded = await this.load()
+    const loaded = await this.stored.load()
     if (loaded.kind === 'ok' && loaded.record.method === 'device' && this.deps.oauthClientId) {
       return `https://github.com/settings/connections/applications/${encodeURIComponent(this.deps.oauthClientId)}`
     }
@@ -321,37 +289,38 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
   /**
    * Revisão publicada como `orkio[bot]`: manda a revisão ao site do PRÓPRIO Orkio
    * (`POST <origem>/github/review`), que confere o push com o token do usuário e posta com o
-   * GitHub App. Única saída do token do usuário para fora do GitHub: a requisição é montada AQUI
-   * (nunca entregue a um callback), só para a origem fixada na construção (`deps.siteOrigin`,
-   * conferida por `isAllowedSiteOrigin`: https; http://127.0.0.1 nunca em produção), sem
-   * seguir redirecionamento, com timeout que cobre a leitura do corpo. Devolve só o status e o JSON
-   * da resposta do site (que nunca ecoa o token).
-   * Erros: `not_configured` (sem origem ou origem recusada), `not_connected`, `network`, `timeout`.
+   * GitHub App. Tempo esgotado = "a revisão pode ter sido publicada" (o site pode estar postando).
    */
   async postReviewViaOrkioSite(payload: OrkioSiteReviewPayload): Promise<OrkioSiteResponse> {
-    return this.callOrkioSite('/github/review', (token) => ({
-      owner: payload.owner,
-      repo: payload.repo,
-      number: payload.number,
-      userToken: token,
-      review: payload.review
-    }))
+    return this.callOrkioSite(
+      '/github/review',
+      (token) => ({
+        owner: payload.owner,
+        repo: payload.repo,
+        number: payload.number,
+        userToken: token,
+        review: payload.review
+      }),
+      {
+        timeoutMs: this.deps.siteTimeoutMs ?? ORKIO_SITE_TIMEOUT_MS,
+        timeoutMessage: ORKIO_SITE_TIMEOUT_MESSAGE
+      }
+    )
   }
 
   /**
    * O orkio[bot] está instalado neste repositório? Só leitura, pelo site do Orkio
    * (`POST <origem>/github/installation`), que confere com o token do usuário que ele enxerga o
-   * repositório e consulta a instalação com o JWT do App. Mesmas regras de destino, timeout e
-   * erros do `postReviewViaOrkioSite`; prazo menor (é só uma consulta).
+   * repositório e consulta a instalação com o JWT do App. Prazo menor (é só uma consulta).
    */
   async orkioBotInstallation(owner: string, repo: string): Promise<OrkioSiteResponse> {
     if (!isOwner(owner) || !isRepo(repo)) {
-      throw new GitHubApiError('unexpected', 'Repositório inválido.')
+      throw new ApiError('github', 'unexpected', 'Repositório inválido.')
     }
     return this.callOrkioSite(
       '/github/installation',
       (token) => ({ owner, repo, userToken: token }),
-      ORKIO_SITE_QUERY_TIMEOUT_MS
+      { timeoutMs: ORKIO_SITE_QUERY_TIMEOUT_MS }
     )
   }
 
@@ -361,63 +330,39 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
    * na construção (`deps.siteOrigin`, conferida por `isAllowedSiteOrigin`: https;
    * http://127.0.0.1 nunca em produção), sem seguir redirecionamento, com timeout que cobre a
    * leitura do corpo. Devolve só o status e o JSON da resposta do site (que nunca ecoa o token).
-   * Erros: `not_configured` (sem origem ou origem recusada), `not_connected`, `network`, `timeout`.
+   * Erros (`ApiError` do serviço `site`): `no_site` (sem origem ou origem recusada), `network`,
+   * `timeout`; e `not_connected` do GitHub.
    */
   private async callOrkioSite(
     path: '/github/review' | '/github/installation',
     body: (token: string) => Record<string, unknown>,
-    timeoutOverrideMs?: number
+    options: { timeoutMs: number; timeoutMessage?: string }
   ): Promise<OrkioSiteResponse> {
     const siteOrigin = this.deps.siteOrigin
     if (!siteOrigin || !isAllowedSiteOrigin(siteOrigin, this.deps.allowLoopbackSite === true)) {
-      throw new GitHubApiError(
-        'not_configured',
-        'Este app não sabe o endereço do site do Orkio (MAIN_VITE_SITE_URL não definido no build).'
-      )
+      throw new ApiError('site', 'no_site', NO_SITE_MESSAGE)
     }
     const host = new URL(siteOrigin).host
-    const doFetch: typeof fetch = (...args) => (this.deps.fetch ?? globalThis.fetch)(...args)
-    const timeoutMs = this.deps.siteTimeoutMs ?? timeoutOverrideMs ?? ORKIO_SITE_TIMEOUT_MS
     return this.withAccessToken(async (token) => {
-      const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), timeoutMs)
-      try {
-        const response = await doFetch(`${siteOrigin}${path}`, {
+      const response = await requestJson(
+        {
+          url: `${siteOrigin}${path}`,
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
           body: JSON.stringify(body(token)),
           // Nunca seguir redirecionamento: o corpo (com o token) iria para outro endereço.
-          redirect: 'error',
-          signal: controller.signal
-        })
-        const text = await readLimitedText(
-          response,
-          ORKIO_SITE_MAX_RESPONSE_BYTES,
-          controller.signal
-        )
-        let parsed: unknown = null
-        try {
-          parsed = text ? JSON.parse(text) : null
-        } catch {
-          parsed = null
+          redirect: 'error'
+        },
+        {
+          service: 'site',
+          label: `o site do Orkio (${host})`,
+          fetch: this.deps.fetch,
+          timeoutMs: options.timeoutMs,
+          maxBodyBytes: ORKIO_SITE_MAX_RESPONSE_BYTES,
+          ...(options.timeoutMessage ? { messages: { timeout: options.timeoutMessage } } : {})
         }
-        return { status: response.status, body: parsed }
-      } catch {
-        // Exceção original descartada (pode carregar detalhes da requisição).
-        throw controller.signal.aborted
-          ? new GitHubApiError(
-              'timeout',
-              path === '/github/review'
-                ? ORKIO_SITE_TIMEOUT_MESSAGE
-                : 'O site do Orkio demorou para responder. Tente de novo.'
-            )
-          : new GitHubApiError(
-              'network',
-              `${ORKIO_SITE_NETWORK_PREFIX} (${host}). Verifique sua internet e tente de novo.`
-            )
-      } finally {
-        clearTimeout(timer)
-      }
+      )
+      return { status: response.status, body: response.body }
     })
   }
 
@@ -426,78 +371,47 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
    * Tokens de OAuth App não expiram: não há renovação; 401 sobe como `unauthorized`.
    */
   private async withAccessToken<T>(call: (token: string) => Promise<T>): Promise<T> {
-    const loaded = await this.load()
+    const loaded = await this.stored.load()
     if (loaded.kind !== 'ok') {
-      throw new GitHubApiError(
-        'not_connected',
-        'Conecte sua conta do GitHub em Integrações para continuar.'
-      )
+      throw new ApiError('github', 'not_connected', GITHUB_MESSAGES.notConnected)
     }
     return call(loaded.record.token)
   }
 
   async disconnect(): Promise<void> {
     this.cancelDeviceFlow()
-    await this.deps.store.delete(SECRET_KEY)
+    await this.stored.delete()
   }
 
-  async getStatus(): Promise<ConnectionStatus> {
-    const loaded = await this.load()
-    if (loaded.kind === 'none') return { state: 'disconnected' }
-    if (loaded.kind === 'error') return loaded.status
-    return connected(loaded.record)
+  getStatus(): Promise<ConnectionStatus> {
+    return this.stored.status()
   }
 
-  async testConnection(): Promise<ConnectionStatus> {
-    const loaded = await this.load()
-    if (loaded.kind === 'none') return { state: 'disconnected' }
-    if (loaded.kind === 'error') return loaded.status
-    const { record } = loaded
-
-    let user: GitHubUser
-    try {
-      user = await this.deps.client.getUser(record.token)
-    } catch (e) {
-      if (isTerminalAuthError(e)) {
-        const message =
-          record.method === 'device' && (e as GitHubApiError).code === 'unauthorized'
-            ? GITHUB_MESSAGES.deviceRevoked
-            : (e as GitHubApiError).message
-        // Mantém o arquivo até o usuário desconectar ou reconectar.
-        return { state: 'error', message, hasStoredCredentials: true }
-      }
-      // Falha transitória (rede, 5xx, rate limit): continua conectado, com aviso.
-      return { ...connected(record), warning: messageFor(e) }
-    }
-
-    const refreshed: StoredGitHubConnection = {
-      ...record,
-      account: toAccount(user),
-      scopes: user.scopes ?? record.scopes
-    }
-    try {
-      await this.save(refreshed)
-    } catch {
-      // Falha ao atualizar dados de exibição não invalida a conexão.
-    }
-    return connected(refreshed)
+  testConnection(): Promise<ConnectionStatus> {
+    return this.stored.revalidate(
+      async (record) => {
+        const user = await this.deps.client.getUser(record.token)
+        return { ...record, account: toAccount(user), scopes: user.scopes ?? record.scopes }
+      },
+      (e, record) =>
+        record.method === 'device' && e.code === 'unauthorized'
+          ? GITHUB_MESSAGES.deviceRevoked
+          : e.message
+    )
   }
 
   private async connectWithToken(raw: string): Promise<ConnectionStatus> {
-    const token = raw.trim()
-    if (token === '') return error(GITHUB_MESSAGES.emptyToken)
-    if (token.length > MAX_TOKEN_LENGTH || /\s/.test(token)) {
-      return error(GITHUB_MESSAGES.malformedToken)
-    }
-    if (!this.deps.store.isAvailable()) return error(GITHUB_MESSAGES.encryptionUnavailable)
+    const pasted = this.stored.pastedToken(raw)
+    if (!pasted.ok) return pasted.status
+    const { token } = pasted
 
     let user: GitHubUser
     try {
       user = await this.deps.client.getUser(token)
     } catch (e) {
-      return error(messageFor(e))
+      return error(this.stored.messageFor(e))
     }
-    return this.saveAndReport({
+    return this.stored.saveAndReport({
       v: 1,
       method: 'token',
       token,
@@ -508,15 +422,15 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
   }
 
   private async connectWithDeviceToken(token: GitHubOAuthToken): Promise<ConnectionStatus> {
-    if (!this.deps.store.isAvailable()) return error(GITHUB_MESSAGES.encryptionUnavailable)
+    if (!this.stored.isAvailable()) return error(GITHUB_MESSAGES.encryptionUnavailable)
     let user: GitHubUser
     try {
       user = await this.deps.client.getUser(token.accessToken)
     } catch (e) {
       // Sem /user não sabemos quem é a conta; como o token é novo, pedimos para tentar de novo.
-      return this.errorKeepingStored(messageFor(e))
+      return this.stored.errorKeepingStored(this.stored.messageFor(e))
     }
-    return this.saveAndReport({
+    return this.stored.saveAndReport({
       v: 1,
       method: 'device',
       token: token.accessToken,
@@ -524,60 +438,6 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
       account: toAccount(user),
       connectedAt: this.now().toISOString()
     })
-  }
-
-  private async saveAndReport(record: StoredGitHubConnection): Promise<ConnectionStatus> {
-    try {
-      await this.save(record)
-    } catch (e) {
-      return error(
-        e instanceof EncryptionUnavailableError
-          ? GITHUB_MESSAGES.encryptionUnavailable
-          : GITHUB_MESSAGES.storageWriteFailed
-      )
-    }
-    return connected(record)
-  }
-
-  private async errorKeepingStored(message: string): Promise<ConnectionStatus> {
-    const loaded = await this.load()
-    return loaded.kind === 'none'
-      ? error(message)
-      : { state: 'error', message, hasStoredCredentials: true }
-  }
-
-  private async save(record: StoredGitHubConnection): Promise<void> {
-    await this.deps.store.set(SECRET_KEY, JSON.stringify(record))
-  }
-
-  private async load(): Promise<
-    | { kind: 'none' }
-    | { kind: 'ok'; record: StoredGitHubConnection }
-    | { kind: 'error'; status: ConnectionStatus }
-  > {
-    let raw: string | null
-    try {
-      raw = await this.deps.store.get(SECRET_KEY)
-    } catch (e) {
-      const message =
-        e instanceof EncryptionUnavailableError
-          ? GITHUB_MESSAGES.encryptionUnavailable
-          : GITHUB_MESSAGES.storageReadFailed
-      return { kind: 'error', status: { state: 'error', message, hasStoredCredentials: true } }
-    }
-    if (raw === null) return { kind: 'none' }
-    const record = parseStored(raw)
-    if (!record) {
-      return {
-        kind: 'error',
-        status: {
-          state: 'error',
-          message: GITHUB_MESSAGES.storageReadFailed,
-          hasStoredCredentials: true
-        }
-      }
-    }
-    return { kind: 'ok', record }
   }
 }
 
@@ -587,37 +447,9 @@ export function toAccount(user: GitHubUser): ConnectedAccount {
   return account
 }
 
-type ConnectedStatus = Extract<ConnectionStatus, { state: 'connected' }>
-
-function connected(record: StoredGitHubConnection): ConnectedStatus {
-  return { state: 'connected', account: record.account, connectedAt: record.connectedAt }
-}
-
-function error(message: string): ConnectionStatus {
-  return { state: 'error', message }
-}
-
-function messageFor(e: unknown): string {
-  return e instanceof GitHubApiError ? e.message : GITHUB_MESSAGES.unknown
-}
-
-/** Erros que exigem ação do usuário (novo token / reconectar), não só tentar de novo. */
-function isTerminalAuthError(e: unknown): boolean {
-  return (
-    e instanceof GitHubApiError &&
-    (e.code === 'unauthorized' || e.code === 'forbidden' || e.code === 'oauth_config')
-  )
-}
-
-function parseStored(raw: string): StoredGitHubConnection | null {
-  let value: unknown
-  try {
-    value = JSON.parse(raw)
-  } catch {
-    return null
-  }
-  if (typeof value !== 'object' || value === null) return null
-  const r = value as Record<string, unknown>
+function parseStored(value: unknown): StoredGitHubConnection | null {
+  if (!isRecord(value)) return null
+  const r = value
   const account = r['account'] as Partial<ConnectedAccount> | null | undefined
   if (
     r['v'] !== 1 ||

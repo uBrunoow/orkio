@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { TaskPullRequest } from '../../shared/task-signals'
 import { ORKIO_ACTIONS } from '../../shared/orkio-actions'
-import { GitHubApiError } from '../connectors/github/github.client'
 import { SIGNALS_FAILURE } from './action-helpers'
 import { createDeliveryActions, DELIVERY_ACTION_MESSAGES } from './delivery-actions'
 import { DeliveryError, type DeliveryService, type PushPreview } from './delivery.service'
+import { ApiError } from '../net/http'
 
 const TARGET = {
   owner: 'acme',
@@ -190,7 +190,7 @@ describe('ações de entrega', () => {
     })
     const refused = setup({
       requestReviewers: async () => {
-        throw new GitHubApiError('invalid', 'O GitHub recusou o pedido de review.', 422)
+        throw new ApiError('github', 'invalid', 'O GitHub recusou o pedido de review.', 422)
       }
     })
     expect(await refused.get('request_review').run({ ...refused.ctx, input: ['x'] })).toEqual({

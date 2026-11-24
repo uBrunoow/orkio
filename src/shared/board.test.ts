@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   findOption,
   moveNeedsStatusWrite,
+  priorityRank,
+  queueStageOf,
   reconcile,
   suggestStages,
   validateStages,
@@ -238,5 +240,38 @@ describe('moveNeedsStatusWrite', () => {
     expect(moveNeedsStatusWrite(REV, { id: 'o-and', name: 'Em andamento' })).toBe(false)
     expect(moveNeedsStatusWrite(FIN, { id: 'o-and', name: 'Em andamento' })).toBe(true)
     expect(moveNeedsStatusWrite(PRIO, null)).toBe(true)
+  })
+})
+
+describe('priorityRank', () => {
+  it('ordena nomes usuais pt/en, P0…P9 e números; sem prioridade por último', () => {
+    const names = ['Baixa', null, 'P1', 'Urgente', 'Média', 'Alta', 'Coisa', '0']
+    expect([...names].sort((a, b) => priorityRank(a) - priorityRank(b))).toEqual([
+      'Urgente',
+      '0',
+      'P1',
+      'Alta',
+      'Média',
+      'Baixa',
+      'Coisa',
+      null
+    ])
+  })
+})
+
+describe('queueStageOf (coluna "A fazer" da lista lateral)', () => {
+  const stage = (id: string, order: number) => ({
+    id,
+    name: id,
+    order,
+    notionStatus: { id: null, name: id }
+  })
+  const stages = [stage('b', 1), stage('a', 0)]
+
+  it('a escolhida no quadro; ausente ou removida = a primeira coluna', () => {
+    expect(queueStageOf({ stages, queueStageId: 'b' })).toBe('b')
+    expect(queueStageOf({ stages })).toBe('a')
+    expect(queueStageOf({ stages, queueStageId: 'sumiu' })).toBe('a')
+    expect(queueStageOf(null)).toBeNull()
   })
 })

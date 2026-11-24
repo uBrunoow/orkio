@@ -2,10 +2,10 @@
  * Lista lateral (reestruturação): as tarefas do projeto atual agrupadas pelo que fazer agora.
  * Puro: junta o que a Visão geral (6D) já calcula (esperando você, rodando) com o quadro (a fazer).
  */
-import { priorityRank } from '../../../shared/orchestrator'
+
 import type { OverviewSnapshot, OverviewTask, TaskSection } from '../../../shared/overview'
 import type { StatusTone } from '../components/StatusToken'
-import type { BoardCard, BoardView } from '../../../shared/board'
+import { priorityRank, queueStageOf, type BoardCard, type BoardView } from '../../../shared/board'
 
 export interface SidebarTask {
   taskId: string
@@ -32,7 +32,6 @@ export function taskGroups(input: {
   projectId: string
   snapshot: OverviewSnapshot | null
   board: BoardView | null
-  queueStageId: string | null
 }): TaskGroups {
   const { projectId, snapshot, board } = input
   const cards = new Map<string, BoardCard>((board?.cards ?? []).map((c) => [c.taskId, c]))
@@ -70,7 +69,7 @@ export function taskGroups(input: {
     })
   }
 
-  const queue = queueStage(board, input.queueStageId)
+  const queue = queueStageOf(board?.config)
   // Os cards vêm do Notion por `created_time` desc: índice maior = tarefa mais antiga.
   const inQueue = (board?.cards ?? [])
     .map((card, index) => ({ card, index }))
@@ -89,11 +88,4 @@ export function taskGroups(input: {
   }))
 
   return { waiting, running, todo, todoTotal: inQueue.length }
-}
-
-function queueStage(board: BoardView | null, queueStageId: string | null): string | null {
-  const stages = board?.config?.stages ?? []
-  if (queueStageId && stages.some((s) => s.id === queueStageId)) return queueStageId
-  const first = [...stages].sort((a, b) => a.order - b.order)[0]
-  return first?.id ?? null
 }

@@ -159,15 +159,23 @@ src/
                            # site.ts (`siteOrigin()`: o endereço do site para tudo)
     config/queries.ts      # `projectById`, `automationProjectIds` (perguntas à config com nome)
     connectors/types.ts    # interface Connector
+    connectors/stored-connection.ts # base dos conectores: conexão salva (load/save/saveAndReport/
+                           # errorKeepingStored), revalidate, token colado, mensagens comuns
+    connectors/github/orkio-site.ts # contrato da resposta do site (`parseOrkioSiteResponse`)
     connectors/<id>/       # <id>.client.ts (HTTP) + <id>.oauth.ts + <id>.connector.ts
     oauth/                 # fluxos genéricos: loopback.ts (redirect, RFC 8252), device-flow.ts (RFC 8628)
+    net/http.ts            # núcleo HTTP: fetchWithTimeout/requestJson (prazo cobre o corpo, leitura
+                           # limitada), ApiError (service + code), API_MESSAGES, isTransientApiError,
+                           # sendWithShortRetry (uma tentativa se a espera ≤ 5 s)
     net/parse.ts           # helpers puros de parsing (isRecord, Retry-After, ...)
     net/rate-queue.ts      # fila de rate limit (concorrência, intervalo mínimo, pausa) + backoff
     errors.ts              # errorName (só o nome vai ao log) e DomainError (código + mensagem pt-BR)
     ipc/                   # register.ts (registro único), emit.ts (eventos), <grupo>.ipc.ts (handlers)
     storage/secure-store.ts  # SEGREDOS (safeStorage)
-    storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações)
-    config/orkio-config.ts   # orkio-config.json (schema v13; migrações v → v+1)
+    storage/atomic-write.ts  # atomicWriteFile (tmp + rename, mode, fsync): SecureStore, ConfigStore, agentes
+    storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações obrigatórias)
+    config/orkio-config.ts   # orkio-config.json (schema v14; `orkioConfigMigrations` v → v+1)
+    config/migrations/     # migrações com dados CONGELADOS da época (regras v4, modelos Alva v12)
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
     notion/                # notion-workspace.service.ts (bancos, mapeamento, vínculo, tarefas)
@@ -272,8 +280,16 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   `invalid_grant` é terminal (erro com `hasStoredCredentials` + "Reconectar").
 - Separe **client** (HTTP puro, timeout, retry, mapeamento de erros para mensagens) de
   **connector** (validação de entrada, persistência, regras de status).
+- HTTP sempre pelo núcleo `net/http.ts`: `fetchWithTimeout`/`requestJson` (o prazo cobre a leitura
+  do corpo, lido com limite), erro único `ApiError` (`service`: notion/github/site, `code`) e as
+  mensagens genéricas de `API_MESSAGES` (tempo, rede, 5xx, inesperado, rate limit) pelo nome do
+  serviço. O client só mapeia o que é dele (404 por chamada, rate limit do GitHub, SSO).
+- A conexão salva é da base `StoredConnection` (`connectors/stored-connection.ts`): o conector só
+  implementa `parse` do registro, o "quem sou eu" (`revalidate`) e o login.
 - Erros esperados viram `{ state: 'error', message }`, sem lançar exceção. Falhas
-  transitórias (rede, 5xx, 429) em conexão já salva viram `connected` com `warning`.
+  transitórias (`isTransientApiError`: rede, tempo, 5xx, 429, resposta estranha) em conexão já
+  salva viram `connected` com `warning`; a mesma regra vale para o polling do login e para o
+  "não verificado" dos projetos.
 - Injete dependências (`fetch`, `sleep`, `store`, `now`) para testar sem rede.
 - Para adicionar um conector: `ConnectorId` em `shared/connection.ts`, métodos em `shared/ipc/api.ts`,
   `connectors/<id>/`, `ipc/<id>.ipc.ts` (handlers) e feature no renderer (o preload sai da declaração).
@@ -417,7 +433,10 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   `ready`); o aviso de carga fica em `ConfigStore.loadWarning`.
 - **Remover** só tira do `orkio-config.json`; nunca toca em arquivos do usuário.
 - **Config não secreta:** sempre via `ConfigStore` (nada de `fs.writeFile` direto). Mudou o
-  formato? Suba `ORKIO_CONFIG_VERSION` e escreva a migração `v → v+1` com teste.
+  formato? Suba `ORKIO_CONFIG_VERSION` e escreva a migração `v → v+1` com teste. Migração é
+  obrigatória (faltou uma → o `ConfigStore` nem é criado; teste exige todas as chaves) e
+  congelada: a que precisa de dados (regras padrão, modelos) leva a cópia da época em
+  `config/migrations/`, nunca o código vivo.
 
 ## Identidade visual
 
@@ -510,7 +529,8 @@ text-muted-foreground / text-subtle-foreground`, `border-border` (controles) e `
 
 - Etapas por projeto em `orkio-config.json` → `boards[projectId]`:
   `{ stages: [{ id, name, order, notionStatus: { id, name }, color }], orkioStageProperty,
-blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamento/Revisando/
+blockedProperty, rules, queueStageId?, updatedAt }` (`queueStageId`: coluna "A fazer" da lista
+  lateral, checkbox na etapa em Colunas; ausente = a primeira). Template: Prioridades→"Prioridades", Em andamento/Revisando/
   Revisado→"Em andamento", Finalizada→"Finalizadas"; a sugestão casa por nome (sem acento/caixa)
   com as opções reais do status. Opção inexistente → erro e não salva; renomeada (mesmo id) → aviso.
 - **SQLite via `node:sqlite`** (`main/db/database.ts`), arquivo `<userData>/orkio.db`: sem módulo
@@ -1036,8 +1056,11 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   aprovar → `run({ confirmed })` posta exatamente isso menos os fora do diff
   (`GitHubReviewPoster.postReview`). Erros: build sem o endereço do site (sem `MAIN_VITE_SITE_URL`
   ou origem recusada pelo conector) → `no_site`, "Este app não sabe o endereço do site do Orkio…"
-  (problema `review_no_site`; o site pode estar certo); o site responde `not_configured` (503) →
-  "o GitHub App do Orkio ainda não está configurado no site" (`review_not_configured`);
+  (problema `review_no_site`; o site pode estar certo; `ApiError` `no_site` do conector); o site
+  responde `not_configured` (503) → `app_not_configured`, "o GitHub App do Orkio ainda não está
+  configurado no site" (`review_not_configured`); site sem a rota (404/405 sem código) →
+  `site_outdated`. Revisão e cartão do bot leem a resposta pelo mesmo `parseOrkioSiteResponse`
+  (código do corpo; status só sem código); o texto ao usuário é sempre do app;
   `not_installed` → mensagem com o link de instalação (problema
   `review_not_installed`, botão; allowlist `github.com/apps/<slug>/installations/new`); timeout ou
   queda de rede no POST ao site (`ReviewPostError` `site_timeout`/`site_network`) → "a revisão
@@ -1066,7 +1089,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 ## Visão geral (Etapa 6D) → lista lateral e sino (fase 9)
 
 - **Tela:** a Visão geral saiu na reestruturação. O mesmo `OverviewSnapshot` alimenta a lista
-  lateral do projeto atual (`app/task-groups.ts`: esperando, rodando e a fazer da etapa de fila) e o
+  lateral do projeto atual (`app/task-groups.ts`: esperando, rodando e a fazer da coluna "A fazer" do quadro,
+  `boards[id].queueStageId` escolhida em Colunas, senão a primeira; `queueStageOf`) e o
   sino (`app/WaitingBell.tsx`: esperando você de todos os projetos + PRs com atenção). Semana e
   atividade continuam calculadas no serviço, sem tela por enquanto.
 - **Abertura** (`app/initial-route.ts`): sem projeto, Primeiros passos; com uma tarefa esperando
@@ -1136,7 +1160,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   roda dentro da transação do movimento (`enterStage`: depois do orquestrador, antes do fluxo), só com
   `manual`/`automation`, só se a tarefa não tiver agente nem fluxo ativo. Trocar com fluxo ativo é
   recusado. Histórico: `agent_assigned`/`agent_unassigned` (com o **nome** do agente; o orquestrador
-  usa o catálogo dos embutidos mesmo antes da primeira rodada, `agentNameFallback`), "por X" em
+  `agentDisplayName` de `shared/agent-presets.ts`: catálogo dos embutidos → nome visto → id, igual
+  na regra da coluna, ao tirar e no orquestrador), "por X" em
   `flow_started`/`run_started`.
 - **UI:** tela Agentes (lista, editor com prévia do prompt, revisar/aprovar, regras), avatar
   (`Token` com iniciais, `card-agent`) no card, seção "Agente" no painel, "Rodar como X" no Claude
@@ -1150,11 +1175,11 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   (o texto é do app) e não podem ser salvos (`AgentError('builtin')`); "Duplicar" grava uma cópia
   em `repo`/`local`. Só Implementador e Corretor de PR entregam (`delivery: true`).
 - **Config** (`orkio-config` v11 → `orchestrator[projectId]`): `enabled`, `enabledSince` (o main
-  preenche ao ligar), `queueStageId`/`maxActive` (sem uso desde que ele parou de puxar da fila;
-  ficam por compatibilidade) e `lanes`
+  preenche ao ligar) e `lanes` (a v14 tirou `maxActive` e levou `queueStageId` para o quadro)
   (`{ stageId, agents, next }`). `validateOrchestrator` (mesma no editor e no main): erros bloqueiam
   só com ele ligado; avisos = etapa sem fluxo `on_enter`, perfil a revisar, `checkAgentFlow` negado,
-  ciclo. `suggestOrchestrator` monta o caminho pelo nome das etapas.
+  ciclo. `suggestOrchestrator` monta o caminho pelo nome das etapas (agentes pelos ids de
+  `BUILTIN_AGENT_KEYS`). O agente da etapa é o `leastLoaded` (o mesmo na rodada e na entrada).
 - **Rodada** (`OrchestratorService.tick`, uma por projeto por vez): depois de cada ciclo das
   automações (wrapper do `run` do agendador) e `runSoon` (500 ms) quando um fluxo termina
   (`FlowRunner` `onFinished`) ou a config muda. `planTick` (puro) decide:
@@ -1226,8 +1251,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 ## Atualizações automáticas (Etapa 6C)
 
 - **electron-updater** (dependência de runtime, a única em `dependencies`; fica fora do bundle) com
-  `publish` github → `uBrunoow/orkio` (`RELEASES_REPO` em `shared/updates.ts`; precisa bater
-  com o electron-builder da 6B). O feed é público: nada de token.
+  `publish` github → `uBrunoow/orkio` (`RELEASES_REPO` em `shared/updates.ts`; o
+  `electron-builder.ts` importa de lá). O feed é público: nada de token.
 - `UpdateService` (`main/updates/`) recebe o `autoUpdater` como `UpdaterLike`. Ligado só com
   `app.isPackaged`; no Linux, só no AppImage (`APPIMAGE` no ambiente, `isAppImage`; o .deb não se
   atualiza) (ou `forceDevUpdateConfig`, flag oficial, usada no E2E). Checa 5 s

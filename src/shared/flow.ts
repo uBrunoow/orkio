@@ -78,6 +78,8 @@ export interface FlowDraft {
   removals: Record<string, string | null>
   /** 5A: fluxo de tarefa de cada coluna. Ausente = mantém as ligações salvas. */
   bindings?: StageFlow[]
+  /** Coluna "A fazer" da lista lateral (`BoardConfig.queueStageId`). Ausente = mantém a salva. */
+  queueStageId?: string | null
 }
 
 // ---------- Frases ----------

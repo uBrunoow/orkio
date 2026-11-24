@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { PUBLISH_REVIEW_MESSAGES } from '../../shared/review-publish'
 import type { ActionConfirm } from '../../shared/task-flow'
-import { GitHubApiError } from '../connectors/github/github.client'
 import { REVIEW_MESSAGES, ReviewPostError } from '../connectors/github/review-poster'
 import { SIGNALS_FAILURE } from './action-helpers'
 import {
@@ -10,6 +9,7 @@ import {
   PUBLISH_FAILURES,
   type PublishReviewDeps
 } from './review-publish'
+import { ApiError } from '../net/http'
 
 const JSON_ANSWER = JSON.stringify({
   event: 'REQUEST_CHANGES',
@@ -253,7 +253,7 @@ describe('publish_review: aprovar', () => {
       message: `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint} https://github.com/apps/orkio/installations/new`
     })
 
-    error = new ReviewPostError('not_configured', REVIEW_MESSAGES.notConfigured)
+    error = new ReviewPostError('app_not_configured', REVIEW_MESSAGES.notConfigured)
     expect(await action.run({ ...ctx, confirmed: info })).toEqual({
       ok: false,
       code: PUBLISH_FAILURES.notConfigured,
@@ -300,7 +300,7 @@ describe('publish_review: aprovar', () => {
     expect(((await other.action.confirm!(other.ctx)) as ActionConfirm).warning).toBeUndefined()
 
     // Erro inesperado: mensagem genérica (nunca a exceção crua).
-    error = new GitHubApiError('unexpected', 'segredo ghp_x')
+    error = new ApiError('github', 'unexpected', 'segredo ghp_x')
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     expect(await action.run({ ...ctx, confirmed: info })).toEqual({
       ok: false,

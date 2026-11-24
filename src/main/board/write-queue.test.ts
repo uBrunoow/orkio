@@ -2,10 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NotionApiError } from '../connectors/notion/notion.client'
 import { openDatabase, type Db } from '../db/database'
 import { BoardStore, type PendingWrite } from './board.store'
 import { NotionWriteQueue, WRITE_MAX_BACKOFF_MS, type WriteQueueDeps } from './write-queue'
+import { ApiError } from '../net/http'
 
 const T0 = Date.parse('2026-11-19T12:00:00Z')
 
@@ -65,7 +65,7 @@ describe('NotionWriteQueue', () => {
   })
 
   it('sem rede: fica pendente com backoff exponencial (1 s, 2 s, 4 s… até 5 min)', async () => {
-    updatePage.mockRejectedValue(new NotionApiError('network', 'Sem conexão.'))
+    updatePage.mockRejectedValue(new ApiError('notion', 'network', 'Sem conexão.'))
     enqueue('t1', 'Finalizadas')
     const q = queue()
     q.start()
@@ -85,7 +85,7 @@ describe('NotionWriteQueue', () => {
   })
 
   it('antes do horário da nova tentativa não reenvia', async () => {
-    updatePage.mockRejectedValueOnce(new NotionApiError('server', '503'))
+    updatePage.mockRejectedValueOnce(new ApiError('notion', 'server', '503'))
     enqueue('t1', 'Finalizadas')
     const q = queue()
     q.start()
@@ -101,7 +101,7 @@ describe('NotionWriteQueue', () => {
   })
 
   it('persistência: pendência sobrevive a fechar e reabrir o app', async () => {
-    updatePage.mockRejectedValue(new NotionApiError('network', 'x'))
+    updatePage.mockRejectedValue(new ApiError('notion', 'network', 'x'))
     enqueue('t1', 'Finalizadas')
     const q1 = queue()
     q1.start()
@@ -127,7 +127,7 @@ describe('NotionWriteQueue', () => {
 
   it('Notion recusa (400/403/404) → rollback, sem nova tentativa', async () => {
     for (const code of ['bad_request', 'forbidden', 'not_found'] as const) {
-      updatePage.mockRejectedValueOnce(new NotionApiError(code, 'Recusado.'))
+      updatePage.mockRejectedValueOnce(new ApiError('notion', code, 'Recusado.'))
       enqueue(`t-${code}`, 'X', 'stage-antes')
     }
     const rejected: PendingWrite[] = []

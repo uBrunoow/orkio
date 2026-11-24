@@ -347,6 +347,33 @@ describe('agentes embutidos (8B)', () => {
     )
   })
 
+  it('regra da coluna e "tirar" mostram o nome do embutido, mesmo sem a lista carregada', async () => {
+    await service.setRules('p1', [{ stageId: 's2', agentKey: 'builtin:implementador' }])
+    // App recém-aberto: ninguém chamou list/get ainda (antes: o histórico mostrava "implementador").
+    const fresh = new AgentsService({
+      db,
+      store,
+      config: (service as unknown as { deps: { config: never } }).deps.config,
+      localDir,
+      hasActiveFlow: () => false,
+      stageIds: () => ['s1', 's2'],
+      actor: () => 'bruno',
+      emit: () => undefined,
+      now: () => now
+    })
+    fresh.onStageChanged({ projectId: 'p1', taskId: 't1', from: 's1', to: 's2', source: 'manual' })
+    expect(store.events('t1')[0]?.detail).toEqual({
+      agentKey: 'builtin:implementador',
+      agent: 'Implementador',
+      by: 'rule'
+    })
+    await fresh.assign('p1', 't1', null)
+    expect(store.events('t1')[0]).toMatchObject({
+      kind: 'agent_unassigned',
+      detail: { agentKey: 'builtin:implementador', agent: 'Implementador' }
+    })
+  })
+
   it('o orquestrador atribui na transação, com histórico e sem marcar como "à mão"', async () => {
     store.transaction(() =>
       service.assignByOrchestrator('p1', 't1', 'builtin:implementador', 'Implementador')

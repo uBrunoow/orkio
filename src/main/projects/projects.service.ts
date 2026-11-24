@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
-import { GitHubApiError, type GitHubRepo } from '../connectors/github/github.client'
+import { type GitHubRepo } from '../connectors/github/github.client'
 import { GitError, type Git } from '../git/git'
 import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
 import { HeadWatcher } from './head-watcher'
@@ -22,6 +22,7 @@ import type {
   ProjectsListResult,
   RemoteCandidate
 } from '../../shared/projects'
+import { isApiError, isTransientApiError } from '../net/http'
 
 /** O que o serviço precisa do conector do GitHub (o token nunca sai de lá). */
 export interface ProjectsGitHub {
@@ -460,10 +461,7 @@ export class ProjectsService {
       const fresh = await this.deps.github.getRepository(repo.owner, repo.name)
       return { health: { state: 'ok' }, repo: toProjectRepo(fresh, repo.remoteName) }
     } catch (error) {
-      if (
-        error instanceof GitHubApiError &&
-        ['network', 'timeout', 'server', 'rate_limited', 'unexpected'].includes(error.code)
-      ) {
+      if (isApiError(error) && isTransientApiError(error, 'github')) {
         return {
           health: {
             state: 'unverified',
@@ -499,7 +497,7 @@ export class ProjectsService {
   }
 
   private async githubFailure(error: unknown): Promise<ProjectError> {
-    if (!(error instanceof GitHubApiError)) {
+    if (!isApiError(error, 'github')) {
       return {
         code: 'github_error',
         message: 'Algo deu errado ao falar com o GitHub. Tente de novo.'

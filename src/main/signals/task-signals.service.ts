@@ -13,7 +13,6 @@ import {
   type TaskSignalsResult
 } from '../../shared/task-signals'
 import type { OrkioConfig } from '../config/orkio-config'
-import { GitHubApiError } from '../connectors/github/github.client'
 import type { Git } from '../git/git'
 import type { ConfigStore } from '../storage/config-store'
 import { GitHubRepoSignals, type GitHubSignalsApi } from './github-signals.source'
@@ -22,6 +21,7 @@ import type { NotionTasksResult } from '../../shared/notion'
 import type { ProjectAction } from '../../shared/projects'
 import { projectById } from '../config/queries'
 import { githubRepoOf } from '../../shared/projects'
+import { isApiError } from '../net/http'
 
 export interface SignalsGitHub extends GitHubSignalsApi {
   isConnected(): Promise<boolean>
@@ -213,8 +213,7 @@ export class TaskSignalsService {
   private async failure(
     e: unknown
   ): Promise<{ state: SignalsGitHubState; message: string; action?: ProjectAction }> {
-    if (!(e instanceof GitHubApiError))
-      return { state: 'unverified', message: SIGNALS_MESSAGES.unknown }
+    if (!isApiError(e, 'github')) return { state: 'unverified', message: SIGNALS_MESSAGES.unknown }
     switch (e.code) {
       case 'not_connected':
         return { state: 'disconnected', message: SIGNALS_MESSAGES.disconnected }

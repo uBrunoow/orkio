@@ -71,11 +71,6 @@ function build(hostRaw: string, pathRaw: string): ParsedRemote | null {
   return { host, owner, name, kind }
 }
 
-/** Host usado na API para um remote confirmado: aliases de SSH apontam para github.com. */
-export function apiHostFor(remote: ParsedRemote): string {
-  return remote.kind === 'enterprise' ? remote.host : 'github.com'
-}
-
 /** Mesmo repositório? (GitHub não diferencia maiúsculas em owner/nome.) */
 export function sameRepo(
   a: { owner: string; name: string },

@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
-import { NotionApiError } from '../connectors/notion/notion.client'
 import type { ConfigStore } from '../storage/config-store'
 import {
   NOTION_READ_LIMIT,
@@ -11,6 +10,7 @@ import {
   WORKSPACE_MESSAGES,
   type NotionWorkspaceApi
 } from './notion-workspace.service'
+import { ApiError } from '../net/http'
 
 const PROJECTS_DS = '11111111-1111-1111-1111-111111111111'
 const TASKS_DS = '22222222-2222-2222-2222-222222222222'
@@ -286,7 +286,7 @@ describe('NotionWorkspaceService', () => {
 
     it('sem rede → unverified, sem mexer na configuração', async () => {
       await configured()
-      api.getDataSource.mockRejectedValue(new NotionApiError('network', 'Sem conexão.'))
+      api.getDataSource.mockRejectedValue(new ApiError('notion', 'network', 'Sem conexão.'))
       const status = await (await makeService()).getStatus()
       expect(status).toMatchObject({ health: 'unverified', messages: ['Sem conexão.'] })
       expect(store.get().notion).not.toBeNull()
@@ -368,7 +368,7 @@ describe('NotionWorkspaceService', () => {
         ok: false,
         error: { code: 'not_found' }
       })
-      api.queryDataSource.mockRejectedValueOnce(new NotionApiError('not_found', 'Sumiu.', 404))
+      api.queryDataSource.mockRejectedValueOnce(new ApiError('notion', 'not_found', 'Sumiu.', 404))
       expect(await service.listProjectChoices('local-1', { force: true })).toEqual({
         ok: false,
         error: { code: 'not_found', message: 'Sumiu.', canReconnect: true }

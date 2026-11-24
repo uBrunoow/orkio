@@ -4,9 +4,10 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DeviceAuthorization, DevicePollResult } from '../../oauth/device-flow'
 import { SecureStore, type SafeStorageLike } from '../../storage/secure-store'
-import { GitHubApiError, createGitHubClient, type GitHubClient } from './github.client'
+import { createGitHubClient, type GitHubClient } from './github.client'
 import { GITHUB_MESSAGES, GitHubConnector, ORKIO_SITE_TIMEOUT_MS } from './github.connector'
 import type { GitHubDeviceApi, GitHubOAuthToken } from './github.oauth'
+import { ApiError } from '../../net/http'
 
 const PAT = 'github_pat_CONNECTOR_TOKEN_SHOULD_NEVER_LEAK'
 const DEVICE_TOKEN = 'gho_DEVICE_TOKEN_SHOULD_NEVER_LEAK'
@@ -196,7 +197,7 @@ describe('GitHubConnector', () => {
 
     it('Device Flow desligado na OAuth App → erro de configuração', async () => {
       device.requestCode.mockRejectedValueOnce(
-        new GitHubApiError('oauth_config', 'O login com GitHub está mal configurado.')
+        new ApiError('github', 'oauth_config', 'O login com GitHub está mal configurado.')
       )
       expect(await makeConnector().startDeviceFlow()).toEqual({
         ok: false,
@@ -224,7 +225,7 @@ describe('GitHubConnector', () => {
 
     it('rede instável durante o polling é tolerada', async () => {
       pollSequence([
-        new GitHubApiError('network', 'sem rede'),
+        new ApiError('github', 'network', 'sem rede'),
         { kind: 'token', value: { accessToken: DEVICE_TOKEN, scopes: ['repo'] } }
       ])
       const connector = makeConnector()
@@ -469,7 +470,7 @@ describe('GitHubConnector', () => {
         })
       })
 
-      it('sem origem ou origem fora das regras → not_configured, sem rede', async () => {
+      it('sem origem ou origem fora das regras → no_site, sem rede', async () => {
         const site = vi.fn<typeof fetch>(async () => json({}))
         await withSite(site).connect({ kind: 'token', token: PAT })
         for (const siteOrigin of [
@@ -484,7 +485,7 @@ describe('GitHubConnector', () => {
           const connector = withSite(site, { siteOrigin: siteOrigin ?? null })
           expect(connector.hasOrkioSite()).toBe(false)
           await expect(connector.postReviewViaOrkioSite(PAYLOAD)).rejects.toMatchObject({
-            code: 'not_configured'
+            code: 'no_site'
           })
         }
         expect(site).not.toHaveBeenCalled()
@@ -615,7 +616,7 @@ describe('GitHubConnector', () => {
       )
       const error = await connector.getRepository('acme', 'app').catch((e: unknown) => e)
       expect(error).toMatchObject({ code: 'sso_required', details: { org: 'acme' } })
-      expect((error as GitHubApiError).details.ssoUrl).toBeUndefined()
+      expect((error as ApiError).details.ssoUrl).toBeUndefined()
     })
 
     it('accessSettingsUrl: OAuth App → página do app; PAT → página de tokens', async () => {

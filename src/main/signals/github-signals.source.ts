@@ -13,13 +13,13 @@ import type {
   ReviewDecision
 } from '../../shared/task-signals'
 import {
-  GitHubApiError,
   parseBranchItem,
   parsePullItem,
   type ConditionalPage
 } from '../connectors/github/github.client'
 import { isRecord } from '../net/parse'
 import { isAuthorLogin, isTeamSlug } from '../../shared/github-names'
+import { isApiError } from '../net/http'
 
 export interface GitHubSignalsApi {
   getConditional(path: string, etag: string | null): Promise<ConditionalPage>
@@ -193,7 +193,7 @@ export class GitHubRepoSignals {
           : null
       } catch (error) {
         this.detailsWarning =
-          error instanceof GitHubApiError && error.code === 'forbidden'
+          isApiError(error, 'github') && error.code === 'forbidden'
             ? error.message
             : 'Não foi possível carregar revisões e comentários das PRs agora. Mostrando o que já se sabe.'
         break

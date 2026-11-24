@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { atomicWriteFile } from './atomic-write'
 
 /** Subconjunto do `safeStorage` do Electron que usamos (facilita mock em testes). */
 export interface SafeStorageLike {
@@ -73,16 +74,7 @@ export class SecureStore implements SecretStore {
     const file = this.fileFor(key)
     this.assertAvailable()
     const encrypted = this.safeStorage.encryptString(value)
-    await mkdir(this.dir, { recursive: true, mode: 0o700 })
-    // Escrita atômica: grava em arquivo temporário e renomeia.
-    const tmp = `${file}.${process.pid}.tmp`
-    try {
-      await writeFile(tmp, encrypted, { mode: 0o600 })
-      await rename(tmp, file)
-    } catch (error) {
-      await rm(tmp, { force: true })
-      throw error
-    }
+    await atomicWriteFile(file, encrypted, { mode: 0o600, fsync: true, dirMode: 0o700 })
   }
 
   async delete(key: string): Promise<void> {

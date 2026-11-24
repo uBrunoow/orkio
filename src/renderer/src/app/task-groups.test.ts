@@ -52,10 +52,11 @@ const card = (taskId: string, stageId: string, priority: string | null = null): 
   sync: { state: 'synced' }
 })
 
-const board = (cards: BoardCard[]): BoardView =>
+const board = (cards: BoardCard[], queueStageId?: string): BoardView =>
   ({
     projectId: 'p1',
     config: {
+      ...(queueStageId ? { queueStageId } : {}),
       stages: [
         { id: 's2', name: 'Em andamento', order: 1, notionStatus: { id: null, name: 'b' } },
         { id: 's1', name: 'Prioridades', order: 0, notionStatus: { id: null, name: 'a' } }
@@ -80,8 +81,7 @@ describe('taskGroups', () => {
         ],
         [running('t1'), running('t2')]
       ),
-      board: null,
-      queueStageId: null
+      board: null
     })
     expect(g.waiting).toHaveLength(1)
     expect(g.waiting[0]).toMatchObject({
@@ -94,28 +94,29 @@ describe('taskGroups', () => {
     expect(g.running[0]?.tone).toBe('running')
   })
 
-  it('a fazer vem da etapa de fila por prioridade e antiguidade', () => {
+  it('a fazer vem da coluna "A fazer" do quadro, por prioridade e antiguidade', () => {
     const g = taskGroups({
       projectId: 'p1',
       snapshot: null,
-      board: board([
-        card('novaAlta', 's2', 'Alta'),
-        card('velhaAlta', 's2', 'Alta'),
-        card('velhaBaixa', 's2', 'Baixa'),
-        card('outraEtapa', 's1')
-      ]),
-      queueStageId: 's2'
+      board: board(
+        [
+          card('novaAlta', 's2', 'Alta'),
+          card('velhaAlta', 's2', 'Alta'),
+          card('velhaBaixa', 's2', 'Baixa'),
+          card('outraEtapa', 's1')
+        ],
+        's2'
+      )
     })
     expect(g.todo.map((t) => t.taskId)).toEqual(['velhaAlta', 'novaAlta', 'velhaBaixa'])
     expect(g.todo[0]).toMatchObject({ title: 'Card velhaAlta', tone: 'neutral' })
   })
 
-  it('sem fila configurada usa a primeira etapa', () => {
+  it('sem coluna "A fazer" escolhida no quadro usa a primeira etapa', () => {
     const g = taskGroups({
       projectId: 'p1',
       snapshot: null,
-      board: board([card('a', 's2'), card('b', 's1')]),
-      queueStageId: null
+      board: board([card('a', 's2'), card('b', 's1')])
     })
     expect(g.todo.map((t) => t.taskId)).toEqual(['b'])
   })
@@ -124,8 +125,7 @@ describe('taskGroups', () => {
     const g = taskGroups({
       projectId: 'p1',
       snapshot: snapshot([waiting('a', '2026-11-23T10:00:00Z', 'x')], [running('b')]),
-      board: board([card('a', 's1'), card('b', 's1'), card('c', 's1')]),
-      queueStageId: null
+      board: board([card('a', 's1'), card('b', 's1'), card('c', 's1')])
     })
     expect(g.todo.map((t) => t.taskId)).toEqual(['c'])
   })
@@ -135,8 +135,7 @@ describe('taskGroups', () => {
     const g = taskGroups({
       projectId: 'p1',
       snapshot: null,
-      board: board(cards),
-      queueStageId: null
+      board: board(cards)
     })
     expect(TODO_LIMIT).toBe(8)
     expect(g.todo).toHaveLength(8)
@@ -144,9 +143,12 @@ describe('taskGroups', () => {
   })
 
   it('sem quadro e sem snapshot não quebra', () => {
-    expect(
-      taskGroups({ projectId: 'p1', snapshot: null, board: null, queueStageId: null })
-    ).toEqual({ waiting: [], running: [], todo: [], todoTotal: 0 })
+    expect(taskGroups({ projectId: 'p1', snapshot: null, board: null })).toEqual({
+      waiting: [],
+      running: [],
+      todo: [],
+      todoTotal: 0
+    })
   })
 
   it('título cai para o do quadro e depois para o genérico', () => {
@@ -156,8 +158,7 @@ describe('taskGroups', () => {
     const g = taskGroups({
       projectId: 'p1',
       snapshot: snapshot([noTitle, { ...w2, task: { ...w2.task, title: null } }]),
-      board: board([card('a', 's1')]),
-      queueStageId: null
+      board: board([card('a', 's1')])
     })
     expect(g.waiting.map((t) => t.title)).toEqual(['Card a', 'Tarefa do Notion'])
   })

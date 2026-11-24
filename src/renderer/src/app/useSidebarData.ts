@@ -20,9 +20,7 @@ export function useSidebarData(
   const { snapshot } = useOverview()
   // Guardados com o projeto: trocar de projeto não mostra o quadro do anterior.
   const [loaded, setLoaded] = useState<{ projectId: string; view: BoardView } | null>(null)
-  const [queue, setQueue] = useState<{ projectId: string; stageId: string | null } | null>(null)
   const board = loaded && loaded.projectId === projectId ? loaded.view : null
-  const queueStageId = queue && queue.projectId === projectId ? queue.stageId : null
 
   useEffect(() => {
     if (!projectId) return
@@ -36,12 +34,6 @@ export function useSidebarData(
         .catch(() => undefined)
     }
     load()
-    void window.orkio.agents
-      .orchestrator(projectId)
-      .then((r) => {
-        if (active && r.ok) setQueue({ projectId, stageId: r.value.config.queueStageId })
-      })
-      .catch(() => undefined)
     const offBoard = window.orkio.board.onChanged((e) => {
       if (e.projectId === projectId) load()
     })
@@ -54,8 +46,8 @@ export function useSidebarData(
   }, [projectId, refreshKey])
 
   const groups = useMemo(
-    () => (projectId ? taskGroups({ projectId, snapshot, board, queueStageId }) : null),
-    [projectId, snapshot, board, queueStageId]
+    () => (projectId ? taskGroups({ projectId, snapshot, board }) : null),
+    [projectId, snapshot, board]
   )
   return { groups, snapshot, board }
 }

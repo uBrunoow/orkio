@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GitHubApiError, type ConditionalPage } from './github.client'
+import { type ConditionalPage } from './github.client'
 import type { OrkioSiteResponse, OrkioSiteReviewPayload } from './github.connector'
 import {
   GitHubReviewPoster,
@@ -11,6 +11,7 @@ import {
   type ReviewGitHub,
   type ReviewInput
 } from './review-poster'
+import { ApiError } from '../../net/http'
 
 const REVIEW_URL = 'https://github.com/acme/orkio/pull/7#pullrequestreview-99'
 
@@ -284,8 +285,8 @@ describe('erros em pt-BR', () => {
   const site = (status: number, body: unknown) => () => ({ status, body })
 
   it.each([
-    [503, { error: 'not_configured' }, 'not_configured', REVIEW_MESSAGES.notConfigured],
-    [404, null, 'not_configured', REVIEW_MESSAGES.notConfigured],
+    [503, { error: 'not_configured' }, 'app_not_configured', REVIEW_MESSAGES.notConfigured],
+    [404, null, 'site_outdated', REVIEW_MESSAGES.siteOutdated],
     [403, { error: 'forbidden' }, 'forbidden', REVIEW_MESSAGES.forbidden],
     [429, { error: 'rate_limited' }, 'rate_limited', REVIEW_MESSAGES.rateLimited],
     [400, { error: 'bad_request', reason: 'rejected' }, 'rejected', REVIEW_MESSAGES.rejected],
@@ -340,7 +341,12 @@ describe('erros em pt-BR', () => {
   ] as const)('erro %s do conector → %s, com a mensagem segura', async (from, to) => {
     const gh = fakeGitHub({
       site: () => {
-        throw new GitHubApiError(from, `mensagem ${from}`, from === 'server' ? 500 : undefined)
+        throw new ApiError(
+          from === 'not_connected' ? 'github' : 'site',
+          from,
+          `mensagem ${from}`,
+          from === 'server' ? 500 : undefined
+        )
       }
     })
     const error = await rejection(
@@ -352,7 +358,7 @@ describe('erros em pt-BR', () => {
   it('conector sem origem (ou origem recusada) → no_site, não "site sem App"', async () => {
     const gh = fakeGitHub({
       site: () => {
-        throw new GitHubApiError('not_configured', 'Este app não sabe o endereço do site…')
+        throw new ApiError('site', 'no_site', 'Este app não sabe o endereço do site…')
       }
     })
     const error = await rejection(
@@ -362,12 +368,12 @@ describe('erros em pt-BR', () => {
     expect(error.message).toBe(REVIEW_MESSAGES.noSite)
   })
 
-  it('o site respondeu not_configured (503) → not_configured com a mensagem do site', async () => {
+  it('o site respondeu not_configured (503) → app_not_configured com a mensagem do site', async () => {
     const gh = fakeGitHub({ site: () => ({ status: 503, body: { error: 'not_configured' } }) })
     const error = await rejection(
       poster(gh).postReview('acme', 'orkio', 7, { ...REVIEW, comments: [] })
     )
-    expect(error.code).toBe('not_configured')
+    expect(error.code).toBe('app_not_configured')
     expect(error.message).toBe(REVIEW_MESSAGES.notConfigured)
     expect(error.message).not.toBe(REVIEW_MESSAGES.noSite)
   })

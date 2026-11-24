@@ -3,7 +3,7 @@
  * (versões, recorte do CHANGELOG, notas em blocos simples, URL do DMG). Sem Node/DOM.
  */
 
-/** Repositório público do Orkio, onde ficam os releases (6B). Precisa bater com o `publish` do electron-builder. */
+/** Repositório público do Orkio, onde ficam os releases (6B); o `publish` do `electron-builder.ts` lê daqui. */
 export const RELEASES_REPO = { owner: 'uBrunoow', repo: 'orkio' } as const
 
 export const UPDATE_CHANNELS = ['stable', 'beta'] as const

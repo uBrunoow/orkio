@@ -2,62 +2,29 @@
  * Cliente HTTP mínimo da API REST do GitHub. Roda só no processo main.
  * fetch nativo (mesmo motivo do Notion): poucos endpoints, controle de timeout e rate limit.
  */
+import {
+  ApiError,
+  isApiError,
+  defaultSleep,
+  fetchWithTimeout,
+  formatWait,
+  genericStatusError,
+  readJson,
+  sendWithShortRetry,
+  unexpectedError,
+  type HttpResponse
+} from '../../net/http'
 import { httpsUrlOrNull, isRecord, parseRetryAfterMs, stringOrNull } from '../../net/parse'
 import { notionPageIdsIn } from '../../../shared/slug'
 import { GITHUB_API_VERSION, isAuthorLogin, isLogin } from '../../../shared/github-names'
 
 export const GITHUB_API_BASE_URL = 'https://api.github.com'
 export const GITHUB_REQUEST_TIMEOUT_MS = 10_000
-/** Esperamos e repetimos uma vez se o GitHub pedir até este tempo; acima disso, erro. */
-export const GITHUB_MAX_RETRY_WAIT_MS = 5_000
 /** Rate limit secundário sem Retry-After: a documentação pede ao menos 1 minuto. */
 export const GITHUB_SECONDARY_RATE_LIMIT_DEFAULT_MS = 60_000
 export const GITHUB_USER_AGENT = 'Orkio-Desktop'
 
-export type GitHubErrorCode =
-  | 'unauthorized'
-  | 'forbidden'
-  | 'rate_limited'
-  | 'timeout'
-  | 'network'
-  | 'server'
-  | 'unexpected'
-  /** Device Flow: app sem Device Flow habilitado ou client ID inválido. */
-  | 'oauth_config'
-  /** 404: o repositório não existe ou a conta não tem acesso (o GitHub não diferencia). */
-  | 'not_found'
-  /** 403 com X-GitHub-SSO: a org exige autorização SAML SSO para este token. */
-  | 'sso_required'
-  /** 403 por restrição de OAuth Apps da org: um owner precisa aprovar o Orkio. */
-  | 'oauth_restricted'
-  /** 422: pedido recusado pelo GitHub (ex.: revisor sem acesso ao repositório ou autor da PR). */
-  | 'invalid'
-  /** Nenhuma conta do GitHub conectada no Orkio. */
-  | 'not_connected'
-  /** Revisão como orkio[bot]: o build não tem a origem do site do Orkio. */
-  | 'not_configured'
-
-/** Erro com mensagem segura para o usuário (pt-BR). Nunca contém o token nem a exceção original. */
-export class GitHubApiError extends Error {
-  constructor(
-    readonly code: GitHubErrorCode,
-    message: string,
-    readonly status?: number,
-    /** Dados extras seguros para a UI (ex.: URL de autorização SSO do próprio GitHub). */
-    readonly details: { ssoUrl?: string; org?: string } = {}
-  ) {
-    super(message)
-    this.name = 'GitHubApiError'
-  }
-}
-
-/** Erros que não encerram um polling (podem passar sozinhos). */
-export function isTransientGitHubError(error: unknown): boolean {
-  return (
-    error instanceof GitHubApiError &&
-    (error.code === 'network' || error.code === 'timeout' || error.code === 'server')
-  )
-}
+const GITHUB = { service: 'github' } as const
 
 export interface GitHubUser {
   id: number
@@ -117,8 +84,7 @@ export interface GitHubClient {
 }
 
 export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
-  const doFetch: typeof fetch = (...args) => (deps.fetch ?? globalThis.fetch)(...args)
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const sleep = deps.sleep ?? defaultSleep
   const timeoutMs = deps.timeoutMs ?? GITHUB_REQUEST_TIMEOUT_MS
   const now = deps.now ?? Date.now
 
@@ -126,42 +92,36 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
     path: string,
     token: string,
     options: RequestOptions = {}
-  ): Promise<Response> {
-    for (let attempt = 0; ; attempt++) {
-      const response = await fetchWithTimeout(
-        doFetch,
-        `${GITHUB_API_BASE_URL}${path}`,
-        token,
-        timeoutMs,
-        options
-      )
-      if (response.ok || response.status === 304) return response
-
-      const body = await response.text().catch(() => '')
-      const rateLimitWait = rateLimitWaitMs(response, body, now())
-      if (rateLimitWait !== null) {
-        if (attempt === 0 && rateLimitWait.ms <= GITHUB_MAX_RETRY_WAIT_MS) {
-          await sleep(rateLimitWait.ms)
-          continue
-        }
-        throw rateLimited(rateLimitWait)
-      }
-      throw errorForResponse(response, body, path)
-    }
+  ): Promise<HttpResponse> {
+    const { response, wait } = await sendWithShortRetry(
+      () =>
+        fetchWithTimeout(
+          {
+            url: `${GITHUB_API_BASE_URL}${path}`,
+            method: options.method ?? 'GET',
+            headers: {
+              ...githubHeaders(token),
+              ...options.headers,
+              ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {})
+            },
+            ...(options.body !== undefined ? { body: options.body } : {})
+          },
+          { ...GITHUB, fetch: deps.fetch, timeoutMs }
+        ),
+      (r) => (r.status === 304 ? null : rateLimitWaitMs(r, r.text ?? '', now())),
+      sleep
+    )
+    if (wait) throw rateLimited(wait)
+    if (response.ok || response.status === 304) return response
+    throw errorForResponse(response, response.text ?? '', path)
   }
 
-  async function json(response: Response): Promise<unknown> {
-    try {
-      return await response.json()
-    } catch {
-      throw unexpected(response.status)
-    }
-  }
+  const json = (response: HttpResponse): unknown => readJson(response, GITHUB)
 
   return {
     async getUser(token: string): Promise<GitHubUser> {
       const response = await request('/user', token)
-      const user = parseUser(await json(response), response.headers.get('x-oauth-scopes'))
+      const user = parseUser(json(response), response.headers.get('x-oauth-scopes'))
       if (!user) throw unexpected(response.status)
       return user
     },
@@ -169,7 +129,7 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
     async getRepository(token: string, owner: string, name: string): Promise<GitHubRepo> {
       const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`
       const response = await request(path, token)
-      const repo = parseRepository(await json(response))
+      const repo = parseRepository(json(response))
       if (!repo) throw unexpected(response.status)
       return repo
     },
@@ -183,7 +143,7 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
       if (response.status === 304) return { notModified: true }
       return {
         notModified: false,
-        body: await json(response),
+        body: json(response),
         etag: response.headers.get('etag'),
         nextPath: parseNextLink(response.headers.get('link'))
       }
@@ -194,7 +154,7 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
         method: 'POST',
         body: JSON.stringify({ query, variables })
       })
-      const body = await json(response)
+      const body = json(response)
       if (!isRecord(body)) throw unexpected(response.status)
       const errors = Array.isArray(body['errors'])
         ? body['errors'].filter(isRecord).map((e) => ({
@@ -205,17 +165,14 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
       if (!isRecord(body['data'])) {
         // Sem dados: erro geral (ex.: token sem acesso ao recurso).
         throw errors.some((e) => e.type === 'INSUFFICIENT_SCOPES' || e.type === 'FORBIDDEN')
-          ? new GitHubApiError(
+          ? new ApiError(
+              'github',
               'forbidden',
               'A conexão do GitHub não tem permissão para ler parte dos detalhes das PRs (revisões, comentários ou checks).',
               response.status
             )
           : errors.some((e) => e.type === 'NOT_FOUND')
-            ? new GitHubApiError(
-                'not_found',
-                'O GitHub não encontrou este repositório com a conta conectada: ele não existe ou a conta não tem acesso.',
-                response.status
-              )
+            ? repoNotFound(response.status)
             : unexpected(response.status)
       }
       return { data: body['data'], errors }
@@ -229,8 +186,9 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
           body: JSON.stringify({ reviewers: reviewers.users, team_reviewers: reviewers.teams })
         })
       } catch (error) {
-        if (error instanceof GitHubApiError && error.status === 422) {
-          throw new GitHubApiError(
+        if (isApiError(error, 'github') && error.status === 422) {
+          throw new ApiError(
+            'github',
             'invalid',
             'O GitHub recusou o pedido de review: confira se os revisores têm acesso ao repositório (o autor da PR não pode revisar a própria PR).',
             422
@@ -242,7 +200,7 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
 
     async listCollaborators(token, owner, repo) {
       const path = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/collaborators?per_page=100`
-      const body = await json(await request(path, token))
+      const body = json(await request(path, token))
       return Array.isArray(body)
         ? body.flatMap((u) => (isRecord(u) && isLogin(u['login']) ? [u['login']] : []))
         : []
@@ -282,40 +240,6 @@ export function githubHeaders(token: string): Record<string, string> {
   }
 }
 
-async function fetchWithTimeout(
-  doFetch: typeof fetch,
-  url: string,
-  token: string,
-  timeoutMs: number,
-  options: RequestOptions = {}
-): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  const headers = { ...githubHeaders(token), ...options.headers }
-  if (options.body !== undefined) headers['Content-Type'] = 'application/json'
-  try {
-    return await doFetch(url, {
-      method: options.method ?? 'GET',
-      headers,
-      ...(options.body !== undefined ? { body: options.body } : {}),
-      signal: controller.signal
-    })
-  } catch {
-    // Não propagamos a exceção original: ela pode carregar detalhes da requisição.
-    throw controller.signal.aborted
-      ? new GitHubApiError(
-          'timeout',
-          'O GitHub demorou demais para responder. Verifique sua conexão e tente novamente.'
-        )
-      : new GitHubApiError(
-          'network',
-          'Não foi possível falar com o GitHub. Verifique sua conexão com a internet.'
-        )
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
 interface RateLimitWait {
   kind: 'primary' | 'secondary'
   ms: number
@@ -328,7 +252,7 @@ interface RateLimitWait {
  * Devolve null quando a resposta não é de rate limit (ex.: 403 de permissão).
  */
 export function rateLimitWaitMs(
-  response: Response,
+  response: Pick<HttpResponse, 'status' | 'headers'>,
   body: string,
   now: number
 ): RateLimitWait | null {
@@ -349,9 +273,10 @@ export function rateLimitWaitMs(
   return null
 }
 
-function rateLimited(wait: RateLimitWait): GitHubApiError {
+function rateLimited(wait: RateLimitWait): ApiError {
   const when = formatWait(wait.ms)
-  return new GitHubApiError(
+  return new ApiError(
+    'github',
     'rate_limited',
     wait.kind === 'primary'
       ? `Limite de requisições do GitHub atingido. Tente novamente ${when}.`
@@ -360,10 +285,13 @@ function rateLimited(wait: RateLimitWait): GitHubApiError {
   )
 }
 
-function formatWait(ms: number): string {
-  const seconds = Math.max(1, Math.ceil(ms / 1000))
-  if (seconds < 120) return `em ${seconds} s`
-  return `em ${Math.ceil(seconds / 60)} min`
+function repoNotFound(status: number): ApiError {
+  return new ApiError(
+    'github',
+    'not_found',
+    'O GitHub não encontrou este repositório com a conta conectada: ele não existe ou a conta não tem acesso.',
+    status
+  )
 }
 
 /**
@@ -372,7 +300,7 @@ function formatWait(ms: number): string {
  * - 403 + mensagem de "OAuth App access restrictions" → um owner da org precisa aprovar;
  * - 404 em /repos → sem acesso ou inexistente.
  */
-function errorForResponse(response: Response, body: string, path: string): GitHubApiError {
+function errorForResponse(response: HttpResponse, body: string, path: string): ApiError {
   const { status } = response
   const org = /^\/repos\/([^/]+)\//.exec(path)?.[1]
   const orgName = org ? decodeURIComponent(org) : undefined
@@ -380,7 +308,8 @@ function errorForResponse(response: Response, body: string, path: string): GitHu
     const sso = response.headers.get('x-github-sso')
     if (sso && /required/i.test(sso)) {
       const ssoUrl = parseSsoUrl(sso)
-      return new GitHubApiError(
+      return new ApiError(
+        'github',
         'sso_required',
         `A organização${orgName ? ` ${orgName}` : ''} usa SSO (SAML). Autorize o acesso do Orkio pelo login da organização e tente de novo.`,
         status,
@@ -388,7 +317,8 @@ function errorForResponse(response: Response, body: string, path: string): GitHu
       )
     }
     if (/OAuth App access restrictions/i.test(body)) {
-      return new GitHubApiError(
+      return new ApiError(
+        'github',
         'oauth_restricted',
         `A organização${orgName ? ` ${orgName}` : ''} restringe o acesso de OAuth Apps. Um admin da organização precisa aprovar o Orkio; você pode pedir a aprovação nas configurações de acesso da sua conta.`,
         status,
@@ -396,13 +326,7 @@ function errorForResponse(response: Response, body: string, path: string): GitHu
       )
     }
   }
-  if (status === 404 && path.startsWith('/repos/')) {
-    return new GitHubApiError(
-      'not_found',
-      'O GitHub não encontrou este repositório com a conta conectada: ele não existe ou a conta não tem acesso.',
-      status
-    )
-  }
+  if (status === 404 && path.startsWith('/repos/')) return repoNotFound(status)
   return errorForStatus(status)
 }
 
@@ -422,37 +346,28 @@ export function parseSsoUrl(header: string): string | null {
   }
 }
 
-function errorForStatus(status: number): GitHubApiError {
+function errorForStatus(status: number): ApiError {
   if (status === 401) {
-    return new GitHubApiError(
+    return new ApiError(
+      'github',
       'unauthorized',
       'Token do GitHub inválido, expirado ou revogado. Gere um novo token e cole aqui.',
       status
     )
   }
   if (status === 403) {
-    return new GitHubApiError(
+    return new ApiError(
+      'github',
       'forbidden',
       'O GitHub recusou o acesso com este token. Verifique as permissões e se a sua organização exige aprovação (SSO).',
       status
     )
   }
-  if (status >= 500) {
-    return new GitHubApiError(
-      'server',
-      `O GitHub está instável agora (erro ${status}). Tente novamente em instantes.`,
-      status
-    )
-  }
-  return unexpected(status)
+  return genericStatusError(GITHUB, status)
 }
 
-function unexpected(status: number): GitHubApiError {
-  return new GitHubApiError(
-    'unexpected',
-    `Resposta inesperada do GitHub (HTTP ${status}). Tente novamente.`,
-    status
-  )
+function unexpected(status: number): ApiError {
+  return unexpectedError(GITHUB, status)
 }
 
 export function parseUser(body: unknown, scopesHeader: string | null): GitHubUser | null {

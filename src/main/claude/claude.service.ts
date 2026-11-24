@@ -32,7 +32,6 @@ import { parseDisplayId } from '../../shared/task-id-match'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
 import { errorName } from '../errors'
-import { NotionApiError } from '../connectors/notion/notion.client'
 import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
 import { redactSecrets } from './redact'
@@ -60,6 +59,7 @@ import type { Result } from '../../shared/result'
 import type { NotionTask } from '../../shared/notion'
 import type { TaskSignalsResult } from '../../shared/task-signals'
 import { projectById } from '../config/queries'
+import { isApiError } from '../net/http'
 
 export const CLAUDE_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista de projetos.',
@@ -789,7 +789,7 @@ export class ClaudeService {
     } catch (error) {
       if (error instanceof ClaudeFailure) return fail(error.code, error.message)
       if (error instanceof ArtifactError) return fail(error.code, error.message)
-      if (error instanceof NotionApiError) {
+      if (isApiError(error, 'notion')) {
         return fail(error.code, error.message)
       }
       if (error instanceof WorktreeError) {

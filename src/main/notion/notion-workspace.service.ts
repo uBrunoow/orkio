@@ -7,11 +7,7 @@
  */
 import type { StatusOption } from '../../shared/board'
 import type { OrkioConfig } from '../config/orkio-config'
-import {
-  NotionApiError,
-  type NotionListPage,
-  type NotionQueryOptions
-} from '../connectors/notion/notion.client'
+import { type NotionListPage, type NotionQueryOptions } from '../connectors/notion/notion.client'
 import {
   REQUIRED_FIELDS,
   checkMapping,
@@ -49,6 +45,7 @@ import type {
 } from '../../shared/notion'
 import type { Result } from '../../shared/result'
 import { projectById } from '../config/queries'
+import { isApiError } from '../net/http'
 
 /** O que o serviço precisa do conector do Notion (o token fica lá dentro). */
 export interface NotionWorkspaceApi {
@@ -693,7 +690,7 @@ export class NotionWorkspaceService {
       // costuma se resolver reconectando e marcando os bancos.
       if (
         (error.code === 'not_found' || error.code === 'forbidden') &&
-        e instanceof NotionApiError &&
+        isApiError(e, 'notion') &&
         (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth'
       ) {
         return { ok: false, error: { ...error, canReconnect: true } }
@@ -708,6 +705,6 @@ export class NotionWorkspaceService {
 
 function toError(e: unknown): Err {
   if (e instanceof WorkspaceError) return e.info
-  if (e instanceof NotionApiError) return { code: e.code, message: e.message }
+  if (isApiError(e, 'notion')) return { code: e.code, message: e.message }
   return { code: 'unexpected', message: WORKSPACE_MESSAGES.unknown }
 }

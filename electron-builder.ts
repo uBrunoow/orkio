@@ -14,9 +14,7 @@
  * arquitetura no nome do dmg/zip do mac e do instalador do Windows.
  */
 import type { Configuration } from 'electron-builder'
-
-export const RELEASES_OWNER = 'uBrunoow'
-export const RELEASES_REPO = 'orkio'
+import { RELEASES_REPO } from './src/shared/updates'
 
 type Env = Readonly<Record<string, string | undefined>>
 
@@ -60,8 +58,8 @@ export function builderConfig(env: Env): Configuration {
     },
     publish: {
       provider: 'github',
-      owner: RELEASES_OWNER,
-      repo: RELEASES_REPO,
+      owner: RELEASES_REPO.owner,
+      repo: RELEASES_REPO.repo,
       // Os jobs (mac, Windows e Linux) sobem para o mesmo rascunho; o release.yml publica no fim.
       releaseType: 'draft'
     },

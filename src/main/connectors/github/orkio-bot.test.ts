@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GitHubApiError } from './github.client'
 import {
   ORKIO_BOT_MESSAGES,
   OrkioBotService,
@@ -8,6 +7,7 @@ import {
   stateFromError
 } from './orkio-bot'
 import type { ProjectView } from '../../../shared/projects'
+import { ApiError } from '../../net/http'
 
 const INSTALL = 'https://github.com/apps/orkio/installations/new'
 
@@ -53,7 +53,7 @@ describe('parseInstallationResponse', () => {
     expect(parseInstallationResponse({ status: 403, body: { error: 'forbidden' } })).toEqual({
       state: 'no_access'
     })
-    expect(parseInstallationResponse({ status: 503, body: null })).toEqual({
+    expect(parseInstallationResponse({ status: 503, body: { error: 'not_configured' } })).toEqual({
       state: 'unknown',
       message: ORKIO_BOT_MESSAGES.notConfigured
     })
@@ -61,6 +61,8 @@ describe('parseInstallationResponse', () => {
       state: 'unknown',
       message: ORKIO_BOT_MESSAGES.siteOutdated
     })
+    // Decide pelo código do corpo: 503 sem código não é "App não configurado".
+    expect(parseInstallationResponse({ status: 503, body: null }).state).toBe('unknown')
     expect(parseInstallationResponse({ status: 502, body: null })).toEqual({
       state: 'unknown',
       message: ORKIO_BOT_MESSAGES.unexpected
@@ -71,7 +73,7 @@ describe('parseInstallationResponse', () => {
   })
 
   it('erros do conector viram mensagem em pt-BR, nunca a exceção crua', () => {
-    expect(stateFromError(new GitHubApiError('not_configured', 'x'))).toEqual({
+    expect(stateFromError(new ApiError('site', 'no_site', 'x'))).toEqual({
       state: 'unknown',
       message: ORKIO_BOT_MESSAGES.noSite
     })
@@ -113,7 +115,7 @@ describe('OrkioBotService', () => {
     const installation = vi.fn(async (_o: string, repo: string) =>
       repo === 'orkio'
         ? { status: 200, body: { installed: true } }
-        : Promise.reject(new GitHubApiError('network', 'Sem internet.'))
+        : Promise.reject(new ApiError('github', 'network', 'Sem internet.'))
     )
     const svc = new OrkioBotService({
       isConnected: async () => true,

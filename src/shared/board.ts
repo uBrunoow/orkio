@@ -25,7 +25,50 @@ export interface BoardConfig {
   blockedProperty: { id: string; name: string } | null
   /** Regras de automação (3B), avaliadas nesta ordem. Editor completo na 3C. */
   rules: AutomationRule[]
+  /**
+   * Coluna "A fazer" da lista lateral (as tarefas que esperam começar). Ausente, ou etapa que não
+   * existe mais = a primeira coluna do quadro. Editada em Colunas (Quadro e automações).
+   */
+  queueStageId?: string | null
   updatedAt: string
+}
+
+/** Coluna "A fazer" do quadro: a escolhida, se ainda existe; senão a primeira. */
+export function queueStageOf(
+  config:
+    | { stages: readonly { id: string; order: number }[]; queueStageId?: string | null | undefined }
+    | null
+    | undefined
+): string | null {
+  const stages = config?.stages ?? []
+  const chosen = config?.queueStageId
+  if (chosen && stages.some((s) => s.id === chosen)) return chosen
+  return [...stages].sort((a, b) => a.order - b.order)[0]?.id ?? null
+}
+
+/** `queueStageId` que vale guardar para estas etapas (`null` se a etapa não existe). */
+export function keptQueueStage(
+  queueStageId: string | null | undefined,
+  stages: readonly { id: string }[]
+): { queueStageId: string } | Record<string, never> {
+  return queueStageId && stages.some((s) => s.id === queueStageId) ? { queueStageId } : {}
+}
+
+/**
+ * Ordem da prioridade do Notion (menor = antes). Reconhece nomes usuais pt/en e P0…P9; número puro
+ * vale como está. Sem prioridade ou nome desconhecido vai depois de todas.
+ */
+export function priorityRank(name: string | null | undefined): number {
+  if (!name) return 100
+  const n = normalizeLabel(name)
+  const p = /^p\s*(\d)\b/.exec(n) ?? /^(\d+)$/.exec(n)
+  if (p) return Number(p[1])
+  if (/urgent|critic|blocker|imediat|highest/.test(n)) return 0
+  if (/alta|high|importante/.test(n)) return 1
+  if (/media|medium|normal|moderad/.test(n)) return 2
+  if (/baixa|low|minor/.test(n)) return 3
+  if (/lowest|minima|someday|talvez/.test(n)) return 4
+  return 50
 }
 
 export interface StatusOption {

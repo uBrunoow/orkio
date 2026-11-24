@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createOrkioConfigStore } from '../config/orkio-config'
-import { GitHubApiError, type GitHubRepo } from '../connectors/github/github.client'
+import { type GitHubRepo } from '../connectors/github/github.client'
 import { GitError, type Git, type GitRemote } from '../git/git'
 import {
   ProjectsService,
@@ -13,6 +13,7 @@ import {
   type ProjectsServiceDeps
 } from './projects.service'
 import type { BranchChangedEvent, PickFolderResult, ProjectSelection } from '../../shared/projects'
+import { ApiError } from '../net/http'
 
 interface FakeRepo {
   remotes: GitRemote[]
@@ -296,7 +297,8 @@ describe('ProjectsService', () => {
 
     it('sem acesso ao repositório (404)', async () => {
       github.getRepository.mockRejectedValueOnce(
-        new GitHubApiError(
+        new ApiError(
+          'github',
           'not_found',
           'O GitHub não encontrou este repositório com a conta conectada.'
         )
@@ -318,7 +320,7 @@ describe('ProjectsService', () => {
 
     it('org com SSO → mensagem + link de autorização do próprio GitHub', async () => {
       github.getRepository.mockRejectedValueOnce(
-        new GitHubApiError('sso_required', 'A organização acme usa SSO (SAML).', 403, {
+        new ApiError('github', 'sso_required', 'A organização acme usa SSO (SAML).', 403, {
           org: 'acme',
           ssoUrl: 'https://github.com/orgs/acme/sso?authorization_request=X'
         })
@@ -346,7 +348,8 @@ describe('ProjectsService', () => {
 
     it('org com restrição de OAuth Apps → admin precisa aprovar + link das configurações de acesso', async () => {
       github.getRepository.mockRejectedValueOnce(
-        new GitHubApiError(
+        new ApiError(
+          'github',
           'oauth_restricted',
           'A organização acme restringe o acesso de OAuth Apps. Um admin da organização precisa aprovar o Orkio.',
           403
@@ -578,13 +581,13 @@ describe('ProjectsService', () => {
       github.isConnected.mockResolvedValueOnce(false)
       expect((await service.revalidate()).projects[0]!.health.state).toBe('github_disconnected')
 
-      github.getRepository.mockRejectedValueOnce(new GitHubApiError('network', 'Sem internet.'))
+      github.getRepository.mockRejectedValueOnce(new ApiError('github', 'network', 'Sem internet.'))
       expect((await service.revalidate()).projects[0]!.health).toMatchObject({
         state: 'unverified',
         message: expect.stringContaining('Sem internet.')
       })
 
-      github.getRepository.mockRejectedValueOnce(new GitHubApiError('not_found', 'Sem acesso.'))
+      github.getRepository.mockRejectedValueOnce(new ApiError('github', 'not_found', 'Sem acesso.'))
       expect((await service.revalidate()).projects[0]!.health).toMatchObject({
         state: 'no_access',
         message: 'Sem acesso.'

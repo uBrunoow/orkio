@@ -75,8 +75,6 @@ const RESPONSE_MAX_BYTES = 256 * 1024
 const UPSTREAM_TIMEOUT_MS = 10_000
 export const REVIEW_DEADLINE_MS = 15_000
 const USER_AGENT = 'Orkio-Site'
-export const REVIEW_REJECTED_MESSAGE =
-  'O GitHub recusou a revisão: confira as linhas dos comentários.'
 
 /** Login de usuário/organização: letras, dígitos, `-` e `_` (contas gerenciadas), até 100. */
 export const OWNER_SLUG = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,99}$/
@@ -356,7 +354,8 @@ async function review(request: Request, env: GitHubAppEnv, deps: ReviewDeps): Pr
   })
   if (!posted || isRateLimited(posted)) return fail('upstream')
   if (posted.status === 422) {
-    return fail('bad_request', { reason: 'rejected', message: REVIEW_REJECTED_MESSAGE })
+    // Só o código: o texto ao usuário é do app (`REVIEW_MESSAGES.rejected`).
+    return fail('bad_request', { reason: 'rejected' })
   }
   if (posted.status === 404) return fail('bad_request', { reason: 'pr_not_found' })
   // Token do App recusado para esta PR: permissão da instalação faltando.

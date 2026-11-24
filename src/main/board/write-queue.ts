@@ -7,9 +7,9 @@
  *   backoff exponencial até 5 min, sem limite de tentativas (a mudança fica "pendente").
  * - O Notion recusou (400/403/404) → desfaz localmente (`onRejected`) e avisa.
  */
-import { NotionApiError } from '../connectors/notion/notion.client'
 import { backoffMs } from '../net/rate-queue'
 import type { BoardStore, PendingWrite } from './board.store'
+import { isApiError } from '../net/http'
 
 export const WRITE_MAX_BACKOFF_MS = 5 * 60 * 1000
 
@@ -31,7 +31,7 @@ export interface WriteQueueDeps {
 const PERMANENT = new Set(['bad_request', 'forbidden', 'not_found'])
 
 export function isPermanentWriteError(e: unknown): boolean {
-  return e instanceof NotionApiError && PERMANENT.has(e.code)
+  return isApiError(e, 'notion') && PERMANENT.has(e.code)
 }
 
 export class NotionWriteQueue {
@@ -112,10 +112,9 @@ export class NotionWriteQueue {
     try {
       await this.deps.updatePage(write.taskPageId, write.properties)
     } catch (e) {
-      const error =
-        e instanceof NotionApiError
-          ? { code: e.code, message: e.message }
-          : { code: 'unexpected', message: 'Algo deu errado ao falar com o Notion.' }
+      const error = isApiError(e, 'notion')
+        ? { code: e.code, message: e.message }
+        : { code: 'unexpected', message: 'Algo deu errado ao falar com o Notion.' }
       // Mudou durante o envio? A versão nova será enviada; ignora o resultado desta.
       const current = this.deps.store.pending(write.taskPageId)
       if (!current || JSON.stringify(current.properties) !== payload) return

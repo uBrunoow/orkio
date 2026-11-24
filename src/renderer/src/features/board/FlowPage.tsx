@@ -55,7 +55,7 @@ import {
 import { useProjectActivity } from '../../components/SentenceDetail'
 import { RuleDetail } from './RuleDetail'
 import type { BoardSettingsTab } from '../../app/routes'
-import type { BoardView } from '../../../../shared/board'
+import { queueStageOf, type BoardView } from '../../../../shared/board'
 import type { NotionColor } from '../../../../shared/notion'
 import type { Result } from '../../../../shared/result'
 
@@ -188,8 +188,17 @@ function initialDraft(view: BoardView): FlowDraft {
   return {
     stages: fromBoardStages(view.config!.stages),
     rules: view.config!.rules.map((r) => structuredClone(r)),
-    removals: {}
+    removals: {},
+    queueStageId: view.config!.queueStageId ?? null
   }
+}
+
+/** Coluna "A fazer" do rascunho (a escolhida, se ainda está no rascunho; senão a primeira). */
+function draftQueueStage(draft: FlowDraft): string | null {
+  return queueStageOf({
+    stages: draft.stages.map((s, order) => ({ id: s.id, order })),
+    queueStageId: draft.queueStageId ?? null
+  })
 }
 
 interface RuleEditing {
@@ -306,7 +315,8 @@ export function FlowPage({
     const flowChanges = diffFlow(named(baseline), named(draft)).length
     const bindingChanges =
       JSON.stringify(baseline.bindings ?? []) === JSON.stringify(draft.bindings ?? []) ? 0 : 1
-    return flowChanges + bindingChanges
+    const queueChanges = draftQueueStage(baseline) === draftQueueStage(draft) ? 0 : 1
+    return flowChanges + bindingChanges + queueChanges
   }, [baseline, draft, options])
 
   const update = (patch: (d: FlowDraft) => FlowDraft): void => {
@@ -830,6 +840,15 @@ export function FlowPage({
                       onChange={(value) => updateStage(stage.id, { color: value as NotionColor })}
                     />
                   </div>
+
+                  <CheckboxField
+                    label="Coluna “A fazer” da lista lateral"
+                    description="As tarefas desta coluna aparecem em “A fazer”, ao lado do quadro. Sem escolha, vale a primeira coluna."
+                    checked={draftQueueStage(draft) === stage.id}
+                    onChange={(checked) =>
+                      update((d) => ({ ...d, queueStageId: checked ? stage.id : null }))
+                    }
+                  />
 
                   <StageFlowField
                     flows={taskFlows?.flows ?? null}

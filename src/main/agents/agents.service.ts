@@ -13,9 +13,10 @@
  *   aprovados; valem em todos os projetos. Para mudar, duplique (vira um perfil comum).
  */
 import type { TaskEventDetailInput } from '../../shared/task-events'
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { DomainError } from '../errors'
-import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { lstat, readdir, readFile } from 'node:fs/promises'
+import { atomicWriteFile } from '../storage/atomic-write'
 import { join, relative, resolve, sep } from 'node:path'
 import {
   AGENT_ID,
@@ -37,7 +38,7 @@ import {
   type ProjectAgents,
   type WritableAgentScope
 } from '../../shared/agent'
-import { BUILTIN_AGENTS, builtinAgent } from '../../shared/agent-presets'
+import { BUILTIN_AGENTS, agentDisplayName, builtinAgent } from '../../shared/agent-presets'
 import type { BoardStore } from '../board/board.store'
 import type { StageChange } from '../board/board.service'
 import type { OrkioConfig } from '../config/orkio-config'
@@ -280,7 +281,7 @@ export class AgentsService {
     const out: Record<string, AgentBadge> = {}
     for (const r of rows) {
       const view = agents.find((a) => a.key === r.agent_key)
-      const name = view?.profile?.name ?? parseAgentKey(r.agent_key)?.id ?? '?'
+      const name = view?.profile?.name ?? agentDisplayName(r.agent_key, this.names)
       out[r.task_page_id] = {
         key: r.agent_key,
         name,
@@ -365,7 +366,7 @@ export class AgentsService {
           kind: 'agent_unassigned',
           detail: {
             agentKey: current,
-            agent: current ? (parseAgentKey(current)?.id ?? '') : '',
+            agent: current ? agentDisplayName(current, this.names) : '',
             by: 'manual'
           }
         })
@@ -426,7 +427,7 @@ export class AgentsService {
     const rule = this.rules(change.projectId).find((r) => r.stageId === change.to)
     if (!rule) return
     if (this.assignedKey(change.taskId) || this.deps.hasActiveFlow(change.taskId)) return
-    const name = this.names.get(rule.agentKey) ?? parseAgentKey(rule.agentKey)?.id ?? ''
+    const name = agentDisplayName(rule.agentKey, this.names)
     this.insertAssignment(change.projectId, change.taskId, rule.agentKey, name, 'rule')
     this.deps.emit(change.projectId)
   }
@@ -647,14 +648,9 @@ export class AgentsService {
     const file = join(dir, `${id}.md`)
     const st = await lstat(file).catch(() => null)
     if (st?.isSymbolicLink()) throw new AgentError('symlink', AGENT_MESSAGES.symlink)
-    const tmp = join(dir, `.${id}.md.${randomBytes(6).toString('hex')}.tmp`)
     try {
-      await mkdir(dir, { recursive: true })
-      await writeFile(tmp, text, { encoding: 'utf8', mode: 0o644 })
-      await rename(tmp, file)
-    } catch (error) {
-      await rm(tmp, { force: true }).catch(() => undefined)
-      if (error instanceof AgentError) throw error
+      await atomicWriteFile(file, text, { mode: 0o644, fsync: false })
+    } catch {
       throw new AgentError('write_failed', AGENT_MESSAGES.writeFailed)
     }
   }

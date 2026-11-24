@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   GITHUB_API_URL,
   attribution,
-  REVIEW_REJECTED_MESSAGE,
   apiBaseFrom,
   createAppJwt,
   handleInstallation,
@@ -375,8 +374,7 @@ describe('POST /github/review', () => {
     const body = await res.text()
     expect(JSON.parse(body)).toEqual({
       error: 'bad_request',
-      reason: 'rejected',
-      message: REVIEW_REJECTED_MESSAGE
+      reason: 'rejected'
     })
     expect(body).not.toContain('inválida')
     expectNoSecrets(body)

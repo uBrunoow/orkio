@@ -9,7 +9,7 @@ import { BoardStore } from '../board/board.store'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
-import { OrchestratorService, agentNameFallback } from './orchestrator.service'
+import { OrchestratorService } from './orchestrator.service'
 import type { BoardCard, BoardView } from '../../shared/board'
 import type { Result } from '../../shared/result'
 import { isLive } from '../../shared/flow-run-state'
@@ -21,8 +21,6 @@ const STAGES = ['fila', 'dev', 'rev', 'ok']
 const ENABLED: OrchestratorConfig = {
   enabled: true,
   enabledSince: null,
-  queueStageId: 'fila',
-  maxActive: 2,
   lanes: [
     { stageId: 'dev', agents: ['builtin:implementador'], next: 'rev' },
     { stageId: 'rev', agents: ['builtin:revisor'], next: 'ok' }
@@ -355,14 +353,6 @@ describe('entrada por outro caminho', () => {
   })
 })
 
-describe('agentNameFallback', () => {
-  it('embutido pelo catálogo; outros pelo id', () => {
-    expect(agentNameFallback('builtin:implementador')).toBe('Implementador')
-    expect(agentNameFallback('repo:ana')).toBe('ana')
-    expect(agentNameFallback('lixo')).toBe('lixo')
-  })
-})
-
 describe('salvar', () => {
   it('valida no main, registra quando ligou e o histórico de configuração', async () => {
     await expect(service.save(P, { ...ENABLED, lanes: [] })).rejects.toMatchObject({
@@ -379,7 +369,7 @@ describe('salvar', () => {
 
     // Salvar de novo (ligado) mantém a data; desligar limpa.
     clock += 60_000
-    expect((await service.save(P, { ...ENABLED, maxActive: 3 })).config.enabledSince).toBe(
+    expect((await service.save(P, { ...ENABLED, lanes: [...ENABLED.lanes].reverse() })).config.enabledSince).toBe(
       state.config.enabledSince
     )
     expect((await service.save(P, { ...ENABLED, enabled: false })).config.enabledSince).toBeNull()

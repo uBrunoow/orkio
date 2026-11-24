@@ -38,8 +38,6 @@ describe('conceitos: uma regra por id', () => {
     ])
     const config = parseOrchestratorConfig({
       enabled: true,
-      queueStageId: 'a_fazer',
-      maxActive: 2,
       lanes: [{ stageId: 'em_andamento', agents: ['builtin:implementador'], next: null }]
     })
     expect(config).not.toBe(INVALID)
@@ -100,6 +98,9 @@ describe('payloads: forma e cópia só com campos conhecidos', () => {
     ).toBe(INVALID)
     expect(parseFlowDraft({ ...draft, rules: [{ id: 'x', trigger: 'pr.hack' }] })).toBe(INVALID)
     expect(parseFlowDraft({ ...draft, removals: { 'stage-2': '../y' } })).toBe(INVALID)
+    expect(parseFlowDraft({ ...draft, queueStageId: '../y' })).toBe(INVALID)
+    const queue = parseFlowDraft({ ...draft, queueStageId: 'stage-2' })
+    expect(queue !== INVALID && queue.queueStageId).toBe('stage-2')
   })
 
   it('claude.start: forma, limites e só os campos conhecidos', () => {
@@ -183,18 +184,11 @@ describe('parseOrchestratorConfig', () => {
   const OK = {
     enabled: true,
     enabledSince: '2020-01-01T00:00:00.000Z',
-    queueStageId: 'fila',
-    maxActive: 2,
     lanes: [{ stageId: 'dev', agents: ['builtin:implementador', 'repo:ana'], next: null }]
   }
 
   it('aceita a forma certa; enabledSince é sempre do main', () => {
     expect(parseOrchestratorConfig(OK)).toEqual({ ...OK, enabledSince: null })
-  })
-
-  it('não ajusta o teto em silêncio (o validador explica)', () => {
-    const parsed = parseOrchestratorConfig({ ...OK, maxActive: 99 })
-    expect(parsed !== INVALID && parsed.maxActive).toBe(99)
   })
 
   it('recusa em vez de descartar: etapa ou agente repetido, chave inválida, forma errada', () => {
@@ -203,7 +197,6 @@ describe('parseOrchestratorConfig', () => {
       null,
       [],
       { ...OK, enabled: 'sim' },
-      { ...OK, queueStageId: '../x' },
       { ...OK, lanes: [lane, lane] },
       { ...OK, lanes: [{ ...lane, agents: ['repo:ana', 'repo:ana'] }] },
       { ...OK, lanes: [{ ...lane, agents: ['nuvem:x'] }] },

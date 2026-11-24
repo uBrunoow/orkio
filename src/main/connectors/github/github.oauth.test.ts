@@ -133,12 +133,12 @@ describe('parseTokenPollResponse', () => {
     }
   )
 
-  it('erro desconhecido → unexpected, sem detalhes do GitHub na mensagem', () => {
+  it('erro desconhecido → invalid (para o polling), sem detalhes do GitHub na mensagem', () => {
     expect(() =>
       parseTokenPollResponse({ error: 'weird', error_description: 'segredo interno' })
     ).toThrow(
       expect.objectContaining({
-        code: 'unexpected',
+        code: 'invalid',
         message: expect.not.stringContaining('segredo')
       })
     )

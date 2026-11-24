@@ -41,9 +41,6 @@ export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
 export const AGENT_COLORS = ['orange', 'blue', 'green', 'purple', 'pink', 'teal', 'yellow'] as const
 export type AgentColor = (typeof AGENT_COLORS)[number]
 
-/** Modelos sugeridos no editor; qualquer nome que passe `isModelName` também vale. */
-export const AGENT_MODELS: readonly string[] = CLAUDE_MODELS.map((m) => m.id)
-
 export const AGENT_MODEL_LABELS: Record<string, string> = Object.fromEntries(
   CLAUDE_MODELS.map((m) => [m.id, m.label])
 )

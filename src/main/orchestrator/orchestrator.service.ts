@@ -28,8 +28,8 @@ import {
   type PlanCard,
   type PlanDecision
 } from '../../shared/orchestrator'
-import { checkAgentFlow, parseAgentKey, type AgentKey, type AgentsState } from '../../shared/agent'
-import { builtinAgent } from '../../shared/agent-presets'
+import { checkAgentFlow, type AgentKey, type AgentsState } from '../../shared/agent'
+import { agentDisplayName } from '../../shared/agent-presets'
 import type { BoardService, StageChange } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
@@ -86,17 +86,6 @@ interface Dispatched {
   projectId: string
   agentKey: AgentKey
   at: number
-}
-
-/**
- * Nome do agente sem a lista carregada (antes da primeira rodada): embutido pelo catálogo, senão o
- * id. Nunca o id de um embutido, que o histórico mostraria em minúsculas ("implementador").
- */
-export function agentNameFallback(key: AgentKey): string {
-  const parsed = parseAgentKey(key)
-  if (!parsed) return key
-  if (parsed.scope === 'builtin') return builtinAgent(parsed.id)?.name ?? parsed.id
-  return parsed.id
 }
 
 export class OrchestratorService {
@@ -237,7 +226,7 @@ export class OrchestratorService {
     if (!config.lanes.some((l) => l.stageId === change.to)) {
       const current = this.deps.agents.assignment(change.taskId)
       if (current && !current.manual && config.lanes.some((l) => l.agents.includes(current.key))) {
-        const name = agents.get(current.key)?.name ?? agentNameFallback(current.key)
+        const name = agentDisplayName(current.key, agents)
         this.deps.agents.releaseByOrchestrator(change.projectId, change.taskId, name)
         this.dispatched.delete(change.taskId)
       }
@@ -251,7 +240,7 @@ export class OrchestratorService {
       this.loadByAgent()
     )
     if (!key) return
-    const name = agents.get(key)?.name ?? agentNameFallback(key)
+    const name = agentDisplayName(key, agents)
     this.deps.agents.assignByOrchestrator(change.projectId, change.taskId, key, name)
     this.dispatched.set(change.taskId, {
       projectId: change.projectId,
@@ -313,8 +302,7 @@ export class OrchestratorService {
       if (waiting.length < 20)
         waiting.push({ taskId, displayId: display.get(taskId) ?? '', reason })
     }
-    const name = (key: AgentKey | null): string =>
-      key ? (ctx.plan.get(key)?.name ?? agentNameFallback(key)) : ''
+    const name = (key: AgentKey | null): string => (key ? agentDisplayName(key, ctx.plan) : '')
 
     // Mover: atribuição + movimento numa transação só.
     let actions = 0
@@ -485,7 +473,7 @@ export class OrchestratorService {
     }
     for (const key of laneKeys) {
       if (!infos.some((i) => i.key === key)) {
-        infos.push({ key, name: agentNameFallback(key), status: 'missing' })
+        infos.push({ key, name: agentDisplayName(key), status: 'missing' })
       }
     }
     return { stages, bindings: projectFlows.bindings, agents, infos, plan }
@@ -508,13 +496,11 @@ function agentCount(n: number): string {
 }
 
 function toPlanCards(view: Extract<Result<BoardView>, { ok: true }>): PlanCard[] {
-  return view.value.cards.map((c, index) => ({
+  return view.value.cards.map((c) => ({
     taskId: c.taskId,
     displayId: c.displayId ?? 'Tarefa',
     stageId: c.stageId,
-    priority: c.priority?.name ?? null,
     blocked: c.blocked,
-    automationPaused: c.automationPaused,
-    index
+    automationPaused: c.automationPaused
   }))
 }

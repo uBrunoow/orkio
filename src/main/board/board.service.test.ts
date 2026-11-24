@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ALVA_TEMPLATE_IDS, alvaDeliverFlow, alvaTemplates } from '../../shared/alva-templates'
 import type { StatusOption, BoardSaveInput, BoardSyncEvent } from '../../shared/board'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
-import { NotionApiError } from '../connectors/notion/notion.client'
 import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
 import { openDatabase, type Db, type Tx } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
@@ -13,6 +12,7 @@ import { BoardService, type StageChange, type BoardNotion } from './board.servic
 import { BoardStore } from './board.store'
 import type { NotionWriteQueue } from './write-queue'
 import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
+import { ApiError } from '../net/http'
 
 const OPTIONS: StatusOption[] = [
   { id: 'o-prio', name: 'Prioridades', color: 'gray' },
@@ -113,8 +113,8 @@ class FakeNotion implements BoardNotion {
 
   /** PATCH /pages/{id}. */
   async updatePage(pageId: string, properties: Record<string, unknown>): Promise<void> {
-    if (this.offline) throw new NotionApiError('network', 'Sem conexão.')
-    if (this.reject) throw new NotionApiError('bad_request', 'Recusado.', 400)
+    if (this.offline) throw new ApiError('notion', 'network', 'Sem conexão.')
+    if (this.reject) throw new ApiError('notion', 'bad_request', 'Recusado.', 400)
     this.writes.push({ pageId, properties })
     const st = properties['st'] as { status?: { name: string } } | undefined
     if (st?.status) this.status[pageId] = st.status.name
@@ -688,6 +688,38 @@ describe('BoardService', () => {
         'Automação criada: Quando a PR é aprovada e a tarefa está em Revisando, mover para QA.'
       ])
       expect(events[1]!.changes[0]).toMatch(/Quadro criado com 5 etapas/)
+    })
+
+    it('coluna "A fazer" (lista lateral) é do quadro: salva, registra e some com a etapa', async () => {
+      const view = await createBoard()
+      const dev = stageId(view, 'Em andamento')
+      const saved = await service.saveFlow('p1', { ...(await flowFrom(view)), queueStageId: dev })
+      expect(saved.ok && saved.value.config!.queueStageId).toBe(dev)
+      expect((await service.configEvents('p1'))[0]!.changes).toEqual([
+        'Coluna “A fazer” da lista lateral: “Em andamento”'
+      ])
+      // Sem o campo no rascunho: mantém a salva.
+      const kept = await service.saveFlow('p1', await flowFrom(view))
+      expect(kept.ok && kept.value.config!.queueStageId).toBe(dev)
+      // Etapa removida: a coluna "A fazer" volta a ser a primeira.
+      const draft = await flowFrom(view)
+      draft.stages = draft.stages.filter((s) => s.id !== dev)
+      draft.rules = draft.rules.map((r) => ({
+        ...r,
+        enabled: r.action.type === 'move_to_stage' && r.action.stageId === dev ? false : r.enabled,
+        action:
+          r.action.type === 'move_to_stage' && r.action.stageId === dev
+            ? { ...r.action, stageId: stageId(view, 'Revisando') }
+            : r.action,
+        conditions: {
+          ...r.conditions,
+          fromStages: (r.conditions?.fromStages ?? []).filter((id) => id !== dev)
+        }
+      }))
+      draft.removals = { [dev]: stageId(view, 'Prioridades') }
+      const removed = await service.saveFlow('p1', draft)
+      expect(removed).toMatchObject({ ok: true })
+      expect(config.get().boards['p1']).not.toHaveProperty('queueStageId')
     })
 
     it('valida de novo no main: etapa sem status e regra para etapa removida', async () => {

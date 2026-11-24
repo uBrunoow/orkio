@@ -2,13 +2,18 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import {
-  ALVA_TEMPLATE_IDS,
-  alvaReviewedFlow,
-  alvaReviewPublishFlow
-} from '../../shared/alva-templates'
+import { ALVA_TEMPLATE_IDS, alvaReviewedFlow } from '../../shared/alva-templates'
 import { parseStep } from '../../shared/task-flow'
-import { ORKIO_CONFIG_VERSION, createOrkioConfigStore, validateConfig } from './orkio-config'
+import {
+  ORKIO_CONFIG_VERSION,
+  createOrkioConfigStore,
+  orkioConfigMigrations,
+  validateConfig
+} from './orkio-config'
+import { missingMigrations } from '../storage/config-store'
+import V12_ALVA_TEMPLATES from './migrations/v11-alva-templates.json'
+
+const frozenTemplate = (id: string): unknown => V12_ALVA_TEMPLATES.find((t) => t.id === id)
 
 const PROJECT = {
   id: 'p1',
@@ -248,7 +253,7 @@ describe('orkio-config v2/v3', () => {
     expect(data).not.toHaveProperty('claudeContexts')
     expect(data.automation.paused).toBe(true)
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(13)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
     expect(saved).not.toHaveProperty('claudeContexts')
   })
 
@@ -523,8 +528,6 @@ describe('orkio-config v2/v3', () => {
       p1: {
         enabled: true,
         enabledSince: null,
-        queueStageId: 'fila',
-        maxActive: 10,
         lanes: [
           { stageId: 'dev', agents: ['builtin:implementador'], next: 'rev' },
           { stageId: 'rev', agents: ['builtin:revisor'], next: null }
@@ -591,8 +594,13 @@ describe('v11 → v12: modelos Alva e ligações padrão (Task 18)', () => {
     }).load()
     const p1 = data.flows['p1']!
     expect(p1.flows.find((f) => f.id === 'meu')).toEqual(userFlow)
-    expect(p1.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.reviewed)).toEqual(alvaReviewedFlow())
-    expect(p1.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.review)).toEqual(alvaReviewPublishFlow())
+    // Os modelos da época (congelados), não os de hoje: mudar os modelos não muda a migração.
+    expect(p1.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.reviewed)).toEqual(
+      frozenTemplate(ALVA_TEMPLATE_IDS.reviewed)
+    )
+    expect(p1.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.review)).toEqual(
+      frozenTemplate(ALVA_TEMPLATE_IDS.review)
+    )
     // A cópia antiga (diferente do modelo) foi guardada, sem coluna, antes da troca.
     expect(p1.flows.find((f) => f.id === 'alva-revisado-anterior')).toEqual({
       ...oldReviewed,
@@ -622,6 +630,58 @@ describe('v11 → v12: modelos Alva e ligações padrão (Task 18)', () => {
     const again: unknown[] = []
     await createOrkioConfigStore(file, { onMigrationNote: (n) => again.push(n) }).load()
     expect(again).toEqual([])
+  })
+})
+
+describe('migrações publicadas', () => {
+  it('há uma migração v → v+1 para toda versão de 0 até a atual', () => {
+    const migrations = orkioConfigMigrations()
+    expect(missingMigrations(migrations, ORKIO_CONFIG_VERSION)).toEqual([])
+    expect(Object.keys(migrations).map(Number)).toEqual(
+      Array.from({ length: ORKIO_CONFIG_VERSION }, (_, v) => v)
+    )
+  })
+
+  it('v13 → v14: a coluna "A fazer" vai do orquestrador para o quadro; sai maxActive', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-v14-'))
+    const file = join(dir, 'orkio-config.json')
+    const stages = [
+      { id: 'fila', name: 'Prioridades', order: 0, notionStatus: { id: 'o', name: 'A' } },
+      { id: 'dev', name: 'Em andamento', order: 1, notionStatus: { id: 'o', name: 'A' } }
+    ]
+    const board = { stages, orkioStageProperty: null, blockedProperty: null, rules: [] }
+    const lanes = [{ stageId: 'dev', agents: ['builtin:implementador'], next: null }]
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 13,
+        projects: [
+          { ...PROJECT, notionProject: null },
+          { ...PROJECT, id: 'p2', notionProject: null }
+        ],
+        notion: null,
+        boards: { p1: board, p2: board },
+        automation: { paused: false },
+        flows: {},
+        delivery: {},
+        agents: {},
+        orchestrator: {
+          p1: { enabled: true, queueStageId: 'dev', maxActive: 99, lanes },
+          // Etapa que não existe mais: não vira coluna "A fazer".
+          p2: { enabled: false, queueStageId: 'sumiu', maxActive: 2, lanes: [] }
+        },
+        updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.boards['p1']!.queueStageId).toBe('dev')
+    expect(data.boards['p2']).not.toHaveProperty('queueStageId')
+    expect(data.orchestrator['p1']).toEqual({ enabled: true, enabledSince: null, lanes })
+    const saved = JSON.parse(await readFile(file, 'utf8')) as {
+      orchestrator: Record<string, Record<string, unknown>>
+    }
+    expect(saved.orchestrator['p1']).not.toHaveProperty('maxActive')
+    expect(saved.orchestrator['p1']).not.toHaveProperty('queueStageId')
   })
 })
 

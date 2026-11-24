@@ -4,9 +4,10 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LoopbackAuthError } from '../../oauth/loopback'
 import { SecureStore, type SafeStorageLike } from '../../storage/secure-store'
-import { NotionApiError, type NotionClient, type NotionSelf } from './notion.client'
+import { type NotionClient, type NotionSelf } from './notion.client'
 import { NOTION_MESSAGES, NotionConnector, type NotionOAuthDeps } from './notion.connector'
 import type { NotionOAuthBroker, NotionTokenSet } from './notion.oauth'
+import { ApiError } from '../../net/http'
 
 const NOW = new Date('2026-11-19T12:00:00.000Z')
 const REDIRECT = 'http://localhost:47821/oauth/notion/callback'
@@ -209,7 +210,7 @@ describe('NotionConnector — OAuth', () => {
     it('intermediário recusa o code → erro e nada gravado', async () => {
       authorize.mockResolvedValueOnce({ code: 'code-1' })
       broker.exchangeCode.mockRejectedValueOnce(
-        new NotionApiError('invalid_grant', 'Sua autorização do Notion expirou.', 400)
+        new ApiError('notion', 'invalid_grant', 'Sua autorização do Notion expirou.', 400)
       )
       expect(await makeConnector().startOAuth()).toMatchObject({
         state: 'error',
@@ -243,7 +244,9 @@ describe('NotionConnector — OAuth', () => {
     it('/users/me fora do ar logo após autorizar → salva mesmo assim, com aviso', async () => {
       authorize.mockResolvedValueOnce({ code: 'code-1' })
       broker.exchangeCode.mockResolvedValueOnce(tokens(1))
-      client.getSelf.mockRejectedValueOnce(new NotionApiError('server', 'O Notion está instável.'))
+      client.getSelf.mockRejectedValueOnce(
+        new ApiError('notion', 'server', 'O Notion está instável.')
+      )
 
       expect(await makeConnector().startOAuth()).toMatchObject({
         state: 'connected',
@@ -269,7 +272,7 @@ describe('NotionConnector — OAuth', () => {
 
     it('401 → renova no intermediário, salva o par novo e tenta de novo', async () => {
       client.getSelf
-        .mockRejectedValueOnce(new NotionApiError('unauthorized', 'Token inválido', 401))
+        .mockRejectedValueOnce(new ApiError('notion', 'unauthorized', 'Token inválido', 401))
         .mockResolvedValueOnce(BOT_SELF)
       broker.refresh.mockResolvedValueOnce(tokens(2))
 
@@ -288,7 +291,7 @@ describe('NotionConnector — OAuth', () => {
 
     it('renovações concorrentes viram uma só (refresh token é rotativo)', async () => {
       client.getSelf.mockImplementation(async (token) => {
-        if (token === tokens(1).accessToken) throw new NotionApiError('unauthorized', 'x', 401)
+        if (token === tokens(1).accessToken) throw new ApiError('notion', 'unauthorized', 'x', 401)
         return BOT_SELF
       })
       broker.refresh.mockImplementation(async () => {
@@ -304,9 +307,9 @@ describe('NotionConnector — OAuth', () => {
     })
 
     it('refresh com invalid_grant → erro "reconectar", arquivo mantido', async () => {
-      client.getSelf.mockRejectedValueOnce(new NotionApiError('unauthorized', 'x', 401))
+      client.getSelf.mockRejectedValueOnce(new ApiError('notion', 'unauthorized', 'x', 401))
       broker.refresh.mockRejectedValueOnce(
-        new NotionApiError('invalid_grant', 'Sua autorização expirou.', 400)
+        new ApiError('notion', 'invalid_grant', 'Sua autorização expirou.', 400)
       )
       expect(await makeConnector().testConnection()).toEqual({
         state: 'error',
@@ -317,9 +320,9 @@ describe('NotionConnector — OAuth', () => {
     })
 
     it('refresh sem rede → continua conectado, com aviso', async () => {
-      client.getSelf.mockRejectedValueOnce(new NotionApiError('unauthorized', 'x', 401))
+      client.getSelf.mockRejectedValueOnce(new ApiError('notion', 'unauthorized', 'x', 401))
       broker.refresh.mockRejectedValueOnce(
-        new NotionApiError('network', 'Não foi possível falar com o serviço de login.')
+        new ApiError('notion', 'network', 'Não foi possível falar com o serviço de login.')
       )
       expect(await makeConnector().testConnection()).toMatchObject({
         state: 'connected',
@@ -328,9 +331,9 @@ describe('NotionConnector — OAuth', () => {
     })
 
     it('intermediário mal configurado → erro com a mensagem de configuração', async () => {
-      client.getSelf.mockRejectedValueOnce(new NotionApiError('unauthorized', 'x', 401))
+      client.getSelf.mockRejectedValueOnce(new ApiError('notion', 'unauthorized', 'x', 401))
       broker.refresh.mockRejectedValueOnce(
-        new NotionApiError('oauth_config', 'O login com Notion está mal configurado.', 401)
+        new ApiError('notion', 'oauth_config', 'O login com Notion está mal configurado.', 401)
       )
       expect(await makeConnector().testConnection()).toMatchObject({
         state: 'error',
@@ -342,7 +345,7 @@ describe('NotionConnector — OAuth', () => {
     it('sem refresh token salvo, 401 → erro "reconectar" sem chamar o intermediário', async () => {
       const record = await storedRecord()
       await store.set('notion', JSON.stringify({ ...record, refreshToken: null }))
-      client.getSelf.mockRejectedValueOnce(new NotionApiError('unauthorized', 'x', 401))
+      client.getSelf.mockRejectedValueOnce(new ApiError('notion', 'unauthorized', 'x', 401))
 
       expect(await makeConnector().testConnection()).toMatchObject({
         state: 'error',
@@ -352,7 +355,9 @@ describe('NotionConnector — OAuth', () => {
     })
 
     it('falha transitória sem 401 → aviso, sem renovar', async () => {
-      client.getSelf.mockRejectedValueOnce(new NotionApiError('server', 'Notion instável (503).'))
+      client.getSelf.mockRejectedValueOnce(
+        new ApiError('notion', 'server', 'Notion instável (503).')
+      )
       expect(await makeConnector().testConnection()).toMatchObject({
         state: 'connected',
         warning: 'Notion instável (503).'
@@ -401,7 +406,7 @@ describe('NotionConnector — OAuth', () => {
       await connectViaOAuth()
       expect(await makeConnector().connectionMethod()).toBe('oauth')
       client.queryDataSource.mockImplementation(async (token) => {
-        if (token === tokens(1).accessToken) throw new NotionApiError('unauthorized', 'x', 401)
+        if (token === tokens(1).accessToken) throw new ApiError('notion', 'unauthorized', 'x', 401)
         return { results: [{ id: 'task' }], nextCursor: null }
       })
       broker.refresh.mockResolvedValueOnce(tokens(2))
@@ -417,8 +422,8 @@ describe('NotionConnector — OAuth', () => {
 
     it('autorização revogada → mensagem de reconectar; erro desconhecido não vaza', async () => {
       await connectViaOAuth()
-      client.getDataSource.mockRejectedValueOnce(new NotionApiError('unauthorized', 'x', 401))
-      broker.refresh.mockRejectedValueOnce(new NotionApiError('invalid_grant', 'y', 400))
+      client.getDataSource.mockRejectedValueOnce(new ApiError('notion', 'unauthorized', 'x', 401))
+      broker.refresh.mockRejectedValueOnce(new ApiError('notion', 'invalid_grant', 'y', 400))
       await expect(makeConnector().getDataSource('ds')).rejects.toMatchObject({
         code: 'invalid_grant',
         message: NOTION_MESSAGES.oauthRevoked

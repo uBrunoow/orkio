@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { apiHostFor, parseRemoteUrl, sameRepo } from './remote-url'
+import { parseRemoteUrl, sameRepo } from './remote-url'
 
 const gh = (owner: string, name: string, host = 'github.com') => ({
   host,
@@ -60,12 +60,6 @@ describe('parseRemoteUrl — hosts que pedem confirmação', () => {
       name: '.github',
       kind: 'github'
     })
-  })
-
-  it('apiHostFor: alias → github.com; enterprise → o próprio host', () => {
-    expect(apiHostFor(parseRemoteUrl('git@github-trabalho:a/b')!)).toBe('github.com')
-    expect(apiHostFor(parseRemoteUrl('https://github.acme.com/a/b')!)).toBe('github.acme.com')
-    expect(apiHostFor(parseRemoteUrl('https://github.com/a/b')!)).toBe('github.com')
   })
 })
 

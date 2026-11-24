@@ -12,7 +12,7 @@
  *
  * Erros viram `ReviewPostError` com mensagem pt-BR (nunca a exceção crua nem corpos de resposta).
  */
-import { isInstallUrl, isOwner, isRepo } from '../../../shared/github-names'
+import { isOwner, isRepo } from '../../../shared/github-names'
 import {
   REVIEW_COMMENT_MAX,
   REVIEW_COMMENTS_MAX,
@@ -22,9 +22,15 @@ import {
   type PublishReviewEvent
 } from '../../../shared/review-publish'
 import { redactSecrets } from '../../claude/redact'
+import { isApiError } from '../../net/http'
 import { isRecord } from '../../net/parse'
-import { GitHubApiError, type ConditionalPage } from './github.client'
-import type { OrkioSiteResponse, OrkioSiteReviewPayload } from './github.connector'
+import type { ConditionalPage } from './github.client'
+import {
+  NO_SITE_MESSAGE,
+  type OrkioSiteResponse,
+  type OrkioSiteReviewPayload
+} from './github.connector'
+import { parseOrkioSiteResponse } from './orkio-site'
 
 /** Páginas de `GET /pulls/{n}/files` (100 por página; o GitHub para em 3000 arquivos). */
 const PR_FILES_MAX_PAGES = 30
@@ -58,8 +64,10 @@ export interface PostedReview {
 export type ReviewPostErrorCode =
   /** Pedido inválido (evento, owner/repo/número, textos, limites, linha fora do diff). */
   | 'invalid'
-  /** O site respondeu que não tem o GitHub App configurado (ou não tem a rota). */
-  | 'not_configured'
+  /** O site respondeu que não tem o GitHub App configurado. */
+  | 'app_not_configured'
+  /** O site publicado não tem a rota (versão antiga do site). */
+  | 'site_outdated'
   /** Este build do app não sabe o endereço do site (sem `MAIN_VITE_SITE_URL` ou origem recusada). */
   | 'no_site'
   /** App não instalado no repositório (ou sem acesso às PRs): `details.installUrl`. */
@@ -97,9 +105,8 @@ export class ReviewPostError extends Error {
 
 export const REVIEW_MESSAGES = {
   notConfigured: 'O GitHub App do Orkio ainda não está configurado no site.',
-  noSite:
-    'Este app não sabe o endereço do site do Orkio (MAIN_VITE_SITE_URL não definido no build). ' +
-    'Em dev, defina em .env.development e reinicie o pnpm dev.',
+  noSite: NO_SITE_MESSAGE,
+  siteOutdated: 'O site do Orkio ainda não publica revisões (versão antiga do site).',
   notInstalled:
     'O GitHub App do Orkio não está instalado neste repositório (ou não tem acesso às PRs). ' +
     'Instale o App no repositório e tente de novo.',
@@ -310,39 +317,36 @@ export class GitHubReviewPoster {
       checkCommentsAgainstDiff(prepared.comments, await this.diffLines(owner, repo, number))
     }
 
-    const response = await this.github(
-      () => this.deps.github.postReviewViaOrkioSite({ owner, repo, number, review: prepared }),
-      { posting: true }
+    const response = await this.github(() =>
+      this.deps.github.postReviewViaOrkioSite({ owner, repo, number, review: prepared })
     )
     return parseSiteResponse(response, owner, repo, number)
   }
 
   /**
-   * Erros do conector → `ReviewPostError` (mensagens dele já são pt-BR e sem token). `posting`: a
-   * chamada é o POST da revisão, e rede/tempo viram `site_network`/`site_timeout`.
+   * Erros do conector → `ReviewPostError` (mensagens dele já são pt-BR e sem token). Rede/tempo no
+   * POST ao site (serviço `site`) viram `site_network`/`site_timeout`: o pedido pode ter chegado.
    */
-  private async github<T>(call: () => Promise<T>, options: { posting?: boolean } = {}): Promise<T> {
+  private async github<T>(call: () => Promise<T>): Promise<T> {
     try {
       return await call()
     } catch (error) {
       if (error instanceof ReviewPostError) throw error
-      if (error instanceof GitHubApiError) {
-        if (error.code === 'not_connected')
-          throw new ReviewPostError('not_connected', error.message)
-        if (error.code === 'network') {
-          throw new ReviewPostError(options.posting ? 'site_network' : 'network', error.message)
-        }
-        if (error.code === 'timeout') {
-          throw new ReviewPostError(options.posting ? 'site_timeout' : 'timeout', error.message)
-        }
-        if (error.code === 'rate_limited') throw new ReviewPostError('rate_limited', error.message)
-        if (error.code === 'not_found') {
-          throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
-        }
-        // O conector só diz `not_configured` quando o build não tem (ou recusa) a origem do site:
-        // é problema deste app, não do site.
-        if (error.code === 'not_configured') {
-          throw new ReviewPostError('no_site', REVIEW_MESSAGES.noSite)
+      if (isApiError(error)) {
+        const site = error.service === 'site'
+        switch (error.code) {
+          case 'not_connected':
+            throw new ReviewPostError('not_connected', error.message)
+          case 'no_site':
+            throw new ReviewPostError('no_site', REVIEW_MESSAGES.noSite)
+          case 'network':
+            throw new ReviewPostError(site ? 'site_network' : 'network', error.message)
+          case 'timeout':
+            throw new ReviewPostError(site ? 'site_timeout' : 'timeout', error.message)
+          case 'rate_limited':
+            throw new ReviewPostError('rate_limited', error.message)
+          case 'not_found':
+            throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
         }
       }
       throw new ReviewPostError('upstream', REVIEW_MESSAGES.upstream)
@@ -357,37 +361,35 @@ export function parseSiteResponse(
   repo: string,
   number: number
 ): PostedReview {
-  const body = isRecord(response.body) ? response.body : {}
-  const code = typeof body['error'] === 'string' ? body['error'] : null
-  if (response.status === 200) {
-    return { url: reviewUrlOrNull(body['url'], owner, repo, number) }
+  const result = parseOrkioSiteResponse(response)
+  switch (result.kind) {
+    case 'ok':
+      return { url: reviewUrlOrNull(result.body['url'], owner, repo, number) }
+    case 'not_installed':
+      throw new ReviewPostError(
+        'not_installed',
+        REVIEW_MESSAGES.notInstalled,
+        result.installUrl ? { installUrl: result.installUrl } : {}
+      )
+    case 'forbidden':
+      throw new ReviewPostError('forbidden', REVIEW_MESSAGES.forbidden)
+    case 'app_not_configured':
+      throw new ReviewPostError('app_not_configured', REVIEW_MESSAGES.notConfigured)
+    case 'site_outdated':
+      throw new ReviewPostError('site_outdated', REVIEW_MESSAGES.siteOutdated)
+    case 'rate_limited':
+      throw new ReviewPostError('rate_limited', REVIEW_MESSAGES.rateLimited)
+    case 'bad_request':
+      if (result.reason === 'rejected') {
+        throw new ReviewPostError('rejected', REVIEW_MESSAGES.rejected)
+      }
+      if (result.reason === 'pr_not_found') {
+        throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
+      }
+      throw invalid(REVIEW_MESSAGES.badRequest)
+    case 'upstream':
+      throw new ReviewPostError('upstream', REVIEW_MESSAGES.upstream)
   }
-  if (code === 'not_installed') {
-    const installUrl = body['installUrl']
-    throw new ReviewPostError(
-      'not_installed',
-      REVIEW_MESSAGES.notInstalled,
-      isInstallUrl(installUrl) ? { installUrl } : {}
-    )
-  }
-  if (code === 'forbidden') throw new ReviewPostError('forbidden', REVIEW_MESSAGES.forbidden)
-  // Site sem a rota (versão antiga): 404 sem código conhecido também é "não configurado".
-  if (code === 'not_configured' || (response.status === 404 && code === null)) {
-    throw new ReviewPostError('not_configured', REVIEW_MESSAGES.notConfigured)
-  }
-  if (code === 'rate_limited' || response.status === 429) {
-    throw new ReviewPostError('rate_limited', REVIEW_MESSAGES.rateLimited)
-  }
-  if (code === 'bad_request') {
-    if (body['reason'] === 'rejected') {
-      throw new ReviewPostError('rejected', REVIEW_MESSAGES.rejected)
-    }
-    if (body['reason'] === 'pr_not_found') {
-      throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
-    }
-    throw invalid(REVIEW_MESSAGES.badRequest)
-  }
-  throw new ReviewPostError('upstream', REVIEW_MESSAGES.upstream)
 }
 
 /** Só o link de revisão de uma PR em github.com. */

@@ -2,11 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GITHUB_API_VERSION } from '../../../shared/github-names'
 import {
   GITHUB_REQUEST_TIMEOUT_MS,
-  GitHubApiError,
   createGitHubClient,
   parseUser,
   rateLimitWaitMs
 } from './github.client'
+import { ApiError } from '../../net/http'
 
 const TOKEN = 'github_pat_TEST_TOKEN_SHOULD_NEVER_LEAK'
 const NOW = Date.parse('2026-11-19T12:00:00Z')
@@ -71,7 +71,7 @@ describe('createGitHubClient().getUser', () => {
       fetch: async () => json({ message: 'Bad credentials' }, 401)
     })
     const error = await client.getUser(TOKEN).catch((e: unknown) => e)
-    expect(error).toBeInstanceOf(GitHubApiError)
+    expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ code: 'unauthorized', status: 401 })
     expect((error as Error).message).toMatch(/inválido, expirado ou revogado/)
     expectNoLeak(error)

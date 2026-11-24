@@ -13,11 +13,11 @@
 import { ACTION_VARS, ORKIO_ACTIONS } from '../../shared/orkio-actions'
 import { FLOW_NO, FLOW_YES, type ActionConfirm, type StepFailure } from '../../shared/task-flow'
 import type { BoardStore } from '../board/board.store'
-import { GitHubApiError } from '../connectors/github/github.client'
 import { errorName } from '../errors'
 import type { OrkioAction } from '../flows/flow-runner'
 import { deliveryEvent, openPullFor, type SignalsFetch } from './action-helpers'
 import { DeliveryError, type DeliveryService } from './delivery.service'
+import { isApiError } from '../net/http'
 
 export interface DeliveryActionsDeps {
   delivery: DeliveryService
@@ -188,7 +188,7 @@ export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] 
           teams: chosen.filter((c) => c.startsWith('team:')).map((c) => c.slice(5))
         })
       } catch (error) {
-        if (error instanceof GitHubApiError) {
+        if (isApiError(error, 'github')) {
           return { ok: false, code: `github_${error.code}`, message: error.message }
         }
         console.error(`[orkio] pedir review: ${errorName(error)}`)

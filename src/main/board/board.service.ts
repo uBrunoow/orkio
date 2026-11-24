@@ -25,6 +25,8 @@ import {
   stageMatchesStatus,
   suggestStages,
   validateStages,
+  keptQueueStage,
+  queueStageOf,
   type BoardConfig,
   type BoardStage,
   type ReconcileTask,
@@ -36,7 +38,6 @@ import {
   type BoardView
 } from '../../shared/board'
 import type { OrkioConfig } from '../config/orkio-config'
-import { NotionApiError } from '../connectors/notion/notion.client'
 import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
 import type { CachedTasks } from '../notion/notion-workspace.service'
 import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
@@ -45,6 +46,7 @@ import { NotionWriteQueue, type WriteQueueDeps } from './write-queue'
 import type { Tx } from '../db/database'
 import type { NotionMapping, NotionPropertySummary } from '../../shared/notion'
 import type { Result } from '../../shared/result'
+import { isApiError } from '../net/http'
 
 type Err = Extract<Result<never>, { ok: false }>['error']
 
@@ -673,9 +675,13 @@ export class BoardService {
 
       const stages = toBoardStages(draft.stages, options)
       const board: BoardConfig = {
-        ...previous,
+        ...withoutQueueStage(previous),
         stages,
         rules: draft.rules,
+        ...keptQueueStage(
+          draft.queueStageId !== undefined ? draft.queueStageId : previous.queueStageId,
+          stages
+        ),
         updatedAt: this.now().toISOString()
       }
       // 5A: ligações etapa → fluxo de tarefa (só para etapas e fluxos que existem).
@@ -702,6 +708,10 @@ export class BoardService {
       }
 
       const changes = diffFlow(previous, board)
+      if (queueStageOf(previous) !== queueStageOf(board)) {
+        const name = stages.find((s) => s.id === queueStageOf(board))?.name ?? ''
+        changes.push(`Coluna “A fazer” da lista lateral: “${name}”`)
+      }
       changes.push(...diffBindings(current.bindings, bindings, stages, current.flows))
       let moved = 0
       this.deps.store.transaction(() => {
@@ -853,6 +863,7 @@ export class BoardService {
         blockedProperty,
         // Quadro novo ganha as regras padrão; ajustar etapas mantém as regras (editor na 3C).
         rules: previous?.rules ?? defaultRules(stages).rules,
+        ...keptQueueStage(previous?.queueStageId, stages),
         updatedAt: this.now().toISOString()
       }
       // Quadro novo num projeto que já usa os modelos Alva: Revisando/Revisado ganham os fluxos
@@ -987,7 +998,7 @@ export class BoardService {
       return { ok: true, value: await run() }
     } catch (e) {
       if (e instanceof BoardError) return { ok: false, error: e.info }
-      if (e instanceof NotionApiError) {
+      if (isApiError(e, 'notion')) {
         const canReconnect =
           e.code === 'unauthorized' ||
           e.code === 'invalid_grant' ||
@@ -1054,4 +1065,10 @@ function diffBindings(
     }
   }
   return out
+}
+
+function withoutQueueStage(board: BoardConfig): BoardConfig {
+  const rest = { ...board }
+  delete rest.queueStageId
+  return rest
 }

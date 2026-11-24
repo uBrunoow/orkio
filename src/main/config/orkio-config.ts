@@ -5,9 +5,12 @@
 import type { DeliverySettings } from '../../shared/delivery'
 import { parseProjectAgents, type ProjectAgents } from '../../shared/agent'
 import { parseOrchestrator, type OrchestratorConfig } from '../../shared/orchestrator'
-import { defaultRules, parseRule, type AutomationRule } from '../../shared/automation'
-import type { BoardConfig, BoardStage } from '../../shared/board'
-import { ConfigStore } from '../storage/config-store'
+import { parseRule, type AutomationRule } from '../../shared/automation'
+import { keptQueueStage, type BoardConfig, type BoardStage } from '../../shared/board'
+import { ConfigStore, type ConfigMigrations } from '../storage/config-store'
+import { migrateV11, type AlvaMigrationNote } from './migrations/v11-alva'
+import { migrateV13 } from './migrations/v13-queue-stage'
+import { migrateV3 } from './migrations/v3-default-rules'
 
 export const ORKIO_CONFIG_FILE = 'orkio-config.json'
 /**
@@ -17,7 +20,6 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
  */
 import { clampAlvaParallel } from '../../shared/alva'
-import { upgradeAlvaFlows } from '../../shared/alva-templates'
 import { parseFlowDef, type Flow, type ProjectFlows, type StageFlow } from '../../shared/task-flow'
 import type { UpdateChannel } from '../../shared/updates'
 import type {
@@ -28,7 +30,7 @@ import type {
 } from '../../shared/notion'
 import type { ProjectRepo } from '../../shared/projects'
 
-export const ORKIO_CONFIG_VERSION = 13
+export const ORKIO_CONFIG_VERSION = 14
 
 export interface StoredProject {
   id: string
@@ -54,7 +56,7 @@ export interface OrkioConfig {
   delivery: Record<string, DeliverySettings>
   /** Agentes (8A): regras de atribuição por coluna. Os perfis ficam em arquivos, não aqui. */
   agents: Record<string, ProjectAgents>
-  /** Orquestrador (8B): fila, etapas de trabalho e agentes de cada uma, por projeto. */
+  /** Orquestrador (8B): etapas de trabalho e agentes de cada uma, por projeto. */
   orchestrator: Record<string, OrchestratorConfig>
   /** Atualizações (6C): canal, última versão vista ("O que há de novo") e última verificação. */
   updates: UpdatesConfig
@@ -87,9 +89,62 @@ export function emptyConfig(): OrkioConfig {
  * Mudanças feitas por uma migração num projeto, para o histórico de configuração (`config_events`).
  * A migração roda no `ConfigStore` (sem banco): o main recebe as notas e grava quando o banco abre.
  */
-export interface ConfigMigrationNote {
-  projectId: string
-  changes: string[]
+export type ConfigMigrationNote = AlvaMigrationNote
+
+/**
+ * Migrações publicadas (`v → v+1`), uma para cada versão de 0 até `ORKIO_CONFIG_VERSION - 1`
+ * (o `ConfigStore` recusa abrir se faltar uma; teste exige todas). Nunca edite uma publicada:
+ * as que precisam de dados (regras padrão, modelos Alva) levam uma cópia congelada da época em
+ * `migrations/`, nunca o código vivo.
+ */
+export function orkioConfigMigrations(
+  options: { onMigrationNote?: (note: ConfigMigrationNote) => void } = {}
+): ConfigMigrations {
+  return {
+    // v0: arquivo sem schemaVersion (rascunhos antigos) → v1.
+    0: (data) => ({ projects: Array.isArray(data['projects']) ? data['projects'] : [] }),
+    // v1 → v2: Notion ainda não configurado; nenhum projeto vinculado.
+    1: (data) => ({
+      ...data,
+      notion: null,
+      projects: Array.isArray(data['projects'])
+        ? data['projects'].map((p: unknown) => (isRecord(p) ? { ...p, notionProject: null } : p))
+        : []
+    }),
+    // v2 → v3: nenhum quadro ainda.
+    2: (data) => ({ ...data, boards: {} }),
+    // v3 → v4: quadros existentes ganham as regras padrão da época (etapas pelo nome).
+    3: migrateV3,
+    // v4 → v5: nenhum contexto do Claude Code ainda.
+    4: (data) => ({ ...data, claudeContexts: {} }),
+    // v5 → v6: nenhum fluxo de tarefa ainda.
+    5: (data) => ({ ...data, flows: {} }),
+    // v6 → v7 (5B): só campos opcionais novos nos fluxos (includeBriefing, tags, limite Alva).
+    6: (data) => ({ ...data }),
+    // v7 → v8 (5C): ajustes de entrega por projeto (padrão: exigir aprovação para push).
+    7: (data) => ({ ...data, delivery: {} }),
+    // v8 → v9 (6C): canal Estável. Sem versão vista: a primeira abertura só registra a versão
+    // (quem chega à 6C instalou na mão); o "O que há de novo" vale a partir da próxima.
+    8: (data) => ({
+      ...data,
+      updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
+    }),
+    // v9 → v10 (8A): nenhuma regra de atribuição de agentes ainda.
+    9: (data) => ({ ...data, agents: {} }),
+    // v10 → v11 (8B): orquestrador desligado em todos os projetos.
+    10: (data) => ({ ...data, orchestrator: {} }),
+    // v11 → v12: modelos Alva da v12 (congelados) e as ligações padrão de Revisando/Revisado.
+    11: (data) => migrateV11(data, options.onMigrationNote),
+    // v12 → v13: sai o contexto do projeto do Claude Code (`claudeContexts`), sem leitor desde
+    // que o contexto passou a vir só da tarefa.
+    12: (data) => {
+      const rest = { ...data }
+      delete rest['claudeContexts']
+      return rest
+    },
+    // v13 → v14: coluna "A fazer" vai do orquestrador para o quadro; sai `maxActive`.
+    13: migrateV13
+  }
 }
 
 export function createOrkioConfigStore(
@@ -99,64 +154,7 @@ export function createOrkioConfigStore(
   return new ConfigStore<OrkioConfig>({
     file,
     currentVersion: ORKIO_CONFIG_VERSION,
-    migrations: {
-      // v0: arquivo sem schemaVersion (rascunhos antigos) → v1.
-      0: (data) => ({ projects: Array.isArray(data['projects']) ? data['projects'] : [] }),
-      // v1 → v2: Notion ainda não configurado; nenhum projeto vinculado.
-      1: (data) => ({
-        ...data,
-        notion: null,
-        projects: Array.isArray(data['projects'])
-          ? data['projects'].map((p: unknown) => (isRecord(p) ? { ...p, notionProject: null } : p))
-          : []
-      }),
-      // v2 → v3: nenhum quadro ainda.
-      2: (data) => ({ ...data, boards: {} }),
-      // v3 → v4: quadros existentes ganham as regras padrão (etapas resolvidas pelo nome).
-      3: (data) => {
-        const boards: Record<string, unknown> = {}
-        const raw = isRecord(data['boards']) ? data['boards'] : {}
-        for (const [projectId, board] of Object.entries(raw)) {
-          const parsed = parseBoard({ ...(isRecord(board) ? board : {}), rules: [] })
-          boards[projectId] =
-            parsed && isRecord(board)
-              ? { ...board, rules: defaultRules(parsed.stages).rules }
-              : board
-        }
-        return { ...data, boards, automation: { paused: false } }
-      },
-      // v4 → v5: nenhum contexto do Claude Code ainda.
-      4: (data) => ({ ...data, claudeContexts: {} }),
-      // v5 → v6: nenhum fluxo de tarefa ainda.
-      5: (data) => ({ ...data, flows: {} }),
-      // v6 → v7 (5B): só campos opcionais novos nos fluxos (includeBriefing, tags, limite Alva);
-      // os fluxos existentes continuam iguais.
-      6: (data) => ({ ...data }),
-      // v7 → v8 (5C): ajustes de entrega por projeto (padrão: exigir aprovação para push).
-      7: (data) => ({ ...data, delivery: {} }),
-      // v8 → v9 (6C): canal Estável. Sem versão vista: a primeira abertura só registra a versão
-      // (quem chega à 6C instalou na mão); o "O que há de novo" vale a partir da próxima.
-      8: (data) => ({
-        ...data,
-        updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
-      }),
-      // v9 → v10 (8A): nenhuma regra de atribuição de agentes ainda.
-      9: (data) => ({ ...data, agents: {} }),
-      // v10 → v11 (8B): orquestrador desligado em todos os projetos.
-      10: (data) => ({ ...data, orchestrator: {} }),
-      // v11 → v12 (Task 18): projetos com os modelos Alva ganham os modelos novos ("Alva: revisão
-      // publicada"), as cópias antigas dos modelos (mesmo id) viram a versão nova e Revisando/
-      // Revisado ganham os fluxos padrão só se a coluna não tiver fluxo ligado. Fluxos e ligações
-      // do usuário nunca mudam.
-      11: (data) => migrateAlvaDefaults(data, options.onMigrationNote),
-      // v12 → v13: sai o contexto do projeto do Claude Code (`claudeContexts`), sem leitor desde
-      // que o contexto passou a vir só da tarefa.
-      12: (data) => {
-        const rest = { ...data }
-        delete rest['claudeContexts']
-        return rest
-      }
-    },
+    migrations: orkioConfigMigrations(options),
     validate: validateConfig,
     empty: emptyConfig
   })
@@ -386,6 +384,10 @@ export function parseBoard(value: unknown): BoardConfig | null {
     rules: Array.isArray(value['rules'])
       ? value['rules'].map(parseRule).filter((r): r is AutomationRule => r !== null)
       : [],
+    ...keptQueueStage(
+      typeof value['queueStageId'] === 'string' ? value['queueStageId'] : null,
+      stages as BoardStage[]
+    ),
     updatedAt: typeof value['updatedAt'] === 'string' ? value['updatedAt'] : ''
   }
 }
@@ -420,44 +422,4 @@ export function parseProjectFlows(v: unknown): { value: ProjectFlows; dropped: n
     value: { flows, bindings, ...(maxParallel !== null ? { alva: { maxParallel } } : {}) },
     dropped: rawFlows.length - flows.length
   }
-}
-
-/** v11 → v12: `upgradeAlvaFlows` sobre os dados crus (o `validateConfig` normaliza depois). */
-export function migrateAlvaDefaults(
-  data: Record<string, unknown>,
-  onNote?: (note: ConfigMigrationNote) => void
-): Record<string, unknown> {
-  const rawFlows = data['flows']
-  if (!isRecord(rawFlows)) return data
-  const boards = isRecord(data['boards']) ? data['boards'] : {}
-  const flows: Record<string, unknown> = {}
-  for (const [projectId, raw] of Object.entries(rawFlows)) {
-    flows[projectId] = raw
-    if (!isRecord(raw) || !Array.isArray(raw['flows']) || !Array.isArray(raw['bindings'])) continue
-    const pf = {
-      ...raw,
-      flows: raw['flows'].filter((f): f is Flow => isRecord(f) && typeof f['id'] === 'string'),
-      bindings: raw['bindings'].filter(
-        (b): b is StageFlow =>
-          isRecord(b) && typeof b['stageId'] === 'string' && typeof b['flowId'] === 'string'
-      )
-    } as ProjectFlows
-    // Itens sem id ficam como estavam (o validateConfig decide); só os reconhecíveis mudam.
-    if (pf.flows.length !== raw['flows'].length || pf.bindings.length !== raw['bindings'].length) {
-      continue
-    }
-    const board = boards[projectId]
-    const stages =
-      isRecord(board) && Array.isArray(board['stages'])
-        ? board['stages'].filter(
-            (st): st is { id: string; name: string } =>
-              isRecord(st) && typeof st['id'] === 'string' && typeof st['name'] === 'string'
-          )
-        : []
-    const r = upgradeAlvaFlows(pf, stages)
-    if (r.changes.length === 0) continue
-    flows[projectId] = r.flows
-    onNote?.({ projectId, changes: r.changes })
-  }
-  return { ...data, flows }
 }
