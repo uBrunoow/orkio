@@ -1,19 +1,12 @@
-# CI do app desktop (Electron). Mudanças só no site/ não rodam este workflow (o site tem o site.yml).
-# Também é chamado pelo release.yml (workflow_call) antes de empacotar.
+# CI do app desktop (Electron). Roda na PR e é chamado pelo release.yml (workflow_call) antes de
+# empacotar. Sem `push` na main: o merge já dispara o release, que roda este mesmo CI; rodar também
+# no push duplicava tudo a cada merge. Mudanças só no site/ (site.yml) ou só em docs não rodam.
 name: CI
 
 on:
-  push:
-    branches: [main]
-    paths-ignore: ['site/**']
   pull_request:
-    paths-ignore: ['site/**']
+    paths-ignore: ['site/**', 'docs/**', 'README.md', '.github/ISSUE_TEMPLATE/**']
   workflow_dispatch:
-    inputs:
-      macos:
-        description: 'Rodar também o E2E no macOS (minutos de macOS custam 10x em repo privado)'
-        type: boolean
-        default: false
   workflow_call:
 
 permissions:
@@ -75,21 +68,3 @@ jobs:
       - run: pnpm exec playwright install-deps
       - run: pnpm dist:dir
       - run: xvfb-run -a pnpm smoke:packaged --trace off
-
-  # Opcional (workflow_dispatch com "macos"). O Keychain do runner pode pedir acesso: experimental.
-  e2e-macos:
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.macos }}
-    runs-on: macos-latest
-    needs: checks
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm e2e --trace off --grep-invert @site
