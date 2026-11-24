@@ -1,16 +1,17 @@
 /** Cliente do socket de permissões do Orkio (usado pelo servidor MCP e pelos testes). */
 import { connect } from 'node:net'
+import { encodeBridgeRequest, type BridgeRequest } from './protocol'
 
 export function askOrkio(
   socketPath: string,
   token: string,
-  payload: Record<string, unknown>
+  request: BridgeRequest
 ): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
     const socket = connect(socketPath)
     let buffer = ''
     const fail = (message: string): void => resolve({ behavior: 'deny', message })
-    socket.on('connect', () => socket.write(`${JSON.stringify({ token, ...payload })}\n`))
+    socket.on('connect', () => socket.write(`${encodeBridgeRequest(token, request)}\n`))
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8')
       const nl = buffer.indexOf('\n')

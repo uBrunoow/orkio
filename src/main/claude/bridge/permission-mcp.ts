@@ -8,9 +8,10 @@
  */
 import { createInterface } from 'node:readline'
 import { askOrkio as ask } from './client'
+import { BRIDGE_ENV, BRIDGE_SERVER, BRIDGE_TOOL } from './protocol'
 
-const SOCKET = process.env['ORKIO_BRIDGE_SOCKET'] ?? ''
-const TOKEN = process.env['ORKIO_BRIDGE_TOKEN'] ?? ''
+const SOCKET = process.env[BRIDGE_ENV.socket] ?? ''
+const TOKEN = process.env[BRIDGE_ENV.token] ?? ''
 
 interface JsonRpc {
   jsonrpc: '2.0'
@@ -31,7 +32,7 @@ async function handle(msg: JsonRpc): Promise<void> {
       reply({
         protocolVersion: (msg.params?.['protocolVersion'] as string | undefined) ?? '2025-06-18',
         capabilities: { tools: {} },
-        serverInfo: { name: 'orkio', version: '1.0.0' }
+        serverInfo: { name: BRIDGE_SERVER, version: '1.0.0' }
       })
       return
     case 'ping':
@@ -41,7 +42,7 @@ async function handle(msg: JsonRpc): Promise<void> {
       reply({
         tools: [
           {
-            name: 'approve',
+            name: BRIDGE_TOOL,
             description: 'Pede ao Orkio (e ao usuário) permissão para usar uma ferramenta.',
             inputSchema: {
               type: 'object',
@@ -62,7 +63,7 @@ async function handle(msg: JsonRpc): Promise<void> {
       const decision = await ask(SOCKET, TOKEN, {
         toolName: typeof args['tool_name'] === 'string' ? args['tool_name'] : '',
         // A doc não fixa o nome do campo da entrada: aceitamos os dois usados no Claude Code.
-        input: (args['input'] ?? args['tool_input'] ?? {}) as unknown,
+        input: (args['input'] ?? args['tool_input'] ?? {}) as Record<string, unknown>,
         toolUseId: typeof args['tool_use_id'] === 'string' ? args['tool_use_id'] : null
       })
       // Sem structuredContent: a doc pede exatamente um bloco de texto.

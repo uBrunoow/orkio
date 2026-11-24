@@ -221,7 +221,7 @@ describe('modo entrega: git push', () => {
       'gh pr list --state open',
       'gh run view 123 --log-failed',
       'gh api repos/{owner}/{repo}/pulls/14/reviews',
-      'gh api -X GET repos/acme/app/pulls/14/comments -f per_page=100',
+      'gh api -X GET repos/acme/app/pulls/14/comments?per_page=100',
       `gh api graphql -f query='query { repository(owner: "acme", name: "app") { pullRequest(number: 14) { reviewThreads(first: 50) { nodes { isResolved } } } } }'`
     ]) {
       allowed(cmd, c)
@@ -232,6 +232,8 @@ describe('modo entrega: git push', () => {
       'gh pr review 14 --approve',
       'gh pr merge 14',
       'gh api repos/acme/app/pulls/14/comments -f body=oi',
+      // GET com campos: o CLI nega (não há como distinguir de um POST com campos); vai na URL.
+      'gh api -X GET repos/acme/app/pulls/14/comments -f per_page=100',
       'gh api -X PATCH repos/acme/app/pulls/14 -f state=closed',
       'gh api --input body.json repos/acme/app/pulls/14/reviews',
       `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "x"}) { clientMutationId } }'`,

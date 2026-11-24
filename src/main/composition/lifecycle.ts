@@ -2,7 +2,7 @@
 export interface StopParts {
   work: {
     flows: { dispose(): void }
-    runs: { cancelAll(): void; activeList(): readonly { queued: boolean }[] }
+    runs: { cancelAll(): void; activeRuns(): readonly { queued: boolean }[] }
     writes: { stop(): void }
     scheduler: { stop(): void }
     overview: { dispose(): void }
@@ -36,7 +36,7 @@ export function createStop(
       work?.runs.cancelAll()
       if (work && options.waitMs > 0) {
         const deadline = now() + options.waitMs
-        while (work.runs.activeList().some((r) => !r.queued) && now() < deadline) await sleep(200)
+        while (work.runs.activeRuns().some((r) => !r.queued) && now() < deadline) await sleep(200)
       }
       work?.writes.stop()
       work?.scheduler.stop()

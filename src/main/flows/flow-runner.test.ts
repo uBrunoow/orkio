@@ -105,20 +105,25 @@ function makeRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
     flows: () => config,
     currentStage: () => stage,
     prepare: prepare as unknown as FlowRunnerDeps['prepare'],
-    startClaude: async (input) => {
+    // O pedido (`RunRequest`) achatado para as asserções: comando/args, briefing da sessão nova,
+    // resposta (continua a sessão, sem sessão nova) ou pedido em texto (continua ou começa).
+    startClaude: async (req) => {
       const runId = `run-${started.length + 1}`
+      const s = req.session
+      const fresh = s.kind === 'new' ? s : s.kind === 'latest' ? s.orNew : null
+      const text = req.input.kind === 'prompt' ? req.input.text : null
       started.push({
         runId,
-        command: input.command,
-        args: input.args,
-        briefing: input.briefing,
-        includeBriefing: input.includeBriefing,
-        delivery: input.delivery,
-        agent: input.agent,
-        ...(input.reply !== undefined ? { reply: input.reply } : {}),
-        ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
-        ...(input.readOnly !== undefined ? { readOnly: input.readOnly } : {}),
-        ...(input.runtime !== undefined ? { runtime: input.runtime } : {})
+        command: req.input.kind === 'command' ? req.input.name : '',
+        args: req.input.kind === 'command' ? req.input.args : '',
+        briefing: fresh?.briefing ?? '',
+        ...(fresh ? { includeBriefing: fresh.includeBriefing } : {}),
+        delivery: req.access.github === 'deliver',
+        agent: req.agent,
+        ...(text !== null && s.kind === 'latest' && !s.orNew ? { reply: text } : {}),
+        ...(text !== null && s.kind === 'latest' && s.orNew ? { prompt: text } : {}),
+        ...(req.access.tools === 'read_only' ? { readOnly: true } : {}),
+        ...(req.runtime !== null ? { runtime: req.runtime } : {})
       })
       return runId
     },
@@ -256,7 +261,8 @@ describe('FlowRunner', () => {
 
     await runner.resumeWithReply(id, ' Formato: CSV; só admins ')
     expect(started).toHaveLength(2)
-    expect(started[1]).toMatchObject({ command: 'revisar', reply: 'Formato: CSV; só admins' })
+    // A resposta vai como texto na sessão do passo (o comando não roda de novo).
+    expect(started[1]).toMatchObject({ command: '', reply: 'Formato: CSV; só admins' })
     expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'revisar' })
 
     // Falhou de novo: "Retomar" roda o comando de verdade, sem reenviar a resposta.

@@ -1,21 +1,23 @@
 import type { ORKIO_API } from '../../shared/ipc/api'
 import type { ClaudeService } from '../claude/claude.service'
+import type { RunService } from '../claude/run.service'
 import type { Impl } from './register'
 
 /** Claude Code (4A/4B): execuções, sessão, ambiente, branches e artefatos da tarefa. */
-export function claudeHandlers(service: ClaudeService): Impl<typeof ORKIO_API.claude> {
+export function claudeHandlers(
+  service: ClaudeService,
+  runs: RunService
+): Impl<typeof ORKIO_API.claude> {
   return {
     status: (options) => service.getStatus(options.force),
     state: (projectId, taskId) => service.state(projectId, taskId),
     prepare: (projectId, taskId) => service.prepare(projectId, taskId),
     start: (request) => service.start(request),
     send: (request) => service.send(request),
-    cancel: (runId) => service.cancel(runId),
-    answerPermission: (runId, requestId, answer) =>
-      service.answerPermission(runId, requestId, answer),
-    answerQuestion: (runId, requestId, answers) =>
-      service.answerQuestion(runId, requestId, answers),
-    readLog: (runId) => service.readLog(runId),
+    cancel: (runId) => runs.cancel(runId),
+    answerPermission: (runId, requestId, answer) => runs.answerPermission(runId, requestId, answer),
+    answerQuestion: (runId, requestId, answers) => runs.answerQuestion(runId, requestId, answers),
+    readLog: (runId) => runs.readLog(runId),
     cleanup: (projectId, taskId, force) => service.cleanup(projectId, taskId, force),
     openEditor: (projectId, taskId, editor) => service.openEditor(projectId, taskId, editor),
     openTerminal: (projectId, taskId) => service.openTerminal(projectId, taskId),

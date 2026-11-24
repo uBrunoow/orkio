@@ -16,7 +16,6 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  * v3: `boards` (quadro kanban por projeto: etapas ↔ opções do status do Notion).
  * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
  */
-import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
 import { clampAlvaParallel } from '../../shared/alva'
 import { upgradeAlvaFlows } from '../../shared/alva-templates'
 import { parseFlowDef, type Flow, type ProjectFlows, type StageFlow } from '../../shared/task-flow'
@@ -29,7 +28,7 @@ import type {
 } from '../../shared/notion'
 import type { ProjectRepo } from '../../shared/projects'
 
-export const ORKIO_CONFIG_VERSION = 12
+export const ORKIO_CONFIG_VERSION = 13
 
 export interface StoredProject {
   id: string
@@ -49,8 +48,6 @@ export interface OrkioConfig {
   boards: Record<string, BoardConfig>
   /** Automações (3B): pausa global ("Pausar todas"). */
   automation: { paused: boolean }
-  /** Contexto do Claude Code por projeto (4B): instruções + páginas de referência (só ids/nomes). */
-  claudeContexts: Record<string, ProjectClaudeContext>
   /** Fluxos de tarefa por projeto (5A) e a ligação de cada um com as etapas. */
   flows: Record<string, ProjectFlows>
   /** Ajustes de entrega por projeto (5C). Ausente = padrão (aprovação para push). */
@@ -78,7 +75,6 @@ export function emptyConfig(): OrkioConfig {
     notion: null,
     boards: {},
     automation: { paused: false },
-    claudeContexts: {},
     flows: {},
     delivery: {},
     agents: {},
@@ -152,7 +148,14 @@ export function createOrkioConfigStore(
       // publicada"), as cópias antigas dos modelos (mesmo id) viram a versão nova e Revisando/
       // Revisado ganham os fluxos padrão só se a coluna não tiver fluxo ligado. Fluxos e ligações
       // do usuário nunca mudam.
-      11: (data) => migrateAlvaDefaults(data, options.onMigrationNote)
+      11: (data) => migrateAlvaDefaults(data, options.onMigrationNote),
+      // v12 → v13: sai o contexto do projeto do Claude Code (`claudeContexts`), sem leitor desde
+      // que o contexto passou a vir só da tarefa.
+      12: (data) => {
+        const rest = { ...data }
+        delete rest['claudeContexts']
+        return rest
+      }
     },
     validate: validateConfig,
     empty: emptyConfig
@@ -192,14 +195,6 @@ export function validateConfig(
   const automation = {
     paused: isRecord(automationRaw) && automationRaw['paused'] === true
   }
-  // Contextos do Claude Code: um inválido é descartado sozinho.
-  const claudeContexts: Record<string, ProjectClaudeContext> = {}
-  if (isRecord(data['claudeContexts'])) {
-    for (const [projectId, raw] of Object.entries(data['claudeContexts'])) {
-      const ctx = parseClaudeContext(raw)
-      if (ctx) claudeContexts[projectId] = ctx
-    }
-  }
   // Fluxos de tarefa: fluxo ou ligação inválidos são descartados sozinhos, com aviso.
   const flows: Record<string, ProjectFlows> = {}
   if (isRecord(data['flows'])) {
@@ -238,7 +233,6 @@ export function validateConfig(
     notion,
     boards,
     automation,
-    claudeContexts,
     flows,
     delivery,
     agents,
@@ -393,17 +387,6 @@ export function parseBoard(value: unknown): BoardConfig | null {
       ? value['rules'].map(parseRule).filter((r): r is AutomationRule => r !== null)
       : [],
     updatedAt: typeof value['updatedAt'] === 'string' ? value['updatedAt'] : ''
-  }
-}
-
-export function parseClaudeContext(value: unknown): ProjectClaudeContext | null {
-  if (!isRecord(value) || typeof value['instructions'] !== 'string') return null
-  const pages = Array.isArray(value['notionPages'])
-    ? value['notionPages'].map(nameRef).filter((p): p is { id: string; name: string } => !!p)
-    : []
-  return {
-    instructions: value['instructions'].slice(0, CONTEXT_LIMITS.instructions),
-    notionPages: pages.slice(0, CONTEXT_LIMITS.pages)
   }
 }
 

@@ -8,7 +8,7 @@ function parts(log: string[], active: { queued: boolean }[]): StopParts {
       flows: { dispose: step('flows.dispose') },
       runs: {
         cancelAll: step('runs.cancelAll'),
-        activeList: () => active
+        activeRuns: () => active
       },
       writes: { stop: step('writes.stop') },
       scheduler: { stop: step('scheduler.stop') },

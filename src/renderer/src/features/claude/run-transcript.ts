@@ -4,7 +4,8 @@
  * ("Rodou 6 comandos · Editou 2 arquivos"); pedidos pendentes ficam de fora (têm cartão próprio);
  * permissões negadas/bloqueadas e erros continuam visíveis na ordem em que aconteceram.
  */
-import { isEditTool, type RunLogEvent, type RunStatus } from '../../../../shared/agent-run'
+import type { PermissionBlockCode, RunLogEvent, RunStatus } from '../../../../shared/agent-run'
+import { toolCategory, type ToolCategory } from '../../../../shared/claude-tools'
 import { plural } from '../../lib/format'
 
 export type StepCategory = 'command' | 'edit' | 'read' | 'search' | 'subagent' | 'tool'
@@ -15,7 +16,7 @@ export interface WorkStep {
   tool: string
   summary: string
   category: StepCategory
-  /** Arquivo editado (só ferramentas de edição). */
+  /** Arquivo lido ou editado (ferramentas de arquivo do catálogo). */
   file: string | null
   state: StepState
 }
@@ -32,8 +33,8 @@ export interface SubagentRow {
   at: string
 }
 
-/** Bloqueio de push ou de `gh` que publica (textos de `POLICY_MESSAGES`, também os antigos). */
-const PUBLISH_BLOCK = /Bloqueado pelo Orkio: (git push|comandos do GitHub CLI que publicam)/
+/** Bloqueio de push ou de `gh` que publica fora do modo entrega: o recibo oferece "Abrir PR". */
+const PUBLISH_BLOCK: ReadonlySet<PermissionBlockCode> = new Set(['push', 'gh'])
 
 export type TranscriptItem =
   | { kind: 'started'; key: string; model: string | null }
@@ -61,24 +62,21 @@ export type TranscriptItem =
       costUsd: number | null
     }
 
+/** Categoria da linha na conversa, a partir do catálogo de ferramentas. */
+const STEP_CATEGORY: Record<ToolCategory, StepCategory> = {
+  edit: 'edit',
+  read: 'read',
+  search: 'search',
+  web: 'search',
+  command: 'command',
+  subagent: 'subagent',
+  plan: 'tool',
+  question: 'tool'
+}
+
 export function categoryOf(tool: string): StepCategory {
-  if (isEditTool(tool)) return 'edit'
-  switch (tool) {
-    case 'Bash':
-      return 'command'
-    case 'Read':
-      return 'read'
-    case 'Grep':
-    case 'Glob':
-    case 'WebFetch':
-    case 'WebSearch':
-      return 'search'
-    case 'Task':
-    case 'Agent':
-      return 'subagent'
-    default:
-      return 'tool'
-  }
+  const c = toolCategory(tool)
+  return c ? STEP_CATEGORY[c] : 'tool'
 }
 
 const VERB: Record<string, string> = {
@@ -283,7 +281,7 @@ export function buildTranscript(
             'problem',
             `Bloqueado: ${e.summary}${e.reason ? ` (${e.reason})` : ''}`,
             key,
-            e.reason && PUBLISH_BLOCK.test(e.reason) ? 'open-pr' : undefined
+            e.code && PUBLISH_BLOCK.has(e.code) ? 'open-pr' : undefined
           )
         } else if (e.state === 'denied') {
           receipt('problem', `Negado: ${e.summary}`, key)

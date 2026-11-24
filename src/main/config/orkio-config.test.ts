@@ -53,7 +53,6 @@ describe('orkio-config v2/v3', () => {
       notion: null,
       boards: {},
       automation: { paused: false },
-      claudeContexts: {},
       flows: {},
       delivery: {},
       agents: {},
@@ -226,36 +225,31 @@ describe('orkio-config v2/v3', () => {
     expect(result?.warning).toBeUndefined()
   })
 
-  it('migra v4 → v5: contextos do Claude Code começam vazios; inválido é descartado', async () => {
+  it('migra v12 → v13: o contexto do projeto do Claude Code (sem leitor) sai do arquivo', async () => {
     await writeFile(
       file,
       JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 12,
         projects: [{ ...PROJECT, notionProject: null }],
         notion: NOTION,
         boards: {},
-        automation: { paused: true }
+        automation: { paused: true },
+        claudeContexts: {
+          p1: { instructions: 'Use pnpm', notionPages: [{ id: 'p1', name: 'Arquitetura' }] }
+        },
+        flows: {},
+        delivery: {},
+        agents: {},
+        orchestrator: {},
+        updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
       })
     )
     const { data } = await createOrkioConfigStore(file).load()
-    expect(data.claudeContexts).toEqual({})
+    expect(data).not.toHaveProperty('claudeContexts')
     expect(data.automation.paused).toBe(true)
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
-
-    const parsed = validateConfig({
-      projects: [],
-      claudeContexts: {
-        ok: {
-          instructions: 'Use pnpm',
-          notionPages: [{ id: 'p1', name: 'Arquitetura' }, { id: 7 }]
-        },
-        ruim: { notionPages: [] }
-      }
-    })
-    expect(parsed?.value.claudeContexts).toEqual({
-      ok: { instructions: 'Use pnpm', notionPages: [{ id: 'p1', name: 'Arquitetura' }] }
-    })
+    expect(saved['schemaVersion']).toBe(13)
+    expect(saved).not.toHaveProperty('claudeContexts')
   })
 
   it('migra v5 → v6: sem fluxos; fluxo inválido e ligação órfã são descartados', async () => {
@@ -563,7 +557,6 @@ describe('v11 → v12: modelos Alva e ligações padrão (Task 18)', () => {
       notion: null,
       boards: { p1: board, p2: board },
       automation: { paused: false },
-      claudeContexts: {},
       flows,
       delivery: {},
       agents: {},
@@ -624,8 +617,8 @@ describe('v11 → v12: modelos Alva e ligações padrão (Task 18)', () => {
       'Cópia anterior de “Alva: comentários da PR” guardada como “Alva: comentários da PR (cópia anterior)” (sem coluna)'
     )
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(12)
-    // Já na v12: abrir de novo não migra nem avisa.
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
+    // Já na versão atual: abrir de novo não migra nem avisa.
     const again: unknown[] = []
     await createOrkioConfigStore(file, { onMigrationNote: (n) => again.push(n) }).load()
     expect(again).toEqual([])

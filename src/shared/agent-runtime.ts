@@ -7,8 +7,6 @@
  *   (versão ≥ `CLAUDE_EFFORT_VERSION`); essa checagem é do main.
  */
 
-export type AgentRuntimeId = 'claude'
-
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 export type Effort = (typeof EFFORTS)[number]
 

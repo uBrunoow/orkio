@@ -24,6 +24,7 @@ import {
   type BacklogTaskInfo
 } from '../../shared/alva'
 import { FLOW_NO, FLOW_YES } from '../../shared/task-flow'
+import { BRIEFING_PATH } from '../../shared/orkio-scratch'
 import { redactSecrets } from '../claude/redact'
 import type { Db } from '../db/database'
 import type { ExtractContext, ExtractResult, FlowExtractor } from '../flows/flow-runner'
@@ -234,9 +235,9 @@ export class AlvaService {
       ? [
           info.displayId ? `${info.displayId} — ${info.title}.` : `${info.title}.`,
           info.url ? `Tarefa no Notion: ${info.url}` : '',
-          'Briefing completo em .orkio/briefing.md.'
+          `Briefing completo em ${BRIEFING_PATH}.`
         ]
-      : ['Briefing completo em .orkio/briefing.md.']
+      : [`Briefing completo em ${BRIEFING_PATH}.`]
     return { [ALVA_VARS.specArg]: parts.filter(Boolean).join(' '), [ALVA_VARS.linked]: FLOW_NO }
   }
 

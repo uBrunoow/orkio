@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { SCRATCH_GITIGNORE } from '../../shared/orkio-scratch'
 import { WorktreeError } from '../claude/worktree.service'
 import { createReviewActions } from './review-action'
 import {
@@ -268,7 +269,7 @@ describe('ação review_snapshot', () => {
       const md = await readFile(join(dir, '.orkio', 'revisao.md'), 'utf8')
       expect(md).toContain('## src/a.ts:10')
       expect(md).toContain('> Troque isto')
-      expect(await readFile(join(dir, '.orkio', '.gitignore'), 'utf8')).toBe('*\n')
+      expect(await readFile(join(dir, '.orkio', '.gitignore'), 'utf8')).toBe(SCRATCH_GITIGNORE)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

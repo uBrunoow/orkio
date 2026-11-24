@@ -58,10 +58,10 @@ import type { BoardStore, TaskEventInput } from '../board/board.store'
 import type { TaskEventDetailInput } from '../../shared/task-events'
 import type { StageChange } from '../board/board.service'
 import type { RunFinished } from '../claude/run.service'
+import { BRIEFING_PATH } from '../../shared/orkio-scratch'
 import { redactSecrets } from '../claude/redact'
-import type { RunAgent } from '../claude/run.service'
+import type { RunAgent, RunRequest } from '../claude/run-spec'
 import { buildAgentPrompt, checkAgentFlow, type AgentProfile } from '../../shared/agent'
-import type { RuntimeChoice } from '../../shared/agent-runtime'
 import type { Db } from '../db/database'
 import { DomainError, errorName } from '../errors'
 
@@ -184,31 +184,11 @@ export interface FlowRunnerDeps {
   currentStage(projectId: string, taskId: string): string | null
   /** Monta o briefing da tarefa (Notion) e garante o worktree. */
   prepare(projectId: string, taskId: string): Promise<FlowContext>
-  /** Inicia uma execução da 4A; devolve o id. Falha esperada: lance `FlowError` (mensagem pt-BR). */
-  startClaude(input: {
-    projectId: string
-    taskId: string
-    command: string
-    args: string
-    briefing: string
-    timeoutMin: number
-    includeBriefing: boolean
-    /** Modo entrega (5C): só nesta execução. */
-    delivery: boolean
-    /** Agente (8A): instruções e modelo; nenhuma permissão a mais. */
-    agent: RunAgent | null
-    /** Modelo/raciocínio do passo (vencem os do agente). */
-    runtime?: Partial<RuntimeChoice>
-    /**
-     * Resposta sua ("Responder e continuar"): continua a sessão do passo parado com este texto,
-     * em vez de rodar o comando de novo (sem briefing, mesma conversa).
-     */
-    reply?: string
-    /** Pedido em texto (já com as variáveis): roda sem comando, na sessão mais recente. */
-    prompt?: string
-    /** Passo só de leitura: o Claude Code não recebe as ferramentas de edição. */
-    readOnly?: boolean
-  }): Promise<string>
+  /**
+   * Inicia uma execução da 4A (o mesmo pedido do campo da sessão e do "Rodar"); devolve o id.
+   * Falha esperada: lance `FlowError` (mensagem pt-BR).
+   */
+  startClaude(request: RunRequest): Promise<string>
   cancelClaude(runId: string): void
   extractors: readonly FlowExtractor[]
   actions: readonly OrkioAction[]
@@ -1393,7 +1373,7 @@ export class FlowRunner {
         : undefined
       const prompt = isPromptStep(step)
       const { text, missing } = renderArgs(prompt ? step.prompt! : step.args, {
-        briefingPath: '.orkio/briefing.md',
+        briefingPath: BRIEFING_PATH,
         taskId: ctx.displayId,
         ...(ctx.title ? { taskTitle: ctx.title } : {}),
         notionUrl: ctx.notionUrl,
@@ -1410,27 +1390,42 @@ export class FlowRunner {
       const reply =
         persisted.pendingReply?.stepId === step.id ? persisted.pendingReply.text : undefined
       if (reply !== undefined) this.savePersisted(row.id, { ...persisted, pendingReply: null })
+      const fresh = {
+        kind: 'new',
+        briefing: ctx.briefing,
+        includeBriefing: step.includeBriefing !== false
+      } as const
       const runId = await this.deps.startClaude({
-        ...(reply !== undefined ? { reply } : {}),
-        ...(prompt ? { prompt: text } : {}),
-        ...(step.readOnly === true ? { readOnly: true } : {}),
         projectId: row.project_id,
         taskId: row.task_page_id,
-        command: prompt ? '' : step.command,
-        args: prompt ? '' : text,
-        briefing: ctx.briefing,
-        timeoutMin: step.timeoutMin,
-        includeBriefing: step.includeBriefing !== false,
-        delivery: step.delivery === true,
+        // Resposta sua: continua a sessão do passo parado com ela (sem rodar o comando de novo).
+        // Pedido em texto: continua a sessão mais recente (ou começa uma). Comando: sessão nova.
+        input:
+          reply !== undefined
+            ? { kind: 'prompt', text: reply }
+            : prompt
+              ? { kind: 'prompt', text }
+              : { kind: 'command', name: step.command, args: text },
+        session:
+          reply !== undefined
+            ? { kind: 'latest', orNew: null }
+            : prompt
+              ? { kind: 'latest', orNew: fresh }
+              : fresh,
+        // Só leitura nunca entrega (o validador já recusa os dois juntos).
+        access:
+          step.readOnly === true
+            ? { tools: 'read_only', github: 'read' }
+            : { tools: 'full', github: step.delivery === true ? 'deliver' : 'read' },
         agent: this.runAgent(row),
-        ...(step.model !== undefined || step.effort !== undefined
-          ? {
-              runtime: {
+        runtime:
+          step.model !== undefined || step.effort !== undefined
+            ? {
                 ...(step.model !== undefined ? { model: step.model } : {}),
                 ...(step.effort !== undefined ? { effort: step.effort } : {})
               }
-            }
-          : {})
+            : null,
+        timeoutMin: step.timeoutMin
       })
       this.deps.db.run('UPDATE flow_steps SET run_id = ? WHERE id = ?', runId, rowId)
       this.runIndex.set(runId, { flowRunId: row.id, rowId })

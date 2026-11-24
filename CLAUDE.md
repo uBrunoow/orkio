@@ -120,6 +120,10 @@ src/
   shared/board.ts          # etapas, template, validação e reconciliação do quadro (puras)
   shared/automation.ts     # snapshot, deriveEvents, regras padrão, evaluate (motor puro)
   shared/agent-run.ts      # tipos das execuções do Claude Code (log normalizado, resumo, status)
+  shared/claude-tools.ts   # catálogo das ferramentas do CLI (categoria, pathKeys, toolPath): política,
+                           # log, passo só de leitura e conversa derivam dele
+  shared/orkio-scratch.ts  # pasta de rascunho `.orkio/` (briefing, anexos, revisao.md) e
+                           # `isScratchPath` (não engole `.orkio/agents/`, versionado)
   shared/briefing.ts       # blocos do Notion → markdown e montagem do briefing (puro)
   shared/slug.ts           # slug, nome da branch (<tipo>/<ID>-<slug> ou <tipo>/<slug>), links do Notion
   shared/task-flow.ts      # 5A: fluxos de tarefa (tipos, motor puro, condições, template, validação)
@@ -163,7 +167,7 @@ src/
     ipc/                   # register.ts (registro único), emit.ts (eventos), <grupo>.ipc.ts (handlers)
     storage/secure-store.ts  # SEGREDOS (safeStorage)
     storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações)
-    config/orkio-config.ts   # orkio-config.json (schema v12; migrações v → v+1)
+    config/orkio-config.ts   # orkio-config.json (schema v13; migrações v → v+1)
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
     notion/                # notion-workspace.service.ts (bancos, mapeamento, vínculo, tarefas)
@@ -186,10 +190,13 @@ src/
                            # `flow_runs`: as consultas dos outros passam por ele), flows.service.ts,
                            # flow-integration.ts (integração por marcador), open-pr.ts ("Abrir PR")
     power/                 # keep-awake.ts (manter o computador acordado com trabalho rodando)
-    claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
-                           # policy (+ delivery-policy, 5C), redact, run.service, claude.service,
+    claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker +
+                           # buildCliArgs), run-spec.ts (RunRequest/RunSpec: a execução num tipo
+                           # só), stream, policy (+ delivery-policy, 5C), github-rules.ts (tabela
+                           # única do GitHub/push: política, deny do CLI e textos), redact,
+                           # run.service, claude.service, scratch.ts (`ensureScratch`),
                            # attachments.ts (anexos), terminal.ts (terminal externo);
-                           # bridge/permission-mcp.ts
+                           # bridge/protocol.ts (contrato da ponte), bridge/permission-mcp.ts
                            # (servidor MCP stdio → out/main/permission-mcp.js)
   preload/index.ts         # contextBridge → window.orkio, gerado de `ORKIO_API` (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
@@ -292,7 +299,7 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   resultado das chamadas é `Result<T>` (`shared/result.ts`).
 - Regras que o renderer e o main checam (defesa em profundidade) moram em `shared/` e os dois lados
   importam: nomes do GitHub (`github-names.ts`), anexos (`attachments.ts`), nome de comando
-  (`isCommandName`) e ferramentas de edição (`EDIT_TOOLS`) em `agent-run.ts`, tipos de branch
+  (`isCommandName`) em `agent-run.ts`, ferramentas do Claude Code (`shared/claude-tools.ts`), tipos de branch
   (`BRANCH_KINDS`/`withBranchKind` em `slug.ts`), limites da revisão publicada (`review-publish.ts`).
   Comparar rótulos (etapas, status, busca) sempre com `normalizeLabel` (`shared/text.ts`).
 - O preload expõe só as funções declaradas, nunca `ipcRenderer` cru.
@@ -619,30 +626,42 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   deixa trocar para `fix`/`hotfix` quando a branch ainda não existe (`branchKind`). Branch já em checkout na pasta principal → erro claro.
   A pasta principal do usuário nunca é tocada. "Limpar ambiente" remove só o worktree (a branch
   fica); com mudanças pendentes exige confirmação (`force`).
+- **Execução num tipo só** (`run-spec.ts`): quem pede (campo da sessão, "Rodar", passo de fluxo)
+  monta um `RunRequest` (entrada prompt|comando, sessão nova|retomada|a mais recente, ferramentas
+  completas|só leitura × GitHub leitura|entrega — só leitura nunca entrega, no tipo —, agente,
+  runtime, tempo limite); `ClaudeService.startRun` resolve uma vez num `RunSpec` (alvo do GitHub,
+  modelo/raciocínio cortados pela versão do CLI) e o `RunService` e `buildCliArgs(spec)` (runner)
+  usam sem desmontar. Opção nova = campo no tipo + quem a usa.
 - **Permissões em camadas:** `--permission-mode acceptEdits`, `--settings` (bloqueio de escrita fora
-  do diretório + deny de push e das formas do `gh` que escrevem: `gh pr create|comment|merge…`,
-  `gh api` com `-X`/`--method`/`--input`/`mutation` ou campos em `repos/…`, para valer mesmo com
-  "permitir" no `~/.claude` do usuário) e `--permission-prompt-tool mcp__orkio__approve`.
+  do diretório + deny gerado da tabela `github-rules.ts`: push, ações `write`/`never` do `gh`,
+  `gh api` com método de escrita, `--input`, `mutation` ou campos em `repos/…`, para valer mesmo com
+  "permitir" no `~/.claude` do usuário) e `--permission-prompt-tool mcp__orkio__approve`. A tabela
+  dá a cada forma `read|write|never` + evento; um teste confere que nenhuma leitura cai num deny e
+  que todo `never` está nos dois deny. `gh api` GET com campos (`-f`) não é leitura (vai na URL).
   A ponte (`bridge/permission-mcp.ts`, roda no Node do Electron com `ELECTRON_RUN_AS_NODE`) fala com
   o main por socket local (0600, token aleatório no mcp-config 0600 apagado no fim).
-  `policy.ts`: push (qualquer forma, inclusive `env X=1 git push`), `gh pr|api|release` e caminhos
-  fora do worktree → bloqueio sem perguntar (evento `run_blocked`), **menos a leitura da PR**
-  (`isGhRead` em `delivery-policy.ts`: `gh pr view|diff|checks|list|status`, `gh run view|list|
-watch`, `gh api` GET/HEAD em `repos/<owner>/<repo>/…` ou GraphQL sem mutation, só no repositório
-  do projeto, `RunInput.githubRead`), que passa sem perguntar; sem repositório verificado, segue
-  bloqueado. Escrever no GitHub continua só no modo entrega; shell → pergunta (uma vez /
+  `policy.ts`: push (qualquer forma, inclusive `env X=1 git push`), o `gh` da tabela
+  (`pr|run|label|release|repo|api`) e caminhos fora do worktree → bloqueio sem perguntar (evento
+  `run_blocked`, com `code` no evento `permission`), **menos a leitura da PR** (`isGhRead` = acesso
+  `read` da tabela, só no repositório do projeto), que passa sem perguntar; sem repositório
+  verificado, segue bloqueado. Passo só de leitura (`readOnly` no `PolicyContext`): editar é
+  bloqueado e nada passa sozinho (nem regra "sempre", nem leitura da PR). Contexto caro a política
+  pede (`decidePermission`: a branch atual só é lida num push do modo entrega, depois dos aliases). Escrever no GitHub continua só no modo entrega; shell → pergunta (uma vez /
   sempre neste projeto por prefixo em `permission_rules` / negar), com notificação; 10 min sem
   resposta → nega. `AskUserQuestion` → card de pergunta; respostas voltam em `updatedInput.answers`.
   A mensagem do bloqueio de push/`gh` termina com "Para publicar, use “Abrir PR” …" (o briefing
   diz o mesmo) e o recibo na conversa ganha o botão "Abrir PR" (`run-transcript` marca
-  `action: 'open-pr'`) quando a tarefa não tem PR aberta e tem ambiente.
+  `action: 'open-pr'` pelo `code` `push`/`gh`, nunca pelo texto) quando a tarefa não tem PR aberta
+  e tem ambiente.
 - **Execuções** (`run.service.ts`): no máximo 2 em paralelo, 1 por tarefa (fila). `agent_runs`
   (SQLite v4) + `<userData>/runs/<id>.jsonl` só com eventos normalizados (nunca o stream cru),
   mantendo 10 por tarefa. Todo texto passa por `redactSecrets` + valores lidos dos `.env*` do
   worktree (só em memória). Ao abrir o app, execuções "em andamento" viram `failed`; ao fechar,
   todas são canceladas (SIGINT → SIGTERM 5 s → SIGKILL 10 s).
 - Briefing: blocos da página (até 3 níveis, 400 blocos) → markdown + campos + PR; editável antes
-  de rodar e gravado em `.orkio/briefing.md` (com `.orkio/.gitignore` = `*`). Não vai ao Notion.
+  de rodar e gravado em `.orkio/briefing.md` (só em sessão nova). A pasta de rascunho `.orkio/` tem
+  um escritor só (`ensureScratch`, `claude/scratch.ts`): `.gitignore` = tudo menos `agents/` (os
+  perfis versionados continuam no git, no resumo, no diff e nos artefatos). Não vai ao Notion.
 - Resumo ao terminar: `git diff --stat`/arquivos e commits desde a base e comandos de teste vistos.
 - **Custo por mensagem** (SQLite v11 `agent_runs.session_cost_total`): o `result.total_cost_usd` do
   CLI é o acumulado da sessão; com `--resume`, o custo da execução = bruto − maior
@@ -671,7 +690,8 @@ watch`, `gh api` GET/HEAD em `repos/<owner>/<repo>/…` ou GraphQL sem mutation,
   `cwd` = worktree. macOS `open -a Terminal <pasta>`; Linux `$TERMINAL` (só nome simples, sem
   caminho/opções), `x-terminal-emulator`, gnome-terminal, konsole, xfce4-terminal, kitty, alacritty
   (o primeiro no PATH); Windows `wt -d .` ou `cmd.exe` **sem a pasta nos argumentos** (`& | ^ %`
-  seriam reinterpretados). Pasta inexistente → `no_workspace`.
+  seriam reinterpretados); `terminalCommand(…, exists)` escolhe (no macOS o `open` sempre existe).
+  Pasta inexistente → `TerminalError('no_workspace')`.
 - Eventos ao renderer: `claude:run-event` (`onRunEvent` → unsubscribe). Histórico da tarefa ganha
   `run_started|finished|cancelled|failed|blocked`.
 
@@ -732,7 +752,7 @@ watch`, `gh api` GET/HEAD em `repos/<owner>/<repo>/…` ou GraphQL sem mutation,
   (`questionTimeoutMs`); permissão continua em 10 min. Com o fluxo parado num comando do Claude
   Code, o cartão de problema tem "Responder e continuar" (`FlowRunner.resumeWithReply`, IPC
   `taskFlows.resumeWithReply`): guarda a resposta em `pendingReply`, refaz o passo e
-  `startForFlow({ reply })` manda só o texto na sessão mais recente da tarefa (`--resume`), sem
+  o pedido do passo (`session: { kind: 'latest', orNew: null }`) manda só o texto na sessão mais recente da tarefa (`--resume`), sem
   rodar o comando do zero; a resposta é consumida uma vez ("Retomar" depois roda o comando de
   verdade). Sem sessão guardada: erro `no_session`. Perguntas já expiradas também se respondem
   pelo campo da sessão (o fluxo parado por falha aceita mensagem).
@@ -769,8 +789,8 @@ markdown_version: 'v2' }`;
 position: { type: 'end' } } }` (documentado como legado, ainda suportado).
     Ambos exigem a capacidade **Insert content** (403 → mensagem própria). Eventos
     `artifact_attached`/`artifact_published` no histórico.
-- **Contexto do projeto:** saiu na reestruturação (o contexto vem só da tarefa). O
-  `claudeContexts[projectId]` do `orkio-config` v5 fica no arquivo sem uso (sem migração).
+- **Contexto do projeto:** saiu na reestruturação (o contexto vem só da tarefa). A migração
+  v12→v13 do `orkio-config` apaga o `claudeContexts` antigo.
 
 ## Fluxos de tarefa (Etapa 5A)
 
@@ -809,7 +829,7 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   `validateTaskFlow` (mesma no editor e no main): salto para passo inexistente, volta para trás sem
   condição de voltas (ou pelo "senão") = erro; comando fora do catálogo/variável desconhecida = aviso.
 - **Execução** (`main/flows/flow-runner.ts`, SQLite v6 `flow_runs`/`flow_steps`):
-  - Um fluxo por tarefa; cada comando é uma execução da 4A (`ClaudeService.startForFlow`, mesmo
+  - Um fluxo por tarefa; cada comando é uma execução da 4A (`ClaudeService.startRun` com o `RunRequest` do passo, mesmo
     worktree/branch/limite de paralelismo); execução manual do Claude Code fica bloqueada com
     fluxo ativo. Briefing montado uma vez por fluxo, só em memória (`flow_json` guarda a cópia do
     fluxo; `state_json` só variáveis, visitas e resultados).
@@ -955,8 +975,9 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   declaradas) e
   `request_review` (quem revisou/foi pedido, ou você escolhe; POST pelo conector; `runNow` da 3B).
 - **Modo entrega** (`claude_command.delivery`, só no passo marcado; nunca no "Rodar" manual):
-  `RunService` recebe o alvo; o CLI ganha `DELIVERY_RUN_SETTINGS` (deny de força/delete/mirror/
-  `gh pr merge|close`/`gh release`/`gh repo`); `delivery-policy.ts` decide:
+  `RunService` recebe o alvo; o CLI ganha `DELIVERY_RUN_SETTINGS` (deny dos `never` da tabela
+  `github-rules.ts`: força, delete, `--all`/`--tags`/`--mirror`, `+x`/`:x`, `gh pr merge|close|
+  review|checkout…`, `gh release`, `gh repo`, `gh api -X DELETE`); `delivery-policy.ts` decide:
   - `git push`: só remote do projeto e branch da tarefa (refspec, `HEAD`, `HEAD:x`, sem refspec com
     a branch atual lida antes de avaliar); bloqueia `-f`/`--force*`/`+x`/`:x`/`--delete`/`--all`/
     `--tags`/`--mirror`, opções globais além de `-C`, `push.default=matching` e troca de branch na

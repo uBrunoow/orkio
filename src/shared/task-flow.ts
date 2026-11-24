@@ -7,7 +7,7 @@
  */
 
 import { isEffort, isModelName, type Effort } from './agent-runtime'
-import { EDIT_TOOLS } from './agent-run'
+import { toolsIn } from './claude-tools'
 import type { DeliverySettings } from './delivery'
 import type { PublishReviewEvent } from './review-publish'
 import { isRecord } from './guards'
@@ -96,7 +96,7 @@ export const GATE_SHOWS: readonly GateShow[] = ['diff', 'summary', 'backlog', 'r
 /** Limite de voltas de "Pedir ajustes" num gate. */
 export const MAX_REVISE = 10
 /** Ferramentas que um passo só de leitura não recebe (`--disallowedTools`). */
-export const READ_ONLY_DENIED_TOOLS = EDIT_TOOLS
+export const READ_ONLY_DENIED_TOOLS = toolsIn('edit')
 /** Tamanho máximo do pedido em texto de um passo e do texto de "Pedir ajustes". */
 export const MAX_PROMPT_CHARS = 8000
 

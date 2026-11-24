@@ -275,7 +275,7 @@ export function createApp(): OrkioApp {
     enabled: () => configStore.get().keepAwake === true,
     busy: () =>
       work !== null &&
-      (work.claude.runs.activeList().some((r) => !r.queued) || work.flows.runningList().length > 0)
+      (work.claude.runs.activeRuns().some((r) => !r.queued) || work.flows.runningList().length > 0)
   })
   keepAwakeRef.set(keepAwake)
 
@@ -286,7 +286,7 @@ export function createApp(): OrkioApp {
     configReady,
     emit,
     busy: () => ({
-      runs: work?.claude.runs.activeList() ?? [],
+      runs: work?.claude.runs.activeRuns() ?? [],
       flows: work?.flows.runningList() ?? [],
       pendingWrites: work?.board.writes.pendingCount() ?? 0
     }),
@@ -726,7 +726,7 @@ function createWork(core: {
       alva: flows.handlers.alva,
       agents: agentsHandlers(agents, orchestrator),
       taskFlows: flows.handlers.taskFlows,
-      claude: claudeHandlers(claude.service),
+      claude: claudeHandlers(claude.service, claude.runs),
       overview: overviewHandlers(overview)
     }
   }

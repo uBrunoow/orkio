@@ -2,16 +2,20 @@
  * Política de permissões das execuções do Claude Code (Etapa 4A). Função pura, chamada pela
  * ferramenta de permissão (`--permission-prompt-tool`) para cada pedido do CLI.
  *
- * - Ler/editar DENTRO do worktree: permitido. Fora: bloqueado.
- * - `git push` (qualquer forma, ex. `git -C . push`, aliases), `gh pr`, `gh api`: bloqueados, mesmo
- *   que o usuário tenha aprovado "sempre". Exceção (5C): passo com "modo entrega", com as regras de
- *   `delivery-policy.ts` (só a branch da tarefa, só o repositório do projeto, sem força/merge).
+ * - Ler/editar DENTRO do worktree: permitido. Fora: bloqueado (ferramentas pelo catálogo
+ *   `shared/claude-tools.ts`). Passo só de leitura: editar é bloqueado.
+ * - `git push` (qualquer forma, ex. `git -C . push`, aliases) e o GitHub CLI (`github-rules.ts`):
+ *   bloqueados, mesmo que o usuário tenha aprovado "sempre", menos a leitura da PR do projeto.
+ *   Exceção (5C): passo com "modo entrega", com as regras de `delivery-policy.ts` (só a branch da
+ *   tarefa, só o repositório do projeto, sem força/merge).
  * - Outros comandos de shell: perguntar ao usuário (uma vez / sempre neste projeto / negar).
- *   "Sempre" vale por prefixo de comando e só se TODOS os trechos (`&&`, `;`, `|`) casarem.
+ *   "Sempre" vale por prefixo de comando e só se TODOS os trechos (`&&`, `;`, `|`) casarem; num
+ *   passo só de leitura nada passa sozinho.
  * - `AskUserQuestion`: vira pergunta na tela.
  */
 import { isAbsolute, normalize, relative, resolve, sep } from 'node:path'
-import { isEditTool } from '../../shared/agent-run'
+import type { PermissionBlockCode } from '../../shared/agent-run'
+import { toolCategory, toolPath } from '../../shared/claude-tools'
 import type { DeliveryTarget } from '../../shared/delivery'
 import {
   deliveryVerdict,
@@ -19,8 +23,10 @@ import {
   gitParse,
   isGhRead,
   type DeliveryEvent,
-  type DeliveryKind
+  type DeliveryKind,
+  type DeliveryPolicyContext
 } from './delivery-policy'
+import { GH_READ_TEXT, GH_RULED } from './github-rules'
 
 export interface PermissionRequest {
   tool: string
@@ -39,32 +45,32 @@ export interface DeliveryAction {
 }
 export type { DeliveryEvent, DeliveryKind }
 
+/**
+ * Por que a política negou (vai no evento `permission` do log; a tela decide por ele, nunca pelo
+ * texto): `push`/`gh` fora do modo entrega oferecem "Abrir PR".
+ */
+export type PolicyDenyCode = PermissionBlockCode
+
 export type PolicyDecision =
   | { decision: 'allow'; reason?: string; delivery?: DeliveryAction[] }
-  | { decision: 'deny'; reason: string }
+  | { decision: 'deny'; reason: string; code: PolicyDenyCode }
   | { decision: 'ask'; suggestion: string; delivery?: DeliveryAction[] }
   | { decision: 'question' }
-
-const FILE_READ = new Set(['Read', 'Grep', 'Glob', 'LS'])
-/** Ferramentas sem efeito fora da sessão (planejamento, subagentes, skills, tarefas). */
-const HARMLESS = new Set([
-  'TodoWrite',
-  'Task',
-  'Agent',
-  'Skill',
-  'TaskCreate',
-  'TaskUpdate',
-  'TaskList',
-  'ExitPlanMode'
-])
 
 export const POLICY_MESSAGES = {
   outside: 'Bloqueado pelo Orkio: fora do ambiente desta tarefa (worktree).',
   push: 'Bloqueado pelo Orkio: git push só é permitido em um passo de fluxo com “modo entrega”. Para publicar, use “Abrir PR” na aba PR & CI da tarefa.',
-  gh: 'Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo de fluxo com “modo entrega”. Ler a PR do projeto pode (gh pr view/diff/checks, gh api com GET ou GraphQL sem mutation). Para publicar, use “Abrir PR” na aba PR & CI da tarefa.',
+  gh: `Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo de fluxo com “modo entrega”. Ler a PR do projeto pode (${GH_READ_TEXT}). Para publicar, use “Abrir PR” na aba PR & CI da tarefa.`,
   alias:
-    'Bloqueado pelo Orkio: alias definido na própria linha de comando (git -c alias.…) ou aninhado demais.'
+    'Bloqueado pelo Orkio: alias definido na própria linha de comando (git -c alias.…) ou aninhado demais.',
+  readOnly: 'Bloqueado pelo Orkio: este passo é só de leitura (sem editar arquivos).'
 } as const
+
+const deny = (code: PolicyDenyCode, reason: string): PolicyDecision => ({
+  decision: 'deny',
+  reason,
+  code
+})
 
 export function isInside(path: string, worktree: string): boolean {
   const target = normalize(isAbsolute(path) ? path : resolve(worktree, path))
@@ -196,16 +202,11 @@ export interface PolicyAliases {
 }
 
 /** Contexto do modo entrega (5C): só existe na execução de um passo marcado. */
-export interface DeliveryContext {
-  target: DeliveryTarget
+export interface DeliveryContext extends DeliveryPolicyContext {
   /** Pedir aprovação a cada push (ajuste do projeto). */
   requirePushApproval: boolean
   /** Categorias já aprovadas nesta execução. */
   granted: ReadonlySet<DeliveryKind>
-  /** `git config push.default` no worktree (`matching` torna `git push` sem refspec perigoso). */
-  pushDefault: string | null
-  /** Branch atual do worktree, lida logo antes de avaliar. */
-  currentBranch?: string | null
 }
 
 export interface PolicyContext {
@@ -215,10 +216,14 @@ export interface PolicyContext {
   delivery?: DeliveryContext | null
   /**
    * Repositório do projeto (e branch da tarefa) fora do modo entrega: com ele, a leitura do GitHub
-   * (`isGhRead`) passa sem perguntar. Sem repositório verificado, `gh pr`/`gh api` seguem
-   * bloqueados.
+   * (`isGhRead`) passa sem perguntar. Sem repositório verificado, o GitHub CLI segue bloqueado.
    */
   repo?: DeliveryTarget | null
+  /**
+   * Passo só de leitura: editar arquivo é bloqueado e nenhum comando passa sozinho (nem regra
+   * "sempre neste projeto", nem leitura do GitHub): todo comando pede sua aprovação.
+   */
+  readOnly?: boolean
 }
 
 /** Comando simples já resolvido (aliases expandidos). */
@@ -311,12 +316,17 @@ function expandShell(
   return out
 }
 
-/** Bloqueio fora do modo entrega (4A): push e comandos do gh que publicam (ler pode). */
-function blockedOutsideDelivery(cmd: Cmd, repo: DeliveryTarget | null): string | null {
-  if (cmd.name === 'git' && gitParse(cmd.args).sub === 'push') return POLICY_MESSAGES.push
-  if (cmd.name === 'gh' && ['pr', 'api', 'release'].includes(cmd.args[0] ?? '')) {
+/**
+ * Bloqueio fora do modo entrega (4A): push e todo comando do GitHub CLI da tabela
+ * (`github-rules.ts`) que não seja leitura no repositório do projeto.
+ */
+function blockedOutsideDelivery(cmd: Cmd, repo: DeliveryTarget | null): PolicyDecision | null {
+  if (cmd.name === 'git' && gitParse(cmd.args).sub === 'push') {
+    return deny('push', POLICY_MESSAGES.push)
+  }
+  if (cmd.name === 'gh' && GH_RULED.has(cmd.args[0] ?? '')) {
     if (repo && isGhRead(cmd.args, repo)) return null
-    return POLICY_MESSAGES.gh
+    return deny('gh', POLICY_MESSAGES.gh)
   }
   return null
 }
@@ -365,29 +375,56 @@ function matchesCmd(cmd: Cmd, pattern: string): boolean {
 
 export const DELIVERY_ALLOWED = 'Liberado pelo modo entrega'
 
-export function evaluatePermission(req: PermissionRequest, ctx: PolicyContext): PolicyDecision {
-  const { tool, input } = req
-  if (tool === 'AskUserQuestion') return { decision: 'question' }
-  if (HARMLESS.has(tool)) return { decision: 'allow' }
+/**
+ * Decide um pedido. O contexto que custa ler (a branch atual, para um `git push` do modo entrega)
+ * a política pede só quando precisa: `currentBranch` é chamado depois de resolver os aliases.
+ */
+export async function decidePermission(
+  req: PermissionRequest,
+  ctx: PolicyContext,
+  lazy: { currentBranch(): Promise<string | null> }
+): Promise<PolicyDecision> {
+  const first = evaluate(req, ctx)
+  if (first !== NEEDS_BRANCH || !ctx.delivery) return first as PolicyDecision
+  const currentBranch = await lazy.currentBranch().catch(() => null)
+  return evaluatePermission(req, { ...ctx, delivery: { ...ctx.delivery, currentBranch } })
+}
 
-  const path =
-    (typeof input['file_path'] === 'string' && input['file_path']) ||
-    (typeof input['notebook_path'] === 'string' && input['notebook_path']) ||
-    (typeof input['path'] === 'string' && input['path']) ||
-    null
-  if (isEditTool(tool) || FILE_READ.has(tool)) {
-    if (path && !isInside(path, ctx.worktree))
-      return { decision: 'deny', reason: POLICY_MESSAGES.outside }
+/** Versão síncrona: a branch atual vem no contexto (sem ela, `git push` sem branch é negado). */
+export function evaluatePermission(req: PermissionRequest, ctx: PolicyContext): PolicyDecision {
+  const d = evaluate(req, ctx)
+  if (d !== NEEDS_BRANCH) return d
+  return evaluate(req, {
+    ...ctx,
+    delivery: { ...ctx.delivery!, currentBranch: null }
+  }) as PolicyDecision
+}
+
+const NEEDS_BRANCH = Symbol('currentBranch')
+
+function evaluate(
+  req: PermissionRequest,
+  ctx: PolicyContext
+): PolicyDecision | typeof NEEDS_BRANCH {
+  const { tool, input } = req
+  const category = toolCategory(tool)
+  if (category === 'question') return { decision: 'question' }
+  if (category === 'subagent' || category === 'plan') return { decision: 'allow' }
+
+  if (category === 'edit' || category === 'read' || category === 'search') {
+    if (category === 'edit' && ctx.readOnly) return deny('read_only', POLICY_MESSAGES.readOnly)
+    const path = toolPath(tool, input)
+    if (path && !isInside(path, ctx.worktree)) return deny('outside', POLICY_MESSAGES.outside)
     return { decision: 'allow' }
   }
 
-  if (tool === 'Bash') {
+  if (category === 'command') {
     const command = typeof input['command'] === 'string' ? input['command'] : ''
     const segments = shellSegments(command)
     const commands: Cmd[] = []
     for (const s of segments) {
       const resolved = resolveCommands(s, ctx.aliases)
-      if (typeof resolved === 'string') return { decision: 'deny', reason: resolved }
+      if (typeof resolved === 'string') return deny('alias', resolved)
       commands.push(...resolved)
     }
     // Bloqueios primeiro (push/gh fora do modo entrega; regras do modo entrega).
@@ -396,24 +433,28 @@ export function evaluatePermission(req: PermissionRequest, ctx: PolicyContext): 
     for (const cmd of commands) {
       if (!ctx.delivery) {
         const blocked = blockedOutsideDelivery(cmd, ctx.repo ?? null)
-        if (blocked) return { decision: 'deny', reason: blocked }
+        if (blocked) return blocked
         others.push(cmd)
         continue
       }
       const siblings = commands.filter((c) => c !== cmd)
-      const v = deliveryVerdict(cmd.name, cmd.args, ctx.delivery, ctx.worktree, siblings)
+      const v = deliveryVerdict(cmd.name, cmd.args, ctx.delivery, siblings)
       if (v === null) others.push(cmd)
-      else if (!v.ok) return { decision: 'deny', reason: v.reason }
-      else delivery.push({ kind: v.kind, event: v.event })
+      else if (!v.ok) {
+        if ('needs' in v) return NEEDS_BRANCH
+        return deny('delivery', v.reason)
+      } else delivery.push({ kind: v.kind, event: v.event })
     }
     if (segments.some((s) => escapesWorktree(s, ctx.worktree))) {
-      return { decision: 'deny', reason: POLICY_MESSAGES.outside }
+      return deny('outside', POLICY_MESSAGES.outside)
     }
-    const rules = ctx.allowRules.filter((r) => r.tool === 'Bash')
+    // Só leitura: nada passa sozinho (as regras "sempre" e a leitura do GitHub também perguntam).
+    const rules = ctx.readOnly ? [] : ctx.allowRules.filter((r) => r.tool === 'Bash')
     // Só leitura do GitHub (ex.: `gh pr view 14 --json comments; gh api repos/o/r/pulls/14/comments`).
     const repo = ctx.repo ?? null
     if (
       !ctx.delivery &&
+      !ctx.readOnly &&
       repo &&
       commands.length > 0 &&
       commands.every((c) => c.name === 'gh' && isGhRead(c.args, repo))

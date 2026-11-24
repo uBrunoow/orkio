@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import {
   isDocFile,
+  parsePorcelainLine,
   type ArtifactCandidate,
   type ArtifactPublishMode,
   type ArtifactView
@@ -86,7 +87,9 @@ export class ArtifactsService {
     if (!wt) throw new ArtifactError('no_workspace', ARTIFACT_MESSAGES.noWorkspace)
     const { files } = await this.deps.git.diffStat(wt.path, wt.baseRef)
     // Pastas novas aparecem agrupadas (`?? docs/`): tudo dentro delas está pendente.
-    const pending = (await this.deps.git.statusPorcelain(wt.path)).map((l) => unquote(l.slice(3)))
+    const pending = (await this.deps.git.statusPorcelain(wt.path)).flatMap(
+      (l) => parsePorcelainLine(l)?.path ?? []
+    )
     const isPending = (path: string): boolean =>
       pending.some((p) => p === path || (p.endsWith('/') && path.startsWith(p)))
     return files.filter(isDocFile).map((path) => ({ path, committed: !isPending(path) }))
@@ -229,9 +232,4 @@ function toView(r: Row): ArtifactView {
         ? { mode: r.notion_mode, pageId: r.notion_page_id, publishedAt: r.published_at }
         : null
   }
-}
-
-/** `git status --porcelain` põe aspas em caminhos com espaços. */
-function unquote(path: string): string {
-  return path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path
 }

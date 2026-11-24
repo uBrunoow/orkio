@@ -3,10 +3,12 @@
  * e grava `<worktree>/.orkio/revisao.md` para o agente (que não lê comentários da PR sozinho).
  * Variáveis: as saídas declaradas em `ORKIO_ACTIONS.review_snapshot` (pendentes e número da PR).
  */
-import { mkdir, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { ACTION_VARS, ORKIO_ACTIONS } from '../../shared/orkio-actions'
 import { WorktreeError } from '../claude/worktree.service'
+import { ensureScratch } from '../claude/scratch'
+import { REVIEW_PATH } from '../../shared/orkio-scratch'
 import type { OrkioAction } from '../flows/flow-runner'
 import { errorName } from '../errors'
 import {
@@ -43,12 +45,9 @@ export function createReviewActions(deps: ReviewActionDeps): OrkioAction[] {
       if (!root) return { ok: false, ...noWorktree }
       const { pr, threads, reviews, truncated, unreadThreads } = result.value
       try {
-        const dir = join(root, '.orkio')
-        await mkdir(dir, { recursive: true })
-        // O briefing já cria este .gitignore; garante o mesmo se o worktree for anterior a ele.
-        await writeFile(join(dir, '.gitignore'), '*\n', { flag: 'wx' }).catch(() => undefined)
+        await ensureScratch(root)
         await writeFile(
-          join(dir, 'revisao.md'),
+          join(root, REVIEW_PATH),
           buildReviewMarkdown(pr.number, threads, { reviews, truncated, unreadThreads }),
           'utf8'
         )

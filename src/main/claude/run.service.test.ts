@@ -7,8 +7,10 @@ import { BoardStore } from '../board/board.store'
 import { openDatabase, type Db } from '../db/database'
 import { askOrkio } from './bridge/client'
 import { POLICY_MESSAGES } from './policy'
-import { RUN_MESSAGES, RunService, type RunServiceDeps } from './run.service'
+import { RUN_MESSAGES, RunBusyError, RunService, type RunServiceDeps } from './run.service'
+import { deliveryOf, type RunSpec } from './run-spec'
 import type { PermissionBroker } from './runner'
+import { parseStreamLine } from './stream'
 import { WorktreeService } from './worktree.service'
 
 interface FakeRun {
@@ -63,7 +65,7 @@ describe('RunService', () => {
       git: {
         diffStat: vi.fn(async () => ({
           stat: ' src/a.ts | 2 +-',
-          files: ['src/a.ts', '.orkio/briefing.md']
+          files: ['src/a.ts', '.orkio/briefing.md', '.orkio/agents/ana.md']
         })),
         commitsSince: vi.fn(async () => [{ hash: 'abc1234', subject: 'feat: lista' }])
       },
@@ -99,16 +101,22 @@ describe('RunService', () => {
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
   })
 
-  const start = (n: number, over: Partial<Parameters<RunService['start']>[0]> = {}) =>
+  const start = (n: number, over: Partial<Omit<RunSpec, 'project' | 'task'>> = {}) =>
     service.start({
       project,
       task: task(n),
-      mode: 'prompt',
-      command: null,
-      text: 'Implemente',
-      briefing: '# ORK',
+      input: { kind: 'prompt', text: 'Implemente' },
+      session: { kind: 'new', briefing: '# ORK', includeBriefing: true },
+      access: { tools: 'full', github: null },
+      agent: null,
+      runtime: { model: null, effort: null },
+      timeoutMin: null,
       ...over
     })
+  const resumeWith = (text: string, id: string): Partial<RunSpec> => ({
+    input: { kind: 'prompt', text },
+    session: { kind: 'resume', id }
+  })
   const tick = () => new Promise((r) => setTimeout(r, 20))
   const statusOf = (id: string) => service.view(id)?.status
   /** Espera o n-ésimo processo simulado existir (o status "running" vem antes dele). */
@@ -123,13 +131,25 @@ describe('RunService', () => {
       timeout: 3000
     })
 
-  it('prompt com briefing; comando instalado com argumentos', () => {
-    expect(RunService.composePrompt('command', 'spec', 'foco em UX', '# B')).toBe(
+  it('prompt com briefing; comando instalado com argumentos; sessão retomada só o texto', () => {
+    const fresh = { kind: 'new', briefing: '# B', includeBriefing: true } as const
+    expect(
+      RunService.composePrompt({ kind: 'command', name: 'spec', args: 'foco em UX' }, fresh)
+    ).toBe(
       '/spec foco em UX\n\nBriefing da tarefa (também em .orkio/briefing.md no worktree):\n\n# B'
     )
-    expect(RunService.composePrompt('prompt', null, 'Faça X', '# B')).toContain(
+    expect(RunService.composePrompt({ kind: 'prompt', text: 'Faça X' }, fresh)).toContain(
       'Faça X\n\n---\n\nBriefing'
     )
+    expect(
+      RunService.composePrompt(
+        { kind: 'command', name: 'alva-flow:plan', args: 'TASK-1' },
+        { ...fresh, includeBriefing: false }
+      )
+    ).toBe('/alva-flow:plan TASK-1')
+    expect(
+      RunService.composePrompt({ kind: 'prompt', text: ' e agora? ' }, { kind: 'resume', id: 's' })
+    ).toBe('e agora?')
   })
 
   it('roda, registra log/histórico e resume arquivos, commits e testes', async () => {
@@ -145,8 +165,9 @@ describe('RunService', () => {
     await tick()
     const done = service.view(view.id)!
     expect(done).toMatchObject({ status: 'succeeded', costUsd: 0.12, branch: 'ORK-1/tarefa' })
+    // O rascunho do Orkio sai do resumo; os perfis dos agentes (versionados) ficam.
     expect(done.summary).toEqual({
-      files: ['src/a.ts'],
+      files: ['src/a.ts', '.orkio/agents/ana.md'],
       diffStat: ' src/a.ts | 2 +-',
       commits: [{ hash: 'abc1234', subject: 'feat: lista' }],
       tests: ['npm test -- --run']
@@ -160,20 +181,17 @@ describe('RunService', () => {
     const first = await start(1)
     await spawned(1)
     const sessionId = runs[0]!.opts.sessionId
-    expect(runs[0]!.opts.resume).toBe(false)
+    expect(runs[0]!.opts.spec.session.kind).toBe('new')
     expect(runs[0]!.opts.prompt).toContain('Briefing da tarefa')
     expect(service.view(first.id)?.hasSession).toBe(true)
     expect(service.lastSession('task-1')).toBe(sessionId)
     runs[0]!.exit(0)
     await finished(first.id)
 
-    const second = await start(1, { text: 'Agora rode os testes', resumeSessionId: sessionId })
+    const second = await start(1, resumeWith('Agora rode os testes', sessionId))
     await spawned(2)
-    expect(runs[1]!.opts).toMatchObject({
-      sessionId,
-      resume: true,
-      prompt: 'Agora rode os testes'
-    })
+    expect(runs[1]!.opts).toMatchObject({ sessionId, prompt: 'Agora rode os testes' })
+    expect(runs[1]!.opts.spec.session).toEqual({ kind: 'resume', id: sessionId })
     expect(store.events('task-1')[0]?.detail).toMatchObject({ resumed: true })
     runs[1]!.exit(0)
     await finished(second.id)
@@ -201,7 +219,7 @@ describe('RunService', () => {
     expect(costOf(first.id)).toEqual({ cost: 7.56, session_cost_total: 7.56 })
     expect(await resultCosts(first.id)).toEqual([7.56])
 
-    const second = await start(1, { text: 'mais', resumeSessionId: sessionId })
+    const second = await start(1, resumeWith('mais', sessionId))
     await spawned(2)
     runs[1]!.emit(result(7.83))
     runs[1]!.exit(0)
@@ -211,7 +229,7 @@ describe('RunService', () => {
     expect((await resultCosts(second.id))[0]).toBeCloseTo(0.27, 10)
     expect(service.view(second.id)?.costUsd).toBeCloseTo(0.27, 10)
 
-    const third = await start(1, { text: 'de novo', resumeSessionId: sessionId })
+    const third = await start(1, resumeWith('de novo', sessionId))
     await spawned(3)
     runs[2]!.emit(result(1.5))
     runs[2]!.exit(0)
@@ -219,37 +237,18 @@ describe('RunService', () => {
     expect(costOf(third.id)).toEqual({ cost: 1.5, session_cost_total: 1.5 })
   })
 
-  it('runtime da mensagem vence o agente; null do agente não bloqueia; log "Modelo · Raciocínio"', async () => {
-    const view = await start(1, {
-      agent: { key: 'repo:ana', name: 'Ana', prompt: 'x', model: 'sonnet', effort: null },
-      runtime: { effort: 'max' }
-    })
+  it('log "Modelo · Raciocínio" do runtime já resolvido; sem nada definido, sem linha', async () => {
+    const view = await start(1, { runtime: { model: 'sonnet', effort: 'max' } })
     await spawned(1)
-    expect(runs[0]!.opts).toMatchObject({ model: 'sonnet', effort: 'max' })
-    const log = await service.readLog(view.id)
-    expect(log).toContainEqual({ kind: 'info', text: 'Modelo: Sonnet · Raciocínio: Máximo' })
+    expect(await service.readLog(view.id)).toContainEqual({
+      kind: 'info',
+      text: 'Modelo: Sonnet · Raciocínio: Máximo'
+    })
     runs[0]!.exit(0)
     await finished(view.id)
-
-    // Mensagem/passo com null = padrão de propósito; agente com valor define o resto.
-    const second = await start(1, {
-      agent: { key: 'repo:ana', name: 'Ana', prompt: 'x', model: 'sonnet', effort: 'low' },
-      runtime: { model: null }
-    })
+    const second = await start(1)
     await spawned(2)
-    expect(runs[1]!.opts).toMatchObject({ model: null, effort: 'low' })
-    expect(await service.readLog(second.id)).toContainEqual({
-      kind: 'info',
-      text: 'Raciocínio: Baixo'
-    })
-    runs[1]!.exit(0)
-    await finished(second.id)
-
-    // Valor inválido (defesa em profundidade) nem chega ao CLI; sem nada definido, sem linha info.
-    const third = await start(1, { runtime: { model: '--x', effort: 'ultra' as never } })
-    await spawned(3)
-    expect(runs[2]!.opts).toMatchObject({ model: null, effort: null })
-    expect((await service.readLog(third.id)).some((e) => e.kind === 'info')).toBe(false)
+    expect((await service.readLog(second.id)).some((e) => e.kind === 'info')).toBe(false)
   })
 
   it('agente (8A): instruções e modelo vão para o CLI; execução fica com o agente; política igual', async () => {
@@ -258,9 +257,8 @@ describe('RunService', () => {
     })
     await spawned(1)
     const run = runs[0]!
-    expect(run.opts.appendSystemPrompt).toBe('Você é Ana.')
-    expect(run.opts.model).toBe('sonnet')
-    expect(run.opts.delivery).toBe(false)
+    expect(run.opts.spec.agent?.prompt).toBe('Você é Ana.')
+    expect(deliveryOf(run.opts.spec)).toBeNull()
     expect(
       db.get<{ agent_key: string }>('SELECT agent_key FROM agent_runs WHERE id = ?', view.id)
     ).toEqual({ agent_key: 'repo:ana' })
@@ -331,10 +329,12 @@ describe('RunService', () => {
       defaultBranch: 'main',
       displayId: 'ORK-1'
     }
-    const view1 = await start(1, { delivery: { target, requirePushApproval: false } })
+    const view1 = await start(1, {
+      access: { tools: 'full', github: { mode: 'deliver', target, requirePushApproval: false } }
+    })
     await spawned(1)
     const run = runs[0]!
-    expect(run.opts.delivery).toBe(true)
+    expect(deliveryOf(run.opts.spec)).not.toBeNull()
     // Primeira vez: pergunta, sem "sempre neste projeto".
     const first = run.ask('Bash', { command: 'gh pr create --fill' }, 'd-1')
     await vi.waitFor(() => {
@@ -374,7 +374,7 @@ describe('RunService', () => {
     await start(1)
     await spawned(2)
     const next = runs[1]!
-    expect(next.opts.delivery).toBe(false)
+    expect(deliveryOf(next.opts.spec)).toBeNull()
     expect(await next.ask('Bash', { command: 'gh pr comment 3 --body ok' })).toEqual({
       behavior: 'deny',
       message: POLICY_MESSAGES.gh
@@ -385,12 +385,61 @@ describe('RunService', () => {
     })
   })
 
+  it('bug: push por alias (git p) no modo entrega lê a branch atual (antes: noBranch)', async () => {
+    const target = {
+      owner: 'acme',
+      repo: 'app',
+      remote: 'origin',
+      branch: 'ORK-1/tarefa',
+      defaultBranch: 'main',
+      displayId: 'ORK-1'
+    }
+    const currentBranch = vi.fn(async () => 'ORK-1/tarefa')
+    const svc = new RunService({
+      ...(service as unknown as { deps: RunServiceDeps }).deps,
+      newId: () => 'run-alias',
+      policyInputs: async () => ({ aliases: { git: { p: 'push' } }, pushDefault: null }),
+      currentBranch
+    })
+    await svc.start({
+      project,
+      task: task(2),
+      input: { kind: 'prompt', text: 'Publique' },
+      session: { kind: 'new', briefing: '# ORK', includeBriefing: true },
+      access: { tools: 'full', github: { mode: 'deliver', target, requirePushApproval: false } },
+      agent: null,
+      runtime: { model: null, effort: null },
+      timeoutMin: null
+    })
+    await spawned(1)
+    const answer = runs[0]!.ask('Bash', { command: 'git p' }, 'push-1')
+    await vi.waitFor(
+      () =>
+        expect(messages.at(-1)?.event).toMatchObject({
+          kind: 'permission',
+          state: 'pending',
+          delivery: true
+        }),
+      { timeout: 3000 }
+    )
+    expect(currentBranch).toHaveBeenCalledTimes(1)
+    svc.answerPermission('run-alias', 'push-1', 'allow_once')
+    expect(await answer).toEqual({ behavior: 'allow' })
+    // Comando sem push não lê a branch.
+    await runs[0]!.ask('Bash', { command: 'gh pr view 1' })
+    expect(currentBranch).toHaveBeenCalledTimes(1)
+  })
+
   it('token errado no socket é recusado', async () => {
     await start(1)
     await spawned(1)
     const broker = runs[0]!.opts.broker as PermissionBroker
     expect(
-      await askOrkio(broker.socketPath, 'errado', { toolName: 'Bash', input: { command: 'ls' } })
+      await askOrkio(broker.socketPath, 'errado', {
+        toolName: 'Bash',
+        input: { command: 'ls' },
+        toolUseId: null
+      })
     ).toMatchObject({
       behavior: 'deny',
       message: 'Pedido não autorizado.'
@@ -495,7 +544,7 @@ describe('RunService', () => {
 
   it('uma por tarefa; no máximo 2 em paralelo (a terceira espera na fila)', async () => {
     await start(1)
-    await expect(start(1)).rejects.toThrow(RUN_MESSAGES.busy)
+    await expect(start(1)).rejects.toBeInstanceOf(RunBusyError)
     await start(2)
     const third = await start(3)
     await spawned(2)
@@ -542,9 +591,24 @@ describe('RunService', () => {
     await spawned(1)
     const run = runs[0]!
     run.emit({ kind: 'text', text: 'conectei em postgres://u:senha-forte-9@h/db com DEBUG=true' })
-    // Arquivo .env criado depois: lido quando o agente o usa.
-    await writeFile(join(wt, '.env.local'), 'SEGREDO_X=abc-123-xyz\n')
-    run.emit({ kind: 'tool', id: 't', tool: 'Read', summary: '.env.local', file: '.env.local' })
+    // Arquivo .env criado depois, numa subpasta: lido quando o agente o lê com `Read` (o evento
+    // vem do parser real do stream-json; antes ele só trazia `file` nas edições).
+    await mkdir(join(wt, 'apps', 'api'), { recursive: true })
+    await writeFile(join(wt, 'apps', 'api', '.env.local'), 'SEGREDO_X=abc-123-xyz\n')
+    const line = JSON.stringify({
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 't',
+            name: 'Read',
+            input: { file_path: join(wt, 'apps', 'api', '.env.local') }
+          }
+        ]
+      }
+    })
+    for (const event of parseStreamLine(line, wt)) run.emit(event)
     run.emit({ kind: 'text', text: 'o valor é abc-123-xyz e SENHA=qualquer' })
     run.exit(0)
     await tick()
@@ -554,6 +618,35 @@ describe('RunService', () => {
     expect(raw).not.toContain('qualquer')
     expect(raw).toContain('DEBUG=true')
     expect(JSON.stringify(messages)).not.toContain('abc-123-xyz')
+  })
+
+  it('bug: só leitura — "sempre neste projeto" não libera nada; todo comando pergunta', async () => {
+    db.run(
+      `INSERT INTO permission_rules (project_id, tool, pattern, created_at) VALUES ('p1', 'Bash', 'npm test', 'x')`
+    )
+    await start(1)
+    await spawned(1)
+    expect(await runs[0]!.ask('Bash', { command: 'npm test' })).toEqual({ behavior: 'allow' })
+    runs[0]!.exit(0)
+    await vi.waitFor(() => expect(service.activeRuns()).toEqual([]), { timeout: 3000 })
+
+    const ro = await start(1, { access: { tools: 'read_only', github: null } })
+    await spawned(2)
+    expect(await service.readLog(ro.id)).toContainEqual(
+      expect.objectContaining({ kind: 'info', text: expect.stringContaining('todo comando pede') })
+    )
+    const answer = runs[1]!.ask('Bash', { command: 'npm test' }, 'ro-1')
+    await vi.waitFor(
+      () => expect(messages.at(-1)?.event).toMatchObject({ kind: 'permission', state: 'pending' }),
+      { timeout: 3000 }
+    )
+    service.answerPermission(ro.id, 'ro-1', 'deny')
+    expect(await answer).toEqual({ behavior: 'deny', message: RUN_MESSAGES.denied })
+    // Editar no passo só de leitura é bloqueado, com o código no log.
+    expect(await runs[1]!.ask('Edit', { file_path: join(dir, 'wt', 'ORK-1', 'src/a.ts') })).toEqual(
+      { behavior: 'deny', message: POLICY_MESSAGES.readOnly }
+    )
+    expect(messages.at(-1)?.event).toMatchObject({ state: 'blocked', code: 'read_only' })
   })
 
   it('avisa quem pediu quando termina (texto redigido) e cancela no tempo limite como falha', async () => {

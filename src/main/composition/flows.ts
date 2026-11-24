@@ -103,12 +103,12 @@ export function createFlows(deps: {
       if (!r.ok) throw new FlowError(r.error.code, r.error.message)
       return r.value
     },
-    startClaude: async (input) => {
-      const r = await claude.service.startForFlow(input)
+    startClaude: async (request) => {
+      const r = await claude.service.startRun(request)
       if (!r.ok) throw new FlowError(r.error.code, r.error.message)
       return r.value
     },
-    cancelClaude: (runId) => claude.service.cancel(runId),
+    cancelClaude: (runId) => claude.runs.cancel(runId),
     extractors,
     actions,
     worktreePath: (taskId) => claude.worktrees.get(taskId)?.path ?? null,

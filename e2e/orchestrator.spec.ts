@@ -146,7 +146,7 @@ test('prepara o quadro e um fluxo por coluna de trabalho', async () => {
     boards: Record<string, { stages: { id: string; name: string }[] }>
     flows: Record<string, unknown>
   }
-  expect(config.schemaVersion).toBe(12)
+  expect(config.schemaVersion).toBe(13)
   const stage = (name: string): string =>
     config.boards[PROJECT]!.stages.find((st) => st.name === name)!.id
   const oneStep = (id: string, name: string): unknown => ({

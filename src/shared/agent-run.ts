@@ -4,6 +4,7 @@
  */
 import type { BranchKind } from './slug'
 import type { RuntimeChoice } from './agent-runtime'
+import { isScratchPath } from './orkio-scratch'
 
 /** Nome de comando do Claude Code (`review`, `alva-flow:pr`), sem a barra: catálogo, execução e perfis. */
 const COMMAND_NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
@@ -24,12 +25,11 @@ export const MESSAGE_MAX = 200_000
 /** Teto do briefing editável antes de rodar. */
 export const BRIEFING_MAX = 200_000
 
-/** Ferramentas do Claude Code que editam arquivos (política, log, passo só de leitura, tela). */
-export const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
-
-export function isEditTool(tool: string): boolean {
-  return (EDIT_TOOLS as readonly string[]).includes(tool)
-}
+/**
+ * Por que a política do Orkio bloqueou um pedido (no evento `permission`): `push`/`gh` = publicar
+ * fora do modo entrega (a tela oferece "Abrir PR"); `delivery` = regra do modo entrega.
+ */
+export type PermissionBlockCode = 'outside' | 'push' | 'gh' | 'alias' | 'delivery' | 'read_only'
 
 export type RunMode = 'prompt' | 'command'
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
@@ -65,6 +65,8 @@ export type RunLogEvent =
       summary: string
       state: 'pending' | 'allowed' | 'denied' | 'blocked'
       reason?: string
+      /** Bloqueio (`state: 'blocked'`) pela política: o motivo em código. */
+      code?: PermissionBlockCode
       /** Padrão sugerido para "sempre neste projeto" (ex.: "npm test"). */
       suggestion?: string
       /** Comando de entrega (5C): a aprovação vale só nesta execução (sem "sempre"). */
@@ -284,7 +286,7 @@ export interface CatalogGroup {
 
 /** Documento gerado/alterado que pode virar artefato da tarefa (4B). */
 export function isDocFile(path: string): boolean {
-  if (path.startsWith('.orkio/')) return false
+  if (isScratchPath(path)) return false
   return /\.(md|mdx|markdown|txt|adoc|rst)$/i.test(path)
 }
 
@@ -307,20 +309,5 @@ export interface ArtifactView {
   attachedAt: string
   notion: { mode: ArtifactPublishMode; pageId: string | null; publishedAt: string } | null
 }
-
-/** Contexto do projeto para o Claude Code (4B): vai no briefing de toda execução. */
-export interface ProjectClaudeContext {
-  /** Instruções fixas (convenções, comandos de teste, o que evitar...). */
-  instructions: string
-  /** Páginas de referência do Notion (só id e nome; o conteúdo é lido na hora). */
-  notionPages: { id: string; name: string }[]
-}
-
-export const CONTEXT_LIMITS = {
-  instructions: 8_000,
-  pages: 5,
-  /** Total de contexto (instruções + páginas) no briefing; acima disso corta com aviso. */
-  total: 30_000
-} as const
 
 export const CLAUDE_CODE_DOCS_URL = 'https://code.claude.com/docs/en/setup'

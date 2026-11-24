@@ -8,6 +8,7 @@
 import { isProtectedBranch, type DeliveryTarget } from '../../shared/delivery'
 import { isBranchName } from '../../shared/github-names'
 import { isCommandName, parsePorcelainLine } from '../../shared/agent-run'
+import { isScratchPath } from '../../shared/orkio-scratch'
 import type {
   ArtifactCandidate,
   ArtifactPublishMode,
@@ -17,9 +18,7 @@ import type {
   ClaudeDiff,
   TaskBranchesView,
   EditorId,
-  PermissionAnswer,
   RunLogEvent,
-  RunMode,
   RunPreparation,
   SendMessageRequest,
   StartRunRequest,
@@ -29,7 +28,7 @@ import type {
 } from '../../shared/agent-run'
 import { blocksToMarkdown, buildBriefing, type NotionBlock } from '../../shared/briefing'
 import { taskBranchName } from '../../shared/slug'
-import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
+import { parseDisplayId } from '../../shared/task-id-match'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
 import { errorName } from '../errors'
@@ -37,12 +36,26 @@ import { NotionApiError } from '../connectors/notion/notion.client'
 import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
 import { redactSecrets } from './redact'
-import type { RuntimeChoice } from '../../shared/agent-runtime'
-import { RUN_MESSAGES, type RunAgent, type RunService } from './run.service'
+import { isEffort, isModelName, resolveRuntime } from '../../shared/agent-runtime'
+import { RunBusyError, type RunService } from './run.service'
+import type {
+  GithubDeliver,
+  GithubRead,
+  RunAgent,
+  RunRequest,
+  RunSession,
+  RunSpec
+} from './run-spec'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { attachmentNote, checkAttachments, saveAttachments } from './attachments'
-import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
+import { TerminalError } from './terminal'
+import {
+  WorktreeError,
+  type WorktreeProject,
+  type WorktreeRecord,
+  type WorktreeService
+} from './worktree.service'
 import type { Result } from '../../shared/result'
 import type { NotionTask } from '../../shared/notion'
 import type { TaskSignalsResult } from '../../shared/task-signals'
@@ -88,10 +101,7 @@ export interface ClaudeServiceDeps {
     projectId: string,
     taskId: string
   ): { target: DeliveryTarget; requirePushApproval: boolean }
-  config: {
-    get(): OrkioConfig
-    update(fn: (c: OrkioConfig) => OrkioConfig): Promise<unknown>
-  }
+  config: { get(): OrkioConfig }
   worktrees: WorktreeService
   runs: RunService
   git: Pick<
@@ -125,7 +135,7 @@ export interface ClaudeServiceDeps {
   ) => Promise<{ used: boolean } | { error: string }>
   /** Abre a pasta no editor (execFile, sem shell). */
   openEditor(editor: EditorId, path: string): Promise<void>
-  /** Abre o terminal do sistema na pasta (rejeita se não achar um terminal). */
+  /** Abre o terminal do sistema na pasta (`TerminalError` se a pasta sumiu ou não há terminal). */
   openTerminal(path: string): Promise<void>
   /**
    * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
@@ -168,7 +178,12 @@ export class ClaudeService {
       const task = await this.task(projectId, taskId)
       const parsed = parseDisplayId(task.displayId)
       const state = await this.taskState(taskId)
-      const existing = state.workspace?.branch ?? (await this.existingBranch(project, task))
+      const existing =
+        state.workspace?.branch ??
+        (await this.deps.worktrees
+          .findTaskBranch(this.worktreeProject(project), task)
+          .then((f) => f?.branch ?? null)
+          .catch(() => null))
       const branch = existing ?? taskBranchName(parsed ? task.displayId : null, task.title)
 
       let pageMarkdown = ''
@@ -232,19 +247,23 @@ export class ClaudeService {
     return this.wrap(async () => {
       // 5A: com fluxo ativo, quem roda o Claude Code na tarefa é o fluxo.
       if (this.deps.flowActive?.(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.flowActive)
-      let agent: RunAgent | null = null
-      if (req.asAgent !== false && this.deps.agentFor) {
-        try {
-          agent = await this.deps.agentFor(
-            req.projectId,
-            req.taskId,
-            req.mode === 'command' ? req.command : null
-          )
-        } catch (error) {
-          return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
-        }
-      }
-      const started = await this.startRun(req, undefined, true, false, agent)
+      const command = req.mode === 'command' ? (req.command ?? '') : null
+      const agent = await this.agentForRun(req.projectId, req.taskId, req.asAgent, command)
+      if (!agent.ok) return agent
+      const started = await this.startRun({
+        projectId: req.projectId,
+        taskId: req.taskId,
+        input:
+          command !== null
+            ? { kind: 'command', name: command, args: req.text }
+            : { kind: 'prompt', text: req.text },
+        session: { kind: 'new', briefing: req.briefing, includeBriefing: true },
+        access: { tools: 'full', github: 'read' },
+        agent: agent.value,
+        runtime: null,
+        timeoutMin: null,
+        ...(req.branchKind ? { branchKind: req.branchKind } : {})
+      })
       if (!started.ok) return started
       return ok(await this.taskState(req.taskId))
     })
@@ -274,13 +293,7 @@ export class ClaudeService {
       const save = async (): Promise<string> => {
         if (files.length === 0) return ''
         if (saved.length > 0) return attachmentNote(saved)
-        const project = this.project(req.projectId)
-        const task = await this.task(req.projectId, req.taskId)
-        const wt = await this.deps.worktrees.ensure(
-          this.worktreeProject(project),
-          { id: task.id, displayId: task.displayId, title: task.title },
-          {}
-        )
+        const { worktree: wt } = await this.ensureForTask(req.projectId, req.taskId)
         wtPath = wt.path
         saved = await saveAttachments(wt.path, files)
         return attachmentNote(saved)
@@ -304,187 +317,101 @@ export class ClaudeService {
   }
 
   private async cliRefusal(): Promise<Result<never> | null> {
+    const cli = await this.readyCli()
+    return cli.ok ? null : cli
+  }
+
+  /** O CLI está instalado, logado e na versão mínima? (Lido de novo a cada execução.) */
+  private async readyCli(): Promise<Result<ClaudeCodeStatus>> {
     const status = await this.getStatus(true)
     if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
     if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
     if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
-    return null
+    return ok(status)
+  }
+
+  /** Agente da tarefa para uma execução manual (`asAgent: false` = sem agente). */
+  private async agentForRun(
+    projectId: string,
+    taskId: string,
+    asAgent: boolean | undefined,
+    command: string | null
+  ): Promise<Result<RunAgent | null>> {
+    if (asAgent === false || !this.deps.agentFor) return ok(null)
+    try {
+      return ok(await this.deps.agentFor(projectId, taskId, command))
+    } catch (error) {
+      return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
+    }
   }
 
   private async sendChecked(
     req: SendMessageRequest,
-    userText: string,
+    text: string,
     hasFiles: boolean,
     save: () => Promise<string>
   ): Promise<Result<TaskRunsState>> {
-    {
-      const text = userText
-      // Como no Claude Code: a mensagem não espera o piloto automático; o fluxo a usa (escolha,
-      // interromper o passo e continuar com ela, responder e continuar).
-      if (this.deps.flowMessage) {
-        const note = hasFiles && (this.deps.flowActive?.(req.taskId) ?? false) ? await save() : ''
-        const used = await this.deps.flowMessage(req.taskId, userText, note)
-        if ('error' in used) return fail('flow_message', used.error)
-        if (used.used) return ok(await this.taskState(req.taskId))
-      }
-      const busy = this.deps.flowBusy ?? this.deps.flowActive
-      if (busy?.(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
-      // Execução avulsa no meio de um turno: interrompe e continua a sessão com a mensagem.
-      const current = (await this.taskState(req.taskId)).activeRunId
-      if (current) await this.cancelAndWait(current)
-      const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text)
-      const mode: RunMode = slash ? 'command' : 'prompt'
-      const command = slash ? slash[1]! : null
-      let args = slash ? (slash[2] ?? '').trim() : text
-      const session = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
-      let briefing = ''
-      if (!session) {
-        const prep = await this.prepare(req.projectId, req.taskId)
-        if (!prep.ok) return prep
-        briefing = prep.value.briefing
-      }
-      let agent: RunAgent | null = null
-      if (req.asAgent !== false && this.deps.agentFor) {
-        try {
-          agent = await this.deps.agentFor(req.projectId, req.taskId, command)
-        } catch (error) {
-          return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
-        }
-      }
-      args += await save()
-      const started = await this.startRun(
-        { projectId: req.projectId, taskId: req.taskId, mode, command, text: args, briefing },
-        undefined,
-        true,
-        false,
-        agent,
-        session,
-        req.runtime ?? null
-      )
-      if (!started.ok) return started
-      return ok(await this.taskState(req.taskId))
+    // Como no Claude Code: a mensagem não espera o piloto automático; o fluxo a usa (escolha,
+    // interromper o passo e continuar com ela, responder e continuar).
+    if (this.deps.flowMessage) {
+      const note = hasFiles && (this.deps.flowActive?.(req.taskId) ?? false) ? await save() : ''
+      const used = await this.deps.flowMessage(req.taskId, text, note)
+      if ('error' in used) return fail('flow_message', used.error)
+      if (used.used) return ok(await this.taskState(req.taskId))
     }
+    const busy = this.deps.flowBusy ?? this.deps.flowActive
+    if (busy?.(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
+    // Execução avulsa no meio de um turno: interrompe e continua a sessão com a mensagem.
+    const current = (await this.taskState(req.taskId)).activeRunId
+    if (current) await this.cancelAndWait(current)
+    const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text)
+    const command = slash ? slash[1]! : null
+    let args = slash ? (slash[2] ?? '').trim() : text
+    const last = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
+    let session: RunSession
+    if (last) session = { kind: 'resume', id: last }
+    else {
+      const prep = await this.prepare(req.projectId, req.taskId)
+      if (!prep.ok) return prep
+      session = { kind: 'new', briefing: prep.value.briefing, includeBriefing: true }
+    }
+    const agent = await this.agentForRun(req.projectId, req.taskId, req.asAgent, command)
+    if (!agent.ok) return agent
+    args += await save()
+    const started = await this.startRun({
+      projectId: req.projectId,
+      taskId: req.taskId,
+      input:
+        command !== null
+          ? { kind: 'command', name: command, args }
+          : { kind: 'prompt', text: args },
+      session,
+      access: { tools: 'full', github: 'read' },
+      agent: agent.value,
+      runtime: req.runtime ?? null,
+      timeoutMin: null
+    })
+    if (!started.ok) return started
+    return ok(await this.taskState(req.taskId))
   }
 
-  /** Passo `claude_command` de um fluxo (5A): mesma execução da 4A; devolve o id ou o erro. */
-  startForFlow(input: {
-    projectId: string
-    taskId: string
-    command: string
-    args: string
-    briefing: string
-    timeoutMin: number
-    includeBriefing?: boolean
-    /** Modo entrega (5C): só nesta execução. */
-    delivery?: boolean
-    /** Agente (8A) do fluxo (cópia do perfil feita no início do fluxo). */
-    agent?: RunAgent | null
-    /** "Responder e continuar": manda este texto na sessão mais recente da tarefa (`--resume`). */
-    reply?: string
-    /**
-     * Pedido em texto (passo sem comando): continua a sessão mais recente da tarefa com ele, ou
-     * começa uma com o briefing quando ainda não há sessão.
-     */
-    prompt?: string
-    /** Passo só de leitura: sem as ferramentas de edição. */
-    readOnly?: boolean
-    /** Modelo/raciocínio do passo: vencem os do agente. */
-    runtime?: Partial<RuntimeChoice> | null
-  }): Promise<Result<string>> {
-    const readOnly = input.readOnly === true
-    if (input.reply !== undefined) {
-      const session = this.deps.runs.lastSession(input.taskId)
-      if (!session) {
-        return Promise.resolve(fail('no_session', CLAUDE_MESSAGES.noSession))
-      }
-      return this.wrap(() =>
-        this.startRun(
-          {
-            projectId: input.projectId,
-            taskId: input.taskId,
-            mode: 'prompt',
-            command: null,
-            text: input.reply!,
-            briefing: ''
-          },
-          input.timeoutMin,
-          true,
-          input.delivery === true,
-          input.agent ?? null,
-          session,
-          input.runtime ?? null,
-          readOnly
-        )
-      )
-    }
-    if (input.prompt !== undefined) {
-      const session = this.deps.runs.lastSession(input.taskId)
-      return this.wrap(() =>
-        this.startRun(
-          {
-            projectId: input.projectId,
-            taskId: input.taskId,
-            mode: 'prompt',
-            command: null,
-            text: input.prompt!,
-            briefing: session ? '' : input.briefing
-          },
-          input.timeoutMin,
-          // Sessão retomada já leu o briefing; sessão nova recebe (a não ser que o passo recuse).
-          session ? true : input.includeBriefing !== false,
-          input.delivery === true,
-          input.agent ?? null,
-          session,
-          input.runtime ?? null,
-          readOnly
-        )
-      )
-    }
-    return this.wrap(() =>
-      this.startRun(
-        {
-          projectId: input.projectId,
-          taskId: input.taskId,
-          mode: 'command',
-          command: input.command,
-          text: input.args,
-          briefing: input.briefing
-        },
-        input.timeoutMin,
-        input.includeBriefing !== false,
-        input.delivery === true,
-        input.agent ?? null,
-        null,
-        input.runtime ?? null,
-        readOnly
-      )
-    )
-  }
-
-  /** Contexto de um fluxo (5A): briefing do Notion, ID e URL da tarefa. */
   /**
    * Garante o worktree da tarefa (cria ou recria) e devolve o caminho. Para ações do Orkio que
    * gravam no ambiente (ex.: `review_snapshot`); `null` se projeto/tarefa não existem; erro do
    * worktree é lançado.
    */
   async ensureWorktreePath(projectId: string, taskId: string): Promise<string | null> {
-    let project
-    let task
     try {
-      project = this.project(projectId)
-      task = await this.task(projectId, taskId)
+      this.project(projectId)
+      await this.task(projectId, taskId)
     } catch {
       return null
     }
     // Erros do WorktreeService (mensagem pt-BR) sobem para o passo do fluxo.
-    const wt = await this.deps.worktrees.ensure(
-      this.worktreeProject(project),
-      { id: task.id, displayId: task.displayId, title: task.title },
-      {}
-    )
-    return wt.path
+    return (await this.ensureForTask(projectId, taskId)).worktree.path
   }
 
+  /** Contexto de um fluxo (5A): briefing do Notion, ID e URL da tarefa. */
   flowContext(
     projectId: string,
     taskId: string
@@ -507,73 +434,85 @@ export class ClaudeService {
     })
   }
 
-  private async startRun(
-    req: StartRunRequest,
-    timeoutMin?: number,
-    includeBriefing = true,
-    delivery = false,
-    agent: RunAgent | null = null,
-    resumeSessionId: string | null = null,
-    runtime: Partial<RuntimeChoice> | null = null,
-    readOnly = false
-  ): Promise<Result<string>> {
-    const project = this.project(req.projectId)
-    const status = await this.getStatus(true)
-    if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
-    if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
-    if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
-    if (req.mode === 'command' && !isCommandName(req.command)) {
-      return fail('invalid', CLAUDE_MESSAGES.invalidCommand)
-    }
-    if (req.mode === 'prompt' && !req.text.trim()) {
-      return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
-    }
-    const task = await this.task(req.projectId, req.taskId)
-    const wtProject = this.worktreeProject(project)
-    const taskRef = { id: task.id, displayId: task.displayId, title: task.title }
-    await this.deps.worktrees.ensure(
-      wtProject,
-      taskRef,
-      req.branchKind ? { kind: req.branchKind } : {}
-    )
-    let deliveryInput: { target: DeliveryTarget; requirePushApproval: boolean } | null = null
-    let githubRead: DeliveryTarget | null = null
-    if (delivery) {
-      if (!this.deps.deliveryTarget) return fail('no_repo', CLAUDE_MESSAGES.noRepo)
-      try {
-        deliveryInput = this.deps.deliveryTarget(req.projectId, req.taskId)
-      } catch (error) {
-        return fail('no_repo', error instanceof Error ? error.message : CLAUDE_MESSAGES.noRepo)
+  /**
+   * A única entrada das execuções (manual, mensagem, passo de fluxo): resolve o pedido uma vez
+   * (sessão, worktree, alvo do GitHub, modelo/raciocínio cortados pela versão do CLI) e roda.
+   */
+  startRun(request: RunRequest): Promise<Result<string>> {
+    return this.wrap(async () => {
+      this.project(request.projectId)
+      const cli = await this.readyCli()
+      if (!cli.ok) return cli
+      const { input } = request
+      if (input.kind === 'command' && !isCommandName(input.name)) {
+        return fail('invalid', CLAUDE_MESSAGES.invalidCommand)
       }
-    } else {
+      if (input.kind === 'prompt' && !input.text.trim()) {
+        return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
+      }
+      let session: RunSession
+      if (request.session.kind === 'latest') {
+        const last = this.deps.runs.lastSession(request.taskId)
+        if (last) session = { kind: 'resume', id: last }
+        else if (request.session.orNew) session = request.session.orNew
+        else return fail('no_session', CLAUDE_MESSAGES.noSession)
+      } else session = request.session
+      const { project, wtProject, task } = await this.ensureForTask(
+        request.projectId,
+        request.taskId,
+        request.branchKind
+      )
       // Fora da entrega, o repositório só libera a leitura da PR; sem ele, nada muda.
-      try {
-        githubRead = this.deps.deliveryTarget?.(req.projectId, req.taskId).target ?? null
-      } catch {
-        githubRead = null
+      const read = (): GithubRead => {
+        try {
+          const t = this.deps.deliveryTarget?.(request.projectId, request.taskId)
+          return t ? { mode: 'read', target: t.target } : null
+        } catch {
+          return null
+        }
       }
-    }
-    const view = await this.deps.runs.start({
-      project: { ...wtProject, name: project.name },
-      task: taskRef,
-      mode: req.mode,
-      command: req.mode === 'command' ? req.command : null,
-      text: req.text,
-      briefing: req.briefing,
-      ...(timeoutMin ? { timeoutMin } : {}),
-      includeBriefing,
-      delivery: deliveryInput,
-      githubRead,
-      agent: agent && !status.supportsEffort ? { ...agent, effort: null } : agent,
-      // CLI sem `--effort`: o raciocínio some (o seletor também some na UI).
-      runtime:
-        runtime && !status.supportsEffort
-          ? { ...(runtime.model !== undefined ? { model: runtime.model } : {}) }
-          : runtime,
-      resumeSessionId,
-      ...(readOnly ? { readOnly: true } : {})
+      let access: RunSpec['access']
+      if (request.access.tools === 'read_only') access = { tools: 'read_only', github: read() }
+      else if (request.access.github === 'read') access = { tools: 'full', github: read() }
+      else {
+        if (!this.deps.deliveryTarget) return fail('no_repo', CLAUDE_MESSAGES.noRepo)
+        let deliver: GithubDeliver
+        try {
+          const t = this.deps.deliveryTarget(request.projectId, request.taskId)
+          deliver = { mode: 'deliver', ...t }
+        } catch (error) {
+          return fail('no_repo', error instanceof Error ? error.message : CLAUDE_MESSAGES.noRepo)
+        }
+        access = { tools: 'full', github: deliver }
+      }
+      // Mensagem/passo > agente > padrão. No agente, `null` = sem preferência (não bloqueia).
+      const agent = request.agent
+      const resolved = resolveRuntime(
+        request.runtime,
+        agent
+          ? {
+              ...(agent.model !== null ? { model: agent.model } : {}),
+              ...(agent.effort !== null ? { effort: agent.effort } : {})
+            }
+          : undefined
+      )
+      const view = await this.deps.runs.start({
+        project: { ...wtProject, name: project.name },
+        task,
+        input,
+        session,
+        access,
+        agent,
+        runtime: {
+          // De novo, antes de chegar ao CLI: nome fora do padrão ou raciocínio desconhecido some;
+          // CLI sem `--effort`, o raciocínio some (o seletor também some na UI).
+          model: isModelName(resolved.model) ? resolved.model : null,
+          effort: cli.value.supportsEffort && isEffort(resolved.effort) ? resolved.effort : null
+        },
+        timeoutMin: request.timeoutMin
+      })
+      return ok(view.id)
     })
-    return ok(view.id)
   }
 
   /** Cancela e espera a execução terminar (até 15 s), para a próxima continuar a sessão. */
@@ -588,28 +527,8 @@ export class ClaudeService {
         off()
         resolve()
       }
-      this.cancel(runId)
-    })
-  }
-
-  cancel(runId: string): void {
-    try {
       this.deps.runs.cancel(runId)
-    } catch {
-      // Já terminou: nada a cancelar.
-    }
-  }
-
-  answerPermission(runId: string, requestId: string, answer: PermissionAnswer): void {
-    this.deps.runs.answerPermission(runId, requestId, answer)
-  }
-
-  answerQuestion(runId: string, requestId: string, answers: Record<string, string>): void {
-    this.deps.runs.answerQuestion(runId, requestId, answers)
-  }
-
-  async readLog(runId: string): Promise<RunLogEvent[]> {
-    return this.deps.runs.readLog(runId)
+    })
   }
 
   /** "Limpar ambiente": remove o worktree (a branch fica). Mudanças pendentes pedem `force`. */
@@ -647,7 +566,7 @@ export class ClaudeService {
       try {
         await this.deps.openTerminal(wt.path)
       } catch (error) {
-        if (error instanceof Error && error.message === 'no_workspace') {
+        if (error instanceof TerminalError && error.code === 'no_workspace') {
           return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
         }
         console.error(`[orkio] terminal: ${errorName(error)}`)
@@ -713,7 +632,7 @@ export class ClaudeService {
       const linked = this.deps.worktrees
         .linkedBranches(projectId, taskId)
         .map((l) => ({ branch: l.branch, source: l.source }))
-      const remote = project.repo?.remoteName ?? 'origin'
+      const remote = project.repo.remoteName
       const [local, remotes] = await Promise.all([
         this.deps.git.localBranches(project.localPath).catch(() => [] as string[]),
         this.deps.git.remoteBranches(project.localPath, remote).catch(() => [] as string[])
@@ -759,10 +678,9 @@ export class ClaudeService {
       if (!wt) return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
       const text = await this.deps.git.diffText(wt.path, wt.baseRef)
       const status = await this.deps.git.statusPorcelain(wt.path)
-      const untracked = status.filter((l) => l.startsWith('??')).map((l) => l.slice(3))
-      const uncommitted = status
-        .map(parsePorcelainLine)
-        .filter((f): f is UncommittedFile => f !== null && !f.path.startsWith('.orkio/'))
+      const files = status.map(parsePorcelainLine).filter((f): f is UncommittedFile => f !== null)
+      const untracked = files.filter((f) => f.status === 'untracked').map((f) => f.path)
+      const uncommitted = files.filter((f) => !isScratchPath(f.path))
       const cut = text.slice(0, MAX_DIFF_CHARS)
       const shortstat = await this.deps.git.diffShortstat(wt.path, wt.baseRef).catch(() => null)
       return ok({
@@ -785,6 +703,25 @@ export class ClaudeService {
     if (!project) throw new ClaudeFailure('not_found', CLAUDE_MESSAGES.projectNotFound)
     if (!project.repo) throw new ClaudeFailure('no_repo', CLAUDE_MESSAGES.noRepo)
     return project as StoredProject & { repo: NonNullable<StoredProject['repo']> }
+  }
+
+  /** Projeto + tarefa (do Notion) + worktree garantido (cria ou recria). */
+  private async ensureForTask(
+    projectId: string,
+    taskId: string,
+    kind?: StartRunRequest['branchKind']
+  ): Promise<{
+    project: StoredProject & { repo: NonNullable<StoredProject['repo']> }
+    wtProject: WorktreeProject
+    task: { id: string; displayId: string | null; title: string }
+    worktree: WorktreeRecord
+  }> {
+    const project = this.project(projectId)
+    const wtProject = this.worktreeProject(project)
+    const t = await this.task(projectId, taskId)
+    const task = { id: t.id, displayId: t.displayId, title: t.title }
+    const worktree = await this.deps.worktrees.ensure(wtProject, task, kind ? { kind } : {})
+    return { project, wtProject, task, worktree }
   }
 
   private worktreeProject(
@@ -819,30 +756,6 @@ export class ClaudeService {
       workspace = { branch: wt.branch, path: wt.path, changes }
     }
     return { runs, activeRunId: active?.id ?? null, workspace }
-  }
-
-  /**
-   * Branch local/remota já existente para a tarefa (só para exibir antes de rodar): a registrada
-   * para ela (`task_branches`) ou, com ID do Notion, a que tem o ID no nome. O worktree usa a mesma
-   * ordem ao criar.
-   */
-  private async existingBranch(project: StoredProject, task: NotionTask): Promise<string | null> {
-    const parsed = parseDisplayId(task.displayId)
-    const linked = this.deps.worktrees.linkedBranches(project.id, task.id).map((l) => l.branch)
-    if (!parsed && linked.length === 0) return null
-    const matches = (b: string): boolean =>
-      linked.includes(b) || (!!parsed && mentionsTask(b, parsed.prefix, parsed.number))
-    try {
-      const local = await this.deps.git.localBranches(project.localPath)
-      const hit = linked.find((b) => local.includes(b)) ?? local.find(matches)
-      if (hit) return hit
-      const remote = project.repo?.remoteName ?? 'origin'
-      // Os nomes já vêm sem o "<remote>/" (git.remoteBranches).
-      const remotes = await this.deps.git.remoteBranches(project.localPath, remote)
-      return linked.find((b) => remotes.includes(b)) ?? remotes.find(matches) ?? null
-    } catch {
-      return null
-    }
   }
 
   /** Blocos da página (filhos até MAX_DEPTH, no máximo MAX_BLOCKS no total). */
@@ -882,9 +795,7 @@ export class ClaudeService {
       if (error instanceof WorktreeError) {
         return fail(error.code, error.message, error.files.length ? error.files : undefined)
       }
-      if (error instanceof Error && error.message === RUN_MESSAGES.busy) {
-        return fail('busy', error.message)
-      }
+      if (error instanceof RunBusyError) return fail(error.code, error.message)
       console.error(`[orkio] claude: ${errorName(error)}`)
       return fail('unexpected', CLAUDE_MESSAGES.generic)
     }

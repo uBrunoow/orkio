@@ -994,7 +994,7 @@ describe('claude', () => {
     const ipc = fakeIpc()
     const catalog = vi.fn(async () => ({ ok: true as const, value: [] }))
     const ch = ORKIO_API.claude
-    registerGroup(ipc, options(), ch, claudeHandlers({ catalog } as never))
+    registerGroup(ipc, options(), ch, claudeHandlers({ catalog } as never, {} as never))
     expect(await ipc.invoke(ch.catalog.channel, 'p1', null)).toEqual({ ok: true, value: [] })
     await ipc.invoke(ch.catalog.channel, 'p1', TASK)
     expect(await ipc.invoke(ch.catalog.channel, 'p1', 'projeto')).toMatchObject(invalid)

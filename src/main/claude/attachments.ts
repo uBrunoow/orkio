@@ -13,6 +13,8 @@ import {
   type AttachmentExt
 } from '../../shared/attachments'
 import { stripAccents } from '../../shared/text'
+import { ATTACHMENTS_DIR } from '../../shared/orkio-scratch'
+import { ensureScratch } from './scratch'
 
 /** O que cada tipo binário precisa ser (mensagem quando o conteúdo não bate). */
 const BINARY_WHAT: Partial<Record<AttachmentExt, string>> = {
@@ -104,10 +106,8 @@ export async function saveAttachments(
 ): Promise<string[]> {
   const checked = checkAttachments(files)
   if (!checked.ok) throw new Error(checked.message)
-  const dir = join(worktree, '.orkio', 'attachments')
-  await mkdir(dir, { recursive: true })
-  // Fora do git do usuário (no worktree, `.git` é arquivo: a exclusão é a da própria pasta).
-  await writeFile(join(worktree, '.orkio', '.gitignore'), '*\n', 'utf8')
+  await ensureScratch(worktree)
+  await mkdir(join(worktree, ATTACHMENTS_DIR), { recursive: true })
   const paths: string[] = []
   for (const [i, f] of files.entries()) {
     const sha = createHash('sha256').update(f.data).digest('hex').slice(0, 8)
@@ -117,7 +117,7 @@ export async function saveAttachments(
     const dot = safe.lastIndexOf('.')
     const stem = dot > 0 ? safe.slice(0, dot) : safe
     safe = `${stem}.${ext}`
-    const rel = `.orkio/attachments/${sha}-${safe}`
+    const rel = `${ATTACHMENTS_DIR}/${sha}-${safe}`
     await writeFile(join(worktree, rel), f.data, { mode: 0o600 })
     paths.push(rel)
   }

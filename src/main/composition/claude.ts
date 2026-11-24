@@ -7,7 +7,7 @@ import { ClaudeService, type ClaudeServiceDeps } from '../claude/claude.service'
 import { detectClaude } from '../claude/detect'
 import { ClaudeRun } from '../claude/runner'
 import { RunService } from '../claude/run.service'
-import { onPath, terminalCandidates } from '../claude/terminal'
+import { onPath, terminalCommand, TerminalError } from '../claude/terminal'
 import { WorktreeService } from '../claude/worktree.service'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { ConfigStore } from '../storage/config-store'
@@ -164,12 +164,12 @@ async function openTerminalAt(dir: string, env: NodeJS.ProcessEnv): Promise<void
     }
   }
   if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
-    throw new Error('no_workspace')
+    throw new TerminalError('no_workspace')
   }
-  const candidate = terminalCandidates(process.platform, env, dir).find((c) =>
-    process.platform === 'darwin' ? true : onPath(c.cmd, env, process.platform, isFile)
+  const candidate = terminalCommand(process.platform, env, dir, (cmd) =>
+    onPath(cmd, env, process.platform, isFile)
   )
-  if (!candidate) throw new Error('no_terminal')
+  if (!candidate) throw new TerminalError('no_terminal')
   // Terminais sem argumento de pasta ($TERMINAL, x-terminal-emulator) abrem no cwd.
   await spawnDetached(candidate.cmd, candidate.args, { cwd: dir, env, windowsHide: false })
 }

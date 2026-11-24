@@ -3,6 +3,7 @@
  * `{ cmd, args }` (nunca shell); quem executa é o main com `spawn` sem shell e `cwd: dir`.
  */
 import { delimiter, join } from 'node:path'
+import { DomainError } from '../errors'
 
 export interface TerminalCommand {
   cmd: string
@@ -51,8 +52,9 @@ export function terminalCandidates(
 }
 
 /**
- * O primeiro candidato que existe (`exists` diz se o executável está no PATH). Quem executa deve
- * sempre passar `cwd: dir`: `$TERMINAL`, `x-terminal-emulator` e os do Windows só usam o cwd.
+ * O primeiro candidato que existe (`exists` diz se o executável está no PATH; no macOS o `open`
+ * sempre existe). Quem executa deve sempre passar `cwd: dir`: `$TERMINAL`, `x-terminal-emulator`
+ * e os do Windows só usam o cwd.
  */
 export function terminalCommand(
   platform: NodeJS.Platform,
@@ -60,7 +62,10 @@ export function terminalCommand(
   dir: string,
   exists: (cmd: string) => boolean = () => true
 ): TerminalCommand | null {
-  return terminalCandidates(platform, env, dir).find((c) => exists(c.cmd)) ?? null
+  return (
+    terminalCandidates(platform, env, dir).find((c) => platform === 'darwin' || exists(c.cmd)) ??
+    null
+  )
 }
 
 /** Procura um executável nas pastas do PATH (nomes simples; no Windows tenta as extensões). */
@@ -73,4 +78,12 @@ export function onPath(
   const dirs = (env['PATH'] ?? env['Path'] ?? '').split(delimiter).filter(Boolean)
   const exts = platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : ['']
   return dirs.some((d) => exts.some((e) => isFile(join(d, cmd + e))))
+}
+
+/** "Abrir terminal aqui" falhou: a pasta sumiu (`no_workspace`) ou não há terminal (`no_terminal`). */
+export class TerminalError extends DomainError {
+  constructor(code: 'no_workspace' | 'no_terminal') {
+    super(code, code === 'no_workspace' ? 'Pasta de trabalho não encontrada.' : 'Nenhum terminal.')
+    this.name = 'TerminalError'
+  }
 }

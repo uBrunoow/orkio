@@ -7,6 +7,8 @@ import { slugify, taskBranchName } from '../../shared/slug'
 import { TaskBranchesStore } from '../branches/task-branches.store'
 import { openDatabase, type Db } from '../db/database'
 import { createGit } from '../git/git'
+import { isScratchPath } from '../../shared/orkio-scratch'
+import { ensureScratch } from './scratch'
 import { WorktreeService, type WorktreeProject } from './worktree.service'
 
 function sh(cwd: string, ...args: string[]): string {
@@ -168,6 +170,61 @@ describe('WorktreeService (git real)', () => {
       { kind: 'fix' }
     )
     expect(other.branch).toBe('fix/corrigir-login-2')
+    mainUntouched()
+  })
+
+  it('findTaskBranch: registrada antes do ID no nome, local antes de remota (a mesma do ensure)', async () => {
+    expect(
+      await service.findTaskBranch(project, { id: 't8', displayId: 'ORK-8', title: 'x' })
+    ).toEqual({ branch: 'feat/ORK-8-local', where: 'local' })
+    expect(
+      await service.findTaskBranch(project, { id: 't9', displayId: 'ORK-9', title: 'x' })
+    ).toEqual({ branch: 'ORK-9/remota', where: 'remote' })
+    // Registrada para a tarefa vence o casamento pelo ID.
+    sh(main, 'branch', 'outra-coisa')
+    new TaskBranchesStore(db).link('p1', 't8', 'outra-coisa', 'manual')
+    expect(
+      await service.findTaskBranch(project, { id: 't8', displayId: 'ORK-8', title: 'x' })
+    ).toEqual({ branch: 'outra-coisa', where: 'local' })
+    const wt = await service.ensure(project, { id: 't8', displayId: 'ORK-8', title: 'x' })
+    expect(wt).toMatchObject({ reused: 'local_branch', branch: 'outra-coisa' })
+    // Sem ID e sem registro: nenhuma (sem nem listar as branches).
+    expect(
+      await service.findTaskBranch(project, { id: 'tx', displayId: null, title: 'x' })
+    ).toBeNull()
+  })
+
+  it('bug: .orkio/ ignora só o rascunho; perfis em .orkio/agents/ continuam no git', async () => {
+    // Perfil versionado no repositório.
+    const seed = join(tmp, 'seed')
+    sh(seed, 'checkout', '-q', 'main')
+    execFileSync('mkdir', ['-p', join(seed, '.orkio', 'agents')])
+    writeFileSync(join(seed, '.orkio', 'agents', 'ana.md'), 'v1\n')
+    sh(seed, 'add', '.')
+    sh(seed, 'commit', '-q', '-m', 'agente')
+    sh(seed, 'push', '-q', 'origin', 'main')
+    const wt = await service.ensure(project, { id: 't7', displayId: 'ORK-7', title: 'Listar' })
+    await ensureScratch(wt.path)
+    writeFileSync(join(wt.path, '.orkio', 'briefing.md'), '# briefing')
+    execFileSync('mkdir', ['-p', join(wt.path, '.orkio', 'attachments')])
+    writeFileSync(join(wt.path, '.orkio', 'attachments', 'a.png'), 'x')
+    writeFileSync(join(wt.path, '.orkio', 'revisao.md'), 'r')
+    writeFileSync(join(wt.path, '.orkio', 'agents', 'ana.md'), 'v2\n')
+    writeFileSync(join(wt.path, '.orkio', 'agents', 'novo.md'), 'n\n')
+    // Antes o `.gitignore` era `*`: um perfil novo nem aparecia no git.
+    const status = sh(wt.path, 'status', '--porcelain', '-uall')
+      .split('\n')
+      .map((l) => l.trim())
+      .sort()
+    expect(status).toEqual(['?? .orkio/agents/novo.md', 'M .orkio/agents/ana.md'])
+    // E o rascunho sai do resumo/diff/artefatos; os perfis não.
+    expect(isScratchPath('.orkio/briefing.md')).toBe(true)
+    expect(isScratchPath('.orkio/attachments/a.png')).toBe(true)
+    expect(isScratchPath('.orkio/')).toBe(true)
+    expect(isScratchPath('.orkio/agents/ana.md')).toBe(false)
+    expect(isScratchPath('.orkio/agents')).toBe(false)
+    expect(isScratchPath('src/.orkio/x')).toBe(false)
+    expect(isScratchPath('docs/x.md')).toBe(false)
     mainUntouched()
   })
 })
