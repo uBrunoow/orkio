@@ -61,15 +61,17 @@ export const ptBR = {
         { id: 'ORK-139', title: 'Filtro por período no painel', col: 0 },
         { id: 'ORK-145', title: 'Erro ao importar planilha vazia', col: 0 },
         { id: 'ORK-131', title: 'Paginação na lista de clientes', col: 2 },
-        { id: 'ORK-128', title: 'Login com SSO do Google', col: 3 }
+        { id: 'ORK-136', title: 'Recibo em PDF no e-mail', col: 2 },
+        { id: 'ORK-128', title: 'Login com SSO do Google', col: 3 },
+        { id: 'ORK-121', title: 'Cache dos relatórios mensais', col: 3 }
       ],
       agent: 'Implementador',
       running: 'Implementando',
       pr: 'PR #57'
     },
     session: {
-      autopilot: 'Piloto automático · Alva: implementar e entregar · passo 3 de 9',
-      command: '/alva-flow:implement TASK-12',
+      autopilot: 'Piloto automático · ORK-142 · passo 3 de 9',
+      command: '/alva-flow:implement',
       lines: [
         {
           kind: 'text',
@@ -127,36 +129,48 @@ export const ptBR = {
   },
   how: {
     title: 'Um caminho só, do pedido ao merge',
-    lead: 'Cada parada conversa com a ferramenta que você já usa. O Orkio liga uma na outra e para onde você precisa decidir.',
+    lead: 'O Orkio liga as ferramentas que você já usa, direto do seu computador, sem servidor no meio. E para onde você precisa decidir.',
     steps: [
       {
         name: 'Notion',
-        text: 'Você escolhe os bancos de Projetos e Tarefas. O Orkio lê as suas tarefas, com o ID e o status de cada uma.'
+        artifact: 'ORK-142 · A fazer',
+        text: 'Lê as suas tarefas, com ID e status, dos bancos que você escolher.',
+        via: 'Login com OAuth ou token'
       },
       {
         name: 'Quadro',
-        text: 'Um kanban por projeto, com colunas ligadas ao status do Notion. Mover o card atualiza o Notion.'
+        artifact: 'Em andamento',
+        text: 'Um kanban por projeto. Mover o card atualiza o Notion.',
+        via: 'Colunas ligadas ao status'
       },
       {
         name: 'Claude Code',
-        text: 'Cada tarefa roda num worktree próprio, com o briefing da página. Você acompanha a conversa e aprova o que o agente pede.'
+        artifact: 'worktree ORK-142',
+        text: 'Trabalha num ambiente só da tarefa. Você aprova o que ele pede.',
+        via: 'O seu CLI e a sua assinatura'
       },
       {
         name: 'PR',
-        text: 'Commit, push da branch da tarefa e PR aberta, cada passo depois da sua aprovação. Revisão e CI aparecem no card.'
+        artifact: 'PR #57 · CI passou',
+        text: 'Commit, push e PR, cada passo depois da sua aprovação.',
+        via: 'GitHub pelo Device Flow ou token'
       },
       {
         name: 'Finalizada',
-        text: 'Mergeou? A tarefa vai para Finalizada sozinha, e o Notion acompanha.'
+        artifact: 'merge',
+        text: 'Mergeou, a tarefa fecha sozinha e o Notion acompanha.',
+        via: 'Sem nada para mover à mão'
       }
     ],
     rulesTitle: 'O GitHub diz o que aconteceu. Regras dizem para onde a tarefa vai.',
+    rulesWhen: 'Quando',
+    rulesThen: 'A tarefa vai para',
     rules: [
-      { when: 'Branch ORK-142 criada', then: 'Em andamento' },
-      { when: 'PR aberta', then: 'Revisando' },
-      { when: 'Alterações pedidas', then: 'Revisado' },
-      { when: 'Novo pedido de review', then: 'Revisando' },
-      { when: 'PR mergeada', then: 'Finalizada' }
+      { when: 'Branch ORK-142 criada', then: 'Em andamento', tone: 'neutral', hint: '' },
+      { when: 'PR aberta', then: 'Revisando', tone: 'neutral', hint: '' },
+      { when: 'Alterações pedidas', then: 'Revisado', tone: 'warn', hint: 'corrigir' },
+      { when: 'Novo pedido de review', then: 'Revisando', tone: 'neutral', hint: '' },
+      { when: 'PR mergeada', then: 'Finalizada', tone: 'ok', hint: '' }
     ]
   },
   features: {
@@ -192,6 +206,17 @@ export const ptBR = {
           'Mostra quanto do contexto já foi usado'
         ]
       }
+    ],
+    frames: {
+      agents: 'Agentes · Orquestrador',
+      flow: 'ORK-142 · Fluxo',
+      review: 'ORK-142 · Revisão',
+      session: 'ORK-142 · Sessão'
+    },
+    diff: [
+      { n: '41', kind: 'ctx', code: 'for (const cell of row) {' },
+      { n: '42', kind: 'del', code: '  out.push(`"${cell}"`)' },
+      { n: '42', kind: 'add', code: '  out.push(`"${cell.replaceAll(\'"\', \'""\')}"`)' }
     ],
     agents: {
       lanes: [
@@ -243,25 +268,8 @@ export const ptBR = {
       }
     ],
     blocked: ['git push --force origin main', 'gh pr merge 57 --squash', 'cat ~/.ssh/id_ed25519'],
-    blockedTitle: 'Bloqueado pelo Orkio, sem perguntar'
-  },
-  tools: {
-    title: 'Usa o que você já tem',
-    lead: 'Sem conta nova e sem servidor no meio. O Orkio conversa direto com as suas ferramentas, do seu computador.',
-    items: [
-      {
-        name: 'Notion',
-        text: 'Login com OAuth ou token. Bancos de Projetos e Tarefas, status e o conteúdo da página como briefing.'
-      },
-      {
-        name: 'GitHub',
-        text: 'Login pelo Device Flow ou token. Branches, PRs, revisões e CI de cada tarefa.'
-      },
-      {
-        name: 'Claude Code',
-        text: 'O CLI claude com a sua assinatura. Os comandos, skills e plugins que você já instalou.'
-      }
-    ]
+    blockedTitle: 'Bloqueado pelo Orkio, sem perguntar',
+    blockedTag: 'bloqueado'
   },
   download: {
     title: 'Baixe o Orkio',

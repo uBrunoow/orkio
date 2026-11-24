@@ -5,6 +5,7 @@ import type { Dictionary } from '@/i18n/pt-BR'
 
 type Preview = Dictionary['preview']
 import { BranchIcon, CheckIcon, ClipIcon, PauseIcon, PlayIcon, TerminalIcon } from './Icons'
+import { initials } from './initials'
 import { Symbol } from './Logo'
 import s from './preview.module.css'
 
@@ -118,11 +119,23 @@ export function AppPreview({ p }: { p: Preview }) {
         </p>
         <div
           className={s.window}
+          data-glow
           role="tabpanel"
           id="preview-panel"
           aria-labelledby={`preview-tab-${scene}`}
           data-scene={scene}
         >
+          <div className={s.titlebar} aria-hidden="true">
+            <span className={s.traffic}>
+              <i />
+              <i />
+              <i />
+            </span>
+            <span className={s.appName}>
+              <Symbol size={14} className={s.sideSymbol} />
+              Orkio
+            </span>
+          </div>
           <div className={s.chrome}>
             <span className={s.path}>
               <span>{p.project}</span>
@@ -149,10 +162,6 @@ export function AppPreview({ p }: { p: Preview }) {
 
           <div className={s.body}>
             <aside className={s.side} aria-hidden="true">
-              <div className={s.sideBrand}>
-                <Symbol size={18} className={s.sideSymbol} />
-                <span>{p.project}</span>
-              </div>
               <SideGroup
                 title={p.side.waiting}
                 items={waiting ? [{ id: p.taskId, title: p.task, hot: true }] : []}
@@ -182,7 +191,12 @@ export function AppPreview({ p }: { p: Preview }) {
               {scene === 'quadro' && <BoardScene p={p} moved={boardMoved} />}
               {scene === 'sessao' && <SessionScene p={p} />}
               {scene === 'push' && (
-                <PushScene p={p} pushed={pushed} onPush={() => setPushed(true)} />
+                <div className={s.modalScene}>
+                  <div className={s.behind} aria-hidden="true">
+                    <SessionScene p={p} still />
+                  </div>
+                  <PushScene p={p} pushed={pushed} onPush={() => setPushed(true)} />
+                </div>
               )}
               {scene === 'revisao' && (
                 <ReviewScene p={p} approved={approved} onApprove={() => setApproved(true)} />
@@ -254,6 +268,7 @@ function SideGroup({
   title: string
   items: { id: string; title: string; hot?: boolean; live?: boolean }[]
 }) {
+  if (items.length === 0) return null
   return (
     <div className={s.sideGroup}>
       <p className={s.sideTitle}>
@@ -295,7 +310,7 @@ function BoardScene({ p, moved }: { p: Preview; moved: boolean }) {
                 <p className={s.cardTitle}>{p.task}</p>
                 {ci === 1 ? (
                   <p className={s.cardAgent}>
-                    <span className={s.avatar}>IM</span>
+                    <span className={s.avatar}>{initials(b.agent)}</span>
                     {b.agent}
                     <span className={s.live}>{b.running}</span>
                   </p>
@@ -334,7 +349,7 @@ function BoardScene({ p, moved }: { p: Preview; moved: boolean }) {
   )
 }
 
-function SessionScene({ p }: { p: Preview }) {
+function SessionScene({ p, still = false }: { p: Preview; still?: boolean }) {
   const x = p.session
   return (
     <div className={s.session}>
@@ -349,7 +364,7 @@ function SessionScene({ p }: { p: Preview }) {
             key={i}
             className={s.line}
             data-kind={l.kind}
-            style={{ animationDelay: `${400 + i * 1050}ms` }}
+            style={still ? { animation: 'none' } : { animationDelay: `${400 + i * 1050}ms` }}
           >
             {l.kind === 'text' ? (
               <p>{l.text}</p>

@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { getDictionary } from '@/i18n'
-import { inter, jost, mono } from './fonts'
+import { display, inter, jost, mono } from './fonts'
 import './globals.css'
 
 const t = getDictionary()
@@ -25,7 +25,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang={t.locale} className={`${jost.variable} ${inter.variable} ${mono.variable}`}>
+    <html
+      lang={t.locale}
+      className={`${jost.variable} ${display.variable} ${inter.variable} ${mono.variable}`}
+    >
       <body>{children}</body>
     </html>
   )

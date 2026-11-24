@@ -26,3 +26,11 @@ export const mono = localFont({
   variable: '--font-mono',
   display: 'swap'
 })
+
+// Títulos da landing: Geist (Vercel, licença OFL em fonts/GEIST-LICENSE.txt), uma grotesca técnica.
+// Jost continua só no logo.
+export const display = localFont({
+  src: [{ path: './fonts/geist-variable.woff2', weight: '100 900', style: 'normal' }],
+  variable: '--font-display',
+  display: 'swap'
+})
