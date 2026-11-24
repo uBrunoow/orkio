@@ -93,7 +93,6 @@ export function tailSession(
     }
   }
   const visible = items.slice(cut)
-  // Repõe o separador do dia do primeiro item visível.
   let dayIndex = cut - 1
   while (dayIndex >= 0 && items[dayIndex]!.kind !== 'day') dayIndex--
   const head = dayIndex >= 0 ? [items[dayIndex]!] : []

@@ -12,7 +12,6 @@ function list(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} ou ${names[names.length - 1]}`
 }
 
-/** Automação em frase: quando começa, o que faz, quando rodou. O formulário fica em "Editar". */
 export function RuleDetail({
   rule,
   index,

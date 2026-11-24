@@ -21,19 +21,16 @@ import { useAgentBadges } from './agent-badges'
 import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
 import { useAgentsState, useCommandNames, useOrchestrator } from './useAgents'
 
-/** Tela "Agentes" (8A): perfis, aprovação dos perfis do repositório e regras por coluna. */
 export function AgentsPage({
   projectId: currentProjectId = null,
   onOpenOrchestrator
 }: {
   /** Projeto atual (as tarefas e a carga dos agentes são deste projeto). */
   projectId?: string | null
-  /** "Orquestrador: ligado/desligado" leva a Configurações › Agentes do projeto. */
   onOpenOrchestrator?: () => void
 } = {}): React.JSX.Element {
   const projects = useProjects().projects
   const [chosen, setChosen] = useState<string | null>(null)
-  // Projeto escolhido aqui → o atual do App → o primeiro.
   const projectId =
     chosen ??
     (currentProjectId && projects?.some((p) => p.id === currentProjectId)
@@ -207,7 +204,6 @@ export function AgentsPage({
   const hasAgents = state !== null && state.agents.length > 0
 
   return (
-    // A tela vem num contêiner com margem (App): a barra de filtros ocupa a largura toda.
     <div role="region" aria-label="Agentes" className="-mx-6 -mt-5 flex flex-col">
       {header}
       {hasAgents && (
@@ -353,7 +349,6 @@ export function AgentsPage({
   )
 }
 
-/** Pílula dos filtros e da visualização (mockup `.pill`). */
 const PILL =
   'h-7 gap-1.5 rounded-full px-2.5 text-xs font-normal text-muted-foreground hover:bg-muted hover:text-foreground data-[state=on]:bg-muted data-[state=on]:text-foreground'
 
@@ -373,5 +368,4 @@ function matchesFilter(a: AgentView, now: AgentNow, f: Filter): boolean {
   return f === 'all' || now.filter === f
 }
 
-/** Ordem da grade: esperando você, trabalhando, depois os parados. */
 const ORDER: Record<AgentNow['filter'], number> = { waiting: 0, working: 1, stopped: 2 }

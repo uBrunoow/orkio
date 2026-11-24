@@ -4,7 +4,6 @@ import { Spinner } from '@/components/Spinner'
 import { ExternalLinkIcon } from '../../components/icons'
 import type { DeviceFlowInfo } from '../../../../shared/connection'
 
-/** Código do Device Flow do GitHub (card do GitHub em Integrações e login dos Primeiros passos). */
 export function DeviceFlowView({
   flow,
   onCancel

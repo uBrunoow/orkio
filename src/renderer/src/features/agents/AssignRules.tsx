@@ -4,7 +4,6 @@ import { SelectField } from '@/components/form'
 import type { AgentsState } from '../../../../shared/agent'
 import { TrashIcon } from '../../components/icons'
 
-/** "Tarefas que entram em <etapa> vão para <agente>" (uma por etapa). */
 export function AssignRules({
   state,
   onSave

@@ -15,7 +15,6 @@ export function useAgentsState(projectId: string | null): IpcResource<AgentsStat
   })
 }
 
-/** Estado do orquestrador do projeto (carga dos agentes, última rodada). */
 export function useOrchestrator(projectId: string | null): IpcResource<OrchestratorState> {
   return useIpcResource(projectId, (id) => window.orkio.agents.orchestrator(id).then(unwrap), {
     subscribe: onAgentsChanged

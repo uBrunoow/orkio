@@ -2,7 +2,6 @@ import { CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 import { ChevronRightIcon } from './icons'
 
-/** Gatilho de seção recolhível: chevron que gira + rótulo. */
 export function CollapsibleHeader({
   open,
   children,

@@ -3,7 +3,6 @@
  * tema; nada de cor/medida de layout fixa.
  */
 @layer orkio-brand {
-  /* Bloco de código do texto do Claude (markdown): mono, quebra linha, fundo elevado do tema. */
   .orkio-codeblock {
     display: block;
     white-space: pre-wrap;
@@ -14,7 +13,6 @@
     font-family: var(--font-mono);
   }
 
-  /* Diff do ambiente (DiffView): linhas coloridas pelos tons de estado do tema. */
   .orkio-diff {
     overflow: hidden;
     border-radius: var(--radius);

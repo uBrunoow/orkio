@@ -140,7 +140,6 @@ export function createAppSources(): AppSources {
         const r = await window.orkio.projects[arg === 'revalidate' ? 'revalidate' : 'list']()
         return { projects: r.projects, warning: r.warning ?? null }
       },
-      // Branch ao vivo (evento do main) e estado local ao voltar para a janela.
       listen: (src) =>
         window.orkio.projects.onBranchChanged(({ projectId, branch }) =>
           src.set('', (s) =>

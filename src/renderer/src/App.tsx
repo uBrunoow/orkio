@@ -50,7 +50,6 @@ export function App(): React.JSX.Element | null {
     window.localStorage.getItem(CURRENT_PROJECT_KEY)
   )
 
-  // Projeto atual: o da rota (ex.: notificação) → o escolhido no menu → o primeiro.
   const fromRoute = routeProjectId(route)
   const project = useMemo(() => {
     if (!projects) return null
@@ -79,7 +78,6 @@ export function App(): React.JSX.Element | null {
     navigate({ name: 'setup', ...(project ? { projectId: project.id } : {}) })
   }
 
-  // Primeira tela: sem projeto, Primeiros passos; com algo esperando, essa tarefa; senão o Quadro.
   const decided = useRef(false)
   useEffect(() => {
     if (decided.current || projects === null) return
@@ -88,7 +86,6 @@ export function App(): React.JSX.Element | null {
       dispatch({ type: 'reset', route: { name: 'setup' } })
       return
     }
-    // Espera a Visão geral responder para saber se há algo esperando você (só dados locais).
     if (linkedProject && sidebar.snapshot === null) return
     decided.current = true
     dispatch({
@@ -109,10 +106,8 @@ export function App(): React.JSX.Element | null {
     [chooseProject, navigate]
   )
 
-  // Clique numa notificação: abre a tarefa (troca o projeto quando é de outro).
   useEffect(() => window.orkio.board.onOpenTask(openTask), [openTask])
 
-  // Atalhos globais e Command Palette (fora dos Primeiros passos).
   // Paleta: `all` (Ctrl/Cmd+K: telas e tarefas) ou `tasks` ("Buscar tarefa": só tarefas, no Notion).
   const [palette, setPalette] = useState<'all' | 'tasks' | null>(null)
   const inShell = route.name !== 'setup'
@@ -143,7 +138,6 @@ export function App(): React.JSX.Element | null {
 
   const runCommand = (command: CommandData): void => {
     if (command.url) {
-      // Tarefa de fora do quadro (outra pessoa ou projeto sem vínculo): abre no Notion.
       void window.orkio.openExternal(command.url)
       return
     }
@@ -165,7 +159,6 @@ export function App(): React.JSX.Element | null {
     navigate({ name: 'settings', section })
   const toBoard = (): void => navigate({ name: 'board' })
 
-  // Primeiros passos em tela cheia, sem a navegação.
   if (route.name === 'setup') {
     return (
       <SetupPage
@@ -294,12 +287,10 @@ export function App(): React.JSX.Element | null {
           SETTINGS_TITLES[route.section ?? 'integrations']
         ]
       : null
-  // Quadro e tarefa ocupam a altura toda (rolagem própria); o resto rola com margem.
   const fullHeight = route.name === 'board' || route.name === 'task'
   const keyed = <Fragment key={router.key}>{page}</Fragment>
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      {/* Atualização pronta (6C) e "O que há de novo": acima de tudo. */}
       <UpdateBanner
         {...(route.name === 'settings'
           ? {}
@@ -360,7 +351,6 @@ export function App(): React.JSX.Element | null {
               </div>
             }
           >
-            {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
             {fullHeight || route.name === 'settings' ? (
               <div className="h-full min-h-0">{keyed}</div>
             ) : (

@@ -61,10 +61,6 @@ function AccountAvatar({
   )
 }
 
-/**
- * Conta na lateral (rodapé, como no Alva Tasks: avatar, nome e login) e no canto da barra (só o
- * avatar). Os dois abrem o mesmo menu: contas conectadas, configurações e Sair.
- */
 export function AccountMenu({
   account,
   variant,

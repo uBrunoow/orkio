@@ -13,7 +13,6 @@ import type {
 
 const mono = 'font-mono text-xs text-muted-foreground'
 
-/** Segundo passo do "Adicionar projeto": confirma remote, host e nome. */
 export function AddProjectPanel({
   selection,
   onCreate,

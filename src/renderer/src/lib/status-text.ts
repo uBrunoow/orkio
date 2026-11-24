@@ -26,14 +26,10 @@ export interface StatusText {
 
 const CHECKING: StatusText = { label: 'Verificando', tone: 'neutral' }
 
-// ---------- Conexões (Notion, GitHub) ----------
-
-/** Nome da conta conectada: login do GitHub, workspace do Notion ou o nome da pessoa. */
 export function accountName(account: ConnectedAccount): string {
   return account.handle ?? account.workspaceName ?? account.userName
 }
 
-/** Estado da conexão, igual no cartão de Integrações, no painel do conector e nos Primeiros passos. */
 export function connectionStatusText(s: ConnectionStatus | null): StatusText {
   if (!s) return CHECKING
   switch (s.state) {
@@ -49,8 +45,6 @@ export function connectionStatusText(s: ConnectionStatus | null): StatusText {
       return { label: 'Não conectado', tone: 'warning' }
   }
 }
-
-// ---------- Notion ----------
 
 /**
  * Cor de uma opção do Notion → tom do app. Explícito por cor: o tema não tem marrom, azul, roxo
@@ -69,7 +63,6 @@ export const NOTION_COLOR_TONE: Record<NotionColor, StatusTone> = {
   red: 'danger'
 }
 
-/** Saúde dos bancos do Notion (painel "Bancos e campos" e o cartão de Integrações). */
 export const WORKSPACE_HEALTH: Record<NotionWorkspaceStatus['health'], StatusText> = {
   checking: { label: 'Verificando…', tone: 'neutral' },
   ok: { label: 'Pronto', tone: 'success' },
@@ -78,7 +71,6 @@ export const WORKSPACE_HEALTH: Record<NotionWorkspaceStatus['health'], StatusTex
   unverified: { label: 'Não verificado', tone: 'warning' }
 }
 
-/** Bancos prontos: escolhidos e com o mapeamento ok. */
 export function isWorkspaceReady(s: NotionWorkspaceStatus | null): boolean {
   return !!s?.config && s.health === 'ok'
 }
@@ -92,8 +84,6 @@ export function workspaceStatusText(
   if (!s.config) return { label: 'Falta escolher os bancos', tone: 'warning' }
   return WORKSPACE_HEALTH[s.health]
 }
-
-// ---------- Claude Code ----------
 
 /** Instalado, na versão mínima e com login (login não verificado conta como pronto). */
 export function isClaudeReady(c: ClaudeCodeStatus | null): boolean {
@@ -120,8 +110,6 @@ export function claudeLoginText(c: ClaudeCodeStatus): StatusText {
     : { label: 'Login não verificado', tone: 'neutral' }
 }
 
-// ---------- Projetos ----------
-
 export const PROJECT_HEALTH: Record<ProjectHealthState, StatusText> = {
   checking: { label: 'Verificando…', tone: 'neutral' },
   ok: { label: 'OK', tone: 'success' },
@@ -134,9 +122,6 @@ export const PROJECT_HEALTH: Record<ProjectHealthState, StatusText> = {
   git_error: { label: 'Erro do git', tone: 'danger' }
 }
 
-// ---------- Agentes ----------
-
-/** Estado do perfil do agente (o mesmo texto no "agora" do card e no token do perfil). */
 export const AGENT_STATUS: Record<AgentStatus, StatusText> = {
   ready: { label: 'Pronto', tone: 'success' },
   needs_review: { label: 'Revisar perfil', tone: 'warning' },
@@ -144,9 +129,6 @@ export const AGENT_STATUS: Record<AgentStatus, StatusText> = {
   archived: { label: 'Arquivado', tone: 'neutral' }
 }
 
-// ---------- Execuções ----------
-
-/** Execução do Claude Code. */
 export const RUN_STATUS: Record<RunStatus, StatusText> = {
   queued: { label: 'Na fila', tone: 'warning' },
   running: { label: 'Rodando', tone: 'running' },
@@ -155,7 +137,6 @@ export const RUN_STATUS: Record<RunStatus, StatusText> = {
   cancelled: { label: 'Cancelada', tone: 'neutral' }
 }
 
-/** Execução de um fluxo de tarefa. */
 export const FLOW_RUN_STATUS: Record<FlowRunStatus, StatusText> = {
   running: { label: 'Rodando', tone: 'running' },
   waiting_gate: { label: 'Esperando aprovação', tone: 'warning' },
@@ -171,8 +152,6 @@ export const ALVA_CHECK: Record<AlvaCheckItem['state'], StatusText> = {
   missing: { label: 'Falta', tone: 'warning' },
   warning: { label: 'Atenção', tone: 'warning' }
 }
-
-// ---------- PR, revisão e CI ----------
 
 export const PR_STATE: Record<PullRequestState, StatusText> = {
   draft: { label: 'Rascunho', tone: 'neutral' },
@@ -193,12 +172,9 @@ export const CI_STATUS: Record<ChecksState, StatusText> = {
   pending: { label: 'CI rodando', tone: 'neutral' }
 }
 
-/** PR ainda aberta (rascunho conta). */
 export function isPrOpen(pr: Pick<TaskPullRequest, 'state'> | null | undefined): boolean {
   return pr?.state === 'open' || pr?.state === 'draft'
 }
-
-// ---------- Atualizações ----------
 
 /** Pronta para instalar: baixada (automática) ou disponível para baixar (macOS sem assinatura). */
 export function isUpdateReady(s: UpdateStatus | null): boolean {

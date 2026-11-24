@@ -19,7 +19,6 @@ import { useClaudeStatus } from './useClaudeStatus'
 const MODEL_ERROR = 'Use letras minúsculas, números, ponto e hífen.'
 const DEFAULT_LABEL = 'Padrão do Claude Code'
 
-/** Rótulo do que está escolhido (ou do herdado, quando nada foi escolhido). */
 export function pickerLabel(value: Partial<RuntimeChoice>, inheritLabel?: string): string {
   if (value.model === undefined && value.effort === undefined) return inheritLabel ?? DEFAULT_LABEL
   return runtimeLabel({ model: value.model ?? null, effort: value.effort ?? null })

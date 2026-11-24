@@ -20,7 +20,6 @@ import { useTaskView } from './task-view'
 import { backlogDocumentOf } from '../../../../shared/alva'
 import { buildSession, tailSession, type SessionItem } from './task-session'
 
-/** Quantos itens a conversa mostra antes de "Mostrar anteriores". */
 const TAIL = 30
 
 /**
@@ -34,16 +33,13 @@ export function TaskSession({
   scrollToEnd = false,
   focusRun = null
 }: {
-  /** Seção do fluxo (5A): estado, decisões e problemas do fluxo da tarefa. */
   flowSlot: React.ReactNode
   /** Ao abrir, rola até o fim da conversa, onde está o que importa agora. */
   scrollToEnd?: boolean
-  /** "Ver a sessão do passo" (cartão de problema do fluxo): abre e mostra esta execução. */
   focusRun?: { runId: string; nonce: number } | null
 }): React.JSX.Element {
   const view = useTaskView()
   const { projectId, taskId, agent, history, stageName, runs, activity, flow } = view
-  // Um passo de fluxo está rodando: o campo fica bloqueado.
   const flowRunning = flow.run?.status === 'running'
   const backlogLinked = !!view.backlog?.linked
   const [showAll, setShowAll] = useState(false)

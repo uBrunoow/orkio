@@ -1,6 +1,5 @@
 import { cn } from '@/lib/utils'
 
-/** Círculo numerado de um passo (assistentes): feito = ✓ verde, atual = borda da marca. */
 export function StepCircle({
   number,
   state

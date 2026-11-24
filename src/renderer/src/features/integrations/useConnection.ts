@@ -8,7 +8,6 @@ import {
 import { ipcCall, useSource } from '../../lib/ipc'
 import type { AuthOptions, ConnectionStatus, DeviceFlowInfo } from '../../../../shared/connection'
 
-/** O que está acontecendo agora, além do status persistido. */
 export type ConnectionActivity =
   'loading' | 'idle' | 'connecting' | 'authorizing' | 'testing' | 'disconnecting'
 
@@ -21,7 +20,6 @@ export interface UseConnection {
   authOptions: AuthOptions | null
   /** Código e página do Device Flow do GitHub em andamento (nunca contém tokens). */
   deviceFlow: DeviceFlowInfo | null
-  /** Momento da última verificação bem-sucedida nesta sessão. */
   lastVerifiedAt: Date | null
   /** Muda quando a conexão muda (conectou, desconectou, reconectou); `null` = ainda não se sabe. */
   key: string | null
@@ -83,7 +81,6 @@ export function useConnection(
     [apply]
   )
 
-  // Ao abrir: status salvo na hora e revalidação em segundo plano.
   useEffect(() => {
     mounted.current = true
     if (revalidate) {

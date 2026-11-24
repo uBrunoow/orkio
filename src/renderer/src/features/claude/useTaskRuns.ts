@@ -82,7 +82,6 @@ export function useTaskRuns(
     setLog(runId ? await window.orkio.claude.readLog(runId).catch(() => []) : [])
   }, [])
 
-  // Carga inicial: seleciona a ativa ou a mais recente.
   useEffect(() => {
     let active = true
     void (async () => {
@@ -104,12 +103,10 @@ export function useTaskRuns(
     }
   }, [projectId, taskId])
 
-  // Eventos ao vivo desta tarefa.
   useEffect(
     () =>
       window.orkio.claude.onRunEvent((m) => {
         if (m.taskId !== taskId) return
-        // Execução nova na tarefa (ex.: passo de um fluxo): passa a mostrar o log dela.
         const isNew =
           m.runId !== selected.current &&
           m.event.kind === 'status' &&

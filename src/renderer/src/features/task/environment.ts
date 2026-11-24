@@ -1,4 +1,3 @@
-/** Peças puras do painel "Ambiente" (nome curto da pasta, contexto, texto das mudanças). */
 import type { RunLogEvent } from '../../../../shared/agent-run'
 import { contextPercent } from '../../../../shared/context-usage'
 
@@ -17,7 +16,6 @@ export function latestContextPercent(log: readonly RunLogEvent[]): number | null
   return null
 }
 
-/** Tom da barra de contexto: perto de encher chama atenção. */
 export function contextTone(percent: number): 'ok' | 'warn' | 'danger' {
   if (percent >= 90) return 'danger'
   if (percent >= 70) return 'warn'

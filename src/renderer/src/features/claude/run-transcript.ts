@@ -16,7 +16,6 @@ export interface WorkStep {
   tool: string
   summary: string
   category: StepCategory
-  /** Arquivo lido ou editado (ferramentas de arquivo do catálogo). */
   file: string | null
   state: StepState
 }
@@ -62,7 +61,6 @@ export type TranscriptItem =
       costUsd: number | null
     }
 
-/** Categoria da linha na conversa, a partir do catálogo de ferramentas. */
 const STEP_CATEGORY: Record<ToolCategory, StepCategory> = {
   edit: 'edit',
   read: 'read',
@@ -326,7 +324,6 @@ export function buildTranscript(
     item.live = live && item === tail && item.steps.some((s) => s.state === 'running')
   }
   if (!live) {
-    // Sem resultado: só vale como concluído se a execução terminou bem.
     const stopped = finalStatus === 'cancelled' || finalStatus === 'failed'
     for (const row of agentById.values()) {
       if (row.state === 'running') row.state = stopped ? 'interrupted' : 'done'
@@ -335,7 +332,6 @@ export function buildTranscript(
   return items
 }
 
-/** Subagentes ainda trabalhando (para a linha "Esperando N subagentes" acima do campo). */
 export function runningSubagents(items: readonly TranscriptItem[]): SubagentRow[] {
   return items
     .flatMap((i) => (i.kind === 'subagents' ? i.agents : []))

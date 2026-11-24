@@ -128,11 +128,9 @@ export const QuestionIcon = adapt(IconHelpCircle)
 export const InfoIcon = adapt(IconInfoCircle)
 export const ToolIcon = adapt(IconTool)
 export const ReadIcon = adapt(IconFileText)
-/** Ponto de estado (StatusToken). */
 export const BellIcon = adapt(IconBell)
 export const DotIcon = adapt(IconPointFilled)
 
-/** Marca do Claude (estrela de raios), desenhada em currentColor. */
 /** Símbolo oficial do Claude (cor herdada do contexto, como as logos do Notion e do GitHub). */
 export const ClaudeLogo: SvgIcon = (props) => (
   <svg

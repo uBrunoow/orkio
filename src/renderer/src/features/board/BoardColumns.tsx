@@ -115,7 +115,6 @@ export function BoardColumns({
       teardown.current?.()
       const card = cards.find((c) => c.taskId === taskId)
       if (started && target && card && card.stageId !== target) actions.onMove(taskId, target)
-      // Clique simples (sem arrasto) abre os detalhes.
       if (!started) actions.onOpen(taskId)
       setDrag(null)
     }
@@ -232,7 +231,6 @@ export function BoardColumns({
               role="listitem"
               aria-label={column.name}
               data-stage-id={column.id}
-              // Colunas não encolhem: o quadro rola na horizontal.
               className={cn(
                 'group/col flex h-full w-[268px] shrink-0 flex-col gap-2 rounded-[10px] transition-colors',
                 isTarget && 'bg-muted/60'
@@ -242,7 +240,6 @@ export function BoardColumns({
                 <span aria-hidden="true" className={cn('size-[7px] shrink-0 rounded-full', dot)} />
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    {/* O nome da coluna não quebra nem encolhe; o status do Notion encolhe. */}
                     <h3 className="shrink-0 text-sm font-normal whitespace-nowrap text-muted-foreground">
                       {column.name}
                     </h3>

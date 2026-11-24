@@ -42,7 +42,6 @@ export interface RunInitial {
 }
 export const EMPTY_INITIAL: RunInitial = { mode: 'prompt', command: '', text: '' }
 
-/** "Nova sessão": modo, comando do catálogo, briefing editável e "Rodar como" (4A). */
 export function Composer({
   prep,
   initial,
@@ -64,7 +63,6 @@ export function Composer({
   const [error, setError] = useState<string | null>(null)
   // 8A: com agente na tarefa, roda como ele (instruções e modelo) a menos que você desmarque.
   const [asAgent, setAsAgent] = useState(prep.agent !== null)
-  // Branch nova: o tipo (feat/fix/hotfix) troca só o começo do nome sugerido.
   const [kind, setKind] = useState<BranchKind>('feat')
   const branch = prep.branchIsNew ? withBranchKind(prep.branch, kind) : prep.branch
 
@@ -226,7 +224,6 @@ export function PermissionCard({
   )
 }
 
-/** Ambiente da tarefa: editores, diff e limpar (4A). */
 export function Workspace({
   projectId,
   taskId,
@@ -335,7 +332,6 @@ export function Workspace({
   )
 }
 
-/** Catálogo agrupado por origem (usuário, projeto, plugin), com busca e recarregar. */
 function CommandPicker({
   projectId,
   taskId,

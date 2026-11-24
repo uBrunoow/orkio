@@ -42,7 +42,6 @@ const CATEGORY_ICON: Record<StepCategory, SvgIcon> = {
 /** Mais recentes primeiro quando o log é longo; o resto abre em "Mostrar anteriores". */
 const TAIL = 40
 
-/** Caixa das chamadas de ferramenta (mockup `.tools`): borda suave, fundo da superfície, mono. */
 const TOOLS_BOX =
   'rounded-lg border border-border-soft bg-surface px-2.5 py-2 font-mono text-xs text-muted-foreground'
 
@@ -138,7 +137,6 @@ function Receipt({
   tone: 'info' | 'problem'
   text: string
   count: number
-  /** "Abrir PR" no recibo de push/gh bloqueado (só quando a tarefa pode abrir PR). */
   openPr?: boolean
 }): React.JSX.Element {
   const problem = tone === 'problem'
@@ -195,10 +193,6 @@ function ResultFooter({
   )
 }
 
-/**
- * Sessão do Claude Code como conversa: respostas em markdown, ferramentas agrupadas numa frase,
- * recibos de permissão, avisos de falha e o fechamento com turnos, tempo e custo.
- */
 export function RunTranscript({
   items,
   tail = TAIL,

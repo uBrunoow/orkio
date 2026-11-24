@@ -5,7 +5,6 @@ import { StatusToken } from '../../components/StatusToken'
 import { CI_STATUS, isPrOpen, PR_STATE, REVIEW_DECISION } from '../../lib/status-text'
 import { GitBranchIcon, PullRequestIcon } from '../../components/icons'
 
-/** Branch (local/remota) e PR de uma tarefa. Nada é renderizado sem sinais. */
 export function TaskSignalsLine({
   signals
 }: {

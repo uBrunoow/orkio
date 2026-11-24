@@ -15,7 +15,6 @@ export function TaskDiffView({
   label: string
   /** Avisa de segredo no diff (gate de aprovação). */
   secrets?: boolean
-  /** Só o que falta commitar. */
   onlyUncommitted?: boolean
 }): React.JSX.Element {
   const { value, error } = useTaskDiff()

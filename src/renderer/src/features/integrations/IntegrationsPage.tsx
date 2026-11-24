@@ -47,10 +47,8 @@ export function IntegrationsPage({
 }): React.JSX.Element {
   const notion = useConnection('notion', { revalidate: true })
   const github = useConnection('github', { revalidate: true })
-  // Revalida os bancos quando a conexão do Notion muda (conectou, desconectou, reconectou).
   const workspace = useNotionWorkspace(notion.key)
   const claude = useClaudeStatus().status
-  // Pré-checagem do alva-flow do projeto atual (gh, plugin); só leitura.
   const precheck = useIpcResource(projectId, (id) =>
     window.orkio.alva.precheck(id).then(unwrap)
   ).value
@@ -58,7 +56,6 @@ export function IntegrationsPage({
   const notionReady = notion.status?.state === 'connected'
   const workspaceReady = notionReady && isWorkspaceReady(workspace.status)
   const githubReady = github.status?.state === 'connected'
-  // Consulta o orkio[bot] quando o estado do GitHub já é conhecido (e de novo se ele mudar).
   const bot = useOrkioBot(github.status !== null && github.status.state !== 'connecting')
   const botStatus = orkioBotSummary(bot.status)
   const claudeReady = isClaudeReady(claude)
@@ -192,7 +189,6 @@ export function IntegrationsPage({
       status: pluginsStatus,
       action: 'Ver no Claude Code',
       ready: pluginsStatus.tone === 'success',
-      // Sem painel próprio: abre a configuração do Claude Code.
       opensId: 'claude'
     }
   ]

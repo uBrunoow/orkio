@@ -18,12 +18,6 @@ import { backlogDocumentOf } from '../../../../shared/alva'
 import { TaskDiffView } from '../task/TaskDiffView'
 import { useTaskView } from '../task/task-view'
 
-/**
- * Uma execução do Claude Code dentro da sessão da tarefa: quem falou (agente ou Claude Code), o
- * comando, o estado, a mensagem que você mandou (prompt) e a conversa inteira (respostas em
- * markdown, ferramentas agrupadas numa frase). Depois dela, o que ela produziu: a spec ou o plano
- * (alva-flow) e as mudanças no código (arquivos, commits, diff).
- */
 export function RunBlock({
   run,
   agent,
@@ -40,20 +34,17 @@ export function RunBlock({
    * (fluxo, passo N de M e o comando que ele mandou), como numa sessão dirigida pelo Orkio.
    */
   origin?: FlowStepOrigin | null
-  /** Agente da tarefa: se foi ele que rodou, mostra o avatar e o nome. */
   agent: AgentBadge | null
   /** Log ao vivo (só para a execução mais recente, vindo do `useTaskRuns`). */
   liveLog: readonly RunLogEvent[] | null
   /** "Rodar de novo": abre a nova sessão com o mesmo modo, comando e texto (só sem nada rodando). */
   onRerun?: () => void
-  /** Pedido para mostrar esta execução ("Ver a sessão do passo"): abre e rola até ela. */
   focused?: boolean
   /**
    * Execução que criou/atualizou a spec ou o plano (alva-flow): mostra a task do Backlog.md logo
    * abaixo da conversa (aberta na mais recente; as anteriores recolhidas, porque é o mesmo arquivo).
    */
   showDocument?: boolean | 'open'
-  /** Mudanças (arquivos, commits, diff) abertas por padrão (a execução mais recente que mudou código). */
   changesOpen?: boolean
 }): React.JSX.Element {
   const canOpenPr = useTaskView().openPr.available
@@ -63,7 +54,6 @@ export function RunBlock({
     if (focused) ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }, [focused])
   const live = run.status === 'running' || run.status === 'queued'
-  // Execuções anteriores: lê o log uma vez para mostrar a última fala.
   useEffect(() => {
     if (liveLog) return
     let active = true
@@ -90,7 +80,6 @@ export function RunBlock({
     .filter(Boolean)
     .join(' · ')
   const youSaid = !origin && run.mode === 'prompt' && run.text ? run.text : null
-  // O que o piloto mandou: o comando e os argumentos (ou o texto, num passo em modo prompt).
   const autopilotSaid = origin
     ? [run.command ? `/${run.command}` : null, run.text].filter(Boolean).join(' ')
     : null
@@ -177,7 +166,6 @@ export function RunBlock({
   )
 }
 
-/** Spec ou plano (task do Backlog.md) logo depois da execução que o criou ou atualizou. */
 function RunDocument({
   command,
   defaultOpen
@@ -209,7 +197,6 @@ function RunDocument({
   )
 }
 
-/** O que a execução mudou: arquivos, commits, testes e o diff da tarefa. */
 function RunChanges({
   summary,
   defaultOpen

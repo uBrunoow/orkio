@@ -57,7 +57,6 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
   let newNo = 0
 
   const rows = text.split('\n')
-  // O \n final do texto deixa uma linha vazia que não é contexto.
   if (rows[rows.length - 1] === '') rows.pop()
 
   for (const raw of rows) {
@@ -82,7 +81,6 @@ export function parseUnifiedDiff(text: string): DiffFile[] {
     if (!file) continue
 
     if (!hunk) {
-      // Cabeçalho do arquivo (antes do primeiro @@).
       if (line.startsWith('new file mode')) file.status = 'added'
       else if (line.startsWith('deleted file mode')) file.status = 'deleted'
       else if (line.startsWith('rename from ')) {
@@ -147,7 +145,6 @@ export function diffTotals(files: readonly DiffFile[]): DiffTotals {
   }
 }
 
-/** Linhas de um arquivo (soma dos hunks): decide o que abre sozinho e o que recolhe. */
 export function diffLineCount(file: DiffFile): number {
   return file.hunks.reduce((n, h) => n + h.lines.length, 0)
 }

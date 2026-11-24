@@ -39,13 +39,8 @@ function Section({
   )
 }
 
-/**
- * O que mudou no código: resumo da última execução (arquivos, commits, testes), o ambiente da
- * tarefa (editores, diff, limpar) e os documentos para anexar/publicar no Notion.
- */
 export function TaskChanges(): React.JSX.Element {
   const { projectId, taskId, card, stages, runs } = useTaskView()
-  // A tarefa está na etapa concluída (papel `done`): sugere limpar o ambiente.
   const done = card.stageId !== null && stages.find((s) => s.id === card.stageId)?.role === 'done'
   const state = runs.state
   const summary = state?.runs.find((r) => r.summary)?.summary ?? null
@@ -105,7 +100,6 @@ export function TaskChanges(): React.JSX.Element {
   )
 }
 
-/** Aba PR & CI: branch e PR da tarefa e as branches vinculadas à mão. */
 export function TaskGitHub(): React.JSX.Element {
   const { projectId, taskId, signals, refreshSignals } = useTaskView()
   return (
@@ -130,7 +124,6 @@ export function TaskDetails(): React.JSX.Element {
   const { projectId, card, agent, backlog, history, stageName, setBlocked, setAutomationPaused } =
     view
   const [specOpen, setSpecOpen] = useState(false)
-  // Aberto já quando a tarefa abre no histórico (sino, notificação).
   const [historyOpen, setHistoryOpen] = useState(view.focusSection === 'history')
   return (
     <div className="flex flex-col gap-6">
@@ -208,7 +201,6 @@ export function TaskDetails(): React.JSX.Element {
   )
 }
 
-/** "Mover para" na barra da tarefa, com a sincronização com o Notion. */
 export function StageSelector(): React.JSX.Element {
   const { card, stages, move } = useTaskView()
   return (

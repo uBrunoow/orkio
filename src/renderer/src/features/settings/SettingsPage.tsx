@@ -128,7 +128,6 @@ export function PowerSection(): React.JSX.Element {
   )
 }
 
-/** Caixa das seções de Configurações (borda fina, fundo de card). */
 const SECTION_CLASS = 'flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5'
 
 function PhaseToken({ status }: { status: UpdateStatus }): React.JSX.Element | null {

@@ -3,7 +3,6 @@ import { useSources } from '../../app/sources'
 import { useSource } from '../../lib/ipc'
 import type { UpdateChannel, UpdateStatus } from '../../../../shared/updates'
 
-/** Status das atualizações (6C), um para o App, ao vivo pelo evento do main. */
 export function useUpdates(): {
   status: UpdateStatus | null
   checking: boolean

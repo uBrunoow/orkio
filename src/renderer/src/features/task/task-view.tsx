@@ -32,7 +32,6 @@ import {
 import { canOpenPr, useOpenPr, type OpenPrState } from './open-pr'
 import { currentPhase, taskPhases, type TaskPhase } from './task-phases'
 
-/** O que está trabalhando agora na tarefa (rodapé "Trabalhando há…" da conversa). */
 export interface TaskActivity {
   who: string
   what: string | null
@@ -47,15 +46,11 @@ export interface TaskFlowData {
   /** Execuções do fluxo da tarefa, mais nova primeiro (`null` = carregando). */
   runs: FlowRunView[] | null
   run: FlowRunView | null
-  /** Plano da execução mais nova (calculado uma vez por mudança). */
   plan: PlanStep[] | null
   /** O fluxo está em andamento (rodando, esperando ou pausado). */
   live: boolean
-  /** Fluxo ligado à etapa atual (o botão "Rodar fluxo"). */
   binding: (StageFlow & { flowName: string }) | null
-  /** Modelo "CI vermelho" salvo no projeto. */
   ciFlow: { id: string; name: string } | null
-  /** Execução do Claude Code → passo do fluxo que a disparou. */
   origins: ReadonlyMap<string, FlowStepOrigin>
   reload(): void
 }
@@ -70,7 +65,6 @@ export interface TaskViewInput {
   move(stageId: string): void
   setBlocked(blocked: boolean): void
   setAutomationPaused(paused: boolean): void
-  /** Vinculou/desvinculou uma branch: relê os sinais. */
   refreshSignals(): void
   /** Seção a mostrar ao abrir (sino, notificação): fluxo, Claude Code ou histórico. */
   focusSection: TaskSection | null
@@ -91,7 +85,6 @@ export interface TaskView extends TaskViewInput {
   diff: Source<ClaudeDiff>
   /** "Abrir PR": um estado só para o botão da aba, o do Ambiente e o do recibo de bloqueio. */
   openPr: OpenPrState & {
-    /** Sem PR aberta e com ambiente. */
     available: boolean
     /** Um fluxo está em andamento (uma execução por vez). */
     blocked: boolean
@@ -104,7 +97,6 @@ export interface TaskView extends TaskViewInput {
    * (uma vez), sem esperar tempo fixo: o elemento chega quando os dados chegam.
    */
   sectionRef(section: TaskSection): (el: HTMLElement | null) => void
-  /** Liga o campo de mensagem da sessão (`SessionComposer`). */
   setComposer(el: HTMLTextAreaElement | null): void
   /** Leva ao campo de mensagem (o texto vai para o Claude): "Pedir ajuste…" do gate. */
   focusComposer(): void
@@ -140,7 +132,6 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
     if (touchesTask(m)) bump()
   })
 
-  // Fluxo da tarefa: execuções e a ligação da etapa atual.
   const [flowRuns, setFlowRuns] = useState<FlowRunView[] | null>(null)
   const [binding, setBinding] = useState<TaskFlowData['binding']>(null)
   const [ciFlow, setCiFlow] = useState<TaskFlowData['ciFlow']>(null)
@@ -219,7 +210,6 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
     reload: bump
   }
 
-  // Quem está trabalhando agora: o passo do fluxo; senão a execução avulsa do Claude Code.
   const state = runs.state
   const activeRun = state?.runs.find((r) => r.id === state.activeRunId) ?? null
   const currentStep = run

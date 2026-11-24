@@ -34,10 +34,6 @@ type NotionError = ResultError
 /** A sugestão automática só é pré-selecionada a partir desta semelhança de nome. */
 const SUGGESTION_THRESHOLD = 0.5
 
-/**
- * Vínculo do projeto local com uma página do banco de Projetos do Notion e lista (só leitura)
- * das tarefas ligadas a ela.
- */
 export function ProjectNotionSection({
   project,
   workspace,
@@ -46,7 +42,6 @@ export function ProjectNotionSection({
 }: {
   project: ProjectView
   workspace: NotionWorkspaceStatus
-  /** Recarrega a lista de projetos (vínculo mudou). */
   onChanged(): Promise<void>
   onOpenIntegrations(): void
 }): React.JSX.Element {

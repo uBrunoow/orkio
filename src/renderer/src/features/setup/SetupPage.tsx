@@ -48,11 +48,6 @@ const LEAD: Record<SetupStepId, string> = {
   'first-task': 'Tudo pronto. Escolha uma tarefa para começar.'
 }
 
-/**
- * Primeiros passos (reestruturação): um caminho só, do zero até a primeira tarefa. Os passos vêm
- * do estado real; o conteúdo de cada passo reaproveita os fluxos que já existem (login do GitHub,
- * conexão do Notion, Claude Code, adicionar projeto, bancos e vínculo, criar o quadro).
- */
 export function SetupPage({
   projectId = null,
   onExit,

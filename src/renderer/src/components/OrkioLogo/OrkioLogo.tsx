@@ -16,11 +16,9 @@ export interface OrkioLogoProps {
   size?: number
   /** Para mudar a cor, defina `color` (símbolo) e/ou `--orkio-wordmark-color` via CSS. */
   className?: string
-  /** Rótulo acessível. */
   label?: string
 }
 
-/** Peso do wordmark (classes de `OrkioLogo.css`). */
 const WEIGHT_CLASS: Record<WordmarkMetrics['fontWeight'], string> = {
   300: 'orkio-logo__wordmark--w300',
   400: 'orkio-logo__wordmark--w400'

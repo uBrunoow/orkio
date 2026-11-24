@@ -1,4 +1,3 @@
-/** Abas do painel da fase (direita da tela da tarefa) e qual abre primeiro. */
 import type { TaskPhaseId } from '../../../../shared/task-phase'
 
 export type PanelTab = 'spec' | 'plan' | 'changes' | 'pr' | 'review' | 'details'

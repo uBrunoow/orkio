@@ -52,7 +52,6 @@ export function stepShort(step: Step): string {
   }
 }
 
-/** Uma linha que resume o passo (lista de passos do editor). */
 export function stepSummary(step: Step): string {
   switch (step.type) {
     case 'claude_command':
@@ -80,7 +79,6 @@ export function stepSummary(step: Step): string {
   }
 }
 
-/** Uma frase por passo ("Faz"). */
 export function stepSentence(step: Step, stepName: (id: string) => string): string {
   switch (step.type) {
     case 'claude_command': {

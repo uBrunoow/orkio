@@ -19,7 +19,6 @@ function startPhrase(bindings: readonly StageFlow[], stageName: (id: string) => 
   return 'Quando você roda à mão'
 }
 
-/** Título-frase do fluxo: como começa e a sequência de passos. */
 function describeFlow(
   flow: Flow,
   bindings: readonly StageFlow[],
@@ -30,7 +29,6 @@ function describeFlow(
   return `${start}: ${joinPt(flow.steps.map((s) => stepShort(s)))}.`
 }
 
-/** Fluxo em frase: quando começa, cada passo, quando rodou. O editor fica em "Editar". */
 export function FlowDetail({
   flow,
   bindings,

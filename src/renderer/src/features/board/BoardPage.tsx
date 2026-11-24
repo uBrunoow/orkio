@@ -41,10 +41,6 @@ import { formatTime } from '../../lib/format'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { SignalsMessages } from '../notion-workspace/SignalsMessages'
 
-/**
- * Tela "Quadro" do projeto atual (o projeto vem do menu). Etapas e automações, Fluxos e Contexto
- * do Claude são rotas próprias (6E); aqui fica só o quadro e, sem quadro ainda, a criação dele.
- */
 export function BoardPage({
   project,
   onOpenIntegrations,
@@ -55,7 +51,6 @@ export function BoardPage({
   project: ProjectView | null
   onOpenIntegrations(): void
   onOpenProjects(): void
-  /** Abre a tela da tarefa. */
   onOpenTask(taskId: string): void
 }): React.JSX.Element {
   if (!project) {
@@ -115,7 +110,6 @@ function Board({
   const [layout, setLayout] = useState<'kanban' | 'list'>('kanban')
   const { view } = board
 
-  // Branches/PRs depois de carregar o quadro.
   const fetchedAt = view?.fetchedAt
   useEffect(() => {
     if (fetchedAt) void refreshSignals(false)
@@ -178,7 +172,6 @@ function Board({
   const refreshing = board.loading || automation.running
 
   return (
-    // Ocupa a altura útil da janela: as colunas e o painel rolam por dentro.
     <div className="flex h-full min-h-0 flex-col gap-3 p-3.5">
       <ScreenBarStart>
         <ScreenTitle look={5}>Quadro</ScreenTitle>
@@ -217,7 +210,6 @@ function Board({
           variant="outline"
           disabled={refreshing}
           onClick={() => {
-            // Verifica git/GitHub agora (automações) e relê o Notion.
             void automation.runNow().then(() => board.load(true))
           }}
         >
@@ -239,7 +231,6 @@ function Board({
           </DropdownMenuContent>
         </DropdownMenu>
       </ScreenBarEnd>
-      {/* Filtros finos e o estado das automações, numa linha só acima das colunas. */}
       <div
         role="toolbar"
         aria-label="Filtros do quadro"
@@ -395,7 +386,6 @@ function useAutomationStatus(projectId: string): {
   }
 }
 
-/** Estado das automações, curto, no cabeçalho do quadro. */
 function AutomationLine({
   status,
   onOpenIntegrations
@@ -442,10 +432,6 @@ function AutomationLine({
   )
 }
 
-/**
- * Agentes com tarefas neste quadro: avatar e quantas tarefas. Clicar filtra o quadro pelo agente;
- * o ponto laranja marca agente com fluxo rodando agora.
- */
 function AgentRow({
   cards,
   badges,

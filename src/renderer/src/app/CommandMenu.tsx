@@ -18,11 +18,8 @@ import { isMac } from '../lib/platform'
 
 export interface CommandData {
   group: string
-  /** Rota de destino (Ir para, tarefas). */
   route?: Route
-  /** Trocar o projeto atual. */
   projectId?: string
-  /** ID da tarefa (mono) e onde ela está. */
   taskRef?: { displayId: string | null; where: string }
   keys?: string
   /** Tarefa fora do quadro: abre a página no Notion. */
@@ -40,7 +37,6 @@ interface SearchSource {
   search(query: string): Promise<CommandItem[]>
 }
 
-/** Comandos fixos de navegação, com o atalho de cada um, e as seções de Configurações. */
 function navigationItems(hasProject: boolean): CommandItem[] {
   const group = 'Ir para'
   const items: CommandItem[] = SHORTCUTS.filter((s) => hasProject || !s.isProjectScreen).map(
@@ -169,7 +165,6 @@ export function CommandMenu({
         }))
       return [...(await tasks), ...navigationItems(projects.length > 0), ...switchItems]
     }
-    // Modo tarefas: tarefas do quadro (para saber o que abre no Orkio) + busca no Notion.
     let board: Promise<Set<string>> | null = null
     const notion = async (query: string): Promise<CommandItem[]> => {
       board ??= loadTasks(projects).then(
@@ -190,7 +185,6 @@ export function CommandMenu({
     return {
       bootstrap: async () => {
         const items = await all()
-        // Sem busca: as telas primeiro, e só algumas tarefas.
         const tasksOnly = items.filter((i) => i.auxiliaryData?.group === 'Tarefas').slice(0, 5)
         return [...items.filter((i) => i.auxiliaryData?.group !== 'Tarefas'), ...tasksOnly]
       },
@@ -218,7 +212,6 @@ export function CommandMenu({
   useEffect(() => {
     if (!isOpen) return
     let alive = true
-    // Busca no Notion com um respiro entre teclas; a lista local responde na hora.
     const delay = mode === 'tasks' && query.trim() ? 250 : 0
     const timer = window.setTimeout(() => {
       const run = query.trim() ? source.search(query) : source.bootstrap()

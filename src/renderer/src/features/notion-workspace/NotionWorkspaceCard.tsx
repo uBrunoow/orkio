@@ -485,7 +485,6 @@ const FIELD_WIDTH = 'max-w-md'
 
 const WIZARD_STEPS = ['Projetos', 'Tarefas', 'Mapeamento'] as const
 
-/** Passos do assistente: círculo numerado (feito = ✓ verde, atual = borda laranja). */
 function WizardSteps({ active }: { active: number }): React.JSX.Element {
   return (
     <ol aria-label="Configurar bancos do Notion" className="flex flex-wrap items-center gap-2">

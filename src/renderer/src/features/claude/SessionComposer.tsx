@@ -16,7 +16,6 @@ import { useTaskView } from '../task/task-view'
 
 const SEND_KEY = `${isMac() ? '⌘' : 'Ctrl'} ⏎ enviar`
 
-/** Comandos do catálogo que começam com o que foi digitado depois da barra. */
 export function matchCommands(
   commands: readonly CatalogCommand[],
   typed: string,
@@ -53,10 +52,8 @@ export function SessionComposer({
   state: TaskRunsState | null
   /** Um passo de fluxo está rodando (ou vai começar sozinho): a mensagem interrompe e segue. */
   flowRunning: boolean
-  /** Passo que o piloto automático (fluxo) está rodando agora. */
   autopilotStep?: string | null
   onSent(state: TaskRunsState): void
-  /** Abre o formulário completo (briefing editável, modo, comando, rodar como). */
   onNewSession(): void
 }): React.JSX.Element {
   const [text, setText] = useState('')

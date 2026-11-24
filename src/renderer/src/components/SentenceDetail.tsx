@@ -16,10 +16,6 @@ import { EditIcon } from './icons'
 import { StatusToken } from './StatusToken'
 import { Timestamp } from './Timestamp'
 
-/**
- * Detalhe "em frase" de uma regra ou fluxo (fase 6): a frase como título, "Começa" e "Faz",
- * execuções e uma coluna de detalhes. O editor fica atrás de "Editar".
- */
 export function SentenceDetail({
   label,
   sentence,
@@ -30,14 +26,12 @@ export function SentenceDetail({
   actions,
   onEdit
 }: {
-  /** Nome acessível da região (ex.: "Automação PR aprovada"). */
   label: string
   sentence: string
   starts: React.ReactNode
   does: React.ReactNode
   executions: React.ReactNode
   details: readonly { label: string; value: React.ReactNode }[]
-  /** Ações extras ao lado de "Editar" (ex.: Ativar/Desativar). */
   actions?: React.ReactNode
   onEdit(): void
 }): React.JSX.Element {
@@ -92,7 +86,6 @@ export function SentenceDetail({
   )
 }
 
-/** Atividade recente do projeto num grupo (a mesma da Visão geral), recarregada quando muda. */
 export function useProjectActivity(projectId: string, group: ActivityGroup): ActivityItem[] | null {
   const [items, setItems] = useState<ActivityItem[] | null>(null)
   const [tick, setTick] = useState(0)
@@ -114,7 +107,6 @@ export function useProjectActivity(projectId: string, group: ActivityGroup): Act
   return items
 }
 
-/** Tabela "Quando · Tarefa · Resultado"; vazio vira uma frase. */
 export function ExecutionsTable({
   executions,
   empty

@@ -44,7 +44,6 @@ export function useProjects({ revalidate = false }: { revalidate?: boolean } = {
     if (mounted.current) setRevalidating(false)
   }, [source])
 
-  // Ao abrir: lista local rápida (a fonte) e, em seguida, revalidação no GitHub.
   useEffect(() => {
     mounted.current = true
     if (revalidate) {

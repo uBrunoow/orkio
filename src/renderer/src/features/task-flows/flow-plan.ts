@@ -35,11 +35,9 @@ export interface PlanStep {
   /** O que o passo faz, curto, para ler: `/alva-flow:spec`, "Sua aprovação", a ação. */
   detail: string
   state: PlanState
-  /** Quantas vezes rodou (voltas de um loop). */
   visits: number
 }
 
-/** Fase de um passo: uma das fases da tarefa ou, para outro comando, o nome dele. */
 export type PlanPhase = { id: TaskPhaseId } | { command: string }
 
 /** Passo visível no plano: saltos (`branch`) são decisões internas, não trabalho. */
@@ -136,7 +134,6 @@ export function planProgress(plan: readonly PlanStep[]): { done: number; total: 
   }
 }
 
-/** De onde veio uma execução do Claude Code: o passo do fluxo que a disparou. */
 export interface FlowStepOrigin {
   flowRunId: string
   flowName: string

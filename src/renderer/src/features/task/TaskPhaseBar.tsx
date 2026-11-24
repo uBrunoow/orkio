@@ -11,7 +11,6 @@ const SUFFIX: Record<PhaseState, string> = {
   next: 'a seguir'
 }
 
-/** Fase em destaque: o tom diz se o agente trabalha (laranja), espera você ou parou. */
 const PHASE_CLASS: Record<PhaseState, string> = {
   done: 'text-muted-foreground',
   current: 'bg-brand-tint text-brand-tint-foreground',
@@ -20,7 +19,6 @@ const PHASE_CLASS: Record<PhaseState, string> = {
   next: 'text-subtle-foreground'
 }
 
-/** Ponto na fase de agora (laranja), esperando você (amarelo). */
 const DOT_CLASS: Partial<Record<PhaseState, string>> = {
   current: 'bg-brand',
   waiting: 'bg-warn'

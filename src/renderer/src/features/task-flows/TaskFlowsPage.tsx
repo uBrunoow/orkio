@@ -42,7 +42,6 @@ import { GATE_SHOW_TEXT, stepSummary } from './step-text'
 import { IPC_FAILURE, ipcCall, ipcResult, useIpcResource } from '../../lib/ipc'
 import { useBoard } from '../board/useBoard'
 
-/** Chip mono (categoria do passo, contagem de erros). */
 function Chip({
   tone = 'neutral',
   children
@@ -112,12 +111,10 @@ function emptyStep(flow: Flow, type: StepType): Step {
 export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.Element {
   const [project, setProject] = useState<TaskFlowsProject | null>(null)
   const [flows, setFlows] = useState<Flow[]>([])
-  // Última versão salva: base do contador de alterações e do "Descartar".
   const [saved, setSaved] = useState<Flow[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
-  // Fluxo aberto no editor (os outros aparecem em frase, fase 6). Novo fluxo já abre editando.
   const [editingId, setEditingId] = useState<string | null>(null)
   const flowActivity = useProjectActivity(projectId, 'flow')
 
@@ -136,7 +133,6 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
       active = false
     }
   }, [projectId])
-  // Nomes das colunas para a frase "Quando a tarefa entra em…" (o quadro que a tela já leu).
   const board = useBoard(projectId).view
   const stageNames = useMemo(
     () => Object.fromEntries((board?.config?.stages ?? []).map((st) => [st.id, st.name])),
@@ -313,7 +309,6 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
   )
 }
 
-/** Quantos fluxos mudaram desde o último salvar (novos, removidos ou editados). */
 function countFlowChanges(saved: readonly Flow[], current: readonly Flow[]): number {
   const before = new Map(saved.map((f) => [f.id, JSON.stringify(f)]))
   const now = new Set(current.map((f) => f.id))
@@ -353,7 +348,6 @@ function FlowEditor({
     onChange({ ...flow, steps })
     setSelectedIndex(i + delta)
   }
-  // Novo passo entra depois do selecionado (ou no fim) e já fica aberto.
   const add = (type: StepType): void => {
     const at = flow.steps.length === 0 ? 0 : index + 1
     const steps = [...flow.steps]
@@ -544,7 +538,6 @@ function StepForm({
   catalog: CatalogGroup[] | null
   project: TaskFlowsProject
   stepOptions: { value: string; label: string }[]
-  /** Passos do Claude Code (alvo de "Pedir ajustes"). */
   claudeSteps: { value: string; label: string }[]
   onChange(step: Step): void
 }): React.JSX.Element {

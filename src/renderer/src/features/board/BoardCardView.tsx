@@ -34,7 +34,6 @@ export interface CardActions {
 
 export type CardMenuItem = { label: string; onClick(): void } | { type: 'divider' }
 
-/** Itens do menu "Ações de …" (card do quadro e linha da lista). */
 export function cardMenuItems(
   card: BoardCard,
   stages: readonly BoardStage[],
@@ -60,7 +59,6 @@ export function cardMenuItems(
   ]
 }
 
-/** Botão "Ações de …" com o menu do card (o mesmo no quadro e na lista). */
 export function CardActionsMenu({
   label,
   items,
@@ -97,11 +95,9 @@ export function CardActionsMenu({
   )
 }
 
-/** Caixa do card do kanban (mockup `.kc`): também usada no "fantasma" do arrasto. */
 export const CARD_CLASS =
   'flex flex-col gap-1.5 rounded-[9px] border border-border-soft bg-card px-[11px] py-2.5'
 
-/** Conteúdo do card (no quadro e no "fantasma" do arrasto): ID · agente · estado, título, metadados. */
 export function BoardCardBody({
   card,
   stages,

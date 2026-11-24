@@ -21,7 +21,6 @@ export function IntegrationCard({
 }: {
   id: string
   logo: SvgIcon
-  /** Cores do quadrado do logo (tokens). */
   logoClassName?: string
   name: string
   /** Rótulo pequeno em mono (também usado na busca). */

@@ -14,10 +14,6 @@ import { suggestAlvaTargets, type AlvaTargets } from './alva-targets'
 import { stageWithRole } from '../../../../shared/board'
 import type { BoardView } from '../../../../shared/board'
 
-/**
- * Tela "alva-flow" (5B): pré-checagem do projeto, criação dos fluxos Alva (templates editáveis no
- * "Fluxos de tarefa"), coluna opcional "Planejando" e limite de fluxos Alva em paralelo.
- */
 export function AlvaPage({
   projectId,
   view,
@@ -33,7 +29,6 @@ export function AlvaPage({
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [planStatus, setPlanStatus] = useState<string>(
-    // Sugestão: o status da coluna de trabalho (papel `work`), senão a primeira opção.
     view.config?.stages.find((s) => s.role === 'work')?.notionStatus.id ??
       view.statusOptions[0]?.id ??
       ''
@@ -297,7 +292,6 @@ export function AlvaPage({
   )
 }
 
-/** Copia o comando de correção para colar no terminal. */
 function CopyButton({ text, label }: { text: string; label: string }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
   return (

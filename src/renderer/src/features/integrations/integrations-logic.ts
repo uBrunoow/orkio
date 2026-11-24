@@ -12,7 +12,6 @@ export function matchesQuery(
   return !needle || normalizeLabel(`${card.name} ${card.category} ${card.section}`).includes(needle)
 }
 
-/** O primeiro card (na ordem da página) que ainda não está pronto. */
 export function firstPendingId(
   cards: ReadonlyArray<{ id: string; pending: boolean }>
 ): string | null {

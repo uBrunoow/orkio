@@ -15,7 +15,6 @@ export interface UseBoard {
   notice: BoardState['notice']
   dismissNotice(): void
   load(force: boolean): Promise<void>
-  /** Troca o quadro exibido (ex.: depois de salvar o fluxo). */
   replace(view: BoardView): void
   move(taskId: string, stageId: string): Promise<void>
   setBlocked(taskId: string, blocked: boolean): Promise<void>

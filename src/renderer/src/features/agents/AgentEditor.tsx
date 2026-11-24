@@ -121,7 +121,6 @@ export function AgentEditor({
   const set = (patch: Partial<AgentProfile>): void =>
     onChange({ ...editing, draft: { ...d, ...patch } })
   const isNew = editing.mode === 'new'
-  // Id gerado do nome até você mexer nele (só na criação).
   const [idTouched, setIdTouched] = useState(false)
   const errors = useMemo(() => validateAgent(d), [d])
   const commandOptions = [...new Set([...commands, ...d.commands])].map((c) => ({

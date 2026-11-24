@@ -8,7 +8,6 @@ const AgentBadgesContext = createContext<AgentBadges>({})
 
 export const AgentBadgesProvider = AgentBadgesContext.Provider
 
-/** Agente da tarefa (avatar no card). */
 export function useAgentBadge(taskId: string): AgentBadge | null {
   return useContext(AgentBadgesContext)[taskId] ?? null
 }

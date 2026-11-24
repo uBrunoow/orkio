@@ -19,19 +19,16 @@ import { isMac } from '../lib/platform'
 import { ProjectAvatar } from '../components/ProjectAvatar'
 import { useUpdates } from '../features/settings/useUpdates'
 
-/** `aria-keyshortcuts` e o atalho visível (Kbd) de uma tela do menu. */
 function shortcutOf(route: Route['name']): { aria: string; keys: string } | null {
   const keys = SHORTCUTS.find((s) => s.route.name === route)?.keys
   if (!keys) return null
   return { aria: keys.replace('mod', isMac() ? 'Meta' : 'Control'), keys }
 }
 
-/** Versão do app (rodapé da marca). Só leitura; sem versão, nada aparece. */
 function useAppVersion(): string | null {
   return useUpdates().status?.currentVersion ?? null
 }
 
-/** Linha de tarefa: ponto do estado, ID em mono apagado e o título. */
 function TaskRow({
   task,
   isSelected,
@@ -64,7 +61,6 @@ function TaskRow({
   )
 }
 
-/** Grupo de tarefas com título em caixa-alta pequena e a contagem (mockup). */
 function Section({
   title,
   count,
@@ -88,10 +84,6 @@ function Section({
   )
 }
 
-/**
- * Lista lateral (mockup + Alva Tasks): marca e versão, projeto atual, "Buscar tarefa", as tarefas
- * do projeto pelo que fazer agora e, embaixo, as três telas com o atalho e a conta.
- */
 export function Sidebar({
   route,
   project,
@@ -106,7 +98,6 @@ export function Sidebar({
   onContinueSetup,
   account
 }: {
-  /** Conta da pessoa no rodapé (`AccountMenu`). */
   account: React.ReactNode
   route: Route
   project: ProjectView | null

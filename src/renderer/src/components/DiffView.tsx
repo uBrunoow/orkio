@@ -22,7 +22,6 @@ const AUTO_OPEN_LINES = 200
 const ROWS_FIRST = 300
 const ROWS_MORE = 500
 
-/** Cor da linha pelo tipo (classes da camada da marca, `styles/brand.css`). */
 const LINE_CLASS: Record<DiffLineKind, string> = {
   add: 'orkio-diff-add',
   del: 'orkio-diff-del',
@@ -61,7 +60,6 @@ function FileBody({
   onMore
 }: {
   file: DiffFile
-  /** Linhas extras já reveladas com "Mostrar mais". */
   extra: number
   onMore(): void
 }): React.JSX.Element {
@@ -124,10 +122,6 @@ function FileBody({
   )
 }
 
-/**
- * Diff do ambiente da tarefa: resumo (arquivos, +/−), um cartão por arquivo com as linhas
- * coloridas e o número da linha, e os arquivos novos que ainda estão fora do git. Só leitura.
- */
 export function DiffView({
   label,
   diff,
@@ -195,7 +189,6 @@ export function DiffView({
       )}
 
       {files.length === 0 && !onlyUncommitted && diff.trim() !== '' && (
-        // Texto que não é diff unificado: mostra como veio.
         <pre className="orkio-codeblock text-xs">{diff}</pre>
       )}
 

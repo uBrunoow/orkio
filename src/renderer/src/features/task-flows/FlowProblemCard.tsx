@@ -6,10 +6,6 @@ import { ExternalLinkIcon, ProblemIcon } from '@/components/icons'
 import type { FlowProblem } from '../../../../shared/flow-problem'
 import { TaskDiffView } from '../task/TaskDiffView'
 
-/**
- * Fluxo parado por um problema: o que o Orkio registrou, o que isso quer dizer e as saídas
- * (retomar, rodar de novo o passo anterior, ver a sessão ou o que falta commitar, pular, cancelar).
- */
 export function FlowProblemCard({
   problem,
   busy,
@@ -28,7 +24,6 @@ export function FlowProblemCard({
   onReply(text: string): void
   onSkip(): void
   onCancel(): void
-  /** Abre a sessão (log) da execução do passo parado. */
   onOpenRun?: (runId: string) => void
 }): React.JSX.Element {
   const [reply, setReply] = useState('')

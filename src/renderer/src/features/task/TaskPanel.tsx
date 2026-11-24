@@ -25,7 +25,6 @@ export function TaskPanel({
   onOpenBoard,
   ...input
 }: TaskViewInput & {
-  /** Clique no projeto do caminho: volta ao quadro. */
   onOpenBoard(): void
 }): React.JSX.Element {
   const view = useTaskViewState(input)

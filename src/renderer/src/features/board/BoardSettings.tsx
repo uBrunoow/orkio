@@ -25,7 +25,6 @@ interface DraftStage {
 
 const ORKIO_STAGE = 'Etapa Orkio'
 
-/** Criar/ajustar o quadro: etapas ↔ status do Notion, "Etapa Orkio" e "Bloqueada". */
 export function BoardSettings({
   view,
   onSave,

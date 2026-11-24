@@ -28,7 +28,6 @@ const ACTORS: Record<Exclude<EventActor['kind'], 'agent'>, { name: string; icon:
   orkio: { name: 'Orkio', icon: AutomationIcon }
 }
 
-/** Quem "fala" em cada evento (a regra está no catálogo, `shared/task-events.ts`). */
 export function actorOf(e: BoardHistoryEntry): Actor {
   const actor = eventActor(e)
   return actor.kind === 'agent' ? { name: actor.name, agent: true } : ACTORS[actor.kind]
@@ -55,7 +54,6 @@ export function TaskTimeline({
       {ordered.map((e, i) => {
         const actor = actorOf(e)
         const prev = i > 0 ? actorOf(ordered[i - 1]!) : null
-        // Mesmo autor em sequência: só a primeira linha mostra o avatar e o nome.
         const repeated = prev?.name === actor.name
         const link = prUrl(e) ?? branchUrl(e)
         const ActorIcon = 'agent' in actor ? null : actor.icon

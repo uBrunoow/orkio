@@ -18,11 +18,6 @@ const BAR: Record<'ok' | 'warn' | 'danger', string> = {
   danger: 'bg-danger'
 }
 
-/**
- * "Ambiente" (topo da aba Detalhes), como a coluna do Claude Desktop: onde o agente trabalha
- * (projeto, pasta, branch, editor/terminal), quanto do contexto da conversa já foi usado e o que
- * mudou na branch, com a PR (ou "Abrir PR").
- */
 export function EnvironmentPanel(): React.JSX.Element {
   const view = useTaskView()
   const { projectId, taskId, projectName, signals, runs } = view

@@ -18,7 +18,6 @@ const DOT_CLASS: Record<StatusTone, string> = {
   neutral: 'bg-subtle-foreground'
 }
 
-/** Ponto de estado (7 px, como no mockup). */
 export function StatusDot({
   tone,
   className

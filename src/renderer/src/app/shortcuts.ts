@@ -13,7 +13,6 @@ export interface Shortcut {
   isProjectScreen?: boolean
 }
 
-/** Telas por número, na ordem do menu: Quadro, Agentes, Configurações. */
 export const SHORTCUTS: readonly Shortcut[] = [
   { keys: 'mod+1', label: ROUTE_TITLES.board, route: { name: 'board' }, isProjectScreen: true },
   { keys: 'mod+2', label: ROUTE_TITLES.agents, route: { name: 'agents' } },
@@ -29,7 +28,6 @@ export interface KeyInput {
   metaKey: boolean
   altKey: boolean
   shiftKey: boolean
-  /** Foco num campo de texto (input, textarea, contenteditable). */
   inTextField: boolean
 }
 
@@ -46,7 +44,6 @@ export function globalShortcut(e: KeyInput, isMac: boolean): GlobalAction | null
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'ArrowLeft') {
     return e.inTextField ? null : { type: 'back' }
   }
-  // "?" abre a paleta, que mostra os atalhos ao lado de cada tela.
   if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.inTextField) {
     return { type: 'palette' }
   }

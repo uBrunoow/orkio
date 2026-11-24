@@ -72,19 +72,11 @@ function stepSummary(history: FlowRunView['history']): string {
   return [total, ...[...counts].map(([label, n]) => `${n} ${label}`)].join(' · ')
 }
 
-/**
- * Fluxo da tarefa (5A), no fim da sessão: estado, passos (recolhidos), gate (aprovar/recusar com
- * diff ou resumo), pausas (retomar/pular/cancelar) e a decisão quando a tarefa sai da etapa. A
- * conversa do passo atual (Claude Code) aparece logo acima, na sessão.
- */
-
 export function TaskFlowSection({
   onOpenRun,
   onShowPlan
 }: {
-  /** Abre a sessão (log) de uma execução do Claude Code desta tarefa. */
   onOpenRun?: (runId: string) => void
-  /** Abre o plano do piloto automático (popover da barra de fases, no topo da tela). */
   onShowPlan?: () => void
 }): React.JSX.Element | null {
   const view = useTaskView()
@@ -372,10 +364,6 @@ export function TaskFlowSection({
   )
 }
 
-/**
- * Cartão "esperando você" (gate, ação pendente, escolha, decisão): fundo amarelo discreto, título
- * com o ponto de estado e as ações embaixo (mockup `.gate`).
- */
 function WaitCard({
   label,
   title,
@@ -400,7 +388,6 @@ function WaitCard({
   )
 }
 
-/** Gate de uma ação do Orkio (5C): o que vai acontecer (destino, commits, diff, revisores). */
 function ConfirmCard({
   info,
   busy,
@@ -634,7 +621,6 @@ function GateCard({
   resultRunId: string | null
   /** "Pedir ajustes": voltas usadas e o limite (`null` = o gate não aceita ajustes). */
   revise: { used: number; max: number } | null
-  /** Nome do passo que recebe o ajuste. */
   reviseStep: string | null
   /** O que acontece ao aprovar e ao recusar (frase curta, junto dos botões). */
   outcomes: { approve: string; reject: string } | null

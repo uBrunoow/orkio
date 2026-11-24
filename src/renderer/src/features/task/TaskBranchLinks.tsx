@@ -20,7 +20,6 @@ export function TaskBranchLinks({
 }: {
   projectId: string
   taskId: string
-  /** Vinculou/desvinculou: relê os sinais (branch, PR) da tarefa. */
   onChanged?: () => void
 }): React.JSX.Element {
   const [view, setView] = useState<TaskBranchesView | null>(null)

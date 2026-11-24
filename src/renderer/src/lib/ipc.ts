@@ -41,8 +41,6 @@ function errorOf(e: unknown): ResultError {
   return e instanceof ResultFailure ? e.error : IPC_FAILURE
 }
 
-// ---------- Fontes de dados ----------
-
 export interface SourceState<T> {
   /** `null` até a primeira carga com sucesso (uma falha depois mantém o último valor). */
   value: T | null
@@ -51,11 +49,9 @@ export interface SourceState<T> {
 }
 
 export interface SourceControl<T, A> {
-  /** Chaves com alguém lendo agora. */
   keys(): string[]
   /** Relê a chave. Sem `arg`, junta-se a uma carga em andamento; com `arg`, sempre pede de novo. */
   reload(key: string, arg?: A): Promise<void>
-  /** Troca o valor guardado (evento com o dado novo, mudança otimista, resultado de uma ação). */
   set(key: string, update: T | null | ((current: T | null) => T | null)): void
 }
 
@@ -66,7 +62,6 @@ export interface SourceSpec<T, A = never> {
   /** Relê cada chave lida a cada `pollMs` (só quando `pollWhen()`; padrão: janela visível). */
   pollMs?: number
   pollWhen?(): boolean
-  /** Relê cada chave lida quando a janela volta ao foco. */
   refreshOnFocus?: boolean
 }
 

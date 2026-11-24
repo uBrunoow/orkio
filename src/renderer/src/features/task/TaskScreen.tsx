@@ -8,10 +8,6 @@ import { TaskPanel } from './TaskPanel'
 import { useBoard } from '../board/useBoard'
 import type { ProjectView } from '../../../../shared/projects'
 
-/**
- * Tela da tarefa: fases no topo, conversa no meio e o painel da fase à direita. Abre pela lista
- * lateral, pelo Quadro, pelo sino, pela Command Palette e pelas notificações.
- */
 export function TaskScreen({
   project,
   taskId,

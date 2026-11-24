@@ -8,10 +8,6 @@ import { ipcResult } from '../../lib/ipc'
 import { useTaskView } from '../task/task-view'
 import { FLOW_RUN_STATUS } from '../../lib/status-text'
 
-/**
- * Conteúdo do popover da barra de fases: nome do fluxo (e agente), estado, a frase do piloto
- * automático, o plano e "Cancelar fluxo" (a mesma ação do fim da conversa).
- */
 export function FlowPlanPanel({ onCancelled }: { onCancelled(): void }): React.JSX.Element | null {
   const { run, plan } = useTaskView().flow
   const [busy, setBusy] = useState(false)

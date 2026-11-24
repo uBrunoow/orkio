@@ -33,7 +33,6 @@ import { useConnectionStatus } from '../integrations/useConnection'
 import { isFolderProblem } from '../../../../shared/projects'
 import { ProjectAvatar } from '../../components/ProjectAvatar'
 
-/** Colunas da lista (cabeçalho e linhas). */
 const STATE_COL = 'w-[220px] shrink-0'
 /**
  * Lista estreita (< 44rem: janela de ~1100 px com as duas colunas laterais): o estado e as ações
@@ -49,7 +48,6 @@ export function ProjectsPage({
   onOpenIntegrations(): void
   /** Abre o Quadro do projeto (e o torna o projeto atual). */
   onOpenBoard(projectId: string): void
-  /** Primeiros passos só com o que falta para este projeto. */
   onContinueSetup(projectId: string): void
 }): React.JSX.Element {
   const projects = useProjects({ revalidate: true })
@@ -136,7 +134,6 @@ export function ProjectsPage({
         )
       ) : (
         <div className="@container overflow-hidden rounded-xl border border-border-soft bg-card">
-          {/* Cabeçalho das colunas (só visual: cada linha já diz o projeto e o estado). */}
           <div
             aria-hidden="true"
             className="flex gap-3.5 border-b border-border-soft px-4 py-2 text-2xs tracking-wider text-subtle-foreground uppercase"
@@ -193,7 +190,6 @@ function ProjectRow({
   onOpenBoard(): void
   onContinueSetup(): void
   checks: ProjectCheck[]
-  /** Vínculo com o Notion e tarefas (quando os bancos estão configurados). */
   notion: React.ReactNode
 }): React.JSX.Element {
   const [busy, setBusy] = useState<'relocate' | 'remove' | null>(null)
@@ -354,7 +350,6 @@ function ProjectRow({
           </>
         )}
       </div>
-      {/* Detalhes (aviso, Notion e tarefas) em largura cheia, alinhados ao nome do projeto. */}
       <div className="flex min-w-0 flex-col gap-2 pl-[46px] empty:hidden">
         {project.health.message && project.health.state !== 'ok' && (
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

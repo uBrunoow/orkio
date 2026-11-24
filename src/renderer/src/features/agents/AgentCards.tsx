@@ -24,7 +24,6 @@ import { ProfileSummary, ReadOnlyText } from './AgentEditor'
 import type { AgentNow } from './agent-state'
 import { Sparkline } from './Sparkline'
 
-/** Onde o perfil mora (etiqueta do card quando o agente está livre). */
 const SCOPE_TAG: Record<AgentView['scope'], string> = {
   builtin: 'Embutido',
   repo: '.orkio/agents',
@@ -55,7 +54,6 @@ export interface AgentHandlers {
   onApprove(): void
 }
 
-/** Chip mono do rodapé do card (mockup `.tag`); `hot` = tarefa esperando você. */
 function Tag({ hot = false, children }: { hot?: boolean; children: string }): React.JSX.Element {
   return (
     <span
@@ -71,7 +69,6 @@ function Tag({ hot = false, children }: { hot?: boolean; children: string }): Re
   )
 }
 
-/** Linha de metadados, erros, avisos e a revisão do perfil (igual em linha e card). */
 function AgentDetails({
   view,
   state,
@@ -156,7 +153,6 @@ function AgentDetails({
   )
 }
 
-/** Ações do agente: Editar e o menu com Duplicar/Arquivar (embutido: só Duplicar). */
 function AgentActions({
   view,
   onEdit,
@@ -241,10 +237,6 @@ export function AgentRow(
   )
 }
 
-/**
- * Card do agente (mockup `.ag`): avatar, nome e descrição; o que está fazendo agora e a atividade
- * das últimas horas; avisos e a revisão do perfil; no rodapé, as tarefas dele, vagas e custo.
- */
 export function AgentCard(
   props: { view: AgentView; state: AgentsState } & AgentHandlers
 ): React.JSX.Element {

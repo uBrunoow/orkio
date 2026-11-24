@@ -15,7 +15,6 @@ function formatRelative(at: Date, now = Date.now()): string {
   return DAY.format(at)
 }
 
-/** Data relativa que se atualiza a cada minuto, com a absoluta no tooltip nativo. */
 export function Timestamp({
   value,
   className

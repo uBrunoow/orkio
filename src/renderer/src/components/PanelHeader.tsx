@@ -1,4 +1,3 @@
-/** Cabeçalho dos cartões de configuração (conexões, Claude Code, bancos): ícone, título/descrição e status. */
 export function PanelHeader({
   titleId,
   title,
@@ -23,7 +22,6 @@ export function PanelHeader({
         </h2>
         <p className="text-xs text-muted-foreground">{description}</p>
       </div>
-      {/* O status mantém o tamanho natural (não é truncado). */}
       <div className="shrink-0">{badge}</div>
     </div>
   )

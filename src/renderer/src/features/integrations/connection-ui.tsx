@@ -88,7 +88,6 @@ export function TokenForm({
               disabled={connecting}
               aria-describedby={describedBy}
               aria-invalid={error ? true : undefined}
-              // Tokens em fonte mono (BRAND.md).
               className="font-mono"
             />
           )}
@@ -215,7 +214,6 @@ export function StoredCredentialErrorView({
   )
 }
 
-/** Confirmação inline (sem diálogo). */
 export function DisconnectButton({
   busy,
   disconnecting,
@@ -258,7 +256,6 @@ export function DisconnectButton({
   )
 }
 
-/** Volta para o fluxo principal a partir do formulário de token (ou avisa que não há OAuth). */
 export function TokenFallbackFooter({
   oauthAvailable,
   connecting,
@@ -283,6 +280,5 @@ export function TokenFallbackFooter({
   )
 }
 
-/** Caixa dos cards de conexão: borda fina, fundo de card (região nomeada pelo título). */
 export const CONNECTION_CARD_CLASS =
   'flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-4'

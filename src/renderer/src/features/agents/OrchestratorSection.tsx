@@ -19,10 +19,6 @@ import { PlusIcon, TrashIcon } from '../../components/icons'
 import { StatusToken } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
 
-/**
- * Orquestrador (8B) na tela Agentes: resumo em frase (fila → etapas → agentes), última rodada,
- * carga de cada agente e o que ficou esperando; o editor fica atrás de "Configurar".
- */
 export function OrchestratorSection({
   projectId,
   agents

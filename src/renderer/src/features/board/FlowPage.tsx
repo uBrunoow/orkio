@@ -103,7 +103,6 @@ function StageDot({ color }: { color: NotionColor | undefined }): React.JSX.Elem
   )
 }
 
-/** Cabeçalho de bloco (mockup `.sh` menor): título, descrição e ação à direita. */
 function BlockHead({
   title,
   level = 2,
@@ -211,16 +210,12 @@ export function FlowPage({
   flowsSlot
 }: {
   view: BoardView
-  /** Cabeçalho da página com as ações do fluxo à direita. */
   header(action: React.ReactNode): React.ReactNode
   onSaved(view: BoardView): void
   onOpenNotionSettings(): void
-  /** "Criar fluxo" numa coluna: leva à aba Fluxos (5A). */
   onOpenTaskFlows(): void
-  /** Aba de Quadro e automações (Colunas · Automações · Fluxos · Entrega). */
   tab: BoardSettingsTab
   onTabChange(tab: BoardSettingsTab): void
-  /** Conteúdo da aba Fluxos (editor da 5A e modelos do alva-flow). */
   flowsSlot: React.ReactNode
 }): React.JSX.Element {
   const [draft, setDraft] = useState<FlowDraft>(() => initialDraft(view))
@@ -230,11 +225,9 @@ export function FlowPage({
   const [message, setMessage] = useState<{ tone: 'danger' | 'warning'; text: string } | null>(null)
   const [events, setEvents] = useState<ConfigEvent[]>([])
   const [eventsKey, setEventsKey] = useState(0)
-  /** 5A: fluxos de tarefa do projeto e as ligações salvas (para "Fluxo desta coluna"). */
   const [taskFlows, setTaskFlows] = useState<{ flows: Flow[]; bindings: StageFlow[] } | null>(null)
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const [showAllEvents, setShowAllEvents] = useState(false)
-  // Automação aberta em frase (fase 6); o formulário só abre em "Editar".
   const [viewingRule, setViewingRule] = useState<string | null>(null)
   const automationActivity = useProjectActivity(view.projectId, 'automation')
 
@@ -284,7 +277,6 @@ export function FlowPage({
   const errors = issues.filter((i) => i.level === 'error')
   const warnings = issues.filter((i) => i.level === 'warning')
 
-  // Rascunho salvo (o que "Descartar" restaura) e quantas mudanças o rascunho tem.
   const baseline = useMemo(
     (): FlowDraft => ({
       ...initialDraft(view),
@@ -569,7 +561,6 @@ export function FlowPage({
     ? draft.rules.filter((r) => r.action.type === 'move_to_stage' && r.action.stageId === stage.id)
     : []
   const shownRule = viewingRule ? (draft.rules.find((r) => r.id === viewingRule) ?? null) : null
-  /** Fluxo que a coluna dispara ao entrar (para a tabela das colunas). */
   const onEnterFlow = (stageId: string): string | null => {
     const b = (draft.bindings ?? []).find(
       (x) => x.stageId === stageId && x.enabled && x.mode === 'on_enter'
@@ -657,7 +648,6 @@ export function FlowPage({
         </TabsList>
 
         <TabsContent value="columns" className="flex flex-col gap-5">
-          {/* Tabela das colunas (mockup): escolher uma linha abre o editor dela embaixo. */}
           <section aria-label="Etapas" className={ROWS}>
             <div
               aria-hidden="true"
@@ -1321,7 +1311,6 @@ function Simulator({ view, draft }: { view: BoardView; draft: FlowDraft }): Reac
   )
 }
 
-/** "Fluxo desta coluna" (5A): fluxo de tarefa ligado à etapa, ligado/desligado e modo. */
 function StageFlowField({
   stageId,
   flows,
