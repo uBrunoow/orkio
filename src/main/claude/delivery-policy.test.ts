@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import type { DeliveryTarget } from '../../shared/delivery'
-import { checkPushBranch, isProtectedBranch } from '../../shared/delivery'
 import { topLevelFields, type DeliveryKind } from './delivery-policy'
 import {
   DELIVERY_ALLOWED,
@@ -59,31 +58,6 @@ const allowed = (command: string, c?: PolicyContext) => {
   expect(d.decision, command).toBe('allow')
   return d
 }
-
-describe('entrega: branches protegidas', () => {
-  it('padrão, main/master/develop/production/release* nunca; só a branch da tarefa', () => {
-    for (const b of [
-      'main',
-      'MASTER',
-      'develop',
-      'production',
-      'release/1.2',
-      'hotfix-x',
-      'trunk-x'
-    ])
-      expect(isProtectedBranch(b, 'trunk-x'), b).toBe(true)
-    expect(checkPushBranch(BRANCH, target)).toBeNull()
-    expect(checkPushBranch('ORK-7/outra', target)).toMatch(/Só a branch da tarefa/)
-    expect(checkPushBranch('main', target)).toMatch(/protegida/)
-    expect(checkPushBranch('-f', target)).toMatch(/inválido/)
-    // A branch da tarefa vai mesmo sem o ID no nome (vinculada à mão, banco sem ID).
-    expect(checkPushBranch('feature/x', { ...target, branch: 'feature/x' })).toBeNull()
-    // hotfix/<nome> é tipo de branch de tarefa; hotfix sozinho, hotfix-x e release* não.
-    expect(checkPushBranch('hotfix/login', { ...target, branch: 'hotfix/login' })).toBeNull()
-    for (const b of ['hotfix', 'hotfix-1.2', 'hotfix_x', 'release/2.0'])
-      expect(checkPushBranch(b, { ...target, branch: b }), b).toMatch(/protegida/)
-  })
-})
 
 describe('modo entrega: git push', () => {
   it('push da branch da tarefa: liberado (com o registro do evento)', () => {

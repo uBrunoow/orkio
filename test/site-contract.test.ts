@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { NOTION_VERSION as NOTION_CLIENT_VERSION } from '../src/main/connectors/notion/notion.client'
+import { ORKIO_SITE_TIMEOUT_MS } from '../src/main/connectors/github/github.connector'
 import { parseOrkioSiteResponse } from '../src/main/connectors/github/orkio-site'
 import {
   GITHUB_API_VERSION,
@@ -52,6 +53,7 @@ interface SiteContract {
 /** `site/lib/github-app.ts` (o que o teste usa). */
 interface SiteGitHubApp {
   validateReviewRequest(body: unknown): object | null
+  REVIEW_DEADLINE_MS: number
 }
 
 // Caminho em variável: o tsc da raiz não segue o import para dentro do package do site (que tem o
@@ -104,6 +106,10 @@ describe('contrato app ↔ site: valores', () => {
       comment: REVIEW_COMMENT_MAX,
       path: REVIEW_PATH_MAX
     })
+  })
+
+  it('o app espera a revisão mais que o prazo total do site (senão desiste de uma revisão publicada)', () => {
+    expect(ORKIO_SITE_TIMEOUT_MS).toBeGreaterThan(siteGitHubApp.REVIEW_DEADLINE_MS)
   })
 
   it('mesmos códigos de erro (e status) das rotas /github/*', () => {

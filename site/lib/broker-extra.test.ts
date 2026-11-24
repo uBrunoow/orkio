@@ -1,6 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { brokerPost } from './broker-route'
 import { NOTION_OAUTH_REDIRECT_URI } from './contract'
 import { NOTION_TOKEN_URL, tokenUrlFrom, type BrokerEnv } from './notion-broker'
@@ -15,6 +13,19 @@ const ENV: BrokerEnv = {
 afterEach(() => {
   vi.unstubAllEnvs()
   vi.unstubAllGlobals()
+})
+
+// Nada é logado em nenhum caminho do intermediário (corpo, tokens, headers): o teste confere o
+// comportamento em todos os casos deste arquivo (a regra de lint `no-console` cobre o texto).
+let logs: ReturnType<typeof vi.spyOn>[] = []
+beforeEach(() => {
+  logs = (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) =>
+    vi.spyOn(console, m).mockImplementation(() => undefined)
+  )
+})
+afterEach(() => {
+  for (const spy of logs) expect(spy).not.toHaveBeenCalled()
+  vi.restoreAllMocks()
 })
 
 describe('limitador por IP (defesa mínima)', () => {
@@ -90,23 +101,5 @@ describe('endpoint de token', () => {
       })
     )
     expect(res.status).toBe(500)
-  })
-})
-
-describe('sem logs', () => {
-  it('nenhum console.* no intermediário (corpo, tokens e headers nunca vão para o log)', () => {
-    const files: string[] = []
-    const walk = (dir: string): void => {
-      for (const name of readdirSync(dir)) {
-        const p = join(dir, name)
-        if (statSync(p).isDirectory()) walk(p)
-        else if (/\.ts$/.test(name) && !/\.test\.ts$/.test(name)) files.push(p)
-      }
-    }
-    walk(join(import.meta.dirname))
-    walk(join(import.meta.dirname, '..', 'app', 'notion'))
-    walk(join(import.meta.dirname, '..', 'app', 'health'))
-    walk(join(import.meta.dirname, '..', 'app', 'github'))
-    for (const f of files) expect(readFileSync(f, 'utf8'), f).not.toMatch(/console\.\w+\s*\(/)
   })
 })

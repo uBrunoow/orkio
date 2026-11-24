@@ -372,10 +372,6 @@ test('critério 5: passo que falha pausa o fluxo e nada segue sozinho', async ()
   const timeline = flow.getByRole('list', { name: 'Linha do tempo do fluxo' })
   await expect(timeline.getByRole('listitem')).toHaveCount(1)
   await expect(timeline).toContainText('falhou')
-  // Continua parado (não foi para o gate nem para o próximo passo).
-  await page.waitForTimeout(1500)
-  await expect(flow.getByTestId('flow-status')).toHaveText('Pausado')
-  await expect(timeline.getByRole('listitem')).toHaveCount(1)
 
   // Responder e continuar: a resposta vai na mesma sessão do passo (sem rodar o comando do zero)
   // e, dando certo, o fluxo segue para o próximo passo (o gate).

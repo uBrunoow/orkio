@@ -220,10 +220,13 @@ test('orquestrador não puxa da fila; movida à mão, a tarefa chega a Revisado 
   expect(saved.orchestrator[PROJECT]?.enabled).toBe(true)
   expect(saved.orchestrator[PROJECT]?.enabledSince).toMatch(/^\d{4}-/)
 
-  // Uma rodada não puxa a tarefa da fila: ela fica em Prioridades até você mover.
-  await orch.getByRole('button', { name: 'Rodar agora' }).click()
+  // Uma rodada não puxa a tarefa da fila: ela fica em Prioridades até você mover. "Rodar agora"
+  // só volta a ficar disponível quando a rodada termina (movimentos e atribuições já aplicados).
+  const runNow = orch.getByRole('button', { name: 'Rodar agora' })
+  await runNow.click()
+  await expect(orch).toContainText('Última rodada')
+  await expect(runNow).toBeEnabled()
   await goTo(page, 'Quadro')
-  await page.waitForTimeout(1500)
   await expect(
     page
       .getByRole('list', { name: 'Tarefas em Prioridades' })

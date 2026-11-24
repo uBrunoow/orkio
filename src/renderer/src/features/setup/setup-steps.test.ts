@@ -7,7 +7,7 @@ import type { ProjectView } from '../../../../shared/projects'
 
 const connected = (handle: string): ConnectionStatus => ({
   state: 'connected',
-  account: { userName: handle, handle } as never,
+  account: { userName: handle, handle },
   connectedAt: ''
 })
 const claudeOk: ClaudeCodeStatus = {
@@ -25,12 +25,26 @@ const project = {
   localPath: '/home/x/www/orkio',
   notionProject: { id: 'n', name: 'Orkio' }
 } as ProjectView
-const workspace = {
-  config: {} as never,
+const prop = (name: string, type: string): { id: string; name: string; type: string } => ({
+  id: name,
+  name,
+  type
+})
+const workspace: NotionWorkspaceStatus = {
+  config: {
+    projectsDataSource: { id: 'ds-p', name: 'Projetos' },
+    tasksDataSource: { id: 'ds-t', name: 'Tarefas' },
+    mapping: {
+      title: prop('Nome', 'title'),
+      status: prop('Status', 'status'),
+      project: prop('Projeto', 'relation')
+    },
+    updatedAt: ''
+  },
   health: 'ok',
   messages: [],
   connection: 'oauth'
-} as NotionWorkspaceStatus
+}
 
 const empty: SetupInput = {
   github: { state: 'disconnected' },

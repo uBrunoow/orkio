@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { BACKLOG_DOC_LIMIT, backlogTaskBody } from './alva'
+import {
+  BACKLOG_DOC_LIMIT,
+  backlogTaskBody,
+  parseBacklogTask,
+  sizeFromSpecResult,
+  taskFileId
+} from './alva'
 
 const FILE = `---
 id: TASK-3
@@ -57,5 +63,55 @@ describe('backlogTaskBody', () => {
     expect(truncated).toBe(true)
     expect(body.length).toBeLessThanOrEqual(BACKLOG_DOC_LIMIT)
     expect(body.endsWith(line)).toBe(true)
+  })
+})
+
+const TASK = (questions: string[], ac: string[]): string => `---
+id: TASK-7
+title: 'Exportar CSV'
+status: Requirements Defined
+assignee: []
+labels: []
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+## Perguntas em aberto
+${questions.join('\n')}
+
+## Decisões
+- [ ] não conta (fora da seção)
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+${ac.join('\n')}
+<!-- AC:END -->
+`
+
+describe('task do Backlog.md', () => {
+  it('parse: frontmatter, critérios e perguntas em aberto (só na seção)', () => {
+    expect(
+      parseBacklogTask(
+        TASK(
+          ['- [ ] Qual separador?', '- [x] Formato → CSV', '- [ ] Limite?'],
+          ['- [x] #1 CA-F01: gera', '- [ ] #2 CA-F02: baixa']
+        )
+      )
+    ).toEqual({
+      id: 'TASK-7',
+      title: 'Exportar CSV',
+      status: 'Requirements Defined',
+      criteria: { done: 1, total: 2 },
+      openQuestions: 2
+    })
+    expect(parseBacklogTask('# sem frontmatter')).toBeNull()
+  })
+
+  it('id pelo nome do arquivo e tamanho pela linha do /spec', () => {
+    expect(taskFileId('task-12 - Exportar-CSV.md')).toBe('task-12')
+    expect(sizeFromSpecResult('## Spec pronta ✓\n**Tamanho:** Grande')).toBe('Grande')
+    expect(sizeFromSpecResult('Pronto para commit')).toBeNull()
   })
 })

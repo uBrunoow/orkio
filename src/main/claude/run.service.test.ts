@@ -96,6 +96,7 @@ describe('RunService', () => {
   })
 
   afterEach(async () => {
+    vi.useRealTimers()
     db.close()
     // Uma execução pode estar fechando o log (.jsonl) agora: tenta de novo se a pasta ainda não esvaziou.
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 })
@@ -117,7 +118,6 @@ describe('RunService', () => {
     input: { kind: 'prompt', text },
     session: { kind: 'resume', id }
   })
-  const tick = () => new Promise((r) => setTimeout(r, 20))
   const statusOf = (id: string) => service.view(id)?.status
   /** Espera o n-ésimo processo simulado existir (o status "running" vem antes dele). */
   const spawned = async (n: number) => {
@@ -133,14 +133,16 @@ describe('RunService', () => {
 
   it('prompt com briefing; comando instalado com argumentos; sessão retomada só o texto', () => {
     const fresh = { kind: 'new', briefing: '# B', includeBriefing: true } as const
-    expect(
-      RunService.composePrompt({ kind: 'command', name: 'spec', args: 'foco em UX' }, fresh)
-    ).toBe(
-      '/spec foco em UX\n\nBriefing da tarefa (também em .orkio/briefing.md no worktree):\n\n# B'
+    // O comando vem primeiro (o CLI só reconhece `/nome` no começo) e o briefing vai junto.
+    const command = RunService.composePrompt(
+      { kind: 'command', name: 'spec', args: 'foco em UX' },
+      fresh
     )
-    expect(RunService.composePrompt({ kind: 'prompt', text: 'Faça X' }, fresh)).toContain(
-      'Faça X\n\n---\n\nBriefing'
-    )
+    expect(command.startsWith('/spec foco em UX\n')).toBe(true)
+    expect(command.endsWith('# B')).toBe(true)
+    const prompt = RunService.composePrompt({ kind: 'prompt', text: 'Faça X' }, fresh)
+    expect(prompt.startsWith('Faça X\n')).toBe(true)
+    expect(prompt.endsWith('# B')).toBe(true)
     expect(
       RunService.composePrompt(
         { kind: 'command', name: 'alva-flow:plan', args: 'TASK-1' },
@@ -162,7 +164,7 @@ describe('RunService', () => {
     run.emit({ kind: 'tool', id: 't1', tool: 'Bash', summary: 'npm test -- --run' })
     run.emit({ kind: 'result', ok: true, durationMs: 1000, costUsd: 0.12, turns: 3, text: 'ok' })
     run.exit(0)
-    await tick()
+    await finished(view.id)
     const done = service.view(view.id)!
     expect(done).toMatchObject({ status: 'succeeded', costUsd: 0.12, branch: 'ORK-1/tarefa' })
     // O rascunho do Orkio sai do resumo; os perfis dos agentes (versionados) ficam.
@@ -173,7 +175,14 @@ describe('RunService', () => {
       tests: ['npm test -- --run']
     })
     const log = await service.readLog(view.id)
-    expect(log.map((e) => e.kind)).toEqual(['status', 'status', 'text', 'tool', 'result', 'status'])
+    // O que o Claude mandou, na ordem, e o estado final por último (linhas de status/info no meio
+    // não são contrato).
+    expect(log.filter((e) => e.kind !== 'status' && e.kind !== 'info').map((e) => e.kind)).toEqual([
+      'text',
+      'tool',
+      'result'
+    ])
+    expect(log.at(-1)).toMatchObject({ kind: 'status', status: 'succeeded' })
     expect(store.events('task-1').map((e) => e.kind)).toEqual(['run_finished', 'run_started'])
   })
 
@@ -267,7 +276,7 @@ describe('RunService', () => {
     const answer = await run.ask('Bash', { command: 'git push origin HEAD' })
     expect(answer['behavior']).toBe('deny')
     run.exit(0)
-    await tick()
+    await finished(view.id)
     const log = await service.readLog(view.id)
     expect(log.some((e) => e.kind === 'text' && e.text.startsWith('Rodando como Ana'))).toBe(true)
   })
@@ -296,7 +305,10 @@ describe('RunService', () => {
       behavior: 'allow'
     })
     const denied = run.ask('Bash', { command: 'rm -rf build' }, 'req-3')
-    await tick()
+    await vi.waitFor(
+      () => expect(service.waitingRequests().map((r) => r.requestId)).toContain('req-3'),
+      { timeout: 3000 }
+    )
     service.answerPermission('run-1', 'req-3', 'deny')
     expect(await denied).toEqual({ behavior: 'deny', message: RUN_MESSAGES.denied })
   })
@@ -461,12 +473,19 @@ describe('RunService', () => {
     const input = {
       questions: [{ question: 'Formato?', options: [{ label: 'CSV' }], multiSelect: false }]
     }
+    // Relógio falso só para os prazos (o socket da ponte continua real).
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     let settled = false
     const answer = runs[0]!.ask('AskUserQuestion', input, 'q-slow').then((a) => {
       settled = true
       return a
     })
-    await new Promise((r) => setTimeout(r, 500)) // 2,5× o prazo da permissão (200 ms)
+    await vi.waitFor(
+      () => expect(service.waitingRequests().map((r) => r.requestId)).toContain('q-slow'),
+      { timeout: 3000 }
+    )
+    await vi.advanceTimersByTimeAsync(500) // 2,5× o prazo da permissão (200 ms)
+    vi.useRealTimers()
     expect(settled).toBe(false)
     expect(service.waitingRequests()).toEqual([
       expect.objectContaining({ requestId: 'q-slow', kind: 'question' })
@@ -489,7 +508,7 @@ describe('RunService', () => {
 
   it('pergunta do Claude: respostas voltam em updatedInput', async () => {
     await start(1)
-    await tick()
+    await spawned(1)
     const input = {
       questions: [
         {
@@ -548,7 +567,6 @@ describe('RunService', () => {
     await start(2)
     const third = await start(3)
     await spawned(2)
-    await tick()
     expect(runs).toHaveLength(2)
     expect(statusOf(third.id)).toBe('queued')
     expect(
@@ -611,7 +629,7 @@ describe('RunService', () => {
     for (const event of parseStreamLine(line, wt)) run.emit(event)
     run.emit({ kind: 'text', text: 'o valor é abc-123-xyz e SENHA=qualquer' })
     run.exit(0)
-    await tick()
+    await finished(view.id)
     const raw = JSON.stringify(await service.readLog(view.id))
     expect(raw).not.toContain('senha-forte-9')
     expect(raw).not.toContain('abc-123-xyz')

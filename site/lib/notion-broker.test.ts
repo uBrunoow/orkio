@@ -2,7 +2,7 @@
  * Intermediário OAuth do Notion. `handleRequest` faz o papel do roteador do Next (app/notion/*,
  * app/health): chama os mesmos handlers que as rotas usam.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GET as healthGet } from '@/app/health/route'
 import { GET as tokenGet } from '@/app/notion/token/route'
 import { GET as refreshGet } from '@/app/notion/refresh/route'
@@ -24,6 +24,19 @@ async function handleRequest(
   if (request.method !== 'POST') return pathname === '/notion/token' ? tokenGet() : refreshGet()
   return handleBroker(pathname === '/notion/token' ? 'token' : 'refresh', request, env, fetchImpl)
 }
+
+// Nada é logado em nenhum caminho do intermediário (corpo, tokens, headers): o teste confere o
+// comportamento em todos os casos deste arquivo (a regra de lint `no-console` cobre o texto).
+let logs: ReturnType<typeof vi.spyOn>[] = []
+beforeEach(() => {
+  logs = (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) =>
+    vi.spyOn(console, m).mockImplementation(() => undefined)
+  )
+})
+afterEach(() => {
+  for (const spy of logs) expect(spy).not.toHaveBeenCalled()
+  vi.restoreAllMocks()
+})
 
 const SECRET = 'secret_CLIENT_SECRET_NEVER_IN_RESPONSES'
 const REDIRECT = NOTION_OAUTH_REDIRECT_URI

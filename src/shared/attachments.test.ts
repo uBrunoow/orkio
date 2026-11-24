@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { ATTACHMENT_ACCEPT, ATTACHMENT_MESSAGES, attachmentType } from './attachments'
+import {
+  ATTACHMENT_ACCEPT,
+  ATTACHMENT_EXTENSIONS,
+  ATTACHMENT_LIMITS,
+  ATTACHMENT_MESSAGES,
+  attachmentType
+} from './attachments'
 
 describe('anexos (regras comuns ao renderer e ao main)', () => {
   it('tipo pela extensão, sem caixa; extensão desconhecida ou herdada do objeto → null', () => {
@@ -11,8 +17,15 @@ describe('anexos (regras comuns ao renderer e ao main)', () => {
   })
 
   it('accept e mensagens saem dos mesmos limites e extensões', () => {
-    expect(ATTACHMENT_ACCEPT).toBe('.png,.jpg,.jpeg,.webp,.gif,.pdf,.md,.markdown,.txt')
-    expect(ATTACHMENT_MESSAGES.tooMany).toBe('Até 5 anexos por mensagem.')
-    expect(ATTACHMENT_MESSAGES.tooBig('a.png')).toBe('O arquivo a.png é maior que 10 MB.')
+    // O campo de arquivo oferece exatamente o que a checagem aceita.
+    const offered = ATTACHMENT_ACCEPT.split(',')
+    for (const ext of offered) expect(attachmentType(`a${ext}`), ext).not.toBeNull()
+    expect(offered).toHaveLength(Object.keys(ATTACHMENT_EXTENSIONS).length)
+    expect(offered).not.toContain('.exe')
+    // As mensagens citam os limites de verdade.
+    expect(ATTACHMENT_MESSAGES.tooMany).toContain(String(ATTACHMENT_LIMITS.maxFiles))
+    expect(ATTACHMENT_MESSAGES.tooBig('a.png')).toContain(
+      `${ATTACHMENT_LIMITS.maxBytes / (1024 * 1024)} MB`
+    )
   })
 })

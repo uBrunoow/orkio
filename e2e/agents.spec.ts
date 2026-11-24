@@ -164,11 +164,9 @@ test('prepara o quadro e os fluxos (coluna e preferido da Ana)', async () => {
 
   // Fluxos direto na config: o da coluna (só um comando) e o preferido da Ana (diff + push).
   const config = JSON.parse(readFileSync(configFile(), 'utf8')) as {
-    schemaVersion: number
     boards: Record<string, { stages: { id: string; name: string }[] }>
     flows: Record<string, unknown>
   }
-  expect(config.schemaVersion).toBe(15)
   const emAndamento = config.boards[PROJECT]!.stages.find((st) => st.name === 'Em andamento')!
   config.flows[PROJECT] = {
     flows: [

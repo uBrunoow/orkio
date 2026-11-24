@@ -3,10 +3,11 @@ import type {
   OverviewSnapshot,
   OverviewTask,
   RunningItem,
-  WaitingItem
+  WaitingItem,
+  WeekStats
 } from '../../../shared/overview'
 import { taskGroups, TODO_LIMIT } from './task-groups'
-import type { BoardCard, BoardView } from '../../../shared/board'
+import type { BoardCard, BoardStage, BoardView } from '../../../shared/board'
 
 const task = (taskId: string, projectId = 'p1'): OverviewTask => ({
   projectId,
@@ -35,8 +36,25 @@ const running = (taskId: string): RunningItem => ({
   section: 'flow'
 })
 
-const snapshot = (w: WaitingItem[], r: RunningItem[] = []): OverviewSnapshot =>
-  ({ waiting: w, running: r, prs: [], projects: [], notices: [] }) as unknown as OverviewSnapshot
+const WEEK: WeekStats = {
+  since: '',
+  finished: 0,
+  prsOpened: null,
+  prsMerged: null,
+  cost: { usd: 0, known: 0, total: 0 },
+  reviewAvgMs: null,
+  reviewSamples: 0
+}
+
+const snapshot = (w: WaitingItem[], r: RunningItem[] = []): OverviewSnapshot => ({
+  generatedAt: '',
+  waiting: w,
+  running: r,
+  prs: [],
+  projects: [],
+  week: WEEK,
+  notices: []
+})
 
 const card = (taskId: string, stageId: string, priority: string | null = null): BoardCard => ({
   taskId,
@@ -52,21 +70,30 @@ const card = (taskId: string, stageId: string, priority: string | null = null): 
   sync: { state: 'synced' }
 })
 
-const board = (cards: BoardCard[], queueStageId?: string): BoardView =>
-  ({
-    projectId: 'p1',
-    config: {
-      stages: [
-        { id: 's2', name: 'Em andamento', order: 1, notionStatus: { id: null, name: 'b' } },
-        { id: 's1', name: 'Prioridades', order: 0, notionStatus: { id: null, name: 'a' } }
-      ].map((s) => (s.id === queueStageId ? { ...s, role: 'queue' } : s)),
-      orkioStageProperty: null,
-      blockedProperty: null,
-      rules: [],
-      updatedAt: ''
-    },
-    cards
-  }) as unknown as BoardView
+const board = (cards: BoardCard[], queueStageId?: string): BoardView => ({
+  projectId: 'p1',
+  projectName: 'Orkio',
+  config: {
+    stages: [
+      { id: 's2', name: 'Em andamento', order: 1, notionStatus: { id: null, name: 'b' } },
+      { id: 's1', name: 'Prioridades', order: 0, notionStatus: { id: null, name: 'a' } }
+    ].map((s): BoardStage => (s.id === queueStageId ? { ...s, role: 'queue' } : s)),
+    orkioStageProperty: null,
+    blockedProperty: null,
+    rules: [],
+    updatedAt: ''
+  },
+  suggestion: null,
+  statusOptions: [],
+  selectProperties: [],
+  checkboxProperties: [],
+  issues: [],
+  cards,
+  truncated: false,
+  pendingCount: 0,
+  fetchedAt: '',
+  ruleCountsWeek: {}
+})
 
 describe('taskGroups', () => {
   it('agrupa por projeto e não repete tarefa', () => {
@@ -129,16 +156,15 @@ describe('taskGroups', () => {
     expect(g.todo.map((t) => t.taskId)).toEqual(['c'])
   })
 
-  it('corta em 8 e conta o total', () => {
-    const cards = Array.from({ length: 10 }, (_, i) => card(`t${i}`, 's1'))
+  it('corta em TODO_LIMIT e conta o total', () => {
+    const cards = Array.from({ length: TODO_LIMIT + 2 }, (_, i) => card(`t${i}`, 's1'))
     const g = taskGroups({
       projectId: 'p1',
       snapshot: null,
       board: board(cards)
     })
-    expect(TODO_LIMIT).toBe(8)
-    expect(g.todo).toHaveLength(8)
-    expect(g.todoTotal).toBe(10)
+    expect(g.todo).toHaveLength(TODO_LIMIT)
+    expect(g.todoTotal).toBe(TODO_LIMIT + 2)
   })
 
   it('sem quadro e sem snapshot não quebra', () => {

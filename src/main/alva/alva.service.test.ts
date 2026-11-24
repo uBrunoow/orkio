@@ -2,7 +2,6 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { parseBacklogTask, sizeFromSpecResult, taskFileId } from '../../shared/alva'
 import { openDatabase, type Db } from '../db/database'
 import type { ExtractContext } from '../flows/flow-runner'
 import { ALVA_FAILURES, ALVA_OUTPUTS } from '../../shared/alva'
@@ -80,27 +79,6 @@ async function runStep(command: string, resultText: string, change: () => Promis
 }
 
 describe('alva-flow: vínculo e extratores', () => {
-  it('parse da task: frontmatter, critérios e perguntas em aberto (só na seção)', () => {
-    expect(
-      parseBacklogTask(
-        task('TASK-7', 'Requirements Defined', {
-          questions: ['- [ ] Qual separador?', '- [x] Formato → CSV', '- [ ] Limite?'],
-          ac: ['- [x] #1 CA-F01: gera', '- [ ] #2 CA-F02: baixa']
-        })
-      )
-    ).toEqual({
-      id: 'TASK-7',
-      title: 'Exportar CSV',
-      status: 'Requirements Defined',
-      criteria: { done: 1, total: 2 },
-      openQuestions: 2
-    })
-    expect(parseBacklogTask('# sem frontmatter')).toBeNull()
-    expect(taskFileId('task-12 - Exportar-CSV.md')).toBe('task-12')
-    expect(sizeFromSpecResult('## Spec pronta ✓\n**Tamanho:** Grande')).toBe('Grande')
-    expect(sizeFromSpecResult('Pronto para commit')).toBeNull()
-  })
-
   it('variáveis iniciais: sem vínculo, a descrição leva ID, título e a URL do Notion', async () => {
     expect(await service.initialVars('p1', 'notion-1')).toEqual({
       'alva.spec_arg':

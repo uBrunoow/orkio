@@ -36,10 +36,33 @@ describe('DeliveryService com git real', () => {
   let record: WorktreeRecord
   let service: DeliveryService
 
+  // O git do teste não pode herdar a máquina: config global/do sistema (credential helper, `url.*`
+  // insteadOf) nem um GIT_ASKPASS do ambiente (o do VS Code fica esperando a janela que nunca abre).
+  const ISOLATED = [
+    'HOME',
+    'GIT_CONFIG_GLOBAL',
+    'GIT_CONFIG_NOSYSTEM',
+    'GIT_ASKPASS',
+    'SSH_ASKPASS'
+  ]
+  const savedEnv: Record<string, string | undefined> = {}
+
   beforeAll(async () => {
     tmp = await realpath(await mkdtemp(join(tmpdir(), 'orkio-delivery-')))
+    for (const key of ISOLATED) savedEnv[key] = process.env[key]
+    const emptyConfig = join(tmp, 'gitconfig')
+    await writeFile(emptyConfig, '')
+    process.env['HOME'] = tmp
+    process.env['GIT_CONFIG_GLOBAL'] = emptyConfig
+    process.env['GIT_CONFIG_NOSYSTEM'] = '1'
+    delete process.env['GIT_ASKPASS']
+    delete process.env['SSH_ASKPASS']
   })
   afterAll(async () => {
+    for (const key of ISOLATED) {
+      if (savedEnv[key] === undefined) delete process.env[key]
+      else process.env[key] = savedEnv[key]
+    }
     await rm(tmp, { recursive: true, force: true })
   })
 
@@ -215,8 +238,6 @@ describe('DeliveryService com git real', () => {
     it('o git pede usuário/senha → falha na hora com mensagem de credenciais (sem travar)', async () => {
       await commit('a.txt', 'feat: a')
       sh(wtPath, 'remote', 'set-url', 'origin', url)
-      // Sem credential helper do sistema neste teste.
-      sh(wtPath, 'config', 'credential.helper', '')
       const started = Date.now()
       const err = await service.push('p1', 't1').catch((e: unknown) => e)
       expect(err).toMatchObject({

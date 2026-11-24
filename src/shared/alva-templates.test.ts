@@ -32,7 +32,7 @@ const CTX = {
   declaredVars: DECLARED_FLOW_VARS
 }
 
-/** Roda o motor: `outcomes[stepId]` dá as variáveis que o extrator gravaria a cada execução. */
+/** Roda o motor: `onStep` dá as variáveis que o extrator/ação gravaria a cada execução. */
 function simulate(
   flow: Flow,
   initial: Record<string, string>,
@@ -49,6 +49,11 @@ function simulate(
     trail.push(id)
     count[id] = (count[id] ?? 0) + 1
     const r = onStep(id, count[id]!)
+    // Só o que um produtor real grava (ações e extrator do alva-flow): uma chave renomeada no
+    // produtor quebra a simulação em vez de seguir verde com o nome antigo.
+    for (const key of Object.keys(r.vars ?? {})) {
+      if (key.includes('.')) expect(DECLARED_FLOW_VARS, key).toContain(key)
+    }
     const step = flow.steps.find((s) => s.id === id)!
     d =
       step.type === 'gate'

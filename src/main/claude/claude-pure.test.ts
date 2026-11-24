@@ -489,9 +489,10 @@ describe('briefing', () => {
     expect(briefing.startsWith('# ORK-7 — Listar tarefas')).toBe(true)
     expect(briefing).toContain('- **Status:** Em andamento')
     expect(briefing).not.toContain('Prioridade')
-    expect(briefing).toContain(
-      'Branch de trabalho: ORK-7/listar-tarefas (worktree isolado). Não faça push nem abra PR: o Orkio faz isso pelo botão “Abrir PR” (ou pelo passo de entrega do fluxo). Se o usuário pedir, diga isso a ele.'
-    )
+    // A branch de trabalho e o caminho para publicar (o agente não faz push: é o “Abrir PR”).
+    const branchLine = briefing.split('\n').find((l) => l.includes('ORK-7/listar-tarefas'))
+    expect(branchLine).toMatch(/push/)
+    expect(branchLine).toContain('“Abrir PR”')
     expect(briefing).toContain('PR: #12 (aberta)')
     expect(briefing).toContain('## Critérios de aceite\n\n- [ ] lista aparece')
     expect(briefing).toContain('2 bloco(s) do Notion não foram convertidos (ai_block, breadcrumb)')
@@ -529,7 +530,6 @@ describe('briefing', () => {
 
 describe('POLICY_MESSAGES: o caminho para publicar', () => {
   it('push e gh dizem para usar “Abrir PR” (a tela decide o botão pelo código)', () => {
-    for (const m of [POLICY_MESSAGES.push, POLICY_MESSAGES.gh])
-      expect(m).toContain('Para publicar, use “Abrir PR” na aba PR & CI da tarefa.')
+    for (const m of [POLICY_MESSAGES.push, POLICY_MESSAGES.gh]) expect(m).toContain('“Abrir PR”')
   })
 })

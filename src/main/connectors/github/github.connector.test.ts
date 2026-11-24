@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DeviceAuthorization, DevicePollResult } from '../../oauth/device-flow'
 import { SecureStore, type SafeStorageLike } from '../../storage/secure-store'
 import { createGitHubClient, type GitHubClient } from './github.client'
-import { GITHUB_MESSAGES, GitHubConnector, ORKIO_SITE_TIMEOUT_MS } from './github.connector'
+import { GITHUB_MESSAGES, GitHubConnector } from './github.connector'
 import type { GitHubDeviceApi, GitHubOAuthToken } from './github.oauth'
 import { ApiError } from '../../net/http'
 
@@ -528,10 +528,6 @@ describe('GitHubConnector', () => {
             'O site do Orkio demorou para responder. Confira a PR antes de tentar de novo: a ' +
             'revisão pode ter sido publicada.'
         })
-      })
-
-      it('o timeout do app (25 s) é maior que o prazo total do site (15 s)', () => {
-        expect(ORKIO_SITE_TIMEOUT_MS).toBe(25_000)
       })
     })
 

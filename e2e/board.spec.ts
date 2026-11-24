@@ -140,7 +140,8 @@ test('critério 2: mover para Revisando grava a etapa fina e mantém "Em andamen
   const { app, page } = orkio!
   await moveViaMenu(page, 'Revisando')
   await expect(column(page, 'Revisando').getByRole('listitem', { name: ORK2 })).toBeVisible()
-  await page.waitForTimeout(300)
+  // Sem escrita pendente: uma escrita criada por engano só ficaria "synced" depois do PATCH.
+  await expect(card(page)).toHaveAttribute('data-sync', 'synced')
   expect(await pagePatches(app)).toEqual([])
   expect((await notionState(app)).status[NOTION_TASK_IDS.ork2]).toBe('Em andamento')
 

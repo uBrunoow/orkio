@@ -117,7 +117,6 @@ describe('alva-flow como integração dos fluxos: limite de fluxos em paralelo',
 
     // Liberou a vaga: só o mais antigo da fila começa.
     await second.cancel(runs[0]!.id)
-    await new Promise((r) => setImmediate(r))
     expect(runs.map((r) => second.view(r.id).status)).toEqual([
       'cancelled',
       'waiting_gate',

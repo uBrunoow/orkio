@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  GITHUB_DEVICE_GRANT_TYPE,
   createGitHubDeviceApi,
   isGitHubDevicePage,
   parseTokenPollResponse,
@@ -86,9 +85,8 @@ describe('createGitHubDeviceApi', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       client_id: CONFIG.clientId,
       device_code: 'dev-1',
-      grant_type: GITHUB_DEVICE_GRANT_TYPE
+      grant_type: 'urn:ietf:params:oauth:grant-type:device_code' // RFC 8628
     })
-    expect(GITHUB_DEVICE_GRANT_TYPE).toBe('urn:ietf:params:oauth:grant-type:device_code')
   })
 
   it('pollToken: 5xx e rede viram erros transitórios', async () => {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CLAUDE_EFFORT_VERSION,
   CLAUDE_MODELS,
   EFFORT_LABELS,
   EFFORTS,
@@ -89,10 +88,6 @@ describe('CLAUDE_MODELS e versão', () => {
       { id: 'sonnet', label: 'Sonnet' },
       { id: 'haiku', label: 'Haiku' }
     ])
-  })
-
-  it('versão mínima do CLI para --effort', () => {
-    expect(CLAUDE_EFFORT_VERSION).toBe('2.1.300')
   })
 })
 

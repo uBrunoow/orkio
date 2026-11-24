@@ -351,6 +351,8 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
 
   it('idempotência: repetir o ciclo e reiniciar o app não repetem automações', async () => {
     await cycle()
+    // A foto dos sinais antes da PR existir (para voltar a ela no fim).
+    const beforePr = new BoardStore(db).snapshots('p1')
     world.pr[T1] = {}
     await cycle()
     expect(await stageOf(T1)).toBe('Revisando')
@@ -369,10 +371,13 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
     expect((await history(T1)).length).toBe(before)
     expect(notion.writes.length).toBe(writes)
 
-    // Mesmo que o snapshot se perca, a chave do evento impede repetir.
-    db.run('DELETE FROM signal_snapshots')
-    await cycle() // linha de base de novo
+    // Mesmo que a foto volte a ser a de antes da PR (a abertura aparece de novo no diff), a chave
+    // do evento impede repetir.
+    const store = new BoardStore(db)
+    for (const [taskId, snapshot] of beforePr) store.saveSnapshot(taskId, 'p1', snapshot, 'x')
     expect(await cycle()).toMatchObject({ moves: 0 })
+    expect(await stageOf(T1)).toBe('Revisando')
+    expect((await history(T1)).length).toBe(before)
   })
 
   // Bug: a chave (`pr#5:opened`, `branch:local:<nome>`) era única no banco inteiro.

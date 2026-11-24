@@ -298,7 +298,7 @@ describe('limites diários', () => {
 })
 
 describe('atividade (tela Agentes)', () => {
-  it('atividade por hora nas últimas 12 h', async () => {
+  it('atividade por hora na janela de ACTIVITY_HOURS (a hora atual por último)', async () => {
     const run = (_id: string, startedAt: Date, key = 'builtin:revisor'): void => {
       agentRunRows.push({ key, startedAt: startedAt.toISOString(), cost: null })
     }
@@ -307,13 +307,12 @@ describe('atividade (tela Agentes)', () => {
     run('b', ago(10 * 60_000))
     run('c', ago(5 * 3_600_000 + 60_000))
     run('d', ago(60_000), 'builtin:qa')
-    run('e', ago(13 * 3_600_000))
+    run('e', ago((ACTIVITY_HOURS + 1) * 3_600_000)) // fora da janela
     const { agents } = await service.list('p1')
     const rev = agents.find((a) => a.key === 'builtin:revisor')!
-    expect(ACTIVITY_HOURS).toBe(12)
-    expect(rev.activity).toHaveLength(12)
-    expect(rev.activity[11]).toBe(2)
-    expect(rev.activity[6]).toBe(1)
+    expect(rev.activity).toHaveLength(ACTIVITY_HOURS)
+    expect(rev.activity[ACTIVITY_HOURS - 1]).toBe(2)
+    expect(rev.activity[ACTIVITY_HOURS - 1 - 5]).toBe(1)
     expect(rev.activity.reduce((x, y) => x + y, 0)).toBe(3)
   })
 })

@@ -45,7 +45,6 @@ describe('createGitHubClient().getUser', () => {
       'X-GitHub-Api-Version': GITHUB_API_VERSION,
       'User-Agent': 'Orkio-Desktop'
     })
-    expect(GITHUB_API_VERSION).toBe('2026-03-10')
   })
 
   it('token válido → login, nome, avatar e escopos', async () => {

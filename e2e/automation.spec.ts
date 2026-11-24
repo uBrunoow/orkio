@@ -323,11 +323,14 @@ test('critério 5: pausar impede movimentos e registra no histórico', async () 
 
   git('checkout', '-q', '-b', 'feat/ORK-2-outra')
   await refresh(page)
-  await page.waitForTimeout(500)
+  // Sinal de que o ciclo já tratou o evento (consumido como "ignorada" na mesma transação em que
+  // moveria): só depois dele a ausência do movimento prova alguma coisa.
+  await expect
+    .poll(() => historyText(page), { timeout: 15_000 })
+    .toContain(
+      'Branch criada (feat/ORK-2-outra): regra “Branch criada inicia a tarefa” ignorada (automações pausadas nesta tarefa)'
+    )
   await expectIn(page, 'Prioridades')
-  expect(await historyText(page)).toContain(
-    'Branch criada (feat/ORK-2-outra): regra “Branch criada inicia a tarefa” ignorada (automações pausadas nesta tarefa)'
-  )
 
   // "Pausar todas" fica no menu ⋯ da barra do quadro.
   await page.getByRole('button', { name: 'Mais ações do quadro' }).click()

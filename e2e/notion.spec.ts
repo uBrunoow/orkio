@@ -95,10 +95,13 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
 
   // Fontes locais, logo e botão primário.
   await notionCard(page).getByLabel('Token do Notion').fill('x')
-  await page.waitForTimeout(300) // fim da transição de cor do botão
+  // Espera a transição de cor do botão terminar (as animações CSS dele, não um tempo fixo).
   await notionCard(page)
     .getByRole('button', { name: 'Conectar', exact: true })
-    .evaluate((el) => el.setAttribute('data-primary-probe', ''))
+    .evaluate(async (el) => {
+      await Promise.all(el.getAnimations().map((a) => a.finished))
+      el.setAttribute('data-primary-probe', '')
+    })
   const visual = await page.evaluate(async () => {
     await Promise.all([
       document.fonts.load('300 30px Jost'),

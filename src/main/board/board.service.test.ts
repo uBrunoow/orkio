@@ -451,7 +451,6 @@ describe('BoardService', () => {
     notion.reject = 'bad_request'
     await service.move('p1', T1, stageId(view, 'Finalizada'))
     await queue.kick()
-    await new Promise((r) => setTimeout(r, 0))
     expect(events.at(-1)).toMatchObject({
       taskId: T1,
       state: 'failed',
@@ -483,7 +482,6 @@ describe('BoardService', () => {
     notion.reject = 'bad_request'
     await service.move('p1', T2, stageId(view, 'Finalizada'))
     await queue.kick()
-    await new Promise((r) => setTimeout(r, 0))
     expect(seen.map((s) => [s.change.source, s.lastEvent, s.inTransaction])).toEqual([
       ['manual', 'moved', true],
       ['notion', 'reconciled', true],

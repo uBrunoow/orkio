@@ -68,7 +68,14 @@ function integration(over: Partial<FlowIntegration> = {}): FlowIntegration {
   }
 }
 
-const flush = (): Promise<void> => new Promise((r) => setImmediate(() => setImmediate(r)))
+/**
+ * Espera o runner terminar o que os gatilhos sem promessa (`onRunFinished`, `onStageChanged`)
+ * deixaram em andamento: roda os `setImmediate` (falsos) e as promessas até nada mais ficar
+ * pendente, sem depender de quantos saltos assíncronos o runner dá.
+ */
+const flush = async (): Promise<void> => {
+  await vi.runAllTimersAsync()
+}
 
 let db: Db
 let store: BoardStore
@@ -159,6 +166,7 @@ const enter = (runner: FlowRunner, source: StageChange['source'], to = 's-rev'):
   runner.onStageChanged({ projectId: 'p1', taskId: 't1', from: 's-dev', to, source })
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setImmediate'] })
   db = openDatabase(':memory:')
   store = new BoardStore(db)
   started = []
@@ -171,7 +179,10 @@ beforeEach(() => {
     bindings: [{ stageId: 's-rev', flowId: 'f1', enabled: true, mode: 'on_enter' }]
   }
 })
-afterEach(() => db.close())
+afterEach(() => {
+  vi.useRealTimers()
+  db.close()
+})
 
 describe('FlowRunner', () => {
   it('on_enter só em entrada real (manual/automação), nunca reconciliação/desfazer/remoção', async () => {
@@ -187,8 +198,8 @@ describe('FlowRunner', () => {
     expect(started).toHaveLength(1)
     // Desligada ou modo manual: entrar não dispara.
     config = { ...config, bindings: [{ ...config.bindings[0]!, mode: 'manual' }] }
-    const other = makeRunner()
-    db.run("UPDATE flow_runs SET status = 'cancelled'")
+    await runner.cancel(runner.list('t1')[0]!.id)
+    const other = makeRunner({ newId: () => 'fr-other' })
     enter(other, 'manual')
     await flush()
     expect(other.list('t1').filter((r) => r.status !== 'cancelled')).toEqual([])
@@ -298,7 +309,7 @@ describe('FlowRunner', () => {
 
     started.length = 0
     config = { ...config, flows: [FLOW] }
-    db.run("UPDATE flow_runs SET status = 'cancelled'")
+    await runner.cancel(id)
     await makeRunner({ newId: () => 'fr-other' }).startManual('p1', 't1')
     expect(started[0]).not.toHaveProperty('runtime')
   })
@@ -863,7 +874,6 @@ describe('FlowRunner', () => {
       const runner = makeRunner({ actions: [PUSH, REVIEW] })
       enter(runner, 'manual')
       await flush()
-      await flush()
       const id = 'fr-1'
       expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'pr' })
       runner.onStageChanged({
@@ -927,7 +937,7 @@ describe('FlowRunner', () => {
         }
       })
       enter(runner, 'manual')
-      for (let i = 0; i < 4; i++) await flush()
+      await flush()
       expect(runner.view('fr-1')).toMatchObject({ status: 'finished', result: 'done' })
       expect(entered).toEqual([
         { projectId: 'p1', taskId: 't1', from: 's-rev', to: 's-revisado', source: 'automation' }
@@ -947,7 +957,6 @@ describe('FlowRunner', () => {
       const entered: StageChange[] = []
       const runner = makeRunner({ enterStage: (c) => void entered.push(c) })
       enter(runner, 'manual')
-      await flush()
       await flush()
       stage = 's-revisando'
       runner.onStageChanged({
@@ -1136,7 +1145,6 @@ describe('FlowRunner: publicar revisão como orkio[bot] (Task 18)', () => {
       bindings: [{ stageId: 's-rev', flowId: 'rp', enabled: true, mode: 'on_enter' }]
     }
     enter(r2, 'manual')
-    await flush()
     await flush()
     finish(r2, `run-${started.length}`, 'succeeded', ANSWER)
     await flush()

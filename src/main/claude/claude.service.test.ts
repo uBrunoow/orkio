@@ -35,7 +35,7 @@ function para(text: string, extra: Record<string, unknown> = {}): Record<string,
 
 function setup(over: Partial<ClaudeServiceDeps> = {}) {
   const runs = {
-    start: vi.fn(async () => ({ id: 'run-1' })),
+    start: vi.fn<(spec: RunSpec) => Promise<{ id: string }>>(async () => ({ id: 'run-1' })),
     list: vi.fn(() => []),
     lastSession: vi.fn(() => null as string | null),
     isRunning: vi.fn(() => false),
@@ -100,7 +100,7 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
     ...over
   }
   /** O `RunSpec` da última execução iniciada. */
-  const lastSpec = (): RunSpec => (runs.start.mock.calls.at(-1) as unknown as [RunSpec])[0]
+  const lastSpec = (): RunSpec => runs.start.mock.calls.at(-1)![0]
   return { service: new ClaudeService(deps), deps, runs, worktrees, lastSpec }
 }
 
@@ -460,7 +460,7 @@ describe('ClaudeService', () => {
       expect(r.ok).toBe(true)
       const files = await readdir(join(wt, '.orkio', 'attachments'))
       expect(files).toHaveLength(2)
-      const call = runs.start.mock.calls[0] as unknown as [RunSpec]
+      const call = runs.start.mock.calls[0]!
       const input = call[0].input
       expect(input.kind === 'prompt' && input.text).toMatch(
         /^veja\n\nAnexos \(leia com a ferramenta Read\): \.orkio\/attachments\/[0-9a-f]{8}-nota\.md, \.orkio\/attachments\/[0-9a-f]{8}-f\.png$/
