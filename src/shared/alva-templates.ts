@@ -381,14 +381,29 @@ export function alvaTemplates(): Flow[] {
   ]
 }
 
+export type AlvaStagedTemplate = 'plan' | 'deliver' | 'review' | 'reviewed'
+
 /**
- * Ligações padrão (ao entrar), sem configurar: "Alva: revisão publicada" na etapa de papel
- * `review` (Revisando) e "Alva: comentários da PR" na `reviewed` (Revisado), como `defaultRules`.
+ * Coluna de cada modelo Alva pelo papel da etapa (sugestão da tela alva-flow) e se ele já vem
+ * ligado sem configurar (`byDefault`): "Alva: revisão publicada" em `review` (Revisando) e
+ * "Alva: comentários da PR" em `reviewed` (Revisado), como `defaultRules`.
  */
-export const ALVA_DEFAULT_STAGES: readonly { flowId: string; role: StageRole }[] = [
-  { flowId: ALVA_TEMPLATE_IDS.review, role: 'review' },
-  { flowId: ALVA_TEMPLATE_IDS.reviewed, role: 'reviewed' }
-]
+export const ALVA_TEMPLATE_STAGES: Record<
+  AlvaStagedTemplate,
+  { role: StageRole; byDefault: boolean }
+> = {
+  plan: { role: 'plan', byDefault: false },
+  deliver: { role: 'work', byDefault: false },
+  review: { role: 'review', byDefault: true },
+  reviewed: { role: 'reviewed', byDefault: true }
+}
+
+/** Ligações padrão (ao entrar), sem configurar. */
+export const ALVA_DEFAULT_STAGES: readonly { flowId: string; role: StageRole }[] = (
+  Object.keys(ALVA_TEMPLATE_STAGES) as AlvaStagedTemplate[]
+)
+  .filter((key) => ALVA_TEMPLATE_STAGES[key].byDefault)
+  .map((key) => ({ flowId: ALVA_TEMPLATE_IDS[key], role: ALVA_TEMPLATE_STAGES[key].role }))
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`

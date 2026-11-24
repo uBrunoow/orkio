@@ -53,10 +53,12 @@ import {
   PlusIcon,
   TrashIcon
 } from '../../components/icons'
-import { useProjectActivity } from '../../components/SentenceDetail'
+import { useProjectActivity } from '../overview/useProjectActivity'
+import { useProjectFlows } from '../task-flows/useProjectFlows'
 import { RuleDetail } from './RuleDetail'
 import type { BoardSettingsTab } from '../../app/routes'
 import {
+  ORKIO_STAGE_PROPERTY_NAME,
   STAGE_ROLES,
   STAGE_ROLE_LABEL,
   isStageRole,
@@ -65,7 +67,7 @@ import {
 } from '../../../../shared/board'
 import type { NotionColor } from '../../../../shared/notion'
 import { stageDotClass } from './stage-dot'
-import { ipcResult } from '../../lib/ipc'
+import { IPC_FAILURE_MESSAGE, ipcCall, ipcResult } from '../../lib/ipc'
 
 const BOARD_TABS: { id: BoardSettingsTab; label: string }[] = [
   { id: 'columns', label: 'Colunas' },
@@ -225,24 +227,15 @@ export function FlowPage({
   const [message, setMessage] = useState<{ tone: 'danger' | 'warning'; text: string } | null>(null)
   const [events, setEvents] = useState<ConfigEvent[]>([])
   const [eventsKey, setEventsKey] = useState(0)
-  const [taskFlows, setTaskFlows] = useState<{ flows: Flow[]; bindings: StageFlow[] } | null>(null)
+  const projectFlows = useProjectFlows(view.projectId)
+  const taskFlows = projectFlows.value
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const [showAllEvents, setShowAllEvents] = useState(false)
   const [viewingRule, setViewingRule] = useState<string | null>(null)
   const automationActivity = useProjectActivity(view.projectId, 'automation')
 
-  useEffect(() => {
-    let active = true
-    void window.orkio.taskFlows.getProject(view.projectId).then((r) => {
-      if (!active || !r.ok) return
-      setTaskFlows({ flows: r.value.flows, bindings: r.value.bindings })
-      // O rascunho ganha as ligações salvas (se ainda não tiver mexido nelas).
-      setDraft((d) => (d.bindings ? d : { ...d, bindings: r.value.bindings }))
-    })
-    return () => {
-      active = false
-    }
-  }, [view.projectId])
+  // O rascunho ganha as ligações salvas (se ainda não tiver mexido nelas).
+  if (taskFlows && !draft.bindings) setDraft({ ...draft, bindings: taskFlows.bindings })
 
   const saved = view.config!
   const options = view.statusOptions
@@ -254,12 +247,9 @@ export function FlowPage({
 
   useEffect(() => {
     let active = true
-    void window.orkio.flow
-      .events(view.projectId)
-      .then((list) => {
-        if (active) setEvents(list)
-      })
-      .catch(() => {})
+    void ipcCall(() => window.orkio.flow.events(view.projectId), null).then((list) => {
+      if (active && list) setEvents(list)
+    })
     return () => {
       active = false
     }
@@ -376,7 +366,7 @@ export function FlowPage({
     // A tela continua aberta depois de salvar: o salvo vira o novo rascunho (e as ligações salvas
     // são as do rascunho), senão "Descartar" e o contador comparariam com o estado anterior.
     const bindings = draft.bindings
-    if (bindings) setTaskFlows((tf) => (tf ? { ...tf, bindings } : tf))
+    if (bindings && taskFlows) projectFlows.set({ ...taskFlows, bindings })
     setDraft({ ...initialDraft(result.value), ...(bindings ? { bindings } : {}) })
     setEditing(null)
     setAcceptWarnings(false)
@@ -385,17 +375,22 @@ export function FlowPage({
 
   async function doExport(): Promise<void> {
     const file = exportFlow(draft, options, new Date().toISOString())
-    const result = await window.orkio.flow.exportFile(file).catch(() => null)
-    if (result && !result.ok && !result.cancelled) {
+    const result = await ipcCall(() => window.orkio.flow.exportFile(file), null)
+    if (!result) setMessage({ tone: 'danger', text: IPC_FAILURE_MESSAGE })
+    else if (!result.ok && !result.cancelled) {
       setMessage({ tone: 'danger', text: result.message ?? 'Não foi possível exportar.' })
-    } else if (result?.ok) {
+    } else if (result.ok) {
       setMessage({ tone: 'warning', text: 'Fluxo exportado.' })
     }
   }
 
   async function doImport(): Promise<void> {
-    const result = await window.orkio.flow.importFile().catch(() => null)
-    if (!result || (!result.ok && result.cancelled)) return
+    const result = await ipcCall(() => window.orkio.flow.importFile(), null)
+    if (!result) {
+      setMessage({ tone: 'danger', text: IPC_FAILURE_MESSAGE })
+      return
+    }
+    if (!result.ok && result.cancelled) return
     if (!result.ok) {
       setMessage({ tone: 'danger', text: result.message ?? 'Não foi possível importar.' })
       return
@@ -607,7 +602,7 @@ export function FlowPage({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={onOpenNotionSettings}>
-              Etapa Orkio e Bloqueada…
+              {ORKIO_STAGE_PROPERTY_NAME} e Bloqueada…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={restoreDefault}>Restaurar padrão</DropdownMenuItem>

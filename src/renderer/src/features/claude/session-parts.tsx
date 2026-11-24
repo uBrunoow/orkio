@@ -13,7 +13,7 @@ import { CheckboxField, Field, SegmentedControl, TextAreaField, TextField } from
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
 import { StatusToken } from '../../components/StatusToken'
-import type { CatalogGroup, EditorId, RunMode, RunPreparation } from '../../../../shared/agent-run'
+import type { EditorId, RunMode, RunPreparation } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import {
   CheckIcon,
@@ -33,7 +33,8 @@ import {
 } from '../../../../shared/slug'
 import type { PendingPermission, useTaskRuns } from './useTaskRuns'
 import { TaskDiffView } from '../task/TaskDiffView'
-import { useIpcResource } from '../../lib/ipc'
+import { useCatalog } from './useCatalog'
+import { ipcResult } from '../../lib/ipc'
 
 export interface RunInitial {
   mode: RunMode
@@ -69,16 +70,18 @@ export function Composer({
   const start = async (): Promise<void> => {
     setStarting(true)
     setError(null)
-    const r = await window.orkio.claude.start({
-      projectId,
-      taskId: prep.taskId,
-      mode,
-      command: mode === 'command' ? command.replace(/^\//, '').trim() : null,
-      text,
-      briefing,
-      asAgent,
-      ...(prep.branchIsNew ? { branchKind: kind } : {})
-    })
+    const r = await ipcResult(() =>
+      window.orkio.claude.start({
+        projectId,
+        taskId: prep.taskId,
+        mode,
+        command: mode === 'command' ? command.replace(/^\//, '').trim() : null,
+        text,
+        briefing,
+        asAgent,
+        ...(prep.branchIsNew ? { branchKind: kind } : {})
+      })
+    )
     setStarting(false)
     if (r.ok) onStarted(r.value)
     else setError(r.error.message)
@@ -244,11 +247,11 @@ export function Workspace({
   const [confirmFiles, setConfirmFiles] = useState<string[] | null>(null)
 
   const openEditor = async (editor: EditorId): Promise<void> => {
-    const r = await window.orkio.claude.openEditor(projectId, taskId, editor)
+    const r = await ipcResult(() => window.orkio.claude.openEditor(projectId, taskId, editor))
     setError(r.ok ? null : r.error.message)
   }
   const cleanup = async (force: boolean): Promise<void> => {
-    const r = await window.orkio.claude.cleanup(projectId, taskId, force)
+    const r = await ipcResult(() => window.orkio.claude.cleanup(projectId, taskId, force))
     if (r.ok) {
       setConfirmFiles(null)
       setError(null)
@@ -347,13 +350,8 @@ function CommandPicker({
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   // Catálogo da tarefa ("Recarregar" lê de novo); falha = vazio (cai na lista de reserva).
-  const catalog = useIpcResource(`${projectId}:${taskId}`, () =>
-    window.orkio.claude
-      .catalog(projectId, taskId)
-      .then((r) => (r.ok ? r.value : []))
-      .catch((): CatalogGroup[] => [])
-  )
-  const groups = catalog.value
+  const catalog = useCatalog(projectId, taskId)
+  const groups = catalog.groups
   const loading = catalog.loading && groups !== null
   const load = catalog.reload
 

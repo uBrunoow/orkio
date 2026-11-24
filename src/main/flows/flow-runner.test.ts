@@ -499,7 +499,7 @@ describe('FlowRunner', () => {
     await runner.startManual('p1', 't1')
     await expect(runner.startManual('p1', 't1')).rejects.toBeInstanceOf(FlowError)
     expect(runner.hasActive('t1')).toBe(true)
-    expect(runner.activeForProject('p1')).toEqual({ t1: 'running' })
+    expect(runner.activeViews().map((v) => [v.taskId, v.status])).toEqual([['t1', 'running']])
   })
 
   it('reiniciar: rodando vira interrompido (retomável); gate continua em gate', async () => {
@@ -516,7 +516,6 @@ describe('FlowRunner', () => {
       currentStep: 'revisar'
     })
     expect(v.history[0]!.status).toBe('interrupted')
-    expect(r2.activeForProject('p1')).toMatchObject({ t1: 'needs_you' })
     // Retomar deste passo: nova execução do mesmo comando, briefing refeito.
     await r2.resume(id)
     expect(started.at(-1)!.command).toBe('revisar')

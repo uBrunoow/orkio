@@ -3,7 +3,7 @@ import { Alert } from '../../components/Alert'
 import { MarkdownText } from '../../components/MarkdownText'
 import { StatusToken } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
-import { splitBacklogBody } from '../task/backlog-sections'
+import { splitBacklogBody } from '../../../../shared/alva'
 import { useTaskDocument } from '../task/task-view'
 
 /**

@@ -123,9 +123,13 @@ export function useConnection(
 
   const cancelAuthorize = useCallback(async () => {
     // O login pendente resolve com o status salvo assim que o main cancelar.
-    await (
-      kind === 'notion' ? window.orkio.notion.cancelOAuth() : window.orkio.github.cancelDeviceFlow()
-    ).catch(() => undefined)
+    await ipcCall(
+      () =>
+        kind === 'notion'
+          ? window.orkio.notion.cancelOAuth()
+          : window.orkio.github.cancelDeviceFlow(),
+      undefined
+    )
   }, [kind])
 
   const testConnection = useCallback(async () => {

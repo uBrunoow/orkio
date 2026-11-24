@@ -46,13 +46,15 @@ const workspace: NotionWorkspaceStatus = {
   connection: 'oauth'
 }
 
+const BOARD = { config: {} } as SetupInput['board']
+
 const empty: SetupInput = {
   github: { state: 'disconnected' },
   notion: { state: 'disconnected' },
   claude: null,
   project: null,
   workspace: null,
-  boardConfigured: false
+  board: null
 }
 
 const states = (input: SetupInput): string[] => setupSteps(input).map((s) => `${s.id}:${s.state}`)
@@ -104,10 +106,10 @@ describe('setupSteps', () => {
       claude: claudeOk,
       project,
       workspace,
-      boardConfigured: false
+      board: null
     }
     expect(setupPending(setupSteps(almost))).toBe(1)
-    expect(setupPending(setupSteps({ ...almost, boardConfigured: true }))).toBe(0)
+    expect(setupPending(setupSteps({ ...almost, board: BOARD }))).toBe(0)
     expect(setupPending(setupSteps({ ...almost, github: { state: 'disconnected' } }))).toBe(2)
   })
 
@@ -118,9 +120,21 @@ describe('setupSteps', () => {
       claude: claudeOk,
       project,
       workspace,
-      boardConfigured: true
+      board: BOARD
     })
     expect(all.at(-1)).toMatchObject({ id: 'first-task', state: 'current' })
+  })
+
+  it('quadro só conta com página do Notion vinculada (a mesma regra no aviso e na tela)', () => {
+    const steps = setupSteps({
+      github: connected('u'),
+      notion: connected('Ana'),
+      claude: claudeOk,
+      project: { ...project, notionProject: null },
+      workspace,
+      board: BOARD
+    })
+    expect(steps.find((s) => s.id === 'board')?.state).not.toBe('done')
   })
 
   it('sem página do Notion vinculada, o passo 5 continua pendente', () => {

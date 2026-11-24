@@ -16,13 +16,15 @@ import type { FlowRunView, StageFlow } from '../../../../shared/task-flow'
 import type { TaskSignals } from '../../../../shared/task-signals'
 import {
   createSource,
+  ipcCall,
   ipcResult,
-  unwrap,
-  useSource,
   type Source,
-  type SourceState
+  type SourceState,
+  unwrap,
+  useSource
 } from '../../lib/ipc'
 import { useTaskRuns, type TaskRuns } from '../claude/useTaskRuns'
+import { useProjectFlows } from '../task-flows/useProjectFlows'
 import {
   flowPlan,
   flowStepIndex,
@@ -133,8 +135,16 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
   })
 
   const [flowRuns, setFlowRuns] = useState<FlowRunView[] | null>(null)
-  const [binding, setBinding] = useState<TaskFlowData['binding']>(null)
-  const [ciFlow, setCiFlow] = useState<TaskFlowData['ciFlow']>(null)
+  const projectFlows = useProjectFlows(projectId).value
+  const binding = useMemo((): TaskFlowData['binding'] => {
+    const b = projectFlows?.bindings.find((x) => x.stageId === card.stageId && x.enabled)
+    const flow = b ? projectFlows?.flows.find((f) => f.id === b.flowId) : null
+    return b && flow ? { ...b, flowName: flow.name } : null
+  }, [projectFlows, card.stageId])
+  const ciFlow = useMemo((): TaskFlowData['ciFlow'] => {
+    const ci = projectFlows?.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.ci)
+    return ci ? { id: ci.id, name: ci.name } : null
+  }, [projectFlows])
   useEffect(
     () =>
       window.orkio.taskFlows.onChanged((e) => {
@@ -144,24 +154,13 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
   )
   useEffect(() => {
     let active = true
-    void window.orkio.taskFlows
-      .runs(taskId)
-      .then((r) => {
-        if (active) setFlowRuns(r)
-      })
-      .catch(() => undefined)
-    void ipcResult(() => window.orkio.taskFlows.getProject(projectId)).then((r) => {
-      if (!active || !r.ok) return
-      const b = r.value.bindings.find((x) => x.stageId === card.stageId && x.enabled)
-      const flow = b ? r.value.flows.find((f) => f.id === b.flowId) : null
-      setBinding(b && flow ? { ...b, flowName: flow.name } : null)
-      const ci = r.value.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.ci)
-      setCiFlow(ci ? { id: ci.id, name: ci.name } : null)
+    void ipcCall(() => window.orkio.taskFlows.runs(taskId), null).then((r) => {
+      if (active && r) setFlowRuns(r)
     })
     return () => {
       active = false
     }
-  }, [projectId, taskId, card.stageId, version])
+  }, [taskId, version])
 
   // Histórico: muda com o card (movido, sincronizado, recusado), o agente e os eventos da tarefa.
   const [history, setHistory] = useState<BoardHistoryEntry[] | null>(null)

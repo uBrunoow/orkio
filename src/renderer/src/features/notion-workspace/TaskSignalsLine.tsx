@@ -2,7 +2,7 @@ import { PrHoverCard } from '../../components/PrHoverCard'
 import { Button } from '@/components/ui/button'
 import type { TaskSignals } from '../../../../shared/task-signals'
 import { StatusToken } from '../../components/StatusToken'
-import { CI_STATUS, isPrOpen, PR_STATE, REVIEW_DECISION } from '../../lib/status-text'
+import { prPills } from '../../lib/status-text'
 import { GitBranchIcon, PullRequestIcon } from '../../components/icons'
 
 export function TaskSignalsLine({
@@ -42,18 +42,14 @@ export function TaskSignalsLine({
               <PullRequestIcon />#{pr.number}
             </Button>
           </PrHoverCard>
-          <StatusToken {...PR_STATE[pr.state]} data-testid="pr-state" />
-          {pr.reviewDecision && isPrOpen(pr) && (
-            <StatusToken {...REVIEW_DECISION[pr.reviewDecision]} data-testid="pr-review" />
-          )}
-          {pr.unresolvedComments !== null && pr.unresolvedComments > 0 && (
+          {prPills(pr).map(({ kind, label, tone }) => (
             <StatusToken
-              label={`${pr.unresolvedComments} ${pr.unresolvedComments === 1 ? 'comentário' : 'comentários'}`}
-              tone="warning"
-              data-testid="pr-comments"
+              key={kind}
+              label={label}
+              tone={tone}
+              {...(kind === 'ci' ? {} : { 'data-testid': `pr-${kind}` })}
             />
-          )}
-          {pr.checks && isPrOpen(pr) && <StatusToken {...CI_STATUS[pr.checks]} />}
+          ))}
           {signals.otherPrs > 0 && (
             <span className="text-xs text-subtle-foreground">
               +{signals.otherPrs} {signals.otherPrs === 1 ? 'PR' : 'PRs'}

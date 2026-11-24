@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitBacklogBody } from './backlog-sections'
+import { splitBacklogBody } from './alva'
 
 describe('splitBacklogBody', () => {
   it('separa no título do plano (inglês ou português)', () => {

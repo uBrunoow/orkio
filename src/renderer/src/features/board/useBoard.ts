@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { patchBoardCard, useSources, type BoardState } from '../../app/sources'
-import { ipcResult, useSource } from '../../lib/ipc'
+import { ipcCall, ipcResult, useSource } from '../../lib/ipc'
 import type { BoardCard, BoardSaveInput, BoardView } from '../../../../shared/board'
 import type { Result, ResultError } from '../../../../shared/result'
 
@@ -30,7 +30,7 @@ export interface UseBoard {
  * `board.onSyncChanged` (sincronizado, pendente ou recusado → card volta).
  */
 export function useBoard(projectId: string | null): UseBoard {
-  const { board } = useSources()
+  const { board, projectFlows } = useSources()
   const state = useSource(board, projectId)
   const key = projectId ?? ''
 
@@ -101,11 +101,15 @@ export function useBoard(projectId: string | null): UseBoard {
       ),
     save: async (input) => {
       const result = await ipcResult(() => window.orkio.board.save(key, input))
-      if (result.ok) replace(result.value)
+      if (result.ok) {
+        replace(result.value)
+        // Quadro novo ganha as ligações dos fluxos Alva já existentes (e etapas mudam as ligações).
+        void projectFlows.reload(key)
+      }
       return result
     },
     retryNow: async () => {
-      await window.orkio.board.retryNow().catch(() => undefined)
+      await ipcCall(() => window.orkio.board.retryNow(), undefined)
     }
   }
 }

@@ -6,7 +6,6 @@ import {
   validateTaskFlow,
   type Flow,
   type FlowRunView,
-  type TaskFlowActivity,
   type TaskFlowsProject
 } from '../../shared/task-flow'
 import { DEFAULT_DELIVERY_SETTINGS, type DeliverySettings } from '../../shared/delivery'
@@ -129,10 +128,6 @@ export class FlowsService {
 
   runs(taskId: string): FlowRunView[] {
     return this.deps.runner.list(taskId)
-  }
-
-  active(projectId: string): Record<string, TaskFlowActivity> {
-    return this.deps.runner.activeForProject(projectId)
   }
 }
 

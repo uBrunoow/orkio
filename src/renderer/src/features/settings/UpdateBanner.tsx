@@ -5,6 +5,7 @@ import { InstallControls } from './InstallControls'
 import { useUpdates } from './useUpdates'
 import { WhatsNewDialog } from './WhatsNewDialog'
 import { useIpcResource } from '../../lib/ipc'
+import { isUpdateReady } from '../../lib/status-text'
 
 /**
  * Topo do conteúdo: aviso discreto quando há atualização pronta (ou, no macOS sem assinatura,
@@ -22,13 +23,8 @@ export function UpdateBanner({
   const whatsNew = notes.value
   const setWhatsNew = notes.set
 
-  const ready =
-    status &&
-    status.version &&
-    ((status.mode === 'auto' && status.phase === 'downloaded') ||
-      (status.mode === 'manual' && status.phase === 'available'))
   // Esperando para instalar: o aviso continua mesmo depois de "Agora não".
-  const show = ready && (status.installWhenIdle || dismissed !== status.version)
+  const show = isUpdateReady(status) && (status.installWhenIdle || dismissed !== status.version)
 
   return (
     <>

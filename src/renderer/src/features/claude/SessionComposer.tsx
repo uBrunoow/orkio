@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
@@ -13,6 +13,8 @@ import { checkNewAttachments, type PendingAttachment } from './attachments-ui'
 import { RuntimePicker, useSupportsEffort } from './RuntimePicker'
 import { isMac } from '../../lib/platform'
 import { useTaskView } from '../task/task-view'
+import { useCatalog } from './useCatalog'
+import { ipcResult } from '../../lib/ipc'
 
 const SEND_KEY = `${isMac() ? '⌘' : 'Ctrl'} ⏎ enviar`
 
@@ -59,7 +61,7 @@ export function SessionComposer({
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [catalog, setCatalog] = useState<CatalogCommand[] | null>(null)
+  const [wantsCatalog, setWantsCatalog] = useState(false)
   const [runtime, setRuntime] = useState<Partial<RuntimeChoice>>({})
   const supportsEffort = useSupportsEffort()
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
@@ -78,20 +80,13 @@ export function SessionComposer({
 
   const slash = /^\/(\S*)$/.exec(text)
   const typed = slash ? slash[1]! : null
-  useEffect(() => {
-    if (typed === null || catalog !== null) return
-    let active = true
-    void window.orkio.claude
-      .catalog(projectId, taskId)
-      .then((r) => (r.ok ? r.value.flatMap((g) => g.commands) : []))
-      .catch(() => [])
-      .then((commands) => {
-        if (active) setCatalog(commands)
-      })
-    return () => {
-      active = false
-    }
-  }, [typed, catalog, projectId, taskId])
+  // O catálogo só é lido quando você digita "/" pela primeira vez.
+  if (typed !== null && !wantsCatalog) setWantsCatalog(true)
+  const { groups } = useCatalog(wantsCatalog ? projectId : null, taskId)
+  const catalog = useMemo(
+    () => (wantsCatalog && groups ? groups.flatMap((g) => g.commands) : null),
+    [wantsCatalog, groups]
+  )
   const suggestions = useMemo(
     () => (typed !== null && catalog ? matchCommands(catalog, typed) : []),
     [typed, catalog]
@@ -133,13 +128,15 @@ export function SessionComposer({
         return
       }
     }
-    const r = await window.orkio.claude.send({
-      projectId,
-      taskId,
-      text: message,
-      ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
-      ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {})
-    })
+    const r = await ipcResult(() =>
+      window.orkio.claude.send({
+        projectId,
+        taskId,
+        text: message,
+        ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
+        ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {})
+      })
+    )
     setSending(false)
     if (r.ok) {
       setText('')

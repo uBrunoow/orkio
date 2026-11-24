@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { IPC_FAILURE_MESSAGE } from '../../lib/ipc'
+import { IPC_FAILURE_MESSAGE, ipcResult } from '../../lib/ipc'
 import type { TaskPullRequest } from '../../../../shared/task-signals'
 
 export interface OpenPrState {
@@ -26,7 +26,7 @@ export function useOpenPr(projectId: string, taskId: string): OpenPrState {
     setBusy(true)
     setError(null)
     try {
-      const r = await window.orkio.taskFlows.openPr(projectId, taskId)
+      const r = await ipcResult(() => window.orkio.taskFlows.openPr(projectId, taskId))
       if (r.ok) {
         setCompareUrl(r.value.compareUrl)
         setStarted(r.value.started)

@@ -16,7 +16,6 @@ import {
   PauseIcon,
   PullRequestIcon
 } from '../../components/icons'
-import { useTaskFlowState } from '../task-flows/active-flows'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { StatusToken } from '../../components/StatusToken'
@@ -110,15 +109,18 @@ export function BoardCardBody({
   actions: CardActions | null
 }): React.JSX.Element {
   const label = card.displayId ?? card.title
-  const flow = useTaskFlowState(card.taskId)
   const agent = useAgentBadge(card.taskId)
-  const status = cardStatus(card, flow, signals)
+  const activity = useTaskActivity(card.taskId)
+  const status = cardStatus(card, activity, signals)
   const branches = signals
     ? [...new Set([...signals.localBranches, ...signals.remoteBranches])]
     : []
   const pr = signals?.pr ?? null
-  const activity = useTaskActivity(card.taskId)
-  const detail = cardDetail({ ...activity, pr: null })
+  const detail = cardDetail({
+    waiting: activity.waiting?.what ?? null,
+    running: activity.running?.label ?? null,
+    pr: null
+  })
   const hasMeta =
     Boolean(detail) ||
     card.blocked ||

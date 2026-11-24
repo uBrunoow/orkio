@@ -4,6 +4,7 @@
  */
 
 import type { OverviewSnapshot, OverviewTask, TaskSection } from '../../../shared/overview'
+import { activityByTask } from '../features/overview/task-activity'
 import type { StatusTone } from '../components/StatusToken'
 import { priorityRank, queueStageOf, type BoardCard, type BoardView } from '../../../shared/board'
 
@@ -37,13 +38,10 @@ export function taskGroups(input: {
   const cards = new Map<string, BoardCard>((board?.cards ?? []).map((c) => [c.taskId, c]))
   const title = (t: OverviewTask): string => t.title ?? cards.get(t.taskId)?.title ?? FALLBACK_TITLE
 
-  const oldestWaiting = new Map<string, OverviewSnapshot['waiting'][number]>()
-  for (const item of snapshot?.waiting ?? []) {
-    if (item.task.projectId !== projectId) continue
-    const current = oldestWaiting.get(item.task.taskId)
-    if (!current || item.since < current.since) oldestWaiting.set(item.task.taskId, item)
-  }
-  const waiting: SidebarTask[] = [...oldestWaiting.values()]
+  const byTask = activityByTask(snapshot, projectId)
+  const activity = [...byTask.values()]
+  const waiting: SidebarTask[] = activity
+    .flatMap((a) => (a.waiting ? [a.waiting] : []))
     .sort((a, b) => a.since.localeCompare(b.since))
     .map((item) => ({
       taskId: item.task.taskId,
@@ -53,27 +51,27 @@ export function taskGroups(input: {
       detail: item.what,
       section: item.section
     }))
-
-  const seen = new Set(oldestWaiting.keys())
-  const running: SidebarTask[] = []
-  for (const item of snapshot?.running ?? []) {
-    if (item.task.projectId !== projectId || seen.has(item.task.taskId)) continue
-    seen.add(item.task.taskId)
-    running.push({
-      taskId: item.task.taskId,
-      displayId: item.task.displayId,
-      title: title(item.task),
-      tone: 'running',
-      detail: item.label,
-      section: item.section
-    })
-  }
+  // Quem espera você não aparece de novo em "Rodando".
+  const running: SidebarTask[] = activity.flatMap(({ waiting: w, running: item }) =>
+    !w && item
+      ? [
+          {
+            taskId: item.task.taskId,
+            displayId: item.task.displayId,
+            title: title(item.task),
+            tone: 'running' as const,
+            detail: item.label,
+            section: item.section
+          }
+        ]
+      : []
+  )
 
   const queue = queueStageOf(board?.config)
   // Os cards vêm do Notion por `created_time` desc: índice maior = tarefa mais antiga.
   const inQueue = (board?.cards ?? [])
     .map((card, index) => ({ card, index }))
-    .filter(({ card }) => queue !== null && card.stageId === queue && !seen.has(card.taskId))
+    .filter(({ card }) => queue !== null && card.stageId === queue && !byTask.has(card.taskId))
     .sort(
       (a, b) =>
         priorityRank(a.card.priority?.name) - priorityRank(b.card.priority?.name) ||

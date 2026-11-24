@@ -10,6 +10,7 @@ import { PrHoverCard } from '../../components/PrHoverCard'
 import { CI_STATUS, isPrOpen } from '../../lib/status-text'
 import { useTaskDiff, useTaskView } from './task-view'
 import { contextTone, folderName, latestContextPercent } from './environment'
+import { ipcResult } from '../../lib/ipc'
 
 const TITLE = 'text-2xs font-medium tracking-wider text-subtle-foreground uppercase'
 const BAR: Record<'ok' | 'warn' | 'danger', string> = {
@@ -35,8 +36,8 @@ export function EnvironmentPanel(): React.JSX.Element {
   async function open(kind: 'cursor' | 'code' | 'terminal'): Promise<void> {
     const r =
       kind === 'terminal'
-        ? await window.orkio.claude.openTerminal(projectId, taskId)
-        : await window.orkio.claude.openEditor(projectId, taskId, kind)
+        ? await ipcResult(() => window.orkio.claude.openTerminal(projectId, taskId))
+        : await ipcResult(() => window.orkio.claude.openEditor(projectId, taskId, kind))
     setError(r.ok ? null : r.error.message)
   }
 

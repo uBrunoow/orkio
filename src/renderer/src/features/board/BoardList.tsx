@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils'
 import { StatusToken } from '../../components/StatusToken'
-import { useTaskFlowState } from '../task-flows/active-flows'
+import { useTaskActivity } from './task-activity'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { CardActionsMenu, cardMenuItems, type CardActions } from './BoardCardView'
@@ -69,9 +69,8 @@ function BoardListRow({
   signals: TaskSignals | undefined
   actions: CardActions
 }): React.JSX.Element {
-  const flow = useTaskFlowState(card.taskId)
   const agent = useAgentBadge(card.taskId)
-  const status = cardStatus(card, flow, signals)
+  const status = cardStatus(card, useTaskActivity(card.taskId), signals)
   const stage = stages.find((s) => s.id === card.stageId)
   return (
     <li

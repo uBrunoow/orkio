@@ -20,6 +20,7 @@ import { AgentEditor, type Editing } from './AgentEditor'
 import { useAgentBadges } from './agent-badges'
 import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
 import { useAgentsState, useCommandNames, useOrchestrator } from './useAgents'
+import { ipcResult } from '../../lib/ipc'
 
 export function AgentsPage({
   projectId: currentProjectId = null,
@@ -116,12 +117,14 @@ export function AgentsPage({
   const save = async (e: Editing): Promise<void> => {
     setBusy(true)
     setMessage(null)
-    const r = await window.orkio.agents.save({
-      projectId,
-      scope: e.scope,
-      profile: e.draft,
-      isNew: e.mode === 'new'
-    })
+    const r = await ipcResult(() =>
+      window.orkio.agents.save({
+        projectId,
+        scope: e.scope,
+        profile: e.draft,
+        isNew: e.mode === 'new'
+      })
+    )
     setBusy(false)
     if (!r.ok) {
       setMessage({ tone: 'error', text: r.error.message })
@@ -140,7 +143,7 @@ export function AgentsPage({
 
   const approve = async (view: AgentView): Promise<void> => {
     setBusy(true)
-    const r = await window.orkio.agents.approve(projectId, view.key, view.hash)
+    const r = await ipcResult(() => window.orkio.agents.approve(projectId, view.key, view.hash))
     setBusy(false)
     if (r.ok) {
       agents.set(r.value)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ipcResult } from '../../lib/ipc'
+import { ipcCall, ipcResult } from '../../lib/ipc'
 import {
   isRunLive,
   type RunEventMessage,
@@ -84,7 +84,7 @@ export function useTaskRuns(
   const select = useCallback(async (runId: string | null) => {
     selected.current = runId
     setSelectedRunId(runId)
-    setLog(runId ? await window.orkio.claude.readLog(runId).catch(() => []) : [])
+    setLog(runId ? await ipcCall(() => window.orkio.claude.readLog(runId), []) : [])
   }, [])
 
   useEffect(() => {
@@ -100,7 +100,7 @@ export function useTaskRuns(
       const runId = r.value.activeRunId ?? r.value.runs[0]?.id ?? null
       selected.current = runId
       setSelectedRunId(runId)
-      const events = runId ? await window.orkio.claude.readLog(runId).catch(() => []) : []
+      const events = runId ? await ipcCall(() => window.orkio.claude.readLog(runId), []) : []
       if (active) setLog(events)
     })()
     return () => {

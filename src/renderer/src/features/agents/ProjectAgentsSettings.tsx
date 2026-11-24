@@ -7,6 +7,7 @@ import { PAGE_WIDTH } from '../../components/page-width'
 import { AssignRules } from './AssignRules'
 import { useAgentsState } from './useAgents'
 import { OrchestratorSection } from './OrchestratorSection'
+import { ipcResult } from '../../lib/ipc'
 
 /**
  * Configurações › Agentes do projeto: o orquestrador (quem puxa tarefas da fila e passa adiante) e
@@ -39,7 +40,7 @@ export function ProjectAgentsSettings({ projectId }: { projectId: string }): Rea
             key={JSON.stringify(state.rules)}
             state={state}
             onSave={async (rules) => {
-              const r = await window.orkio.agents.setRules(projectId, rules)
+              const r = await ipcResult(() => window.orkio.agents.setRules(projectId, rules))
               if (r.ok) {
                 agents.set(r.value)
                 setMessage({ tone: 'ok', text: 'Regras de atribuição salvas.' })

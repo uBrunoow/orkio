@@ -1,5 +1,7 @@
-import { useEffect, useId, useMemo, useState } from 'react'
-import { useProjectActivity } from '../../components/SentenceDetail'
+import { useId, useMemo, useState } from 'react'
+import { useProjectActivity } from '../overview/useProjectActivity'
+import { useProjectFlows } from './useProjectFlows'
+import { useCatalog } from '../claude/useCatalog'
 import { FlowDetail } from './FlowDetail'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,7 +41,7 @@ import { plural } from '../../lib/format'
 import { RuntimePicker, useSupportsEffort } from '../claude/RuntimePicker'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
 import { GATE_SHOW_TEXT, stepSummary } from './step-text'
-import { IPC_FAILURE, ipcCall, ipcResult, useIpcResource } from '../../lib/ipc'
+import { ipcResult } from '../../lib/ipc'
 import { useBoard } from '../board/useBoard'
 
 function Chip({
@@ -109,7 +111,8 @@ function emptyStep(flow: Flow, type: StepType): Step {
  * com formulário por tipo. Comandos vêm do catálogo da 4B. A validação é a mesma do main.
  */
 export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.Element {
-  const [project, setProject] = useState<TaskFlowsProject | null>(null)
+  const projectFlows = useProjectFlows(projectId)
+  const project = projectFlows.value
   const [flows, setFlows] = useState<Flow[]>([])
   const [saved, setSaved] = useState<Flow[]>([])
   const [selected, setSelected] = useState<string | null>(null)
@@ -118,33 +121,23 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
   const [editingId, setEditingId] = useState<string | null>(null)
   const flowActivity = useProjectActivity(projectId, 'flow')
 
-  useEffect(() => {
-    let active = true
-    void ipcResult(() => window.orkio.taskFlows.getProject(projectId)).then((r) => {
-      if (!active) return
-      if (r.ok) {
-        setProject(r.value)
-        setFlows(r.value.flows)
-        setSaved(r.value.flows)
-        setSelected(r.value.flows[0]?.id ?? null)
-      } else setMessage({ tone: 'error', text: r.error.message })
-    })
-    return () => {
-      active = false
-    }
-  }, [projectId])
+  // O salvo acompanha a fonte (outra tela criou fluxos Alva, releitura ao abrir) enquanto você
+  // não tiver mudanças a salvar.
+  const loaded = project?.flows
+  const [shown, setShown] = useState<Flow[] | null>(null)
+  if (loaded && loaded !== shown && countFlowChanges(saved, flows) === 0) {
+    setShown(loaded)
+    setFlows(loaded)
+    setSaved(loaded)
+    setSelected((id) => (id && loaded.some((f) => f.id === id) ? id : (loaded[0]?.id ?? null)))
+  }
   const board = useBoard(projectId).view
   const stageNames = useMemo(
     () => Object.fromEntries((board?.config?.stages ?? []).map((st) => [st.id, st.name])),
     [board]
   )
   // Catálogo do Claude Code no projeto (sem tarefa: a pasta do projeto); falha = vazio.
-  const catalogResource = useIpcResource(projectId, (id) =>
-    ipcCall(() => window.orkio.claude.catalog(id, null), { ok: false, error: IPC_FAILURE }).then(
-      (r) => (r.ok ? r.value : [])
-    )
-  )
-  const catalog: CatalogGroup[] | null = catalogResource.value
+  const catalog: CatalogGroup[] | null = useCatalog(projectId, null).groups
 
   const commands = useMemo(
     () => (catalog ? new Set(catalog.flatMap((g) => g.commands.map((c) => c.name))) : null),
@@ -164,7 +157,13 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
     [flows, ctx]
   )
 
-  if (!project) return <Skeleton className="h-60" aria-label="Carregando fluxos" />
+  if (!project) {
+    return projectFlows.error ? (
+      <Alert tone="danger">{projectFlows.error.message}</Alert>
+    ) : (
+      <Skeleton className="h-60" aria-label="Carregando fluxos" />
+    )
+  }
 
   const flow = flows.find((f) => f.id === selected) ?? null
   const hasErrors = [...issuesByFlow.values()].some((l) => l.some((i) => i.level === 'error'))
@@ -175,9 +174,13 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
 
   const save = async (): Promise<void> => {
     setSaving(true)
-    const r = await window.orkio.taskFlows.saveFlows(projectId, flows)
+    const r = await ipcResult(() => window.orkio.taskFlows.saveFlows(projectId, flows))
     setSaving(false)
-    if (r.ok) setSaved(flows)
+    if (r.ok) {
+      setSaved(flows)
+      setShown(r.value.flows)
+      projectFlows.set(r.value)
+    }
     setMessage(
       r.ok ? { tone: 'ok', text: 'Fluxos salvos.' } : { tone: 'error', text: r.error.message }
     )

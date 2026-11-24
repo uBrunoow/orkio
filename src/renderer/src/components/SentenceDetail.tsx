@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -9,8 +8,6 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table'
-import type { ActivityItem } from '../../../shared/overview'
-import type { ActivityGroup } from '../../../shared/task-events'
 import type { Execution } from './executions'
 import { EditIcon } from './icons'
 import { StatusToken } from './StatusToken'
@@ -84,27 +81,6 @@ export function SentenceDetail({
       </div>
     </section>
   )
-}
-
-export function useProjectActivity(projectId: string, group: ActivityGroup): ActivityItem[] | null {
-  const [items, setItems] = useState<ActivityItem[] | null>(null)
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    let alive = true
-    void window.orkio.overview
-      .activity({ projectId, group, limit: 200 })
-      .then((r) => {
-        if (alive) setItems(r.ok ? r.value.items : [])
-      })
-      .catch(() => {
-        if (alive) setItems([])
-      })
-    return () => {
-      alive = false
-    }
-  }, [projectId, group, tick])
-  useEffect(() => window.orkio.overview.onChanged(() => setTick((n) => n + 1)), [])
-  return items
 }
 
 export function ExecutionsTable({

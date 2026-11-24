@@ -90,7 +90,7 @@ export function SetupPage({
     claude,
     project,
     workspace: workspace.status,
-    boardConfigured: !!board.view?.config
+    board: board.view
   })
   const current = steps.find((s) => s.state === 'current') ?? steps[steps.length - 1]!
   const step = steps.find((s) => s.id === selected) ?? current

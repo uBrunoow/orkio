@@ -9,7 +9,7 @@ import type { AgentStatus } from '../../../shared/agent'
 import type { ConnectedAccount, ConnectionStatus } from '../../../shared/connection'
 import type { NotionColor, NotionWorkspaceStatus } from '../../../shared/notion'
 import type { ProjectHealthState } from '../../../shared/projects'
-import type { FlowRunStatus } from '../../../shared/task-flow'
+import type { FlowRunStatus, FlowRunView } from '../../../shared/task-flow'
 import type {
   ChecksState,
   PullRequestState,
@@ -143,13 +143,21 @@ export const RUN_STATUS: Record<RunStatus, StatusText> = {
   cancelled: { label: 'Cancelada', tone: 'neutral' }
 }
 
-export const FLOW_RUN_STATUS: Record<FlowRunStatus, StatusText> = {
+const FLOW_RUN_STATUS: Record<FlowRunStatus, StatusText> = {
   running: { label: 'Rodando', tone: 'running' },
   waiting_gate: { label: 'Esperando aprovação', tone: 'warning' },
   paused: { label: 'Pausado', tone: 'danger' },
   awaiting_decision: { label: 'Esperando sua decisão', tone: 'warning' },
   finished: { label: 'Concluído', tone: 'success' },
   cancelled: { label: 'Cancelado', tone: 'neutral' }
+}
+
+/** Estado de uma execução de fluxo: terminado por um gate recusado é "Recusado", não "Concluído". */
+export function flowRunText(run: Pick<FlowRunView, 'status' | 'result'>): StatusText {
+  if (run.status === 'finished' && run.result === 'rejected') {
+    return { label: 'Recusado', tone: 'danger' }
+  }
+  return FLOW_RUN_STATUS[run.status]
 }
 
 /** Item da pré-checagem do alva-flow (falta configurar é aviso: o resto do Orkio funciona). */
@@ -182,8 +190,39 @@ export function isPrOpen(pr: Pick<TaskPullRequest, 'state'> | null | undefined):
   return pr?.state === 'open' || pr?.state === 'draft'
 }
 
+export interface PrPill extends StatusText {
+  kind: 'state' | 'review' | 'comments' | 'ci'
+}
+
+/**
+ * Pílulas da PR, na ordem em que aparecem: estado, revisão, comentários sem resposta e CI. Revisão,
+ * comentários e CI só contam com a PR aberta (numa encerrada não pedem nada).
+ */
+export function prPills(
+  pr: Pick<TaskPullRequest, 'state' | 'reviewDecision' | 'unresolvedComments' | 'checks'>
+): PrPill[] {
+  const open = isPrOpen(pr)
+  const comments = open ? (pr.unresolvedComments ?? 0) : 0
+  return [
+    { kind: 'state', ...PR_STATE[pr.state] },
+    ...(open && pr.reviewDecision
+      ? [{ kind: 'review' as const, ...REVIEW_DECISION[pr.reviewDecision] }]
+      : []),
+    ...(comments > 0
+      ? [
+          {
+            kind: 'comments' as const,
+            label: `${comments} ${comments === 1 ? 'comentário' : 'comentários'}`,
+            tone: 'warning' as const
+          }
+        ]
+      : []),
+    ...(open && pr.checks ? [{ kind: 'ci' as const, ...CI_STATUS[pr.checks] }] : [])
+  ]
+}
+
 /** Pronta para instalar: baixada (automática) ou disponível para baixar (macOS sem assinatura). */
-export function isUpdateReady(s: UpdateStatus | null): boolean {
+export function isUpdateReady(s: UpdateStatus | null): s is UpdateStatus & { version: string } {
   return (
     !!s?.version &&
     ((s.mode === 'auto' && s.phase === 'downloaded') ||
@@ -191,12 +230,15 @@ export function isUpdateReady(s: UpdateStatus | null): boolean {
   )
 }
 
+/** Baixando: no modo automático, `available` já é o começo do download. */
+export function isUpdateDownloading(s: UpdateStatus): boolean {
+  return s.phase === 'downloading' || (s.mode === 'auto' && s.phase === 'available')
+}
+
 /** Token de Configurações › Atualizações (`null` = nada a destacar). */
 export function updatePhaseText(s: UpdateStatus): StatusText | null {
   if (s.mode === 'disabled') return { label: 'Desligadas', tone: 'neutral' }
   if (isUpdateReady(s)) return { label: 'Nova versão', tone: 'warning' }
-  if (s.phase === 'downloading' || s.phase === 'available') {
-    return { label: 'Baixando', tone: 'neutral' }
-  }
+  if (isUpdateDownloading(s)) return { label: 'Baixando', tone: 'running' }
   return null
 }

@@ -34,10 +34,10 @@ import { BacklogDocumentView } from '../alva/BacklogDocumentView'
 import { gateOutcomes, gateResultRunId, planProgress, type PlanStep } from './flow-plan'
 import { MarkdownText } from '../../components/MarkdownText'
 import { formatDuration, formatUsd, plural } from '../../lib/format'
-import { ipcResult } from '../../lib/ipc'
+import { ipcCall, ipcResult } from '../../lib/ipc'
 import { TaskDiffView } from '../task/TaskDiffView'
 import { useTaskView } from '../task/task-view'
-import { CI_STATUS, FLOW_RUN_STATUS, isPrOpen } from '../../lib/status-text'
+import { CI_STATUS, flowRunText, isPrOpen } from '../../lib/status-text'
 import { PLAN_TRIGGER_ATTR } from '../task/task-phases'
 
 const STEP_STATUS: Record<FlowStepStatus, string> = {
@@ -129,21 +129,7 @@ export function TaskFlowSection({
         <h3 className="text-sm font-medium">
           {run ? `Fluxo: ${run.flowName}${run.agent ? ` · ${run.agent.name}` : ''}` : 'Fluxo'}
         </h3>
-        {run && (
-          <StatusToken
-            tone={
-              run.status === 'finished' && run.result === 'rejected'
-                ? 'danger'
-                : FLOW_RUN_STATUS[run.status].tone
-            }
-            label={
-              run.status === 'finished' && run.result === 'rejected'
-                ? 'Recusado'
-                : FLOW_RUN_STATUS[run.status].label
-            }
-            data-testid="flow-status"
-          />
-        )}
+        {run && <StatusToken {...flowRunText(run)} data-testid="flow-status" />}
         {run && live && (
           <>
             <span
@@ -644,11 +630,13 @@ function GateCard({
   useEffect(() => {
     if (show !== 'result') return
     let active = true
-    void (resultRunId ? window.orkio.claude.readLog(resultRunId) : Promise.resolve([]))
-      .catch(() => [])
-      .then((events) => {
-        if (active) setResult(finalText(events) ?? '')
-      })
+    void (
+      resultRunId
+        ? ipcCall(() => window.orkio.claude.readLog(resultRunId), [])
+        : Promise.resolve([])
+    ).then((events) => {
+      if (active) setResult(finalText(events) ?? '')
+    })
     return () => {
       active = false
     }

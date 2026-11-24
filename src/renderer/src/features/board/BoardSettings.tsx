@@ -4,11 +4,13 @@ import { CheckboxField, RadioListField, SelectField, TextField } from '@/compone
 import { Alert } from '../../components/Alert'
 import { Spinner } from '../../components/Spinner'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
-import type {
-  BoardSaveInput,
-  BoardView,
-  OrkioStageChoice,
-  StageRole
+import {
+  BOARD_SETUP_MESSAGES as MSG,
+  ORKIO_STAGE_PROPERTY_NAME as ORKIO_STAGE,
+  type BoardSaveInput,
+  type BoardView,
+  type OrkioStageChoice,
+  type StageRole
 } from '../../../../shared/board'
 import type { Result } from '../../../../shared/result'
 
@@ -22,8 +24,6 @@ interface DraftStage {
   role?: StageRole
   missingName: string | null
 }
-
-const ORKIO_STAGE = 'Etapa Orkio'
 
 export function BoardSettings({
   view,
@@ -84,20 +84,12 @@ export function BoardSettings({
       : []
 
   const blockers = [
-    ...(stages.length === 0 ? ['Adicione pelo menos uma etapa.'] : []),
-    ...(stages.some((s) => !s.name.trim()) ? ['Toda etapa precisa de um nome.'] : []),
-    ...(stages.some((s) => !s.optionId)
-      ? ['Escolha uma opção de status do Notion que exista para cada etapa.']
-      : []),
-    ...(orkioMode === 'existing' && !orkioProperty
-      ? ['Escolha a propriedade da Etapa Orkio.']
-      : []),
-    ...(orkioMode === 'create' && !confirmCreate
-      ? ['Confirme a criação da propriedade “Etapa Orkio”.']
-      : []),
-    ...(missingOptions.length > 0 && !addMissing
-      ? ['Confirme adicionar as opções que faltam na Etapa Orkio.']
-      : [])
+    ...(stages.length === 0 ? [MSG.noStages] : []),
+    ...(stages.some((s) => !s.name.trim()) ? [MSG.stageNeedsName] : []),
+    ...(stages.some((s) => !s.optionId) ? [MSG.stageNeedsOption] : []),
+    ...(orkioMode === 'existing' && !orkioProperty ? [MSG.chooseOrkioProperty] : []),
+    ...(orkioMode === 'create' && !confirmCreate ? [MSG.confirmCreateOrkioProperty] : []),
+    ...(missingOptions.length > 0 && !addMissing ? [MSG.confirmMissingOptions] : [])
   ]
 
   async function save(): Promise<void> {
@@ -229,7 +221,7 @@ export function BoardSettings({
             },
             {
               value: 'create',
-              label: 'Criar a propriedade “Etapa Orkio”',
+              label: `Criar a propriedade “${ORKIO_STAGE}”`,
               disabled: hasOrkioProperty,
               ...(hasOrkioProperty ? { description: 'Já existe: use “existente”.' } : {})
             }
@@ -237,7 +229,7 @@ export function BoardSettings({
         />
         {orkioMode === 'existing' && (
           <SelectField
-            label="Propriedade da Etapa Orkio"
+            label={`Propriedade da ${ORKIO_STAGE}`}
             options={view.selectProperties.map((p) => ({ value: p.id, label: p.name }))}
             placeholder="Escolha a propriedade"
             value={orkioProperty}
@@ -256,7 +248,7 @@ export function BoardSettings({
         )}
         {orkioMode === 'create' && (
           <CheckboxField
-            label="Confirmo criar a propriedade “Etapa Orkio” no banco de Tarefas (vale para todas as tarefas do banco)"
+            label={`Confirmo criar a propriedade “${ORKIO_STAGE}” no banco de Tarefas (vale para todas as tarefas do banco)`}
             checked={confirmCreate}
             onChange={setConfirmCreate}
           />

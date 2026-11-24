@@ -6,7 +6,7 @@ import { AutomationIcon } from '../../components/icons'
 import { AUTOPILOT_TEXT, AutopilotPlan } from './AutopilotPlan'
 import { ipcResult } from '../../lib/ipc'
 import { useTaskView } from '../task/task-view'
-import { FLOW_RUN_STATUS } from '../../lib/status-text'
+import { flowRunText } from '../../lib/status-text'
 
 export function FlowPlanPanel({ onCancelled }: { onCancelled(): void }): React.JSX.Element | null {
   const { run, plan } = useTaskView().flow
@@ -31,10 +31,7 @@ export function FlowPlanPanel({ onCancelled }: { onCancelled(): void }): React.J
           {run.flowName}
           {run.agent ? ` · ${run.agent.name}` : ''}
         </span>
-        <StatusToken
-          tone={FLOW_RUN_STATUS[run.status].tone}
-          label={FLOW_RUN_STATUS[run.status].label}
-        />
+        <StatusToken {...flowRunText(run)} />
       </div>
       <p className="text-xs text-muted-foreground">{AUTOPILOT_TEXT}</p>
       <AutopilotPlan plan={plan ?? []} />

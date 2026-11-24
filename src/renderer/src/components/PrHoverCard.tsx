@@ -3,7 +3,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { StatusDot, type StatusTone } from '@/components/StatusToken'
 import { Timestamp } from '@/components/Timestamp'
 import { plural } from '@/lib/format'
-import { CI_STATUS, isPrOpen, PR_STATE, REVIEW_DECISION, type StatusText } from '@/lib/status-text'
+import { prPills, PR_STATE, REVIEW_DECISION, type StatusText } from '@/lib/status-text'
 import type { TaskSignals } from '../../../shared/task-signals'
 
 type TaskPullRequest = NonNullable<TaskSignals['pr']>
@@ -48,10 +48,10 @@ export function PrHoverCard({
 }): React.JSX.Element {
   const repo = repoOfPrUrl(pr.url)
   const badge = prBadge(pr)
-  const open = isPrOpen(pr)
-  const ci = open && pr.checks ? CI_STATUS[pr.checks] : null
+  const pills = prPills(pr)
+  const ci = pills.find((p) => p.kind === 'ci') ?? null
   const hasSize = pr.additions !== undefined && pr.deletions !== undefined
-  const unresolved = open ? (pr.unresolvedComments ?? 0) : 0
+  const unresolved = pills.some((p) => p.kind === 'comments') ? (pr.unresolvedComments ?? 0) : 0
   return (
     <HoverCard>
       <HoverCardTrigger asChild>{children}</HoverCardTrigger>

@@ -5,6 +5,7 @@
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import type { ConnectionStatus } from '../../../../shared/connection'
 import type { NotionWorkspaceStatus } from '../../../../shared/notion'
+import type { BoardView } from '../../../../shared/board'
 import type { ProjectView } from '../../../../shared/projects'
 import { accountName, isClaudeReady } from '../../lib/status-text'
 
@@ -26,7 +27,8 @@ export interface SetupInput {
   claude: ClaudeCodeStatus | null
   project: ProjectView | null
   workspace: NotionWorkspaceStatus | null
-  boardConfigured: boolean
+  /** Quadro do projeto (`null` = sem quadro ou ainda não lido). */
+  board: Pick<BoardView, 'config'> | null
 }
 
 const SETUP_TITLES: Record<SetupStepId, string> = {
@@ -66,7 +68,7 @@ export function setupSteps(input: SetupInput): SetupStep[] {
     claude: isClaudeReady(input.claude),
     folder: project !== null,
     'notion-data': !!input.workspace?.config && !!project?.notionProject,
-    board: input.boardConfigured,
+    board: !!project?.notionProject && !!input.board?.config,
     'first-task': false
   }
   const summary: Record<SetupStepId, string | null> = {

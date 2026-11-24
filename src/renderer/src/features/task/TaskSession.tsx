@@ -19,6 +19,7 @@ import { actorOf } from './TaskTimeline'
 import { useTaskView } from './task-view'
 import { backlogDocumentOf } from '../../../../shared/alva'
 import { buildSession, tailSession, type SessionItem } from './task-session'
+import { ipcResult } from '../../lib/ipc'
 
 const TAIL = 30
 
@@ -110,7 +111,7 @@ export function TaskSession({
       from ? { mode: from.mode, command: from.command ?? '', text: from.text ?? '' } : EMPTY_INITIAL
     )
     setPreparing(true)
-    const r = await window.orkio.claude.prepare(projectId, taskId)
+    const r = await ipcResult(() => window.orkio.claude.prepare(projectId, taskId))
     setPreparing(false)
     setNewSession(r)
   }

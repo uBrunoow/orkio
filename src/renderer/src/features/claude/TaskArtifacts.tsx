@@ -9,6 +9,7 @@ import type {
 } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import { ExternalLinkIcon, NotionLogo } from '../../components/icons'
+import { ipcResult } from '../../lib/ipc'
 
 const MODE_LABEL: Record<ArtifactPublishMode, string> = {
   section: 'seção na página da tarefa',
@@ -46,7 +47,7 @@ export function TaskArtifacts({
 
   useEffect(() => {
     let active = true
-    void window.orkio.claude.artifacts(projectId, taskId).then((r) => {
+    void ipcResult(() => window.orkio.claude.artifacts(projectId, taskId)).then((r) => {
       if (!active) return
       if (r.ok) setData(r.value)
       else setError(r.error.message)
@@ -63,7 +64,9 @@ export function TaskArtifacts({
 
   const attach = async (path: string): Promise<void> => {
     setBusy(true)
-    const r = await window.orkio.claude.attachArtifact(projectId, taskId, path, runId)
+    const r = await ipcResult(() =>
+      window.orkio.claude.attachArtifact(projectId, taskId, path, runId)
+    )
     setBusy(false)
     setError(r.ok ? null : r.error.message)
     setTick((n) => n + 1)
@@ -71,10 +74,8 @@ export function TaskArtifacts({
   const publish = async (): Promise<void> => {
     if (!confirm) return
     setBusy(true)
-    const r = await window.orkio.claude.publishArtifact(
-      projectId,
-      confirm.artifact.id,
-      confirm.mode
+    const r = await ipcResult(() =>
+      window.orkio.claude.publishArtifact(projectId, confirm.artifact.id, confirm.mode)
     )
     setBusy(false)
     if (r.ok) {

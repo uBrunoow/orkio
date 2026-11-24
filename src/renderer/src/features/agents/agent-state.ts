@@ -4,6 +4,7 @@
  */
 import type { AgentBadge, AgentView } from '../../../../shared/agent'
 import type { OverviewSnapshot } from '../../../../shared/overview'
+import { activityByTask } from '../overview/task-activity'
 import type { StatusTone } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
 import { AGENT_STATUS } from '../../lib/status-text'
@@ -27,24 +28,20 @@ export function agentNow(input: {
   const mine = Object.entries(input.badges)
     .filter(([, b]) => b.key === agent.key)
     .map(([taskId]) => taskId)
-  const waitingItems = (snapshot?.waiting ?? []).filter(
-    (w) => w.task.projectId === projectId && mine.includes(w.task.taskId)
-  )
-  const runningItems = (snapshot?.running ?? []).filter(
-    (r) => r.task.projectId === projectId && mine.includes(r.task.taskId)
-  )
-  const idOf = (taskId: string): string | null =>
-    [...(snapshot?.waiting ?? []), ...(snapshot?.running ?? [])].find(
-      (i) => i.task.taskId === taskId
-    )?.task.displayId ?? null
-  const hot = new Set(waitingItems.map((w) => w.task.taskId))
-  const tasks = mine.map((taskId) => ({ taskId, displayId: idOf(taskId), hot: hot.has(taskId) }))
+  const byTask = activityByTask(snapshot, projectId)
+  // Na ordem da Visão geral: quem espera há mais tempo, depois o que roda.
+  const activity = [...byTask].flatMap(([taskId, a]) => (mine.includes(taskId) ? [a] : []))
+  const tasks = mine.map((taskId) => {
+    const a = byTask.get(taskId)
+    const displayId = (a?.waiting ?? a?.running)?.task.displayId ?? null
+    return { taskId, displayId, hot: !!a?.waiting }
+  })
 
   if (agent.status === 'needs_review' || agent.status === 'invalid') {
     const { label, tone } = AGENT_STATUS[agent.status]
     return { filter: 'stopped', tone, text: label, tasks }
   }
-  const firstWaiting = waitingItems[0]
+  const firstWaiting = activity.find((a) => a.waiting)?.waiting
   if (firstWaiting) {
     const id = firstWaiting.task.displayId ?? 'uma tarefa'
     return {
@@ -54,7 +51,7 @@ export function agentNow(input: {
       tasks
     }
   }
-  const firstRunning = runningItems[0]
+  const firstRunning = activity.find((a) => a.running)?.running
   if (firstRunning) {
     return {
       filter: 'working',

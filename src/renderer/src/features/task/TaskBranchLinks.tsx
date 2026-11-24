@@ -5,6 +5,7 @@ import { Field } from '@/components/form'
 import type { TaskBranchesView } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import { Spinner } from '../../components/Spinner'
+import { ipcResult } from '../../lib/ipc'
 
 const SOURCE_LABEL = { orkio: 'criada pelo Orkio', manual: 'vinculada por você' } as const
 
@@ -29,7 +30,7 @@ export function TaskBranchLinks({
 
   useEffect(() => {
     let active = true
-    void window.orkio.claude.branches(projectId, taskId).then((r) => {
+    void ipcResult(() => window.orkio.claude.branches(projectId, taskId)).then((r) => {
       if (!active) return
       if (r.ok) setView(r.value)
       else setError(r.error.message)

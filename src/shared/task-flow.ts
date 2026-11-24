@@ -720,9 +720,6 @@ export interface ConfirmReview {
   pr: { owner: string; repo: string; number: number }
 }
 
-/** Fluxo ativo numa tarefa, do jeito que o card e a lista mostram. */
-export type TaskFlowActivity = 'running' | 'needs_you'
-
 /** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
 export interface TaskFlowsProject extends ProjectFlows {
   extractors: { id: string; label: string }[]

@@ -6,13 +6,16 @@ import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
 import { StatusToken } from '../../components/StatusToken'
 import { ALVA_CHECK } from '../../lib/status-text'
-import type { AlvaPrecheck, AlvaStatusView } from '../../../../shared/alva'
+import type { AlvaStatusView } from '../../../../shared/alva'
+import { useSources } from '../../app/sources'
+import { useAlvaPrecheck } from './useAlvaPrecheck'
 import { Alert } from '../../components/Alert'
 import { CopyIcon, RefreshIcon } from '../../components/icons'
 import { PAGE_WIDTH } from '../../components/page-width'
 import { suggestAlvaTargets, type AlvaTargets } from './alva-targets'
 import { stageWithRole } from '../../../../shared/board'
 import type { BoardView } from '../../../../shared/board'
+import { ipcResult } from '../../lib/ipc'
 
 export function AlvaPage({
   projectId,
@@ -23,8 +26,8 @@ export function AlvaPage({
   view: BoardView
   onBoardChanged(): void
 }): React.JSX.Element {
-  const [precheck, setPrecheck] = useState<AlvaPrecheck | null>(null)
-  const [checking, setChecking] = useState(false)
+  const { precheck, checking, recheck } = useAlvaPrecheck(projectId)
+  const { projectFlows } = useSources()
   const [status, setStatus] = useState<AlvaStatusView | null>(null)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -48,10 +51,7 @@ export function AlvaPage({
 
   useEffect(() => {
     let active = true
-    void window.orkio.alva.precheck(projectId).then((r) => {
-      if (active && r.ok) setPrecheck(r.value)
-    })
-    void window.orkio.alva.status(projectId).then((r) => {
+    void ipcResult(() => window.orkio.alva.status(projectId)).then((r) => {
       if (active && r.ok) setStatus(r.value)
     })
     return () => {
@@ -64,13 +64,6 @@ export function AlvaPage({
     if (status && !touched.current) setTargets(suggestAlvaTargets(stages ?? [], status))
   }, [status, stages])
 
-  const recheck = async (): Promise<void> => {
-    setChecking(true)
-    const r = await window.orkio.alva.precheck(projectId, { force: true })
-    setChecking(false)
-    if (r.ok) setPrecheck(r.value)
-  }
-
   const stageOptions = [
     { value: '', label: 'Nenhuma (rodar à mão)' },
     ...(view.config?.stages ?? []).map((s) => ({ value: s.id, label: s.name }))
@@ -79,10 +72,11 @@ export function AlvaPage({
 
   const create = async (): Promise<void> => {
     setBusy(true)
-    const r = await window.orkio.alva.createTemplates(projectId, targets)
+    const r = await ipcResult(() => window.orkio.alva.createTemplates(projectId, targets))
     setBusy(false)
     if (r.ok) {
       setStatus(r.value)
+      void projectFlows.reload(projectId)
       setMessage({
         tone: 'ok',
         text: 'Fluxos Alva criados. Edite em Fluxo do projeto → Fluxos de tarefa.'
@@ -92,10 +86,11 @@ export function AlvaPage({
 
   const addPlanning = async (): Promise<void> => {
     setBusy(true)
-    const r = await window.orkio.alva.addPlanningStage(projectId, planStatus)
+    const r = await ipcResult(() => window.orkio.alva.addPlanningStage(projectId, planStatus))
     setBusy(false)
     if (r.ok) {
       choose({ plan: r.value })
+      void projectFlows.reload(projectId)
       setMessage({ tone: 'ok', text: 'Coluna “Planejando” criada.' })
       onBoardChanged()
     } else setMessage({ tone: 'error', text: r.error.message })
@@ -273,9 +268,11 @@ export function AlvaPage({
           options={[1, 2, 3, 4].map((n) => ({ value: String(n), label: String(n) }))}
           value={String(status.maxParallel)}
           onChange={(v: string) =>
-            void window.orkio.alva.setMaxParallel(projectId, Number(v)).then((r) => {
-              if (r.ok) setStatus(r.value)
-            })
+            void ipcResult(() => window.orkio.alva.setMaxParallel(projectId, Number(v))).then(
+              (r) => {
+                if (r.ok) setStatus(r.value)
+              }
+            )
           }
         />
       )}

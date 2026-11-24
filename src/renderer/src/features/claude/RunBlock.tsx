@@ -22,6 +22,7 @@ import { RUN_STATUS } from '../../lib/status-text'
 import { backlogDocumentOf } from '../../../../shared/alva'
 import { TaskDiffView } from '../task/TaskDiffView'
 import { useTaskView } from '../task/task-view'
+import { ipcCall } from '../../lib/ipc'
 
 export function RunBlock({
   run,
@@ -62,12 +63,9 @@ export function RunBlock({
   useEffect(() => {
     if (liveLog) return
     let active = true
-    void window.orkio.claude
-      .readLog(run.id)
-      .catch(() => [])
-      .then((events) => {
-        if (active) setLoaded(events)
-      })
+    void ipcCall(() => window.orkio.claude.readLog(run.id), []).then((events) => {
+      if (active) setLoaded(events)
+    })
     return () => {
       active = false
     }

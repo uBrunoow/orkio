@@ -37,15 +37,13 @@ import {
   type ProjectFlows,
   type Step,
   type StepEnd,
-  type StepFailure,
-  type TaskFlowActivity
+  type StepFailure
 } from '../../shared/task-flow'
 import {
   acceptsReply,
   ACTIVE_FLOW_STATUSES,
   FLOW_PAUSE_REASONS,
   FLOW_PAUSES,
-  needsYou,
   waitingKind
 } from '../../shared/flow-run-state'
 import {
@@ -1053,24 +1051,6 @@ export class FlowRunner {
         taskId
       )
       .map((r) => this.view(r.id))
-  }
-
-  /** Para o card do quadro: tarefas com fluxo ativo e se ele espera você. */
-  activeForProject(projectId: string): Record<string, TaskFlowActivity> {
-    const out: Record<string, TaskFlowActivity> = {}
-    for (const r of this.deps.db.all<{
-      task_page_id: string
-      status: FlowRunStatus
-      pause_reason: FlowPauseReason | null
-    }>(
-      `SELECT task_page_id, status, pause_reason FROM flow_runs WHERE project_id = ? AND status IN ${ACTIVE_SQL}`,
-      projectId
-    )) {
-      out[r.task_page_id] = needsYou({ status: r.status, pauseReason: r.pause_reason })
-        ? 'needs_you'
-        : 'running'
-    }
-    return out
   }
 
   /**

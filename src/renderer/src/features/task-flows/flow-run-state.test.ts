@@ -17,9 +17,9 @@ import { flowPlan } from './flow-plan'
 
 /**
  * "Esperando você" tem uma regra só (`shared/flow-run-state.ts`). Aqui, todos os que mostram o
- * estado de um fluxo concordam para cada combinação de status e motivo de pausa: o card
- * (`needsYou`, que o executor usa no `activeForProject`), o sino e a lista lateral
- * (`flowWaitingItem`/`buildRunning`), o cartão de problema (`describeFlowProblem`) e o plano.
+ * estado de um fluxo concordam para cada combinação de status e motivo de pausa: o card, o sino e
+ * a lista lateral (`flowWaitingItem`/`buildRunning`, lidos por `activityByTask`), o cartão de
+ * problema (`describeFlowProblem`) e o plano.
  */
 const STEPS: Step[] = [
   { id: 'a', name: 'A', type: 'claude_command', command: 'x', args: '', timeoutMin: 5 },

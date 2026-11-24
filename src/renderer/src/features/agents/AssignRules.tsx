@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { SelectField } from '@/components/form'
-import type { AgentsState } from '../../../../shared/agent'
+import { isUsableAgent, type AgentsState } from '../../../../shared/agent'
 import { TrashIcon } from '../../components/icons'
 
 export function AssignRules({
@@ -14,9 +14,7 @@ export function AssignRules({
   const [rules, setRules] = useState(state.rules)
   const [stageId, setStageId] = useState<string>('')
   const [agentKey, setAgentKey] = useState<string>('')
-  const usable = state.agents.filter(
-    (a) => a.profile && a.status !== 'invalid' && a.status !== 'archived'
-  )
+  const usable = state.agents.filter(isUsableAgent)
   if (state.stages.length === 0) {
     return (
       <div className="flex flex-col gap-2">
@@ -77,7 +75,7 @@ export function AssignRules({
             className="w-56"
             label="Atribuir a"
             placeholder="Escolha o agente"
-            options={usable.map((a) => ({ value: a.key, label: a.profile!.name }))}
+            options={usable.map((a) => ({ value: a.key, label: a.profile.name }))}
             value={agentKey || null}
             onChange={(v) => setAgentKey(v)}
           />

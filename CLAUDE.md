@@ -223,11 +223,16 @@ src/
     app/WaitingBell.tsx    # 9: sino (esperando você de todos os projetos + PRs com atenção)
     app/sources.tsx        # fontes compartilhadas (SourcesProvider no topo): visão geral, sinais
                            # por projeto, quadro por projeto, projetos, conexões, bancos do Notion,
-                           # Claude Code, atualizações; um poll e uma assinatura de eventos por fonte
+                           # Claude Code, atualizações, fluxos do projeto, catálogo, pré-checagem
+                           # alva, automações e atividade; um poll e uma assinatura de eventos por
+                           # fonte. Dado do main lido por mais de uma tela vem daqui (nunca
+                           # `window.orkio.*.get` direto); quem grava põe o resultado ou relê
     lib/ipc.ts             # IPC_FAILURE_MESSAGE, ipcCall/ipcResult, createSource/useSource e
-                           # useIpcResource (dado de um componente: chave, assinatura, poll, foco)
+                           # useIpcResource (dado de um componente: chave, assinatura, poll, foco).
+                           # Toda chamada ao main passa por ipcCall/ipcResult (nada de `.catch` mudo)
     lib/status-text.ts     # { label, tone } por dado (conexão, bancos, cores do Notion, Claude,
-                           # projeto, agente, execuções, PR/CI/revisão, atualização)
+                           # projeto, agente, execuções, fluxo (`flowRunText`), pílulas da PR
+                           # (`prPills`), atualização (`isUpdateReady`/`updatePhaseText`))
     lib/format.ts          # plural, formatUsd, durações e datas (pt-BR)
     features/<feature>/    # componentes + hooks por funcionalidade
       integrations/        # grade (IntegrationsPage, IntegrationCard, integrations-logic puro),
@@ -933,7 +938,8 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
     o campo da sessão fica bloqueado; "Ver a sessão do passo" abre e mostra a execução na conversa.
 - **UI:** editor "Fluxos de tarefa" (do Fluxo do projeto), bloco "Fluxo" no fim da sessão (passos
   recolhidos, gate, pausas, decisão; a conversa do passo atual aparece logo acima) e token
-  "Fluxo"/"Esperando você" no card (`active-flows.tsx`, contexto React).
+  "Fluxo rodando"/"Esperando você" no card pela Visão geral (`features/overview/task-activity.ts`,
+  `activityByTask`: a mesma regra da lista lateral e da tela Agentes).
 
 ## alva-flow (Etapa 5B)
 
@@ -986,7 +992,8 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
 - **Ligações padrão** (`upgradeAlvaFlows`, `ALVA_DEFAULT_STAGES`): "revisão publicada" na etapa de
   papel `review` e "comentários da PR" na `reviewed` (`on_enter`, pelo papel como `defaultRules`), só em
   coluna sem fluxo e se o modelo não estiver ligado em outra. Valem na tela alva-flow (seletores
-  sugeridos por `features/alva/alva-targets.ts`: o modelo já ligado fica na coluna dele; pelo papel só
+  sugeridos por `features/alva/alva-targets.ts` com o papel de `ALVA_TEMPLATE_STAGES`, a mesma tabela
+  das ligações padrão: o modelo já ligado fica na coluna dele; pelo papel só
   em coluna sem fluxo, `AlvaStatus.boundStages`), no quadro novo de projeto que já tem modelos Alva
   (calculado dentro do `config.update`) e na migração `orkio-config` v11→v12 (acrescenta os modelos
   que faltam e troca as cópias de mesmo id que diferem do modelo, comparadas sem depender da ordem

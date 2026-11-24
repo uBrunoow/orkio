@@ -21,7 +21,7 @@ import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
 import { useConnection } from './useConnection'
 import { useClaudeStatus } from '../claude/useClaudeStatus'
-import { useIpcResource, unwrap } from '../../lib/ipc'
+import { useAlvaPrecheck } from '../alva/useAlvaPrecheck'
 import { IntegrationCard } from './IntegrationCard'
 import {
   effectiveOpenId,
@@ -49,9 +49,7 @@ export function IntegrationsPage({
   const github = useConnection('github', { revalidate: true })
   const workspace = useNotionWorkspace(notion.key)
   const claude = useClaudeStatus().status
-  const precheck = useIpcResource(projectId, (id) =>
-    window.orkio.alva.precheck(id).then(unwrap)
-  ).value
+  const { precheck } = useAlvaPrecheck(projectId)
 
   const notionReady = notion.status?.state === 'connected'
   const workspaceReady = notionReady && isWorkspaceReady(workspace.status)

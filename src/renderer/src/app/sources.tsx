@@ -1,25 +1,31 @@
 /**
  * Fontes de dados compartilhadas pelas telas (uma por dado do main): criadas uma vez no topo do
  * App e lidas pelos hooks das features (`useOverview`, `useTaskSignals`, `useBoard`, `useProjects`,
- * `useConnection`, `useUpdates`, `useClaudeStatus`). Cada fonte tem uma carga, uma assinatura de
+ * `useConnection`, `useUpdates`, `useClaudeStatus`, `useProjectFlows`, `useCatalog`,
+ * `useAlvaPrecheck`, `useAutomationStatus`, `useProjectActivity`). Cada fonte tem uma carga, uma assinatura de
  * eventos e um poll, por mais telas que a leiam ao mesmo tempo.
  */
 import { createContext, useContext, useState } from 'react'
 import {
   createSource,
   ipcCall,
+  ipcResult,
   IPC_FAILURE_MESSAGE,
   unwrap,
   type Source,
   type SourceControl
 } from '../lib/ipc'
-import type { ClaudeCodeStatus } from '../../../shared/agent-run'
+import type { CatalogGroup, ClaudeCodeStatus } from '../../../shared/agent-run'
+import type { AlvaPrecheck } from '../../../shared/alva'
+import type { AutomationStatus } from '../../../shared/automation'
 import type { BoardCard, BoardView } from '../../../shared/board'
 import type { AuthOptions, ConnectionStatus } from '../../../shared/connection'
 import type { NotionWorkspaceStatus } from '../../../shared/notion'
-import type { OverviewSnapshot } from '../../../shared/overview'
+import type { ActivityItem, OverviewSnapshot } from '../../../shared/overview'
 import type { ProjectView } from '../../../shared/projects'
 import type { ResultError } from '../../../shared/result'
+import type { TaskFlowsProject } from '../../../shared/task-flow'
+import type { ActivityGroup } from '../../../shared/task-events'
 import type { TaskSignalsResult } from '../../../shared/task-signals'
 import type { UpdateStatus } from '../../../shared/updates'
 
@@ -27,6 +33,8 @@ import type { UpdateStatus } from '../../../shared/updates'
 const OVERVIEW_POLL_MS = 60_000
 /** Sinais: atualização leve (o main usa ETag: quase sempre 304), com a janela visível e em foco. */
 const SIGNALS_POLL_MS = 60_000
+/** Estado das automações do projeto (próxima verificação, erro) enquanto o Quadro está aberto. */
+const AUTOMATION_POLL_MS = 15_000
 
 export type ConnectorKind = 'notion' | 'github'
 
@@ -58,7 +66,22 @@ export interface AppSources {
   claude: Source<ClaudeCodeStatus, { force: boolean }>
   notionWorkspace: Source<NotionWorkspaceStatus, 'revalidate'>
   updates: Source<UpdateStatus>
+  /** Fluxos de tarefa, ligações e entrega do projeto. Quem grava devolve o novo (ou relê). */
+  projectFlows: Source<TaskFlowsProject>
+  /** Catálogo do Claude Code, chave `catalogKey(projeto, tarefa)`; falha = vazio. */
+  catalog: Source<CatalogGroup[]>
+  /** Pré-checagem do alva-flow por projeto (`force` refaz). */
+  alvaPrecheck: Source<AlvaPrecheck, { force: boolean }>
+  automation: Source<AutomationStatus>
+  /** Atividade recente do projeto por grupo, chave `activityKey(projeto, grupo)`. */
+  activity: Source<ActivityItem[]>
 }
+
+export const catalogKey = (projectId: string, taskId: string | null): string =>
+  JSON.stringify([projectId, taskId])
+
+export const activityKey = (projectId: string, group: ActivityGroup): string =>
+  JSON.stringify([projectId, group])
 
 export const connectorApi = (
   kind: string
@@ -83,6 +106,18 @@ function patchCard(
 }
 
 export { patchCard as patchBoardCard }
+
+/**
+ * Quadro de um projeto lido fora de um componente (busca, lista de projetos): pela fonte, que junta
+ * a leitura com a de outras telas e guarda o resultado; `null` = sem quadro ou falha.
+ */
+export async function readBoard(
+  board: AppSources['board'],
+  projectId: string
+): Promise<BoardView | null> {
+  await board.reload(projectId)
+  return board.get(projectId).value?.view ?? null
+}
 
 /** Relê todas as chaves lidas quando a conta de um serviço muda (conectou, desconectou...). */
 function reloadOnConnection<T, A>(
@@ -211,6 +246,38 @@ export function createAppSources(): AppSources {
     updates: createSource({
       load: () => window.orkio.updates.status(),
       listen: (src) => window.orkio.updates.onStatus((s) => src.set('', s))
+    }),
+    projectFlows: createSource({
+      load: (projectId) => window.orkio.taskFlows.getProject(projectId).then(unwrap)
+    }),
+    catalog: createSource({
+      load: (key) => {
+        const [projectId, taskId] = JSON.parse(key) as [string, string | null]
+        return ipcResult(() => window.orkio.claude.catalog(projectId, taskId)).then((r) =>
+          r.ok ? r.value : []
+        )
+      }
+    }),
+    alvaPrecheck: createSource<AlvaPrecheck, { force: boolean }>({
+      load: (projectId, arg) =>
+        window.orkio.alva.precheck(projectId, arg?.force ? { force: true } : undefined).then(unwrap)
+    }),
+    automation: createSource({
+      load: (projectId) => window.orkio.automation.status(projectId),
+      pollMs: AUTOMATION_POLL_MS
+    }),
+    activity: createSource({
+      load: (key) => {
+        const [projectId, group] = JSON.parse(key) as [string, ActivityGroup]
+        return ipcResult(() =>
+          window.orkio.overview.activity({ projectId, group, limit: 200 })
+        ).then((r) => (r.ok ? r.value.items : []))
+      },
+      // Uma execução nova de regra ou fluxo muda a visão geral (mesmo evento de antes).
+      listen: (src) =>
+        window.orkio.overview.onChanged(() => {
+          for (const key of src.keys()) void src.reload(key)
+        })
     })
   }
 }

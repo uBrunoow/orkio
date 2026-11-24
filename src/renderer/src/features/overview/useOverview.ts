@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useSources } from '../../app/sources'
 import { ipcResult, useSource } from '../../lib/ipc'
 import type { OverviewSnapshot } from '../../../../shared/overview'
@@ -18,14 +18,13 @@ export function useOverview(): OverviewState {
   const state = useSource(overview, '')
   const [refreshing, setRefreshing] = useState(false)
   const [refreshError, setRefreshError] = useState<string | null>(null)
-  const mounted = useRef(true)
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
     const result = await ipcResult(() => window.orkio.overview.refresh())
     if (result.ok) overview.set('', result.value)
     setRefreshError(result.ok ? null : result.error.message)
-    if (mounted.current) setRefreshing(false)
+    setRefreshing(false)
   }, [overview])
 
   return {

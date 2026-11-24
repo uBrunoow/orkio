@@ -2,7 +2,7 @@ import type { StatusTone } from '../../components/StatusToken'
 import { CI_STATUS, isPrOpen, PR_STATE, REVIEW_DECISION } from '../../lib/status-text'
 import type { BoardCard } from '../../../../shared/board'
 import type { TaskSignals } from '../../../../shared/task-signals'
-import type { TaskFlowActivity } from '../../../../shared/task-flow'
+import type { TaskActivity } from '../overview/task-activity'
 
 export interface CardStatus {
   /** Gancho de teste: o fluxo e a sincronização mantêm os ids que o E2E já usa. */
@@ -13,23 +13,26 @@ export interface CardStatus {
 
 /**
  * O único estado que o card mostra no canto (6E, referências): o que mais pede a pessoa vence.
+ * "Esperando você" e "Fluxo rodando" vêm da Visão geral (`activityByTask`), a mesma regra da lista
+ * lateral e do sino.
  * Mesmo mapa do app (StatusToken): esperando você em amarelo, falha em vermelho, fluxo rodando
  * em laranja (o único laranja de estado), o resto neutro.
  */
 export function cardStatus(
   card: Pick<BoardCard, 'sync'>,
-  flow: TaskFlowActivity | null,
+  activity: TaskActivity,
   signals: Pick<TaskSignals, 'pr'> | undefined
 ): CardStatus | null {
   const pr = signals?.pr ?? null
   const prOpen = pr !== null && isPrOpen(pr)
-  if (flow === 'needs_you') return { kind: 'flow', label: 'Esperando você', tone: 'warning' }
+  if (activity.waiting) return { kind: 'flow', label: 'Esperando você', tone: 'warning' }
   if (card.sync.state === 'failed')
     return { kind: 'sync', label: 'Não sincronizou', tone: 'danger' }
   if (prOpen && pr.checks === 'failure') return { kind: 'pr', ...CI_STATUS.failure }
   if (prOpen && pr.reviewDecision === 'changes_requested')
     return { kind: 'pr', ...REVIEW_DECISION.changes_requested }
-  if (flow === 'running') return { kind: 'flow', label: 'Fluxo rodando', tone: 'running' }
+  if (activity.running?.kind === 'flow')
+    return { kind: 'flow', label: 'Fluxo rodando', tone: 'running' }
   if (card.sync.state === 'pending')
     return { kind: 'sync', label: 'Sincronizando', tone: 'neutral' }
   if (pr?.state === 'open') return { kind: 'pr', label: 'Em revisão', tone: 'neutral' }

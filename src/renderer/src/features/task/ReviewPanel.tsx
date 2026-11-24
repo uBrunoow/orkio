@@ -13,6 +13,7 @@ import { MarkdownText } from '../../components/MarkdownText'
 import { plural } from '../../lib/format'
 import { CollapsibleHeader } from '../../components/CollapsibleHeader'
 import { useTaskView } from './task-view'
+import { ipcResult } from '../../lib/ipc'
 
 type State =
   | { phase: 'loading' }
@@ -67,17 +68,14 @@ export function ReviewPanel({ active }: { active: boolean }): React.JSX.Element 
   useEffect(() => {
     if (!active) return
     let live = true
-    void window.orkio.signals
-      .reviewThreads(projectId, taskId, { force: nonce > 0 })
-      .then((r) => {
-        if (!live) return
-        setState(
-          r.ok ? { phase: 'ready', data: r.value } : { phase: 'error', message: r.error.message }
-        )
-      })
-      .catch(() => {
-        if (live) setState({ phase: 'error', message: 'Não deu para ler os comentários da PR.' })
-      })
+    void ipcResult(() =>
+      window.orkio.signals.reviewThreads(projectId, taskId, { force: nonce > 0 })
+    ).then((r) => {
+      if (!live) return
+      setState(
+        r.ok ? { phase: 'ready', data: r.value } : { phase: 'error', message: r.error.message }
+      )
+    })
     return () => {
       live = false
     }

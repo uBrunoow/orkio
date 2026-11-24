@@ -81,13 +81,7 @@ import type {
 } from '../projects'
 import type { Result } from '../result'
 import type { ReviewThreadsResult } from '../review'
-import type {
-  Flow,
-  FlowRunView,
-  OpenPrResult,
-  TaskFlowActivity,
-  TaskFlowsProject
-} from '../task-flow'
+import type { Flow, FlowRunView, OpenPrResult, TaskFlowsProject } from '../task-flow'
 import type { TaskSignalsResult } from '../task-signals'
 import {
   UPDATE_CHANNELS,
@@ -834,12 +828,6 @@ export const ORKIO_API = {
         channel: 'task-flows:runs',
         args: [taskId],
         fallback: []
-      }),
-      /** Para os cards: tarefas com fluxo ativo e se ele espera você. */
-      active: call<(projectId: string) => Promise<Record<string, TaskFlowActivity>>>()({
-        channel: 'task-flows:active',
-        args: [projectId],
-        fallback: {}
       }),
       /** "Rodar fluxo": o fluxo ligado à etapa atual da tarefa. */
       start: call<(projectId: string, taskId: string) => FlowRunResult>()({

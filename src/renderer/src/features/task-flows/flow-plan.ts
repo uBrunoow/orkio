@@ -5,7 +5,7 @@
  * veio cada execução, para a conversa mostrar quem "mandou" o comando.
  */
 import { ALVA_COMMAND_PHASE, alvaCommandOf, alvaWaitsForCi } from '../../../../shared/alva'
-import { isProblem, needsYou } from '../../../../shared/flow-run-state'
+import { isLive, isProblem, needsYou } from '../../../../shared/flow-run-state'
 import { orkioAction } from '../../../../shared/orkio-actions'
 import {
   isPromptStep,
@@ -79,7 +79,7 @@ export function flowPlan(run: FlowRunView): PlanStep[] {
     last.set(h.stepId, h.status)
     visits.set(h.stepId, (visits.get(h.stepId) ?? 0) + 1)
   }
-  const ended = run.status === 'finished' || run.status === 'cancelled'
+  const ended = !isLive(run.status)
   const currentIndex = ended ? -1 : steps.findIndex((s) => s.id === run.currentStep)
   return steps.map((step, i) => {
     const status = last.get(step.id)

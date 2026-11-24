@@ -1,14 +1,12 @@
 import { createContext, useContext } from 'react'
+import { NO_ACTIVITY, type TaskActivity } from '../overview/task-activity'
 
-export type TaskActivityMap = Record<string, { waiting: string | null; running: string | null }>
+export type TaskActivityMap = ReadonlyMap<string, TaskActivity>
 
-const TaskActivityContext = createContext<TaskActivityMap>({})
+const TaskActivityContext = createContext<TaskActivityMap>(new Map())
 
 export const TaskActivityProvider = TaskActivityContext.Provider
 
-export function useTaskActivity(taskId: string): {
-  waiting: string | null
-  running: string | null
-} {
-  return useContext(TaskActivityContext)[taskId] ?? { waiting: null, running: null }
+export function useTaskActivity(taskId: string): TaskActivity {
+  return useContext(TaskActivityContext).get(taskId) ?? NO_ACTIVITY
 }

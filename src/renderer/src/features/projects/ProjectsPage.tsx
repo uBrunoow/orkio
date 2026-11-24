@@ -29,6 +29,7 @@ import type {
   ProjectView
 } from '../../../../shared/projects'
 import { useIpcResource } from '../../lib/ipc'
+import { readBoard, useSources } from '../../app/sources'
 import { useConnectionStatus } from '../integrations/useConnection'
 import { isFolderProblem } from '../../../../shared/projects'
 import { ProjectAvatar } from '../../components/ProjectAvatar'
@@ -380,6 +381,7 @@ function ProjectRow({
 
 /** Colunas do quadro de cada projeto vinculado (`null` = sem quadro). Lê do main (cache). */
 function useBoardStages(projects: ProjectView[] | null): Record<string, number | null> {
+  const { board } = useSources()
   const ids = (projects ?? [])
     .filter((p) => p.notionProject)
     .map((p) => p.id)
@@ -388,8 +390,8 @@ function useBoardStages(projects: ProjectView[] | null): Record<string, number |
     useIpcResource(ids || null, async (key) => {
       const entries = await Promise.all(
         key.split(',').map(async (id) => {
-          const r = await window.orkio.board.get(id).catch(() => null)
-          return r?.ok ? ([id, r.value.config?.stages.length ?? null] as const) : null
+          const view = await readBoard(board, id)
+          return view ? ([id, view.config?.stages.length ?? null] as const) : null
         })
       )
       return Object.fromEntries(entries.filter((e) => e !== null))

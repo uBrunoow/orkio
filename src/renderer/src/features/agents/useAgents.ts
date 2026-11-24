@@ -1,4 +1,6 @@
+import { useMemo } from 'react'
 import { unwrap, useIpcResource, type IpcResource } from '../../lib/ipc'
+import { useCatalog } from '../claude/useCatalog'
 import type { AgentsState } from '../../../../shared/agent'
 import type { OrchestratorState } from '../../../../shared/orchestrator'
 
@@ -23,10 +25,9 @@ export function useOrchestrator(projectId: string | null): IpcResource<Orchestra
 
 /** Nomes dos comandos do catálogo do Claude Code no projeto (sem tarefa: a pasta do projeto). */
 export function useCommandNames(projectId: string | null): string[] {
-  return (
-    useIpcResource(projectId, async (id) => {
-      const groups = unwrap(await window.orkio.claude.catalog(id, null))
-      return [...new Set(groups.flatMap((g) => g.commands.map((c) => c.name)))]
-    }).value ?? []
+  const { groups } = useCatalog(projectId, null)
+  return useMemo(
+    () => [...new Set((groups ?? []).flatMap((g) => g.commands.map((c) => c.name)))],
+    [groups]
   )
 }

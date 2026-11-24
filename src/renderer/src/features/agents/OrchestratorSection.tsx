@@ -5,7 +5,7 @@ import { Spinner } from '@/components/Spinner'
 import { Timestamp } from '@/components/Timestamp'
 import { MultiSelectField } from './MultiSelectField'
 import { useOrchestrator } from './useAgents'
-import type { AgentsState } from '../../../../shared/agent'
+import { isUsableAgent, type AgentsState } from '../../../../shared/agent'
 import {
   ORCHESTRATOR_LIMITS,
   suggestOrchestrator,
@@ -18,6 +18,7 @@ import { Alert } from '../../components/Alert'
 import { PlusIcon, TrashIcon } from '../../components/icons'
 import { StatusToken } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
+import { ipcResult } from '../../lib/ipc'
 
 export function OrchestratorSection({
   projectId,
@@ -48,7 +49,7 @@ export function OrchestratorSection({
 
   const run = async (): Promise<void> => {
     setBusy(true)
-    const r = await window.orkio.agents.runOrchestrator(projectId)
+    const r = await ipcResult(() => window.orkio.agents.runOrchestrator(projectId))
     setBusy(false)
     if (r.ok) orchestrator.set(r.value)
     else setError(r.error.message)
@@ -57,7 +58,7 @@ export function OrchestratorSection({
   const save = async (next: OrchestratorConfig): Promise<void> => {
     setBusy(true)
     setError(null)
-    const r = await window.orkio.agents.saveOrchestrator(projectId, next)
+    const r = await ipcResult(() => window.orkio.agents.saveOrchestrator(projectId, next))
     setBusy(false)
     if (!r.ok) {
       setError(r.error.message)
@@ -239,12 +240,10 @@ function OrchestratorEditor({
   const set = (patch: Partial<OrchestratorConfig>): void => onChange({ ...draft, ...patch })
   const setLane = (i: number, patch: Partial<OrchestratorLane>): void =>
     set({ lanes: draft.lanes.map((l, j) => (j === i ? { ...l, ...patch } : l)) })
-  const usable = agents.agents.filter(
-    (a) => a.profile && a.status !== 'invalid' && a.status !== 'archived'
-  )
+  const usable = agents.agents.filter(isUsableAgent)
   const agentOptions = usable.map((a) => ({
     value: a.key,
-    label: a.scope === 'builtin' ? `${a.profile!.name} (embutido)` : a.profile!.name
+    label: a.scope === 'builtin' ? `${a.profile.name} (embutido)` : a.profile.name
   }))
   const stageOptions = state.stages.map((s) => ({ value: s.id, label: s.name }))
   // A mesma validação do main (a checagem de permissão do agente vem do main, depois de salvar).

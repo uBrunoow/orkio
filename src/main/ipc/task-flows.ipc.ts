@@ -21,7 +21,6 @@ export function taskFlowsHandlers(
     getProject: (projectId) => service.getProject(projectId),
     saveFlows: (projectId, flows) => service.saveFlows(projectId, flows),
     runs: (taskId) => service.runs(taskId),
-    active: (projectId) => service.active(projectId),
     start: (projectId, taskId) => ok(runner.startManual(projectId, taskId)),
     approve: (id, values) => ok(runner.approveGate(id, values)),
     setDelivery: (projectId, settings) => service.setDelivery(projectId, settings),

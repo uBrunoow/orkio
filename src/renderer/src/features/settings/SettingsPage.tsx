@@ -10,6 +10,7 @@ import { formatDateTime } from '../../lib/format'
 import { WhatsNewDialog } from './WhatsNewDialog'
 import { StatusToken } from '../../components/StatusToken'
 import { ipcCall, useIpcResource } from '../../lib/ipc'
+import { isUpdateDownloading, updatePhaseText } from '../../lib/status-text'
 
 export function UpdatesSection(): React.JSX.Element {
   const { status, checking, check, setChannel } = useUpdates()
@@ -131,11 +132,8 @@ export function PowerSection(): React.JSX.Element {
 const SECTION_CLASS = 'flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5'
 
 function PhaseToken({ status }: { status: UpdateStatus }): React.JSX.Element | null {
-  if (status.mode === 'disabled') return <StatusToken label="Desligadas" />
-  if (status.phase === 'downloaded' || status.phase === 'available')
-    return <StatusToken tone="warning" label="Nova versão" />
-  if (status.phase === 'downloading') return <StatusToken tone="running" label="Baixando" />
-  return null
+  const text = updatePhaseText(status)
+  return text && <StatusToken {...text} />
 }
 
 function StatusLine({ status }: { status: UpdateStatus }): React.JSX.Element {
@@ -144,7 +142,7 @@ function StatusLine({ status }: { status: UpdateStatus }): React.JSX.Element {
     text = 'As atualizações automáticas funcionam só no app instalado (macOS e Windows).'
   } else if (status.phase === 'checking') {
     text = 'Procurando atualizações…'
-  } else if (status.phase === 'downloading') {
+  } else if (isUpdateDownloading(status)) {
     text = `Baixando a versão ${status.version ?? ''}${status.progress !== null ? ` (${status.progress}%)` : ''}…`
   } else if (status.phase === 'downloaded') {
     text = `A versão ${status.version ?? ''} está pronta. Ela é instalada quando você reiniciar ou fechar o Orkio.`

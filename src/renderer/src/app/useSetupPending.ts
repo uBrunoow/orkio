@@ -15,15 +15,8 @@ export function useSetupPending(project: ProjectView | null, board: BoardView | 
   const notion = useConnectionStatus('notion')
   const claude = useClaudeStatus().status
   const workspace = useNotionWorkspace().status
+  // Ainda carregando (inclusive o quadro do projeto vinculado): não conta nada.
   if (!project || github === null || notion === null || claude === null) return 0
-  return setupPending(
-    setupSteps({
-      github,
-      notion,
-      claude,
-      project,
-      workspace,
-      boardConfigured: project.notionProject ? (board ? !!board.config : true) : false
-    })
-  )
+  if (project.notionProject && board === null) return 0
+  return setupPending(setupSteps({ github, notion, claude, project, workspace, board }))
 }

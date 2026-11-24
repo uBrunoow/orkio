@@ -24,17 +24,18 @@ import {
   RefreshIcon,
   SearchIcon
 } from '../../components/icons'
-import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
 import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
-import type { ActiveFlows } from '../task-flows/active-flows'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
 import { TaskActivityProvider, type TaskActivityMap } from './task-activity'
+import { activityByTask } from '../overview/task-activity'
 import { useOverview } from '../overview/useOverview'
 import { useBoard } from './useBoard'
+import { useSources } from '../../app/sources'
+import { ipcCall, useSource } from '../../lib/ipc'
 import type { AutomationStatus } from '../../../../shared/automation'
 import type { ProjectView } from '../../../../shared/projects'
 import { formatTime } from '../../lib/format'
@@ -86,23 +87,9 @@ function Board({
   const automation = useAutomationStatus(projectId)
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
-  const activeFlows = useActiveFlows(projectId)
   const agentBadges = useAgentBadges(projectId)
   const { snapshot } = useOverview()
-  const taskActivity = useMemo(() => {
-    const map: TaskActivityMap = {}
-    for (const w of snapshot?.waiting ?? []) {
-      if (w.task.projectId !== projectId) continue
-      const cur = map[w.task.taskId] ?? { waiting: null, running: null }
-      map[w.task.taskId] = { ...cur, waiting: cur.waiting ?? w.what }
-    }
-    for (const r of snapshot?.running ?? []) {
-      if (r.task.projectId !== projectId) continue
-      const cur = map[r.task.taskId] ?? { waiting: null, running: null }
-      map[r.task.taskId] = { ...cur, running: cur.running ?? r.label }
-    }
-    return map
-  }, [snapshot, projectId])
+  const taskActivity = useMemo(() => activityByTask(snapshot, projectId), [snapshot, projectId])
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
   const [onlyBlocked, setOnlyBlocked] = useState(false)
@@ -188,7 +175,7 @@ function Board({
         <AgentRow
           cards={view.cards}
           badges={agentBadges}
-          flows={activeFlows}
+          activity={taskActivity}
           selected={agentKey}
           onSelect={setAgentKey}
         />
@@ -312,25 +299,23 @@ function Board({
           />
         ) : (
           <TaskActivityProvider value={taskActivity}>
-            <ActiveFlowsProvider value={activeFlows}>
-              <AgentBadgesProvider value={agentBadges}>
-                {layout === 'list' ? (
-                  <BoardList
-                    stages={view.config.stages}
-                    cards={cards}
-                    signals={signals.result?.signals ?? {}}
-                    actions={actions}
-                  />
-                ) : (
-                  <BoardColumns
-                    stages={view.config.stages}
-                    cards={cards}
-                    signals={signals.result?.signals ?? {}}
-                    actions={actions}
-                  />
-                )}
-              </AgentBadgesProvider>
-            </ActiveFlowsProvider>
+            <AgentBadgesProvider value={agentBadges}>
+              {layout === 'list' ? (
+                <BoardList
+                  stages={view.config.stages}
+                  cards={cards}
+                  signals={signals.result?.signals ?? {}}
+                  actions={actions}
+                />
+              ) : (
+                <BoardColumns
+                  stages={view.config.stages}
+                  cards={cards}
+                  signals={signals.result?.signals ?? {}}
+                  actions={actions}
+                />
+              )}
+            </AgentBadgesProvider>
           </TaskActivityProvider>
         )}
       </div>
@@ -338,44 +323,30 @@ function Board({
   )
 }
 
-/** Estado das automações do projeto (atualiza a cada 15 s enquanto a tela está aberta). */
+/** Estado das automações do projeto (fonte compartilhada, relida a cada 15 s com a janela visível). */
 function useAutomationStatus(projectId: string): {
   status: AutomationStatus | null
   running: boolean
   runNow(): Promise<void>
   setPaused(paused: boolean): Promise<void>
 } {
-  const [status, setStatus] = useState<AutomationStatus | null>(null)
+  const { automation } = useSources()
+  const status = useSource(automation, projectId).value
   const [running, setRunning] = useState(false)
-  useEffect(() => {
-    let active = true
-    const load = (): void => {
-      void window.orkio.automation
-        .status(projectId)
-        .then((s) => {
-          if (active) setStatus(s)
-        })
-        .catch(() => {})
-    }
-    load()
-    const timer = window.setInterval(load, 15_000)
-    return () => {
-      active = false
-      window.clearInterval(timer)
-    }
-  }, [projectId])
+  const apply = (next: AutomationStatus | null): void => {
+    if (next) automation.set(projectId, next)
+  }
   return {
     status,
     running,
     runNow: async () => {
       setRunning(true)
-      const next = await window.orkio.automation.runNow(projectId).catch(() => null)
+      const next = await ipcCall(() => window.orkio.automation.runNow(projectId), null)
       setRunning(false)
-      if (next) setStatus(next)
+      apply(next)
     },
     setPaused: async (paused) => {
-      const next = await window.orkio.automation.setPaused(projectId, paused).catch(() => null)
-      if (next) setStatus(next)
+      apply(await ipcCall(() => window.orkio.automation.setPaused(projectId, paused), null))
     }
   }
 }
@@ -429,13 +400,13 @@ function AutomationLine({
 function AgentRow({
   cards,
   badges,
-  flows,
+  activity,
   selected,
   onSelect
 }: {
   cards: readonly { taskId: string }[]
   badges: AgentBadges
-  flows: ActiveFlows
+  activity: TaskActivityMap
   selected: string | null
   onSelect(key: string | null): void
 }): React.JSX.Element | null {
@@ -453,7 +424,7 @@ function AgentRow({
       running: false
     }
     cur.count += 1
-    if (flows[taskId] === 'running') cur.running = true
+    if (activity.get(taskId)?.running) cur.running = true
     agents.set(badge.key, cur)
   }
   if (agents.size === 0) return null
