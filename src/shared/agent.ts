@@ -498,6 +498,16 @@ export interface AgentView {
   activity: number[]
 }
 
+/**
+ * O agente pode receber tarefas (atribuir à mão, regra da coluna, raia do orquestrador): tem perfil
+ * e não está inválido nem arquivado. Perfil esperando aprovação pode (só não roda até você aprovar).
+ */
+export function isUsableAgent<T extends Pick<AgentView, 'status' | 'profile'>>(
+  view: T
+): view is T & { profile: AgentProfile } {
+  return view.profile !== null && view.status !== 'invalid' && view.status !== 'archived'
+}
+
 /** Janela da atividade dos agentes (mini-histograma da tela Agentes). */
 export const ACTIVITY_HOURS = 12
 

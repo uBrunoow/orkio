@@ -15,7 +15,8 @@ import {
   MAX_EXECUTED_STEPS,
   type FlowPauseReason,
   type FlowRunStatus,
-  type FlowRunView
+  type FlowRunView,
+  type Step
 } from './task-flow'
 
 /** Status de uma execução que ainda não terminou (fonte do TS e do SQL do executor). */
@@ -147,4 +148,14 @@ export function needsYou(run: RunState): boolean {
 /** Pausa que é problema (o passo parou): cartão de problema e "parou aqui" no plano. */
 export function isProblem(reason: FlowPauseReason | null): boolean {
   return reason !== null && FLOW_PAUSES[reason].waits === 'problem'
+}
+
+/**
+ * "Responder e continuar": a sua mensagem volta ao passo parado, na mesma sessão do Claude Code.
+ * Só com o fluxo parado por um problema (falha, interrupção, limite de passos, limite do dia do
+ * agente) num comando do Claude Code; fila e escolha têm a tela delas e um gate não tem sessão.
+ * Regra única do botão, do executor e do campo da sessão.
+ */
+export function acceptsReply(run: RunState, step: Pick<Step, 'type'> | null | undefined): boolean {
+  return run.status === 'paused' && isProblem(run.pauseReason) && step?.type === 'claude_command'
 }

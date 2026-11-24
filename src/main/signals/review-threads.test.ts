@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { SCRATCH_GITIGNORE } from '../../shared/orkio-scratch'
 import { WorktreeError } from '../claude/worktree.service'
+import { DomainError } from '../errors'
 import { createReviewActions } from './review-action'
 import { pendingCount } from '../../shared/review'
 import {
@@ -346,23 +347,24 @@ describe('ação review_snapshot', () => {
     expect(JSON.stringify(r)).not.toContain('SECRET')
   })
 
-  it('ensure sem caminho: erro claro e nenhuma pasta criada', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'orkio-review-'))
-    try {
-      const gone = join(base, 'apagada')
-      const [action] = createReviewActions({
-        reviews: service().svc,
-        ensureWorktree: async () => null
-      })
-      const r = await action!.run({ projectId: 'p', taskId: 't', vars: {} })
-      expect(r.ok).toBe(false)
-      expect(existsSync(gone)).toBe(false)
-    } finally {
-      await rm(base, { recursive: true, force: true })
-    }
+  it('ensure que falha com a causa (Notion fora, tarefa sumiu): a mensagem dela chega ao passo', async () => {
+    const [action] = createReviewActions({
+      reviews: service().svc,
+      ensureWorktree: async () => {
+        throw new DomainError(
+          'task_not_found',
+          'Tarefa não encontrada no Notion. Atualize o quadro.'
+        )
+      }
+    })
+    expect(await action!.run({ projectId: 'p', taskId: 't', vars: {} })).toEqual({
+      ok: false,
+      code: 'task_not_found',
+      message: 'Tarefa não encontrada no Notion. Atualize o quadro.'
+    })
   })
 
-  it('sem PR ou sem worktree: falha com mensagem em pt-BR', async () => {
+  it('sem PR: falha com mensagem em pt-BR', async () => {
     const [noPr] = createReviewActions({
       reviews: service({ pr: false }).svc,
       ensureWorktree: async () => '/tmp'
@@ -370,14 +372,6 @@ describe('ação review_snapshot', () => {
     expect(await noPr!.run({ projectId: 'p', taskId: 't', vars: {} })).toMatchObject({
       ok: false,
       message: expect.stringContaining('não tem PR')
-    })
-    const [noTree] = createReviewActions({
-      reviews: service().svc,
-      ensureWorktree: async () => null
-    })
-    expect(await noTree!.run({ projectId: 'p', taskId: 't', vars: {} })).toMatchObject({
-      ok: false,
-      message: expect.stringContaining('ambiente de trabalho')
     })
   })
 })

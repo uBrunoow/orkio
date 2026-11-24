@@ -41,10 +41,10 @@ import {
   type TaskFlowActivity
 } from '../../shared/task-flow'
 import {
+  acceptsReply,
   ACTIVE_FLOW_STATUSES,
   FLOW_PAUSE_REASONS,
   FLOW_PAUSES,
-  isProblem,
   needsYou,
   waitingKind
 } from '../../shared/flow-run-state'
@@ -57,11 +57,12 @@ import { integrationsOf, type FlowIntegration } from './flow-integration'
 import type { BoardStore, TaskEventInput } from '../board/board.store'
 import type { TaskEventDetailInput } from '../../shared/task-events'
 import type { StageChange } from '../board/board.service'
+import { isStageEntry } from '../board/stage-entry'
 import type { RunFinished } from '../claude/run.service'
 import { BRIEFING_PATH } from '../../shared/orkio-scratch'
-import { redactSecrets } from '../claude/redact'
-import type { RunAgent, RunRequest } from '../claude/run-spec'
-import { buildAgentPrompt, checkAgentFlow, type AgentProfile } from '../../shared/agent'
+import { redactSecrets } from '../platform/redact'
+import { toRunAgent, type RunAgent, type RunRequest } from '../claude/run-spec'
+import { checkAgentFlow, type AgentProfile } from '../../shared/agent'
 import type { Db } from '../db/database'
 import { DomainError, errorName } from '../errors'
 
@@ -188,20 +189,20 @@ export interface FlowRunnerDeps {
   cancelClaude(runId: string): void
   extractors: readonly FlowExtractor[]
   actions: readonly OrkioAction[]
-  worktreePath?: (taskId: string) => string | null
-  integrations?: readonly FlowIntegration[]
+  worktreePath(taskId: string): string | null
+  integrations: readonly FlowIntegration[]
   /**
    * 8A: agente atribuído à tarefa (`null` = nenhum). Lança `FlowError` (mensagem pt-BR) quando há
    * agente, mas ele não pode rodar (sem aprovação, arquivado, apagado).
    */
-  agentFor?: (projectId: string, taskId: string) => Promise<FlowAgent | null>
+  agentFor(projectId: string, taskId: string): Promise<FlowAgent | null>
   /** 8A: limite diário do agente atingido? Mensagem pt-BR ou `null`. */
-  agentLimit?: (agent: FlowAgent) => string | null
+  agentLimit(agent: FlowAgent): string | null
   notify(title: string, body: string, ref: { projectId: string; taskId: string }): void
   /** Algo mudou no fluxo da tarefa (a tela recarrega). */
   emit(ref: { projectId: string; taskId: string }): void
   /** 8B: um fluxo terminou (o orquestrador decide se a tarefa segue). */
-  onFinished?: (ref: { projectId: string; taskId: string; result: RunRow['result'] }) => void
+  onFinished(ref: { projectId: string; taskId: string; result: RunRow['result'] }): void
   /**
    * A entrada numa etapa (`createEnterStage`: orquestrador, regra da coluna, fluxo da coluna), a
    * mesma que o quadro chama. Usada quando um fluxo que uma ação `detach_and_reenter` tirou da
@@ -327,11 +328,8 @@ export class FlowRunner {
           at,
           row.id
         )
-        this.deps.db.run(
-          `UPDATE flow_runs SET status = 'paused', pause_reason = 'interrupted' WHERE id = ?`,
-          row.id
-        )
-        this.event(row, 'flow_paused', { reason: 'interrupted', step: row.current_step })
+        // Ao abrir o app, sem notificação: o sino e a lista mostram o que parou.
+        this.pause(row, 'interrupted', { body: null })
       } else if (row.status === 'awaiting_decision') {
         // O passo que rodava morreu com o app: quando você decidir, ele aparece interrompido.
         this.deps.db.run(
@@ -383,9 +381,7 @@ export class FlowRunner {
         await this.leftStage(active.id)
         return
       }
-      // Só entrada real dispara (nunca reconciliação, desfazer ou remoção de etapa).
-      if (change.source !== 'manual' && change.source !== 'automation') return
-      if (!change.to || active) return
+      if (!isStageEntry(change) || active) return
       const binding = this.deps
         .flows(change.projectId)
         .bindings.find((b) => b.stageId === change.to && b.enabled && b.mode === 'on_enter')
@@ -457,7 +453,7 @@ export class FlowRunner {
     builtin: Flow | null = null
   ): Promise<FlowRunView> {
     if (this.activeRow(taskId)) throw new FlowError('busy', FLOW_MESSAGES.busy)
-    const agent = (await this.deps.agentFor?.(projectId, taskId)) ?? null
+    const agent = await this.deps.agentFor(projectId, taskId)
     const flows = this.deps.flows(projectId).flows
     const preferred = useAgentFlow && agent?.profile.flow ? agent.profile.flow : null
     const flowId = preferred && flows.some((f) => f.id === preferred) ? preferred : columnFlowId
@@ -533,7 +529,7 @@ export class FlowRunner {
   }
 
   private integrations(flow: Flow): FlowIntegration[] {
-    return integrationsOf(this.deps.integrations ?? [], flow.tags)
+    return integrationsOf(this.deps.integrations, flow.tags)
   }
 
   /**
@@ -713,16 +709,25 @@ export class FlowRunner {
       if (row.status !== 'paused' || !row.current_step) {
         throw new FlowError('wrong_state', FLOW_MESSAGES.wrongState)
       }
-      const p = this.persisted(row)
-      // Limite de passos: retomar ainda conta, mas o usuário decidiu seguir (zera a trava).
-      const engine = row.pause_reason === 'loop_guard' ? { ...p.engine, executed: 0 } : p.engine
-      // Limite do dia do agente: você decidiu seguir; vale para o próximo comando.
-      if (row.pause_reason === 'agent_daily_limit') {
-        this.savePersisted(flowRunId, { ...p, limitBypass: true })
-      }
-      await this.apply(flowRunId, retryStep(this.flow(row), engine, row.current_step))
+      await this.retryPaused(row, row.current_step, {})
     })
     return this.view(flowRunId)
+  }
+
+  /**
+   * Você decidiu seguir de um passo parado ("Retomar" ou "Responder e continuar"): o limite de
+   * passos ainda conta, mas a trava zera; o limite do dia do agente fica liberado para o próximo
+   * comando. `extra` vai junto no estado salvo (ex.: a resposta).
+   */
+  private async retryPaused(row: RunRow, stepId: string, extra: Partial<Persisted>): Promise<void> {
+    const p = this.persisted(row)
+    const engine = row.pause_reason === 'loop_guard' ? { ...p.engine, executed: 0 } : p.engine
+    this.savePersisted(row.id, {
+      ...p,
+      ...extra,
+      ...(row.pause_reason === 'agent_daily_limit' ? { limitBypass: true } : {})
+    })
+    await this.apply(row.id, retryStep(this.flow(row), engine, stepId))
   }
 
   /**
@@ -735,21 +740,12 @@ export class FlowRunner {
     if (!reply) throw new FlowError('invalid_reply', FLOW_MESSAGES.emptyReply)
     await this.withLock(flowRunId, async () => {
       const row = this.row(flowRunId)
-      // Só parado por um problema (falha, interrupção, limite...): fila e escolha têm a tela delas.
-      if (row.status !== 'paused' || !row.current_step || !isProblem(row.pause_reason)) {
+      if (!this.acceptsReply(row) || !row.current_step) {
         throw new FlowError('wrong_state', FLOW_MESSAGES.wrongState)
       }
-      const flow = this.flow(row)
-      if (flow.steps.find((s) => s.id === row.current_step)?.type !== 'claude_command') {
-        throw new FlowError('invalid_step', FLOW_MESSAGES.invalidStep)
-      }
-      const p = this.persisted(row)
-      this.savePersisted(flowRunId, {
-        ...p,
+      await this.retryPaused(row, row.current_step, {
         pendingReply: { stepId: row.current_step, text: reply }
       })
-      const engine = row.pause_reason === 'loop_guard' ? { ...p.engine, executed: 0 } : p.engine
-      await this.apply(flowRunId, retryStep(flow, engine, row.current_step))
     })
     return this.view(flowRunId)
   }
@@ -926,6 +922,7 @@ export class FlowRunner {
       let extracted: ExtractResult = {}
       let message = info.message
       let code: string | null = info.code
+      let link: string | null = null
       if (info.status === 'succeeded' && step?.type === 'claude_command' && step.extract) {
         extracted = await this.extract(row, step, info.resultText, info.runId)
       }
@@ -933,6 +930,7 @@ export class FlowRunner {
         end = { outcome: 'failed' }
         message = extracted.fail.message
         code = extracted.fail.code
+        link = extracted.fail.link ?? null
       } else if (info.status === 'succeeded') {
         end = { outcome: 'ok', vars: cleanVars(extracted.vars ?? {}) }
       } else {
@@ -941,7 +939,7 @@ export class FlowRunner {
       this.closeStep(
         ref.flowRunId,
         end.outcome === 'ok' ? 'ok' : end.outcome === 'cancelled' ? 'cancelled' : 'failed',
-        { message, code: end.outcome === 'ok' ? null : code, costUsd: info.costUsd }
+        { message, code: end.outcome === 'ok' ? null : code, link, costUsd: info.costUsd }
       )
       this.event(row, end.outcome === 'ok' ? 'step_finished' : 'step_failed', {
         step: current.step_id,
@@ -960,13 +958,10 @@ export class FlowRunner {
             vars: end.vars ?? {}
           }
         })
-        this.deps.db.run(
-          `UPDATE flow_runs SET status = 'paused', pause_reason = 'needs_choice' WHERE id = ?`,
-          ref.flowRunId
-        )
-        this.event(row, 'flow_paused', { reason: 'needs_choice', step: current.step_id })
-        this.notifyRow(row, 'Um fluxo precisa de você', extracted.choose.prompt)
-        this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
+        this.pause(row, 'needs_choice', {
+          step: current.step_id,
+          body: extracted.choose.prompt
+        })
         return
       }
       if (row.status === 'awaiting_decision') {
@@ -1002,7 +997,7 @@ export class FlowRunner {
    * - esperando uma escolha (ex.: qual task do Backlog): a mensagem que cita uma das opções (ID
    *   como TASK-5) escolhe essa e o fluxo segue; sem citar, erro pedindo a opção;
    * - passo do Claude Code rodando: interrompe e o passo continua na mesma sessão com a mensagem;
-   * - parado por falha/interrupção num comando do Claude Code: "Responder e continuar";
+   * - parado por um problema num comando do Claude Code (`acceptsReply`): "Responder e continuar";
    * - gate com "Pedir ajustes" esperando você: a mensagem vira o pedido de ajuste (`reviseGate`).
    * `null` = o fluxo não usa a mensagem (gate, sem fluxo...): ela vai para o Claude como sempre.
    */
@@ -1038,14 +1033,17 @@ export class FlowRunner {
       this.deps.cancelClaude(runId)
       return 'interrupt'
     }
-    if (
-      row.status === 'paused' &&
-      (row.pause_reason === 'step_failed' || row.pause_reason === 'interrupted')
-    ) {
+    if (this.acceptsReply(row)) {
       await this.resumeWithReply(row.id, message)
       return 'reply'
     }
     return null
+  }
+
+  /** A sua mensagem volta ao passo parado (`acceptsReply`, a mesma regra da tela)? */
+  private acceptsReply(row: RunRow): boolean {
+    const step = this.flow(row).steps.find((s) => s.id === row.current_step)
+    return acceptsReply({ status: row.status, pauseReason: row.pause_reason }, step)
   }
 
   list(taskId: string): FlowRunView[] {
@@ -1178,6 +1176,7 @@ export class FlowRunner {
           ? (JSON.parse(s.result_json) as {
               message?: string
               code?: string
+              link?: string
               costUsd?: number | null
               revised?: boolean
             })
@@ -1191,6 +1190,7 @@ export class FlowRunner {
           endedAt: s.ended_at,
           message: r.message ?? null,
           code: r.code ?? null,
+          link: r.link ?? null,
           costUsd: r.costUsd ?? null
         }
       })
@@ -1242,15 +1242,7 @@ export class FlowRunner {
       return
     }
     if (decision.kind === 'paused') {
-      this.deps.db.run(
-        `UPDATE flow_runs SET status = 'paused', pause_reason = ?, current_step = COALESCE(?, current_step) WHERE id = ?`,
-        decision.reason,
-        decision.stepId,
-        flowRunId
-      )
-      this.event(row, 'flow_paused', { reason: decision.reason, step: decision.stepId })
-      this.notifyRow(row, 'Um fluxo precisa de você', this.pauseText(decision.reason, row))
-      this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
+      this.pause(row, decision.reason, { step: decision.stepId })
       return
     }
     if (this.agentLimitReached(flowRunId, decision.stepId)) return
@@ -1265,7 +1257,7 @@ export class FlowRunner {
     const row = this.row(flowRunId)
     const agent = this.agentOf(row)
     const step = this.flow(row).steps.find((s) => s.id === stepId)
-    if (!agent || step?.type !== 'claude_command' || !this.deps.agentLimit) return false
+    if (!agent || step?.type !== 'claude_command') return false
     const p = this.persisted(row)
     if (p.limitBypass) {
       this.savePersisted(flowRunId, { ...p, limitBypass: false })
@@ -1273,14 +1265,7 @@ export class FlowRunner {
     }
     const problem = this.deps.agentLimit(agent)
     if (!problem) return false
-    this.deps.db.run(
-      `UPDATE flow_runs SET status = 'paused', pause_reason = 'agent_daily_limit', current_step = ? WHERE id = ?`,
-      stepId,
-      flowRunId
-    )
-    this.event(row, 'flow_paused', { reason: 'agent_daily_limit', step: stepId })
-    this.notifyRow(row, 'Um fluxo precisa de você', problem)
-    this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
+    this.pause(row, 'agent_daily_limit', { step: stepId, body: problem })
     return true
   }
 
@@ -1347,7 +1332,7 @@ export class FlowRunner {
       })
       // Variável de uma integração sem valor (ex.: a task do Backlog não foi vinculada): o comando
       // rodaria com o argumento vazio e gastaria uma execução à toa. Para antes de começar.
-      const lacking = (this.deps.integrations ?? []).find((i) =>
+      const lacking = this.deps.integrations.find((i) =>
         missing.some((name) => name.startsWith(i.varPrefix))
       )
       if (lacking) throw new FlowError(lacking.missingVar.code, lacking.missingVar.message)
@@ -1484,7 +1469,7 @@ export class FlowRunner {
       if (r.ok) end = { outcome: 'ok', ...(r.vars ? { vars: cleanVars(r.vars) } : {}) }
       else {
         end = { outcome: 'failed' }
-        failure = { code: r.code, message: r.message }
+        failure = { code: r.code, message: r.message, ...(r.link ? { link: r.link } : {}) }
       }
     } catch (error) {
       console.error(`[orkio] ação do fluxo: ${errorName(error)}`)
@@ -1523,9 +1508,10 @@ export class FlowRunner {
       const row = this.row(flowRunId)
       if (!ACTIVE.includes(row.status) || row.status === 'awaiting_decision') return
       this.clearGateTimer(flowRunId)
-      this.setStatus(flowRunId, 'awaiting_decision', 'left_stage')
-      this.event(row, 'flow_paused', { reason: 'left_stage', step: row.current_step })
-      this.notifyRow(row, FLOW_PAUSES.left_stage.label, FLOW_PAUSES.left_stage.notify)
+      this.pause(row, 'left_stage', {
+        title: FLOW_PAUSES.left_stage.label,
+        body: FLOW_PAUSES.left_stage.notify
+      })
     })
   }
 
@@ -1545,7 +1531,7 @@ export class FlowRunner {
     this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
     this.briefings.delete(row.id)
     this.promoteWaiting()
-    this.deps.onFinished?.({ projectId: row.project_id, taskId: row.task_page_id, result })
+    this.deps.onFinished({ projectId: row.project_id, taskId: row.task_page_id, result })
     // Concluído depois de um passo `detach_and_reenter` mudar a etapa: a coluna onde a tarefa está
     // agora começa o fluxo dela (ex.: revisão publicada com "Pedir alterações" → Revisado →
     // comentários da PR).
@@ -1570,12 +1556,18 @@ export class FlowRunner {
     info: {
       message?: string | null
       code?: string | null
+      link?: string | null
       costUsd?: number | null
       revised?: true
     } = {}
   ): void {
-    const { message, code, ...extra } = info
-    const result = { ...(message ? { message } : {}), ...(code ? { code } : {}), ...extra }
+    const { message, code, link, ...extra } = info
+    const result = {
+      ...(message ? { message } : {}),
+      ...(code ? { code } : {}),
+      ...(link ? { link } : {}),
+      ...extra
+    }
     this.deps.db.run(
       `UPDATE flow_steps SET status = ?, ended_at = ?, result_json = ? WHERE id = (SELECT MAX(id) FROM flow_steps WHERE flow_run_id = ?)`,
       status,
@@ -1617,13 +1609,7 @@ export class FlowRunner {
           const r = this.row(row.id)
           if (r.status !== 'waiting_gate') return
           this.closeStep(row.id, 'cancelled', { message: 'A aprovação expirou.' })
-          this.deps.db.run(
-            `UPDATE flow_runs SET status = 'paused', pause_reason = 'gate_timeout' WHERE id = ?`,
-            row.id
-          )
-          this.event(r, 'flow_paused', { reason: 'gate_timeout', step: r.current_step })
-          this.notifyRow(r, 'Um fluxo precisa de você', FLOW_PAUSES.gate_timeout.notify)
-          this.deps.emit({ projectId: r.project_id, taskId: r.task_page_id })
+          this.pause(r, 'gate_timeout', { body: FLOW_PAUSES.gate_timeout.notify })
         })
       }, left)
     )
@@ -1680,14 +1666,7 @@ export class FlowRunner {
 
   private runAgent(row: RunRow): RunAgent | null {
     const a = this.agentOf(row)
-    if (!a) return null
-    return {
-      key: a.key,
-      name: a.profile.name,
-      prompt: buildAgentPrompt(a.profile),
-      model: a.profile.model === 'default' ? null : a.profile.model,
-      effort: a.profile.effort
-    }
+    return a ? toRunAgent(a) : null
   }
 
   private extractContext(row: RunRow, step: ClaudeCommandStep): ExtractContext {
@@ -1695,8 +1674,31 @@ export class FlowRunner {
       projectId: row.project_id,
       taskId: row.task_page_id,
       step,
-      worktreePath: this.deps.worktreePath?.(row.task_page_id) ?? null
+      worktreePath: this.deps.worktreePath(row.task_page_id)
     }
+  }
+
+  /**
+   * Pausa o fluxo (a tarefa saiu da etapa = esperando decisão): grava o motivo e o passo (se veio),
+   * registra no histórico, avisa você (`body: null` = sem notificação) e a tela.
+   */
+  private pause(
+    row: RunRow,
+    reason: FlowPauseReason,
+    options: { step?: string | null; title?: string; body?: string | null } = {}
+  ): void {
+    const step = options.step ?? null
+    this.deps.db.run(
+      `UPDATE flow_runs SET status = ?, pause_reason = ?, current_step = COALESCE(?, current_step) WHERE id = ?`,
+      reason === 'left_stage' ? 'awaiting_decision' : 'paused',
+      reason,
+      step,
+      row.id
+    )
+    this.event(row, 'flow_paused', { reason, step: step ?? row.current_step })
+    const body = options.body === undefined ? this.pauseText(reason, row) : options.body
+    if (body !== null) this.notifyRow(row, options.title ?? 'Um fluxo precisa de você', body)
+    this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
   }
 
   private pauseText(reason: FlowPauseReason, row: RunRow): string {

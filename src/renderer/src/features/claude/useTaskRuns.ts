@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ipcResult } from '../../lib/ipc'
-import type { RunEventMessage, RunLogEvent, TaskRunsState } from '../../../../shared/agent-run'
+import {
+  isRunLive,
+  type RunEventMessage,
+  type RunLogEvent,
+  type TaskRunsState
+} from '../../../../shared/agent-run'
 
 export interface PendingPermission {
   kind: 'permission'
@@ -108,9 +113,7 @@ export function useTaskRuns(
       window.orkio.claude.onRunEvent((m) => {
         if (m.taskId !== taskId) return
         const isNew =
-          m.runId !== selected.current &&
-          m.event.kind === 'status' &&
-          (m.event.status === 'queued' || m.event.status === 'running')
+          m.runId !== selected.current && m.event.kind === 'status' && isRunLive(m.event.status)
         if (selected.current === null || isNew) {
           selected.current = m.runId
           setSelectedRunId(m.runId)

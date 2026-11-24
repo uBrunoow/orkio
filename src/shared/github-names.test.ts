@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  findInstallUrl,
   isAuthorLogin,
   isBranchName,
   isInstallUrl,
@@ -54,12 +53,11 @@ describe('github-names', () => {
     expect(isBranchName('x'.repeat(251))).toBe(false)
   })
 
-  it('link de instalação do App: só a página de instalação, achado também dentro de um texto', () => {
+  it('link de instalação do App: só a página de instalação', () => {
     const url = 'https://github.com/apps/orkio/installations/new'
     expect(isInstallUrl(url)).toBe(true)
     expect(isInstallUrl(`${url}?x=1`)).toBe(false)
     expect(isInstallUrl('https://github.com/apps/Orkio/installations/new')).toBe(false)
-    expect(findInstallUrl(`Instale o App: ${url}.`)).toBe(url)
-    expect(findInstallUrl(`${url}/x`)).toBeNull()
+    expect(isInstallUrl(`${url}/x`)).toBe(false)
   })
 })

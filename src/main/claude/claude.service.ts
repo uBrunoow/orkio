@@ -7,7 +7,7 @@
  */
 import { isProtectedBranch, type DeliveryTarget } from '../../shared/delivery'
 import { isBranchName } from '../../shared/github-names'
-import { isCommandName, parsePorcelainLine } from '../../shared/agent-run'
+import { isCommandName, isRunLive, parsePorcelainLine } from '../../shared/agent-run'
 import { isScratchPath } from '../../shared/orkio-scratch'
 import type {
   ArtifactCandidate,
@@ -31,10 +31,10 @@ import { taskBranchName } from '../../shared/slug'
 import { parseDisplayId } from '../../shared/task-id-match'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
-import { errorName } from '../errors'
+import { DomainError, errorName } from '../errors'
 import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
-import { redactSecrets } from './redact'
+import { redactSecrets } from '../platform/redact'
 import { isEffort, isModelName, resolveRuntime } from '../../shared/agent-runtime'
 import { RunBusyError, type RunService } from './run.service'
 import type {
@@ -96,7 +96,7 @@ export interface ClaudeServiceDeps {
    * Modo entrega (5C): alvo da entrega (repositório + branch da tarefa) e o ajuste do projeto.
    * Lança erro com mensagem pt-BR se não houver repositório verificado/ambiente.
    */
-  deliveryTarget?(
+  deliveryTarget(
     projectId: string,
     taskId: string
   ): { target: DeliveryTarget; requirePushApproval: boolean }
@@ -117,21 +117,21 @@ export interface ClaudeServiceDeps {
   detect(): Promise<ClaudeCodeStatus>
   artifacts: ArtifactsService
   /** 5A: a tarefa tem fluxo ativo? (bloqueia a execução manual). */
-  flowActive?: (taskId: string) => boolean
+  flowActive(taskId: string): boolean
   /**
    * 5A: o fluxo está rodando (ou vai começar sozinho) um passo agora? Bloqueia a mensagem da
    * sessão; um fluxo esperando você (gate, pausa, escolha) aceita a conversa.
    */
-  flowBusy?: (taskId: string) => boolean
+  flowBusy(taskId: string): boolean
   /**
    * Mensagem do campo com um fluxo ativo: o fluxo usa (escolha, interromper o passo, responder e
    * continuar) → `used`; erro esperado (pt-BR) → `error`; senão vai para o Claude como sempre.
    */
-  flowMessage?: (
+  flowMessage(
     taskId: string,
     text: string,
     note?: string
-  ) => Promise<{ used: boolean } | { error: string }>
+  ): Promise<{ used: boolean } | { error: string }>
   /** Abre a pasta no editor (execFile, sem shell). */
   openEditor(editor: EditorId, path: string): Promise<void>
   /** Abre o terminal do sistema na pasta (`TerminalError` se a pasta sumiu ou não há terminal). */
@@ -140,12 +140,12 @@ export interface ClaudeServiceDeps {
    * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
    * pt-BR quando há agente, mas ele não pode rodar (sem aprovação, limite do dia, comando negado).
    */
-  agentFor?: (projectId: string, taskId: string, command: string | null) => Promise<RunAgent | null>
+  agentFor(projectId: string, taskId: string, command: string | null): Promise<RunAgent | null>
   /** 8A: o que o formulário mostra ("Rodar como Ana" ou por que não dá). */
-  agentInfo?: (
+  agentInfo(
     projectId: string,
     taskId: string
-  ) => Promise<{ name: string; problem: string | null } | null>
+  ): Promise<{ name: string; problem: string | null } | null>
 }
 
 export class ClaudeService {
@@ -224,7 +224,7 @@ export class ClaudeService {
         },
         pr
       })
-      const agent = (await this.deps.agentInfo?.(projectId, taskId).catch(() => null)) ?? null
+      const agent = await this.deps.agentInfo(projectId, taskId).catch(() => null)
       return ok({
         ...state,
         agent,
@@ -244,7 +244,7 @@ export class ClaudeService {
   start(req: StartRunRequest): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       // 5A: com fluxo ativo, quem roda o Claude Code na tarefa é o fluxo.
-      if (this.deps.flowActive?.(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.flowActive)
+      if (this.deps.flowActive(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.flowActive)
       const command = req.mode === 'command' ? (req.command ?? '') : null
       const agent = await this.agentForRun(req.projectId, req.taskId, req.asAgent, command)
       if (!agent.ok) return agent
@@ -333,7 +333,7 @@ export class ClaudeService {
     asAgent: boolean | undefined,
     command: string | null
   ): Promise<Result<RunAgent | null>> {
-    if (asAgent === false || !this.deps.agentFor) return ok(null)
+    if (asAgent === false) return ok(null)
     try {
       return ok(await this.deps.agentFor(projectId, taskId, command))
     } catch (error) {
@@ -349,14 +349,11 @@ export class ClaudeService {
   ): Promise<Result<TaskRunsState>> {
     // Como no Claude Code: a mensagem não espera o piloto automático; o fluxo a usa (escolha,
     // interromper o passo e continuar com ela, responder e continuar).
-    if (this.deps.flowMessage) {
-      const note = hasFiles && (this.deps.flowActive?.(req.taskId) ?? false) ? await save() : ''
-      const used = await this.deps.flowMessage(req.taskId, text, note)
-      if ('error' in used) return fail('flow_message', used.error)
-      if (used.used) return ok(await this.taskState(req.taskId))
-    }
-    const busy = this.deps.flowBusy ?? this.deps.flowActive
-    if (busy?.(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
+    const note = hasFiles && this.deps.flowActive(req.taskId) ? await save() : ''
+    const used = await this.deps.flowMessage(req.taskId, text, note)
+    if ('error' in used) return fail('flow_message', used.error)
+    if (used.used) return ok(await this.taskState(req.taskId))
+    if (this.deps.flowBusy(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
     // Execução avulsa no meio de um turno: interrompe e continua a sessão com a mensagem.
     const current = (await this.taskState(req.taskId)).activeRunId
     if (current) await this.cancelAndWait(current)
@@ -393,17 +390,11 @@ export class ClaudeService {
 
   /**
    * Garante o worktree da tarefa (cria ou recria) e devolve o caminho. Para ações do Orkio que
-   * gravam no ambiente (ex.: `review_snapshot`); `null` se projeto/tarefa não existem; erro do
-   * worktree é lançado.
+   * gravam no ambiente (ex.: `review_snapshot`). Lança com a causa (mensagem pt-BR) para o passo:
+   * projeto/tarefa não existem ou o Notion não respondeu (`DomainError`), erro do worktree
+   * (`WorktreeError`).
    */
-  async ensureWorktreePath(projectId: string, taskId: string): Promise<string | null> {
-    try {
-      this.project(projectId)
-      await this.task(projectId, taskId)
-    } catch {
-      return null
-    }
-    // Erros do WorktreeService (mensagem pt-BR) sobem para o passo do fluxo.
+  async ensureWorktreePath(projectId: string, taskId: string): Promise<string> {
     return (await this.ensureForTask(projectId, taskId)).worktree.path
   }
 
@@ -461,8 +452,8 @@ export class ClaudeService {
       // Fora da entrega, o repositório só libera a leitura da PR; sem ele, nada muda.
       const read = (): GithubRead => {
         try {
-          const t = this.deps.deliveryTarget?.(request.projectId, request.taskId)
-          return t ? { mode: 'read', target: t.target } : null
+          const t = this.deps.deliveryTarget(request.projectId, request.taskId)
+          return { mode: 'read', target: t.target }
         } catch {
           return null
         }
@@ -471,7 +462,6 @@ export class ClaudeService {
       if (request.access.tools === 'read_only') access = { tools: 'read_only', github: read() }
       else if (request.access.github === 'read') access = { tools: 'full', github: read() }
       else {
-        if (!this.deps.deliveryTarget) return fail('no_repo', CLAUDE_MESSAGES.noRepo)
         let deliver: GithubDeliver
         try {
           const t = this.deps.deliveryTarget(request.projectId, request.taskId)
@@ -735,7 +725,7 @@ export class ClaudeService {
 
   private async taskState(taskId: string): Promise<TaskRunsState> {
     const runs = this.deps.runs.list(taskId)
-    const active = runs.find((r) => r.status === 'queued' || r.status === 'running')
+    const active = runs.find((r) => isRunLive(r.status))
     const wt = this.deps.worktrees.get(taskId)
     let workspace: TaskWorkspace | null = null
     if (wt) {
@@ -791,14 +781,9 @@ export class ClaudeService {
   }
 }
 
-class ClaudeFailure extends Error {
-  constructor(
-    readonly code: string,
-    message: string
-  ) {
-    super(message)
-    this.name = 'ClaudeFailure'
-  }
+/** Erro esperado do serviço (projeto/tarefa/repositório): `wrap` devolve como `Result` de falha. */
+class ClaudeFailure extends DomainError {
+  override name = 'ClaudeFailure'
 }
 
 function ok<T>(value: T): Result<T> {

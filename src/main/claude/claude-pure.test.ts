@@ -8,7 +8,7 @@ import {
   suggestPattern
 } from './policy'
 import { decidePermission } from './policy'
-import { isEnvFile, redactSecrets, sanitizeEnv } from './redact'
+import { isEnvFile, redactSecrets, sanitizeEnv } from '../platform/redact'
 import { parseStreamLine } from './stream'
 
 const WT = '/home/u/.config/orkio/worktrees/p1/ORK-7'

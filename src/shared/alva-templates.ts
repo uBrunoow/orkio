@@ -12,6 +12,7 @@ import {
   type AlvaCommand
 } from './alva'
 import { ACTION_VARS, ORKIO_ACTIONS } from './orkio-actions'
+import { REVIEW_PATH } from './orkio-scratch'
 import { REVIEW_COMMENTS_MAX } from './review-publish'
 import {
   FLOW_END,
@@ -219,7 +220,7 @@ export function alvaDeliverFlow(): Flow {
 }
 
 /** Pedido do passo de plano (só leitura): o agente lê os comentários e diz o que vai fazer. */
-export const REVIEW_PLAN_PROMPT = `Leia .orkio/revisao.md (comentários de revisão não resolvidos da PR #${v(ACTION_VARS.reviewPr)}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.`
+export const REVIEW_PLAN_PROMPT = `Leia ${REVIEW_PATH} (comentários de revisão não resolvidos da PR #${v(ACTION_VARS.reviewPr)}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.`
 
 /** Pedido do passo de correção (modo entrega), depois que você aprova o plano. */
 export const REVIEW_APPLY_PROMPT =

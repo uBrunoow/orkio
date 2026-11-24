@@ -25,6 +25,7 @@ const entry = (over: Partial<FlowStepView>): FlowStepView => ({
   endedAt: '2026-11-21T10:00:01Z',
   message: null,
   code: null,
+  link: null,
   costUsd: null,
   ...over
 })
@@ -179,8 +180,12 @@ describe('publicar revisão como orkio[bot] (Task 18)', () => {
     },
     { id: 'pub', name: 'Publicar revisão', type: 'orkio_action', action: 'publish_review' }
   ]
-  const at = (code: string, message: string): FlowRunView =>
-    run({ steps: PUBLISH, currentStep: 'pub', history: [entry({ stepId: 'pub', code, message })] })
+  const at = (code: string, message: string, link: string | null = null): FlowRunView =>
+    run({
+      steps: PUBLISH,
+      currentStep: 'pub',
+      history: [entry({ stepId: 'pub', code, message, link })]
+    })
 
   it('JSON inválido: explica e oferece rodar a conversão de novo', () => {
     const p = describeFlowProblem(
@@ -193,29 +198,19 @@ describe('publicar revisão como orkio[bot] (Task 18)', () => {
     })
   })
 
-  it('App não instalado: link de instalação só no formato conhecido', () => {
+  it('App não instalado: o link vem da falha (campo), só no formato conhecido; nunca do texto', () => {
+    const url = 'https://github.com/apps/orkio/installations/new'
     const msg =
-      'O GitHub App do Orkio não está instalado neste repositório (ou não tem acesso às PRs). Instale o App neste link e retome: https://github.com/apps/orkio/installations/new'
-    expect(describeFlowProblem(at('review_not_installed', msg))).toMatchObject({
+      'O GitHub App do Orkio não está instalado neste repositório. Instale o App pelo link.'
+    expect(describeFlowProblem(at('review_not_installed', msg, url))).toMatchObject({
       kind: 'review_not_installed',
-      link: {
-        label: 'Instalar o GitHub App do Orkio',
-        url: 'https://github.com/apps/orkio/installations/new'
-      }
+      link: { label: 'Instalar o GitHub App do Orkio', url }
     })
-    const evil = msg.replace(
-      'https://github.com/apps/orkio/installations/new',
-      'https://evil.example/apps/orkio/installations/new'
-    )
-    expect(describeFlowProblem(at('review_not_installed', evil))?.link).toBeNull()
-    expect(
-      describeFlowProblem(
-        at(
-          'review_not_installed',
-          `${msg.split(' Instale')[0]} https://github.com/apps/orkio/installations/new/x`
-        )
-      )?.link
-    ).toBeNull()
+    const evil = 'https://evil.example/apps/orkio/installations/new'
+    expect(describeFlowProblem(at('review_not_installed', msg, evil))?.link).toBeNull()
+    expect(describeFlowProblem(at('review_not_installed', `${msg} ${url}`))?.link).toBeNull()
+    // Outra causa com link: não vira botão de instalação.
+    expect(describeFlowProblem(at('review_invalid', msg, url))?.link).toBeNull()
   })
 
   it('timeout do site e site sem App: causas próprias, sem link', () => {

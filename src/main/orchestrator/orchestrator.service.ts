@@ -30,6 +30,7 @@ import {
 import { checkAgentFlow, type AgentKey, type AgentsState } from '../../shared/agent'
 import { agentDisplayName } from '../../shared/agent-presets'
 import type { BoardService, StageChange } from '../board/board.service'
+import { isStageEntry } from '../board/stage-entry'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { ConfigStore } from '../storage/config-store'
@@ -209,8 +210,7 @@ export class OrchestratorService {
    * numa etapa de trabalho por outro caminho ganha um agente da etapa.
    */
   onStageChanged(change: StageChange): void {
-    if (change.source !== 'manual' && change.source !== 'automation') return
-    if (!change.to) return
+    if (!isStageEntry(change)) return
     const config = this.configFor(change.projectId)
     if (!config.enabled || this.deps.flows.hasActive(change.taskId)) return
     const agents = this.agentCache.get(change.projectId) ?? new Map()

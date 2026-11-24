@@ -24,6 +24,8 @@ import {
   AGENT_LIMITS,
   agentInitials,
   agentKey,
+  commandAllowed,
+  isUsableAgent,
   localDayStart,
   parseAgentFile,
   parseAgentKey,
@@ -41,11 +43,14 @@ import {
 import { BUILTIN_AGENTS, agentDisplayName, builtinAgent } from '../../shared/agent-presets'
 import type { BoardStore } from '../board/board.store'
 import type { StageChange } from '../board/board.service'
+import { isStageEntry } from '../board/stage-entry'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
-import { redactSecrets } from '../claude/redact'
+import { redactSecrets } from '../platform/redact'
 import { projectById } from '../config/queries'
+import { toRunAgent, type RunAgent } from '../claude/run-spec'
+import { AGENTS_DIR, SCRATCH_DIR } from '../../shared/orkio-scratch'
 
 export const AGENT_MESSAGES = {
   notFound: 'Agente não encontrado. Atualize a tela.',
@@ -54,7 +59,7 @@ export const AGENT_MESSAGES = {
   secret:
     'As instruções parecem conter um segredo (token, chave ou senha). Remova antes de salvar.',
   idChanged: 'O id de um agente não muda depois de criado. Use “Duplicar” para criar outro.',
-  symlink: 'A pasta .orkio/agents do projeto é um link simbólico; o Orkio não grava nela.',
+  symlink: `A pasta ${AGENTS_DIR} do projeto é um link simbólico; o Orkio não grava nela.`,
   writeFailed: 'Não foi possível gravar o perfil do agente. Confira as permissões da pasta.',
   busy: 'Esta tarefa tem um fluxo em andamento. Cancele ou espere terminar para trocar o agente.',
   invalid: 'O perfil deste agente tem erros. Corrija na tela Agentes.',
@@ -63,7 +68,9 @@ export const AGENT_MESSAGES = {
   stale: 'O perfil mudou desde que você abriu. Atualize a tela e revise de novo.',
   builtin:
     'Os agentes embutidos não podem ser alterados. Use “Duplicar” para criar uma cópia editável.',
-  badStage: 'Etapa não encontrada no quadro deste projeto.'
+  badStage: 'Etapa não encontrada no quadro deste projeto.',
+  gone: 'O agente desta tarefa não existe mais.',
+  unavailable: 'Agente indisponível.'
 } as const
 
 export class AgentError extends DomainError {
@@ -174,8 +181,54 @@ export class AgentsService {
     const key = this.assignedKey(taskId)
     if (!key) return null
     const view = await this.get(projectId, key)
-    if (!view) throw new AgentError('not_found', 'O agente desta tarefa não existe mais.')
+    if (!view) throw new AgentError('not_found', AGENT_MESSAGES.gone)
     return this.usable(view)
+  }
+
+  /**
+   * Agente da tarefa para o "Rodar" manual (como vai para a execução). `null` = sem agente. Lança
+   * `AgentError` (pt-BR) quando ele não pode rodar: sem aprovação, limite do dia ou comando fora
+   * da lista dele.
+   */
+  async runAgentFor(
+    projectId: string,
+    taskId: string,
+    command: string | null
+  ): Promise<RunAgent | null> {
+    const runtime = await this.runtimeFor(projectId, taskId)
+    if (!runtime) return null
+    const limit = this.limitProblem(runtime)
+    if (limit) throw new AgentError('limit', limit)
+    if (command && !commandAllowed(runtime.profile, command)) {
+      throw new AgentError(
+        'denied',
+        `${runtime.profile.name} não tem permissão para o comando /${command}.`
+      )
+    }
+    return toRunAgent(runtime)
+  }
+
+  /**
+   * O que o formulário mostra: "Rodar como <agente>" (`problem: null`) ou por que ele não pode
+   * rodar agora. `null` = tarefa sem agente.
+   */
+  async problemFor(
+    projectId: string,
+    taskId: string
+  ): Promise<{ name: string; problem: string | null } | null> {
+    const key = this.assignedKey(taskId)
+    if (!key) return null
+    const view = await this.get(projectId, key)
+    if (!view?.profile) return { name: key, problem: AGENT_MESSAGES.gone }
+    try {
+      const runtime = await this.runtimeFor(projectId, taskId)
+      return { name: view.profile.name, problem: runtime ? this.limitProblem(runtime) : null }
+    } catch (error) {
+      return {
+        name: view.profile.name,
+        problem: error instanceof AgentError ? error.message : AGENT_MESSAGES.unavailable
+      }
+    }
   }
 
   /** Mensagem do limite diário atingido (main), ou `null`. */
@@ -281,7 +334,7 @@ export class AgentsService {
         initials: agentInitials(name),
         ...(view?.profile ? { model: view.profile.model, effort: view.profile.effort } : {}),
         problem: !view
-          ? 'O agente desta tarefa não existe mais.'
+          ? AGENT_MESSAGES.gone
           : view.status === 'ready'
             ? null
             : this.statusMessage(view)
@@ -366,11 +419,14 @@ export class AgentsService {
     }
     const view = await this.get(projectId, key)
     if (!view) throw new AgentError('not_found', AGENT_MESSAGES.notFound)
-    if (view.status === 'invalid' || view.status === 'archived') {
-      throw new AgentError(view.status, this.statusMessage(view))
+    if (!isUsableAgent(view)) {
+      throw new AgentError(
+        view.status === 'archived' ? 'archived' : 'invalid',
+        this.statusMessage(view)
+      )
     }
     this.deps.store.transaction(() =>
-      this.insertAssignment(projectId, taskId, key, view.profile!.name, 'manual')
+      this.insertAssignment(projectId, taskId, key, view.profile.name, 'manual')
     )
     this.deps.emit(projectId)
   }
@@ -385,7 +441,7 @@ export class AgentsService {
       if (seen.has(r.stageId)) throw new AgentError('invalid', 'Uma etapa só pode ter um agente.')
       seen.add(r.stageId)
       const view = await this.get(projectId, r.agentKey)
-      if (!view?.profile || view.status === 'invalid' || view.status === 'archived') {
+      if (!view || !isUsableAgent(view)) {
         throw new AgentError('invalid', 'Escolha um agente válido para cada etapa.')
       }
       names.push(view.profile.name)
@@ -411,8 +467,7 @@ export class AgentsService {
    * ainda não tem agente) ANTES de o fluxo da coluna começar. Só entrada real (manual/automação).
    */
   onStageChanged(change: StageChange): void {
-    if (change.source !== 'manual' && change.source !== 'automation') return
-    if (!change.to) return
+    if (!isStageEntry(change)) return
     const rule = this.rules(change.projectId).find((r) => r.stageId === change.to)
     if (!rule) return
     if (this.assignedKey(change.taskId) || this.deps.hasActiveFlow(change.taskId)) return
@@ -506,14 +561,14 @@ export class AgentsService {
   }
 
   private repoDir(localPath: string): string {
-    return join(localPath, '.orkio', 'agents')
+    return join(localPath, ...AGENTS_DIR.split('/'))
   }
 
   private toView(projectId: string, e: FileEntry, assigned: number): AgentView {
     const key = agentKey(e.scope, e.id)
     const file =
       e.scope === 'repo'
-        ? `.orkio/agents/${e.id}.md`
+        ? `${AGENTS_DIR}/${e.id}.md`
         : e.scope === 'local'
           ? `agents/${e.id}.md (este computador)`
           : 'Embutido no Orkio'
@@ -621,10 +676,13 @@ export class AgentsService {
       // Nada de seguir links: .orkio e .orkio/agents precisam ser pastas de verdade no projeto.
       const root = resolve(projectPath)
       const target = resolve(dir)
-      if (!target.startsWith(root + sep) || relative(root, target) !== join('.orkio', 'agents')) {
+      if (
+        !target.startsWith(root + sep) ||
+        relative(root, target) !== join(...AGENTS_DIR.split('/'))
+      ) {
         throw new AgentError('write_failed', AGENT_MESSAGES.writeFailed)
       }
-      for (const p of [join(root, '.orkio'), target]) {
+      for (const p of [join(root, SCRATCH_DIR), target]) {
         const st = await lstat(p).catch(() => null)
         if (st?.isSymbolicLink()) throw new AgentError('symlink', AGENT_MESSAGES.symlink)
         if (st && !st.isDirectory())

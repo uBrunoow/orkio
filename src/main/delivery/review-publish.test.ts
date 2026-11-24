@@ -250,7 +250,8 @@ describe('publish_review: aprovar', () => {
     expect(r1).toEqual({
       ok: false,
       code: PUBLISH_FAILURES.notInstalled,
-      message: `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint} https://github.com/apps/orkio/installations/new`
+      message: `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint}`,
+      link: 'https://github.com/apps/orkio/installations/new'
     })
 
     error = new ReviewPostError('app_not_configured', REVIEW_MESSAGES.notConfigured)

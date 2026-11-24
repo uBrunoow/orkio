@@ -12,7 +12,7 @@ import type { StageFlow } from '../../shared/task-flow'
 import type { BoardService } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
-import { errorName } from '../errors'
+import { DomainError, errorName } from '../errors'
 import type { ConfigStore } from '../storage/config-store'
 import type { AlvaService } from './alva.service'
 import type { Result } from '../../shared/result'
@@ -53,7 +53,7 @@ export class AlvaFlowsService {
 
   private project(projectId: string): { localPath: string } {
     const p = projectById(this.deps.config.get(), projectId)
-    if (!p) throw new Error('not_found')
+    if (!p) throw new DomainError('not_found', 'Projeto não encontrado. Atualize a lista.')
     return p
   }
 

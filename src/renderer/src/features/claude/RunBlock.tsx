@@ -3,7 +3,12 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import { Timestamp } from '@/components/Timestamp'
 import type { AgentBadge } from '../../../../shared/agent'
-import type { AgentRunView, RunLogEvent, RunSummary } from '../../../../shared/agent-run'
+import {
+  isRunLive,
+  type AgentRunView,
+  type RunLogEvent,
+  type RunSummary
+} from '../../../../shared/agent-run'
 import { StatusToken } from '../../components/StatusToken'
 import { AutomationIcon, ClaudeLogo, DiffIcon, ReadIcon, UserIcon } from '../../components/icons'
 import type { FlowStepOrigin } from '../task-flows/flow-plan'
@@ -53,7 +58,7 @@ export function RunBlock({
   useEffect(() => {
     if (focused) ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }, [focused])
-  const live = run.status === 'running' || run.status === 'queued'
+  const live = isRunLive(run.status)
   useEffect(() => {
     if (liveLog) return
     let active = true

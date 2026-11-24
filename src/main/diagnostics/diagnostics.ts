@@ -7,7 +7,7 @@
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { formatDiagnostics, type DiagnosticSection } from '../../shared/diagnostics'
-import { redactSecrets } from '../claude/redact'
+import { redactSecrets } from '../platform/redact'
 import type { Db } from '../db/database'
 import { NOTION_PENDING_ATTEMPTS } from '../../shared/overview'
 import type { ConnectionStatus } from '../../shared/connection'

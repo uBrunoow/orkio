@@ -34,6 +34,14 @@ export type PermissionBlockCode = 'outside' | 'push' | 'gh' | 'alias' | 'deliver
 export type RunMode = 'prompt' | 'command'
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
+/** Status de uma execução que ainda não terminou (fonte do TS e do SQL do `RunService`). */
+export const ACTIVE_RUN_STATUSES = ['queued', 'running'] as const satisfies readonly RunStatus[]
+
+/** A execução ainda não terminou (na fila ou rodando)? */
+export function isRunLive(status: RunStatus): boolean {
+  return (ACTIVE_RUN_STATUSES as readonly RunStatus[]).includes(status)
+}
+
 export type RunLogEvent =
   | { kind: 'status'; status: RunStatus; message?: string }
   | { kind: 'init'; model: string | null; plugins: string[]; commands: string[] }

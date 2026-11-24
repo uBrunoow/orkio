@@ -672,10 +672,10 @@ export const ORKIO_API = {
         args: [projectId],
         fallback: automationFallback
       }),
-      /** "Pausar todas" / "Retomar". */
-      setPaused: call<(paused: boolean) => Promise<AutomationStatus>>()({
+      /** "Pausar todas" / "Retomar" (vale para todos); devolve o estado do projeto da tela. */
+      setPaused: call<(projectId: string, paused: boolean) => Promise<AutomationStatus>>()({
         channel: 'automation:set-paused',
-        args: [bool],
+        args: [projectId, bool],
         fallback: automationFallback
       })
     }

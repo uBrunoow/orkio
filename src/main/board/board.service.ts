@@ -20,6 +20,8 @@ import {
   type ConfigEvent
 } from '../../shared/flow'
 import {
+  BOARD_SETUP_MESSAGES,
+  ORKIO_STAGE_PROPERTY_NAME,
   reconcile,
   stageMatchesStatus,
   suggestStages,
@@ -114,17 +116,13 @@ export const BOARD_MESSAGES = {
   storage: 'Não foi possível salvar a configuração do quadro. Tente novamente.',
   readOnly: 'As configurações estão em modo só leitura. Atualize o Orkio para salvar mudanças.',
   unknown: 'Algo deu errado no quadro. Tente novamente.',
-  stageNeedsOption: 'Escolha uma opção de status do Notion que exista para cada etapa.',
-  orkioPropertyExists:
-    'Já existe uma propriedade “Etapa Orkio” no banco de Tarefas. Escolha “usar existente”.',
-  orkioPropertyInvalid: 'Escolha uma propriedade do tipo seleção (select) para a Etapa Orkio.',
-  blockedPropertyInvalid:
-    'Escolha uma propriedade do tipo caixa de seleção (checkbox) para Bloqueada.',
+  stageNeedsOption: BOARD_SETUP_MESSAGES.stageNeedsOption,
+  orkioPropertyExists: BOARD_SETUP_MESSAGES.orkioPropertyExists,
+  orkioPropertyInvalid: BOARD_SETUP_MESSAGES.orkioPropertyInvalid,
+  blockedPropertyInvalid: BOARD_SETUP_MESSAGES.blockedPropertyInvalid,
   pending: 'Aguardando o Notion…',
   retrying: 'Sem conexão com o Notion: a mudança será enviada assim que possível.'
 } as const
-
-export const ORKIO_STAGE_PROPERTY_NAME = 'Etapa Orkio'
 
 class BoardError extends Error {
   constructor(readonly info: Err) {
@@ -297,24 +295,13 @@ export class BoardService {
     const pendingNow = new Set(
       this.deps.store.pendingForProject(projectId).map((w) => w.taskPageId)
     )
-    const cards: BoardCard[] = data.tasks.map((t) => {
-      const d = byId.get(t.id)!
-      return {
-        taskId: t.id,
-        displayId: t.displayId,
-        title: t.title,
-        url: t.url,
-        status: t.status ? { name: t.status.name, color: t.status.color } : null,
-        priority: t.priority,
-        assignees: t.assignees,
-        stageId: d.stageId,
-        blocked: d.blocked,
+    const cards = data.tasks.map((t) =>
+      this.toCard(t, {
+        ...byId.get(t.id)!,
         automationPaused: states.get(t.id)?.automationPaused ?? false,
-        sync: pendingNow.has(t.id)
-          ? { state: 'pending', message: this.retryMessages.get(t.id) ?? BOARD_MESSAGES.pending }
-          : { state: 'synced' }
-      }
-    })
+        pending: pendingNow.has(t.id)
+      })
+    )
 
     return {
       ...base,
@@ -942,21 +929,31 @@ export class BoardService {
   private card(projectId: string, taskId: string): BoardCard {
     const snapshot = this.snapshots.get(projectId)!
     const task = snapshot.data.tasks.find((t) => t.id === taskId)!
-    const state = this.localState(projectId, taskId)
-    const pending = this.deps.store.pending(taskId)
+    return this.toCard(task, {
+      ...this.localState(projectId, taskId),
+      automationPaused: this.deps.store.state(taskId)?.automationPaused ?? false,
+      pending: this.deps.store.pending(taskId) !== null
+    })
+  }
+
+  /** Card do quadro: a tarefa do Notion + o estado local (etapa, bloqueio, pausa, escrita na fila). */
+  private toCard(
+    task: CachedTasks['tasks'][number],
+    local: { stageId: string | null; blocked: boolean; automationPaused: boolean; pending: boolean }
+  ): BoardCard {
     return {
-      taskId,
+      taskId: task.id,
       displayId: task.displayId,
       title: task.title,
       url: task.url,
       status: task.status ? { name: task.status.name, color: task.status.color } : null,
       priority: task.priority,
       assignees: task.assignees,
-      stageId: state.stageId,
-      blocked: state.blocked,
-      automationPaused: this.deps.store.state(taskId)?.automationPaused ?? false,
-      sync: pending
-        ? { state: 'pending', message: this.retryMessages.get(taskId) ?? BOARD_MESSAGES.pending }
+      stageId: local.stageId,
+      blocked: local.blocked,
+      automationPaused: local.automationPaused,
+      sync: local.pending
+        ? { state: 'pending', message: this.retryMessages.get(task.id) ?? BOARD_MESSAGES.pending }
         : { state: 'synced' }
     }
   }

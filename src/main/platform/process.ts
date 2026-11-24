@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { sanitizeEnv } from '../claude/redact'
+import { sanitizeEnv } from './redact'
 
 /**
  * Apps abertos pelo Finder/menu não herdam o PATH do terminal: acrescenta as pastas usuais do

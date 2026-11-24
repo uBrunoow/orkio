@@ -29,10 +29,9 @@ const LOGIN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}$/
 const AUTHOR = /^[A-Za-z0-9][A-Za-z0-9_-]{0,38}(\[bot\])?$/
 /** Slug de time (revisor `team:<slug>`). */
 const TEAM = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/
-const INSTALL_URL_SOURCE = `https://github\\.com/apps/${GITHUB_NAME_SOURCES.appSlug}/installations/new`
-const INSTALL_URL = new RegExp(`^${INSTALL_URL_SOURCE}$`)
-/** O link dentro de um texto (motivo de uma falha), sem pegar o que vier colado depois. */
-const INSTALL_URL_IN_TEXT = new RegExp(`${INSTALL_URL_SOURCE}(?![\\w/-])`)
+const INSTALL_URL = new RegExp(
+  `^https://github\\.com/apps/${GITHUB_NAME_SOURCES.appSlug}/installations/new$`
+)
 /** Nome de branch não pode ser maior que isso (o git aceita mais, mas não há motivo). */
 const BRANCH_MAX = 250
 
@@ -81,9 +80,4 @@ export function isBranchName(value: unknown): value is string {
 /** Página de instalação do GitHub App (formato que o site devolve). */
 export function isInstallUrl(value: unknown): value is string {
   return typeof value === 'string' && INSTALL_URL.test(value)
-}
-
-/** Primeiro link de instalação do App dentro de um texto, ou `null`. */
-export function findInstallUrl(text: string): string | null {
-  return INSTALL_URL_IN_TEXT.exec(text)?.[0] ?? null
 }

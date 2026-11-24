@@ -1,5 +1,14 @@
 import type { StageChange } from './board.service'
 
+/**
+ * Entrada real numa etapa (você ou a automação moveu a tarefa para `to`): é o que atribui agente,
+ * dá o agente da raia e começa o fluxo da coluna. Reconciliação com o Notion, desfazer e remoção de
+ * etapa nunca contam.
+ */
+export function isStageEntry(change: StageChange): change is StageChange & { to: string } {
+  return (change.source === 'manual' || change.source === 'automation') && change.to !== null
+}
+
 export interface StageListener {
   onStageChanged(change: StageChange): void
 }

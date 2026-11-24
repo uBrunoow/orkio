@@ -8,7 +8,7 @@ import { BUILTIN_AGENTS } from '../../shared/agent-presets'
 import { BoardStore } from '../board/board.store'
 import { createOrkioConfigStore } from '../config/orkio-config'
 import { openDatabase, type Db } from '../db/database'
-import { AgentError, AgentsService } from './agents.service'
+import { AGENT_MESSAGES, AgentError, AgentsService } from './agents.service'
 
 const ANA: AgentProfile = defaultAgent({
   id: 'ana',
@@ -268,6 +268,59 @@ describe('atribuição', () => {
       service.setRules('p1', [{ stageId: 's1', agentKey: 'repo:bob' }])
     ).rejects.toMatchObject({
       code: 'invalid'
+    })
+  })
+})
+
+describe('"Rodar como <agente>" (runAgentFor / problemFor)', () => {
+  beforeEach(async () => {
+    await service.save({
+      projectId: 'p1',
+      scope: 'repo',
+      profile: { ...ANA, model: 'sonnet', commands: ['revisar'] },
+      isNew: true
+    })
+  })
+
+  it('sem agente: null nos dois', async () => {
+    expect(await service.runAgentFor('p1', 't1', null)).toBeNull()
+    expect(await service.problemFor('p1', 't1')).toBeNull()
+  })
+
+  it('agente pronto: vai para a execução com instruções e modelo; formulário sem problema', async () => {
+    await service.assign('p1', 't1', 'repo:ana')
+    expect(await service.runAgentFor('p1', 't1', 'revisar')).toMatchObject({
+      key: 'repo:ana',
+      name: 'Ana',
+      model: 'sonnet',
+      prompt: expect.stringContaining('Testes sempre.')
+    })
+    expect(await service.problemFor('p1', 't1')).toEqual({ name: 'Ana', problem: null })
+  })
+
+  it('comando fora da lista e limite do dia: recusa ao rodar; o limite aparece no formulário', async () => {
+    await service.assign('p1', 't1', 'repo:ana')
+    await expect(service.runAgentFor('p1', 't1', 'entregar')).rejects.toMatchObject({
+      code: 'denied'
+    })
+    for (let i = 0; i < ANA.limits.stepsPerDay; i++) {
+      agentRunRows.push({ key: 'repo:ana', startedAt: now.toISOString(), cost: null })
+    }
+    await expect(service.runAgentFor('p1', 't1', null)).rejects.toMatchObject({ code: 'limit' })
+    expect((await service.problemFor('p1', 't1'))?.problem).toMatch(/limite de hoje/)
+  })
+
+  it('perfil mudou no repositório ou sumiu: o formulário diz por quê', async () => {
+    await service.assign('p1', 't1', 'repo:ana')
+    await writeFile(repoFile(), serializeAgent({ ...ANA, instructions: 'Outra coisa' }))
+    expect(await service.problemFor('p1', 't1')).toEqual({
+      name: 'Ana',
+      problem: AGENT_MESSAGES.needsReview
+    })
+    await rm(repoFile())
+    expect(await service.problemFor('p1', 't1')).toEqual({
+      name: 'repo:ana',
+      problem: AGENT_MESSAGES.gone
     })
   })
 })

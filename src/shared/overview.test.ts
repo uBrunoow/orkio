@@ -5,7 +5,6 @@ import {
   costSum,
   finishedCount,
   flowWaitingItem,
-  formatDuration,
   notionWaitingItem,
   prAttention,
   projectCard,
@@ -13,7 +12,6 @@ import {
   requestWaitingItem,
   sortWaiting,
   stageDwell,
-  taskLabel,
   type OverviewTask,
   type StageEventInput
 } from './overview'
@@ -70,6 +68,7 @@ function flow(over: Partial<FlowRunView> = {}): FlowRunView {
         runId: 'run1',
         status: 'running',
         code: null,
+        link: null,
         startedAt: '2026-11-20T10:01:00.000Z',
         endedAt: null,
         message: null,
@@ -435,14 +434,5 @@ describe('Semana', () => {
       known: 2,
       total: 3
     })
-  })
-})
-
-describe('Atividade e formatação', () => {
-  it('formata tempos em pt-BR', () => {
-    expect(formatDuration(45_000)).toBe('45 s')
-    expect(formatDuration(65 * 60_000)).toBe('1 h 05 min')
-    expect(formatDuration(1.8 * 24 * 3600_000)).toBe('1,8 d')
-    expect(taskLabel({ displayId: null, title: null })).toBe('Tarefa do Notion')
   })
 })

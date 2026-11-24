@@ -23,7 +23,7 @@ import {
   shell,
   type IpcMainInvokeEvent
 } from 'electron'
-import { AgentError, AgentsService } from '../agents/agents.service'
+import { AgentsService } from '../agents/agents.service'
 import { AutomationService, type AutomationNotification } from '../automation/automation.service'
 import { AutomationScheduler } from '../automation/scheduler'
 import { BoardService } from '../board/board.service'
@@ -88,7 +88,6 @@ import { ReviewThreadsService } from '../signals/review-threads'
 import { TaskSignalsService } from '../signals/task-signals.service'
 import type { ConfigStore } from '../storage/config-store'
 import { SecureStore } from '../storage/secure-store'
-import { buildAgentPrompt, commandAllowed } from '../../shared/agent'
 import type { AutomationStatus } from '../../shared/automation'
 import { githubRepoOf } from '../../shared/projects'
 import { finalText } from '../../shared/review-publish'
@@ -527,40 +526,8 @@ function createWork(core: {
       appendMarkdown: (pageId, markdown) => notion.appendMarkdown(pageId, markdown)
     },
     // 8A: "Rodar como <agente>" (instruções e modelo; mesmas permissões).
-    agentFor: async (projectId, taskId, command) => {
-      const runtime = await agents.runtimeFor(projectId, taskId)
-      if (!runtime) return null
-      const limit = agents.limitProblem(runtime)
-      if (limit) throw new AgentError('limit', limit)
-      if (command && !commandAllowed(runtime.profile, command)) {
-        throw new AgentError(
-          'denied',
-          `${runtime.profile.name} não tem permissão para o comando /${command}.`
-        )
-      }
-      return {
-        key: runtime.key,
-        name: runtime.profile.name,
-        prompt: buildAgentPrompt(runtime.profile),
-        model: runtime.profile.model === 'default' ? null : runtime.profile.model,
-        effort: runtime.profile.effort
-      }
-    },
-    agentInfo: async (projectId, taskId) => {
-      const key = agents.assignedKey(taskId)
-      if (!key) return null
-      const view = await agents.get(projectId, key)
-      if (!view?.profile) return { name: key, problem: 'O agente desta tarefa não existe mais.' }
-      try {
-        const runtime = await agents.runtimeFor(projectId, taskId)
-        return { name: view.profile.name, problem: runtime ? agents.limitProblem(runtime) : null }
-      } catch (error) {
-        return {
-          name: view.profile.name,
-          problem: error instanceof AgentError ? error.message : 'Agente indisponível.'
-        }
-      }
-    },
+    agentFor: (projectId, taskId, command) => agents.runAgentFor(projectId, taskId, command),
+    agentInfo: (projectId, taskId) => agents.problemFor(projectId, taskId),
     flowRunner,
     notify: core.notify,
     emit
@@ -712,9 +679,9 @@ function createWork(core: {
           await scheduler().runNow(projectId)
           return automationStatus(projectId)
         },
-        setPaused: async (paused) => {
+        setPaused: async (projectId, paused) => {
           await configStore.update((c) => ({ ...c, automation: { paused } }))
-          return automationStatus('')
+          return automationStatus(projectId)
         }
       },
       alva: flows.handlers.alva,

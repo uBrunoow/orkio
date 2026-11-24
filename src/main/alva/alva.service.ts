@@ -25,7 +25,7 @@ import {
 } from '../../shared/alva'
 import { FLOW_NO, FLOW_YES } from '../../shared/task-flow'
 import { BRIEFING_PATH } from '../../shared/orkio-scratch'
-import { redactSecrets } from '../claude/redact'
+import { redactSecrets } from '../platform/redact'
 import type { Db } from '../db/database'
 import type { ExtractContext, ExtractResult, FlowExtractor } from '../flows/flow-runner'
 

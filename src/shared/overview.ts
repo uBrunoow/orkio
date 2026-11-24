@@ -559,22 +559,6 @@ export function activitySection(group: ActivityGroup): TaskSection {
       : 'history'
 }
 
-/** "45 s", "12 min", "1 h 05 min", "1,8 d". */
-export function formatDuration(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000))
-  if (s < 60) return `${s} s`
-  const min = Math.floor(s / 60)
-  if (min < 60) return `${min} min`
-  const h = Math.floor(min / 60)
-  if (h < 24) return `${h} h ${String(min % 60).padStart(2, '0')} min`
-  return `${(h / 24).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} d`
-}
-
-/** Rótulo curto da tarefa: "ORK-142 Exportar CSV" ou o que houver. */
-export function taskLabel(task: Pick<OverviewTask, 'displayId' | 'title'>): string {
-  return [task.displayId, task.title].filter(Boolean).join(' ') || 'Tarefa do Notion'
-}
-
 export interface BoardTaskRef {
   projectId: string
   taskId: string

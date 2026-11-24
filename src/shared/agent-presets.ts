@@ -8,6 +8,7 @@
  * usuário. Nenhuma permissão a mais; os que não entregam têm `delivery: false`.
  */
 import { agentKey, defaultAgent, parseAgentKey, type AgentKey, type AgentProfile } from './agent'
+import { BRIEFING_PATH } from './orkio-scratch'
 
 /** Ids dos embutidos que outras partes do app escolhem por nome (ex.: sugestão do orquestrador). */
 export const BUILTIN_AGENT_IDS = {
@@ -20,7 +21,7 @@ export const BUILTIN_AGENT_KEYS: Record<keyof typeof BUILTIN_AGENT_IDS, AgentKey
   reviewer: agentKey('builtin', BUILTIN_AGENT_IDS.reviewer)
 }
 
-const COMMON = `Trabalhe só no worktree da tarefa. O briefing está em .orkio/briefing.md: leia antes de começar. Siga as convenções do repositório (CLAUDE.md, README, padrões do código vizinho). Quando faltar informação para decidir, pergunte em vez de supor. Termine com um resumo curto do que fez e do que ficou pendente.`
+const COMMON = `Trabalhe só no worktree da tarefa. O briefing está em ${BRIEFING_PATH}: leia antes de começar. Siga as convenções do repositório (CLAUDE.md, README, padrões do código vizinho). Quando faltar informação para decidir, pergunte em vez de supor. Termine com um resumo curto do que fez e do que ficou pendente.`
 
 export const BUILTIN_AGENTS: readonly AgentProfile[] = [
   defaultAgent({

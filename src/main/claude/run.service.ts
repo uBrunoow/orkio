@@ -14,13 +14,14 @@ import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import type {
-  AgentRunView,
-  PermissionAnswer,
-  RunLogEvent,
-  RunMode,
-  RunStatus,
-  RunSummary
+import {
+  ACTIVE_RUN_STATUSES,
+  type AgentRunView,
+  type PermissionAnswer,
+  type RunLogEvent,
+  type RunMode,
+  type RunStatus,
+  type RunSummary
 } from '../../shared/agent-run'
 import { BRIEFING_PATH, isScratchPath } from '../../shared/orkio-scratch'
 import type { BoardStore, TaskEventInput } from '../board/board.store'
@@ -37,7 +38,7 @@ import {
   type DeliveryAction,
   type PolicyAliases
 } from './policy'
-import { envFileValues, isEnvFile, redactSecrets, redactValues } from './redact'
+import { envFileValues, isEnvFile, redactSecrets, redactValues } from '../platform/redact'
 import {
   deliveryOf,
   runInputRecord,
@@ -59,6 +60,8 @@ export interface RunHandle {
   cancel(): void
 }
 
+const ACTIVE_RUN_SQL = `(${ACTIVE_RUN_STATUSES.map((s) => `'${s}'`).join(', ')})`
+
 export interface RunServiceDeps {
   db: Db
   store: BoardStore
@@ -77,9 +80,9 @@ export interface RunServiceDeps {
     onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   }): RunHandle
   /** Aliases do git/gh e `push.default`, lidos no começo da execução (política). */
-  policyInputs?(dir: string): Promise<{ aliases: PolicyAliases; pushDefault: string | null }>
+  policyInputs(dir: string): Promise<{ aliases: PolicyAliases; pushDefault: string | null }>
   /** Branch atual do worktree; a política pede quando precisa (push no modo entrega). */
-  currentBranch?(dir: string): Promise<string | null>
+  currentBranch(dir: string): Promise<string | null>
   /** Número da PR aberta da branch (sinais da 2D), para o link no histórico. */
   prFor?(projectId: string, branch: string): number | null
   runsDir: string
@@ -199,7 +202,7 @@ export class RunService {
     this.questionTimeoutMs = deps.questionTimeoutMs ?? 24 * 60 * 60_000
     // Execuções que ficaram "em andamento" (app fechado/derrubado): o processo não existe mais.
     deps.db.run(
-      `UPDATE agent_runs SET status = 'failed', ended_at = ? WHERE status IN ('queued', 'running')`,
+      `UPDATE agent_runs SET status = 'failed', ended_at = ? WHERE status IN ${ACTIVE_RUN_SQL}`,
       this.now().toISOString()
     )
   }
@@ -344,7 +347,7 @@ export class RunService {
           await this.writeBriefing(worktree.path, spec.session.briefing).catch(() => undefined)
         }
         this.collectEnvSecrets(run, worktree.path)
-        const inputs = await this.deps.policyInputs?.(worktree.path).catch(() => null)
+        const inputs = await this.deps.policyInputs(worktree.path).catch(() => null)
         if (inputs) {
           run.aliases = inputs.aliases
           run.pushDefault = inputs.pushDefault
@@ -537,7 +540,7 @@ export class RunService {
     const n = (sql: string): number => this.deps.db.get<{ n: number }>(sql)?.n ?? 0
     return {
       total: n('SELECT COUNT(*) AS n FROM agent_runs'),
-      active: n("SELECT COUNT(*) AS n FROM agent_runs WHERE status IN ('queued', 'running')")
+      active: n(`SELECT COUNT(*) AS n FROM agent_runs WHERE status IN ${ACTIVE_RUN_SQL}`)
     }
   }
 
@@ -634,7 +637,7 @@ export class RunService {
           : null
       },
       {
-        currentBranch: async () => (await this.deps.currentBranch?.(run.worktree.path)) ?? null
+        currentBranch: () => this.deps.currentBranch(run.worktree.path)
       }
     )
     const requestId = req.toolUseId ?? randomUUID()

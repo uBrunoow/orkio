@@ -364,6 +364,26 @@ export interface BoardView {
   ruleCountsWeek: Record<string, number>
 }
 
+/** Nome da propriedade select que o Orkio cria no banco de Tarefas (a etapa local no Notion). */
+export const ORKIO_STAGE_PROPERTY_NAME = 'Etapa Orkio'
+
+/**
+ * Por que o quadro não pode ser salvo: a tela de configuração do quadro mostra antes de salvar e o
+ * main recusa com o mesmo texto (`BOARD_MESSAGES`).
+ */
+export const BOARD_SETUP_MESSAGES = {
+  noStages: 'Adicione pelo menos uma etapa.',
+  stageNeedsName: 'Toda etapa precisa de um nome.',
+  stageNeedsOption: 'Escolha uma opção de status do Notion que exista para cada etapa.',
+  chooseOrkioProperty: `Escolha a propriedade da ${ORKIO_STAGE_PROPERTY_NAME}.`,
+  confirmCreateOrkioProperty: `Confirme a criação da propriedade “${ORKIO_STAGE_PROPERTY_NAME}”.`,
+  confirmMissingOptions: `Confirme adicionar as opções que faltam na ${ORKIO_STAGE_PROPERTY_NAME}.`,
+  orkioPropertyExists: `Já existe uma propriedade “${ORKIO_STAGE_PROPERTY_NAME}” no banco de Tarefas. Escolha “usar existente”.`,
+  orkioPropertyInvalid: `Escolha uma propriedade do tipo seleção (select) para a ${ORKIO_STAGE_PROPERTY_NAME}.`,
+  blockedPropertyInvalid:
+    'Escolha uma propriedade do tipo caixa de seleção (checkbox) para Bloqueada.'
+} as const
+
 export type OrkioStageChoice =
   | { mode: 'none' }
   | { mode: 'existing'; propertyId: string }

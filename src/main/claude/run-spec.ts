@@ -4,6 +4,7 @@
  * modelo/raciocínio cortados pela versão do CLI) num `RunSpec`, que o `RunService` e o processo
  * (`buildCliArgs` em `runner.ts`) usam sem desmontar. Opção nova = um campo aqui + quem a usa.
  */
+import { buildAgentPrompt, type AgentProfile } from '../../shared/agent'
 import type { DeliveryTarget } from '../../shared/delivery'
 import type { Effort, RuntimeChoice } from '../../shared/agent-runtime'
 import type { RunMode } from '../../shared/agent-run'
@@ -40,6 +41,17 @@ export interface RunAgent {
   model: string | null
   /** Raciocínio (`--effort`); `null` = padrão. */
   effort: Effort | null
+}
+
+/** O agente (perfil lido ou a cópia guardada no fluxo) como vai para a execução. */
+export function toRunAgent(agent: { key: string; profile: AgentProfile }): RunAgent {
+  return {
+    key: agent.key,
+    name: agent.profile.name,
+    prompt: buildAgentPrompt(agent.profile),
+    model: agent.profile.model === 'default' ? null : agent.profile.model,
+    effort: agent.profile.effort
+  }
 }
 
 /** O que quem pede sabe. */

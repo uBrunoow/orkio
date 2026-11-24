@@ -54,7 +54,7 @@ export const PUBLISH_ACTION_MESSAGES = {
   generic: 'Não foi possível publicar a revisão. Tente de novo.',
   maybePosted:
     'A tentativa anterior demorou para responder: a revisão pode já estar na PR. Abra a PR e confira antes de publicar de novo.',
-  installHint: 'Instale o App neste link e retome:',
+  installHint: 'Instale o App pelo link e retome.',
   networkMaybePosted:
     'A conexão com o site do Orkio caiu durante a publicação. Confira a PR antes de tentar de novo: a revisão pode ter sido publicada.'
 } as const
@@ -92,12 +92,13 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
         return fail(PUBLISH_FAILURES.maybePosted, PUBLISH_ACTION_MESSAGES.networkMaybePosted)
       case 'not_installed': {
         const link = error.details.installUrl
-        return fail(
-          PUBLISH_FAILURES.notInstalled,
-          link
-            ? `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint} ${link}`
-            : REVIEW_MESSAGES.notInstalled
-        )
+        return link
+          ? {
+              code: PUBLISH_FAILURES.notInstalled,
+              message: `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint}`,
+              link
+            }
+          : fail(PUBLISH_FAILURES.notInstalled, REVIEW_MESSAGES.notInstalled)
       }
       case 'app_not_configured':
         return fail(PUBLISH_FAILURES.notConfigured, PUBLISH_ACTION_MESSAGES.notConfigured)

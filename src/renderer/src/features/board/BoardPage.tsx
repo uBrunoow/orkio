@@ -374,14 +374,8 @@ function useAutomationStatus(projectId: string): {
       if (next) setStatus(next)
     },
     setPaused: async (paused) => {
-      const next = await window.orkio.automation.setPaused(paused).catch(() => null)
-      if (next)
-        setStatus({
-          ...next,
-          ...(status
-            ? { github: status.github, lastRunAt: status.lastRunAt, nextRunAt: status.nextRunAt }
-            : {})
-        })
+      const next = await window.orkio.automation.setPaused(projectId, paused).catch(() => null)
+      if (next) setStatus(next)
     }
   }
 }

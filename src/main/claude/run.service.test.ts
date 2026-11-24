@@ -83,6 +83,8 @@ describe('RunService', () => {
         return { start: async () => undefined, cancel: run.cancel }
       },
       runsDir: join(dir, 'runs'),
+      policyInputs: async () => ({ aliases: {}, pushDefault: null }),
+      currentBranch: async () => null,
       emit: (m) => messages.push(m),
       notify: (title) => notifications.push(title),
       approvalTimeoutMs: 200,

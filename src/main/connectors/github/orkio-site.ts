@@ -6,7 +6,12 @@
  * vira mensagem: cada leitor tem os próprios textos.
  */
 import { isInstallUrl } from '../../../shared/github-names'
-import { isReviewRejectReason, type ReviewRejectReason } from '../../../shared/site-contract'
+import {
+  isReviewRejectReason,
+  isSiteGitHubError,
+  type ReviewRejectReason,
+  type SiteGitHubError
+} from '../../../shared/site-contract'
 import { isRecord } from '../../net/parse'
 import type { OrkioSiteResponse } from './github.connector'
 
@@ -29,10 +34,25 @@ export type OrkioSiteResult =
 
 export function parseOrkioSiteResponse(response: OrkioSiteResponse): OrkioSiteResult {
   const body = isRecord(response.body) ? response.body : {}
-  const code = typeof body['error'] === 'string' ? body['error'] : null
+  const raw = body['error']
+  const hasCode = typeof raw === 'string'
   const url = body['installUrl']
   const installUrl = isInstallUrl(url) ? url : null
-  if (response.status === 200 && code === null) return { kind: 'ok', body, installUrl }
+  if (response.status === 200 && !hasCode) return { kind: 'ok', body, installUrl }
+  if (isSiteGitHubError(raw)) return fromCode(raw, body, installUrl)
+  // Sem código conhecido: decide pelo status.
+  if (!hasCode && (response.status === 404 || response.status === 405)) {
+    return { kind: 'site_outdated' }
+  }
+  if (response.status === 429) return { kind: 'rate_limited' }
+  return { kind: 'upstream' }
+}
+
+function fromCode(
+  code: SiteGitHubError,
+  body: Record<string, unknown>,
+  installUrl: string | null
+): OrkioSiteResult {
   switch (code) {
     case 'not_installed':
       return { kind: 'not_installed', installUrl }
@@ -46,10 +66,7 @@ export function parseOrkioSiteResponse(response: OrkioSiteResponse): OrkioSiteRe
       const reason = body['reason']
       return { kind: 'bad_request', reason: isReviewRejectReason(reason) ? reason : null }
     }
+    case 'upstream':
+      return { kind: 'upstream' }
   }
-  if (code === null && (response.status === 404 || response.status === 405)) {
-    return { kind: 'site_outdated' }
-  }
-  if (response.status === 429) return { kind: 'rate_limited' }
-  return { kind: 'upstream' }
 }

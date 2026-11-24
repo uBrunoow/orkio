@@ -12,11 +12,12 @@ export const SCRATCH_DIR = '.orkio'
 export const BRIEFING_PATH = `${SCRATCH_DIR}/briefing.md`
 export const ATTACHMENTS_DIR = `${SCRATCH_DIR}/attachments`
 export const REVIEW_PATH = `${SCRATCH_DIR}/revisao.md`
-/** Perfis dos agentes do repositório (versionados; não são rascunho). */
-export const AGENTS_DIR = `${SCRATCH_DIR}/agents`
+/** Subpasta dos perfis dos agentes do repositório (versionados; não são rascunho). */
+const AGENTS_SUBDIR = 'agents'
+export const AGENTS_DIR = `${SCRATCH_DIR}/${AGENTS_SUBDIR}`
 
 /** Conteúdo do `.orkio/.gitignore`: tudo, menos os perfis dos agentes. */
-export const SCRATCH_GITIGNORE = '*\n!/agents/\n!/agents/**\n'
+export const SCRATCH_GITIGNORE = `*\n!/${AGENTS_SUBDIR}/\n!/${AGENTS_SUBDIR}/**\n`
 
 /** Caminho relativo à raiz do worktree (com `/`) é rascunho do Orkio? */
 export function isScratchPath(rel: string): boolean {

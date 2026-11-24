@@ -97,6 +97,14 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
     openEditor: vi.fn(async () => undefined),
     openTerminal: vi.fn(async () => undefined),
     artifacts: {} as never,
+    deliveryTarget: () => {
+      throw new Error(CLAUDE_MESSAGES.noRepo)
+    },
+    flowActive: () => false,
+    flowBusy: () => false,
+    flowMessage: async () => ({ used: false }),
+    agentFor: async () => null,
+    agentInfo: async () => null,
     ...over
   }
   /** O `RunSpec` da última execução iniciada. */

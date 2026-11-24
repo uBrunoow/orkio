@@ -140,6 +140,11 @@ function makeRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
     notify: (title) => notifications.push(title),
     emit: () => undefined,
     enterStage: () => undefined,
+    worktreePath: () => null,
+    integrations: [],
+    agentFor: async () => null,
+    agentLimit: () => null,
+    onFinished: () => undefined,
     newId: () => `fr-${++n}`,
     ...over
   })
@@ -330,6 +335,29 @@ describe('FlowRunner', () => {
     // Rodando: não pode.
     await expect(runner.resumeWithReply(id, 'oi')).rejects.toThrow()
     expect(started).toHaveLength(1)
+  })
+
+  it('mensagem da sessão e "Responder e continuar" decidem igual: pausa por limite de passos volta ao passo', async () => {
+    const runner = makeRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    finish(runner, 'run-1', 'failed')
+    await flush()
+    // Antes, só falha/interrupção voltavam ao fluxo: a mensagem escapava para uma execução avulsa.
+    db.run(`UPDATE flow_runs SET pause_reason = 'loop_guard' WHERE id = ?`, id)
+    expect(await runner.handleMessage('t1', 'pode seguir')).toBe('reply')
+    expect(started[1]).toMatchObject({ command: '', reply: 'pode seguir' })
+    expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'revisar' })
+  })
+
+  it('gate expirado: nem a mensagem nem "Responder e continuar" voltam ao passo (gate não tem sessão)', async () => {
+    const runner = makeRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    finish(runner, 'run-1', 'succeeded')
+    await flush()
+    expect(runner.view(id).currentStep).toBe('ok')
+    db.run(`UPDATE flow_runs SET status = 'paused', pause_reason = 'gate_timeout' WHERE id = ?`, id)
+    expect(await runner.handleMessage('t1', 'oi')).toBeNull()
+    await expect(runner.resumeWithReply(id, 'oi')).rejects.toMatchObject({ code: 'wrong_state' })
   })
 
   it('comando com variável de uma integração sem valor não roda: pausa com a falha dela, sem gastar uma execução', async () => {
@@ -1180,9 +1208,10 @@ describe('FlowRunner: publicar revisão como orkio[bot] (Task 18)', () => {
       installUrl: 'https://github.com/apps/orkio/installations/new'
     })
     await runner.approveGate(id)
-    const msg = runner.view(id).history.at(-1)?.message ?? ''
-    expect(msg).toContain('não está instalado')
-    expect(msg).toContain('https://github.com/apps/orkio/installations/new')
+    const failed = runner.view(id).history.at(-1)
+    expect(failed?.message).toContain('não está instalado')
+    // O link vai num campo próprio do passo (a tela de problema não procura no texto).
+    expect(failed?.link).toBe('https://github.com/apps/orkio/installations/new')
     expect(posts).toEqual([])
   })
 
@@ -1317,6 +1346,17 @@ describe('FlowRunner com agentes (8A)', () => {
     // Passou por cima só uma vez: o próximo comando pausa de novo.
     expect(runner.view(view.id).pauseReason).toBe('agent_daily_limit')
     expect(started).toHaveLength(1)
+  })
+
+  it('limite diário: a mensagem da sessão responde e segue (passa por cima uma vez, como "Retomar")', async () => {
+    limit = 'Ana atingiu o limite de hoje (40 execuções do Claude Code).'
+    const runner = agentRunner()
+    const view = await runner.startManual('p1', 't1')
+    expect(runner.view(view.id).pauseReason).toBe('agent_daily_limit')
+    expect(await runner.handleMessage('t1', 'segue mesmo assim')).toBe('reply')
+    expect(started).toHaveLength(1)
+    expect(started[0]).toMatchObject({ reply: 'segue mesmo assim' })
+    expect(runner.view(view.id).status).toBe('running')
   })
 
   it('editar o agente no meio do fluxo não muda o fluxo em curso (cópia do perfil)', async () => {

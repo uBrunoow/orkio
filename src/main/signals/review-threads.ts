@@ -14,7 +14,7 @@ import type {
   ReviewThread,
   ReviewThreadsResult
 } from '../../shared/review'
-import { redactSecrets } from '../claude/redact'
+import { redactSecrets } from '../platform/redact'
 import { isRecord } from '../net/parse'
 
 /**

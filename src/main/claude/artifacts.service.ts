@@ -19,7 +19,7 @@ import {
 import type { BoardStore } from '../board/board.store'
 import type { Db } from '../db/database'
 import type { Git } from '../git/git'
-import { redactSecrets } from './redact'
+import { redactSecrets } from '../platform/redact'
 import type { WorktreeService } from './worktree.service'
 
 /** Acima disso o Notion tende a recusar (5.000 blocos / 500 KB por requisição). */

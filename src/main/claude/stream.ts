@@ -6,7 +6,7 @@ import { isAbsolute, relative } from 'node:path'
 import type { RunLogEvent } from '../../shared/agent-run'
 import { toolInfo, toolPath } from '../../shared/claude-tools'
 import { contextWindowFor, inputTokensOf } from '../../shared/context-usage'
-import { redactSecrets } from './redact'
+import { redactSecrets } from '../platform/redact'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)

@@ -203,14 +203,6 @@ export class DeliveryService {
     if (!wt) return null
     return this.deps.git.headCommit(wt.path).catch(() => null)
   }
-
-  /** Contexto do modo entrega lido no começo do passo: aliases e `push.default`. */
-  async policyInputs(
-    dir: string
-  ): Promise<{ gitAliases: Record<string, string>; pushDefault: string | null }> {
-    const gitAliases = await this.deps.git.aliases(dir).catch(() => ({}))
-    return { gitAliases, pushDefault: await this.deps.git.configValue(dir, 'push.default') }
-  }
 }
 
 /** Saída de `gh alias list` (`nome: expansão`, uma por linha) → mapa. */

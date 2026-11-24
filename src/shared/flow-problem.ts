@@ -5,7 +5,7 @@
  */
 import { ALVA_FAILURES, alvaCommandOf } from './alva'
 import { FLOW_PAUSES, isProblem, type PauseProblemKind } from './flow-run-state'
-import { findInstallUrl } from './github-names'
+import { isInstallUrl } from './github-names'
 import type { FlowRunView, Step } from './task-flow'
 
 /** Causa que vem da falha do passo (pelo código). */
@@ -168,12 +168,12 @@ export function describeFlowProblem(run: FlowRunView): FlowProblem | null {
     stepName: current?.name ?? null,
     runId: entry?.runId ?? null,
     rerun: previous && label ? { stepId: previous.id, label } : null,
-    link: installLink(kind, reason)
+    link: installLink(kind, entry?.link ?? null)
   }
 }
 
-function installLink(kind: ProblemKind, reason: string | null): FlowProblem['link'] {
-  if (kind !== 'review_not_installed' || !reason) return null
-  const url = findInstallUrl(reason)
-  return url ? { label: 'Instalar o GitHub App do Orkio', url } : null
+/** O link que a falha trouxe, só se for o de instalação do App (defesa em profundidade). */
+function installLink(kind: ProblemKind, link: string | null): FlowProblem['link'] {
+  if (kind !== 'review_not_installed' || !isInstallUrl(link)) return null
+  return { label: 'Instalar o GitHub App do Orkio', url: link }
 }

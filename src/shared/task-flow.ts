@@ -644,6 +644,8 @@ export type FlowPauseReason =
 export interface StepFailure {
   code: string
   message: string
+  /** Link para resolver (ex.: instalar o GitHub App), já validado por quem falhou. */
+  link?: string
 }
 
 export interface FlowStepView {
@@ -657,6 +659,8 @@ export interface FlowStepView {
   message: string | null
   /** Código da falha (`StepFailure.code`); `null` em passos sem falha e em linhas antigas. */
   code: string | null
+  /** Link da falha (`StepFailure.link`); `null` quando ela não trouxe. */
+  link: string | null
   costUsd: number | null
 }
 

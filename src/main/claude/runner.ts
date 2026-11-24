@@ -26,7 +26,7 @@ import {
   type BridgeRequest
 } from './bridge/protocol'
 import { cliDenyInDelivery, cliDenyOutsideDelivery } from './github-rules'
-import { redactSecrets, sanitizeEnv } from './redact'
+import { redactSecrets, sanitizeEnv } from '../platform/redact'
 import { deliveryOf, type RunSpec } from './run-spec'
 import { parseStreamLine } from './stream'
 

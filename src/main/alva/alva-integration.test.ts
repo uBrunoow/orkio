@@ -79,6 +79,10 @@ function openApp(precheck: (projectDir: string) => Promise<AlvaPrecheck>): FlowR
     notify: () => undefined,
     emit: () => undefined,
     enterStage: () => undefined,
+    worktreePath: () => null,
+    agentFor: async () => null,
+    agentLimit: () => null,
+    onFinished: () => undefined,
     newId: () => `fr-${++n}-${Math.random().toString(36).slice(2, 6)}`
   })
 }

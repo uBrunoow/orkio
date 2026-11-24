@@ -21,7 +21,7 @@ import {
   sanitizeReviewText,
   type PublishReviewEvent
 } from '../../../shared/review-publish'
-import { redactSecrets } from '../../claude/redact'
+import { redactSecrets } from '../../platform/redact'
 import { isApiError } from '../../net/http'
 import { isRecord } from '../../net/parse'
 import type { ConditionalPage } from './github.client'

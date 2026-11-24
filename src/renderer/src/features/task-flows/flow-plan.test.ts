@@ -42,6 +42,7 @@ function step(
     runId,
     status,
     code: null,
+    link: null,
     startedAt: `2026-11-23T10:0${seq}:00Z`,
     endedAt: status === 'running' || status === 'waiting' ? null : `2026-11-23T10:0${seq}:30Z`,
     message: null,

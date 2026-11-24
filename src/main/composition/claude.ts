@@ -48,8 +48,8 @@ export function createClaude(deps: {
   signals: ClaudeServiceDeps['signals']
   prFor: (projectId: string, branch: string) => number | null
   getBlockChildren: ClaudeServiceDeps['getBlockChildren']
-  agentFor: NonNullable<ClaudeServiceDeps['agentFor']>
-  agentInfo: NonNullable<ClaudeServiceDeps['agentInfo']>
+  agentFor: ClaudeServiceDeps['agentFor']
+  agentInfo: ClaudeServiceDeps['agentInfo']
   /** Escritas no Notion para publicar artefatos (o token fica no conector). */
   notionInsert: ArtifactsDeps['notion']
   /** O executor de fluxos nasce depois (ele usa o Claude Code). */

@@ -6,7 +6,7 @@ import { execFile as nodeExecFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { CLAUDE_MIN_VERSION, type ClaudeCodeStatus } from '../../shared/agent-run'
 import { CLAUDE_EFFORT_VERSION } from '../../shared/agent-runtime'
-import { sanitizeEnv } from './redact'
+import { sanitizeEnv } from '../platform/redact'
 
 export type ExecFileFn = (
   file: string,
