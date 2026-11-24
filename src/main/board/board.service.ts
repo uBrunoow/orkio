@@ -164,8 +164,6 @@ export class BoardService {
     })
   }
 
-  // ---------- Abrir / reconciliar ----------
-
   async get(projectId: string, options: { force?: boolean } = {}): Promise<Result<BoardView>> {
     return this.wrap(() => this.load(projectId, options.force === true))
   }
@@ -221,7 +219,6 @@ export class BoardService {
     const stages = validated.stages
     const config: BoardConfig = { ...board, stages }
 
-    // Reconciliação.
     const pending = new Set(this.deps.store.pendingForProject(projectId).map((w) => w.taskPageId))
     const nowMs = this.now().getTime()
     // "Atualizar" (force) é um pedido explícito pela verdade do Notion: sem janela de espera.
@@ -329,8 +326,6 @@ export class BoardService {
     }
   }
 
-  // ---------- Mover / bloquear ----------
-
   async move(projectId: string, taskId: string, stageId: string): Promise<Result<BoardCard>> {
     return this.wrap(async () => {
       const moved = this.deps.store.transaction(() =>
@@ -361,7 +356,6 @@ export class BoardService {
     })
   }
 
-  /** Depois de um ciclo de automações: envia as escritas e avisa a tela. */
   flushWrites(): void {
     void this.writes.kick()
   }
@@ -545,8 +539,6 @@ export class BoardService {
     })
   }
 
-  // ---------- Resultados da fila ----------
-
   private onSynced(write: PendingWrite): void {
     this.retryMessages.delete(write.taskPageId)
     this.recent.set(write.taskPageId, {
@@ -638,8 +630,6 @@ export class BoardService {
       ...(auth ? { canReconnect: true } : {})
     })
   }
-
-  // ---------- Salvar a configuração (um caminho só) ----------
 
   /**
    * Salva etapas + automações do editor de fluxo (Colunas e Automações). Mesmo caminho do
@@ -831,7 +821,6 @@ export class BoardService {
       rules: next.rules,
       updatedAt: this.now().toISOString()
     }
-    // Garante as tarefas em memória para mover as das etapas removidas.
     const removesStages = previous?.stages.some((p) => !stages.some((s) => s.id === p.id))
     if (removesStages && !this.snapshots.has(projectId)) await this.load(projectId, false)
 
@@ -848,7 +837,6 @@ export class BoardService {
           flows = alva.flows
           flowChanges = alva.changes
         }
-        // Projeto sem fluxos e nada a ligar: não cria a entrada.
         if (!c.flows[projectId] && !next.bindings && flowChanges.length === 0) return withBoard
         return withProjectFlows(withBoard, projectId, flows)
       })
@@ -920,8 +908,6 @@ export class BoardService {
     }
   }
 
-  // ---------- Auxiliares ----------
-
   private project(projectId: string) {
     const project = this.deps.config.get().projects.find((p) => p.id === projectId)
     if (!project) throw new BoardError({ code: 'not_found', message: BOARD_MESSAGES.notFound })
@@ -975,7 +961,6 @@ export class BoardService {
     }
   }
 
-  /** Depois de confirmar, os valores conhecidos do Notion passam a ser os escritos. */
   private applyToSnapshot(write: PendingWrite): void {
     const snapshot = this.snapshots.get(write.projectId)
     if (!snapshot) return
@@ -1026,7 +1011,6 @@ function propertyIdByName(body: unknown, name: string): string | null {
   return typeof id === 'string' && id ? id : null
 }
 
-/** Frases do histórico de configuração para as ligações etapa → fluxo (5A). */
 function diffBindings(
   before: readonly StageFlow[],
   after: readonly StageFlow[],
@@ -1053,7 +1037,6 @@ function diffBindings(
   return out
 }
 
-/** Valor da "Etapa Orkio" (select com o nome da etapa). */
 function orkioStage(name: string): PropertyWrite {
   return { type: 'select', name }
 }

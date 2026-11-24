@@ -6,21 +6,18 @@ export function projectById(config: OrkioConfig, projectId: string): StoredProje
   return config.projects.find((p) => p.id === projectId) ?? null
 }
 
-/** Projetos que as automações acompanham: vinculados a um projeto do Notion e com quadro. */
 export function automationProjectIds(config: OrkioConfig): string[] {
   return config.projects.filter((p) => p.notionProject && config.boards[p.id]).map((p) => p.id)
 }
 
-/** Fluxos de tarefa do projeto (5A): `flows[projectId]` ou vazio. Leitura padrão. */
 export function projectFlows(config: OrkioConfig, projectId: string): ProjectFlows {
   return config.flows[projectId] ?? { flows: [], bindings: [] }
 }
 
 /**
  * Único escritor de `flows[projectId]` (fluxos e ligações etapa → fluxo): a config com `next` no
- * lugar, sem ligação inválida. Uma ligação vale só para fluxo que existe, etapa que existe (com o
- * quadro criado) e uma por etapa (a primeira). Quem muda o quadro e os fluxos juntos passa aqui a
- * config já com o quadro novo.
+ * lugar, sem ligação inválida. Quem muda o quadro e os fluxos juntos passa aqui a config já com o
+ * quadro novo.
  */
 export function withProjectFlows(
   config: OrkioConfig,

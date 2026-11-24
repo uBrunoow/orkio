@@ -28,7 +28,6 @@ export function isAllowedSiteOrigin(origin: string, allowLoopbackHttp: boolean):
   return allowLoopbackHttp && url.protocol === 'http:' && url.hostname === LOOPBACK_HOST
 }
 
-/** `http://127.0.0.1` vale neste build? Só fora de produção (dev e E2E). */
 export function allowsLoopbackSite(env: SiteEnv): boolean {
   return env.MODE !== undefined && env.MODE !== 'production'
 }

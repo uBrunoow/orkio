@@ -10,7 +10,6 @@ import { createSenderGuard } from './ipc/trusted-sender'
 const RENDERER_HTML = join(__dirname, '../renderer/index.html')
 const DEV_SERVER_URL = app.isPackaged ? undefined : process.env['ELECTRON_RENDERER_URL']
 
-/** Janela inicial: 90% da área útil da tela principal (quase cheia, centralizada). */
 function initialWindowSize(): { width: number; height: number } {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize
   return {
@@ -43,7 +42,6 @@ function createMainWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
 
-  // Nenhuma janela nova e nenhuma navegação para fora do app.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (event, url) => {
     if (url !== win.webContents.getURL()) event.preventDefault()

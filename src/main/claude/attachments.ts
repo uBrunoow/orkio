@@ -16,7 +16,6 @@ import { stripAccents } from '../../shared/text'
 import { ATTACHMENTS_DIR } from '../../shared/orkio-scratch'
 import { ensureScratch } from './scratch'
 
-/** O que cada tipo binário precisa ser (mensagem quando o conteúdo não bate). */
 const BINARY_WHAT: Partial<Record<AttachmentExt, string>> = {
   png: 'uma imagem PNG',
   jpg: 'uma imagem JPEG',
@@ -62,7 +61,6 @@ export function sniffAttachment(
       ? { ok: true, ext }
       : { ok: false, message: ATTACHMENT_MESSAGES.mismatch(name, what) }
   }
-  // Markdown/texto: UTF-8 válido, sem byte nulo.
   const notText = ATTACHMENT_MESSAGES.mismatch(name, 'um texto válido')
   if (data.includes(0)) return { ok: false, message: notText }
   try {
@@ -73,7 +71,6 @@ export function sniffAttachment(
   return { ok: true, ext }
 }
 
-/** Só `[A-Za-z0-9._-]`, sem pontos iniciais, no máximo 80 caracteres, sem pastas. */
 export function safeAttachmentName(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? ''
   const cleaned = stripAccents(base)
@@ -83,7 +80,6 @@ export function safeAttachmentName(name: string): string {
   return out.replace(/^\.+/, '') || 'anexo'
 }
 
-/** Valida tudo antes de gravar qualquer coisa; devolve a mensagem do primeiro problema. */
 export function checkAttachments(
   files: readonly { name: string; data: Uint8Array }[]
 ): { ok: true; exts: AttachmentExt[] } | { ok: false; message: string } {
@@ -112,7 +108,6 @@ export async function saveAttachments(
   for (const [i, f] of files.entries()) {
     const sha = createHash('sha256').update(f.data).digest('hex').slice(0, 8)
     let safe = safeAttachmentName(f.name)
-    // Binários: a extensão vem do tipo detectado; texto: .md ou .txt.
     const ext = checked.exts[i]!
     const dot = safe.lastIndexOf('.')
     const stem = dot > 0 ? safe.slice(0, dot) : safe

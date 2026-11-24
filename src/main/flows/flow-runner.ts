@@ -103,12 +103,10 @@ export class FlowError extends DomainError {
 export interface ExtractContext {
   projectId: string
   taskId: string
-  /** O passo (comando do Claude Code) a que o extrator está ligado. */
   step: ClaudeCommandStep
   worktreePath: string | null
 }
 
-/** O que um extrator devolve: variáveis, falha do passo ou uma escolha para o usuário. */
 export interface ExtractResult {
   vars?: Record<string, string>
   /** O passo conta como falho, com este código e mensagem (o fluxo pausa). */
@@ -178,9 +176,7 @@ export interface FlowContext {
 export interface FlowRunnerDeps {
   db: Db
   store: BoardStore
-  /** Fluxos e ligações do projeto (config). */
   flows(projectId: string): ProjectFlows
-  /** Etapa local atual da tarefa. */
   currentStage(projectId: string, taskId: string): string | null
   /** Monta o briefing da tarefa (Notion) e garante o worktree. */
   prepare(projectId: string, taskId: string): Promise<FlowContext>
@@ -192,12 +188,7 @@ export interface FlowRunnerDeps {
   cancelClaude(runId: string): void
   extractors: readonly FlowExtractor[]
   actions: readonly OrkioAction[]
-  /** Pasta do worktree da tarefa (para extratores). */
   worktreePath?: (taskId: string) => string | null
-  /**
-   * Integrações por marcador (ex.: alva-flow): variáveis iniciais, pré-condição para começar,
-   * limite de fluxos em paralelo e variáveis que não podem faltar.
-   */
   integrations?: readonly FlowIntegration[]
   /**
    * 8A: agente atribuído à tarefa (`null` = nenhum). Lança `FlowError` (mensagem pt-BR) quando há
@@ -285,7 +276,6 @@ interface Persisted {
   pendingReply?: { stepId: string; text: string } | null
 }
 
-/** `('running', 'waiting_gate', …)`: os status ativos no SQL (mesma fonte do TS). */
 const ACTIVE_SQL = `(${ACTIVE_FLOW_STATUSES.map((s) => `'${s}'`).join(', ')})`
 const ACTIVE: readonly FlowRunStatus[] = ACTIVE_FLOW_STATUSES
 /** Pausas de fila (vaga do projeto ou do agente): começam sozinhas. */
@@ -321,8 +311,6 @@ export class FlowRunner {
   private now(): string {
     return (this.deps.now?.() ?? new Date()).toISOString()
   }
-
-  // ---------- Ciclo de vida ----------
 
   /**
    * Ao abrir o app: o que estava rodando (ou entre passos) vira "interrompido" e pausa; gate
@@ -364,8 +352,6 @@ export class FlowRunner {
     for (const t of this.gateTimers.values()) clearTimeout(t)
     this.gateTimers.clear()
   }
-
-  // ---------- Gatilhos ----------
 
   /** Da entrada na etapa (`enterStage`, dentro da transação do quadro): adia o trabalho. */
   onStageChanged(change: StageChange): void {
@@ -522,7 +508,6 @@ export class FlowRunner {
     return this.view(id)
   }
 
-  /** Primeiro passo (com as variáveis iniciais da integração). */
   private async begin(id: string): Promise<void> {
     const row = this.row(id)
     // Cancelado enquanto esperava a vaga.
@@ -613,7 +598,6 @@ export class FlowRunner {
     }
   }
 
-  /** Você escolheu uma opção pedida por um extrator. */
   async choose(flowRunId: string, value: string): Promise<FlowRunView> {
     await this.withLock(flowRunId, async () => {
       const row = this.row(flowRunId)
@@ -652,8 +636,6 @@ export class FlowRunner {
     return this.view(flowRunId)
   }
 
-  // ---------- Ações do usuário ----------
-
   approveGate(flowRunId: string, input?: string[]): Promise<FlowRunView> {
     return this.gateAnswer(flowRunId, 'approved', input)
   }
@@ -680,7 +662,6 @@ export class FlowRunner {
           ? this.deps.actions.find((a) => a.id === step.action)
           : undefined
       if (step?.type === 'orkio_action') {
-        // Ação com confirmação: aprovar executa agora; recusar encerra o fluxo (recusado).
         this.savePersisted(flowRunId, { ...p, pendingConfirm: null })
         this.event(row, outcome === 'approved' ? 'gate_approved' : 'gate_rejected', {
           step: row.current_step
@@ -931,8 +912,6 @@ export class FlowRunner {
     return this.view(flowRunId)
   }
 
-  // ---------- Fim das execuções da 4A ----------
-
   onRunFinished(info: RunFinished): void {
     if (this.disposed) return
     const ref = this.runIndex.get(info.runId)
@@ -945,7 +924,6 @@ export class FlowRunner {
       const step = this.flow(row).steps.find((s) => s.id === current.step_id)
       let end: StepEnd
       let extracted: ExtractResult = {}
-      // Mensagem e código guardados no passo: os da execução ou, se o extrator recusou, os dele.
       let message = info.message
       let code: string | null = info.code
       if (info.status === 'succeeded' && step?.type === 'claude_command' && step.extract) {
@@ -992,7 +970,6 @@ export class FlowRunner {
         return
       }
       if (row.status === 'awaiting_decision') {
-        // Você ainda não decidiu: guarda o fim e espera.
         this.savePersisted(ref.flowRunId, {
           ...this.persisted(row),
           pendingEnd: { stepId: current.step_id, end }
@@ -1049,7 +1026,6 @@ export class FlowRunner {
     const step = row.current_step
       ? this.flow(row).steps.find((st) => st.id === row.current_step)
       : undefined
-    // Gate com "Pedir ajustes" esperando você: a mensagem é o pedido de ajuste.
     if (row.status === 'waiting_gate' && step?.type === 'gate' && step.revise) {
       await this.reviseGate(taskId, message)
       return 'revise'
@@ -1072,9 +1048,6 @@ export class FlowRunner {
     return null
   }
 
-  // ---------- Leitura ----------
-
-  /** Fluxo ativo ou o mais recente da tarefa, e os anteriores. */
   list(taskId: string): FlowRunView[] {
     return this.deps.db
       .all<{ id: string }>(
@@ -1124,7 +1097,6 @@ export class FlowRunner {
       })
   }
 
-  /** Fluxos ativos de todos os projetos (Visão geral, 6D). */
   activeViews(): FlowRunView[] {
     return this.deps.db
       .all<{ id: string }>(
@@ -1162,7 +1134,6 @@ export class FlowRunner {
     return out
   }
 
-  /** Tarefas do projeto com fluxo ativo e o agente de cada uma (`null` = sem agente). */
   activeTasks(projectId: string): { taskId: string; agentKey: string | null }[] {
     return this.deps.db
       .all<{ task_page_id: string; agent_key: string | null }>(
@@ -1172,7 +1143,6 @@ export class FlowRunner {
       .map((r) => ({ taskId: r.task_page_id, agentKey: r.agent_key }))
   }
 
-  /** O fluxo mais recente da tarefa (ativo ou não); `null` = nunca rodou. */
   lastFlow(taskId: string): LastFlow | null {
     const r = this.deps.db.get<RunRow>(
       'SELECT * FROM flow_runs WHERE task_page_id = ? ORDER BY started_at DESC LIMIT 1',
@@ -1189,7 +1159,6 @@ export class FlowRunner {
       : null
   }
 
-  /** Contagens para o diagnóstico (todas as execuções e as ativas). */
   counts(): { total: number; active: number } {
     const n = (sql: string): number => this.deps.db.get<{ n: number }>(sql)?.n ?? 0
     return {
@@ -1263,8 +1232,6 @@ export class FlowRunner {
           : null
     }
   }
-
-  // ---------- Interno ----------
 
   private async apply(flowRunId: string, decision: FlowDecision): Promise<void> {
     const row = this.row(flowRunId)
@@ -1364,7 +1331,6 @@ export class FlowRunner {
   ): Promise<void> {
     try {
       const ctx = await this.context(row)
-      // Extrator com "antes": tira a foto antes do comando rodar.
       const ex = step.extract
         ? this.deps.extractors.find((e) => e.id === step.extract!.extractor)
         : undefined
@@ -1385,7 +1351,6 @@ export class FlowRunner {
         missing.some((name) => name.startsWith(i.varPrefix))
       )
       if (lacking) throw new FlowError(lacking.missingVar.code, lacking.missingVar.message)
-      // Resposta sua guardada para este passo: consome e manda na mesma sessão.
       const persisted = this.persisted(this.row(row.id))
       const reply =
         persisted.pendingReply?.stepId === step.id ? persisted.pendingReply.text : undefined
@@ -1483,7 +1448,6 @@ export class FlowRunner {
         return
       }
       if (info) {
-        // Gate da ação: espera você aprovar (com o que vai acontecer na tela).
         this.savePersisted(row.id, { ...this.persisted(this.row(row.id)), pendingConfirm: info })
         this.deps.db.run(
           `UPDATE flow_steps SET status = 'waiting' WHERE id = (SELECT MAX(id) FROM flow_steps WHERE flow_run_id = ?)`,
@@ -1530,7 +1494,6 @@ export class FlowRunner {
     await this.endAction(row, step, end, failure)
   }
 
-  /** Execução do Claude Code mais recente deste fluxo (passo com `run_id`). */
   private lastRunId(flowRunId: string): string | null {
     return (
       this.deps.db.get<{ run_id: string }>(
@@ -1601,7 +1564,6 @@ export class FlowRunner {
     }
   }
 
-  /** Fecha o passo mais recente: estado e o que fica no `result_json` (mensagem, código...). */
   private closeStep(
     flowRunId: string,
     status: FlowStepStatus,

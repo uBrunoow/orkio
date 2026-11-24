@@ -24,7 +24,6 @@ export function compareVersions(a: string, b: string): number {
   return 0
 }
 
-/** O CLI desta versão aceita `--effort`? Sem versão conhecida, não. */
 export function supportsEffortVersion(version: string | null): boolean {
   return version !== null && compareVersions(version, CLAUDE_EFFORT_VERSION) >= 0
 }

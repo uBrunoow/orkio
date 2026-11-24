@@ -61,14 +61,11 @@ export interface Git {
   isDirty(root: string): Promise<boolean>
   /** Branch padrão conhecida localmente (refs/remotes/<remote>/HEAD), se houver. */
   remoteDefaultBranch(root: string, remote: string): Promise<string | null>
-  /** Nomes das branches locais (refs/heads). */
   localBranches(root: string): Promise<string[]>
-  // ---------- Worktrees (4A) ----------
   /** `git fetch <remote> <branch>` (sem credenciais interativas: GIT_TERMINAL_PROMPT=0). */
   fetch(root: string, remote: string, branch: string): Promise<void>
   /** Branches remotas conhecidas localmente (refs/remotes/<remote>/…), sem o prefixo do remote. */
   remoteBranches(root: string, remote: string): Promise<string[]>
-  /** O ref existe? (ex.: `origin/main`, `refs/heads/x`) */
   refExists(root: string, ref: string): Promise<boolean>
   /** `git worktree add`: nova branch a partir de `base`, ou branch existente (`newBranch: false`). */
   worktreeAdd(
@@ -81,7 +78,6 @@ export interface Git {
   worktreeRemove(root: string, path: string, force: boolean): Promise<void>
   /** Worktrees registrados (inclui a pasta principal) e a branch em uso em cada um. */
   worktreeList(root: string): Promise<{ path: string; branch: string | null }[]>
-  /** `git status --porcelain` (linhas). */
   statusPorcelain(dir: string): Promise<string[]>
   /** `git diff --stat <base>` (texto) e arquivos alterados desde `base`, incluindo não commitados. */
   diffStat(dir: string, base: string): Promise<{ stat: string; files: string[] }>
@@ -89,13 +85,11 @@ export interface Git {
   commitsSince(dir: string, base: string): Promise<{ hash: string; subject: string }[]>
   /** Commit atual (hash completo). */
   headCommit(dir: string): Promise<string>
-  /** Conteúdo de um arquivo num commit (`git show <commit>:<path>`). */
   fileAtCommit(root: string, commit: string, path: string): Promise<string>
   /** `git diff <base>` (commits + mudanças no worktree), texto puro, sem cor. */
   diffText(dir: string, base: string): Promise<string>
   /** Linhas adicionadas/removidas contra a base (`git diff --numstat`; binários não contam). */
   diffShortstat(dir: string, base: string): Promise<{ added: number; removed: number }>
-  // ---------- Entrega (5C) ----------
   /**
    * `git push --porcelain -u <remote> refs/heads/<b>:refs/heads/<b>`. Nunca força. Sem prompts
    * (GIT_TERMINAL_PROMPT=0, ssh BatchMode): credencial pedida → GitError('credentials').

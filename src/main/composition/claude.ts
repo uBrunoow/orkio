@@ -1,4 +1,3 @@
-/** Claude Code (4A/4B) e entrega (5C): worktrees, execuções, artefatos, terminal e editor. */
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { statSync } from 'node:fs'

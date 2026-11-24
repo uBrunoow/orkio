@@ -61,7 +61,6 @@ export class TaskBranchesStore {
       }))
   }
 
-  /** Branches de cada tarefa do projeto (para os sinais). */
   forProject(projectId: string): Map<string, string[]> {
     const out = new Map<string, string[]>()
     for (const r of this.db.all<{ branch: string; task_page_id: string }>(

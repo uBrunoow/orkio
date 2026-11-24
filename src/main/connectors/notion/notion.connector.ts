@@ -118,7 +118,6 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
       } catch (e) {
         return this.stored.errorKeepingStored(this.stored.messageFor(e))
       }
-      // Cancelado enquanto trocava o código: descarta os tokens.
       if (controller.signal.aborted) return this.getStatus()
 
       return await this.connectWithOAuthTokens(tokens)
@@ -196,7 +195,6 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
     return this.callApi((token) => this.deps.client.queryDataSource(token, id, options))
   }
 
-  /** Escreve propriedades da página (o formato da API sai de `encodePropertyWrites`). */
   updatePage(id: string, writes: PropertyWrites): Promise<void> {
     const properties = encodePropertyWrites(writes)
     return this.callApi((token) => this.deps.client.updatePage(token, id, properties))
@@ -228,10 +226,6 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
     return this.callApi((token) => this.deps.client.updateDataSource(token, id, properties))
   }
 
-  /**
-   * Chamada com a conexão salva. Lança `ApiError` com mensagem segura; erros de
-   * autenticação ganham a mensagem de "conectar de novo" adequada ao método.
-   */
   private async callApi<T>(call: (token: string) => Promise<T>): Promise<T> {
     const loaded = await this.stored.load()
     if (loaded.kind !== 'ok') {
@@ -257,10 +251,6 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
     }
   }
 
-  /**
-   * Executa uma chamada à API com o token salvo. Em conexões OAuth, um 401 dispara uma
-   * renovação (serializada) e uma nova tentativa. Base para as chamadas das próximas etapas.
-   */
   private async withAccessToken<T>(
     record: StoredNotionConnection,
     call: (accessToken: string) => Promise<T>
@@ -349,7 +339,6 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
   }
 }
 
-/** Converte o dono do token no formato exibido pela UI. */
 export function toAccount(self: NotionSelf): ConnectedAccount {
   const userName =
     self.type === 'bot'
@@ -363,7 +352,6 @@ export function toAccount(self: NotionSelf): ConnectedAccount {
   return account
 }
 
-/** Dados de exibição vindos da resposta de token do OAuth. */
 export function accountFromTokens(tokens: NotionTokenSet): ConnectedAccount {
   const account: ConnectedAccount = { userName: tokens.ownerName ?? 'Usuário do Notion' }
   if (tokens.workspaceName) account.workspaceName = tokens.workspaceName
@@ -372,7 +360,6 @@ export function accountFromTokens(tokens: NotionTokenSet): ConnectedAccount {
   return account
 }
 
-/** Prefere os dados novos e completa com os anteriores. */
 function mergeAccount(fresh: ConnectedAccount, previous: ConnectedAccount): ConnectedAccount {
   const account: ConnectedAccount = { userName: fresh.userName || previous.userName }
   const workspaceName = fresh.workspaceName ?? previous.workspaceName

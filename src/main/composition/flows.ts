@@ -1,4 +1,3 @@
-/** Fluxos de tarefa (5A) e alva-flow (5B), sobre as execuções do Claude Code (4A). */
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { AgentError, type AgentsService } from '../agents/agents.service'
@@ -47,7 +46,6 @@ export function createFlows(deps: {
   enterStage: (change: StageChange) => void
 }): { runner: FlowRunner; handlers: Pick<Handlers, 'alva' | 'taskFlows'> } {
   const { claude } = deps
-  // alva-flow (5B): vínculo com o Backlog.md, extrator e pré-checagem.
   const neutralDir = deps.paths.alvaCheck
   void mkdir(neutralDir, { recursive: true }).catch(() => undefined)
   const alva = new AlvaService({

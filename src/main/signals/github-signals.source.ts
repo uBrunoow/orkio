@@ -91,7 +91,6 @@ export class GitHubRepoSignals {
     const closed = await this.walk(
       `${this.base}/pulls?state=closed&sort=updated&direction=desc&per_page=100`,
       SIGNALS_LIMITS.closedPullPages,
-      // Ordenadas por atualização: para quando a página já passou da janela.
       (items) => {
         const last = parsePullItem(items[items.length - 1])
         return last !== null && Date.parse(last.updatedAt) < cutoff

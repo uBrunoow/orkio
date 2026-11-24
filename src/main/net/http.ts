@@ -79,7 +79,6 @@ export function isTransientApiError(error: unknown, service?: ApiService): boole
   return isApiError(error, service) && TRANSIENT_CODES.has(error.code)
 }
 
-/** Nome de cada serviço nas mensagens (com artigo). */
 export const SERVICE_LABELS: Record<ApiService, string> = {
   notion: 'o Notion',
   github: 'o GitHub',
@@ -113,7 +112,6 @@ export const API_MESSAGES = {
 /** Para quem o erro fala: o serviço e, se diferente do padrão, o nome dele na mensagem. */
 export interface ApiTarget {
   service: ApiService
-  /** Padrão: `SERVICE_LABELS[service]`. */
   label?: string
 }
 
@@ -128,7 +126,6 @@ export function unexpectedError(target: ApiTarget, status: number): ApiError {
   )
 }
 
-/** 5xx → `server`; qualquer outro status sem regra própria → `unexpected`. */
 export function genericStatusError(target: ApiTarget, status: number): ApiError {
   return status >= 500
     ? new ApiError(target.service, 'server', API_MESSAGES.server(labelOf(target), status), status)
@@ -143,8 +140,6 @@ export function rateLimitedError(target: ApiTarget, waitMs: number | null): ApiE
     429
   )
 }
-
-// ---------- Pedido com prazo ----------
 
 /** Corpo lido com limite: respostas que usamos cabem com folga. */
 export const DEFAULT_MAX_BODY_BYTES = 16 * 1024 * 1024
@@ -220,7 +215,6 @@ export async function fetchWithTimeout(
   }
 }
 
-/** Corpo até `max` bytes (passou disso → `null`). Abortou durante a leitura → lança. */
 async function readLimitedText(
   response: Response,
   max: number,
@@ -281,9 +275,6 @@ export async function requestJson(
   }
 }
 
-// ---------- Uma nova tentativa curta ----------
-
-/** Esperamos e repetimos uma vez se o serviço pedir até este tempo; acima disso, erro. */
 export const SHORT_RETRY_MAX_WAIT_MS = 5_000
 
 /**

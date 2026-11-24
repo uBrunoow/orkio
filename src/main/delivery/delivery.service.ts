@@ -54,13 +54,11 @@ export interface PushPreview {
   commits: { hash: string; subject: string }[]
   /** `git diff --stat` do que vai (contra a branch remota, ou a base se ainda não existe). */
   stat: string
-  /** A branch remota já existe? */
   remoteExists: boolean
   /** Mudanças não commitadas (linhas do `status --porcelain`). */
   pending: string[]
   /** Motivo para não fazer o push (`null` = pode), com o código do `DeliveryError` que o push lança. */
   problem: { code: DeliveryErrorCode; message: string } | null
-  /** Link da branch no GitHub. */
   branchUrl: string
 }
 

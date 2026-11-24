@@ -1,6 +1,5 @@
 import type { StageChange } from './board.service'
 
-/** Quem reage à entrada de uma tarefa numa etapa (orquestrador, agentes, fluxos). */
 export interface StageListener {
   onStageChanged(change: StageChange): void
 }

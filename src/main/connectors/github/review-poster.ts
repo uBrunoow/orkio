@@ -75,7 +75,6 @@ export type ReviewPostErrorCode =
   | 'not_installed'
   /** A conta conectada não tem push no repositório. */
   | 'forbidden'
-  /** Nenhuma conta do GitHub conectada. */
   | 'not_connected'
   | 'rate_limited'
   /** GitHub ou site instável (5xx, resposta estranha). */
@@ -90,7 +89,6 @@ export type ReviewPostErrorCode =
   | 'site_network'
   /** O GitHub recusou a revisão (422: linha fora do diff, PR fechada...). */
   | 'rejected'
-  /** PR não existe. */
   | 'not_found'
 
 export class ReviewPostError extends Error {
@@ -175,7 +173,6 @@ function cleanText(text: string): string {
  * Valida, limpa (`sanitizeReviewText`: sem HTML nem imagens, para o gate mostrar exatamente o
  * que vai), redige e normaliza uma revisão (aceita `unknown`: o fluxo lê `.orkio/review.json`).
  * Lança `ReviewPostError('invalid')`; APPROVE (ou qualquer outro evento) é sempre recusado.
- * Use antes do gate para mostrar exatamente o que será postado.
  */
 export function prepareReview(input: unknown): PreparedReview {
   if (!isRecord(input)) throw invalid(REVIEW_MESSAGES.emptyBody)

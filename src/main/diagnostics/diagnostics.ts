@@ -30,9 +30,7 @@ export interface DiagnosticsDeps {
   connections: () => Promise<{ name: string; status: ConnectionStatus }[]>
   /** `<cmd> --version` (primeira linha) ou `null` se não estiver instalado. */
   toolVersion: (cmd: 'git' | 'gh' | 'claude') => Promise<string | null>
-  /** Pastas do userData (`userDataPaths()`): worktrees por projeto e logs das execuções. */
   paths: Pick<UserDataPaths, 'worktrees' | 'runs'>
-  /** Nomes numa pasta (padrão: `fs.readdir`). */
   listDir?: (dir: string) => Promise<string[]>
   projects: () => { total: number; withBoard: number }
   automation: () => { polling: number; failing: number }

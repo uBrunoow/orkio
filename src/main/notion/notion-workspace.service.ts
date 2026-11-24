@@ -131,8 +131,6 @@ export class NotionWorkspaceService {
     this.ttl = deps.cacheTtlMs ?? NOTION_CACHE_TTL_MS
   }
 
-  // ---------- Estado e revalidação ----------
-
   /**
    * Estado atual; na primeira chamada revalida o schema no Notion. Se a conexão do Notion mudou
    * desde a última revalidação (ex.: conectou depois de abrir o app), revalida de novo: o estado
@@ -220,8 +218,6 @@ export class NotionWorkspaceService {
     this.status = status
     return status
   }
-
-  // ---------- Assistente ----------
 
   /** Data sources compartilhados com o Orkio (até NOTION_READ_LIMIT). */
   async listDataSources(query?: string): Promise<Result<NotionDataSourceList>> {
@@ -323,8 +319,6 @@ export class NotionWorkspaceService {
     })
   }
 
-  // ---------- Vínculo projeto local ↔ Notion ----------
-
   /** Páginas do banco de Projetos, ordenadas pela semelhança com o projeto local. */
   async listProjectChoices(
     projectId: string,
@@ -394,8 +388,6 @@ export class NotionWorkspaceService {
       return null
     })
   }
-
-  // ---------- Tarefas ----------
 
   /** Tarefas do projeto vinculado (relação contém a página), até NOTION_READ_LIMIT. Cache de 60 s. */
   async listTasks(
@@ -598,8 +590,6 @@ export class NotionWorkspaceService {
     return { value, fromCache: false }
   }
 
-  // ---------- Auxiliares ----------
-
   private config(): OrkioConfig {
     return this.deps.store.get()
   }
@@ -649,7 +639,6 @@ export class NotionWorkspaceService {
     return value
   }
 
-  /** Lê páginas até o fim ou até NOTION_READ_LIMIT itens. */
   private async paginate(
     fetchPage: (cursor: string | null) => Promise<NotionListPage>
   ): Promise<{ items: unknown[]; truncated: boolean }> {

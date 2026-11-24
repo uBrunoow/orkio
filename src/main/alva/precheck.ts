@@ -115,7 +115,6 @@ export async function runPrecheck(
   const claudeDir = join(deps.home ?? homedir(), '.claude')
   const items: AlvaCheckItem[] = []
 
-  // 1. Plugin + versão + comandos.
   let pluginVersion: string | null = null
   const installed = await readText(join(claudeDir, 'plugins', 'installed_plugins.json'))
   const entry = installed
@@ -156,7 +155,6 @@ export async function runPrecheck(
     })
   }
 
-  // 2. Backlog.md no repositório.
   const hasConfig = await isFile(join(projectDir, 'backlog', 'config.yml'))
   const hasTasks = await isDir(join(projectDir, 'backlog', 'tasks'))
   items.push(
@@ -176,7 +174,7 @@ export async function runPrecheck(
         }
   )
 
-  // 3. MCP do Backlog.md: escopo do usuário (vale em qualquer worktree) ou só no projeto.
+  // MCP do Backlog.md: escopo do usuário (vale em qualquer worktree) ou só no projeto.
   const findBacklog = async (cwd: string): Promise<'ok' | 'pending' | 'failed' | null> => {
     const r = await deps
       .exec('claude', ['mcp', 'list'], { cwd, timeoutMs: 60_000 })
@@ -222,7 +220,7 @@ export async function runPrecheck(
     )
   }
 
-  // 4. gh instalado e autenticado (só o código de saída).
+  // gh instalado e autenticado (só o código de saída).
   const ghVersion = await deps
     .exec('gh', ['--version'], { cwd: deps.neutralDir, timeoutMs: 15_000 })
     .catch(() => null)
@@ -251,7 +249,7 @@ export async function runPrecheck(
     )
   }
 
-  // 5. python3 (scripts de CI e comentários do /pr).
+  // python3 (scripts de CI e comentários do /pr).
   const py = await deps
     .exec('python3', ['--version'], { cwd: deps.neutralDir, timeoutMs: 15_000 })
     .catch(() => null)
@@ -266,7 +264,6 @@ export async function runPrecheck(
         }
   )
 
-  // 6. Makefile com test e lint.
   const makefile = await readText(join(projectDir, 'Makefile'))
   if (makefile === null) {
     items.push({
@@ -291,7 +288,6 @@ export async function runPrecheck(
     )
   }
 
-  // 7. Docker (só se o projeto tem compose).
   let hasDocker = false
   for (const f of COMPOSE_FILES) if (await isFile(join(projectDir, f))) hasDocker = true
   if (hasDocker) {

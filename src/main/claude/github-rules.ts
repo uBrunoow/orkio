@@ -56,7 +56,6 @@ export const GH_COMMANDS = {
 
 export type GhFamily = keyof typeof GH_COMMANDS
 
-/** Famílias do `gh` que nunca rodam (nenhuma ação). */
 export const GH_NEVER_FAMILIES = ['release', 'repo'] as const
 
 /** Famílias que a política do Orkio decide (o resto do `gh` segue a política normal). */
@@ -68,8 +67,6 @@ export function ghRule(family: string, action: string): GhRule | null {
   const actions: Record<string, GhRule> = GH_COMMANDS[family as GhFamily]
   return Object.hasOwn(actions, action) ? actions[action]! : NEVER
 }
-
-// ---------------------------------------------------------------- gh api
 
 /**
  * REST: `GET`/`HEAD` sem campos em `repos/<owner>/<repo>/…` do projeto = leitura; `DELETE` nunca;
@@ -110,8 +107,6 @@ export const GH_API_MUTATIONS: Readonly<Record<string, DeliveryEvent | null>> = 
   markPullRequestReadyForReview: 'pr_ready',
   updatePullRequest: 'pr_edit'
 }
-
-// ---------------------------------------------------------------- git push
 
 export type PushNeverReason = 'force' | 'del' | 'option'
 
@@ -159,8 +154,6 @@ export const PUSH_REFSPEC_NEVER: readonly { prefix: string; reason: PushNeverRea
   { prefix: ':', reason: 'del' }
 ]
 
-// ---------------------------------------------------------------- deny do CLI
-
 const bash = (pattern: string): string => `Bash(${pattern})`
 
 function ghDeny(denied: ReadonlySet<GhAccess>): string[] {
@@ -203,10 +196,6 @@ function pushOptionDeny(): string[] {
   return out
 }
 
-/**
- * Fora do modo entrega o CLI nega o que escreve e o que nunca roda: push, as ações `write`/`never`
- * do `gh` e o `gh api` com método de escrita, arquivo, mutation ou campos em `repos/…`.
- */
 export function cliDenyOutsideDelivery(): string[] {
   const fields = ['-f *', '-F *', '--field*', '--raw-field*']
   return [
@@ -229,8 +218,6 @@ export function cliDenyInDelivery(): string[] {
   ]
 }
 
-// ---------------------------------------------------------------- textos
-
 function actionsWith(access: GhAccess): string[] {
   return Object.entries(GH_COMMANDS).flatMap(([family, actions]) => {
     const names = Object.entries(actions as Record<string, GhRule>)
@@ -240,11 +227,9 @@ function actionsWith(access: GhAccess): string[] {
   })
 }
 
-/** "gh pr view/checks/…, gh run view/list/watch, gh label list, gh api com GET … ". */
 export const GH_READ_TEXT = [
   ...actionsWith('read'),
   'gh api com GET sem campos ou GraphQL sem mutation'
 ].join(', ')
 
-/** "gh pr merge/close/…, gh run rerun/…, gh release e gh repo". */
 export const GH_NEVER_TEXT = `${actionsWith('never').join(', ')}, ${GH_NEVER_FAMILIES.map((f) => `gh ${f}`).join(' e ')}`

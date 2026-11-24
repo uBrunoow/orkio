@@ -129,7 +129,6 @@ export function createApp(): OrkioApp {
   const actor = (): string => userInfo().username
   const site = siteOrigin(import.meta.env)
 
-  // Eventos main → renderer; os efeitos dependem de serviços criados mais abaixo.
   const overviewRef = late<OverviewService | null>('Visão geral')
   const keepAwakeRef = late<KeepAwake>('Manter acordado')
   const emit = createEmitter({
@@ -220,10 +219,8 @@ export function createApp(): OrkioApp {
       graphql: (query, variables) => github.graphql(query, variables)
     },
     listTasks: (projectId) => notionWorkspace.listTasks(projectId),
-    // Sem banco não há branches registradas.
     linkedBranches: (projectId) => worktrees?.linkedBranchesByTask(projectId) ?? new Map()
   })
-  // Threads da PR da tarefa: a PR vem dos sinais em cache; o texto, do GraphQL (repo).
   const reviewThreads = new ReviewThreadsService({
     graphql: (query, variables) => github.graphql(query, variables),
     isConnected: () => github.isConnected(),
@@ -269,7 +266,6 @@ export function createApp(): OrkioApp {
     work?.scheduler.onLocalChange(event.projectId)
   })
 
-  // Manter o computador acordado enquanto agentes trabalham (opção, desligada por padrão).
   const keepAwake = new KeepAwake({
     blocker: powerSaveBlocker,
     enabled: () => configStore.get().keepAwake === true,
@@ -397,7 +393,6 @@ export function createApp(): OrkioApp {
     openExternal: openExternalHandler((url) => shell.openExternal(url), siteUrlRules(site))
   }
 
-  // `ready`: config carregada e o estado do banco retomado (fluxos interrompidos etc.).
   let markReady: (error?: unknown) => void = () => undefined
   const ready = new Promise<void>((resolve, reject) => {
     markReady = (error) => (error === undefined ? resolve() : reject(error))
@@ -463,7 +458,6 @@ function createWork(core: {
       .runNow(projectId)
       .catch((error: unknown) => console.error(`[orkio] automações: ${errorName(error)}`))
 
-  // Agentes (8A): perfis em arquivos, aprovação, atribuição e limites (nenhuma permissão nova).
   const agents = new AgentsService({
     db: boardStore.db,
     store: boardStore,
@@ -475,7 +469,6 @@ function createWork(core: {
     actor: core.actor,
     emit: (projectId) => emit('agentsChanged', { projectId })
   })
-  // Quadro (3A): SQLite local + fila de escrita persistente no Notion.
   const board = new BoardService({
     config: configStore,
     store: boardStore,
@@ -572,12 +565,10 @@ function createWork(core: {
     emit
   })
 
-  // Fluxos de tarefa (5A): passos ligados às colunas, sobre as execuções da 4A.
   const githubRepo = (projectId: string): { owner: string; repo: string } | null => {
     const repo = githubRepoOf(projectById(configStore.get(), projectId))
     return repo ? { owner: repo.owner, repo: repo.name } : null
   }
-  // O orquestrador usa os fluxos e é avisado quando um termina.
   const orchestratorRef = late<OrchestratorService>('Orquestrador')
   const flows = createFlows({
     boardStore,
@@ -638,8 +629,6 @@ function createWork(core: {
   orchestratorRef.set(orchestrator)
   enterStage.set(createEnterStage({ orchestrator, agents, flows: runner }))
 
-  // Automações (3B): motor + agendador em segundo plano. Depois de cada ciclo, uma rodada do
-  // orquestrador (8B).
   const automation = new AutomationService({
     config: configStore,
     store: boardStore,

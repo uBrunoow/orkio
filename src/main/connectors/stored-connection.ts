@@ -51,11 +51,9 @@ export interface StoredConnectionOptions<TRecord> {
   store: SecretStore
   /** Chave no `SecretStore` (`secrets/<key>.bin`). */
   key: string
-  /** Nome nas mensagens ("Notion"). */
   name: string
   /** Lê o JSON salvo; `null` = registro inválido. */
   parse(value: unknown): TRecord | null
-  /** Tamanho máximo do token colado. */
   maxTokenLength: number
 }
 
@@ -179,7 +177,6 @@ export class StoredConnection<TRecord extends StoredRecordBase> {
     return isApiError(e) ? e.message : this.messages.unknown
   }
 
-  /** Token colado: sem espaços nas pontas, não vazio, sem espaço no meio, tamanho máximo. */
   pastedToken(raw: string): { ok: true; token: string } | { ok: false; status: ConnectionStatus } {
     const token = raw.trim()
     if (token === '') return { ok: false, status: errorStatus(this.messages.emptyToken) }

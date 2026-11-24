@@ -1,4 +1,3 @@
-/** Atualizações automáticas (6C): electron-updater, banner e "reiniciar agora". */
 import { app, dialog, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import changelog from '../../../CHANGELOG.md?raw'

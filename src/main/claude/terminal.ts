@@ -10,12 +10,10 @@ export interface TerminalCommand {
   args: string[]
 }
 
-/** Só caminhos absolutos simples (sem nova linha/NUL) vão para a linha de comando. */
 function safeDir(dir: string): boolean {
   return dir.length > 0 && !/[\0\r\n]/.test(dir)
 }
 
-/** Nome de executável sem caminho nem espaços (o `$TERMINAL` do usuário). */
 function safeCommandName(name: string): boolean {
   return /^[A-Za-z0-9._+][A-Za-z0-9._+-]*$/.test(name) && !name.startsWith('.')
 }
@@ -68,7 +66,6 @@ export function terminalCommand(
   )
 }
 
-/** Procura um executável nas pastas do PATH (nomes simples; no Windows tenta as extensões). */
 export function onPath(
   cmd: string,
   env: NodeJS.ProcessEnv,
@@ -80,7 +77,6 @@ export function onPath(
   return dirs.some((d) => exts.some((e) => isFile(join(d, cmd + e))))
 }
 
-/** "Abrir terminal aqui" falhou: a pasta sumiu (`no_workspace`) ou não há terminal (`no_terminal`). */
 export class TerminalError extends DomainError {
   constructor(code: 'no_workspace' | 'no_terminal') {
     super(code, code === 'no_workspace' ? 'Pasta de trabalho não encontrada.' : 'Nenhum terminal.')

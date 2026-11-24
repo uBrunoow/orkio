@@ -291,7 +291,6 @@ export function openDatabase(file: string, migrations: readonly string[] = MIGRA
     get: <T>(sql: string, ...params: SqlValue[]) => db.prepare(sql).get(...params) as T | undefined,
     all: <T>(sql: string, ...params: SqlValue[]) => db.prepare(sql).all(...params) as T[],
     transaction<T>(fn: (tx: Tx) => T): T {
-      // Transações aninhadas viram parte da externa.
       if (depth > 0) return fn(TX_TOKEN)
       depth++
       db.exec('BEGIN IMMEDIATE')

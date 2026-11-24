@@ -89,7 +89,6 @@ export interface AgentsServiceDeps {
     agentKey: AgentKey,
     since: string
   ): { count: number; costUsd: number; startedAt: string[] }
-  /** Ids das etapas do quadro do projeto. */
   stageIds(projectId: string): string[]
   actor(): string
   emit(projectId: string): void
@@ -116,8 +115,6 @@ export class AgentsService {
   private now(): Date {
     return this.deps.now?.() ?? new Date()
   }
-
-  // ---------- Leitura ----------
 
   async list(projectId: string): Promise<AgentsState> {
     const project = this.project(projectId)
@@ -226,7 +223,6 @@ export class AgentsService {
     return r ? { key: r.agent_key, manual: r.assigned_by === 'manual' } : null
   }
 
-  /** Atribuições do projeto (tarefa → agente), para o orquestrador. */
   assignments(projectId: string): Map<string, { key: AgentKey; manual: boolean }> {
     const out = new Map<string, { key: AgentKey; manual: boolean }>()
     for (const r of this.deps.db.all<{
@@ -267,7 +263,6 @@ export class AgentsService {
     this.deps.emit(projectId)
   }
 
-  /** Avatares dos cards do quadro. */
   async badges(projectId: string): Promise<Record<string, AgentBadge>> {
     const rows = this.deps.db.all<{ task_page_id: string; agent_key: string }>(
       'SELECT task_page_id, agent_key FROM agent_assignments WHERE project_id = ?',
@@ -294,8 +289,6 @@ export class AgentsService {
     }
     return out
   }
-
-  // ---------- Escrita ----------
 
   /**
    * Cria (`isNew`) ou atualiza um perfil. O id não muda depois de criado. Perfil do repositório
@@ -382,7 +375,6 @@ export class AgentsService {
     this.deps.emit(projectId)
   }
 
-  /** Regras "tarefas que entram em <etapa> vão para <agente>". */
   async setRules(projectId: string, rules: ProjectAgents['assignOnEnter']): Promise<AgentsState> {
     this.project(projectId)
     const stages = new Set(this.deps.stageIds(projectId))
@@ -428,8 +420,6 @@ export class AgentsService {
     this.insertAssignment(change.projectId, change.taskId, rule.agentKey, name, 'rule')
     this.deps.emit(change.projectId)
   }
-
-  // ---------- Interno ----------
 
   private usable(view: AgentView): AgentRuntime {
     if (view.status !== 'ready' || !view.profile) {
@@ -594,7 +584,6 @@ export class AgentsService {
     return out
   }
 
-  /** Lê `<dir>/<id>.md`: só arquivo comum (sem link), até 16 KB. `null` = não existe. */
   private async readOne(scope: AgentScope, dir: string, id: string): Promise<FileEntry | null> {
     if (!AGENT_ID.test(id)) return null
     const file = join(dir, `${id}.md`)
@@ -664,7 +653,6 @@ function hashOf(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
-/** Tira espaços das pontas e lixo das listas antes de validar/gravar. */
 function normalize(p: AgentProfile): AgentProfile {
   return {
     ...p,

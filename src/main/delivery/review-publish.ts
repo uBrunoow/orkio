@@ -81,7 +81,6 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
   /** Tarefas cuja última tentativa estourou o prazo do site (só em memória; o passo registra). */
   const maybePosted = new Set<string>()
 
-  /** Erro ao publicar → falha do passo (e se a revisão pode ter saído). */
   function postFailure(error: ReviewPostError, taskId: string): StepFailure {
     switch (error.code) {
       // O pedido pode ter chegado ao site (e a revisão, saído): o próximo gate avisa.

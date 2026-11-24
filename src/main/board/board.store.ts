@@ -33,11 +33,9 @@ export interface TaskStateRow {
   blocked: boolean
   updatedAt: string
   source: StateSource
-  /** Automações pausadas nesta tarefa (3B). */
   automationPaused: boolean
 }
 
-/** Evento a gravar: o do catálogo (`shared/task-events.ts`) + tarefa, horário e chave. */
 export type TaskEventInput = NewTaskEvent & {
   taskPageId: string
   projectId: string
@@ -119,7 +117,6 @@ interface EventDbRow {
   detail_json: string | null
 }
 
-/** Evento do histórico com o projeto e a tarefa (consultas de todos os projetos). */
 export type ProjectHistoryEntry = BoardHistoryEntry & { projectId: string; taskId: string }
 
 /** Leitura sempre pelo catálogo: tipo desconhecido (outra versão) vira `null`. */
@@ -190,7 +187,6 @@ export class BoardStore {
     )
   }
 
-  /** Movimentos feitos por cada automação desde `sinceIso` (disparos da semana). */
   ruleCounts(projectId: string, sinceIso: string): Record<string, number> {
     const out: Record<string, number> = {}
     for (const r of this.db.all<{ rule_id: string | null; n: number }>(
@@ -244,9 +240,6 @@ export class BoardStore {
     )
   }
 
-  // ---------- Fluxo (3C) ----------
-
-  /** Tarefas por etapa (estado local). */
   taskCounts(projectId: string): Record<string, number> {
     const rows = this.db.all<{ stage_id: string | null; n: number }>(
       'SELECT stage_id, COUNT(*) AS n FROM task_state WHERE project_id = ? GROUP BY stage_id',
@@ -293,8 +286,6 @@ export class BoardStore {
       }))
   }
 
-  // ---------- Snapshots dos sinais (3B) ----------
-
   snapshots(projectId: string): Map<string, unknown> {
     return new Map(
       this.db
@@ -333,8 +324,6 @@ export class BoardStore {
         return event ? [{ id: r.id, at: r.at, ...event }] : []
       })
   }
-
-  // ---------- Consultas da visão geral, do orquestrador e do diagnóstico ----------
 
   /**
    * Eventos de todos os projetos desde `since`, mais novos primeiro (atividade). `group` só
@@ -428,12 +417,10 @@ export class BoardStore {
     )
   }
 
-  /** Estado local de todas as tarefas (cartões dos projetos). */
   allStates(): TaskStateRow[] {
     return this.db.all<StateDbRow>('SELECT * FROM task_state').map(toStateRow)
   }
 
-  /** Escritas que falharam pelo menos `minAttempts` vezes (presas tentando de novo). */
   stuckWrites(minAttempts: number): PendingWrite[] {
     return this.db
       .all<PendingDbRow>(
@@ -444,7 +431,6 @@ export class BoardStore {
       .map(toPending)
   }
 
-  /** Contagens do diagnóstico. */
   counts(): { events: number; pendingWrites: number } {
     const n = (sql: string): number => this.db.get<{ n: number }>(sql)?.n ?? 0
     return {
@@ -452,8 +438,6 @@ export class BoardStore {
       pendingWrites: n('SELECT COUNT(*) AS n FROM pending_writes')
     }
   }
-
-  // ---------- Escritas pendentes ----------
 
   pending(taskPageId: string): PendingWrite | null {
     const row = this.db.get<PendingDbRow>(

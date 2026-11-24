@@ -14,7 +14,6 @@ const PATTERNS: RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g
 ]
 
-/** NOME_COM_KEY/TOKEN/SECRET/PASSWORD = valor → NOME=[omitido]. */
 const ASSIGNMENT =
   /\b([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL|SENHA|SEGREDO|CHAVE)[A-Za-z0-9_]*)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"']+)/gi
 
@@ -45,7 +44,6 @@ export function envFileValues(content: string): string[] {
   return values
 }
 
-/** Troca valores conhecidos (ex.: lidos de .env) por um marcador. */
 export function redactValues(text: string, values: Iterable<string>): string {
   let out = text
   for (const v of values) if (out.includes(v)) out = out.split(v).join('[segredo omitido]')

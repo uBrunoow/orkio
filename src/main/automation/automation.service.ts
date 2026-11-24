@@ -42,17 +42,14 @@ export interface AutomationServiceDeps {
     get(projectId: string, options?: { force?: boolean }): Promise<Result<TaskSignalsResult>>
   }
   notify(notification: AutomationNotification): void
-  /** Algo mudou no quadro do projeto (a tela recarrega). */
   onChanged(projectId: string): void
   now?: () => Date
 }
 
 export interface CycleResult {
-  /** Situação do GitHub neste ciclo (para o agendador decidir pausa/backoff). */
   github: TaskSignalsResult['github'] | 'unknown'
   events: number
   moves: number
-  /** Erro que impediu o ciclo (ex.: Notion fora do ar e tarefas nunca carregadas). */
   error?: { code: string; message: string }
 }
 
@@ -90,27 +87,23 @@ export class AutomationService {
     const board = config.boards[projectId]
     if (!board) return { github: 'unknown', events: 0, moves: 0 }
 
-    // 1. Tarefas e reconciliação com o Notion (mesmo caminho do quadro).
     const view = await this.deps.board.get(projectId, { force })
     if (!view.ok && !this.deps.board.hasSnapshot(projectId)) {
       return { github: 'unknown', events: 0, moves: 0, error: view.error }
     }
     const cards = view.ok ? view.value.cards : null
 
-    // 2. Sinais (git local + GitHub com ETag).
     const signals = await this.deps.signals.get(projectId, { force })
     if (!signals.ok) return { github: 'unknown', events: 0, moves: 0, error: signals.error }
     const result = signals.value
     const available = { local: result.local, github: result.github === 'ok' }
 
-    // 3. Diff + regras + ações, tarefa a tarefa, numa transação só.
     const previous = this.deps.store.snapshots(projectId)
     const states = this.deps.store.states(projectId)
     const stages = (view.ok ? view.value.config?.stages : null) ?? board.stages
     const taskIds = cards ? cards.map((c) => c.taskId) : [...states.keys()]
     const at = this.now().toISOString()
     const repo = githubRepoOf(projectById(config, projectId))
-    // Só o necessário para montar o link da PR no histórico.
     const pr = (n: number): EventPr =>
       repo ? { number: n, owner: repo.owner, repo: repo.name } : { number: n }
     const notifications: AutomationNotification[] = []

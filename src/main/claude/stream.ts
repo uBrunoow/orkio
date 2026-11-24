@@ -19,7 +19,6 @@ function short(text: string, max = 200): string {
   return one.length > max ? `${one.slice(0, max - 1)}…` : one
 }
 
-/** Caminho relativo ao worktree (para exibir); fora dele, o absoluto. */
 export function displayPath(path: string, worktree: string): string {
   if (!isAbsolute(path)) return path
   const rel = relative(worktree, path)

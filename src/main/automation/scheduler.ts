@@ -12,7 +12,6 @@ import type { CycleResult } from './automation.service'
 
 export interface SchedulerDeps {
   run(projectId: string, options?: { force?: boolean }): Promise<CycleResult>
-  /** Projetos com quadro e vínculo com o Notion (relido a cada volta). */
   projects(): string[]
   /** Nomes das branches locais (para detectar `git branch X` sem checkout). */
   localBranches(projectId: string): Promise<string[] | null>
@@ -73,7 +72,6 @@ export class AutomationScheduler {
     this.localTimer = null
   }
 
-  /** Projetos podem ter sido criados/removidos: agenda os novos, esquece os removidos. */
   sync(): void {
     if (this.stopped) return
     const projects = new Set(this.deps.projects())
@@ -97,7 +95,6 @@ export class AutomationScheduler {
     return this.getStatus(projectId)
   }
 
-  /** Evento local (HeadWatcher): ciclo imediato, sem forçar o GitHub. */
   onLocalChange(projectId: string): void {
     if (this.stopped || !this.deps.projects().includes(projectId)) return
     void this.tick(projectId, false)
@@ -163,7 +160,6 @@ export class AutomationScheduler {
   private scheduleLocal(): void {
     if (this.stopped) return
     this.localTimer = this.schedule(() => {
-      // Quadros criados/removidos desde a última volta entram/saem do agendamento.
       this.sync()
       void this.checkLocal().finally(() => this.scheduleLocal())
     }, this.localInterval)

@@ -11,7 +11,6 @@ export interface FlowFiles {
   open(maxBytes: number): Promise<string | null>
 }
 
-/** Editor do fluxo (3C): salvar (validado de novo no serviço), histórico, exportar e importar. */
 export function flowHandlers(
   service: Pick<BoardService, 'saveFlow' | 'configEvents'>,
   files: FlowFiles

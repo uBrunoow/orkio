@@ -1,8 +1,3 @@
-/**
- * O alva-flow como integração dos fluxos (`FlowIntegration`): tudo o que o executor faz de
- * diferente nos fluxos com o marcador `alva` (variáveis iniciais, pré-checagem, limite com Docker,
- * variável `alva.*` sem vínculo).
- */
 import { ALVA_FAILURES, ALVA_TAG, ALVA_VAR_PREFIX } from '../../shared/alva'
 import type { FlowIntegration } from '../flows/flow-integration'
 import type { AlvaFlowsService } from './alva-flows.service'

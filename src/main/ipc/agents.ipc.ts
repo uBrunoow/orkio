@@ -3,7 +3,6 @@ import type { AgentsService } from '../agents/agents.service'
 import type { OrchestratorService } from '../orchestrator/orchestrator.service'
 import type { Impl } from './register'
 
-/** Agentes (8A) e o orquestrador (8B), no mesmo grupo de `window.orkio.agents`. */
 export function agentsHandlers(
   agents: AgentsService,
   orchestrator: OrchestratorService

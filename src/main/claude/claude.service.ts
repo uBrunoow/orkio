@@ -87,7 +87,6 @@ export const CLAUDE_MESSAGES = {
   generic: 'Algo deu errado. Tente novamente.'
 } as const
 
-/** Limites da leitura da página: profundidade e total de blocos. */
 const MAX_DEPTH = 3
 const MAX_BLOCKS = 400
 const MAX_DIFF_CHARS = 400_000
@@ -160,7 +159,6 @@ export class ClaudeService {
     return this.status
   }
 
-  /** Chamado a cada evento das execuções: guarda os comandos vistos no `init`. */
   onRunEvent(event: RunLogEvent): void {
     if (event.kind === 'init' && event.commands.length > 0) this.commands = [...event.commands]
   }
@@ -321,7 +319,6 @@ export class ClaudeService {
     return cli.ok ? null : cli
   }
 
-  /** O CLI está instalado, logado e na versão mínima? (Lido de novo a cada execução.) */
   private async readyCli(): Promise<Result<ClaudeCodeStatus>> {
     const status = await this.getStatus(true)
     if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
@@ -330,7 +327,6 @@ export class ClaudeService {
     return ok(status)
   }
 
-  /** Agente da tarefa para uma execução manual (`asAgent: false` = sem agente). */
   private async agentForRun(
     projectId: string,
     taskId: string,
@@ -576,7 +572,6 @@ export class ClaudeService {
     })
   }
 
-  /** Documentos candidatos (alterados no worktree) e artefatos já anexados. */
   artifacts(
     projectId: string,
     taskId: string
@@ -615,7 +610,6 @@ export class ClaudeService {
     })
   }
 
-  /** Catálogo de comandos; usa a pasta do worktree da tarefa (ou do projeto) para os do projeto. */
   /** `taskId` `null` = catálogo da pasta do projeto (editor de fluxos, sem tarefa). */
   catalog(projectId: string, taskId: string | null): Promise<Result<CatalogGroup[]>> {
     return this.wrap(async () => {
@@ -625,7 +619,6 @@ export class ClaudeService {
     })
   }
 
-  /** Branches ligadas à tarefa e as do projeto para escolher ("Vincular branch"). */
   branches(projectId: string, taskId: string): Promise<Result<TaskBranchesView>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
@@ -696,8 +689,6 @@ export class ClaudeService {
     })
   }
 
-  // ---------- Interno ----------
-
   private project(projectId: string): StoredProject & { repo: NonNullable<StoredProject['repo']> } {
     const project = projectById(this.deps.config.get(), projectId)
     if (!project) throw new ClaudeFailure('not_found', CLAUDE_MESSAGES.projectNotFound)
@@ -705,7 +696,6 @@ export class ClaudeService {
     return project as StoredProject & { repo: NonNullable<StoredProject['repo']> }
   }
 
-  /** Projeto + tarefa (do Notion) + worktree garantido (cria ou recria). */
   private async ensureForTask(
     projectId: string,
     taskId: string,
@@ -758,7 +748,6 @@ export class ClaudeService {
     return { runs, activeRunId: active?.id ?? null, workspace }
   }
 
-  /** Blocos da página (filhos até MAX_DEPTH, no máximo MAX_BLOCKS no total). */
   private async pageBlocks(pageId: string): Promise<NotionBlock[]> {
     let budget = MAX_BLOCKS
     const load = async (id: string, depth: number): Promise<NotionBlock[]> => {

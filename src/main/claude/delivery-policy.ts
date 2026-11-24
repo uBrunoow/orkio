@@ -74,7 +74,6 @@ export const DELIVERY_POLICY_MESSAGES = {
   apiEndpoint: `${B} gh api sem endpoint.`
 } as const
 
-/** Opções globais do git que levam valor (`-C dir`, `-c k=v`, …). */
 const GIT_GLOBAL_WITH_VALUE = new Set([
   '-C',
   '-c',
@@ -86,7 +85,6 @@ const GIT_GLOBAL_WITH_VALUE = new Set([
   '--super-prefix'
 ])
 
-/** Divide `git <globais> <subcomando> <resto>`. */
 export function gitParse(args: readonly string[]): {
   globals: string[]
   sub: string | null
@@ -119,8 +117,6 @@ export function deliveryVerdict(
   if (name === 'gh') return ghVerdict(args, ctx.target)
   return null
 }
-
-// ---------------------------------------------------------------- git push
 
 const PUSH_REASON: Record<PushNeverReason, (opt: string) => string> = {
   force: () => DELIVERY_POLICY_MESSAGES.force,
@@ -183,7 +179,6 @@ function gitPushVerdict(
       if (reason) return { ok: false, reason }
       continue
     }
-    // Opções curtas (também juntas, `-uf`): cada letra é a longa equivalente da tabela.
     for (const c of a.slice(1)) {
       const long = PUSH_SHORT[c]
       const reason = long ? pushOptionReason(long) : DELIVERY_POLICY_MESSAGES.pushOption(`-${c}`)
@@ -238,9 +233,6 @@ function gitPushVerdict(
 
 const PUSH_OK: DeliveryVerdict = { ok: true, kind: 'push', access: 'write', event: 'push' }
 
-// ---------------------------------------------------------------- gh
-
-/** Valores de uma opção (`-R x`, `--repo x`, `--repo=x`). */
 function optionValues(args: readonly string[], short: string | null, long: string): string[] {
   const out: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -253,7 +245,6 @@ function optionValues(args: readonly string[], short: string | null, long: strin
   return out
 }
 
-/** `owner/repo`, `github.com/owner/repo` ou URL → é o repositório do projeto? */
 function repoArgOk(value: string, target: DeliveryTarget): boolean {
   const clean = value
     .replace(/^https?:\/\//, '')
@@ -317,8 +308,6 @@ export function isGhRead(args: readonly string[], target: DeliveryTarget): boole
   return v !== null && v.ok && v.access === 'read'
 }
 
-// ---------------------------------------------------------------- gh api
-
 const API_WITH_VALUE = new Set([
   '-X',
   '--method',
@@ -376,7 +365,6 @@ export function ghApiParse(args: readonly string[]): GhApiCall {
   return call
 }
 
-/** Campos do primeiro nível da operação (`{ campo(args) { … } }`), ignorando strings. */
 export function topLevelFields(query: string): string[] {
   const body = query.replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/#[^\n]*/g, '')
   const out: string[] = []

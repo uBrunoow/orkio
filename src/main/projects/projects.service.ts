@@ -114,8 +114,6 @@ export class ProjectsService {
     )
   }
 
-  // ---------- Listagem e saúde ----------
-
   /** Rápido: só checagens locais (pasta, repo, branch, sujeira). */
   async list(): Promise<ProjectsListResult> {
     const projects = this.projects()
@@ -141,8 +139,6 @@ export class ProjectsService {
     })
     return this.result(views)
   }
-
-  // ---------- Adicionar ----------
 
   async pickFolder(): Promise<PickFolderResult> {
     const folder = await this.deps.pickFolder('add')
@@ -231,8 +227,6 @@ export class ProjectsService {
     return { ok: true, project: this.view(project, local, this.remoteHealth.get(project.id)) }
   }
 
-  // ---------- Reapontar / remover ----------
-
   async relocate(projectId: string): Promise<ProjectMutationResult> {
     const project = this.findProject(projectId)
     if (!project) return fail('project_not_found', 'Projeto não encontrado.')
@@ -314,8 +308,6 @@ export class ProjectsService {
     this.watching = false
     for (const id of [...this.watchers.keys()]) this.stopWatcher(id)
   }
-
-  // ---------- Internos ----------
 
   private projects(): StoredProject[] {
     return this.deps.store.get().projects

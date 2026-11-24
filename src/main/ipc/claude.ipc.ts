@@ -3,7 +3,6 @@ import type { ClaudeService } from '../claude/claude.service'
 import type { RunService } from '../claude/run.service'
 import type { Impl } from './register'
 
-/** Claude Code (4A/4B): execuções, sessão, ambiente, branches e artefatos da tarefa. */
 export function claudeHandlers(
   service: ClaudeService,
   runs: RunService

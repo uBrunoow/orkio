@@ -18,7 +18,6 @@ export const WRITE_MAX_BACKOFF_MS = 5 * 60 * 1000
 export interface WriteQueueDeps {
   store: BoardStore
   updatePage(pageId: string, writes: PropertyWrites): Promise<void>
-  /** Escrita confirmada pelo Notion. */
   onSynced(write: PendingWrite): void
   /** Escrita recusada pelo Notion: desfazer localmente. */
   onRejected(write: PendingWrite, error: { code: string; message: string }): void
@@ -26,7 +25,6 @@ export interface WriteQueueDeps {
   onRetry(write: PendingWrite, error: { code: string; message: string }): void
   now?: () => Date
   random?: () => number
-  /** Agenda o próximo processamento (padrão: setTimeout). */
   schedule?: (fn: () => void, ms: number) => { cancel(): void }
 }
 
@@ -96,7 +94,6 @@ export class NotionWriteQueue {
   }
 
   private async run(): Promise<void> {
-    // Laço: escritas novas que chegarem durante o envio também são processadas.
     for (;;) {
       const now = this.now().getTime()
       const due = this.deps.store.allPending().filter((w) => Date.parse(w.nextAttemptAt) <= now)
@@ -113,7 +110,6 @@ export class NotionWriteQueue {
       const error = isApiError(e, 'notion')
         ? { code: e.code, message: e.message }
         : { code: 'unexpected', message: 'Algo deu errado ao falar com o Notion.' }
-      // Mudou durante o envio? A versão nova será enviada; ignora o resultado desta.
       const current = this.deps.store.pending(write.taskPageId)
       if (!current || propertyWritesKey(current.properties) !== key) return
       if (isPermanentWriteError(e)) {

@@ -2,7 +2,6 @@ import type { ORKIO_API } from '../../shared/ipc/api'
 import type { AlvaFlowsService } from '../alva/alva-flows.service'
 import type { Impl } from './register'
 
-/** alva-flow (5B): pré-checagem, templates, coluna "Planejando", limite e a task do Backlog.md. */
 export function alvaHandlers(service: AlvaFlowsService): Impl<typeof ORKIO_API.alva> {
   return {
     precheck: async (projectId, options) => ({

@@ -32,7 +32,6 @@ export function createReviewActions(deps: ReviewActionDeps): OrkioAction[] {
       try {
         root = await deps.ensureWorktree(projectId, taskId)
       } catch (error) {
-        // Só a mensagem pt-BR do WorktreeService (pasta em uso, branch em checkout...).
         if (error instanceof WorktreeError) {
           return { ok: false, code: `worktree_${error.code}`, message: error.message }
         }

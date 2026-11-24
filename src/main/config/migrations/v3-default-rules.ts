@@ -64,7 +64,6 @@ const V4_DEFAULT_RULES: readonly {
   }
 ]
 
-/** Regras padrão da v4 para as etapas `{ id, name }` de um quadro. */
 export function v4DefaultRules(stages: readonly { id: string; name: string }[]): unknown[] {
   return V4_DEFAULT_RULES.map((spec) => {
     const id = (name: string): string | null => stageIdByName(stages, name)

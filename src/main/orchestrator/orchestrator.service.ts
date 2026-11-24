@@ -51,7 +51,6 @@ export class OrchestratorError extends DomainError {
   override name = 'OrchestratorError'
 }
 
-/** Status de fluxo que ocupam o agente (inclui esperas e pausas: o trabalho é dele). */
 /** Quanto tempo uma tarefa recém-movida conta como "começando" até o fluxo aparecer. */
 const STARTING_MS = 2 * 60_000
 
@@ -68,7 +67,6 @@ export interface OrchestratorDeps {
     | 'releaseByOrchestrator'
     | 'limitProblem'
   >
-  /** O executor de fluxos (dono de `flow_runs`): consultas e o "Rodar fluxo". */
   flows: Pick<FlowRunner, 'hasActive' | 'activeCountByAgent' | 'activeTasks' | 'lastFlow'> & {
     /** "Rodar fluxo": o fluxo ligado à etapa atual. Lança `FlowError` com mensagem pt-BR. */
     startManual(projectId: string, taskId: string): Promise<unknown>
@@ -105,8 +103,6 @@ export class OrchestratorService {
   configFor(projectId: string): OrchestratorConfig {
     return this.deps.config.get().orchestrator[projectId] ?? defaultOrchestrator()
   }
-
-  // ---------- Tela ----------
 
   async state(projectId: string): Promise<OrchestratorState> {
     const config = this.configFor(projectId)
@@ -198,8 +194,6 @@ export class OrchestratorService {
     return this.state(projectId)
   }
 
-  // ---------- Gatilhos ----------
-
   /** Rodada logo (um fluxo terminou, a config mudou). Junta pedidos próximos. */
   runSoon(projectId: string, ms = 500): void {
     if (!this.configFor(projectId).enabled || this.soon.has(projectId)) return
@@ -247,9 +241,6 @@ export class OrchestratorService {
     })
   }
 
-  // ---------- Rodada ----------
-
-  /** Uma rodada por projeto de cada vez (chamadas durante uma rodada esperam a mesma). */
   tick(projectId: string): Promise<void> {
     const current = this.running.get(projectId)
     if (current) return current
@@ -302,7 +293,6 @@ export class OrchestratorService {
     }
     const name = (key: AgentKey | null): string => (key ? agentDisplayName(key, ctx.plan) : '')
 
-    // Mover: atribuição + movimento numa transação só.
     let actions = 0
     const moves = decisions.filter(
       (d): d is Extract<PlanDecision, { kind: 'handoff' }> => d.kind === 'handoff'
@@ -365,9 +355,6 @@ export class OrchestratorService {
     if (actions > 0 || waiting.length > 0) this.deps.emit(projectId)
   }
 
-  // ---------- Consultas ----------
-
-  /** Fluxos ativos por agente (todos os projetos) + tarefas recém-movidas ainda sem fluxo. */
   private loadByAgent(): Map<AgentKey, number> {
     const out = new Map<AgentKey, number>(this.deps.flows.activeCountByAgent())
     for (const d of this.dispatched.values()) {
@@ -382,7 +369,6 @@ export class OrchestratorService {
     return out
   }
 
-  /** Tarefas do projeto com agente trabalhando (fluxo ativo) ou começando. */
   private activeTotal(projectId: string): number {
     const tasks = new Set(
       this.deps.flows
@@ -394,7 +380,6 @@ export class OrchestratorService {
     return tasks.size
   }
 
-  /** Tira as tarefas recém-movidas cujo fluxo já apareceu (ou que passaram do tempo). */
   private purgeDispatched(): void {
     const nowMs = this.now().getTime()
     for (const [taskId, d] of this.dispatched) {
@@ -422,7 +407,6 @@ export class OrchestratorService {
     return last.endedAt >= entry ? 'carried_in' : null
   }
 
-  /** Agentes do projeto, fluxos ligados às etapas e a checagem estática de cada agente. */
   private async context(projectId: string): Promise<{
     stages: { id: string; name: string; role?: StageRole }[]
     bindings: OrkioConfig['flows'][string]['bindings']

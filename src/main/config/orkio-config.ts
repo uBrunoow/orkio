@@ -14,12 +14,6 @@ import { migrateV14 } from './migrations/v14-stage-roles'
 import { migrateV3 } from './migrations/v3-default-rules'
 
 export const ORKIO_CONFIG_FILE = 'orkio-config.json'
-/**
- * v1: projects. v2: `notion` (bancos de Projetos/Tarefas + mapeamento) e `notionProject` em cada
- * projeto (vínculo com uma página do banco de Projetos). Só ids e nomes, nunca conteúdo.
- * v3: `boards` (quadro kanban por projeto: etapas ↔ opções do status do Notion).
- * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
- */
 import { clampAlvaParallel } from '../../shared/alva'
 import { parseFlowDef, type Flow, type ProjectFlows, type StageFlow } from '../../shared/task-flow'
 import type { UpdateChannel } from '../../shared/updates'
@@ -49,17 +43,13 @@ export interface OrkioConfig {
   notion: NotionWorkspaceConfig | null
   /** Quadro de cada projeto (chave: id do projeto). */
   boards: Record<string, BoardConfig>
-  /** Automações (3B): pausa global ("Pausar todas"). */
   automation: { paused: boolean }
-  /** Fluxos de tarefa por projeto (5A) e a ligação de cada um com as etapas. */
   flows: Record<string, ProjectFlows>
   /** Ajustes de entrega por projeto (5C). Ausente = padrão (aprovação para push). */
   delivery: Record<string, DeliverySettings>
   /** Agentes (8A): regras de atribuição por coluna. Os perfis ficam em arquivos, não aqui. */
   agents: Record<string, ProjectAgents>
-  /** Orquestrador (8B): etapas de trabalho e agentes de cada uma, por projeto. */
   orchestrator: Record<string, OrchestratorConfig>
-  /** Atualizações (6C): canal, última versão vista ("O que há de novo") e última verificação. */
   updates: UpdatesConfig
   /** Manter o computador acordado enquanto agentes trabalham. Ausente = desligado. */
   keepAwake?: boolean
@@ -104,7 +94,6 @@ export function orkioConfigMigrations(
   return {
     // v0: arquivo sem schemaVersion (rascunhos antigos) → v1.
     0: (data) => ({ projects: Array.isArray(data['projects']) ? data['projects'] : [] }),
-    // v1 → v2: Notion ainda não configurado; nenhum projeto vinculado.
     1: (data) => ({
       ...data,
       notion: null,
@@ -112,13 +101,10 @@ export function orkioConfigMigrations(
         ? data['projects'].map((p: unknown) => (isRecord(p) ? { ...p, notionProject: null } : p))
         : []
     }),
-    // v2 → v3: nenhum quadro ainda.
     2: (data) => ({ ...data, boards: {} }),
     // v3 → v4: quadros existentes ganham as regras padrão da época (etapas pelo nome).
     3: migrateV3,
-    // v4 → v5: nenhum contexto do Claude Code ainda.
     4: (data) => ({ ...data, claudeContexts: {} }),
-    // v5 → v6: nenhum fluxo de tarefa ainda.
     5: (data) => ({ ...data, flows: {} }),
     // v6 → v7 (5B): só campos opcionais novos nos fluxos (includeBriefing, tags, limite Alva).
     6: (data) => ({ ...data }),
@@ -130,7 +116,6 @@ export function orkioConfigMigrations(
       ...data,
       updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
     }),
-    // v9 → v10 (8A): nenhuma regra de atribuição de agentes ainda.
     9: (data) => ({ ...data, agents: {} }),
     // v10 → v11 (8B): orquestrador desligado em todos os projetos.
     10: (data) => ({ ...data, orchestrator: {} }),
@@ -182,7 +167,6 @@ export function validateConfig(
     }
   }
 
-  // Quadros: um inválido é descartado sozinho, com aviso.
   const boards: Record<string, BoardConfig> = {}
   const rawBoards = data['boards']
   if (isRecord(rawBoards)) {
@@ -197,7 +181,6 @@ export function validateConfig(
   const automation = {
     paused: isRecord(automationRaw) && automationRaw['paused'] === true
   }
-  // Fluxos de tarefa: fluxo ou ligação inválidos são descartados sozinhos, com aviso.
   const flows: Record<string, ProjectFlows> = {}
   if (isRecord(data['flows'])) {
     for (const [projectId, raw] of Object.entries(data['flows'])) {
@@ -400,8 +383,6 @@ export function parseBoard(value: unknown): BoardConfig | null {
   }
 }
 
-// ---------- Fluxos de tarefa (5A) ----------
-
 const str = (v: unknown): v is string => typeof v === 'string'
 
 function parseBinding(v: unknown): StageFlow | null {
@@ -416,7 +397,6 @@ export function parseProjectFlows(v: unknown): { value: ProjectFlows; dropped: n
   const flows = rawFlows.map(parseFlowDef).filter((f): f is Flow => f !== null)
   const ids = new Set(flows.map((f) => f.id))
   const rawBindings = isRecord(v) && Array.isArray(v['bindings']) ? v['bindings'] : []
-  // Uma ligação por etapa; ligação para fluxo que sumiu é descartada.
   const bindings: StageFlow[] = []
   for (const b of rawBindings.map(parseBinding)) {
     if (b && ids.has(b.flowId) && !bindings.some((x) => x.stageId === b.stageId)) bindings.push(b)

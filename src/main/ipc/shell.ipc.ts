@@ -11,7 +11,6 @@ export interface ExternalUrlRule {
   pathPattern?: RegExp
 }
 
-/** Nome de branch num caminho de URL (segmentos com `%` de escape). */
 const BRANCH_PATH = '[A-Za-z0-9._%-]+(/[A-Za-z0-9._%-]+)*'
 
 export const EXTERNAL_URL_RULES: readonly ExternalUrlRule[] = [

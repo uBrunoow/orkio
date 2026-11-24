@@ -53,11 +53,9 @@ export interface OverviewDeps {
   config(): OrkioConfig
   /** Lista local dos projetos (sem GitHub). */
   projects(): Promise<ProjectView[]>
-  /** Fluxos ativos (5A). */
   flows(): FlowRunView[]
   /** Perguntas e permissões em memória (4A). */
   requests(): (PendingRequest & { projectId: string; taskId: string })[]
-  /** Execuções na fila ou rodando (4A). */
   runs(): { runId: string; projectId: string; taskId: string; status: RunStatus }[]
   /** Tarefas em memória (mesmo vencidas), sem rede. */
   cachedTasks(projectId: string): NotionTask[] | null
@@ -87,8 +85,6 @@ export class OverviewService {
   private now(): Date {
     return this.deps.now?.() ?? new Date()
   }
-
-  // ---------- Leitura ----------
 
   async snapshot(): Promise<OverviewSnapshot> {
     const config = this.deps.config()
@@ -201,7 +197,6 @@ export class OverviewService {
     return { items, hasMore: rows.length > consumed || rows.length > limit * 2 }
   }
 
-  /** "Atualizar": ciclo das automações de cada projeto com quadro e vínculo (em paralelo). */
   async refresh(): Promise<OverviewSnapshot> {
     const config = this.deps.config()
     const ids = automationProjectIds(config)
@@ -209,9 +204,6 @@ export class OverviewService {
     return this.snapshot()
   }
 
-  // ---------- Mudanças ----------
-
-  /** Algo relevante mudou: recalcula o total (com debounce) e avisa. */
   touch(): void {
     if (this.timer) return
     this.timer = setTimeout(() => {
@@ -231,8 +223,6 @@ export class OverviewService {
     if (this.timer) clearTimeout(this.timer)
     this.timer = null
   }
-
-  // ---------- Auxiliares ----------
 
   private hasProject(config: OrkioConfig, projectId: string): boolean {
     return config.projects.some((p) => p.id === projectId)

@@ -177,7 +177,6 @@ export function shellWords(segment: string): string[] {
   return words
 }
 
-/** Pula atribuições de ambiente e wrappers comuns (`env`, `sudo`, `command`, `time`, `nohup`). */
 function program(words: string[]): { name: string; args: string[] } | null {
   const wrappers = ['env', 'sudo', 'command', 'time', 'nohup', 'exec']
   let i = 0
@@ -331,7 +330,6 @@ function blockedOutsideDelivery(cmd: Cmd, repo: DeliveryTarget | null): PolicyDe
   return null
 }
 
-/** Leitura do GitHub no repositório do projeto (passa sem perguntar). */
 export const GH_READ_ALLOWED = 'leitura do GitHub no repositório do projeto'
 
 /** Caminhos absolutos/relativos que saem do worktree (heurística sobre as palavras). */
@@ -427,7 +425,6 @@ function evaluate(
       if (typeof resolved === 'string') return deny('alias', resolved)
       commands.push(...resolved)
     }
-    // Bloqueios primeiro (push/gh fora do modo entrega; regras do modo entrega).
     const delivery: DeliveryAction[] = []
     const others: Cmd[] = []
     for (const cmd of commands) {
@@ -448,9 +445,7 @@ function evaluate(
     if (segments.some((s) => escapesWorktree(s, ctx.worktree))) {
       return deny('outside', POLICY_MESSAGES.outside)
     }
-    // Só leitura: nada passa sozinho (as regras "sempre" e a leitura do GitHub também perguntam).
     const rules = ctx.readOnly ? [] : ctx.allowRules.filter((r) => r.tool === 'Bash')
-    // Só leitura do GitHub (ex.: `gh pr view 14 --json comments; gh api repos/o/r/pulls/14/comments`).
     const repo = ctx.repo ?? null
     if (
       !ctx.delivery &&

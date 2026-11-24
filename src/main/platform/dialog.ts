@@ -1,6 +1,5 @@
 import { BrowserWindow, type BaseWindow } from 'electron'
 
-/** Um diálogo nativo do Electron (aceita a janela dona ou só as opções). */
 interface DialogFn<O, R> {
   (window: BaseWindow, options: O): Promise<R>
   (options: O): Promise<R>

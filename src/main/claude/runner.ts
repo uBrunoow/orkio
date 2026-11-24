@@ -228,7 +228,6 @@ export class ClaudeRun {
     )
   }
 
-  /** Cancela: SIGINT → SIGTERM (5 s) → SIGKILL (10 s). */
   cancel(): void {
     const child = this.child
     if (!child || this.ended) return

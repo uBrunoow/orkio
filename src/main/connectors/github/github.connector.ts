@@ -51,7 +51,6 @@ export interface GitHubConnectorDeps {
   /** Ausente quando o build não tem client ID da OAuth App. */
   device?: GitHubDeviceApi | null
   now?: () => Date
-  /** Injetável para testes do polling. */
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   /** Client ID da OAuth App (público): monta o link das configurações de acesso da conta. */
   oauthClientId?: string | null
@@ -234,7 +233,6 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     return this.withAccessToken((token) => this.deps.client.getConditional(token, path, etag))
   }
 
-  /** Consulta GraphQL (detalhes de PRs: revisão, threads, checks). */
   async graphql(
     query: string,
     variables: Record<string, unknown>
@@ -268,7 +266,6 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     )
   }
 
-  /** Colaboradores do repositório (sugestão de revisores). */
   async listCollaborators(owner: string, repo: string): Promise<string[]> {
     if (!isOwner(owner) || !isRepo(repo)) return []
     return this.withAccessToken((token) => this.deps.client.listCollaborators(token, owner, repo))

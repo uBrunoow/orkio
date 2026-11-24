@@ -24,7 +24,6 @@ const DEFAULT_STAGES: readonly { flowId: string; stage: string }[] = [
   { flowId: 'alva-revisado', stage: 'Revisado' }
 ]
 
-/** JSON com as chaves em ordem (comparação que não depende da ordem das chaves). */
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
   if (value && typeof value === 'object') {

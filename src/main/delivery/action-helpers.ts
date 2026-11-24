@@ -1,7 +1,3 @@
-/**
- * Peças comuns das ações de entrega dos fluxos (`delivery-actions.ts`, `review-publish.ts`): a PR
- * aberta da tarefa lida agora do GitHub e o evento `delivery` do histórico feito pelo Orkio.
- */
 import type { Result } from '../../shared/result'
 import type { TaskEventDetailInput } from '../../shared/task-events'
 import type { StepFailure } from '../../shared/task-flow'

@@ -55,8 +55,6 @@ const FIELD_NAMES: Record<NotionMappingField, readonly string[]> = {
   assignee: ['responsavel', 'responsaveis', 'assignee', 'assignees', 'owner', 'dono', 'atribuido']
 }
 
-// ---------- Leitura ----------
-
 export function plainText(value: unknown): string {
   if (!Array.isArray(value)) return ''
   return value
@@ -117,8 +115,6 @@ export function parseDataSource(body: unknown): NotionDataSourceSchema | null {
   return { id: summary.id, title: summary.title, properties }
 }
 
-// ---------- Sugestão de mapeamento ----------
-
 export function normalizeName(value: string): string {
   return normalizeLabel(value)
     .replace(/[^a-z0-9]+/g, ' ')
@@ -163,7 +159,6 @@ export function suggestMapping(
         p,
         score:
           nameScore(field, p.name) * 10 +
-          // Tipo preferido do campo (ex.: status antes de select) desempata.
           (FIELD_TYPES[field].length - FIELD_TYPES[field].indexOf(p.type))
       }))
       .sort((a, b) => b.score - a.score)
@@ -184,8 +179,6 @@ export function suggestMapping(
 export function toRef(p: NotionPropertySummary): NotionPropertyRef {
   return { id: p.id, name: p.name, type: p.type }
 }
-
-// ---------- Validação do mapeamento salvo ----------
 
 export interface MappingCheck {
   /** Erros que impedem ler tarefas (propriedade sumiu, mudou de tipo, relação errada). */
@@ -243,8 +236,6 @@ export function checkMapping(
   return { errors, warnings, mapping: updated }
 }
 
-// ---------- Páginas ----------
-
 /** Valor de uma propriedade da página, achado pelo id da propriedade (estável a renomeações). */
 function propertyValue(
   page: Record<string, unknown>,
@@ -258,7 +249,6 @@ function propertyValue(
   return null
 }
 
-/** Ids das páginas numa propriedade relation (ex.: o projeto da tarefa). */
 export function relationIds(body: unknown, propertyId: string): string[] {
   if (!isRecord(body)) return []
   const value = propertyValue(body, propertyId)
@@ -390,7 +380,6 @@ export function applyPropertyWrites(
   }
 }
 
-/** Valores select/status/checkbox da página, por id da propriedade. */
 export function simplePropertyValues(body: unknown): Record<string, SimplePropertyValue> {
   const result: Record<string, SimplePropertyValue> = {}
   const props = isRecord(body) ? body['properties'] : null
@@ -430,8 +419,6 @@ function optionValue(value: Record<string, unknown> | null, withId = false): Not
     ? { id: stringOrNull(option['id']), name, color: color(option['color']) }
     : { name, color: color(option['color']) }
 }
-
-// ---------- Similaridade de nomes (vínculo projeto local ↔ Notion) ----------
 
 /** Coeficiente de Dice sobre bigramas dos nomes normalizados (0..1). */
 export function nameSimilarity(a: string, b: string): number {

@@ -108,7 +108,6 @@ function registerCall(
   const fallback = result ? unexpected : spec.fallback
   const invalid = 'invalid' in spec ? spec.invalid : result ? INVALID_RESULT : fallback
 
-  // Resposta declarada: um valor, ou a resposta atual de outro método do grupo (`sameAs`).
   const answer = async (value: unknown, event: IpcMainInvokeEvent): Promise<unknown> => {
     const target = sameAsTarget(value)
     if (target === null) return value

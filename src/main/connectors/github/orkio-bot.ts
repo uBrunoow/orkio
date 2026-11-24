@@ -54,7 +54,6 @@ export function stateFromError(e: unknown): OrkioBotRepoState {
   return { state: 'unknown', message: ORKIO_BOT_MESSAGES.unexpected }
 }
 
-/** Repositórios únicos do github.com dos projetos, com os nomes dos projetos. */
 export function reposOf(projects: readonly ProjectView[]): Omit<OrkioBotRepo, 'status'>[] {
   const byKey = new Map<string, Omit<OrkioBotRepo, 'status'>>()
   for (const p of projects) {
@@ -84,7 +83,6 @@ export class OrkioBotService {
   async status(force = false): Promise<OrkioBotStatus> {
     const now = this.deps.now ?? Date.now
     if (!force && this.cache && now() - this.cache.at < ORKIO_BOT_CACHE_MS) return this.cache.value
-    // Duas telas pedindo ao mesmo tempo dividem a mesma consulta.
     this.inflight ??= this.check().finally(() => {
       this.inflight = null
     })

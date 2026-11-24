@@ -163,7 +163,6 @@ export class ConfigStore<T extends object> {
   }
 }
 
-/** Versões `0..currentVersion-1` sem migração `v → v+1`. */
 export function missingMigrations(migrations: ConfigMigrations, currentVersion: number): number[] {
   const missing: number[] = []
   for (let v = 0; v < currentVersion; v++) {

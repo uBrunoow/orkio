@@ -41,7 +41,6 @@ export interface GitHubRepo {
   defaultBranch: string
   visibility: 'public' | 'private' | 'internal'
   archived: boolean
-  /** Permissão de push da conta conectada. */
   canPush: boolean
 }
 
@@ -52,7 +51,6 @@ export interface GitHubClientDeps {
   now?: () => number
 }
 
-/** Resultado de um GET condicional (ETag/If-None-Match). */
 export type ConditionalPage =
   | { notModified: true }
   | { notModified: false; body: unknown; etag: string | null; nextPath: string | null }
@@ -71,7 +69,6 @@ export interface GitHubClient {
     query: string,
     variables: Record<string, unknown>
   ): Promise<{ data: unknown; errors: { type: string | null; path: string[] }[] }>
-  /** POST /repos/{o}/{r}/pulls/{n}/requested_reviewers (5C). */
   requestReviewers(
     token: string,
     owner: string,
@@ -294,12 +291,6 @@ function repoNotFound(status: number): ApiError {
   )
 }
 
-/**
- * Erros específicos de repositório/organização antes do mapeamento genérico:
- * - 403 + X-GitHub-SSO → SSO/SAML (com a URL de autorização, validada);
- * - 403 + mensagem de "OAuth App access restrictions" → um owner da org precisa aprovar;
- * - 404 em /repos → sem acesso ou inexistente.
- */
 function errorForResponse(response: HttpResponse, body: string, path: string): ApiError {
   const { status } = response
   const org = /^\/repos\/([^/]+)\//.exec(path)?.[1]
@@ -415,8 +406,6 @@ export function parseRepository(body: unknown): GitHubRepo | null {
   }
 }
 
-// ---------- Parsing de branches e PRs (REST) ----------
-
 export interface GitHubPullItem {
   number: number
   title: string
@@ -427,7 +416,6 @@ export interface GitHubPullItem {
   /** Commit no topo da branch da PR (para conferir se o push chegou). */
   headSha: string | null
   updatedAt: string
-  /** Quando a PR foi aberta (REST `created_at`). */
   createdAt: string | null
   closedAt: string | null
   /** Login de quem abriu (REST `user.login`); só para o cartão da PR. */
@@ -485,7 +473,6 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
   }
 }
 
-/** Item de GET /repos/{o}/{r}/branches. */
 export function parseBranchItem(value: unknown): string | null {
   return isRecord(value) ? stringOrNull(value['name']) : null
 }

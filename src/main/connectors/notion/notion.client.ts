@@ -79,9 +79,7 @@ export interface NotionClient {
     token: string,
     options?: { query?: string; startCursor?: string | null }
   ): Promise<NotionListPage>
-  /** GET /v1/data_sources/{id} (schema). */
   getDataSource(token: string, id: string): Promise<unknown>
-  /** POST /v1/data_sources/{id}/query. */
   queryDataSource(token: string, id: string, options?: NotionQueryOptions): Promise<NotionListPage>
   /**
    * PATCH /v1/pages/{id} com `{ properties }` (ex.: `{ "<id>": { status: { name } } }`).
@@ -159,10 +157,6 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
     return readJson(response, NOTION)
   }
 
-  /**
-   * Leituras de dados: passam pela fila (concorrência baixa + intervalo mínimo). Em 429, pausa a
-   * fila inteira pelo Retry-After (ou backoff exponencial) e tenta de novo, até 3 vezes.
-   */
   async function dataRequest(
     path: string,
     token: string,

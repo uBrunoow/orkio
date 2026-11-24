@@ -10,7 +10,6 @@ export function signalsHandlers(
 ): Impl<typeof ORKIO_API.signals> {
   return {
     get: (projectId, options) => service.get(projectId, options),
-    // O main acha a PR pelos sinais em cache; o texto vem do GraphQL.
     reviewThreads: async (projectId, taskId, options) => {
       const r = await reviews.get(projectId, taskId, options.force)
       return r.ok

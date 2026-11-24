@@ -61,14 +61,12 @@ async function listTaskFiles(dir: string): Promise<string[]> {
   }
 }
 
-/** Impressão digital de cada task (nome → hash do conteúdo), para ver o que um passo criou ou mudou. */
 async function taskSignatures(dir: string): Promise<Record<string, string>> {
   const out: Record<string, string> = {}
   for (const f of await listTaskFiles(dir)) {
     try {
       const path = join(dir, 'backlog', 'tasks', f)
       const size = (await stat(path)).size
-      // Arquivo enorme não é lido: o tamanho já mostra se mudou.
       out[f] =
         size > 1024 * 1024
           ? `size:${size}`
@@ -157,7 +155,6 @@ export class AlvaService {
   ): Promise<{ info: BacklogTaskInfo; markdown: string } | null> {
     const worktree = this.deps.worktreePath(taskId)
     if (!worktree) return null
-    // Sem a pasta do projeto não dá para saber o que é desta tarefa: nada de rascunho.
     const project = this.deps.projectDir(projectId)
     if (!project) return null
     const [mine, base] = await Promise.all([taskSignatures(worktree), taskSignatures(project)])
@@ -226,7 +223,6 @@ export class AlvaService {
     return (await this.findTaskFile(dir, id))?.info ?? null
   }
 
-  /** Variáveis no início de um fluxo. */
   async initialVars(projectId: string, taskId: string): Promise<Record<string, string>> {
     const linked = this.getLink(taskId)
     if (linked) return linkedVars(linked)
@@ -312,7 +308,6 @@ export class AlvaService {
     resultText: string
   ): Promise<Record<string, string>> {
     const info = ctx.worktreePath ? await this.findTask(ctx.worktreePath, id) : null
-    // Com vínculo, um novo /spec recebe o ID (retoma a task em vez de criar outra).
     const vars = linkedVars(id)
     if (!info) return vars
     vars[ALVA_VARS.status] = info.status

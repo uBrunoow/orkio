@@ -1,8 +1,3 @@
-/**
- * Tela "alva-flow" (Etapa 5B): pré-checagem (com cache), criação dos templates "Fluxo Alva" e
- * ligação nas colunas, coluna opcional "Planejando", limite de fluxos Alva em paralelo e o resumo
- * da task do Backlog.md para o painel.
- */
 import {
   ALVA_MAX_PARALLEL,
   clampAlvaParallel,
@@ -25,7 +20,6 @@ import { projectById, projectFlows, withProjectFlows } from '../config/queries'
 
 export interface AlvaStatus {
   precheck: AlvaPrecheck | null
-  /** Templates já criados neste projeto (ids presentes na config). */
   templates: { id: string; name: string; stageId: string | null; mode: StageFlow['mode'] | null }[]
   /** Colunas com algum fluxo ligado (para a tela não sugerir trocar a ligação de alguém). */
   boundStages: string[]
@@ -51,7 +45,6 @@ export class AlvaFlowsService {
       board: Pick<BoardService, 'saveFlow'>
       alva: AlvaService
       precheck(projectDir: string): Promise<AlvaPrecheck>
-      /** O projeto usa Docker Compose? (leitura local, sem a pré-checagem). */
       usesDocker(projectDir: string): boolean
       actor(): string
       now?: () => Date
@@ -72,7 +65,6 @@ export class AlvaFlowsService {
     return result
   }
 
-  /** Mensagem que impede um fluxo Alva de começar (ou null). */
   async blockReason(projectId: string): Promise<string | null> {
     const r = await this.precheck(projectId, false).catch(() => null)
     if (!r) return 'Não deu para verificar se o projeto está pronto para o alva-flow.'

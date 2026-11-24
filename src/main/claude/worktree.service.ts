@@ -99,7 +99,6 @@ export class WorktreeService {
     return this.branches.forTask(projectId, taskId)
   }
 
-  /** Registro do projeto inteiro (para os sinais). */
   linkedBranchesByTask(projectId: string): Map<string, string[]> {
     return this.branches.forProject(projectId)
   }

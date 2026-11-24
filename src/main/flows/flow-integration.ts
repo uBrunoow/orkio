@@ -15,7 +15,6 @@ export interface FlowIntegration {
    * vinculada): o passo falha com isto antes de gastar uma execução. Vale em qualquer fluxo.
    */
   missingVar: StepFailure
-  /** Variáveis no início de um fluxo da integração. */
   initialVars(projectId: string, taskId: string): Promise<Record<string, string>>
   /** Mensagem que impede um fluxo da integração de começar (ex.: projeto não pronto) ou `null`. */
   canStart(projectId: string): Promise<string | null>
@@ -27,7 +26,6 @@ export interface FlowIntegration {
   concurrencyLimit(projectId: string): number | null
 }
 
-/** Integrações de um fluxo (pelos marcadores dele). */
 export function integrationsOf(
   integrations: readonly FlowIntegration[],
   tags: readonly string[] | undefined

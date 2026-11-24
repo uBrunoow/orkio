@@ -88,7 +88,6 @@ export class TaskSignalsService {
     const messages: string[] = []
     let action: ProjectAction | undefined
 
-    // Git local.
     let localBranches: string[] = []
     let local = true
     try {
@@ -98,7 +97,6 @@ export class TaskSignalsService {
       messages.push(SIGNALS_MESSAGES.local)
     }
 
-    // GitHub.
     let github: SignalsGitHubState = 'ok'
     let remoteBranches: string[] | null = null
     let pulls: PullRequestSummary[] | null = null
@@ -143,7 +141,6 @@ export class TaskSignalsService {
         }
       }
       if (pulls) {
-        // Detalhes (GraphQL) só das PRs que casam com alguma tarefa.
         const linked = buildTaskSignals(tasks, {
           localBranches: [],
           remoteBranches: [],

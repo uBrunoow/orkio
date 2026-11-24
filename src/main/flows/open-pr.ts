@@ -8,7 +8,6 @@ import { alvaOpenPrFlow, sendBranchFlow } from '../../shared/alva-templates'
 import type { Flow, FlowRunView, OpenPrResult } from '../../shared/task-flow'
 
 export interface OpenPrDeps {
-  /** A task do Backlog.md está vinculada à tarefa? */
   linked(taskId: string): boolean
   /** O projeto está pronto para o alva-flow (pré-checagem)? Falha ao checar = não. */
   alvaReady(projectId: string): Promise<boolean>
@@ -32,7 +31,6 @@ export async function openPr(
     return { started: true, mode: 'pr', compareUrl: null }
   }
   const compareUrl = deps.compareUrl(projectId, taskId)
-  // Sem alva-flow e nada a enviar: não há fluxo, só o link para criar a PR.
   if (pushed) return { started: false, mode: 'push', compareUrl }
   await deps.startBuiltin(projectId, taskId, sendBranchFlow())
   return { started: true, mode: 'push', compareUrl }

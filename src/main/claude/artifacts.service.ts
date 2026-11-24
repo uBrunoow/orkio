@@ -81,7 +81,6 @@ export class ArtifactsService {
     return (this.deps.now?.() ?? new Date()).toISOString()
   }
 
-  /** Documentos alterados desde a base no worktree da tarefa. */
   async candidates(taskId: string): Promise<ArtifactCandidate[]> {
     const wt = this.deps.worktrees.get(taskId)
     if (!wt) throw new ArtifactError('no_workspace', ARTIFACT_MESSAGES.noWorkspace)
@@ -180,7 +179,6 @@ export class ArtifactsService {
       pageId = created.id
       url = created.url
     } else {
-      // Títulos do documento descem um nível para ficarem dentro da seção.
       const nested = clean.replace(/^(#{1,5})\s/gm, '#$1 ')
       const section = `## ${file}\n\n_Do Orkio: \`${row.path}\` (commit ${short})._\n\n${nested}`
       await this.deps.notion.appendMarkdown(row.task_page_id, section)

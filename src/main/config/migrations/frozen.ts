@@ -15,7 +15,6 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** Etapas `{ id, name }` reconhecíveis de um quadro cru. */
 export function rawStages(board: unknown): { id: string; name: string }[] {
   return isRecord(board) && Array.isArray(board['stages'])
     ? board['stages'].filter(

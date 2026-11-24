@@ -52,7 +52,6 @@ import type { WorktreeRecord, WorktreeService } from './worktree.service'
 
 export type { RunAgent, RunSpec } from './run-spec'
 
-/** Eventos do histórico gravados pelas execuções (todos levam o `runId`). */
 type RunEventKind =
   'run_started' | 'run_finished' | 'run_cancelled' | 'run_failed' | 'run_blocked' | 'delivery'
 export interface RunHandle {
@@ -111,7 +110,6 @@ export interface RunFinished {
   code: RunEndCode | null
 }
 
-/** Por que a execução não terminou bem. */
 export type RunEndCode = 'timed_out' | 'claude_error' | 'start_failed' | 'cancelled'
 
 interface Pending {
@@ -157,7 +155,6 @@ interface ActiveRun {
   start: () => Promise<void>
 }
 
-/** A tarefa já tem uma execução (rodando ou na fila). */
 export class RunBusyError extends DomainError {
   constructor() {
     super('busy', RUN_MESSAGES.busy)
@@ -177,7 +174,6 @@ export const RUN_MESSAGES = {
 const TEST_COMMAND =
   /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|e2e|vitest|jest)\b|\b(vitest|jest|pytest|go test|cargo test|playwright test)\b/
 
-/** Primeira pergunta do AskUserQuestion (e quantas há), para listas curtas. */
 function questionSummary(input: Record<string, unknown>): string {
   const questions = Array.isArray(input['questions']) ? (input['questions'] as unknown[]) : []
   const first = questions[0] as Record<string, unknown> | undefined
@@ -437,7 +433,6 @@ export class RunService {
     run.handle?.cancel()
   }
 
-  /** Resposta do usuário a um pedido de permissão. */
   answerPermission(runId: string, requestId: string, answer: PermissionAnswer): void {
     const run = this.active.get(runId)
     const p = run?.pending.get(requestId)
@@ -491,7 +486,6 @@ export class RunService {
     )
   }
 
-  /** Sessão do Claude Code mais recente da tarefa (para continuar a conversa), ou `null`. */
   lastSession(taskId: string): string | null {
     return (
       this.deps.db.get<{ session_id: string }>(
@@ -523,7 +517,6 @@ export class RunService {
       .map((r) => r.cost)
   }
 
-  /** Execuções do agente desde `since`: quantas, custo somado e quando começaram. */
   agentRunsSince(
     agentKey: string,
     since: string
@@ -540,7 +533,6 @@ export class RunService {
     }
   }
 
-  /** Contagens do diagnóstico. */
   counts(): { total: number; active: number } {
     const n = (sql: string): number => this.deps.db.get<{ n: number }>(sql)?.n ?? 0
     return {
@@ -609,8 +601,6 @@ export class RunService {
       agentKey: r.agent_key
     }
   }
-
-  // ---------- Interno ----------
 
   private pump(): void {
     while (this.active.size < this.maxParallel && this.queue.length > 0) {
@@ -974,7 +964,6 @@ export class RunService {
     await writeFile(join(worktree, BRIEFING_PATH), briefing, 'utf8')
   }
 
-  /** Mantém só os `keepPerTask` logs mais recentes da tarefa. */
   private async prune(taskId: string): Promise<void> {
     const old = this.deps.db.all<{ id: string }>(
       'SELECT id FROM agent_runs WHERE task_page_id = ? ORDER BY started_at DESC LIMIT -1 OFFSET ?',
