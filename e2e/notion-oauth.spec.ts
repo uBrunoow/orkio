@@ -8,6 +8,7 @@ import {
   externalCalls,
   launchOrkio,
   notionCard,
+  openIntegration,
   openedUrls,
   removeDir,
   setFakes,
@@ -34,6 +35,17 @@ const secretFiles = (): string[] => {
 async function shot(page: Page, name: string): Promise<void> {
   const dir = process.env['ORKIO_E2E_SCREENSHOTS']
   if (dir) await page.screenshot({ path: join(dir, `${name}.png`) })
+}
+
+/**
+ * Conectado, o card da grade de Integrações fecha os detalhes: espera o resumo do card mostrar a
+ * conta e reabre os detalhes (não faz nada se já estiverem abertos).
+ */
+async function openConnectedNotion(page: Page): Promise<void> {
+  await expect(
+    page.getByRole('article', { name: 'Notion', exact: true }).getByText(/Grace Hopper/)
+  ).toBeVisible()
+  await openIntegration(page, 'Notion')
 }
 
 async function open(fakes: Partial<FakeServices> = {}): Promise<OrkioApp> {
@@ -63,6 +75,7 @@ test('"Conectar com Notion" autoriza no navegador e conecta via intermediário',
 
   await notionCard(page).getByRole('button', { name: 'Conectar com Notion' }).click()
 
+  await openConnectedNotion(page)
   await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
   await expect(notionCard(page).getByText(/Acme Labs/)).toBeVisible()
   await shot(page, 'oauth-2-conectado')
@@ -98,6 +111,7 @@ test('"Conectar com Notion" autoriza no navegador e conecta via intermediário',
 
 test('reabrir o app mantém a conexão OAuth', async () => {
   const { page } = await open()
+  await openConnectedNotion(page)
   await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
   await expect(notionCard(page).getByText(/Verificado às/)).toBeVisible()
 })
@@ -125,6 +139,7 @@ test('autorização revogada → erro com "Reconectar com Notion"', async () => 
 
   await setFakes(app, { validTokens: null, broker: 'ok' })
   await notionCard(page).getByRole('button', { name: 'Reconectar com Notion' }).click()
+  await openConnectedNotion(page)
   await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
   await expect(alerts(notionCard(page))).toHaveCount(0)
 })
@@ -167,6 +182,7 @@ test('cancelar enquanto aguarda o navegador volta ao início e libera a porta', 
   await notionCard(page)
     .getByRole('button', { name: /Conectar com Notion|Tentar novamente/ })
     .click()
+  await openConnectedNotion(page)
   await expect(notionCard(page).getByText('Grace Hopper', { exact: true }).first()).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
   await close()

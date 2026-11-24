@@ -48,6 +48,8 @@ export type TaskEventKind =
   | 'gate_waiting'
   | 'gate_approved'
   | 'gate_rejected'
+  /** Você pediu ajustes no gate (o passo de ajustes roda de novo na mesma sessão). */
+  | 'gate_revised'
   | 'flow_paused'
   | 'flow_finished'
   /** Entrega (5C): push/PR/comentário/resolução/pedido de review feitos por fluxo. */

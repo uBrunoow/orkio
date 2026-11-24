@@ -40,6 +40,7 @@ function flow(over: Partial<FlowRunView> = {}): FlowRunView {
     flowId: 'f1',
     flowName: 'Revisar',
     agent: null,
+    revise: null,
     steps: [
       {
         id: 'rev',
@@ -53,7 +54,7 @@ function flow(over: Partial<FlowRunView> = {}): FlowRunView {
         id: 'ok',
         name: 'Aprovar diff',
         type: 'gate',
-        message: 'ok?',
+        message: 'Confira o diff antes do commit. Se ainda houver blocker, recuse e corrija à mão.',
         show: 'diff',
         onReject: 'stop',
         timeoutMin: null
@@ -100,6 +101,15 @@ describe('Esperando você', () => {
       section: 'flow'
     })
     expect(gate?.since).toBe('2026-11-20T10:01:00.000Z')
+    // Mensagem curta (já com as variáveis do fluxo) vira o título do item.
+    const short = flow({ status: 'waiting_gate', currentStep: 'ok' })
+    const steps = short.steps.map((s) =>
+      s.type === 'gate' ? { ...s, message: 'Aprovar correções da PR #13' } : s
+    )
+    expect(flowWaitingItem({ ...short, steps }, task())).toMatchObject({
+      kind: 'gate',
+      what: 'Aprovar correções da PR #13'
+    })
 
     const action = flowWaitingItem(
       flow({

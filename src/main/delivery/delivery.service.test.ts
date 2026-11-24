@@ -8,6 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { StoredProject } from '../config/orkio-config'
 import { createGit } from '../git/git'
 import type { WorktreeRecord } from '../claude/worktree.service'
+import { isAllowedExternalUrl } from '../ipc/shell.ipc'
 import { DeliveryError, DeliveryService, parseGhAliases } from './delivery.service'
 
 function sh(cwd: string, ...args: string[]): string {
@@ -120,6 +121,31 @@ describe('DeliveryService com git real', () => {
     const p2 = await service.preview('p1', 't1')
     expect(p2.remoteExists).toBe(true)
     expect(p2.commits.map((c) => c.subject)).toEqual(['feat: c'])
+  })
+
+  it('compareUrl: base...branch por segmento; sem branch padrão, só a branch', async () => {
+    expect(service.compareUrl('p1', 't1')).toBe(
+      'https://github.com/acme/app/compare/main...ORK-7/exportar-csv?expand=1'
+    )
+    record = { ...record, branch: "feat/a b!x'(y)*~z" }
+    const url = service.compareUrl('p1', 't1')
+    expect(url).toBe(
+      'https://github.com/acme/app/compare/main...feat/a%20b%21x%27%28y%29%2A%7Ez?expand=1'
+    )
+    // Codificação e allowlist do shell concordam.
+    expect(isAllowedExternalUrl(url)).toBe(true)
+    project = { ...project, repo: { ...project.repo!, defaultBranch: null } }
+    expect(service.compareUrl('p1', 't1')).toBe(
+      'https://github.com/acme/app/compare/feat/a%20b%21x%27%28y%29%2A%7Ez?expand=1'
+    )
+  })
+
+  it('alreadyPushed: só com a branch remota igual ao HEAD', async () => {
+    expect(await service.alreadyPushed('p1', 't1')).toBe(false) // nunca enviada
+    await commit('a.txt', 'feat: a')
+    expect(await service.alreadyPushed('p1', 't1')).toBe(false) // à frente
+    await service.push('p1', 't1')
+    expect(await service.alreadyPushed('p1', 't1')).toBe(true)
   })
 
   it('sem commits novos → recusa', async () => {

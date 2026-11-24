@@ -11,6 +11,7 @@ import {
   navTo,
   openSettings,
   removeDir,
+  restartPrompts,
   simulateUpdate,
   updateInstalls,
   type OrkioApp
@@ -150,6 +151,9 @@ test('Configurações: versão, canal e "Procurar atualizações"; banner com a 
   await expect(banner(page)).toContainText('Atualização 9.9.9 pronta')
   await expect(updates.getByTestId('update-status')).toContainText('9.9.9 está pronta')
   await expect(updates.getByTestId('last-check')).not.toHaveText('Nunca')
+  // Baixou com o app parado: perguntou "Reiniciar agora?"; "Depois" deixa o banner.
+  expect(await restartPrompts(app)).toEqual(['O Orkio 9.9.9 foi baixado.'])
+  expect(await updateInstalls(app)).toBe(0)
 
   // Canal Beta é gravado na config (e volta).
   await updates.getByRole('radio', { name: 'Beta' }).click()
@@ -166,6 +170,29 @@ test('Configurações: versão, canal e "Procurar atualizações"; banner com a 
   await banner(page).getByRole('button', { name: 'Agora não' }).click()
   await expect(banner(page)).toHaveCount(0)
   expect(await cspViolations(page)).toEqual([])
+})
+
+test('Configurações: "Manter o computador acordado" liga e fica salvo (desligado por padrão)', async () => {
+  const { page } = orkio!
+  await goTo(page, 'Atualizações')
+  const toggle = page.getByRole('switch', {
+    name: 'Manter o computador acordado enquanto agentes trabalham'
+  })
+  await expect(toggle).not.toBeChecked()
+  await toggle.click()
+  await expect(toggle).toBeChecked()
+  await expect
+    .poll(
+      () => (JSON.parse(readFileSync(configFile(), 'utf8')) as { keepAwake?: boolean }).keepAwake
+    )
+    .toBe(true)
+  await toggle.click()
+  await expect(toggle).not.toBeChecked()
+  await expect
+    .poll(
+      () => (JSON.parse(readFileSync(configFile(), 'utf8')) as { keepAwake?: boolean }).keepAwake
+    )
+    .toBeUndefined()
 })
 
 test('"Atualizar quando terminar" espera a execução do Claude acabar', async () => {
@@ -205,6 +232,21 @@ test('"Atualizar quando terminar" espera a execução do Claude acabar', async (
   await expect(run.getByTestId('run-status')).toHaveText('Cancelada', { timeout: 20_000 })
   await expect.poll(() => updateInstalls(app), { timeout: 20_000 }).toBe(1)
   expect(await cspViolations(page)).toEqual([])
+})
+
+test('ao abrir: baixa a versão nova e "Reiniciar agora" instala sem precisar de clique no app', async () => {
+  await close()
+  const { app, page } = await open()
+  // O feed simulado entra depois da abertura: "Procurar atualizações" faz o papel da checagem
+  // automática de 5 s (mesmo caminho no main).
+  await simulateUpdate(app, { version: '9.9.9' }, true)
+  await goTo(page, 'Atualizações')
+  await page
+    .getByRole('region', { name: 'Atualizações' })
+    .getByRole('button', { name: 'Procurar atualizações' })
+    .click()
+  await expect.poll(() => updateInstalls(app), { timeout: 20_000 }).toBe(1)
+  expect(await restartPrompts(app)).toEqual(['O Orkio 9.9.9 foi baixado.'])
 })
 
 test('"O que há de novo" aparece uma vez depois de atualizar', async () => {

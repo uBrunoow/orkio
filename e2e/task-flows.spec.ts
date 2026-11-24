@@ -281,6 +281,40 @@ test('critério 4: fechar o app no meio de um passo e retomar ao reabrir', async
   await expect(flow.getByTestId('flow-status')).toHaveText('Rodando')
   // Rodapé do painel: quem está trabalhando, há quanto tempo e em qual passo.
   await expect(panel.getByTestId('task-working')).toContainText('Fluxo trabalhando há')
+  // Barra de fases do topo = gatilho do piloto automático: plano e "Cancelar fluxo".
+  const phaseBar = page.getByRole('button', { name: /^Plano do fluxo / })
+  await phaseBar.click()
+  await expect(phaseBar).toHaveAttribute('aria-expanded', 'true')
+  const plan = page.getByRole('dialog', { name: 'Plano do fluxo' })
+  await expect(plan.getByRole('group', { name: 'Plano do piloto automático' })).toBeVisible()
+  await expect(plan.getByRole('button', { name: 'Cancelar fluxo' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(plan).toBeHidden()
+  // "Ver plano" (fim da conversa) abre o mesmo popover; com ele aberto, não fecha e reabre.
+  const showPlan = flow.getByRole('button', { name: 'Ver plano' })
+  await showPlan.click()
+  await expect(plan).toBeVisible()
+  await page.evaluate(() => {
+    const w = window as unknown as { planRemoved: number }
+    w.planRemoved = 0
+    new MutationObserver((changes) => {
+      for (const c of changes)
+        for (const n of c.removedNodes)
+          if (
+            n instanceof Element &&
+            (n.matches('[role="dialog"]') || n.querySelector('[role="dialog"]'))
+          )
+            w.planRemoved++
+    }).observe(document.body, { childList: true, subtree: true })
+  })
+  await showPlan.click()
+  await page.waitForTimeout(300)
+  await expect(plan).toBeVisible()
+  expect(
+    await page.evaluate(() => (window as unknown as { planRemoved: number }).planRemoved)
+  ).toBe(0)
+  await page.keyboard.press('Escape')
+  await expect(plan).toBeHidden()
   await expect(panel.getByRole('list', { name: 'Log da execução' }).last()).toContainText(
     'Primeira vez: trabalhando',
     { timeout: 30_000 }

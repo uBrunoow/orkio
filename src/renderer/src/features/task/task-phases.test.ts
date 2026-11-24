@@ -37,6 +37,8 @@ describe('phaseLabel', () => {
     expect(phaseLabel('/revisar')).toBe('revisar')
     expect(phaseLabel('Sua aprovação')).toBeNull()
     expect(phaseLabel('Ação do Orkio: noop')).toBeNull()
+    expect(phaseLabel('Ação do Orkio: review_snapshot')).toBe('Revisão')
+    expect(phaseLabel('Ação do Orkio: publish_review')).toBe('Revisão')
   })
 })
 
@@ -59,6 +61,22 @@ describe('taskPhases', () => {
       { id: 'Revisão', label: 'Revisão', state: 'next' },
       { id: 'PR', label: 'PR', state: 'next' }
     ])
+  })
+
+  it('fase repetida depois do PR entra na primeira ocorrência (sem ids duplicados)', () => {
+    const plan = [
+      step('/alva-flow:spec', 'done'),
+      step('/alva-flow:plan', 'done'),
+      step('/alva-flow:implement', 'done'),
+      step('/alva-flow:review', 'done'),
+      step('/alva-flow:pr', 'done'),
+      step('/alva-flow:fix', 'current'),
+      step('/alva-flow:review', 'next')
+    ]
+    const phases = taskPhases({ plan, stages: [], stageId: null })
+    expect(phases.map((p) => p.label)).toEqual(['Spec', 'Plano', 'Implementar', 'Revisão', 'PR'])
+    expect(new Set(phases.map((p) => p.id)).size).toBe(5)
+    expect(phases[3]?.state).toBe('current')
   })
 
   it('gate esperando entra na fase anterior', () => {

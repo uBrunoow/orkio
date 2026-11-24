@@ -409,14 +409,31 @@ test('5C critérios 1, 2 e 4: implement → diff → commit → push aprovado �
   expect(logs.join('\n')).not.toContain(GITHUB_PAT)
 })
 
-test('5C critério 3: alterações pedidas → Revisado → --comments → push confirmado → novo review → Revisando', async () => {
+test('5C critério 3 + Task 16: alterações pedidas → Revisado → plano → ajustes → aprovar → correções → push → novo review', async () => {
   const { page, app, logs } = orkio!
   const panel = taskScreen(page, 'ORK-2')
   const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
   const pushedSha = git(origin(), 'rev-parse', taskBranch()).trim()
+  const agentArgs = (): Record<string, unknown>[] =>
+    readFileSync(join(worktree(), '.orkio', 'agent-args.log'), 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+  const before = agentArgs().length
 
-  // Ana pede alterações: a 3B move para Revisado e o fluxo da coluna começa sozinho.
+  // Ana pede alterações (com uma thread de comentário): a 3B move para Revisado e o fluxo da
+  // coluna começa sozinho.
   await setFakes(app, {
+    // Task 18: diff da PR (a revisão publicada depois comenta a linha 1 de src/exportar.ts).
+    githubPrFiles: {
+      '7': [
+        {
+          filename: 'src/exportar.ts',
+          patch:
+            '@@ -1 +1 @@\n-export const exportar = true\n+export const exportar = true // corrigido'
+        }
+      ]
+    },
     githubPulls: [pull({ sha: pushedSha })],
     githubPrDetails: {
       '7': {
@@ -430,6 +447,22 @@ test('5C critério 3: alterações pedidas → Revisado → --comments → push 
             submittedAt: new Date().toISOString(),
             author: { login: 'ana' }
           }
+        ],
+        threads: [
+          {
+            id: 'thread-7-0',
+            isResolved: false,
+            path: 'src/exportar.ts',
+            line: 1,
+            comments: [
+              {
+                author: 'ana',
+                body: 'Valide a entrada antes de exportar.',
+                createdAt: new Date().toISOString(),
+                url: 'https://github.com/acme/orkio-app/pull/7#discussion_r1'
+              }
+            ]
+          }
         ]
       }
     }
@@ -440,9 +473,48 @@ test('5C critério 3: alterações pedidas → Revisado → --comments → push 
   // CI vermelho na PR: estado no painel (o botão aparece quando nenhum fluxo está rodando).
   await expect(flow.getByTestId('pr-ci')).toHaveText('CI falhou (PR #7)')
 
-  // O /pr --comments tenta o push: você recusa (o Orkio oferece o próprio push depois).
+  // O Orkio grava os comentários e o agente propõe um plano, só leitura, antes de mexer no código.
+  const gate = flow.getByRole('group', { name: 'Aprovação do fluxo' })
+  await expect(gate).toContainText('Aprovar correções da PR #7', { timeout: 30_000 })
+  const plan = gate.getByRole('region', { name: 'Resultado para aprovar' })
+  await expect(plan).toContainText('validar a entrada antes de exportar')
+  expect(readFileSync(join(worktree(), '.orkio', 'revisao.md'), 'utf8')).toContain(
+    'Valide a entrada antes de exportar.'
+  )
+  const planRun = agentArgs()[before]!
+  expect(planRun['disallowedTools']).toBe('Edit,Write,MultiEdit,NotebookEdit')
+  expect(planRun['permissionMode']).toBe('manual')
+  expect(planRun['resume']).not.toBeNull() // continua a sessão da tarefa
+  expect(git(worktree(), 'rev-parse', 'HEAD').trim()).toBe(pushedSha) // nada mudou ainda
+  // "Esperando você" no sino com o título do gate (mensagem com a variável da PR).
+  await page.getByRole('button', { name: /esperando você$/ }).click()
+  await expect(
+    page.getByRole('menuitem').filter({ hasText: 'Aprovar correções da PR #7' })
+  ).toBeVisible({ timeout: 10_000 })
+  await page.keyboard.press('Escape')
+
+  // Pedir ajustes: o plano roda de novo na MESMA sessão com o seu texto.
+  await gate.getByRole('button', { name: 'Pedir ajustes…' }).click()
+  await gate.getByRole('textbox', { name: 'O que ajustar' }).fill('Inclua um teste do caso vazio')
+  await gate.getByRole('button', { name: 'Enviar' }).click()
+  await expect(gate.getByRole('region', { name: 'Resultado para aprovar' })).toContainText(
+    'Ajuste pedido: Inclua um teste do caso vazio',
+    { timeout: 30_000 }
+  )
+  const revised = agentArgs().at(-1)!
+  expect(revised['resume']).toBe(planRun['resume'])
+  expect(revised['disallowedTools']).toBe('Edit,Write,MultiEdit,NotebookEdit')
+  expect(revised['permissionMode']).toBe('manual')
+  await expect(flow.getByTestId('flow-steps-summary')).toContainText('1 ajustes pedidos')
+
+  // Aprovar: o agente aplica em modo entrega e tenta o push: você recusa (o Orkio oferece o
+  // próprio push depois).
+  await gate.getByRole('button', { name: 'Aprovar' }).click()
   const ask = panel.getByRole('group', { name: 'Pedido de aprovação da entrega' })
   await expect(ask).toContainText(`git push origin ${taskBranch()}`, { timeout: 30_000 })
+  const applyRun = agentArgs().at(-1)!
+  expect(applyRun['disallowedTools']).toBeNull()
+  expect(applyRun['permissionMode']).toBe('acceptEdits')
   await ask.getByRole('button', { name: 'Negar' }).click()
   // Resolver a conversa: primeiro comando do gh nesta execução → aprovação.
   await expect(ask).toContainText('resolveReviewThread', { timeout: 30_000 })
@@ -464,6 +536,11 @@ test('5C critério 3: alterações pedidas → Revisado → --comments → push 
   )
   await expect(review.getByRole('checkbox', { name: 'ana' })).toBeChecked()
   await expect(review.getByRole('checkbox', { name: 'bia' })).not.toBeChecked()
+  // Antes de voltar a Revisando (onde a "revisão publicada" começa sozinha e roda o /review).
+  const log = argsLog()
+  expect(log.at(-2)).toBe(`deny:git push origin ${taskBranch()}`)
+  expect(log.at(-1)).toMatch(/^allow:gh api graphql -f query='mutation \{ resolveReviewThread/)
+  expect(ghCalls(userDataDir).at(-1)).toMatch(/^api graphql -f query=mutation/)
   await review.getByRole('button', { name: 'Pedir review' }).click()
   await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
   expect((await notionState(app)).reviewRequests).toEqual([
@@ -471,11 +548,6 @@ test('5C critério 3: alterações pedidas → Revisado → --comments → push 
   ])
   // O novo pedido de review leva a tarefa de volta para Revisando (3B), sozinho.
   await expectStage(panel, 'Revisando')
-
-  const log = argsLog()
-  expect(log.at(-2)).toBe(`deny:git push origin ${taskBranch()}`)
-  expect(log.at(-1)).toMatch(/^allow:gh api graphql -f query='mutation \{ resolveReviewThread/)
-  expect(ghCalls(userDataDir).at(-1)).toMatch(/^api graphql -f query=mutation/)
   // A sessão mostra as entregas com o link da PR; o histórico completo também.
   const conversation = panel.getByRole('list', { name: 'Conversa da tarefa' })
   await expect(conversation).toContainText('Review pedido na PR #7 pelo Orkio')
@@ -484,12 +556,164 @@ test('5C critério 3: alterações pedidas → Revisado → --comments → push 
   ).toBeVisible()
   await expectTaskHistory(
     panel,
+    'Ajustes pedidos: Aprovar correções',
     'Conversa de review resolvida',
     'Review pedido na PR #7 pelo Orkio'
   )
-
-  // Com o fluxo parado e o CI vermelho, o painel oferece o fluxo de CI.
-  await expect(flow.getByRole('button', { name: 'Rodar fluxo CI vermelho' })).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
   expect(logs.join('\n')).not.toContain(GITHUB_PAT)
+})
+
+test('Task 18: Revisando → revisão publicada (padrão da coluna) → gate → orkio[bot] pede alterações → Revisado', async () => {
+  const { page, app, logs } = orkio!
+  const panel = taskScreen(page, 'ORK-2')
+  const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
+  const pushedSha = git(origin(), 'rev-parse', taskBranch()).trim()
+
+  // Sem configurar nada: a coluna Revisando já tem o "Alva: revisão publicada" (padrão da tela
+  // alva-flow), que começou sozinho com a volta da tarefa para Revisando.
+  await expect(flow).toContainText('Fluxo: Alva: revisão publicada', { timeout: 30_000 })
+  // Threads resolvidas (para o fluxo do Revisado, que começa depois, terminar sem comentários).
+  await setFakes(app, {
+    githubPulls: [pull({ sha: pushedSha })],
+    githubPrDetails: {
+      '7': {
+        reviewDecision: 'REVIEW_REQUIRED',
+        unresolved: 0,
+        checks: 'FAILURE',
+        reviews: [
+          {
+            id: 'REV-1',
+            state: 'CHANGES_REQUESTED',
+            submittedAt: new Date(Date.now() - 600_000).toISOString(),
+            author: { login: 'ana' }
+          }
+        ],
+        threads: []
+      }
+    }
+  })
+
+  // /review → o agente converte em JSON (só leitura) → gate com o que vai para a PR.
+  const gate = flow.getByRole('group', { name: 'Publicar a revisão na PR #7?' })
+  await expect(gate).toBeVisible({ timeout: 60_000 })
+  expect(argsLog().at(-1)).toBe('review TASK-1')
+  await expect(gate.getByTestId('review-event')).toHaveText('Pedir alterações')
+  // Texto exato que vai para a PR, sem HTML nem imagens (que o GitHub carregaria).
+  const summary = gate.getByRole('region', { name: 'Resumo da revisão' })
+  await expect(summary).toContainText('Falta **validar a entrada** antes de exportar.')
+  await expect(summary).toContainText('[imagem: grafico]')
+  await expect(summary).not.toContainText('evil.example')
+  await expect(gate.getByRole('list', { name: 'Comentários de linha' })).toContainText(
+    'src/exportar.ts:1'
+  )
+  await expect(gate.getByRole('list', { name: 'Comentários fora do diff' })).toContainText(
+    'README.md:40 · fora do diff, não será publicado'
+  )
+  await expect(gate).toContainText('1 comentário está fora do diff da PR e não será publicado.')
+  expect((await notionState(app)).siteReviews ?? []).toEqual([]) // nada antes de aprovar
+
+  await gate.getByRole('button', { name: 'Publicar revisão' }).click()
+  // Publicada pelo site do Orkio (que posta como orkio[bot]): só os comentários do diff.
+  await expect.poll(async () => (await notionState(app)).siteReviews ?? []).toHaveLength(1)
+  const [posted] = (await notionState(app)).siteReviews!
+  expect(posted).toMatchObject({
+    owner: 'acme',
+    repo: 'orkio-app',
+    number: 7,
+    hasUserToken: true,
+    review: {
+      event: 'REQUEST_CHANGES',
+      comments: [
+        { path: 'src/exportar.ts', line: 1, side: 'RIGHT', body: 'Valide a entrada aqui.' }
+      ]
+    }
+  })
+  expect(posted!.review.body).toContain('validar a entrada')
+  expect(posted!.review.body).toContain('[imagem: grafico]')
+  expect(posted!.review.body).not.toContain('evil.example')
+
+  // "Pedir alterações" do orkio[bot] → regra "Alterações pedidas → Revisado" (3B), sozinha.
+  await expectStage(panel, 'Revisado')
+  await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+  await expectTaskHistory(panel, 'Revisão publicada na PR #7 como orkio[bot] (pedir alterações)')
+
+  // Com o fluxo parado e o CI vermelho, o painel oferece o fluxo de CI.
+  await expect(flow.getByRole('button', { name: 'Rodar fluxo CI vermelho' })).toBeVisible({
+    timeout: 30_000
+  })
+  expect(await cspViolations(page)).toEqual([])
+  expect(logs.join('\n')).not.toContain(GITHUB_PAT)
+})
+
+test('Abrir PR: botão na aba PR & CI → gate do push → aprovar → /pr em modo entrega abre a PR', async () => {
+  const { page, app } = orkio!
+  // Sem PR no GitHub e com um commit novo no ambiente da tarefa (à frente da branch remota).
+  await setFakes(app, { githubPulls: [], githubPrDetails: {} })
+  writeFileSync(join(worktree(), 'extra.txt'), 'mais uma entrega\n')
+  git(worktree(), 'add', 'extra.txt')
+  git(worktree(), 'commit', '-q', '-m', 'feat: mais uma entrega')
+  await page.evaluate((id) => window.orkio.automation.runNow(id), PROJECT)
+  await navTo(page, 'Quadro')
+  const before = ghCalls(userDataDir).filter((c) => c.startsWith('pr create')).length
+
+  const panel = await flowPanel(page)
+  const prTab = await taskTab(panel, 'PR & CI')
+  const button = prTab.getByRole('button', { name: 'Abrir PR' })
+  await expect(button).toBeEnabled({ timeout: 30_000 })
+  await button.click()
+
+  // O push continua passando pelo gate do Orkio (nada foi enviado ainda).
+  const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
+  const push = flow.getByRole('group', { name: 'Enviar a branch para o GitHub?' })
+  await expect(push).toBeVisible({ timeout: 30_000 })
+  await expect(push).toContainText('feat: mais uma entrega')
+  await taskTab(panel, 'PR & CI')
+  await expect(panel.getByRole('button', { name: 'Abrir PR' })).toBeDisabled()
+  await expect(
+    panel.getByRole('tabpanel', { name: 'PR & CI' }).getByText('Espere o fluxo atual terminar')
+  ).toBeVisible()
+  await push.getByRole('button', { name: 'Fazer push' }).click()
+
+  // /alva-flow:pr roda em modo entrega: o gh pede a aprovação desta execução e cria a PR.
+  const ask = panel.getByRole('group', { name: 'Pedido de aprovação da entrega' })
+  await expect(ask).toContainText('gh pr create', { timeout: 30_000 })
+  expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(
+    git(worktree(), 'rev-parse', 'HEAD').trim()
+  )
+  await ask.getByRole('button', { name: 'Permitir nesta execução' }).click()
+  await expect
+    .poll(() => ghCalls(userDataDir).filter((c) => c.startsWith('pr create')).length, {
+      timeout: 30_000
+    })
+    .toBe(before + 1)
+  expect(argsLog().at(-1)).not.toContain('deny:git push')
+  expect(await cspViolations(page)).toEqual([])
+})
+
+test('Abrir PR com a branch já enviada: sem o gate do push, vai direto ao /pr', async () => {
+  const { page } = orkio!
+  const panel = taskScreen(page, 'ORK-2')
+  const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
+  // Termina o fluxo do teste anterior (parado na pergunta do CI).
+  await flow.getByRole('button', { name: 'Cancelar fluxo' }).first().click()
+  await expect(flow.getByTestId('flow-status')).toHaveText('Cancelado', { timeout: 30_000 })
+  expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(
+    git(worktree(), 'rev-parse', 'HEAD').trim()
+  )
+  const before = ghCalls(userDataDir).filter((c) => c.startsWith('pr create')).length
+
+  const prTab = await taskTab(panel, 'PR & CI')
+  await prTab.getByRole('button', { name: 'Abrir PR' }).click()
+  // Nada novo para enviar: nenhum gate de push; o /pr pede a aprovação do gh.
+  const ask = panel.getByRole('group', { name: 'Pedido de aprovação da entrega' })
+  await expect(ask).toContainText('gh pr create', { timeout: 30_000 })
+  await expect(flow.getByRole('group', { name: 'Enviar a branch para o GitHub?' })).toHaveCount(0)
+  await ask.getByRole('button', { name: 'Permitir nesta execução' }).click()
+  await expect
+    .poll(() => ghCalls(userDataDir).filter((c) => c.startsWith('pr create')).length, {
+      timeout: 30_000
+    })
+    .toBe(before + 1)
+  expect(await cspViolations(page)).toEqual([])
 })

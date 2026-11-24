@@ -35,6 +35,8 @@ export type GitHubErrorCode =
   | 'invalid'
   /** Nenhuma conta do GitHub conectada no Orkio. */
   | 'not_connected'
+  /** Revisão como orkio[bot]: o build não tem a origem do site do Orkio. */
+  | 'not_configured'
 
 /** Erro com mensagem segura para o usuário (pt-BR). Nunca contém o token nem a exceção original. */
 export class GitHubApiError extends Error {
@@ -206,7 +208,7 @@ export function createGitHubClient(deps: GitHubClientDeps = {}): GitHubClient {
         throw errors.some((e) => e.type === 'INSUFFICIENT_SCOPES' || e.type === 'FORBIDDEN')
           ? new GitHubApiError(
               'forbidden',
-              'O token do GitHub não tem permissão para ler os detalhes das PRs.',
+              'A conexão do GitHub não tem permissão para ler parte dos detalhes das PRs (revisões, comentários ou checks).',
               response.status
             )
           : errors.some((e) => e.type === 'NOT_FOUND')
@@ -518,8 +520,16 @@ export interface GitHubPullItem {
   /** Quando a PR foi aberta (REST `created_at`). */
   createdAt: string | null
   closedAt: string | null
+  /** Login de quem abriu (REST `user.login`); só para o cartão da PR. */
+  author: string | null
   /** Páginas do Notion citadas no corpo (só os ids; o texto do corpo não é guardado). */
   notionPageIds: string[]
+}
+
+function loginOrNull(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(\[bot\])?$/.test(value)
+    ? value
+    : null
 }
 
 /** Item de GET /repos/{o}/{r}/pulls. URL só se for uma PR em github.com. */
@@ -562,6 +572,7 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
     updatedAt,
     createdAt: stringOrNull(value['created_at']),
     closedAt: stringOrNull(value['closed_at']),
+    author: loginOrNull(isRecord(value['user']) ? value['user']['login'] : null),
     notionPageIds: notionPageIdsIn(typeof value['body'] === 'string' ? value['body'] : null)
   }
 }

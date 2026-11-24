@@ -23,14 +23,48 @@ export function ScreenBarEnd({ children }: { children: React.ReactNode }): React
   return end ? createPortal(children, end) : null
 }
 
-/** Caminho em cinza ("Configurações › Integrações"); o último trecho em branco, peso médio. */
-export function Crumbs({ parts }: { parts: readonly string[] }): React.JSX.Element {
-  const last = parts.at(-1)
+/** Um trecho do caminho; com `onClick`, leva para lá. */
+export type Crumb = string | { label: string; onClick?: (() => void) | undefined }
+
+/** Botão de um trecho do caminho (cinza, sublinha ao passar o mouse). */
+export function CrumbLink({
+  label,
+  onClick
+}: {
+  label: string
+  onClick?: (() => void) | undefined
+}): React.JSX.Element {
+  if (!onClick) return <span>{label}</span>
   return (
-    <p className="min-w-0 truncate text-sm text-muted-foreground">
-      {parts.slice(0, -1).map((p) => `${p} › `)}
-      <span className="font-medium text-foreground">{last}</span>
-    </p>
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-sm text-muted-foreground outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/40"
+    >
+      {label}
+    </button>
+  )
+}
+
+/**
+ * Caminho em cinza ("Configurações › Integrações"); o último trecho em branco, peso médio. Os
+ * trechos com destino são botões (navegação `Caminho`).
+ */
+export function Crumbs({ parts }: { parts: readonly Crumb[] }): React.JSX.Element {
+  const items = parts.map((p) => (typeof p === 'string' ? { label: p } : p))
+  const last = items.at(-1)
+  return (
+    <nav aria-label="Caminho" className="min-w-0 truncate text-sm text-muted-foreground">
+      {items.slice(0, -1).map((p, i) => (
+        <span key={i}>
+          <CrumbLink label={p.label} onClick={p.onClick} />
+          <span aria-hidden="true"> › </span>
+        </span>
+      ))}
+      <span aria-current="page" className="font-medium text-foreground">
+        {last?.label}
+      </span>
+    </nav>
   )
 }
 
@@ -41,7 +75,7 @@ export function ScreenFrame({
   children
 }: {
   /** Caminho padrão; uma tela que põe o próprio título no encaixe pode passar `null`. */
-  crumbs: readonly string[] | null
+  crumbs: readonly Crumb[] | null
   bell: React.ReactNode
   children: React.ReactNode
 }): React.JSX.Element {

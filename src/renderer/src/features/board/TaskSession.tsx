@@ -14,6 +14,7 @@ import { RunBlock } from '../claude/RunBlock'
 import { SessionComposer } from '../claude/SessionComposer'
 import { Composer, EMPTY_INITIAL, PermissionCard, type RunInitial } from '../claude/session-parts'
 import { pendingRequests, type useTaskRuns } from '../claude/useTaskRuns'
+import { buildTranscript, runningSubagents, waitingSubagentsLabel } from '../claude/run-transcript'
 import type { TaskActivity } from '../task-flows/TaskFlowSection'
 import type { FlowStepOrigin } from '../task-flows/flow-plan'
 import { eventActor } from './TaskTimeline'
@@ -48,7 +49,8 @@ export function TaskSession({
   scrollToEnd = false,
   focusRun = null,
   backlogLinked = false,
-  flowOrigins
+  flowOrigins,
+  canOpenPr = false
 }: {
   projectId: string
   taskId: string
@@ -69,6 +71,8 @@ export function TaskSession({
   backlogLinked?: boolean
   /** Execução → passo do fluxo que a disparou (turnos do piloto automático). */
   flowOrigins?: ReadonlyMap<string, FlowStepOrigin>
+  /** Sem PR aberta e com ambiente: o recibo de push/gh bloqueado oferece "Abrir PR". */
+  canOpenPr?: boolean
 }): React.JSX.Element {
   const [showAll, setShowAll] = useState(false)
   const [newSession, setNewSession] = useState<Awaited<
@@ -105,6 +109,14 @@ export function TaskSession({
   const liveLog = latestId && runs.selectedRunId === latestId ? runs.log : null
   const active = state?.runs.find((r) => r.id === state.activeRunId) ?? null
   const pending = active && runs.selectedRunId === active.id ? pendingRequests(runs.log) : []
+  const trackedLog = active && runs.selectedRunId === active.id ? runs.log : null
+  const waitingSubagents = useMemo(
+    () =>
+      trackedLog
+        ? waitingSubagentsLabel(runningSubagents(buildTranscript(trackedLog, true)))
+        : null,
+    [trackedLog]
+  )
   // "Rodar de novo" só sem nada rodando (execução ou passo de fluxo) e sem formulário aberto.
   const canRerun = !active && !flowRunning && !newSession
 
@@ -156,6 +168,7 @@ export function TaskSession({
                 }
                 changesOpen={item.kind === 'run' && item.run.id === changesOpenId}
                 origin={item.kind === 'run' ? (flowOrigins?.get(item.run.id) ?? null) : null}
+                canOpenPr={canOpenPr}
                 item={item}
                 agent={agent}
                 stageName={stageName}
@@ -207,6 +220,16 @@ export function TaskSession({
       </div>
       {/* O campo fica preso embaixo, fora da rolagem: é onde o olho está. */}
       <div className="shrink-0 border-t border-border-soft px-7 pt-3 pb-4">
+        {waitingSubagents && (
+          <p
+            role="status"
+            aria-label="Esperando subagentes"
+            data-testid="waiting-subagents"
+            className="mb-2 min-w-0 truncate text-xs text-muted-foreground"
+          >
+            {waitingSubagents}
+          </p>
+        )}
         {newSession ? (
           newSession.ok ? (
             <Composer
@@ -274,10 +297,12 @@ function SessionRow({
   projectId,
   showDocument,
   changesOpen,
-  origin
+  origin,
+  canOpenPr
 }: {
   item: SessionItem
   origin: FlowStepOrigin | null
+  canOpenPr: boolean
   focused: boolean
   projectId: string
   showDocument: boolean | 'open'
@@ -308,6 +333,7 @@ function SessionRow({
           showDocument={showDocument}
           changesOpen={changesOpen}
           origin={origin}
+          canOpenPr={canOpenPr}
           {...(onRerun && !origin ? { onRerun: () => onRerun(item.run) } : {})}
         />
       </li>

@@ -10,7 +10,7 @@ import { BoardStore } from '../board/board.store'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
-import { OrchestratorService } from './orchestrator.service'
+import { OrchestratorService, agentNameFallback } from './orchestrator.service'
 
 const P = 'p1'
 const STAGES = ['fila', 'dev', 'rev', 'ok']
@@ -222,36 +222,17 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true })
 })
 
-describe('puxar da fila', () => {
-  it('atribui e move para a primeira etapa, respeitando a capacidade do agente', async () => {
+describe('fila', () => {
+  it('nunca puxa da fila: a tarefa só começa quando você move', async () => {
     await enable()
     place('a', 'fila', at(1))
     place('b', 'fila', at(2))
     await service.tick(P)
-    // Implementador: 2 em paralelo; as duas vão (o teto do projeto também é 2).
     expect(cards.map((c) => [c.taskId, c.stageId])).toEqual([
-      ['a', 'dev'],
-      ['b', 'dev']
+      ['a', 'fila'],
+      ['b', 'fila']
     ])
-    expect(agents.assignment('a')).toEqual({ key: 'builtin:implementador', manual: false })
-    const moved = store.events('a').find((e) => e.kind === 'moved' && e.source === 'automation')
-    expect(moved?.detail).toMatchObject({ orchestrator: 'pull', agent: 'Implementador' })
-
-    // Uma terceira não passa do teto, nem enquanto o fluxo das outras ainda não apareceu.
-    place('c', 'fila', at(3))
-    await service.tick(P)
-    expect(cards.find((c) => c.taskId === 'c')?.stageId).toBe('fila')
-    const state = await service.state(P)
-    expect(state.status.waiting).toEqual([
-      { taskId: 'c', displayId: 'C', reason: 'teto de tarefas ao mesmo tempo' }
-    ])
-    expect(state.agents.find((a) => a.key === 'builtin:implementador')?.active).toBe(2)
-  })
-
-  it('desligado não faz nada', async () => {
-    place('a', 'fila', at(1))
-    await service.tick(P)
-    expect(cards[0]?.stageId).toBe('fila')
+    expect(agents.assignment('a')).toBeNull()
   })
 })
 
@@ -311,11 +292,55 @@ describe('entrada por outro caminho', () => {
     service.onStageChanged({ projectId: P, taskId: 'z', from: 'dev', to: 'rev', source: 'notion' })
     expect(agents.assignment('z')).toBeNull()
   })
+
+  it('etapa sem raia (ex.: Revisado): o agente do orquestrador sai; o escolhido à mão fica', async () => {
+    await enable()
+    // Caso real: Revisando → Revisado com o Revisor (que não entrega) travava o fluxo da coluna.
+    place('t', 'rev', at(5))
+    store.transaction(() => agents.assignByOrchestrator(P, 't', 'builtin:revisor', 'Revisor'))
+    flowRun('t', 'rev', at(6), at(20), { agent: 'builtin:revisor' })
+    await service.tick(P)
+    expect(cards[0]?.stageId).toBe('ok')
+    expect(agents.assignment('t')).toBeNull()
+    expect(store.events('t').find((e) => e.kind === 'agent_unassigned')).toMatchObject({
+      detail: { agentKey: 'builtin:revisor', agent: 'Revisor', by: 'orchestrator' }
+    })
+
+    await agents.assign(P, 'm', 'builtin:revisor')
+    service.onStageChanged({ projectId: P, taskId: 'm', from: 'rev', to: 'ok', source: 'manual' })
+    expect(agents.assignment('m')?.key).toBe('builtin:revisor')
+
+    // Agente que não é de nenhuma raia (regra de coluna da 8A) também fica.
+    store.transaction(() => agents.assignByOrchestrator(P, 'q', 'builtin:qa', 'QA'))
+    service.onStageChanged({
+      projectId: P,
+      taskId: 'q',
+      from: 'rev',
+      to: 'ok',
+      source: 'automation'
+    })
+    expect(agents.assignment('q')?.key).toBe('builtin:qa')
+  })
+
+  it('antes da primeira rodada, o histórico mostra o nome do agente embutido (não o id)', async () => {
+    await enable()
+    service.onStageChanged({ projectId: P, taskId: 'w', from: 'fila', to: 'rev', source: 'manual' })
+    expect(agents.assignment('w')?.key).toBe('builtin:revisor')
+    expect(store.events('w')[0]?.detail).toMatchObject({ agent: 'Revisor', by: 'orchestrator' })
+  })
+})
+
+describe('agentNameFallback', () => {
+  it('embutido pelo catálogo; outros pelo id', () => {
+    expect(agentNameFallback('builtin:implementador')).toBe('Implementador')
+    expect(agentNameFallback('repo:ana')).toBe('ana')
+    expect(agentNameFallback('lixo')).toBe('lixo')
+  })
 })
 
 describe('salvar', () => {
   it('valida no main, registra quando ligou e o histórico de configuração', async () => {
-    await expect(service.save(P, { ...ENABLED, queueStageId: null })).rejects.toMatchObject({
+    await expect(service.save(P, { ...ENABLED, lanes: [] })).rejects.toMatchObject({
       code: 'invalid'
     })
     const state = await service.save(P, ENABLED)
@@ -323,7 +348,7 @@ describe('salvar', () => {
     expect(state.validation).toEqual({ errors: [], warnings: [] })
     expect(store.configEvents(P)[0]?.changes).toEqual([
       'Orquestrador ligado',
-      'Orquestrador: fila fila, até 2 ao mesmo tempo, dev (1 agente) → rev (1 agente)'
+      'Orquestrador: dev (1 agente) → rev (1 agente)'
     ])
     expect(pending).toHaveLength(1)
 

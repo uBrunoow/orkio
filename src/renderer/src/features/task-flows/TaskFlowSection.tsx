@@ -2,17 +2,22 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Textarea } from '@/components/ui/textarea'
-import { CheckboxField, Field, RadioListField, TextField } from '@/components/form'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { CheckboxField, Field, RadioListField, TextAreaField, TextField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
+import { cn } from '@/lib/utils'
 import { StatusDot, StatusToken, toneOf } from '../../components/StatusToken'
 import type { RunSummary } from '../../../../shared/agent-run'
 import { ALVA_TEMPLATE_IDS } from '../../../../shared/alva-templates'
 import type { TaskPullRequest } from '../../../../shared/task-signals'
 import {
+  isPromptStep,
+  MAX_PROMPT_CHARS,
   type ActionConfirm,
-  type FlowRunStatus,
+  type ConfirmReview,
   type FlowRunView,
   type FlowStepStatus,
+  type GateShow,
   type StageFlow
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
@@ -27,20 +32,11 @@ import { describeFlowProblem } from '../../../../shared/flow-problem'
 import { FlowProblemCard } from './FlowProblemCard'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
 import { replyChips } from '../task/reply-chips'
-import { AutopilotPlan } from './AutopilotPlan'
-import { gateOutcomes } from './flow-plan'
+import { finalText, flowPlan, gateOutcomes, gateResultRunId, planProgress } from './flow-plan'
+import { MarkdownText } from '../../components/MarkdownText'
 import { formatUsd, plural } from '../../lib/format'
-
-type TokenColor = 'gray' | 'green' | 'red' | 'yellow' | 'orange' | 'blue'
-
-const RUN_STATUS: Record<FlowRunStatus, { label: string; color: TokenColor }> = {
-  running: { label: 'Rodando', color: 'orange' },
-  waiting_gate: { label: 'Esperando aprovação', color: 'yellow' },
-  paused: { label: 'Pausado', color: 'red' },
-  awaiting_decision: { label: 'Esperando sua decisão', color: 'yellow' },
-  finished: { label: 'Concluído', color: 'green' },
-  cancelled: { label: 'Cancelado', color: 'gray' }
-}
+import { RUN_STATUS } from './run-status'
+import { PLAN_TRIGGER_ATTR } from '../task/task-phases'
 
 const STEP_STATUS: Record<FlowStepStatus, string> = {
   running: 'rodando',
@@ -51,7 +47,8 @@ const STEP_STATUS: Record<FlowStepStatus, string> = {
   skipped: 'pulado',
   interrupted: 'interrompido',
   approved: 'aprovado',
-  rejected: 'recusado'
+  rejected: 'recusado',
+  revised: 'ajustes pedidos'
 }
 
 /** O que está trabalhando agora na tarefa (rodapé "Trabalhando há…" do painel). */
@@ -60,6 +57,17 @@ export interface TaskActivity {
   what: string | null
   /** ISO 8601: quando o passo atual começou. */
   since: string
+}
+
+/** "passo 3 de 7": o passo atual entre os que contam (sem os que o fluxo não precisou). */
+function progressText(run: FlowRunView): string {
+  const plan = flowPlan(run)
+  const counted = plan.filter((p) => p.state !== 'unreached')
+  const index = counted.findIndex(
+    (p) => p.state === 'current' || p.state === 'waiting' || p.state === 'failed'
+  )
+  const n = index === -1 ? planProgress(plan).done : index + 1
+  return `passo ${Math.min(n, counted.length)} de ${counted.length}`
 }
 
 /** "4 passos · 3 ok · 1 falhou": resumo da linha do tempo quando ela está recolhida. */
@@ -91,7 +99,8 @@ export function TaskFlowSection({
   onWaitingChange,
   onOpenRun,
   onLiveChange,
-  onRunsChange
+  onRunsChange,
+  onShowPlan
 }: {
   projectId: string
   taskId: string
@@ -108,6 +117,8 @@ export function TaskFlowSection({
   onLiveChange?: (live: boolean) => void
   /** Execuções do fluxo da tarefa (mais nova primeiro): a sessão mostra de que passo veio cada turno. */
   onRunsChange?: (runs: readonly FlowRunView[]) => void
+  /** Abre o plano do piloto automático (popover da barra de fases, no topo da tela). */
+  onShowPlan?: () => void
 }): React.JSX.Element | null {
   // Passos recolhidos enquanto o fluxo roda ou espera você (a decisão vem primeiro); abertos no
   // fim. Clicar no resumo vale até a tarefa mudar.
@@ -208,7 +219,22 @@ export function TaskFlowSection({
       className="flex flex-col gap-3 border-t border-border-soft pt-3"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <AutomationIcon className="text-muted-foreground" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              role="img"
+              aria-label="Piloto automático"
+              tabIndex={0}
+              className="inline-flex rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+            >
+              <AutomationIcon className="text-muted-foreground" />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-64">
+            Piloto automático: o Orkio manda cada passo para o Claude Code e segue sozinho. Ele para
+            quando precisar de você.
+          </TooltipContent>
+        </Tooltip>
         <h3 className="text-sm font-medium">
           {run ? `Fluxo: ${run.flowName}${run.agent ? ` · ${run.agent.name}` : ''}` : 'Fluxo'}
         </h3>
@@ -227,17 +253,28 @@ export function TaskFlowSection({
             data-testid="flow-status"
           />
         )}
+        {run && live && (
+          <>
+            <span
+              className="tabular text-xs text-muted-foreground"
+              data-testid="autopilot-progress"
+            >
+              {progressText(run)}
+            </span>
+            {onShowPlan && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-2 text-xs"
+                {...{ [PLAN_TRIGGER_ATTR]: '' }}
+                onClick={onShowPlan}
+              >
+                Ver plano
+              </Button>
+            )}
+          </>
+        )}
       </div>
-
-      {run?.status === 'running' && (
-        <p className="text-xs text-muted-foreground" data-testid="autopilot-hint">
-          Piloto automático: o Orkio manda cada passo para o Claude Code e segue sozinho. Ele para
-          quando precisar de você.
-        </p>
-      )}
-
-      {/* Encerrado, o histórico abaixo já conta o que rodou: o plano só vale enquanto há caminho. */}
-      {run && live && <AutopilotPlan run={run} />}
 
       {!live && binding && (
         <div className="flex">
@@ -317,9 +354,11 @@ export function TaskFlowSection({
 
       {run?.status === 'running' && current?.type === 'claude_command' && (
         <p className="text-xs text-muted-foreground" data-testid="flow-running-step">
-          {/:pr$/.test(current.command) && !/--comments/.test(current.args)
-            ? 'Aguardando CI do GitHub: o /pr acompanha os checks até terminar (pode levar vários minutos).'
-            : `Rodando /${current.command}. A conversa deste passo está logo acima.`}
+          {isPromptStep(current)
+            ? `Rodando “${current.name}”${current.readOnly ? ' (só leitura)' : ''}. A conversa deste passo está logo acima.`
+            : /:pr$/.test(current.command) && !/--comments/.test(current.args)
+              ? 'Aguardando CI do GitHub: o /pr acompanha os checks até terminar (pode levar vários minutos).'
+              : `Rodando /${current.command}. A conversa deste passo está logo acima.`}
         </p>
       )}
 
@@ -372,14 +411,21 @@ export function TaskFlowSection({
 
       {run?.status === 'waiting_gate' && current?.type === 'gate' && (
         <GateCard
+          key={`${run.id}:${run.history.length}`}
           projectId={projectId}
           taskId={taskId}
           message={current.message}
           show={current.show}
+          resultRunId={current.show === 'result' ? gateResultRunId(run) : null}
+          revise={run.revise}
+          reviseStep={stepName(current.revise?.step ?? null) || null}
           outcomes={gateOutcomes(run)}
           busy={busy}
           onApprove={() => void act(() => window.orkio.taskFlows.approve(run.id))}
           onReject={() => void act(() => window.orkio.taskFlows.reject(run.id))}
+          onRevise={(text) =>
+            void act(() => window.orkio.taskFlows.reviseGate(projectId, taskId, text))
+          }
         />
       )}
 
@@ -507,6 +553,7 @@ function ConfirmCard({
   return (
     <WaitCard label={info.title} title={info.title}>
       <p className="text-sm text-muted-foreground">{info.message}</p>
+      {info.warning && <Alert tone="warning">{info.warning}</Alert>}
       {info.details.length > 0 && (
         <ul
           aria-label="Detalhes da ação"
@@ -520,6 +567,7 @@ function ConfirmCard({
           ))}
         </ul>
       )}
+      {info.review && <ReviewPreview review={info.review} />}
       {info.commits && info.commits.length > 0 && (
         <ul
           aria-label="Commits que vão para o GitHub"
@@ -590,6 +638,84 @@ function ConfirmCard({
   )
 }
 
+/**
+ * Revisão a publicar como orkio[bot]: tipo, resumo e comentários de linha (Task 18), como texto
+ * simples, exatamente como vão para a PR.
+ */
+function ReviewPreview({ review }: { review: ConfirmReview }): React.JSX.Element {
+  const inDiff = review.comments.filter((c) => c.inDiff)
+  const outside = review.comments.filter((c) => !c.inDiff)
+  return (
+    <section aria-label="Revisão a publicar" className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          data-testid="review-event"
+          className={cn(
+            'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium',
+            review.event === 'REQUEST_CHANGES'
+              ? 'border-danger-tint-border bg-danger-tint text-danger'
+              : 'border-border bg-muted text-muted-foreground'
+          )}
+        >
+          {review.event === 'REQUEST_CHANGES' ? 'Pedir alterações' : 'Comentar'}
+        </span>
+        <span className="text-xs text-muted-foreground">como orkio[bot]</span>
+      </div>
+      {/* Texto exato que vai para a PR (sem renderizar markdown: links e tudo mais à vista). */}
+      <pre
+        role="region"
+        aria-label="Resumo da revisão"
+        className="max-h-80 overflow-y-auto rounded-lg border border-border-soft bg-card px-3 py-2 font-sans text-sm break-words whitespace-pre-wrap text-foreground"
+      >
+        {review.summary}
+      </pre>
+      {inDiff.length > 0 && (
+        <ul
+          aria-label="Comentários de linha"
+          className="flex flex-col rounded-lg border border-border-soft bg-card"
+        >
+          {inDiff.map((c, i) => (
+            <li
+              key={`${c.path}:${c.line}:${i}`}
+              className="flex flex-col gap-0.5 border-b border-border-soft px-3 py-2 last:border-b-0"
+            >
+              <code className="font-mono text-xs break-all text-subtle-foreground">
+                {c.path}:{c.line}
+              </code>
+              <span className="text-sm break-words whitespace-pre-wrap">{c.body}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {outside.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <Alert tone="warning">
+            {outside.length === 1
+              ? '1 comentário está fora do diff da PR e não será publicado.'
+              : `${outside.length} comentários estão fora do diff da PR e não serão publicados.`}
+          </Alert>
+          <ul
+            aria-label="Comentários fora do diff"
+            className="flex flex-col rounded-lg border border-border-soft bg-surface"
+          >
+            {outside.map((c, i) => (
+              <li
+                key={`${c.path}:${c.line}:${i}`}
+                className="flex flex-col gap-0.5 border-b border-border-soft px-3 py-2 text-muted-foreground last:border-b-0"
+              >
+                <code className="font-mono text-xs break-all">
+                  {c.path}:{c.line} · fora do diff, não será publicado
+                </code>
+                <span className="text-sm break-words whitespace-pre-wrap">{c.body}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function ChoiceCard({
   prompt,
   options,
@@ -624,22 +750,37 @@ function GateCard({
   taskId,
   message,
   show,
+  resultRunId,
+  revise,
+  reviseStep,
   outcomes,
   busy,
   onApprove,
-  onReject
+  onReject,
+  onRevise
 }: {
   projectId: string
   taskId: string
   message: string
-  show: 'diff' | 'summary' | 'backlog' | 'none'
+  show: GateShow
+  /** `show: 'result'`: a execução do Claude Code cujo texto final o gate mostra. */
+  resultRunId: string | null
+  /** "Pedir ajustes": voltas usadas e o limite (`null` = o gate não aceita ajustes). */
+  revise: { used: number; max: number } | null
+  /** Nome do passo que recebe o ajuste. */
+  reviseStep: string | null
   /** O que acontece ao aprovar e ao recusar (frase curta, junto dos botões). */
   outcomes: { approve: string; reject: string } | null
   busy: boolean
   onApprove(): void
   onReject(): void
+  onRevise(text: string): void
 }): React.JSX.Element {
   const [detail, setDetail] = useState<string | null>(null)
+  const [result, setResult] = useState<string | null>(null)
+  const [revising, setRevising] = useState(false)
+  const [adjust, setAdjust] = useState('')
+  const limitReached = revise !== null && revise.used >= revise.max
   const [diffData, setDiffData] = useState<
     | { diff: string; truncated: boolean; untracked: string[]; secrets: string[] }
     | { error: string }
@@ -658,11 +799,17 @@ function GateCard({
         const summary = r.ok ? r.value.runs.find((x) => x.summary)?.summary : null
         setDetail(summary ? describeSummary(summary) : 'Sem resumo de execução.')
       })
+    } else if (show === 'result') {
+      void (resultRunId ? window.orkio.claude.readLog(resultRunId) : Promise.resolve([])).then(
+        (events) => {
+          if (active) setResult(finalText(events) ?? '')
+        }
+      )
     }
     return () => {
       active = false
     }
-  }, [projectId, taskId, show])
+  }, [projectId, taskId, show, resultRunId])
 
   return (
     <WaitCard label="Aprovação do fluxo" title={message}>
@@ -686,6 +833,19 @@ function GateCard({
             />
           </>
         ))}
+      {show === 'result' && result !== null && (
+        <section
+          role="region"
+          aria-label="Resultado para aprovar"
+          className="max-h-96 overflow-y-auto rounded-lg border border-border-soft bg-card px-3 py-2 text-[13px]"
+        >
+          {result.trim() ? (
+            <MarkdownText text={result} />
+          ) : (
+            <p className="text-muted-foreground">O Claude Code não deixou texto nesta execução.</p>
+          )}
+        </section>
+      )}
       {show === 'summary' && detail !== null && (
         <Field label="Resumo para aprovar">
           {({ id, describedBy }) => (
@@ -700,23 +860,62 @@ function GateCard({
           )}
         </Field>
       )}
-      <div className="flex flex-wrap gap-2">
-        {replyChips('gate').map((chip) =>
-          chip.action === 'approve' ? (
-            <Button key={chip.label} size="sm" disabled={busy} onClick={onApprove}>
+      {revising && revise && (
+        <form
+          aria-label="Pedir ajustes"
+          className="flex flex-col gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (adjust.trim()) onRevise(adjust)
+          }}
+        >
+          <TextAreaField
+            label="O que ajustar"
+            description={`${reviseStep ? `“${reviseStep}” roda de novo na mesma conversa com o seu pedido` : 'O passo roda de novo na mesma conversa com o seu pedido'}; depois esta aprovação volta. Ajuste ${revise.used + 1} de ${revise.max}.`}
+            value={adjust}
+            rows={3}
+            onChange={(v) => setAdjust(v.slice(0, MAX_PROMPT_CHARS))}
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" size="sm" disabled={busy || !adjust.trim()}>
               {busy && <Spinner />}
-              {chip.label}
+              Enviar
             </Button>
-          ) : (
-            <Button key={chip.label} size="sm" variant="outline" onClick={focusComposer}>
-              {chip.label}
+            <Button type="button" size="sm" variant="ghost" onClick={() => setRevising(false)}>
+              Cancelar
             </Button>
-          )
-        )}
-        <Button size="sm" variant="ghost" onClick={onReject}>
-          Recusar
-        </Button>
-      </div>
+          </div>
+        </form>
+      )}
+      {!revising && (
+        <div className="flex flex-wrap gap-2">
+          {replyChips('gate').map((chip) =>
+            chip.action === 'approve' ? (
+              <Button key={chip.label} size="sm" disabled={busy} onClick={onApprove}>
+                {busy && <Spinner />}
+                {chip.label}
+              </Button>
+            ) : revise ? (
+              <Button
+                key={chip.label}
+                size="sm"
+                variant="outline"
+                disabled={busy || limitReached}
+                onClick={() => setRevising(true)}
+              >
+                {limitReached ? `Limite de ajustes atingido (${revise.max})` : 'Pedir ajustes…'}
+              </Button>
+            ) : (
+              <Button key={chip.label} size="sm" variant="outline" onClick={focusComposer}>
+                {chip.label}
+              </Button>
+            )
+          )}
+          <Button size="sm" variant="ghost" onClick={onReject}>
+            Recusar
+          </Button>
+        </div>
+      )}
       {outcomes && (
         <p className="text-xs text-muted-foreground" data-testid="gate-outcomes">
           {outcomes.approve} {outcomes.reject}

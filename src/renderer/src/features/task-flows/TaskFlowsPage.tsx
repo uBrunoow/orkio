@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useProjectActivity } from '../../components/SentenceDetail'
 import { FlowDetail } from './FlowDetail'
 import { Button } from '@/components/ui/button'
@@ -10,11 +10,18 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Select, type SelectOption } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { CheckboxField, SelectField, TextAreaField, TextField } from '@/components/form'
+import {
+  CheckboxField,
+  SegmentedControl,
+  SelectField,
+  TextAreaField,
+  TextField
+} from '@/components/form'
 import { cn } from '@/lib/utils'
 import type { CatalogGroup } from '../../../../shared/agent-run'
 import type { TaskFlowsProject } from '../../../../shared/ipc-contract'
 import {
+  MAX_REVISE,
   STEP_TYPE_LABEL,
   newStepId,
   validateTaskFlow,
@@ -27,6 +34,7 @@ import { Alert } from '../../components/Alert'
 import { PageState } from '../../components/PageState'
 import { SaveBar } from '../../components/SaveBar'
 import { plural } from '../../lib/format'
+import { RuntimePicker, useSupportsEffort } from '../claude/RuntimePicker'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
 
 /** Chip mono (categoria do passo, contagem de erros). */
@@ -317,8 +325,11 @@ function stepSummary(step: Step): string {
   switch (step.type) {
     case 'claude_command':
       return [
-        `/${step.command || '…'} ${step.args}`.trim(),
+        step.prompt !== undefined
+          ? `pedido: “${step.prompt.trim() || '…'}”`
+          : `/${step.command || '…'} ${step.args}`.trim(),
         `${step.timeoutMin} min`,
+        ...(step.readOnly ? ['só leitura'] : []),
         ...(step.delivery ? ['modo entrega'] : [])
       ].join(' · ')
     case 'gate':
@@ -330,8 +341,11 @@ function stepSummary(step: Step): string {
             ? 'mostra o resumo'
             : step.show === 'backlog'
               ? 'mostra a spec e o plano'
-              : null,
-        `recusar → ${step.onReject === 'stop' ? 'encerra' : step.onReject}`
+              : step.show === 'result'
+                ? 'mostra o resultado'
+                : null,
+        `recusar → ${step.onReject === 'stop' ? 'encerra' : step.onReject}`,
+        step.revise ? `ajustes → ${step.revise.step} (até ${step.revise.max})` : null
       ]
         .filter(Boolean)
         .join(' · ')
@@ -539,6 +553,10 @@ function FlowEditor({
             catalog={catalog}
             project={project}
             stepOptions={stepOptions}
+            claudeSteps={flow.steps
+              .slice(0, index)
+              .filter((s) => s.type === 'claude_command')
+              .map((s) => ({ value: s.id, label: `${s.name} (${s.id})` }))}
             onChange={(s) => setStep(index, s)}
           />
         </section>
@@ -552,14 +570,19 @@ function StepForm({
   catalog,
   project,
   stepOptions,
+  claudeSteps,
   onChange
 }: {
   step: Step
   catalog: CatalogGroup[] | null
   project: TaskFlowsProject
   stepOptions: { value: string; label: string }[]
+  /** Passos do Claude Code (alvo de "Pedir ajustes"). */
+  claudeSteps: { value: string; label: string }[]
   onChange(step: Step): void
 }): React.JSX.Element {
+  const supportsEffort = useSupportsEffort()
+  const runtimeLabelId = useId()
   switch (step.type) {
     case 'claude_command': {
       const options: SelectOption[] =
@@ -573,33 +596,99 @@ function StepForm({
               }))
             )
           : []
+      const asPrompt = step.prompt !== undefined
       return (
         <div className="flex flex-col gap-3">
-          {options.length > 0 ? (
-            <SelectField
-              label="Comando"
-              hasSearch
-              searchPlaceholder="Buscar comando…"
-              isLoading={catalog === null}
-              options={options}
-              value={step.command || null}
-              onChange={(command: string) => onChange({ ...step, command })}
+          <SegmentedControl
+            label="O que o passo manda"
+            className="self-start"
+            options={[
+              { value: 'command', label: 'Comando' },
+              { value: 'prompt', label: 'Pedido em texto' }
+            ]}
+            value={asPrompt ? 'prompt' : 'command'}
+            onChange={(v) => {
+              const rest = { ...step }
+              delete rest.prompt
+              onChange(
+                v === 'prompt'
+                  ? { ...rest, command: '', args: '', prompt: '' }
+                  : { ...rest, args: '{{briefing_path}}' }
+              )
+            }}
+          />
+          {asPrompt ? (
+            <TextAreaField
+              label="Pedido"
+              description="Vai na conversa da tarefa (continua a sessão mais recente; sem sessão, começa uma com o briefing). Variáveis: {{task_id}}, {{notion_url}}, {{flow.<chave>}}, {{review.pr}}…"
+              value={step.prompt ?? ''}
+              rows={4}
+              onChange={(prompt) => onChange({ ...step, prompt })}
             />
           ) : (
-            <TextField
-              label="Comando"
-              description="Nenhum comando no catálogo; digite o nome."
-              value={step.command}
-              mono
-              onChange={(command) => onChange({ ...step, command: command.replace(/^\//, '') })}
-            />
+            <>
+              {options.length > 0 ? (
+                <SelectField
+                  label="Comando"
+                  hasSearch
+                  searchPlaceholder="Buscar comando…"
+                  isLoading={catalog === null}
+                  options={options}
+                  value={step.command || null}
+                  onChange={(command: string) => onChange({ ...step, command })}
+                />
+              ) : (
+                <TextField
+                  label="Comando"
+                  description="Nenhum comando no catálogo; digite o nome."
+                  value={step.command}
+                  mono
+                  onChange={(command) => onChange({ ...step, command: command.replace(/^\//, '') })}
+                />
+              )}
+              <TextField
+                label="Argumentos"
+                description="Variáveis: {{briefing_path}}, {{task_id}}, {{notion_url}}, {{flow.<chave>}}"
+                value={step.args}
+                mono
+                onChange={(args) => onChange({ ...step, args })}
+              />
+            </>
           )}
-          <TextField
-            label="Argumentos"
-            description="Variáveis: {{briefing_path}}, {{task_id}}, {{notion_url}}, {{flow.<chave>}}"
-            value={step.args}
-            mono
-            onChange={(args) => onChange({ ...step, args })}
+          <div className="flex flex-col gap-1.5">
+            <span id={runtimeLabelId} className="text-sm font-medium">
+              Modelo e raciocínio
+            </span>
+            <RuntimePicker
+              describedBy={runtimeLabelId}
+              value={{
+                ...(step.model !== undefined ? { model: step.model } : {}),
+                ...(step.effort !== undefined ? { effort: step.effort } : {})
+              }}
+              supportsEffort={supportsEffort}
+              inheritLabel="Do agente"
+              className="self-start border border-input bg-card"
+              onChange={(v) => {
+                const rest = { ...step }
+                delete rest.model
+                delete rest.effort
+                onChange({
+                  ...rest,
+                  ...(v.model !== undefined ? { model: v.model ?? 'default' } : {}),
+                  ...(v.effort ? { effort: v.effort } : {})
+                })
+              }}
+            />
+          </div>
+          <CheckboxField
+            label="Só leitura"
+            description="O Claude Code não recebe as ferramentas de edição e nada é aprovado sozinho: todo comando pede sua aprovação (bom para pedir um plano antes de mexer no código). Não combina com modo entrega."
+            checked={step.readOnly === true}
+            onChange={(on) => {
+              const rest = { ...step }
+              delete rest.readOnly
+              onChange(on ? { ...rest, readOnly: true } : rest)
+            }}
           />
           <CheckboxField
             label="Modo entrega"
@@ -650,6 +739,7 @@ function StepForm({
                 { value: 'diff', label: 'Diff da pasta de trabalho' },
                 { value: 'summary', label: 'Resumo da última execução' },
                 { value: 'backlog', label: 'Spec e plano (task do Backlog)' },
+                { value: 'result', label: 'Resultado do Claude Code (texto final)' },
                 { value: 'none', label: 'Nada' }
               ]}
               value={step.show}
@@ -670,6 +760,32 @@ function StepForm({
               value={step.timeoutMin === null ? '' : String(step.timeoutMin)}
               onChange={(v) => onChange({ ...step, timeoutMin: v.trim() ? Number(v) || 0 : null })}
             />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SelectField
+              label="Pedir ajustes"
+              description="Mostra “Pedir ajustes…” no gate: o seu texto volta a este passo, na mesma conversa, e a aprovação aparece de novo."
+              options={[
+                { value: '', label: 'Não oferecer' },
+                ...claudeSteps.map((o) => ({ ...o, label: `Voltar para ${o.label}` }))
+              ]}
+              value={step.revise?.step ?? ''}
+              onChange={(v: string) => {
+                const rest = { ...step }
+                delete rest.revise
+                onChange(v ? { ...rest, revise: { step: v, max: step.revise?.max ?? 3 } } : rest)
+              }}
+            />
+            {step.revise && (
+              <TextField
+                label="Limite de ajustes"
+                description={`De 1 a ${MAX_REVISE}.`}
+                value={String(step.revise.max)}
+                onChange={(v) =>
+                  onChange({ ...step, revise: { step: step.revise!.step, max: Number(v) || 0 } })
+                }
+              />
+            )}
           </div>
         </div>
       )

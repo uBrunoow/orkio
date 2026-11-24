@@ -23,6 +23,7 @@ const {
   alva,
   agents,
   updates,
+  power,
   overview
 } = IPC_CHANNELS
 
@@ -162,6 +163,7 @@ const api: OrkioApi = {
       ipcRenderer.invoke(alva.createTemplates, projectId, {
         plan: b.plan,
         deliver: b.deliver,
+        review: b.review,
         reviewed: b.reviewed
       }),
     addPlanningStage: (projectId, statusId) =>
@@ -221,11 +223,14 @@ const api: OrkioApi = {
       }),
     startById: (projectId, taskId, flowId) =>
       ipcRenderer.invoke(taskFlows.startById, projectId, taskId, flowId),
+    openPr: (projectId, taskId) => ipcRenderer.invoke(taskFlows.openPr, projectId, taskId),
     reject: (id) => ipcRenderer.invoke(taskFlows.reject, id),
     resume: (id) => ipcRenderer.invoke(taskFlows.resume, id),
     skip: (id) => ipcRenderer.invoke(taskFlows.skip, id),
     rerunFrom: (id, stepId) => ipcRenderer.invoke(taskFlows.rerunFrom, id, stepId),
     resumeWithReply: (id, text) => ipcRenderer.invoke(taskFlows.resumeWithReply, id, text),
+    reviseGate: (projectId, taskId, text) =>
+      ipcRenderer.invoke(taskFlows.reviseGate, projectId, taskId, text),
     cancel: (id) => ipcRenderer.invoke(taskFlows.cancel, id),
     choose: (id, value) => ipcRenderer.invoke(taskFlows.choose, id, value),
     decideLeft: (id, choice) =>
@@ -267,7 +272,9 @@ const api: OrkioApi = {
         taskId: request.taskId,
         text: request.text,
         ...(request.fresh !== undefined ? { fresh: request.fresh } : {}),
-        ...(request.asAgent !== undefined ? { asAgent: request.asAgent } : {})
+        ...(request.asAgent !== undefined ? { asAgent: request.asAgent } : {}),
+        ...(request.runtime !== undefined ? { runtime: request.runtime } : {}),
+        ...(request.attachments !== undefined ? { attachments: request.attachments } : {})
       }),
     cancel: (runId) => ipcRenderer.invoke(claude.cancel, runId),
     answerPermission: (runId, requestId, answer) =>
@@ -279,6 +286,7 @@ const api: OrkioApi = {
       ipcRenderer.invoke(claude.cleanup, projectId, taskId, force === true),
     openEditor: (projectId, taskId, editor) =>
       ipcRenderer.invoke(claude.openEditor, projectId, taskId, editor),
+    openTerminal: (projectId, taskId) => ipcRenderer.invoke(claude.openTerminal, projectId, taskId),
     diff: (projectId, taskId) => ipcRenderer.invoke(claude.diff, projectId, taskId),
     branches: (projectId, taskId) => ipcRenderer.invoke(claude.branches, projectId, taskId),
     linkBranch: (projectId, taskId, branch) =>
@@ -303,7 +311,11 @@ const api: OrkioApi = {
   },
   signals: {
     get: (projectId, options) =>
-      ipcRenderer.invoke(signals.get, projectId, { force: options?.force === true })
+      ipcRenderer.invoke(signals.get, projectId, { force: options?.force === true }),
+    reviewThreads: (projectId, taskId, options) =>
+      ipcRenderer.invoke(signals.reviewThreads, projectId, taskId, {
+        force: options?.force === true
+      })
   },
   projects: {
     list: () => ipcRenderer.invoke(projects.list),
@@ -330,6 +342,10 @@ const api: OrkioApi = {
         ipcRenderer.removeListener(projects.branchChanged, handler)
       }
     }
+  },
+  power: {
+    keepAwake: () => ipcRenderer.invoke(power.get),
+    setKeepAwake: (enabled) => ipcRenderer.invoke(power.setKeepAwake, enabled === true)
   },
   updates: {
     status: () => ipcRenderer.invoke(updates.status),

@@ -23,7 +23,12 @@ export interface LatestRelease {
 export const RELEASE_REVALIDATE_SECONDS = 900
 const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 
-export function releasesRepo(value = process.env['RELEASES_REPO']): string | null {
+/** Repositório público do Orkio (app + releases); vale quando `RELEASES_REPO` não está definido. */
+export const DEFAULT_RELEASES_REPO = 'uBrunoow/orkio'
+
+export function releasesRepo(
+  value = process.env['RELEASES_REPO'] ?? DEFAULT_RELEASES_REPO
+): string | null {
   const repo = value?.trim()
   return repo && REPO.test(repo) ? repo : null
 }

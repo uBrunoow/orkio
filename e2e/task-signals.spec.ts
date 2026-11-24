@@ -115,10 +115,26 @@ test('branch local e PR aparecem na tarefa certa', async () => {
       validTokens: [NOTION_TOKEN],
       githubBranches: ['main', 'feat/ORK-2-tarefas'],
       githubPulls: [
-        { number: 7, title: 'ORK-2 Listar tarefas', head: 'feat/ORK-2-tarefas', state: 'open' },
+        {
+          number: 7,
+          title: 'ORK-2 Listar tarefas',
+          head: 'feat/ORK-2-tarefas',
+          state: 'open',
+          author: 'uBrunoow',
+          createdAt: new Date(Date.now() - 6 * 3_600_000).toISOString()
+        },
         { number: 3, title: 'Antiga', head: 'ORK-2-velha', state: 'closed', updatedDaysAgo: 60 }
       ],
-      githubPrDetails: { '7': { reviewDecision: 'APPROVED', unresolved: 2, checks: 'SUCCESS' } }
+      githubPrDetails: {
+        '7': {
+          reviewDecision: 'APPROVED',
+          unresolved: 2,
+          checks: 'SUCCESS',
+          additions: 4579,
+          deletions: 1099,
+          changedFiles: 127
+        }
+      }
     },
     { startPage: 'projects' }
   )
@@ -162,6 +178,66 @@ test('branch local e PR aparecem na tarefa certa', async () => {
   await expect(ork1.getByTestId('task-branch')).not.toContainText('ORK-12')
   await expect(ork1.getByTestId('task-branch-where')).toHaveText('local')
   await expect(page.getByText('ORK-12/outra')).toHaveCount(0)
+
+  // Cartão ao passar o mouse no chip (e ao focar): título, autor, tamanho e estado.
+  await ork2.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).hover()
+  const card = page.getByTestId('pr-hover-card')
+  await expect(card).toContainText('ORK-2 Listar tarefas')
+  await expect(card).toContainText('acme/orkio-app #7')
+  await expect(card).toContainText('uBrunoow')
+  await expect(card.getByTestId('pr-hover-size')).toHaveText('+4579 −1099')
+  await expect(card).toContainText('127 arquivos')
+  await expect(card.getByTestId('pr-hover-badge')).toHaveText('Aprovada')
+  await expect(card).toContainText('CI ok')
+  await expect(card).toContainText('2 comentários sem resposta')
+  await page.mouse.move(0, 0)
+  await expect(card).toHaveCount(0)
+  await ork2.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).focus()
+  await expect(page.getByTestId('pr-hover-card')).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  // Mudanças pedidas: a pílula muda quando o GitHub atualiza a PR.
+  await setFakes(orkio.app, {
+    githubPulls: [
+      {
+        number: 7,
+        title: 'ORK-2 Listar tarefas',
+        head: 'feat/ORK-2-tarefas',
+        state: 'open',
+        author: 'uBrunoow',
+        updatedAt: '2099-01-01T00:00:00Z'
+      }
+    ],
+    githubPrDetails: {
+      '7': {
+        reviewDecision: 'CHANGES_REQUESTED',
+        unresolved: 2,
+        checks: 'SUCCESS',
+        additions: 4579,
+        deletions: 1099,
+        changedFiles: 127
+      }
+    }
+  })
+  await row.getByRole('button', { name: 'Atualizar' }).click()
+  await expect(ork2.getByTestId('pr-review')).toHaveText('Alterações pedidas')
+  await ork2.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).hover()
+  await expect(page.getByTestId('pr-hover-badge')).toHaveText('Mudanças pedidas')
+  await page.mouse.move(0, 0)
+  await setFakes(orkio.app, {
+    githubPulls: [
+      {
+        number: 7,
+        title: 'ORK-2 Listar tarefas',
+        head: 'feat/ORK-2-tarefas',
+        state: 'open',
+        updatedAt: '2099-01-02T00:00:00Z'
+      }
+    ],
+    githubPrDetails: { '7': { reviewDecision: 'APPROVED', unresolved: 2, checks: 'SUCCESS' } }
+  })
+  await row.getByRole('button', { name: 'Atualizar' }).click()
+  await expect(ork2.getByTestId('pr-review')).toHaveText('Aprovada')
 
   // Abrir a PR usa a allowlist.
   await ork2.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).click()

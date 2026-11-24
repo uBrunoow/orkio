@@ -29,12 +29,22 @@ export const EXTERNAL_URL_RULES: readonly ExternalUrlRule[] = [
   { host: 'github.com', pathPrefix: '/settings/connections/applications' },
   { host: 'github.com', pathPrefix: '/settings/personal-access-tokens' },
   { host: 'github.com', pathPattern: /^\/orgs\/[A-Za-z0-9-]+\/sso$/ },
-  // PRs ligadas às tarefas (Etapa 2D).
-  { host: 'github.com', pathPattern: /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/pull\/\d+$/ },
+  // PRs ligadas às tarefas (Etapa 2D) e revisões publicadas como orkio[bot]. Owner aceita `_`
+  // (contas gerenciadas), como o `OWNER_SLUG` da revisão.
+  { host: 'github.com', pathPattern: /^\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+\/pull\/\d+$/ },
+  // Instalar o GitHub App do Orkio (revisão como orkio[bot] sem o App no repositório): só a página
+  // de instalação, no mesmo formato que o poster aceita do site.
+  { host: 'github.com', pathPattern: /^\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new$/ },
   // Branch da tarefa enviada por um fluxo (Etapa 5C).
   {
     host: 'github.com',
     pathPattern: /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/tree\/[A-Za-z0-9._%-]+(\/[A-Za-z0-9._%-]+)*$/
+  },
+  // "Criar a PR" da branch da tarefa (Abrir PR sem alva-flow): `compare/<base>...<branch>`.
+  {
+    host: 'github.com',
+    pathPattern:
+      /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/compare\/[A-Za-z0-9._%-]+(\/[A-Za-z0-9._%-]+)*(\.\.\.[A-Za-z0-9._%-]+(\/[A-Za-z0-9._%-]+)*)?$/
   },
   // DMG/página de versão do repo PÚBLICO de releases (6C, macOS sem assinatura).
   { host: 'github.com', pathPattern: RELEASES_PATH_PATTERN }

@@ -327,6 +327,30 @@ export function ghVerdict(args: readonly string[], target: DeliveryTarget): Deli
   return { ok: true, kind: 'github', event: null }
 }
 
+/**
+ * Leitura do GitHub fora do modo entrega: `gh pr view|diff|checks|list|status`, `gh run
+ * view|list|watch`, `gh label list` e `gh api` só com GET/HEAD em `repos/<owner>/<repo>/…` do
+ * projeto ou GraphQL sem mutation. Mesmas checagens de repositório do modo entrega; nada que
+ * escreva passa (todo comando que escreve tem evento, e mutation é recusada à parte).
+ */
+export function isGhRead(args: readonly string[], target: DeliveryTarget): boolean {
+  const sub = args[0] ?? ''
+  if (!['pr', 'run', 'label', 'api'].includes(sub)) return false
+  if (sub === 'api') {
+    const call = ghApiParse(args.slice(1))
+    if (call.input || !call.endpoint) return false
+    if (call.endpoint.replace(/^\//, '') === 'graphql') {
+      const query = call.fields.find(([k]) => k === 'query')?.[1]
+      if (query === undefined || query.startsWith('@') || /\bmutation\b/.test(query)) return false
+    } else {
+      const method = call.method ?? (call.fields.length > 0 ? 'POST' : 'GET')
+      if (method !== 'GET' && method !== 'HEAD') return false
+    }
+  }
+  const v = ghVerdict(args, target)
+  return v !== null && v.ok && v.event === null
+}
+
 // ---------------------------------------------------------------- gh api
 
 const API_WITH_VALUE = new Set([

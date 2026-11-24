@@ -46,6 +46,7 @@ function run(over: Partial<FlowRunView>): FlowRunView {
     choice: null,
     confirm: null,
     agent: null,
+    revise: null,
     ...over
   }
 }
@@ -159,5 +160,78 @@ describe('describeFlowProblem', () => {
       expect(describeFlowProblem(run({ pauseReason }))).toBeNull()
     }
     expect(describeFlowProblem(run({ status: 'running', pauseReason: null }))).toBeNull()
+  })
+})
+
+describe('publicar revisão como orkio[bot] (Task 18)', () => {
+  const PUBLISH: Step[] = [
+    {
+      id: 'json',
+      name: 'Converter a revisão em JSON (só leitura)',
+      type: 'claude_command',
+      command: '',
+      args: '',
+      prompt: 'Converta',
+      readOnly: true,
+      timeoutMin: 15
+    },
+    { id: 'pub', name: 'Publicar revisão', type: 'orkio_action', action: 'publish_review' }
+  ]
+  const at = (message: string): FlowRunView =>
+    run({ steps: PUBLISH, currentStep: 'pub', history: [entry({ stepId: 'pub', message })] })
+
+  it('JSON inválido: explica e oferece rodar a conversão de novo', () => {
+    const p = describeFlowProblem(at('A revisão em JSON é inválida: "event" precisa ser …'))
+    expect(p).toMatchObject({
+      kind: 'review_invalid',
+      rerun: { stepId: 'json', label: 'Rodar “Converter a revisão em JSON (só leitura)” de novo' },
+      link: null
+    })
+  })
+
+  it('App não instalado: link de instalação só no formato conhecido', () => {
+    const msg =
+      'O GitHub App do Orkio não está instalado neste repositório (ou não tem acesso às PRs). Instale o App neste link e retome: https://github.com/apps/orkio/installations/new'
+    expect(describeFlowProblem(at(msg))).toMatchObject({
+      kind: 'review_not_installed',
+      link: {
+        label: 'Instalar o GitHub App do Orkio',
+        url: 'https://github.com/apps/orkio/installations/new'
+      }
+    })
+    const evil = msg.replace(
+      'https://github.com/apps/orkio/installations/new',
+      'https://evil.example/apps/orkio/installations/new'
+    )
+    expect(describeFlowProblem(at(evil))?.link).toBeNull()
+    expect(
+      describeFlowProblem(
+        at(`${msg.split(' Instale')[0]} https://github.com/apps/orkio/installations/new/x`)
+      )?.link
+    ).toBeNull()
+  })
+
+  it('timeout do site e site sem App: causas próprias, sem link', () => {
+    expect(
+      describeFlowProblem(
+        at(
+          'O site do Orkio demorou para responder. Confira a PR antes de tentar de novo: a revisão pode ter sido publicada.'
+        )
+      )
+    ).toMatchObject({ kind: 'review_maybe_posted', link: null })
+    expect(
+      describeFlowProblem(
+        at(
+          'Não dá para publicar a revisão como orkio[bot]: o GitHub App do Orkio ainda não está configurado no site do Orkio.'
+        )
+      )
+    ).toMatchObject({ kind: 'review_not_configured' })
+    const noSite = describeFlowProblem(
+      at(
+        'Este app não sabe o endereço do site do Orkio (MAIN_VITE_SITE_URL não definido no build). Em dev, defina em .env.development e reinicie o pnpm dev.'
+      )
+    )
+    expect(noSite).toMatchObject({ kind: 'review_no_site', link: null })
+    expect(noSite?.hint).toContain('MAIN_VITE_SITE_URL')
   })
 })

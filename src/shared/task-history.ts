@@ -24,13 +24,21 @@ export function prNumber(e: HistoryEvent): number | null {
   return typeof pr?.number === 'number' ? pr.number : null
 }
 
-/** Link da PR montado a partir de owner/repo/número (o banco não guarda URLs nem títulos). */
+/**
+ * Link da PR montado a partir de owner/repo/número (o banco não guarda URLs nem títulos). Revisão
+ * publicada como orkio[bot] (`reviewId`) aponta para a própria revisão na PR.
+ */
 export function prUrl(e: HistoryEvent): string | null {
   const pr = e.detail?.['pr'] as { number?: unknown; owner?: unknown; repo?: unknown } | undefined
+  const reviewId = e.detail?.['reviewId']
+  const anchor =
+    typeof reviewId === 'number' && Number.isSafeInteger(reviewId) && reviewId > 0
+      ? `#pullrequestreview-${reviewId}`
+      : ''
   return typeof pr?.number === 'number' &&
     typeof pr.owner === 'string' &&
     typeof pr.repo === 'string'
-    ? `https://github.com/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/pull/${pr.number}`
+    ? `https://github.com/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/pull/${pr.number}${anchor}`
     : null
 }
 
@@ -133,7 +141,9 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
           ? `Atribuída a ${String(e.detail?.['agent'] ?? '')} pelo orquestrador`
           : `Atribuída a ${String(e.detail?.['agent'] ?? '')}`
     case 'agent_unassigned':
-      return 'Atribuição de agente removida'
+      return e.detail?.['by'] === 'orchestrator' && e.detail?.['agent']
+        ? `${String(e.detail['agent'])} saiu da tarefa (etapa sem agente do orquestrador)`
+        : 'Atribuição de agente removida'
     case 'step_started':
       return `Passo começou: ${stepLabel(e)}`
     case 'step_finished':
@@ -148,6 +158,8 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
       return `Aprovação concedida: ${stepLabel(e)}`
     case 'gate_rejected':
       return `Aprovação recusada: ${stepLabel(e)}`
+    case 'gate_revised':
+      return `Ajustes pedidos: ${stepLabel(e)}`
     case 'flow_paused':
       return `Fluxo parado: ${PAUSE_REASON[String(e.detail?.['reason'] ?? '')] ?? 'motivo desconhecido'}`
     case 'flow_finished':
@@ -182,6 +194,10 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
           return `Conversa de review resolvida${pr} pelo ${by}`
         case 'review_request':
           return `Review pedido${pr} pelo ${by}`
+        case 'review_post':
+          return `Revisão publicada${pr} como orkio[bot] (${
+            e.detail?.['reviewEvent'] === 'REQUEST_CHANGES' ? 'pedir alterações' : 'comentário'
+          })`
         default:
           return `Entrega pelo ${by}`
       }

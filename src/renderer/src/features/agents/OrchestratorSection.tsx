@@ -124,9 +124,9 @@ export function OrchestratorSection({
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Puxa tarefas da fila para os agentes, por prioridade do Notion, e passa cada uma para a
-        etapa seguinte quando o fluxo da etapa termina bem. Gates, push e falhas continuam parando
-        em você.
+        Você decide quando uma tarefa começa: mova para a primeira etapa de trabalho. Dali o
+        orquestrador entrega a tarefa ao agente da etapa e passa para a seguinte quando o fluxo
+        termina bem. Gates, push e falhas continuam parando em você.
       </p>
       {error && <Alert tone="danger">{error}</Alert>}
 
@@ -157,7 +157,7 @@ export function OrchestratorSection({
               ) : (
                 'Primeira rodada no próximo ciclo (até 1 min)'
               )}
-              {` · ${plural(status.queued, 'tarefa', 'tarefas')} na fila · até ${config.maxActive} ao mesmo tempo`}
+              {` · ${plural(status.working, 'tarefa', 'tarefas')} com agente agora`}
             </p>
           )}
           {status.error && <Alert tone="warning">{status.error}</Alert>}
@@ -209,13 +209,13 @@ export function OrchestratorSection({
   )
 }
 
-/** "Puxa de Prioridades → Em andamento (Implementador) → Revisando (Revisor) → Revisado." */
+/** "Em andamento (Implementador) → Revisando (Revisor) → Revisado." */
 function summary(
   config: OrchestratorConfig,
   stageName: (id: string | null) => string,
   agentName: (key: string) => string
 ): string {
-  const parts = [`Puxa de ${stageName(config.queueStageId)}`]
+  const parts: string[] = []
   let lane: OrchestratorLane | undefined = config.lanes[0]
   const seen = new Set<string>()
   let last: string | null = null
@@ -282,9 +282,7 @@ function OrchestratorEditor({
       ),
     [draft, state, agents]
   )
-  const freeStage = state.stages.find(
-    (s) => s.id !== draft.queueStageId && !draft.lanes.some((l) => l.stageId === s.id)
-  )
+  const freeStage = state.stages.find((s) => !draft.lanes.some((l) => l.stageId === s.id))
 
   return (
     <div role="form" aria-label="Configurar orquestrador" className="flex flex-col gap-4">
@@ -294,33 +292,11 @@ function OrchestratorEditor({
         checked={draft.enabled}
         onChange={(enabled) => set({ enabled })}
       />
-      <div className="flex flex-wrap gap-3">
-        <SelectField
-          className="min-w-48 flex-1"
-          label="Puxar tarefas de"
-          placeholder="Escolha a coluna de fila"
-          options={stageOptions}
-          value={draft.queueStageId}
-          onChange={(v) => set({ queueStageId: v })}
-        />
-        <SelectField
-          className="min-w-48 flex-1"
-          label="Tarefas ao mesmo tempo"
-          description="Só limita o puxar da fila; o que já está em andamento segue."
-          options={Array.from({ length: ORCHESTRATOR_LIMITS.maxActive }, (_, i) => ({
-            value: String(i + 1),
-            label: String(i + 1)
-          }))}
-          value={String(draft.maxActive)}
-          onChange={(v) => set({ maxActive: Number(v) })}
-        />
-      </div>
-
       <div className="flex flex-col gap-2">
         <h3 className="text-sm font-medium">Etapas de trabalho</h3>
         <p className="text-xs text-muted-foreground">
-          A primeira recebe as tarefas puxadas da fila. Em cada etapa, o menos ocupado dos agentes
-          escolhidos pega a tarefa e o fluxo ligado à coluna roda com ele.
+          Quando você move uma tarefa para uma delas, o menos ocupado dos agentes escolhidos pega a
+          tarefa e o fluxo ligado à coluna roda com ele.
         </p>
         {draft.lanes.map((lane, i) => (
           <div

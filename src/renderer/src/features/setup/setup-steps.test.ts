@@ -18,7 +18,8 @@ const claudeOk: ClaudeCodeStatus = {
   loggedIn: true,
   authMethod: 'claude.ai',
   meetsMinimum: true,
-  minimumVersion: '2.0.0'
+  minimumVersion: '2.0.0',
+  supportsEffort: true
 }
 const project = {
   id: 'p1',

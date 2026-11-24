@@ -65,6 +65,8 @@ function setup(
     version?: string
     arch?: string
     isAppImage?: boolean
+    /** Resposta ao "Reiniciar agora?" (sem isso, o serviço não pergunta). */
+    restart?: boolean
   } = {}
 ) {
   const updater = new FakeUpdater()
@@ -80,6 +82,7 @@ function setup(
   const statuses: UpdateStatus[] = []
   const opened: string[] = []
   const shutdown = vi.fn(async () => undefined)
+  const asked: string[] = []
   const service = new UpdateService({
     updater,
     currentVersion: options.version ?? '1.0.0',
@@ -104,6 +107,14 @@ function setup(
     },
     releaseNotes: () => ({ version: options.version ?? '1.0.0', notes: '### Novo\n- Coisa' }),
     emit: (s) => statuses.push(s),
+    ...(options.restart === undefined
+      ? {}
+      : {
+          askRestart: async (v: string) => {
+            asked.push(v)
+            return options.restart!
+          }
+        }),
     now: () => new Date(clock),
     random: () => 0.5,
     schedule: (fn, ms) => {
@@ -131,6 +142,7 @@ function setup(
     service,
     statuses,
     opened,
+    asked,
     shutdown,
     advance,
     get settings() {
@@ -170,7 +182,7 @@ describe('UpdateService', () => {
     expect((await t.service.check()).mode).toBe('auto')
   })
 
-  it('checa 10 s depois de abrir e depois a cada ~4 h', async () => {
+  it('checa 5 s depois de abrir e depois a cada ~4 h', async () => {
     const t = setup()
     t.service.start()
     await t.advance(FIRST_CHECK_DELAY_MS - 1)
@@ -263,6 +275,43 @@ describe('UpdateService', () => {
     expect(await t.service.install('if_idle')).toEqual({ state: 'installing' })
     expect(t.shutdown).toHaveBeenCalledOnce()
     expect(t.updater.installs).toEqual([[false, true]])
+  })
+
+  it('baixou com o app parado: pergunta "Reiniciar agora?" e instala ao confirmar', async () => {
+    const t = setup({ restart: true })
+    t.updater.next = { version: '1.1.0' }
+    await t.service.check()
+    await vi.waitFor(() => expect(t.updater.installs).toEqual([[false, true]]))
+    expect(t.asked).toEqual(['1.1.0'])
+    expect(t.shutdown).toHaveBeenCalledOnce()
+  })
+
+  it('"Depois": não instala e não pergunta de novo pela mesma versão', async () => {
+    const t = setup({ restart: false })
+    t.updater.next = { version: '1.1.0' }
+    await t.service.check()
+    await t.service.check()
+    await vi.waitFor(() => expect(t.asked).toEqual(['1.1.0']))
+    expect(t.updater.installs).toHaveLength(0)
+    expect(t.service.getStatus().phase).toBe('downloaded')
+  })
+
+  it('baixou com trabalho rodando: não pergunta (fica o banner)', async () => {
+    const t = setup({ restart: true })
+    t.setBusy([{ kind: 'claude', label: 'Claude Code rodando em ORK-1' }])
+    t.updater.next = { version: '1.1.0' }
+    await t.service.check()
+    await new Promise((r) => setImmediate(r))
+    expect(t.asked).toEqual([])
+    expect(t.updater.installs).toHaveLength(0)
+  })
+
+  it('macOS sem assinatura não pergunta (não há o que instalar sozinho)', async () => {
+    const t = setup({ platform: 'darwin', macSigned: false, restart: true })
+    t.updater.next = { version: '1.1.0' }
+    await t.service.check()
+    await new Promise((r) => setImmediate(r))
+    expect(t.asked).toEqual([])
   })
 
   it('com execução rodando: não reinicia; mostra o que está rodando', async () => {

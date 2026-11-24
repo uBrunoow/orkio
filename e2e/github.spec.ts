@@ -7,6 +7,7 @@ import {
   externalCalls,
   githubCard,
   launchOrkio,
+  openIntegration,
   openedUrls,
   removeDir,
   setFakes,
@@ -37,6 +38,7 @@ async function shot(page: Page, name: string): Promise<void> {
 
 async function open(fakes: Partial<FakeServices> = {}): Promise<OrkioApp> {
   orkio = await launchOrkio(userDataDir, fakes)
+  await openIntegration(orkio.page, 'GitHub')
   return orkio
 }
 
@@ -61,13 +63,10 @@ test('Device Flow: mostra o código, copia, abre o GitHub e conecta ao autorizar
   const card = githubCard(page)
   await expect(card.getByText('Desconectado')).toBeVisible()
   // Lista de integrações: a linha do GitHub diz o estado; sem conexão, o card já vem aberto nela.
-  const row = page
-    .getByRole('list', { name: 'Catálogo de integrações' })
-    .getByRole('listitem', { name: 'GitHub', exact: true })
-  await expect(row).toContainText('Branches, PRs')
+  const row = page.getByRole('article', { name: 'GitHub', exact: true })
   await expect(row).toContainText('Não conectado')
   await expect(row.getByRole('button', { name: 'Fechar GitHub' })).toBeVisible()
-  await expect(row.getByRole('region', { name: 'GitHub' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'GitHub' })).toBeVisible()
   await shot(page, 'github-1-desconectado')
 
   await card.getByRole('button', { name: 'Conectar com GitHub' }).click()

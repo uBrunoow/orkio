@@ -13,6 +13,7 @@ import type {
   ReviewDecision
 } from '../../shared/task-signals'
 import {
+  GitHubApiError,
   parseBranchItem,
   parsePullItem,
   type ConditionalPage
@@ -189,9 +190,11 @@ export class GitHubRepoSignals {
         )
           ? 'Parte dos detalhes das PRs (revisão ou checks) não está disponível com esta conta.'
           : null
-      } catch {
+      } catch (error) {
         this.detailsWarning =
-          'Não foi possível carregar revisões e comentários das PRs agora. Mostrando o que já se sabe.'
+          error instanceof GitHubApiError && error.code === 'forbidden'
+            ? error.message
+            : 'Não foi possível carregar revisões e comentários das PRs agora. Mostrando o que já se sabe.'
         break
       }
     }
@@ -211,11 +214,11 @@ export function detailsQuery(numbers: readonly number[]): string {
     .filter((n) => Number.isSafeInteger(n) && n > 0)
     .map(
       (n) =>
-        `pr${n}: pullRequest(number: ${n}) { number reviewDecision ` +
+        `pr${n}: pullRequest(number: ${n}) { number additions deletions changedFiles reviewDecision ` +
         `reviewThreads(first: 100) { nodes { id isResolved } } ` +
         `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
         // 3B: ids estáveis para eventos idempotentes (pedidos de review e reviews com decisão).
-        `timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) { nodes { ... on ReviewRequestedEvent { id createdAt requestedReviewer { ... on User { login } ... on Team { slug } } } } } ` +
+        `timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) { nodes { ... on ReviewRequestedEvent { id createdAt requestedReviewer { ... on User { login } } } } } ` +
         // 5C: logins só em memória, para pedir review de novo a quem já revisou/foi pedido.
         `reviews(last: 20, states: [APPROVED, CHANGES_REQUESTED]) { nodes { id state submittedAt author { login } } } }`
     )
@@ -272,7 +275,14 @@ export function parseDetails(
       rollup && typeof rollup['state'] === 'string' ? CHECKS[rollup['state']] : undefined
     const timeline = isRecord(pr['timelineItems']) ? pr['timelineItems']['nodes'] : null
     const reviewNodes = isRecord(pr['reviews']) ? pr['reviews']['nodes'] : null
+    const size = (key: string): { [k: string]: number } => {
+      const v = pr[key]
+      return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? { [key]: v } : {}
+    }
     result.set(n, {
+      ...size('additions'),
+      ...size('deletions'),
+      ...size('changedFiles'),
       reviewDecision: review ?? null,
       unresolvedComments: unresolved,
       checks: checks ?? null,

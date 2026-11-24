@@ -2,7 +2,17 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ORKIO_CONFIG_VERSION, createOrkioConfigStore, validateConfig } from './orkio-config'
+import {
+  ALVA_TEMPLATE_IDS,
+  alvaReviewedFlow,
+  alvaReviewPublishFlow
+} from '../../shared/alva-templates'
+import {
+  ORKIO_CONFIG_VERSION,
+  createOrkioConfigStore,
+  parseStep,
+  validateConfig
+} from './orkio-config'
 
 const PROJECT = {
   id: 'p1',
@@ -496,7 +506,7 @@ describe('orkio-config v2/v3', () => {
     expect(data.orchestrator).toEqual({})
     expect(data.agents['p1']?.assignOnEnter).toHaveLength(1)
     const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
-    expect(saved['schemaVersion']).toBe(11)
+    expect(saved['schemaVersion']).toBe(ORKIO_CONFIG_VERSION)
     expect(saved['orchestrator']).toEqual({})
 
     await writeFile(
@@ -532,5 +542,164 @@ describe('orkio-config v2/v3', () => {
       }
     })
     expect(again.data.projects).toHaveLength(1)
+  })
+})
+
+describe('v11 → v12: modelos Alva e ligações padrão (Task 18)', () => {
+  const STAGES = [
+    {
+      id: 's-dev',
+      name: 'Em andamento',
+      order: 0,
+      notionStatus: { id: 'o1', name: 'Em andamento' }
+    },
+    { id: 's-rev', name: 'Revisando', order: 1, notionStatus: { id: 'o1', name: 'Em andamento' } },
+    { id: 's-ok', name: 'Revisado', order: 2, notionStatus: { id: 'o1', name: 'Em andamento' } }
+  ]
+  const board = { stages: STAGES, orkioStageProperty: null, blockedProperty: null, rules: [] }
+  const v11 = (flows: Record<string, unknown>): string =>
+    JSON.stringify({
+      schemaVersion: 11,
+      projects: [
+        { ...PROJECT, notionProject: null },
+        { ...PROJECT, id: 'p2', notionProject: null }
+      ],
+      notion: null,
+      boards: { p1: board, p2: board },
+      automation: { paused: false },
+      claudeContexts: {},
+      flows,
+      delivery: {},
+      agents: {},
+      orchestrator: {},
+      updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
+    })
+
+  it('com modelos Alva: acrescenta os novos, atualiza as cópias e liga só colunas vazias; avisa as mudanças', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-v12-'))
+    const file = join(dir, 'orkio-config.json')
+    const userFlow = {
+      id: 'meu',
+      name: 'Meu',
+      steps: [{ id: 'a', name: 'A', type: 'orkio_action', action: 'noop' }]
+    }
+    const oldReviewed = { ...alvaReviewedFlow(), steps: alvaReviewedFlow().steps.slice(0, 1) }
+    await writeFile(
+      file,
+      v11({
+        p1: {
+          flows: [oldReviewed, userFlow],
+          // Revisado já tem um fluxo do usuário: fica como está.
+          bindings: [{ stageId: 's-ok', flowId: 'meu', enabled: true, mode: 'manual' }]
+        },
+        // Sem modelos Alva: nada muda.
+        p2: { flows: [userFlow], bindings: [] }
+      })
+    )
+    const notes: { projectId: string; changes: string[] }[] = []
+    const { data } = await createOrkioConfigStore(file, {
+      onMigrationNote: (n) => notes.push(n)
+    }).load()
+    const p1 = data.flows['p1']!
+    expect(p1.flows.find((f) => f.id === 'meu')).toEqual(userFlow)
+    expect(p1.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.reviewed)).toEqual(alvaReviewedFlow())
+    expect(p1.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.review)).toEqual(alvaReviewPublishFlow())
+    // A cópia antiga (diferente do modelo) foi guardada, sem coluna, antes da troca.
+    expect(p1.flows.find((f) => f.id === 'alva-revisado-anterior')).toEqual({
+      ...oldReviewed,
+      id: 'alva-revisado-anterior',
+      name: 'Alva: comentários da PR (cópia anterior)'
+    })
+    expect(p1.bindings.some((b) => b.flowId === 'alva-revisado-anterior')).toBe(false)
+    expect(p1.bindings).toEqual([
+      { stageId: 's-ok', flowId: 'meu', enabled: true, mode: 'manual' },
+      { stageId: 's-rev', flowId: ALVA_TEMPLATE_IDS.review, enabled: true, mode: 'on_enter' }
+    ])
+    expect(data.flows['p2']).toEqual({ flows: [userFlow], bindings: [] })
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.projectId).toBe('p1')
+    expect(notes[0]!.changes).toContain(
+      'Coluna “Revisando” ganhou o fluxo “Alva: revisão publicada” (ao entrar)'
+    )
+    expect(notes[0]!.changes).toContain(
+      'Fluxo “Alva: comentários da PR” atualizado para a versão nova do modelo Alva'
+    )
+    expect(notes[0]!.changes).toContain(
+      'Cópia anterior de “Alva: comentários da PR” guardada como “Alva: comentários da PR (cópia anterior)” (sem coluna)'
+    )
+    const saved = JSON.parse(await readFile(file, 'utf8')) as Record<string, unknown>
+    expect(saved['schemaVersion']).toBe(12)
+    // Já na v12: abrir de novo não migra nem avisa.
+    const again: unknown[] = []
+    await createOrkioConfigStore(file, { onMigrationNote: (n) => again.push(n) }).load()
+    expect(again).toEqual([])
+  })
+})
+
+describe('keepAwake (campo opcional, sem migração)', () => {
+  const base = { schemaVersion: ORKIO_CONFIG_VERSION, projects: [], notion: null }
+  it('ausente ou inválido = desligado; true é mantido', () => {
+    expect(validateConfig({ ...base })?.value.keepAwake).toBeUndefined()
+    expect(validateConfig({ ...base, keepAwake: 'sim' })?.value.keepAwake).toBeUndefined()
+    expect(validateConfig({ ...base, keepAwake: true })?.value.keepAwake).toBe(true)
+  })
+})
+
+describe('parseStep: modelo e raciocínio do passo', () => {
+  const step = {
+    id: 'a',
+    name: 'A',
+    type: 'claude_command',
+    command: 'x',
+    args: '',
+    timeoutMin: 5
+  }
+  it('preserva os campos válidos; sem eles, objeto igual ao de antes; inválidos somem', () => {
+    expect(parseStep({ ...step, model: 'opus', effort: 'low' })).toEqual({
+      ...step,
+      model: 'opus',
+      effort: 'low'
+    })
+    expect(parseStep(step)).toEqual(step)
+    expect(parseStep({ ...step, model: '--x', effort: 'ultra' })).toEqual(step)
+  })
+})
+
+describe('parseStep: pedido em texto, só leitura e "Pedir ajustes"', () => {
+  it('preserva prompt/readOnly e o gate com show result e revise; inválidos somem', () => {
+    const plan = {
+      id: 'plano',
+      name: 'Plano',
+      type: 'claude_command',
+      command: '',
+      args: '',
+      prompt: 'Leia .orkio/revisao.md',
+      readOnly: true,
+      timeoutMin: 30
+    }
+    expect(parseStep(plan)).toEqual(plan)
+    expect(parseStep({ ...plan, readOnly: 'sim', prompt: 7 })).toEqual({
+      id: 'plano',
+      name: 'Plano',
+      type: 'claude_command',
+      command: '',
+      args: '',
+      timeoutMin: 30
+    })
+    const gate = {
+      id: 'ok',
+      name: 'Aprovar',
+      type: 'gate',
+      message: 'Aprovar correções da PR #{{review.pr}}',
+      show: 'result',
+      onReject: 'stop',
+      timeoutMin: null,
+      revise: { step: 'plano', max: 3 }
+    }
+    expect(parseStep(gate)).toEqual(gate)
+    const plain: Record<string, unknown> = { ...gate }
+    delete plain['revise']
+    expect(parseStep({ ...gate, revise: { step: 'plano' } })).toEqual(plain)
+    expect(parseStep({ ...gate, show: 'tudo' })).toBeNull()
   })
 })

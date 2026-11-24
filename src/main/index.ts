@@ -1,4 +1,5 @@
 import { execFile as execFileCb, spawn } from 'node:child_process'
+import { statSync } from 'node:fs'
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { homedir, release as osRelease, userInfo } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -10,6 +11,7 @@ import {
   ipcMain,
   nativeImage,
   Notification,
+  powerSaveBlocker,
   screen,
   safeStorage,
   session,
@@ -18,6 +20,7 @@ import {
 } from 'electron'
 import { createGitHubClient } from './connectors/github/github.client'
 import { GitHubConnector } from './connectors/github/github.connector'
+import { readOrkioSiteOrigin } from './connectors/github/orkio-site'
 import { createGitHubDeviceApi, readGitHubOAuthConfig } from './connectors/github/github.oauth'
 import { createNotionClient } from './connectors/notion/notion.client'
 import { NotionConnector, type NotionOAuthDeps } from './connectors/notion/notion.connector'
@@ -31,19 +34,22 @@ import {
 import {
   ORKIO_CONFIG_FILE,
   ORKIO_CONFIG_VERSION,
-  createOrkioConfigStore
+  createOrkioConfigStore,
+  type ConfigMigrationNote
 } from './config/orkio-config'
 import { createGit } from './git/git'
 import { registerNotionWorkspaceIpc } from './ipc/notion-workspace.ipc'
 import { registerProjectsIpc } from './ipc/projects.ipc'
 import { registerSignalsIpc } from './ipc/signals.ipc'
+import { createReviewActions } from './signals/review-action'
+import { ReviewThreadsService } from './signals/review-threads'
 import { registerBoardIpc } from './ipc/board.ipc'
 import { registerFlowIpc } from './ipc/flow.ipc'
 import { registerAutomationIpc } from './ipc/automation.ipc'
 import { AutomationService, type AutomationNotification } from './automation/automation.service'
 import { AutomationScheduler } from './automation/scheduler'
 import { errorName } from './ipc/payload'
-import { BoardService } from './board/board.service'
+import { BoardService, type StageChange } from './board/board.service'
 import { BoardStore } from './board/board.store'
 import { NotionWriteQueue } from './board/write-queue'
 import { openDatabase } from './db/database'
@@ -81,6 +87,9 @@ import { buildCatalog } from './claude/catalog'
 import { sanitizeEnv } from './claude/redact'
 import { DeliveryService, parseGhAliases } from './delivery/delivery.service'
 import { createDeliveryActions } from './delivery/delivery-actions'
+import { createPublishReviewAction } from './delivery/review-publish'
+import { GitHubReviewPoster } from './connectors/github/review-poster'
+import { finalText } from '../shared/review-publish'
 import { registerAlvaIpc } from './ipc/alva.ipc'
 import { registerTaskFlowsIpc } from './ipc/task-flows.ipc'
 import { RunService } from './claude/run.service'
@@ -92,6 +101,9 @@ import { OrchestratorService } from './orchestrator/orchestrator.service'
 import { registerOrchestratorIpc } from './ipc/orchestrator.ipc'
 import { buildAgentPrompt, commandAllowed } from '../shared/agent'
 import { registerUpdatesIpc } from './ipc/updates.ipc'
+import { registerPowerIpc } from './ipc/power.ipc'
+import { KeepAwake } from './power/keep-awake'
+import { onPath, terminalCandidates } from './claude/terminal'
 import { collectDiagnostics } from './diagnostics/diagnostics'
 import { UpdateService, type UpdaterLike } from './updates/update.service'
 import { busyCount, describeBusy } from './updates/busy'
@@ -173,11 +185,19 @@ function registerIpc(): void {
     client: createGitHubClient(),
     // Device Flow não usa client secret nem o intermediário (broker/).
     device: githubConfig ? createGitHubDeviceApi(githubConfig) : null,
-    oauthClientId: githubConfig?.clientId ?? null
+    oauthClientId: githubConfig?.clientId ?? null,
+    // Revisão como orkio[bot]: único destino do token do usuário fora do GitHub, fixado aqui.
+    // http://127.0.0.1 só no build de E2E.
+    siteOrigin: readOrkioSiteOrigin(import.meta.env),
+    allowLoopbackSite: import.meta.env.MODE === 'e2e'
   })
 
   // Uma instância só: Projetos e bancos do Notion escrevem no mesmo arquivo.
-  const configStore = createOrkioConfigStore(join(app.getPath('userData'), ORKIO_CONFIG_FILE))
+  // Migrações que mudam fluxos (v11 → v12) avisam aqui; o histórico vai ao banco quando ele abrir.
+  const migrationNotes: ConfigMigrationNote[] = []
+  const configStore = createOrkioConfigStore(join(app.getPath('userData'), ORKIO_CONFIG_FILE), {
+    onMigrationNote: (note) => migrationNotes.push(note)
+  })
   projects = new ProjectsService({
     store: configStore,
     git: createGit(),
@@ -252,11 +272,38 @@ function registerIpc(): void {
     // Branches registradas para cada tarefa (banco sem ID no Notion); o worktree nasce depois.
     linkedBranches: (projectId) => worktreesForSignals?.linkedBranchesByTask(projectId) ?? new Map()
   })
-  registerSignalsIpc(ipcMain, signals, isTrustedSender, projectsReady)
+  // Threads da PR da tarefa (Task 15): a PR vem dos sinais em cache; o texto, do GraphQL (repo).
+  const reviewThreads = new ReviewThreadsService({
+    graphql: (query, variables) => github.graphql(query, variables),
+    isConnected: () => github.isConnected(),
+    locate: (projectId, taskId) => {
+      const repo = configStore.get().projects.find((p) => p.id === projectId)?.repo
+      if (!repo || repo.host.toLowerCase() !== 'github.com') return null
+      const pr = signals.cached(projectId)?.signals[taskId]?.pr ?? null
+      return {
+        owner: repo.owner,
+        repo: repo.name,
+        pr: pr ? { number: pr.number, url: pr.url } : null
+      }
+    },
+    refresh: async (projectId) => void (await signals.get(projectId))
+  })
+  registerSignalsIpc(ipcMain, signals, isTrustedSender, projectsReady, reviewThreads)
 
   // Quadro (3A): SQLite local + fila de escrita persistente no Notion.
   const boardStore = openBoardStore()
   if (boardStore) {
+    // Histórico de configuração das migrações (ex.: fluxos Alva atualizados na v12).
+    void projectsReady.then(() => {
+      const at = new Date().toISOString()
+      for (const note of migrationNotes.splice(0)) {
+        try {
+          boardStore.addConfigEvent(note.projectId, at, 'Orkio (atualização)', note.changes)
+        } catch (error) {
+          console.error(`[orkio] histórico da migração: ${errorName(error)}`)
+        }
+      }
+    })
     const broadcast = (event: BoardSyncEvent): void => {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.board.syncChanged, event)
@@ -267,7 +314,10 @@ function registerIpc(): void {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(channel, payload)
       }
-      if (affectsOverview(channel, payload)) overview?.touch()
+      if (affectsOverview(channel, payload)) {
+        overview?.touch()
+        keepAwake?.evaluate()
+      }
     }
     // Agentes (8A): perfis em arquivos, aprovação, atribuição e limites (nenhuma permissão nova).
     const agents = new AgentsService({
@@ -434,7 +484,8 @@ function registerIpc(): void {
           key: runtime.key,
           name: runtime.profile.name,
           prompt: buildAgentPrompt(runtime.profile),
-          model: runtime.profile.model === 'default' ? null : runtime.profile.model
+          model: runtime.profile.model === 'default' ? null : runtime.profile.model,
+          effort: runtime.profile.effort
         }
       },
       agentInfo: async (projectId, taskId) => {
@@ -467,6 +518,7 @@ function registerIpc(): void {
       claude: claude.service,
       runs: claude.runs,
       worktrees: claude.worktrees,
+      delivery: claude.delivery,
       agents,
       listTasks: (projectId) => notionWorkspace.listTasks(projectId),
       // Entrega (5C): push/pedir review. O token do GitHub fica no conector.
@@ -480,9 +532,36 @@ function registerIpc(): void {
         },
         store: boardStore,
         runAutomation: (projectId) => void scheduler?.runNow(projectId).catch(() => undefined)
-      }),
+      }).concat(
+        // Revisão (Task 15): o Orkio lê as threads da PR e grava .orkio/revisao.md no worktree.
+        createReviewActions({
+          reviews: reviewThreads,
+          ensureWorktree: (projectId, taskId) =>
+            claude.service.ensureWorktreePath(projectId, taskId)
+        }),
+        // Task 18: revisão do agente publicada na PR como orkio[bot] (pelo site, depois do gate).
+        createPublishReviewAction({
+          poster: new GitHubReviewPoster({ github }),
+          finalText: async (runId) => finalText(await claude.runs.readLog(runId)),
+          signals: (projectId, force) => signals.get(projectId, { force }),
+          repo: (projectId) => {
+            const repo = configStore.get().projects.find((p) => p.id === projectId)?.repo
+            return repo && repo.host.toLowerCase() === 'github.com'
+              ? { owner: repo.owner, repo: repo.name }
+              : null
+          },
+          store: boardStore,
+          runAutomation: (projectId) => void scheduler?.runNow(projectId).catch(() => undefined)
+        })
+      ),
       send,
       onFlowFinished: (projectId) => orchestrator?.runSoon(projectId),
+      // Mesma ordem da entrada pelo quadro (orquestrador → regra da coluna → fluxo da coluna).
+      stageEntered: (change) => {
+        orchestrator?.onStageChanged(change)
+        agents.onStageChanged(change)
+        flowRunner?.onStageChanged(change)
+      },
       isTrustedSender,
       ready: projectsReady
     })
@@ -632,6 +711,35 @@ function registerIpc(): void {
     diagnostics
   )
   void projectsReady.then(() => updates?.start())
+
+  // Manter o computador acordado enquanto agentes trabalham (opção, desligada por padrão).
+  keepAwake = new KeepAwake({
+    blocker: powerSaveBlocker,
+    enabled: () => configStore.get().keepAwake === true,
+    busy: () =>
+      (claudeRuns?.activeList().some((r) => !r.queued) ?? false) ||
+      (flowRunner?.runningList().length ?? 0) > 0
+  })
+  keepAwake.start()
+  registerPowerIpc(
+    ipcMain,
+    {
+      keepAwake: () => configStore.get().keepAwake === true,
+      setKeepAwake: async (enabled) => {
+        await projectsReady
+        if (configStore.readOnly) return configStore.get().keepAwake === true
+        await configStore.update((c) => {
+          const next = { ...c }
+          if (enabled) next.keepAwake = true
+          else delete next.keepAwake
+          return next
+        })
+        keepAwake?.evaluate()
+        return configStore.get().keepAwake === true
+      }
+    },
+    isTrustedSender
+  )
 }
 
 /** Endereço do site (Sobre): `MAIN_VITE_SITE_URL` ou a origem do intermediário OAuth (é o site). */
@@ -728,6 +836,23 @@ function createUpdates(deps: {
       for (const win of BrowserWindow.getAllWindows()) {
         if (!win.isDestroyed()) win.webContents.send(IPC_CHANNELS.updates.statusChanged, status)
       }
+    },
+    askRestart: async (next) => {
+      const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+      const options: Electron.MessageBoxOptions = {
+        type: 'info',
+        title: 'Atualização pronta',
+        message: `O Orkio ${next} foi baixado.`,
+        detail: 'Reiniciar agora para atualizar? O Orkio fecha e abre de novo na versão nova.',
+        buttons: ['Reiniciar agora', 'Depois'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true
+      }
+      const { response } = win
+        ? await dialog.showMessageBox(win, options)
+        : await dialog.showMessageBox(options)
+      return response === 0
     }
   })
 }
@@ -742,6 +867,7 @@ let flowRunner: FlowRunner | null = null
 /** Orquestrador (8B): puxa tarefas da fila para os agentes e passa adiante. */
 let orchestrator: OrchestratorService | null = null
 let updates: UpdateService | null = null
+let keepAwake: KeepAwake | null = null
 let overview: OverviewService | null = null
 
 /** Eventos que mudam "Esperando você"/"Em execução" (texto do log não conta). */
@@ -760,11 +886,13 @@ function createFlowRunner(deps: {
   claude: ClaudeService
   runs: RunService
   worktrees: WorktreeService
+  delivery: DeliveryService
   agents: AgentsService
   listTasks: ClaudeServiceDeps['listTasks']
   deliveryActions: OrkioAction[]
   send: (channel: string, payload: unknown) => void
   onFlowFinished: (projectId: string) => void
+  stageEntered: (change: StageChange) => void
   isTrustedSender: ReturnType<typeof createSenderGuard>
   ready: Promise<void>
 }): FlowRunner {
@@ -867,7 +995,8 @@ function createFlowRunner(deps: {
     notify: (title, body, ref) =>
       showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, deps.send),
     emit: (ref) => deps.send(IPC_CHANNELS.taskFlows.changed, ref),
-    onFinished: (ref) => deps.onFlowFinished(ref.projectId)
+    onFinished: (ref) => deps.onFlowFinished(ref.projectId),
+    stageEntered: (change) => deps.stageEntered(change)
   })
   deps.runs.onFinished((info) => runner.onRunFinished(info))
   runner.init()
@@ -879,7 +1008,13 @@ function createFlowRunner(deps: {
     actions,
     actor: () => userInfo().username
   })
-  registerTaskFlowsIpc(ipcMain, service, runner, deps.isTrustedSender, deps.ready)
+  registerTaskFlowsIpc(ipcMain, service, runner, deps.isTrustedSender, deps.ready, {
+    linked: (taskId) => alva.getLink(taskId) !== null,
+    blockReason: (projectId, flow) => alvaFlows.blockReason(projectId, flow),
+    compareUrl: (projectId, taskId) => deps.delivery.compareUrl(projectId, taskId),
+    alreadyPushed: (projectId, taskId) => deps.delivery.alreadyPushed(projectId, taskId),
+    startBuiltin: (projectId, taskId, flow) => runner.startBuiltin(projectId, taskId, flow)
+  })
   return runner
 }
 
@@ -899,6 +1034,40 @@ function toolEnv(): NodeJS.ProcessEnv {
   const current = (process.env['PATH'] ?? '').split(delimiter).filter(Boolean)
   const path = [...current, ...extra.filter((d) => !current.includes(d))].join(delimiter)
   return { ...process.env, PATH: path }
+}
+
+/** Abre o terminal do sistema na pasta (spawn sem shell; o primeiro terminal achado no PATH). */
+async function openTerminalAt(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const isFile = (p: string): boolean => {
+    try {
+      return statSync(p).isFile()
+    } catch {
+      return false
+    }
+  }
+  if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error('no_workspace')
+  }
+  const candidate = terminalCandidates(process.platform, env, dir).find((c) =>
+    process.platform === 'darwin' ? true : onPath(c.cmd, env, process.platform, isFile)
+  )
+  if (!candidate) throw new Error('no_terminal')
+  await new Promise<void>((resolve, reject) => {
+    // Terminais sem argumento de pasta ($TERMINAL, x-terminal-emulator) abrem no cwd.
+    const child = spawn(candidate.cmd, candidate.args, {
+      cwd: dir,
+      detached: true,
+      stdio: 'ignore',
+      shell: false,
+      windowsHide: false,
+      env
+    })
+    child.once('error', reject)
+    child.once('spawn', () => {
+      child.unref()
+      resolve()
+    })
+  })
 }
 
 function createClaude(deps: {
@@ -1005,6 +1174,14 @@ function createClaude(deps: {
     ...(deps.agentInfo ? { agentInfo: deps.agentInfo } : {}),
     flowActive: (taskId) => flowRunner?.hasActive(taskId) ?? false,
     flowBusy: (taskId) => flowRunner?.isBusy(taskId) ?? false,
+    flowMessage: async (taskId, text, note) => {
+      try {
+        return { used: (await flowRunner?.handleMessage(taskId, text, note)) != null }
+      } catch (error) {
+        if (error instanceof FlowError) return { error: error.message }
+        throw error
+      }
+    },
     artifacts: new ArtifactsService({
       db: deps.boardStore.db,
       store: deps.boardStore,
@@ -1012,6 +1189,7 @@ function createClaude(deps: {
       git: deps.git,
       notion: deps.notionInsert
     }),
+    openTerminal: (path) => openTerminalAt(path, env),
     openEditor: (editor, path) =>
       new Promise<void>((resolve, reject) => {
         const child = spawn(editor, [path], {
@@ -1125,6 +1303,7 @@ void app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  keepAwake?.dispose()
   updates?.stop()
   overview?.dispose()
   flowRunner?.dispose()

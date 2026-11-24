@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { FlowRunView, FlowStepView, Step } from '../../../../shared/task-flow'
-import { flowPlan, flowStepIndex, gateOutcomes, planProgress } from './flow-plan'
+import {
+  finalText,
+  flowPlan,
+  flowStepIndex,
+  gateOutcomes,
+  gateResultRunId,
+  planProgress
+} from './flow-plan'
 
 const steps: Step[] = [
   {
@@ -67,6 +74,7 @@ function run(partial: Partial<FlowRunView>): FlowRunView {
     choice: null,
     confirm: null,
     agent: null,
+    revise: null,
     ...partial
   }
 }
@@ -179,5 +187,58 @@ describe('gateOutcomes', () => {
       'Recusar volta para “Planejar”.'
     )
     expect(gateOutcomes(run({ currentStep: 'spec' }))).toBeNull()
+  })
+})
+
+describe('resultado mostrado no gate', () => {
+  it('a execução mais recente do fluxo antes do gate; sem execução, nada', () => {
+    expect(
+      gateResultRunId(
+        run({
+          status: 'waiting_gate',
+          currentStep: 'ok',
+          history: [
+            step(1, 'spec', 'ok', 'r1'),
+            step(2, 'plan', 'ok', 'r2'),
+            step(3, 'ok', 'waiting')
+          ]
+        })
+      )
+    ).toBe('r2')
+    expect(gateResultRunId(run({ history: [step(1, 'ok', 'waiting')] }))).toBeNull()
+  })
+
+  it('texto final: o resultado; sem ele, a última mensagem do Claude', () => {
+    expect(
+      finalText([
+        { kind: 'text', text: 'pensando' },
+        { kind: 'result', ok: true, durationMs: 1, costUsd: null, turns: 1, text: '1. Plano' }
+      ])
+    ).toBe('1. Plano')
+    expect(
+      finalText([
+        { kind: 'text', text: '1. Plano' },
+        { kind: 'result', ok: true, durationMs: 1, costUsd: null, turns: 1, text: '' }
+      ])
+    ).toBe('1. Plano')
+    expect(finalText([])).toBeNull()
+  })
+
+  it('pedido em texto aparece no plano como pedido (sem barra de comando)', () => {
+    const promptSteps: Step[] = [
+      {
+        id: 'plano',
+        name: 'Plano',
+        type: 'claude_command',
+        command: '',
+        args: '',
+        prompt: 'Leia .orkio/revisao.md',
+        readOnly: true,
+        timeoutMin: 30
+      }
+    ]
+    expect(flowPlan(run({ steps: promptSteps, currentStep: 'plano' }))[0]?.detail).toBe(
+      'Pedido ao Claude Code (só leitura)'
+    )
   })
 })

@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { RunLogEvent } from '../../shared/agent-run'
+import { isEffort, isModelName, type Effort } from '../../shared/agent-runtime'
+import { READ_ONLY_DENIED_TOOLS } from '../../shared/task-flow'
 import { redactSecrets, sanitizeEnv } from './redact'
 import { parseStreamLine } from './stream'
 
@@ -109,18 +111,57 @@ export interface RunnerOptions {
   appendSystemPrompt?: string | null
   /** Agente (8A): alias do modelo (`sonnet`, `opus`, `haiku`); ausente = padrão do usuário. */
   model?: string | null
+  /** Raciocínio (`--effort`); só vai um valor válido (o main já checou o suporte do CLI). */
+  effort?: Effort | null
+  /**
+   * Passo só de leitura: o CLI não recebe as ferramentas de edição (`--disallowedTools`) e roda em
+   * `--permission-mode manual` (nada aprovado sozinho).
+   */
+  readOnly?: boolean
   onEvent(event: RunLogEvent): void
   onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   spawn?: SpawnFn
 }
 
-/** Só aliases simples chegam ao `--model` (nada que pareça outra flag). */
-const MODEL_ALIAS = /^[a-z][a-z0-9.-]{0,40}$/
-
+/**
+ * Fora do modo entrega: o CLI nega o que escreve no GitHub mesmo se o usuário tiver uma regra de
+ * "permitir" no `~/.claude`. Ler a PR (`gh pr view`, `gh api` GET/GraphQL sem mutation) passa pela
+ * política do Orkio (`isGhRead`, só o repositório do projeto).
+ */
 export const RUN_SETTINGS = {
   permissions: {
     blockWritesOutsideWorkingDirectories: true,
-    deny: ['Bash(git push *)', 'Bash(gh pr *)', 'Bash(gh api *)']
+    deny: [
+      'Bash(git push *)',
+      ...[
+        'create',
+        'edit',
+        'comment',
+        'merge',
+        'close',
+        'reopen',
+        'ready',
+        'review',
+        'checkout',
+        'lock',
+        'unlock',
+        'revert',
+        'update-branch'
+      ].map((a) => `Bash(gh pr ${a}*)`),
+      'Bash(gh release *)',
+      'Bash(gh api *-X*)',
+      'Bash(gh api *--method*)',
+      'Bash(gh api *--input*)',
+      'Bash(gh api *mutation*)',
+      'Bash(gh api repos/* -f *)',
+      'Bash(gh api repos/* -F *)',
+      'Bash(gh api repos/* --field*)',
+      'Bash(gh api repos/* --raw-field*)',
+      'Bash(gh api /repos/* -f *)',
+      'Bash(gh api /repos/* -F *)',
+      'Bash(gh api /repos/* --field*)',
+      'Bash(gh api /repos/* --raw-field*)'
+    ]
   }
 }
 
@@ -182,8 +223,13 @@ export class ClaudeRun {
       '--input-format',
       'stream-json',
       ...(o.resume ? ['--resume', o.sessionId] : ['--session-id', o.sessionId]),
+      // Lista num argumento só, separada por vírgula; a opção aceita vários valores, então vem
+      // antes de outra flag (nada solto depois dela).
+      ...(o.readOnly ? ['--disallowedTools', READ_ONLY_DENIED_TOOLS.join(',')] : []),
       '--permission-mode',
-      'acceptEdits',
+      // Só leitura: nada é aprovado sozinho (nem comandos de arquivo no shell); tudo passa pela
+      // ferramenta de permissão do Orkio.
+      o.readOnly ? 'manual' : 'acceptEdits',
       '--settings',
       JSON.stringify(o.delivery ? DELIVERY_RUN_SETTINGS : RUN_SETTINGS),
       '--mcp-config',
@@ -191,7 +237,9 @@ export class ClaudeRun {
       '--permission-prompt-tool',
       'mcp__orkio__approve',
       ...(o.appendSystemPrompt ? ['--append-system-prompt', o.appendSystemPrompt] : []),
-      ...(o.model && MODEL_ALIAS.test(o.model) ? ['--model', o.model] : [])
+      // Nada que pareça outra flag chega ao CLI: valida aqui, de novo, antes de montar os args.
+      ...(isModelName(o.model) && o.model !== 'default' ? ['--model', o.model] : []),
+      ...(isEffort(o.effort) ? ['--effort', o.effort] : [])
     ]
     const spawn = o.spawn ?? nodeSpawn
     const child = spawn(o.claudeCommand, args, {
@@ -207,8 +255,10 @@ export class ClaudeRun {
       stderr = (stderr + d.toString('utf8')).slice(-4096)
     })
     const lines = createInterface({ input: child.stdout! })
+    let model: string | null = null
     lines.on('line', (line) => {
-      for (const event of parseStreamLine(line, o.cwd)) {
+      for (const event of parseStreamLine(line, o.cwd, undefined, model)) {
+        if (event.kind === 'init') model = event.model
         o.onEvent(event)
         // Terminou o turno: fecha a entrada para o processo encerrar.
         if (event.kind === 'result') child.stdin?.end()

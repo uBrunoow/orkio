@@ -169,6 +169,17 @@ function stepName(flow: FlowRunView): string | null {
   return step ? step.name || step.id : null
 }
 
+/**
+ * Gate com mensagem curta (uma linha, até 60 caracteres, já com as variáveis): ela é o título do
+ * item (ex.: "Aprovar correções da PR #13"). Mensagens longas são instruções: fica o nome do passo.
+ */
+function gateTitle(flow: FlowRunView): string | null {
+  const step = flow.steps.find((s) => s.id === flow.currentStep)
+  if (step?.type !== 'gate') return null
+  const message = step.message.trim()
+  return message && message.length <= 60 && !message.includes('\n') ? message : null
+}
+
 /** Desde quando o fluxo está no estado atual: início do último passo registrado. */
 function flowSince(flow: FlowRunView): string {
   return flow.history[flow.history.length - 1]?.startedAt ?? flow.startedAt
@@ -182,7 +193,11 @@ export function flowWaitingItem(flow: FlowRunView, task: OverviewTask): WaitingI
     case 'waiting_gate':
       return flow.confirm
         ? { ...base, kind: 'action', what: `Aprovar: ${flow.confirm.title}` }
-        : { ...base, kind: 'gate', what: `Aprovação no fluxo${step ? `: ${step}` : ''}` }
+        : {
+            ...base,
+            kind: 'gate',
+            what: gateTitle(flow) ?? `Aprovação no fluxo${step ? `: ${step}` : ''}`
+          }
     case 'awaiting_decision':
       return {
         ...base,
@@ -300,7 +315,7 @@ export function buildRunning(
     if (current?.runId) flowRunIds.add(current.runId)
     const step = flow.steps.find((s) => s.id === flow.currentStep)
     const stepLabel = step
-      ? step.type === 'claude_command'
+      ? step.type === 'claude_command' && step.command
         ? `/${step.command}`
         : step.name || step.id
       : null
@@ -600,6 +615,7 @@ export const ACTIVITY_KINDS: Record<ActivityGroup, readonly string[]> = {
     'gate_waiting',
     'gate_approved',
     'gate_rejected',
+    'gate_revised',
     'flow_paused',
     'flow_finished'
   ],

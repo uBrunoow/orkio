@@ -183,6 +183,8 @@ describe('atribuição', () => {
       name: 'Ana',
       color: 'orange',
       initials: 'AN',
+      model: 'default',
+      effort: null,
       problem: null
     })
     await service.assign('p1', 't1', null)

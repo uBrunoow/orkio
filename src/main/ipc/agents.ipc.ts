@@ -35,7 +35,8 @@ export function toProfile(value: unknown): AgentProfile | null {
     !str(v['name'], 200) ||
     !str(v['role'], 20) ||
     !str(v['color'], 20) ||
-    !str(v['model'], 20) ||
+    !str(v['model'], 61) ||
+    !(v['effort'] === undefined || v['effort'] === null || str(v['effort'], 10)) ||
     !(v['flow'] === null || str(v['flow'], 100)) ||
     !Array.isArray(v['commands']) ||
     v['commands'].length > 50 ||
@@ -55,6 +56,7 @@ export function toProfile(value: unknown): AgentProfile | null {
     role: v['role'] as AgentProfile['role'],
     color: v['color'] as AgentProfile['color'],
     model: v['model'] as AgentProfile['model'],
+    effort: v['effort'] === undefined ? null : (v['effort'] as AgentProfile['effort']),
     flow: v['flow'] as string | null,
     commands: v['commands'] as string[],
     delivery: v['delivery'],

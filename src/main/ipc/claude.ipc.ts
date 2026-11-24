@@ -8,8 +8,10 @@ import type {
   SendMessageRequest,
   StartRunRequest
 } from '../../shared/agent-run'
+import { isEffort, isModelName } from '../../shared/agent-runtime'
 import { IPC_CHANNELS } from '../../shared/ipc-contract'
 import { isBranchKind } from '../../shared/slug'
+import { ATTACHMENT_LIMITS } from '../claude/attachments'
 import type { ClaudeService } from '../claude/claude.service'
 import { CLAUDE_MIN_VERSION } from '../claude/detect'
 import { errorName } from './payload'
@@ -30,7 +32,8 @@ const UNKNOWN_STATUS: ClaudeCodeStatus = {
   loggedIn: null,
   authMethod: null,
   meetsMinimum: false,
-  minimumVersion: CLAUDE_MIN_VERSION
+  minimumVersion: CLAUDE_MIN_VERSION,
+  supportsEffort: false
 }
 
 /** Limite do briefing/prompt enviados pelo renderer. */
@@ -82,7 +85,39 @@ export function isSendMessageRequest(value: unknown): value is SendMessageReques
     typeof v['text'] === 'string' &&
     v['text'].length <= MAX_TEXT &&
     (v['fresh'] === undefined || typeof v['fresh'] === 'boolean') &&
-    (v['asAgent'] === undefined || typeof v['asAgent'] === 'boolean')
+    (v['asAgent'] === undefined || typeof v['asAgent'] === 'boolean') &&
+    (v['runtime'] === undefined || isRuntimePatch(v['runtime'])) &&
+    (v['attachments'] === undefined || isAttachmentList(v['attachments']))
+  )
+}
+
+/** Forma, quantidade, tamanho e nome; o tipo (bytes) quem confere é o `ClaudeService`. */
+function isAttachmentList(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length > ATTACHMENT_LIMITS.maxFiles) return false
+  return value.every((a: unknown) => {
+    if (typeof a !== 'object' || a === null) return false
+    const v = a as Record<string, unknown>
+    return (
+      Object.keys(v).every((k) => k === 'name' || k === 'mime' || k === 'data') &&
+      typeof v['name'] === 'string' &&
+      v['name'].length > 0 &&
+      v['name'].length <= 120 &&
+      typeof v['mime'] === 'string' &&
+      v['mime'].length <= 100 &&
+      v['data'] instanceof Uint8Array &&
+      v['data'].byteLength <= ATTACHMENT_LIMITS.maxBytes
+    )
+  })
+}
+
+/** `{ model?, effort? }`: nome de modelo no padrão, raciocínio da lista; `null` = padrão. */
+function isRuntimePatch(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const v = value as Record<string, unknown>
+  if (Object.keys(v).some((k) => k !== 'model' && k !== 'effort')) return false
+  return (
+    (v['model'] === undefined || v['model'] === null || isModelName(v['model'])) &&
+    (v['effort'] === undefined || v['effort'] === null || isEffort(v['effort']))
   )
 }
 
@@ -160,6 +195,9 @@ export function registerClaudeIpc(
     isId(projectId) && isId(taskId) && EDITORS.includes(editor as EditorId)
       ? service.openEditor(projectId, taskId, editor as EditorId)
       : INVALID
+  )
+  guarded(ch.openTerminal, GENERIC, async (projectId, taskId) =>
+    isId(projectId) && isId(taskId) ? service.openTerminal(projectId, taskId) : INVALID
   )
   guarded(ch.artifacts, GENERIC, async (projectId, taskId) =>
     isId(projectId) && isId(taskId) ? service.artifacts(projectId, taskId) : INVALID

@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  blocksToMarkdown,
-  buildBriefing,
-  extractAcceptanceCriteria
-} from '../../shared/briefing'
+import { blocksToMarkdown, buildBriefing, extractAcceptanceCriteria } from '../../shared/briefing'
 import {
   POLICY_MESSAGES,
   evaluatePermission,
@@ -13,6 +9,7 @@ import {
 } from './policy'
 import { isEnvFile, redactSecrets, sanitizeEnv } from './redact'
 import { parseStreamLine } from './stream'
+import { isSendMessageRequest } from '../ipc/claude.ipc'
 
 const WT = '/home/u/.config/orkio/worktrees/p1/ORK-7'
 const rt = (
@@ -20,6 +17,47 @@ const rt = (
   annotations: Record<string, boolean> = {},
   href: string | null = null
 ) => [{ plain_text: text, annotations, href }]
+
+describe('stream-json → uso do contexto', () => {
+  const line = (over: Record<string, unknown>): string =>
+    JSON.stringify({
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: {
+        content: [{ type: 'text', text: 'oi' }],
+        usage: {
+          input_tokens: 1000,
+          cache_read_input_tokens: 80000,
+          cache_creation_input_tokens: 1000,
+          output_tokens: 7
+        }
+      },
+      ...over
+    })
+  it('emite o uso da mensagem principal com a janela do modelo', () => {
+    expect(parseStreamLine(line({}), WT)[0]).toEqual({
+      kind: 'usage',
+      inputTokens: 82_000,
+      contextWindow: 200_000
+    })
+    expect(parseStreamLine(line({}), WT, undefined, 'claude-opus[1m]')[0]).toEqual({
+      kind: 'usage',
+      inputTokens: 82_000,
+      contextWindow: 1_000_000
+    })
+  })
+  it('mensagem de subagente e linha sem usage não emitem uso', () => {
+    expect(
+      parseStreamLine(line({ parent_tool_use_id: 'toolu_1' }), WT).some((e) => e.kind === 'usage')
+    ).toBe(false)
+    const none = JSON.stringify({
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: { content: [{ type: 'text', text: 'oi' }] }
+    })
+    expect(parseStreamLine(none, WT)).toEqual([{ kind: 'text', text: 'oi' }])
+  })
+})
 
 describe('stream-json → log', () => {
   it('init, texto, ferramenta, resultado de ferramenta e resultado final', () => {
@@ -105,6 +143,56 @@ describe('stream-json → log', () => {
     ).toEqual([
       { kind: 'result', ok: true, durationMs: 1234, costUsd: 0.42, turns: 5, text: 'Pronto.' }
     ])
+  })
+
+  it('subagentes: parent nas ferramentas filhas e evento subagent para Task/Agent', () => {
+    const line = (parent: string | null, block: unknown): string =>
+      JSON.stringify({
+        type: 'assistant',
+        parent_tool_use_id: parent,
+        message: { content: [block] }
+      })
+    const now = (): Date => new Date('2026-11-23T10:00:00.000Z')
+    expect(
+      parseStreamLine(
+        line('t1', { type: 'tool_use', id: 'r1', name: 'Read', input: { file_path: 'a.ts' } }),
+        WT,
+        now
+      )
+    ).toEqual([{ kind: 'tool', id: 'r1', tool: 'Read', summary: 'a.ts', parent: 't1' }])
+    expect(
+      parseStreamLine(
+        line(null, {
+          type: 'tool_use',
+          id: 't1',
+          name: 'Task',
+          input: { description: 'Revisar API', subagent_type: 'review-agent', prompt: 'x' }
+        }),
+        WT,
+        now
+      )
+    ).toEqual([
+      { kind: 'tool', id: 't1', tool: 'Task', summary: 'Revisar API' },
+      {
+        kind: 'subagent',
+        id: 't1',
+        title: 'Revisar API',
+        agentType: 'review-agent',
+        background: false,
+        at: '2026-11-23T10:00:00.000Z'
+      }
+    ])
+    const bg = parseStreamLine(
+      line(null, {
+        type: 'tool_use',
+        id: 't2',
+        name: 'Agent',
+        input: { description: 'Longo', run_in_background: true }
+      }),
+      WT,
+      now
+    )
+    expect(bg[1]).toMatchObject({ kind: 'subagent', background: true, agentType: null })
   })
 
   it('subagente não vira texto principal; linhas inválidas viram aviso; tipos desconhecidos somem', () => {
@@ -313,7 +401,7 @@ describe('briefing', () => {
     expect(briefing).toContain('- **Status:** Em andamento')
     expect(briefing).not.toContain('Prioridade')
     expect(briefing).toContain(
-      'Branch de trabalho: ORK-7/listar-tarefas (worktree isolado; não faça push nem abra PR)'
+      'Branch de trabalho: ORK-7/listar-tarefas (worktree isolado). Não faça push nem abra PR: o Orkio faz isso pelo botão “Abrir PR” (ou pelo passo de entrega do fluxo). Se o usuário pedir, diga isso a ele.'
     )
     expect(briefing).toContain('PR: #12 (aberta)')
     expect(briefing).toContain('## Critérios de aceite\n\n- [ ] lista aparece')
@@ -347,5 +435,29 @@ describe('briefing', () => {
         '/wt'
       )
     ).toEqual([{ kind: 'info', text: 'Hook do projeto rodou: PostToolUse' }])
+  })
+})
+
+describe('IPC: runtime da mensagem', () => {
+  const base = { projectId: 'p1', taskId: 't1', text: 'oi' }
+  it('valida modelo e raciocínio', () => {
+    expect(isSendMessageRequest({ ...base, runtime: { effort: 'low' } })).toBe(true)
+    expect(isSendMessageRequest({ ...base, runtime: { model: 'opus', effort: null } })).toBe(true)
+    expect(isSendMessageRequest({ ...base, runtime: { model: 'a b' } })).toBe(false)
+    expect(isSendMessageRequest({ ...base, runtime: { model: '--dangerously-x' } })).toBe(false)
+    expect(isSendMessageRequest({ ...base, runtime: { effort: 'ultra' } })).toBe(false)
+    expect(isSendMessageRequest({ ...base, runtime: { cmd: 'x' } })).toBe(false)
+    expect(isSendMessageRequest({ ...base, runtime: 'opus' })).toBe(false)
+  })
+})
+
+describe('POLICY_MESSAGES: o caminho para publicar', () => {
+  it('push e gh dizem para usar “Abrir PR” e mantêm o começo reconhecido', () => {
+    expect(POLICY_MESSAGES.push).toMatch(
+      /^Bloqueado pelo Orkio: git push só é permitido em um passo/
+    )
+    expect(POLICY_MESSAGES.gh).toMatch(/^Bloqueado pelo Orkio: comandos do GitHub CLI que publicam/)
+    for (const m of [POLICY_MESSAGES.push, POLICY_MESSAGES.gh])
+      expect(m).toContain('Para publicar, use “Abrir PR” na aba PR & CI da tarefa.')
   })
 })

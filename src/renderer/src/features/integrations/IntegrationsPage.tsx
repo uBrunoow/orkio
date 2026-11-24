@@ -1,10 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import type { AlvaPrecheck } from '../../../../shared/alva'
 import type { ConnectionStatus, NotionWorkspaceStatus } from '../../../../shared/ipc-contract'
 import type { StatusTone } from '../../components/StatusToken'
-import { ClaudeLogo, GitHubLogo, NotionLogo, TerminalIcon } from '../../components/icons'
+import {
+  ClaudeLogo,
+  DatabaseIcon,
+  GitHubLogo,
+  NotionLogo,
+  PluginIcon,
+  TerminalIcon,
+  type SvgIcon
+} from '../../components/icons'
+import { TextField } from '../../components/form'
+import { isTextField } from '../../app/shortcuts'
 import { PageHeader } from '../../components/PageHeader'
 import { ClaudeCodeCard } from '../claude/ClaudeCodeCard'
 import { NotionWorkspaceCard } from '../notion-workspace/NotionWorkspaceCard'
@@ -13,7 +23,8 @@ import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
 import { useGitHubConnection } from './useGitHubConnection'
 import { useNotionConnection } from './useNotionConnection'
-import { IntegrationListHeader, IntegrationRow } from './IntegrationRow'
+import { IntegrationCard } from './IntegrationCard'
+import { effectiveOpenId, firstPendingId, matchesQuery } from './integrations-logic'
 import { PAGE_WIDTH } from '../../components/page-width'
 
 export function IntegrationsPage({
@@ -35,43 +46,141 @@ export function IntegrationsPage({
   const githubReady = github.status?.state === 'connected'
   const claudeReady = claudeStatus(claude).tone === 'success'
 
-  // Abertas: as que você abriu; sem escolha, as que ainda não estão prontas.
-  const [open, setOpen] = useState<Record<string, boolean>>({})
-  // Uma linha que estava pendente e ficou pronta nesta visita continua aberta (a confirmação de
-  // "conectado" não some na hora). Padrão do React para reagir a uma mudança durante o render.
-  const pendingNow: Record<string, boolean> = {
-    notion: notion.status !== null && !notionReady,
-    github: github.status !== null && !githubReady,
-    claude: claude !== null && !claudeReady,
-    'notion-workspace': notionReady && workspace.status !== null && !workspaceReady
-  }
-  const readyNow: Record<string, boolean> = {
-    notion: notionReady,
-    github: githubReady,
-    claude: claudeReady,
-    'notion-workspace': workspaceReady
-  }
-  const [wasPending, setWasPending] = useState<Record<string, boolean>>({})
-  const newlyPending = Object.keys(pendingNow).filter((k) => pendingNow[k] && !wasPending[k])
-  if (newlyPending.length > 0) {
-    setWasPending((w) => ({ ...w, ...Object.fromEntries(newlyPending.map((k) => [k, true])) }))
-  }
-  const justReady = Object.keys(readyNow).filter(
-    (k) => readyNow[k] && wasPending[k] && open[k] === undefined
-  )
-  if (justReady.length > 0) {
-    setOpen((o) => ({ ...o, ...Object.fromEntries(justReady.map((k) => [k, true])) }))
-  }
-  const isOpen = (id: string, ready: boolean): boolean => open[id] ?? !ready
-  const toggle = (id: string, ready: boolean): void =>
-    setOpen((o) => ({ ...o, [id]: !(o[id] ?? !ready) }))
-
   const gh = precheck?.items.find((i) => i.id === 'gh') ?? null
   const ghStatus: { label: string; tone: StatusTone } = !gh
     ? { label: projectId ? 'Verificando' : 'Escolha um projeto', tone: 'neutral' }
     : gh.state === 'ok'
       ? { label: 'Pronto', tone: 'success' }
       : { label: gh.detail, tone: 'warning' }
+  const pluginsStatus: { label: string; tone: StatusTone } = precheck?.pluginVersion
+    ? { label: `alva-flow ${precheck.pluginVersion}`, tone: 'success' }
+    : { label: precheck ? 'alva-flow não instalado' : 'Verificando', tone: 'neutral' }
+
+  // Um painel aberto por vez. Sem escolha sua (`undefined`), abre o primeiro card pendente na
+  // ordem da página, reavaliado conforme os estados chegam; ao abrir/fechar você, ele para de
+  // escolher. `lastAuto` guarda o último aberto sozinho (continua aberto quando fica pronto).
+  const [chosen, setChosen] = useState<string | null | undefined>(undefined)
+  const [lastAuto, setLastAuto] = useState<string | null>(null)
+  const firstPending = firstPendingId([
+    { id: 'notion', pending: notion.status !== null && !notionReady },
+    {
+      id: 'notion-workspace',
+      pending: notionReady && workspace.status !== null && !workspaceReady
+    },
+    { id: 'github', pending: github.status !== null && !githubReady },
+    { id: 'claude', pending: claude !== null && !claudeReady }
+  ])
+  if (chosen === undefined && firstPending && firstPending !== lastAuto) {
+    setLastAuto(firstPending)
+  }
+  const openId = effectiveOpenId(chosen, firstPending, lastAuto)
+  const toggle = (id: string): void => setChosen(openId === id ? null : id)
+
+  const cards: CardSpec[] = [
+    {
+      id: 'notion',
+      section: 'Tarefas',
+      logo: NotionLogo,
+      logoClassName: 'bg-foreground text-background',
+      name: 'Notion',
+      category: 'tarefas',
+      status: connectionStatus(notion.status),
+      action: notionReady ? 'Gerenciar' : 'Conectar',
+      ready: notionReady,
+      panel: <NotionConnectionCard notion={notion} />
+    },
+    {
+      id: 'notion-workspace',
+      section: 'Tarefas',
+      logo: DatabaseIcon,
+      logoClassName: 'bg-muted text-muted-foreground',
+      name: 'Bancos e campos',
+      category: 'notion',
+      status: workspaceStatus(workspace.status, notion.status),
+      action: workspaceReady ? 'Revisar campos' : 'Configurar',
+      ready: workspaceReady,
+      panel: (
+        <NotionWorkspaceCard
+          workspace={workspace}
+          notionStatus={notion.status}
+          {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
+        />
+      )
+    },
+    {
+      id: 'github',
+      section: 'Código',
+      logo: GitHubLogo,
+      logoClassName: 'border border-border bg-surface text-foreground',
+      name: 'GitHub',
+      category: 'código',
+      status: connectionStatus(github.status),
+      action: githubReady ? 'Gerenciar' : 'Conectar',
+      ready: githubReady,
+      panel: <GitHubConnectionCard github={github} />
+    },
+    {
+      id: 'gh',
+      section: 'Código',
+      logo: TerminalIcon,
+      logoClassName: 'bg-muted text-muted-foreground',
+      name: 'GitHub CLI',
+      category: 'terminal · opcional',
+      status: ghStatus,
+      action: 'Como resolver',
+      ready: ghStatus.tone === 'success',
+      panel: (
+        <p className="rounded-xl border border-border-soft bg-card p-4 text-xs text-muted-foreground">
+          {gh?.fix ? (
+            <>
+              Rode no terminal: <code className="font-mono text-xs text-foreground">{gh.fix}</code>
+            </>
+          ) : (
+            'Nada a fazer: o gh está pronto.'
+          )}
+        </p>
+      )
+    },
+    {
+      id: 'claude',
+      section: 'Agentes de código',
+      logo: ClaudeLogo,
+      logoClassName: 'bg-brand text-primary-foreground',
+      name: 'Claude Code',
+      category: 'agente',
+      status: claudeStatus(claude),
+      action: claudeReady ? 'Gerenciar' : 'Configurar',
+      ready: claudeReady,
+      panel: <ClaudeCodeCard />
+    },
+    {
+      id: 'plugins',
+      section: 'Agentes de código',
+      logo: PluginIcon,
+      logoClassName: 'bg-muted text-muted-foreground',
+      name: 'Plugins e comandos',
+      category: 'claude code',
+      status: pluginsStatus,
+      action: 'Ver no Claude Code',
+      ready: pluginsStatus.tone === 'success',
+      // Sem painel próprio: abre a configuração do Claude Code.
+      opensId: 'claude'
+    }
+  ]
+
+  const [query, setQuery] = useState('')
+  const searchBox = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return
+      e.preventDefault()
+      searchBox.current?.querySelector('input')?.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  const visible = cards.filter((c) => matchesQuery(c, query))
+  const readyCount = cards.filter((c) => c.ready).length
 
   return (
     <div className={cn('flex flex-col gap-[18px]', PAGE_WIDTH.list)}>
@@ -80,124 +189,81 @@ export function IntegrationsPage({
         subtitle="Contas que o Orkio usa. Os tokens ficam cifrados neste computador e nunca saem dele."
       />
 
-      <div className="overflow-hidden rounded-xl border border-border-soft bg-card">
-        <IntegrationListHeader />
-        <ul
-          aria-label="Catálogo de integrações"
-          className="flex flex-col divide-y divide-border-soft"
-        >
-          <IntegrationRow
-            id="notion"
-            logo={NotionLogo}
-            logoClassName="bg-foreground text-background"
-            name="Notion"
-            purpose="Lê suas tarefas e move o status quando você move o card."
-            status={connectionStatus(notion.status)}
-            action={notionReady ? 'Gerenciar' : 'Conectar'}
-            isOpen={isOpen('notion', notionReady)}
-            onToggle={() => toggle('notion', notionReady)}
-            sub={
-              <IntegrationRow
-                id="notion-workspace"
-                logo={null}
-                name="Bancos e campos"
-                purpose={workspaceSummary(workspace.status)}
-                status={workspaceStatus(workspace.status, notion.status)}
-                action={workspaceReady ? 'Revisar campos' : 'Configurar'}
-                isOpen={isOpen('notion-workspace', workspaceReady || !notionReady)}
-                onToggle={() => toggle('notion-workspace', workspaceReady || !notionReady)}
-              >
-                <NotionWorkspaceCard
-                  workspace={workspace}
-                  notionStatus={notion.status}
-                  {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
-                />
-              </IntegrationRow>
-            }
-          >
-            <NotionConnectionCard notion={notion} />
-          </IntegrationRow>
-          <IntegrationRow
-            id="github"
-            logo={GitHubLogo}
-            logoClassName="border border-border bg-surface text-foreground"
-            name="GitHub"
-            purpose="Branches, PRs, revisões e CI das tarefas; pedir review."
-            status={connectionStatus(github.status)}
-            action={githubReady ? 'Gerenciar' : 'Conectar'}
-            isOpen={isOpen('github', githubReady)}
-            onToggle={() => toggle('github', githubReady)}
-          >
-            <GitHubConnectionCard github={github} />
-          </IntegrationRow>
-          <IntegrationRow
-            id="claude"
-            logo={ClaudeLogo}
-            logoClassName="bg-brand text-primary-foreground"
-            name="Claude Code"
-            purpose="Roda as tarefas com o seu login do claude. O Orkio não guarda chave."
-            status={claudeStatus(claude)}
-            action={claudeReady ? 'Gerenciar' : 'Configurar'}
-            isOpen={isOpen('claude', claudeReady)}
-            onToggle={() => toggle('claude', claudeReady)}
-            sub={
-              <IntegrationRow
-                id="plugins"
-                logo={null}
-                name="Plugins e comandos"
-                purpose={
-                  precheck?.pluginVersion
-                    ? `alva-flow ${precheck.pluginVersion}`
-                    : 'alva-flow não encontrado (opcional)'
-                }
-                status={
-                  precheck?.pluginVersion
-                    ? { label: 'Encontrado', tone: 'success' }
-                    : { label: precheck ? 'Opcional' : 'Verificando', tone: 'neutral' }
-                }
-                action="Ver no Claude Code"
-                isOpen={false}
-                onToggle={() => toggle('claude', false)}
-              />
-            }
-          >
-            <ClaudeCodeCard />
-          </IntegrationRow>
-          <IntegrationRow
-            id="gh"
-            logo={TerminalIcon}
-            logoClassName="bg-muted text-muted-foreground"
-            name="GitHub CLI (opcional)"
-            purpose="Usado pelo /alva-flow:pr para abrir a PR."
-            status={ghStatus}
-            action="Como resolver"
-            isOpen={open['gh'] ?? false}
-            onToggle={() => toggle('gh', true)}
-          >
-            {gh?.fix ? (
-              <p className="text-xs text-muted-foreground">
-                Rode no terminal:{' '}
-                <code className="font-mono text-xs text-foreground">{gh.fix}</code>
-              </p>
-            ) : (
-              <p className="text-xs text-muted-foreground">Nada a fazer: o gh está pronto.</p>
-            )}
-          </IntegrationRow>
-        </ul>
+      <div ref={searchBox} className="flex flex-wrap items-center gap-3">
+        <TextField
+          label="Buscar integração"
+          labelHidden
+          type="search"
+          placeholder="Buscar integração (/)"
+          value={query}
+          onChange={setQuery}
+          inputClassName="w-72"
+        />
+        <span className="text-xs text-muted-foreground" data-testid="integrations-count">
+          {readyCount} de {cards.length} prontas
+        </span>
       </div>
-      <p className="border-l-2 border-brand px-3 py-1 text-[12.5px] text-muted-foreground">
-        Faltando algo? Cada linha diz o que fazer. As mesmas checagens aparecem nos “Primeiros
-        passos” e no item do projeto.
-      </p>
+
+      {SECTIONS.map((section) => {
+        const inSection = visible.filter((c) => c.section === section)
+        if (inSection.length === 0) return null
+        return (
+          <section key={section} aria-label={section} className="flex flex-col gap-2">
+            <h2 className="text-2xs tracking-[0.06em] text-subtle-foreground uppercase">
+              {section}
+            </h2>
+            <div className="grid grid-cols-1 gap-2 min-[900px]:grid-cols-2">
+              {inSection.map((c) => {
+                const target = c.opensId ?? c.id
+                return (
+                  <IntegrationCard
+                    key={c.id}
+                    id={c.id}
+                    logo={c.logo}
+                    {...(c.logoClassName ? { logoClassName: c.logoClassName } : {})}
+                    name={c.name}
+                    category={c.category}
+                    status={c.status}
+                    action={c.action}
+                    open={!c.opensId && openId === c.id}
+                    onAction={() => {
+                      if (!c.opensId) return toggle(target)
+                      // Sem painel próprio: sempre ABRE o do outro card (e o mostra na busca).
+                      const targetCard = cards.find((x) => x.id === target)
+                      if (targetCard && !matchesQuery(targetCard, query)) setQuery('')
+                      setChosen(target)
+                    }}
+                  >
+                    {c.panel}
+                  </IntegrationCard>
+                )
+              })}
+            </div>
+          </section>
+        )
+      })}
+      {visible.length === 0 && (
+        <p className="text-xs text-muted-foreground">Nenhuma integração com esse nome.</p>
+      )}
     </div>
   )
 }
 
-function workspaceSummary(s: NotionWorkspaceStatus | null): string {
-  const c = s?.config
-  if (!c) return 'Quais bancos são Projetos e Tarefas, e quais campos o Orkio lê.'
-  const fields = Object.values(c.mapping).filter(Boolean).length
-  return `Projetos → ${c.projectsDataSource.name} · Tarefas → ${c.tasksDataSource.name} · ${fields} de 6 campos ligados`
+const SECTIONS = ['Tarefas', 'Código', 'Agentes de código'] as const
+
+interface CardSpec {
+  id: string
+  section: (typeof SECTIONS)[number]
+  logo: SvgIcon
+  logoClassName?: string
+  name: string
+  category: string
+  status: { label: string; tone: StatusTone }
+  action: string
+  ready: boolean
+  panel?: React.ReactNode
+  /** Card sem painel próprio: a ação abre o painel deste outro card. */
+  opensId?: string
 }
 
 /** Pré-checagem do alva-flow do projeto atual (gh, plugin); só leitura. */

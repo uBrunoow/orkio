@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Flow, ProjectFlows } from '../../shared/task-flow'
 import { defaultAgent, type AgentProfile } from '../../shared/agent'
+import { builtinAgent } from '../../shared/agent-presets'
+import { ORKIO_SITE_TIMEOUT_MESSAGE } from '../connectors/github/github.connector'
+import { ReviewPostError } from '../connectors/github/review-poster'
+import { createPublishReviewAction } from '../delivery/review-publish'
 import { BoardStore } from '../board/board.store'
 import type { StageChange } from '../board/board.service'
 import { openDatabase, type Db } from '../db/database'
@@ -59,8 +63,17 @@ let started: {
   briefing: string
   includeBriefing?: boolean
   delivery?: boolean
-  agent?: { key: string; name: string; prompt: string; model: string | null } | null
+  agent?: {
+    key: string
+    name: string
+    prompt: string
+    model: string | null
+    effort?: string | null
+  } | null
   reply?: string
+  prompt?: string
+  readOnly?: boolean
+  runtime?: { model?: string | null; effort?: string | null }
 }[]
 let cancelled: string[]
 let notifications: string[]
@@ -86,7 +99,10 @@ function makeRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
         includeBriefing: input.includeBriefing,
         delivery: input.delivery,
         agent: input.agent,
-        ...(input.reply !== undefined ? { reply: input.reply } : {})
+        ...(input.reply !== undefined ? { reply: input.reply } : {}),
+        ...(input.prompt !== undefined ? { prompt: input.prompt } : {}),
+        ...(input.readOnly !== undefined ? { readOnly: input.readOnly } : {}),
+        ...(input.runtime !== undefined ? { runtime: input.runtime } : {})
       })
       return runId
     },
@@ -240,6 +256,29 @@ describe('FlowRunner', () => {
     expect(runner.view(id).status).toBe('waiting_gate')
   })
 
+  it('modelo/raciocínio do passo vão em runtime (também em "Responder e continuar"); sem eles, sem runtime', async () => {
+    const first = FLOW.steps[0] as Extract<Flow['steps'][number], { type: 'claude_command' }>
+    config = {
+      ...config,
+      flows: [
+        { ...FLOW, steps: [{ ...first, model: 'opus', effort: 'low' }, ...FLOW.steps.slice(1)] }
+      ]
+    }
+    const runner = makeRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    expect(started[0]!.runtime).toEqual({ model: 'opus', effort: 'low' })
+    finish(runner, 'run-1', 'failed')
+    await flush()
+    await runner.resumeWithReply(id, 'segue')
+    expect(started[1]).toMatchObject({ reply: 'segue', runtime: { model: 'opus', effort: 'low' } })
+
+    started.length = 0
+    config = { ...config, flows: [FLOW] }
+    db.run("UPDATE flow_runs SET status = 'cancelled'")
+    await makeRunner({ newId: () => 'fr-other' }).startManual('p1', 't1')
+    expect(started[0]).not.toHaveProperty('runtime')
+  })
+
   it('isBusy: passo rodando bloqueia a mensagem da sessão; pausa por falha e gate liberam', async () => {
     const runner = makeRunner()
     const { id } = await runner.startManual('p1', 't1')
@@ -311,6 +350,35 @@ describe('FlowRunner', () => {
     await runner.startById('p1', 't1', 'f-alva')
     await flush()
     expect(started.map((s) => s.args)).toEqual(['TASK-7'])
+  })
+
+  it('startBuiltin roda um fluxo que não está na config, com a cópia, e recusa com fluxo ativo', async () => {
+    const builtin: Flow = {
+      id: 'builtin:x',
+      name: 'Do app',
+      steps: [
+        {
+          id: 'c',
+          name: 'C',
+          type: 'claude_command',
+          command: 'revisar',
+          args: 'a',
+          timeoutMin: 5
+        }
+      ]
+    }
+    const runner = makeRunner()
+    const view = await runner.startBuiltin('p1', 't1', builtin)
+    await flush()
+    expect(view.flowName).toBe('Do app')
+    expect(started.map((s) => s.command)).toEqual(['revisar'])
+    const row = db.get<{ flow_json: string; stage_id: string | null }>(
+      'SELECT flow_json, stage_id FROM flow_runs WHERE id = ?',
+      view.id
+    )
+    expect(JSON.parse(row!.flow_json)).toMatchObject({ id: 'builtin:x' })
+    expect(row!.stage_id).toBeNull()
+    await expect(runner.startBuiltin('p1', 't1', builtin)).rejects.toMatchObject({ code: 'busy' })
   })
 
   it('rodar de novo um passo anterior: volta ao comando e segue dali (só em falha)', async () => {
@@ -568,6 +636,19 @@ describe('FlowRunner', () => {
       expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'done' })
     })
 
+    it('mensagem com anexo: a nota não entra no casamento da escolha', async () => {
+      const runner = alvaRunner()
+      await runner.startManual('p1', 't1')
+      finish(runner, 'run-1', 'succeeded', 'varias')
+      await flush()
+      const note =
+        '\n\nAnexos (leia com a ferramenta Read): .orkio/attachments/ab12cd34-a.md, x-b.md'
+      // A nota cita "a" e "b" (as opções): sem ela a mensagem é ambígua, com ela não pode mudar nada.
+      await expect(runner.handleMessage('t1', 'sei lá', note)).rejects.toThrow()
+      expect(await runner.handleMessage('t1', 'escolho B', note)).toBe('choice')
+      expect(started[1]).toMatchObject({ args: 'B Exportar CSV' })
+    })
+
     it('extrator que falha pausa o fluxo com a mensagem', async () => {
       const runner = alvaRunner()
       const { id } = await runner.startManual('p1', 't1')
@@ -765,6 +846,86 @@ describe('FlowRunner', () => {
       expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'depois' })
     })
 
+    it('a revisão publicada moveu a tarefa: ao terminar, o fluxo da coluna nova começa', async () => {
+      // Caso real: revisão do orkio[bot] com "Pedir alterações" → regra move para Revisado durante
+      // o passo → ao terminar, o "comentários da PR" (ligado a Revisado) tem que começar.
+      let runner: FlowRunner | null = null
+      const PUBLISH = {
+        id: 'publish_review',
+        label: 'Publicar revisão',
+        run: async () => {
+          stage = 's-revisado'
+          runner!.onStageChanged({
+            projectId: 'p1',
+            taskId: 't1',
+            from: 's-rev',
+            to: 's-revisado',
+            source: 'automation'
+          })
+          await flush()
+          return { ok: true as const }
+        }
+      }
+      config = {
+        flows: [
+          {
+            id: 'd',
+            name: 'Revisão publicada',
+            steps: [{ id: 'pub', name: 'Publicar', type: 'orkio_action', action: 'publish_review' }]
+          },
+          { id: 'c', name: 'Comentários', steps: [DELIVER.steps[1]!] }
+        ],
+        bindings: [
+          { stageId: 's-rev', flowId: 'd', enabled: true, mode: 'on_enter' },
+          { stageId: 's-revisado', flowId: 'c', enabled: true, mode: 'on_enter' }
+        ]
+      }
+      const entered: StageChange[] = []
+      runner = makeRunner({
+        actions: [PUBLISH],
+        stageEntered: (change) => {
+          entered.push(change)
+          runner!.onStageChanged(change)
+        }
+      })
+      enter(runner, 'manual')
+      for (let i = 0; i < 4; i++) await flush()
+      expect(runner.view('fr-1')).toMatchObject({ status: 'finished', result: 'done' })
+      expect(entered).toEqual([
+        { projectId: 'p1', taskId: 't1', from: 's-rev', to: 's-revisado', source: 'automation' }
+      ])
+      expect(started.map((s) => s.command)).toEqual(['revisar'])
+      expect(runner.view('fr-2')).toMatchObject({ flowId: 'c', status: 'running' })
+    })
+
+    it('outros passos de entrega (/pr → Revisando) não disparam a coluna nova ao terminar', async () => {
+      config = {
+        flows: [{ id: 'd', name: 'Entregar', steps: [DELIVER.steps[0]!] }],
+        bindings: [
+          { stageId: 's-rev', flowId: 'd', enabled: true, mode: 'on_enter' },
+          { stageId: 's-revisando', flowId: 'd', enabled: true, mode: 'on_enter' }
+        ]
+      }
+      const entered: StageChange[] = []
+      const runner = makeRunner({ stageEntered: (c) => void entered.push(c) })
+      enter(runner, 'manual')
+      await flush()
+      await flush()
+      stage = 's-revisando'
+      runner.onStageChanged({
+        projectId: 'p1',
+        taskId: 't1',
+        from: 's-rev',
+        to: 's-revisando',
+        source: 'automation'
+      })
+      await flush()
+      finish(runner, 'run-1', 'succeeded')
+      await flush()
+      expect(runner.view('fr-1')).toMatchObject({ status: 'finished', result: 'done' })
+      expect(entered).toEqual([])
+    })
+
     it('reabrir o app com a confirmação aberta: continua esperando, com o que mostrar', async () => {
       const runner = deliveryRunner()
       const { id } = await runner.startManual('p1', 't1')
@@ -779,6 +940,216 @@ describe('FlowRunner', () => {
       await r2.approveGate(id)
       expect(pushes).toBe(1)
     })
+  })
+})
+
+describe('FlowRunner: publicar revisão como orkio[bot] (Task 18)', () => {
+  const PUBLISH_FLOW: Flow = {
+    id: 'rp',
+    name: 'Revisão publicada',
+    steps: [
+      {
+        id: 'json',
+        name: 'Converter',
+        type: 'claude_command',
+        command: '',
+        args: '',
+        prompt: 'Converta a revisão acima',
+        readOnly: true,
+        timeoutMin: 15
+      },
+      { id: 'publicar', name: 'Publicar', type: 'orkio_action', action: 'publish_review' }
+    ]
+  }
+  const ANSWER =
+    '```json\n' +
+    JSON.stringify({
+      event: 'REQUEST_CHANGES',
+      summary: 'Falta validar a entrada.',
+      comments: [
+        { path: 'src/a.ts', line: 3, body: 'Valide aqui.' },
+        { path: 'README.md', line: 40, body: 'Fora do diff.' }
+      ]
+    }) +
+    '\n```'
+  let posts: { owner: string; repo: string; number: number; review: unknown }[]
+  let postError: Error | null
+  let readRuns: string[]
+
+  function publishRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
+    posts = []
+    postError = null
+    readRuns = []
+    config = {
+      flows: [PUBLISH_FLOW],
+      bindings: [{ stageId: 's-rev', flowId: 'rp', enabled: true, mode: 'manual' }]
+    }
+    const action = createPublishReviewAction({
+      poster: {
+        isConfigured: () => true,
+        diffLines: async () => new Map([['src/a.ts', new Set([3])]]),
+        postReview: async (owner, repo, number, review) => {
+          if (postError) throw postError
+          posts.push({ owner, repo, number, review })
+          return { url: 'https://github.com/acme/app/pull/7#pullrequestreview-99' }
+        }
+      },
+      finalText: async (runId) => {
+        readRuns.push(runId)
+        return ANSWER
+      },
+      signals: async () => ({
+        ok: true,
+        value: {
+          signals: {
+            t1: { pr: { number: 7, state: 'open', url: 'https://github.com/acme/app/pull/7' } }
+          }
+        } as never
+      }),
+      repo: () => ({ owner: 'acme', repo: 'app' }),
+      store
+    })
+    return makeRunner({ actions: [NOOP_ACTION, action], ...over })
+  }
+
+  it('o gate mostra a revisão (lida da última execução); aprovar publica sem os fora do diff', async () => {
+    const runner = publishRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    expect(started[0]).toMatchObject({ prompt: 'Converta a revisão acima', readOnly: true })
+    finish(runner, 'run-1', 'succeeded', ANSWER)
+    await flush()
+    const v = runner.view(id)
+    expect(v).toMatchObject({ status: 'waiting_gate', currentStep: 'publicar' })
+    expect(readRuns).toEqual(['run-1'])
+    expect(v.confirm?.review).toEqual({
+      event: 'REQUEST_CHANGES',
+      summary: 'Falta validar a entrada.',
+      comments: [
+        { path: 'src/a.ts', line: 3, body: 'Valide aqui.', inDiff: true },
+        { path: 'README.md', line: 40, body: 'Fora do diff.', inDiff: false }
+      ],
+      pr: { owner: 'acme', repo: 'app', number: 7 }
+    })
+    expect(posts).toEqual([]) // nada antes de aprovar
+    await runner.approveGate(id)
+    expect(posts).toEqual([
+      {
+        owner: 'acme',
+        repo: 'app',
+        number: 7,
+        review: {
+          event: 'REQUEST_CHANGES',
+          body: 'Falta validar a entrada.',
+          comments: [{ path: 'src/a.ts', line: 3, body: 'Valide aqui.' }]
+        }
+      }
+    ])
+    expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'done' })
+    expect(runner.view(id).vars).toMatchObject({ 'review.posted': 'sim' })
+    const delivery = store.events('t1').find((e) => e.kind === 'delivery')
+    expect(delivery?.detail).toMatchObject({
+      by: 'orkio',
+      action: 'review_post',
+      reviewEvent: 'REQUEST_CHANGES',
+      reviewId: 99,
+      pr: { number: 7, owner: 'acme', repo: 'app' }
+    })
+  })
+
+  it('timeout do site: falha dizendo que pode ter publicado; Retomar pede a confirmação de novo', async () => {
+    const runner = publishRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    finish(runner, 'run-1', 'succeeded', ANSWER)
+    await flush()
+    postError = new ReviewPostError('timeout', ORKIO_SITE_TIMEOUT_MESSAGE)
+    await runner.approveGate(id)
+    const v = runner.view(id)
+    expect(v).toMatchObject({ status: 'paused', pauseReason: 'step_failed' })
+    expect(v.history.at(-1)?.message).toContain('a revisão pode ter sido publicada')
+    postError = null
+    await runner.resume(id)
+    const again = runner.view(id)
+    expect(again).toMatchObject({ status: 'waiting_gate', currentStep: 'publicar' })
+    expect(again.confirm?.warning).toMatch(/pode já estar na PR/)
+    expect(posts).toEqual([]) // nada foi reenviado sem você aprovar
+    await runner.approveGate(id)
+    expect(posts).toHaveLength(1)
+  })
+
+  it('o texto da revisão sai do banco ao cancelar, ao sair da etapa e cancelar, e ao concluir', async () => {
+    const state = (id: string): string =>
+      db.get<{ state_json: string }>('SELECT state_json FROM flow_runs WHERE id = ?', id)!
+        .state_json
+    const runner = publishRunner()
+    const a = await runner.startManual('p1', 't1')
+    finish(runner, 'run-1', 'succeeded', ANSWER)
+    await flush()
+    expect(state(a.id)).toContain('Falta validar a entrada.')
+    await runner.cancel(a.id)
+    expect(state(a.id)).not.toContain('Falta validar')
+
+    // Tarefa saiu da etapa com o gate aberto → "Cancelar".
+    config = {
+      flows: [PUBLISH_FLOW],
+      bindings: [{ stageId: 's-rev', flowId: 'rp', enabled: true, mode: 'on_enter' }]
+    }
+    const r2 = publishRunner({ newId: () => 'fr-left' })
+    config = {
+      flows: [PUBLISH_FLOW],
+      bindings: [{ stageId: 's-rev', flowId: 'rp', enabled: true, mode: 'on_enter' }]
+    }
+    enter(r2, 'manual')
+    await flush()
+    await flush()
+    finish(r2, `run-${started.length}`, 'succeeded', ANSWER)
+    await flush()
+    expect(r2.view('fr-left').status).toBe('waiting_gate')
+    r2.onStageChanged({
+      projectId: 'p1',
+      taskId: 't1',
+      from: 's-rev',
+      to: 's-ok',
+      source: 'manual'
+    })
+    await flush()
+    expect(r2.view('fr-left').status).toBe('awaiting_decision')
+    await r2.decideLeft('fr-left', 'cancel')
+    expect(state('fr-left')).not.toContain('Falta validar')
+
+    // Concluído (aprovado e publicado).
+    const r3 = publishRunner({ newId: () => 'fr-ok' })
+    await r3.startManual('p1', 't1')
+    finish(r3, `run-${started.length}`, 'succeeded', ANSWER)
+    await flush()
+    await r3.approveGate('fr-ok')
+    expect(r3.view('fr-ok').status).toBe('finished')
+    expect(state('fr-ok')).not.toContain('Falta validar')
+  })
+
+  it('não instalado: falha com o link de instalação e nada é publicado', async () => {
+    const runner = publishRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    finish(runner, 'run-1', 'succeeded', ANSWER)
+    await flush()
+    postError = new ReviewPostError('not_installed', 'x', {
+      installUrl: 'https://github.com/apps/orkio/installations/new'
+    })
+    await runner.approveGate(id)
+    const msg = runner.view(id).history.at(-1)?.message ?? ''
+    expect(msg).toContain('não está instalado')
+    expect(msg).toContain('https://github.com/apps/orkio/installations/new')
+    expect(posts).toEqual([])
+  })
+
+  it('o agente Revisor (sem entrega) pode rodar o fluxo de publicar revisão', async () => {
+    const revisor = builtinAgent('revisor')!
+    expect(revisor.delivery).toBe(false)
+    const runner = publishRunner({
+      agentFor: async () => ({ key: 'builtin:revisor', profile: revisor })
+    })
+    const view = await runner.startManual('p1', 't1')
+    expect(view.status).toBe('running')
+    expect(started[0]?.agent).toMatchObject({ key: 'builtin:revisor' })
   })
 })
 
@@ -914,5 +1285,167 @@ describe('FlowRunner com agentes (8A)', () => {
     await runner.approveGate(view.id)
     expect(started[1]?.agent?.name).toBe('Ana')
     expect(started[1]?.agent?.prompt).toContain('Nunca mexa em migrations')
+  })
+})
+
+describe('FlowRunner: plano aprovado antes de corrigir (pedido em texto, só leitura, "Pedir ajustes")', () => {
+  const REVIEW: Flow = {
+    id: 'rev',
+    name: 'Comentários da PR',
+    steps: [
+      { id: 'ler', name: 'Ler', type: 'orkio_action', action: 'snap' },
+      {
+        id: 'plano',
+        name: 'Plano de correções',
+        type: 'claude_command',
+        command: '',
+        args: '',
+        prompt: 'Leia .orkio/revisao.md da PR #{{review.pr}} e faça o plano.',
+        readOnly: true,
+        timeoutMin: 30
+      },
+      {
+        id: 'aprovar',
+        name: 'Aprovar correções',
+        type: 'gate',
+        message: 'Aprovar correções da PR #{{review.pr}}',
+        show: 'result',
+        onReject: 'stop',
+        timeoutMin: null,
+        revise: { step: 'plano', max: 2 }
+      },
+      {
+        id: 'aplicar',
+        name: 'Aplicar',
+        type: 'claude_command',
+        command: '',
+        args: '',
+        prompt: 'Plano aprovado. Aplique.',
+        timeoutMin: 60,
+        delivery: true
+      }
+    ]
+  }
+  const SNAP = {
+    id: 'snap',
+    label: 'Ler',
+    run: async () => ({ ok: true as const, vars: { 'review.count': '2', 'review.pr': '13' } })
+  }
+  let bodies: string[]
+  const reviewRunner = (): FlowRunner =>
+    makeRunner({
+      actions: [NOOP_ACTION, SNAP],
+      notify: (title, body) => {
+        notifications.push(title)
+        bodies.push(body)
+      }
+    })
+
+  beforeEach(() => {
+    bodies = []
+    config = {
+      flows: [REVIEW],
+      bindings: [{ stageId: 's-rev', flowId: 'rev', enabled: true, mode: 'on_enter' }]
+    }
+  })
+
+  async function atGate(runner: FlowRunner): Promise<string> {
+    const { id } = await runner.startManual('p1', 't1')
+    finish(runner, `run-${started.length}`, 'succeeded', '1. Trocar o for por map')
+    await flush()
+    expect(runner.view(id).status).toBe('waiting_gate')
+    return id
+  }
+
+  it('o pedido roda em texto (com as variáveis), só leitura; o gate mostra a mensagem com a PR', async () => {
+    const runner = reviewRunner()
+    const id = await atGate(runner)
+    expect(started[0]).toMatchObject({
+      command: '',
+      args: '',
+      prompt: 'Leia .orkio/revisao.md da PR #13 e faça o plano.',
+      readOnly: true,
+      delivery: false
+    })
+    const v = runner.view(id)
+    expect(v.steps.find((s) => s.id === 'aprovar')).toMatchObject({
+      message: 'Aprovar correções da PR #13'
+    })
+    expect(v.revise).toEqual({ used: 0, max: 2 })
+    expect(bodies).toContain('Aprovar correções da PR #13')
+  })
+
+  it('reviseGate: guarda o texto (sem segredos), volta ao plano na mesma sessão, conta e limita', async () => {
+    const runner = reviewRunner()
+    const id = await atGate(runner)
+    await expect(runner.reviseGate('t1', '   ')).rejects.toThrow('Escreva o que ajustar.')
+    await expect(runner.reviseGate('t1', 'x', 'outro-projeto')).rejects.toThrow(FlowError)
+
+    let v = await runner.reviseGate(
+      't1',
+      'Não mexa no teste. token ghp_abcdefghijklmnopqrstuvwxyz0123456789',
+      'p1'
+    )
+    expect(v).toMatchObject({ status: 'running', currentStep: 'plano', revise: null })
+    expect(started[1]).toMatchObject({ readOnly: true })
+    expect(started[1]!.reply).toContain('Não mexa no teste.')
+    expect(started[1]!.reply).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123456789')
+    expect(started[1]!.reply).toContain('Não altere arquivos.')
+    expect(v.history.map((h) => [h.stepId, h.status])).toEqual([
+      ['ler', 'ok'],
+      ['plano', 'ok'],
+      ['aprovar', 'revised'],
+      ['plano', 'running']
+    ])
+    expect(store.events('t1').map((e) => e.kind)).toContain('gate_revised')
+
+    // Segunda volta pelo campo da sessão ("mensagem nunca espera").
+    finish(runner, 'run-2', 'succeeded', '1. Trocar o for por map (sem mexer no teste)')
+    await flush()
+    expect(runner.view(id).revise).toEqual({ used: 1, max: 2 })
+    expect(await runner.handleMessage('t1', 'Explique o item 1')).toBe('revise')
+    expect(started[2]!.reply).toContain('Explique o item 1')
+    finish(runner, 'run-3', 'succeeded', 'plano final')
+    await flush()
+    v = runner.view(id)
+    expect(v.revise).toEqual({ used: 2, max: 2 })
+    // Limite: recusado, o gate continua esperando.
+    await expect(runner.reviseGate('t1', 'mais um')).rejects.toThrow(
+      'Limite de ajustes atingido (2). Aprove ou recuse no cartão.'
+    )
+    // Pelo campo da sessão, a mesma mensagem (o fluxo usa a mensagem e recusa).
+    await expect(runner.handleMessage('t1', 'mais um')).rejects.toThrow(
+      'Limite de ajustes atingido (2). Aprove ou recuse no cartão.'
+    )
+    expect(runner.view(id).status).toBe('waiting_gate')
+    expect(started).toHaveLength(3)
+
+    // Aprovar segue para aplicar, em modo entrega, sem só leitura.
+    await runner.approveGate(id)
+    expect(started[3]).toMatchObject({
+      prompt: 'Plano aprovado. Aplique.',
+      delivery: true
+    })
+    expect(started[3]!.readOnly).toBeUndefined()
+    expect(started[3]!.reply).toBeUndefined()
+  })
+
+  it('recusar encerra sem corrigir; gate sem ajustes recusa o pedido', async () => {
+    const runner = reviewRunner()
+    const id = await atGate(runner)
+    await runner.rejectGate(id)
+    expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'rejected' })
+    expect(started).toHaveLength(1)
+
+    // Gate sem `revise`: a mensagem da sessão não é usada pelo fluxo (vai ao Claude como sempre).
+    config = { flows: [FLOW], bindings: config.bindings.map((b) => ({ ...b, flowId: 'f1' })) }
+    const plain = makeRunner({ newId: () => 'fr-plain' })
+    const other = await plain.startManual('p1', 't1')
+    finish(plain, `run-${started.length}`, 'succeeded')
+    await flush()
+    expect(plain.view(other.id).status).toBe('waiting_gate')
+    expect(plain.view(other.id).revise).toBeNull()
+    expect(await plain.handleMessage('t1', 'ajuste isso')).toBeNull()
+    await expect(plain.reviseGate('t1', 'ajuste isso')).rejects.toThrow(FLOW_MESSAGES.notRevisable)
   })
 })

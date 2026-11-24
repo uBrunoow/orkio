@@ -16,6 +16,7 @@ import {
   deliveryVerdict,
   ghApiParse,
   gitParse,
+  isGhRead,
   type DeliveryEvent,
   type DeliveryKind
 } from './delivery-policy'
@@ -59,8 +60,8 @@ const HARMLESS = new Set([
 
 export const POLICY_MESSAGES = {
   outside: 'Bloqueado pelo Orkio: fora do ambiente desta tarefa (worktree).',
-  push: 'Bloqueado pelo Orkio: git push só é permitido em um passo de fluxo com “modo entrega”.',
-  gh: 'Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo de fluxo com “modo entrega”.',
+  push: 'Bloqueado pelo Orkio: git push só é permitido em um passo de fluxo com “modo entrega”. Para publicar, use “Abrir PR” na aba PR & CI da tarefa.',
+  gh: 'Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo de fluxo com “modo entrega”. Ler a PR do projeto pode (gh pr view/diff/checks, gh api com GET ou GraphQL sem mutation). Para publicar, use “Abrir PR” na aba PR & CI da tarefa.',
   alias:
     'Bloqueado pelo Orkio: alias definido na própria linha de comando (git -c alias.…) ou aninhado demais.'
 } as const
@@ -212,6 +213,12 @@ export interface PolicyContext {
   allowRules: readonly AllowRule[]
   aliases?: PolicyAliases
   delivery?: DeliveryContext | null
+  /**
+   * Repositório do projeto (e branch da tarefa) fora do modo entrega: com ele, a leitura do GitHub
+   * (`isGhRead`) passa sem perguntar. Sem repositório verificado, `gh pr`/`gh api` seguem
+   * bloqueados.
+   */
+  repo?: DeliveryTarget | null
 }
 
 /** Comando simples já resolvido (aliases expandidos). */
@@ -304,13 +311,18 @@ function expandShell(
   return out
 }
 
-/** Bloqueio fora do modo entrega (4A): push e comandos do gh que publicam. */
-function blockedOutsideDelivery(cmd: Cmd): string | null {
+/** Bloqueio fora do modo entrega (4A): push e comandos do gh que publicam (ler pode). */
+function blockedOutsideDelivery(cmd: Cmd, repo: DeliveryTarget | null): string | null {
   if (cmd.name === 'git' && gitParse(cmd.args).sub === 'push') return POLICY_MESSAGES.push
-  if (cmd.name === 'gh' && ['pr', 'api', 'release'].includes(cmd.args[0] ?? ''))
+  if (cmd.name === 'gh' && ['pr', 'api', 'release'].includes(cmd.args[0] ?? '')) {
+    if (repo && isGhRead(cmd.args, repo)) return null
     return POLICY_MESSAGES.gh
+  }
   return null
 }
+
+/** Leitura do GitHub no repositório do projeto (passa sem perguntar). */
+export const GH_READ_ALLOWED = 'leitura do GitHub no repositório do projeto'
 
 /** Caminhos absolutos/relativos que saem do worktree (heurística sobre as palavras). */
 function escapesWorktree(segment: string, worktree: string): boolean {
@@ -383,7 +395,7 @@ export function evaluatePermission(req: PermissionRequest, ctx: PolicyContext): 
     const others: Cmd[] = []
     for (const cmd of commands) {
       if (!ctx.delivery) {
-        const blocked = blockedOutsideDelivery(cmd)
+        const blocked = blockedOutsideDelivery(cmd, ctx.repo ?? null)
         if (blocked) return { decision: 'deny', reason: blocked }
         others.push(cmd)
         continue
@@ -398,6 +410,16 @@ export function evaluatePermission(req: PermissionRequest, ctx: PolicyContext): 
       return { decision: 'deny', reason: POLICY_MESSAGES.outside }
     }
     const rules = ctx.allowRules.filter((r) => r.tool === 'Bash')
+    // Só leitura do GitHub (ex.: `gh pr view 14 --json comments; gh api repos/o/r/pulls/14/comments`).
+    const repo = ctx.repo ?? null
+    if (
+      !ctx.delivery &&
+      repo &&
+      commands.length > 0 &&
+      commands.every((c) => c.name === 'gh' && isGhRead(c.args, repo))
+    ) {
+      return { decision: 'allow', reason: GH_READ_ALLOWED }
+    }
     if (delivery.length > 0) {
       const d = ctx.delivery!
       const needsAsk = delivery.some(

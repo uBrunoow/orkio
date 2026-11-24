@@ -338,6 +338,23 @@ test('critério 5: pausar impede movimentos e registra no histórico', async () 
   expect(await cspViolations(page)).toEqual([])
 })
 
+test('GraphQL recusado: o Quadro avisa e a PR continua com o estado da REST', async () => {
+  await close()
+  const { page } = await open({
+    githubPulls: [pr({ state: 'open', updatedAt: '2026-11-19T14:00:00Z' })],
+    githubPrDetails: { '7': { reviewDecision: null, unresolved: 1, checks: null } },
+    githubGraphql: 'no_scope',
+    notionInitialStatus: { [NOTION_TASK_IDS.ork2]: 'Finalizadas' }
+  })
+  await goToBoard(page)
+  await refresh(page)
+  await expect(
+    page.getByRole('status').filter({ hasText: 'não tem permissão para ler parte dos detalhes' })
+  ).toBeVisible({ timeout: 15_000 })
+  await expect(card(page).getByTestId('card-status')).toBeVisible()
+  expect(await cspViolations(page)).toEqual([])
+})
+
 test('nenhum token nos logs', async () => {
   await close()
   const logs = allLogs.join('\n')

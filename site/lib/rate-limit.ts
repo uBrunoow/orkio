@@ -1,7 +1,8 @@
 /**
- * Limitador simples em memória por IP (janela deslizante). Defesa MÍNIMA: vale por instância da
- * função (a Vercel pode ter várias e reciclá-las). A proteção real é a regra de Rate Limiting do
- * Firewall da Vercel em /notion/* (ver site/README.md).
+ * Limitador simples em memória por IP (janela deslizante), usado nas rotas do intermediário do
+ * Notion (/notion/*) e na revisão do GitHub App (/github/review). Defesa MÍNIMA: vale por instância
+ * da função (a Vercel pode ter várias e reciclá-las). A proteção real é a regra de Rate Limiting do
+ * Firewall da Vercel em /notion/* e /github/* (ver site/README.md).
  */
 export interface RateLimiter {
   /** `null` = pode seguir; senão, segundos até liberar. */
@@ -51,3 +52,6 @@ export function clientIp(request: Request): string {
 
 /** Limite das rotas /notion/*: 20 por minuto por IP (o login usa 1; renovações são raras). */
 export const brokerLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 })
+
+/** Limite de /github/review: 20 por minuto por IP (uma revisão por passo de fluxo). */
+export const reviewLimiter = createRateLimiter({ limit: 20, windowMs: 60_000 })

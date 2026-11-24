@@ -5,6 +5,7 @@
 import { execFile as nodeExecFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { ClaudeCodeStatus } from '../../shared/agent-run'
+import { CLAUDE_EFFORT_VERSION } from '../../shared/agent-runtime'
 import { sanitizeEnv } from './redact'
 
 /** Versão mínima testada com as flags usadas (stream-json in/out, --permission-prompt-tool, --settings). */
@@ -26,6 +27,11 @@ export function compareVersions(a: string, b: string): number {
   return 0
 }
 
+/** O CLI desta versão aceita `--effort`? Sem versão conhecida, não. */
+export function supportsEffortVersion(version: string | null): boolean {
+  return version !== null && compareVersions(version, CLAUDE_EFFORT_VERSION) >= 0
+}
+
 export async function detectClaude(
   deps: { execFile?: ExecFileFn; command?: string; env?: NodeJS.ProcessEnv } = {}
 ): Promise<ClaudeCodeStatus> {
@@ -43,7 +49,8 @@ export async function detectClaude(
     loggedIn: null,
     authMethod: null,
     meetsMinimum: false,
-    minimumVersion: CLAUDE_MIN_VERSION
+    minimumVersion: CLAUDE_MIN_VERSION,
+    supportsEffort: false
   }
 
   let version: string | null
@@ -86,6 +93,7 @@ export async function detectClaude(
     version,
     loggedIn,
     authMethod,
-    meetsMinimum: version !== null && compareVersions(version, CLAUDE_MIN_VERSION) >= 0
+    meetsMinimum: version !== null && compareVersions(version, CLAUDE_MIN_VERSION) >= 0,
+    supportsEffort: supportsEffortVersion(version)
   }
 }

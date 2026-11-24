@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Field, SegmentedControl } from '@/components/form'
+import { Field, SegmentedControl, SwitchField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import type { AboutInfo } from '../../../../shared/ipc-contract'
 import type { ReleaseNotes, UpdateStatus } from '../../../../shared/updates'
@@ -100,6 +100,31 @@ export function UpdatesSection(): React.JSX.Element {
         </div>
       )}
       {notes && <WhatsNewPanel notes={notes} closeLabel="Fechar" onClose={() => setNotes(null)} />}
+    </section>
+  )
+}
+
+/** Energia: manter o computador acordado enquanto agentes trabalham (desligado por padrão). */
+export function PowerSection(): React.JSX.Element {
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  useEffect(() => {
+    void window.orkio.power.keepAwake().then(setEnabled)
+  }, [])
+  return (
+    <section aria-labelledby="power-title" className={SECTION_CLASS}>
+      <h2 id="power-title" className="text-sm font-medium text-foreground">
+        Energia
+      </h2>
+      <SwitchField
+        label="Manter o computador acordado enquanto agentes trabalham"
+        description="Evita que o computador entre em suspensão com um agente rodando. Desliga sozinho quando nada estiver rodando."
+        checked={enabled === true}
+        disabled={enabled === null}
+        onChange={(value) => {
+          setEnabled(value)
+          void window.orkio.power.setKeepAwake(value).then(setEnabled)
+        }}
+      />
     </section>
   )
 }

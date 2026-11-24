@@ -86,6 +86,11 @@ export function BacklogDocumentView({
             />
           )}
         </div>
+        {state.doc.draft && (
+          <p className="text-xs text-muted-foreground" data-testid="backlog-draft">
+            Rascunho que o /spec está escrevendo nesta tarefa. Leia aqui antes de aprovar.
+          </p>
+        )}
       </div>
       {body ? (
         <MarkdownText text={body} />

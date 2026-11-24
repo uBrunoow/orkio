@@ -1,3 +1,4 @@
+import { PrHoverCard } from './PrHoverCard'
 import { Fragment } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -186,15 +187,17 @@ export function BoardCardBody({
             </span>
           )}
           {pr && (
-            <button
-              type="button"
-              aria-label={`Abrir a PR #${pr.number} no GitHub`}
-              className="-mx-1 flex items-center gap-1 rounded px-1 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
-              onClick={() => void window.orkio.openExternal(pr.url)}
-            >
-              <PullRequestIcon className="size-3.5" />
-              {cardDetail({ waiting: null, running: null, pr }) ?? `#${pr.number}`}
-            </button>
+            <PrHoverCard pr={pr}>
+              <button
+                type="button"
+                aria-label={`Abrir a PR #${pr.number} no GitHub`}
+                className="-mx-1 flex items-center gap-1 rounded px-1 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+                onClick={() => void window.orkio.openExternal(pr.url)}
+              >
+                <PullRequestIcon className="size-3.5" />
+                {cardDetail({ waiting: null, running: null, pr }) ?? `#${pr.number}`}
+              </button>
+            </PrHoverCard>
           )}
           {card.priority && <span data-testid="card-priority">{card.priority.name}</span>}
           {card.assignees.length > 0 && <span>{card.assignees.join(', ')}</span>}

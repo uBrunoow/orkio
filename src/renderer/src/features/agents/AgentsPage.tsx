@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   AGENT_COLORS,
   AGENT_LIMITS,
   AGENT_MODEL_LABELS,
-  AGENT_MODELS,
   AGENT_ROLE_LABELS,
   AGENT_ROLES,
   agentIdFromName,
@@ -63,6 +62,7 @@ import { useAgentBadges } from './agent-badges'
 import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
 import { MultiSelectField } from './MultiSelectField'
 import { Sparkline } from './Sparkline'
+import { RuntimePicker, useSupportsEffort } from '../claude/RuntimePicker'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',
@@ -808,7 +808,8 @@ function ProfileSummary({
   return (
     <div className="flex flex-col gap-1 text-xs text-muted-foreground">
       <p>
-        Papel: {AGENT_ROLE_LABELS[p.role]} · Modelo: {AGENT_MODEL_LABELS[p.model]} · Fluxo: {flow}
+        Papel: {AGENT_ROLE_LABELS[p.role]} · Modelo: {AGENT_MODEL_LABELS[p.model] ?? p.model} ·
+        Fluxo: {flow}
       </p>
       <p>
         Entrega: {p.delivery ? 'pode (com os gates do Orkio)' : 'não pode'} · Comandos:{' '}
@@ -839,6 +840,8 @@ function AgentEditor({
   onCancel(): void
   onSave(e: Editing): void
 }): React.JSX.Element {
+  const supportsEffort = useSupportsEffort()
+  const runtimeLabelId = useId()
   const d = editing.draft
   const set = (patch: Partial<AgentProfile>): void =>
     onChange({ ...editing, draft: { ...d, ...patch } })
@@ -897,12 +900,23 @@ function AgentEditor({
           value={d.color}
           onChange={(color) => set({ color: color as AgentColor })}
         />
-        <SelectField
-          label="Modelo"
-          options={AGENT_MODELS.map((m) => ({ value: m, label: AGENT_MODEL_LABELS[m] }))}
-          value={d.model}
-          onChange={(model) => set({ model: model as AgentProfile['model'] })}
-        />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <span id={runtimeLabelId} className="text-sm font-medium">
+            Modelo e raciocínio
+          </span>
+          <RuntimePicker
+            describedBy={runtimeLabelId}
+            value={{ model: d.model === 'default' ? null : d.model, effort: d.effort }}
+            supportsEffort={supportsEffort}
+            className="w-full justify-start border border-input bg-card"
+            onChange={(v) =>
+              set({
+                model: (v.model ?? 'default') as AgentProfile['model'],
+                effort: v.effort ?? null
+              })
+            }
+          />
+        </div>
       </div>
       <SelectField
         label="Fluxo preferido"

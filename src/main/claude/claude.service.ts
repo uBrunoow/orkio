@@ -28,11 +28,7 @@ import type {
   TaskWorkspace,
   UncommittedFile
 } from '../../shared/agent-run'
-import {
-  blocksToMarkdown,
-  buildBriefing,
-  type NotionBlock
-} from '../../shared/briefing'
+import { blocksToMarkdown, buildBriefing, type NotionBlock } from '../../shared/briefing'
 import type { NotionResult, NotionTask, TaskSignalsResult } from '../../shared/ipc-contract'
 import { taskBranchName } from '../../shared/slug'
 import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
@@ -43,7 +39,11 @@ import { NotionApiError } from '../connectors/notion/notion.client'
 import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
 import { redactSecrets } from './redact'
+import type { RuntimeChoice } from '../../shared/agent-runtime'
 import { RUN_MESSAGES, type RunAgent, type RunService } from './run.service'
+import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { attachmentNote, checkAttachments, saveAttachments } from './attachments'
 import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
 
 export const CLAUDE_MESSAGES = {
@@ -58,6 +58,7 @@ export const CLAUDE_MESSAGES = {
   protectedBranch: (b: string) =>
     `“${b}” é uma branch protegida (padrão, release, hotfix…): não dá para ligá-la a uma tarefa.`,
   editor: 'Não foi possível abrir o editor. Confira se o comando está instalado no PATH.',
+  terminal: 'Não achei um terminal neste computador.',
   invalidCommand: 'Nome de comando inválido.',
   emptyPrompt: 'Escreva o que o Claude Code deve fazer.',
   flowActive:
@@ -66,6 +67,8 @@ export const CLAUDE_MESSAGES = {
   flowRunning:
     'O fluxo está rodando um passo agora. Espere ele parar ou pedir algo para mandar a mensagem.',
   pageUnavailable: 'Não deu para ler a página da tarefa no Notion; o briefing usa só os campos.',
+  noDescription:
+    'A tarefa está sem descrição no Notion. Escreva o que precisa ser feito na página da tarefa e retome o fluxo.',
   generic: 'Algo deu errado. Tente novamente.'
 } as const
 
@@ -90,7 +93,10 @@ export interface ClaudeServiceDeps {
   }
   worktrees: WorktreeService
   runs: RunService
-  git: Pick<Git, 'statusPorcelain' | 'diffText' | 'localBranches' | 'remoteBranches'>
+  git: Pick<
+    Git,
+    'statusPorcelain' | 'diffText' | 'diffShortstat' | 'localBranches' | 'remoteBranches'
+  >
   listTasks(projectId: string): Promise<NotionResult<{ tasks: NotionTask[] }>>
   signals(projectId: string): Promise<NotionResult<TaskSignalsResult>>
   /** Leitura dos blocos de uma página (o token fica no conector). */
@@ -107,8 +113,19 @@ export interface ClaudeServiceDeps {
    * sessão; um fluxo esperando você (gate, pausa, escolha) aceita a conversa.
    */
   flowBusy?: (taskId: string) => boolean
+  /**
+   * Mensagem do campo com um fluxo ativo: o fluxo usa (escolha, interromper o passo, responder e
+   * continuar) → `used`; erro esperado (pt-BR) → `error`; senão vai para o Claude como sempre.
+   */
+  flowMessage?: (
+    taskId: string,
+    text: string,
+    note?: string
+  ) => Promise<{ used: boolean } | { error: string }>
   /** Abre a pasta no editor (execFile, sem shell). */
   openEditor(editor: EditorId, path: string): Promise<void>
+  /** Abre o terminal do sistema na pasta (rejeita se não achar um terminal). */
+  openTerminal(path: string): Promise<void>
   /**
    * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
    * pt-BR quando há agente, mas ele não pode rodar (sem aprovação, limite do dia, comando negado).
@@ -204,7 +221,8 @@ export class ClaudeService {
         unsupported: [...new Set(unsupported)],
         branch,
         branchIsNew: existing === null,
-        commands: this.commands
+        commands: this.commands,
+        descriptionEmpty: !pageWarning && pageMarkdown.trim() === ''
       })
     })
   }
@@ -238,14 +256,85 @@ export class ClaudeService {
    */
   send(req: SendMessageRequest): Promise<ClaudeResult<TaskRunsState>> {
     return this.wrap(async () => {
-      const busy = this.deps.flowBusy ?? this.deps.flowActive
-      if (busy?.(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
       const text = req.text.trim()
       if (!text) return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
+      // Anexos: validados pelo conteúdo antes de qualquer efeito; gravados no worktree da tarefa
+      // só depois das recusas baratas (CLI, fluxo ocupado, briefing, agente) e apagados se a
+      // mensagem acabar recusada. O fluxo ativo já tem worktree: lá gravamos antes de entregar.
+      const files = (req.attachments ?? []).map((a) => ({ name: a.name, data: a.data }))
+      if (files.length > 0) {
+        const checked = checkAttachments(files)
+        if (!checked.ok) return fail('attachment', checked.message)
+        const pre = await this.cliRefusal()
+        if (pre) return pre
+      }
+      let wtPath: string | null = null
+      let saved: string[] = []
+      const save = async (): Promise<string> => {
+        if (files.length === 0) return ''
+        if (saved.length > 0) return attachmentNote(saved)
+        const project = this.project(req.projectId)
+        const task = await this.task(req.projectId, req.taskId)
+        const wt = await this.deps.worktrees.ensure(
+          this.worktreeProject(project),
+          { id: task.id, displayId: task.displayId, title: task.title },
+          {}
+        )
+        wtPath = wt.path
+        saved = await saveAttachments(wt.path, files)
+        return attachmentNote(saved)
+      }
+      const discard = async (): Promise<void> => {
+        const root = wtPath
+        const paths = saved
+        saved = []
+        if (!root) return
+        await Promise.all(paths.map((rel) => rm(join(root, rel), { force: true }).catch(() => {})))
+      }
+      try {
+        const r = await this.sendChecked(req, text, files.length > 0, save)
+        if (!r.ok) await discard()
+        return r
+      } catch (error) {
+        await discard()
+        throw error
+      }
+    })
+  }
+
+  private async cliRefusal(): Promise<ClaudeResult<never> | null> {
+    const status = await this.getStatus(true)
+    if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
+    if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
+    if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
+    return null
+  }
+
+  private async sendChecked(
+    req: SendMessageRequest,
+    userText: string,
+    hasFiles: boolean,
+    save: () => Promise<string>
+  ): Promise<ClaudeResult<TaskRunsState>> {
+    {
+      const text = userText
+      // Como no Claude Code: a mensagem não espera o piloto automático; o fluxo a usa (escolha,
+      // interromper o passo e continuar com ela, responder e continuar).
+      if (this.deps.flowMessage) {
+        const note = hasFiles && (this.deps.flowActive?.(req.taskId) ?? false) ? await save() : ''
+        const used = await this.deps.flowMessage(req.taskId, userText, note)
+        if ('error' in used) return fail('flow_message', used.error)
+        if (used.used) return ok(await this.taskState(req.taskId))
+      }
+      const busy = this.deps.flowBusy ?? this.deps.flowActive
+      if (busy?.(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
+      // Execução avulsa no meio de um turno: interrompe e continua a sessão com a mensagem.
+      const current = (await this.taskState(req.taskId)).activeRunId
+      if (current) await this.cancelAndWait(current)
       const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text)
       const mode: RunMode = slash ? 'command' : 'prompt'
       const command = slash ? slash[1]! : null
-      const args = slash ? (slash[2] ?? '').trim() : text
+      let args = slash ? (slash[2] ?? '').trim() : text
       const session = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
       let briefing = ''
       if (!session) {
@@ -261,17 +350,19 @@ export class ClaudeService {
           return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
         }
       }
+      args += await save()
       const started = await this.startRun(
         { projectId: req.projectId, taskId: req.taskId, mode, command, text: args, briefing },
         undefined,
         true,
         false,
         agent,
-        session
+        session,
+        req.runtime ?? null
       )
       if (!started.ok) return started
       return ok(await this.taskState(req.taskId))
-    })
+    }
   }
 
   /** Passo `claude_command` de um fluxo (5A): mesma execução da 4A; devolve o id ou o erro. */
@@ -289,7 +380,17 @@ export class ClaudeService {
     agent?: RunAgent | null
     /** "Responder e continuar": manda este texto na sessão mais recente da tarefa (`--resume`). */
     reply?: string
+    /**
+     * Pedido em texto (passo sem comando): continua a sessão mais recente da tarefa com ele, ou
+     * começa uma com o briefing quando ainda não há sessão.
+     */
+    prompt?: string
+    /** Passo só de leitura: sem as ferramentas de edição. */
+    readOnly?: boolean
+    /** Modelo/raciocínio do passo: vencem os do agente. */
+    runtime?: Partial<RuntimeChoice> | null
   }): Promise<ClaudeResult<string>> {
+    const readOnly = input.readOnly === true
     if (input.reply !== undefined) {
       const session = this.deps.runs.lastSession(input.taskId)
       if (!session) {
@@ -309,7 +410,32 @@ export class ClaudeService {
           true,
           input.delivery === true,
           input.agent ?? null,
-          session
+          session,
+          input.runtime ?? null,
+          readOnly
+        )
+      )
+    }
+    if (input.prompt !== undefined) {
+      const session = this.deps.runs.lastSession(input.taskId)
+      return this.wrap(() =>
+        this.startRun(
+          {
+            projectId: input.projectId,
+            taskId: input.taskId,
+            mode: 'prompt',
+            command: null,
+            text: input.prompt!,
+            briefing: session ? '' : input.briefing
+          },
+          input.timeoutMin,
+          // Sessão retomada já leu o briefing; sessão nova recebe (a não ser que o passo recuse).
+          session ? true : input.includeBriefing !== false,
+          input.delivery === true,
+          input.agent ?? null,
+          session,
+          input.runtime ?? null,
+          readOnly
         )
       )
     }
@@ -326,12 +452,38 @@ export class ClaudeService {
         input.timeoutMin,
         input.includeBriefing !== false,
         input.delivery === true,
-        input.agent ?? null
+        input.agent ?? null,
+        null,
+        input.runtime ?? null,
+        readOnly
       )
     )
   }
 
   /** Contexto de um fluxo (5A): briefing do Notion, ID e URL da tarefa. */
+  /**
+   * Garante o worktree da tarefa (cria ou recria) e devolve o caminho. Para ações do Orkio que
+   * gravam no ambiente (ex.: `review_snapshot`); `null` se projeto/tarefa não existem; erro do
+   * worktree é lançado.
+   */
+  async ensureWorktreePath(projectId: string, taskId: string): Promise<string | null> {
+    let project
+    let task
+    try {
+      project = this.project(projectId)
+      task = await this.task(projectId, taskId)
+    } catch {
+      return null
+    }
+    // Erros do WorktreeService (mensagem pt-BR) sobem para o passo do fluxo.
+    const wt = await this.deps.worktrees.ensure(
+      this.worktreeProject(project),
+      { id: task.id, displayId: task.displayId, title: task.title },
+      {}
+    )
+    return wt.path
+  }
+
   flowContext(
     projectId: string,
     taskId: string
@@ -342,6 +494,8 @@ export class ClaudeService {
     return this.wrap(async () => {
       const prep = await this.prepare(projectId, taskId)
       if (!prep.ok) return prep
+      // Fluxo (piloto automático) não começa sem saber o que fazer: a página vazia para aqui.
+      if (prep.value.descriptionEmpty) return fail('no_description', CLAUDE_MESSAGES.noDescription)
       const task = await this.task(projectId, taskId)
       return ok({
         briefing: prep.value.briefing,
@@ -358,7 +512,9 @@ export class ClaudeService {
     includeBriefing = true,
     delivery = false,
     agent: RunAgent | null = null,
-    resumeSessionId: string | null = null
+    resumeSessionId: string | null = null,
+    runtime: Partial<RuntimeChoice> | null = null,
+    readOnly = false
   ): Promise<ClaudeResult<string>> {
     const project = this.project(req.projectId)
     const status = await this.getStatus(true)
@@ -380,12 +536,20 @@ export class ClaudeService {
       req.branchKind ? { kind: req.branchKind } : {}
     )
     let deliveryInput: { target: DeliveryTarget; requirePushApproval: boolean } | null = null
+    let githubRead: DeliveryTarget | null = null
     if (delivery) {
       if (!this.deps.deliveryTarget) return fail('no_repo', CLAUDE_MESSAGES.noRepo)
       try {
         deliveryInput = this.deps.deliveryTarget(req.projectId, req.taskId)
       } catch (error) {
         return fail('no_repo', error instanceof Error ? error.message : CLAUDE_MESSAGES.noRepo)
+      }
+    } else {
+      // Fora da entrega, o repositório só libera a leitura da PR; sem ele, nada muda.
+      try {
+        githubRead = this.deps.deliveryTarget?.(req.projectId, req.taskId).target ?? null
+      } catch {
+        githubRead = null
       }
     }
     const view = await this.deps.runs.start({
@@ -398,10 +562,33 @@ export class ClaudeService {
       ...(timeoutMin ? { timeoutMin } : {}),
       includeBriefing,
       delivery: deliveryInput,
-      agent,
-      resumeSessionId
+      githubRead,
+      agent: agent && !status.supportsEffort ? { ...agent, effort: null } : agent,
+      // CLI sem `--effort`: o raciocínio some (o seletor também some na UI).
+      runtime:
+        runtime && !status.supportsEffort
+          ? { ...(runtime.model !== undefined ? { model: runtime.model } : {}) }
+          : runtime,
+      resumeSessionId,
+      ...(readOnly ? { readOnly: true } : {})
     })
     return ok(view.id)
+  }
+
+  /** Cancela e espera a execução terminar (até 15 s), para a próxima continuar a sessão. */
+  private cancelAndWait(runId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(done, 15_000)
+      const off = this.deps.runs.onFinished((info) => {
+        if (info.runId === runId) done()
+      })
+      function done(): void {
+        clearTimeout(timer)
+        off()
+        resolve()
+      }
+      this.cancel(runId)
+    })
   }
 
   cancel(runId: string): void {
@@ -446,6 +633,24 @@ export class ClaudeService {
       } catch (error) {
         console.error(`[orkio] editor: ${errorName(error)}`)
         return fail('editor', CLAUDE_MESSAGES.editor)
+      }
+      return ok(null)
+    })
+  }
+
+  openTerminal(projectId: string, taskId: string): Promise<ClaudeResult<null>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      const wt = this.deps.worktrees.get(taskId)
+      if (!wt) return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
+      try {
+        await this.deps.openTerminal(wt.path)
+      } catch (error) {
+        if (error instanceof Error && error.message === 'no_workspace') {
+          return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
+        }
+        console.error(`[orkio] terminal: ${errorName(error)}`)
+        return fail('terminal', CLAUDE_MESSAGES.terminal)
       }
       return ok(null)
     })
@@ -561,6 +766,7 @@ export class ClaudeService {
         .map(parsePorcelainLine)
         .filter((f): f is UncommittedFile => f !== null && !f.path.startsWith('.orkio/'))
       const cut = text.slice(0, MAX_DIFF_CHARS)
+      const shortstat = await this.deps.git.diffShortstat(wt.path, wt.baseRef).catch(() => null)
       return ok({
         // O diff aparece na tela (gate, "Ver diff"): segredos saem com o valor escondido, e a
         // lista de arquivos com segredo vira aviso antes de aprovar.
@@ -568,7 +774,8 @@ export class ClaudeService {
         truncated: text.length > MAX_DIFF_CHARS,
         untracked,
         uncommitted,
-        secrets: filesWithSecrets(cut)
+        secrets: filesWithSecrets(cut),
+        shortstat
       })
     })
   }
@@ -707,7 +914,6 @@ function fail<T>(code: string, message: string, files?: string[]): ClaudeResult<
 function isBlock(v: unknown): v is NotionBlock {
   return typeof v === 'object' && v !== null && typeof (v as { type?: unknown }).type === 'string'
 }
-
 
 /** Arquivos do diff com linha adicionada que parece segredo (token, chave, senha). */
 export function filesWithSecrets(diff: string): string[] {

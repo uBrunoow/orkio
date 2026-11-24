@@ -26,3 +26,11 @@ export function formatDuration(ms: number): string {
   const rest = minutes % 60
   return `${Math.floor(minutes / 60)} h${rest ? ` ${String(rest).padStart(2, '0')} min` : ''}`
 }
+
+/** Tamanho de arquivo em pt-BR: "512 B", "3,4 KB", "1,2 MB". */
+export function formatBytes(bytes: number): string {
+  const one = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1, minimumFractionDigits: 1 })
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${one.format(bytes / 1024)} KB`
+  return `${one.format(bytes / (1024 * 1024))} MB`
+}

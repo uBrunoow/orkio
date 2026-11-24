@@ -1,6 +1,6 @@
 import { Timestamp } from '@/components/Timestamp'
 import type { ActivityItem } from '../../../../shared/overview'
-import type { Flow, StageFlow, Step } from '../../../../shared/task-flow'
+import { isPromptStep, type Flow, type StageFlow, type Step } from '../../../../shared/task-flow'
 import { ExecutionsTable, SentenceDetail } from '../../components/SentenceDetail'
 import { flowExecutions } from '../../components/executions'
 
@@ -13,7 +13,7 @@ function joinPt(parts: string[]): string {
 function stepShort(step: Step, actionLabel: (id: string) => string): string {
   switch (step.type) {
     case 'claude_command':
-      return `/${step.command || '…'}`
+      return isPromptStep(step) ? `pedido “${step.name}”` : `/${step.command || '…'}`
     case 'gate':
       return 'aprovação'
     case 'orkio_action':
@@ -30,8 +30,16 @@ export function stepSentence(
   actionLabel: (id: string) => string
 ): string {
   switch (step.type) {
-    case 'claude_command':
-      return `Roda /${step.command || '…'}${step.args ? ` ${step.args}` : ''} no Claude Code (até ${step.timeoutMin} min)${step.delivery ? ', em modo entrega' : ''}.`
+    case 'claude_command': {
+      const mode = [
+        step.readOnly ? 'só leitura' : '',
+        step.delivery ? 'em modo entrega' : ''
+      ].filter(Boolean)
+      const extra = `(até ${step.timeoutMin} min)${mode.length ? `, ${mode.join(', ')}` : ''}`
+      return isPromptStep(step)
+        ? `Pede ao Claude Code, na conversa da tarefa: “${step.prompt!.trim()}” ${extra}.`
+        : `Roda /${step.command || '…'}${step.args ? ` ${step.args}` : ''} no Claude Code ${extra}.`
+    }
     case 'gate': {
       const show =
         step.show === 'diff'
@@ -40,12 +48,17 @@ export function stepSentence(
             ? ' com o resumo'
             : step.show === 'backlog'
               ? ' com a spec e o plano'
-              : ''
+              : step.show === 'result'
+                ? ' com o resultado do Claude Code'
+                : ''
       const reject =
         step.onReject === 'stop'
           ? 'recusar encerra'
           : `recusar volta para ${stepName(step.onReject)}`
-      return `Pede sua aprovação${show}: “${step.message}” (${reject}).`
+      const revise = step.revise
+        ? `; pedir ajustes volta para ${stepName(step.revise.step)}, até ${step.revise.max} vezes`
+        : ''
+      return `Pede sua aprovação${show}: “${step.message}” (${reject}${revise}).`
     }
     case 'orkio_action':
       return `${actionLabel(step.action)}.`

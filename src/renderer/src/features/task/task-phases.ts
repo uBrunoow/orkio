@@ -5,6 +5,9 @@
 import type { BoardStage } from '../../../../shared/board'
 import type { PlanStep } from '../task-flows/flow-plan'
 
+/** Marca outros gatilhos do popover do plano (ex.: "Ver plano"), que não contam como clique fora. */
+export const PLAN_TRIGGER_ATTR = 'data-flow-plan-trigger'
+
 export type PhaseState = 'done' | 'current' | 'waiting' | 'failed' | 'next'
 
 export interface TaskPhase {
@@ -28,7 +31,9 @@ const DELIVERY_ACTIONS = new Set(['push', 'verify_pushed', 'request_review'])
 /** Fase de um passo pelo que ele faz (`PlanStep.detail`); `null` = entra na fase anterior. */
 export function phaseLabel(detail: string): string | null {
   if (detail.startsWith('Ação do Orkio: ')) {
-    return DELIVERY_ACTIONS.has(detail.slice('Ação do Orkio: '.length)) ? 'PR' : null
+    const action = detail.slice('Ação do Orkio: '.length)
+    if (action === 'review_snapshot' || action === 'publish_review') return 'Revisão'
+    return DELIVERY_ACTIONS.has(action) ? 'PR' : null
   }
   if (!detail.startsWith('/')) return null
   const name = detail.slice(1).split(/\s/)[0] ?? ''
@@ -56,15 +61,25 @@ export function taskPhases(input: {
   stageId: string | null
 }): TaskPhase[] {
   if (input.plan && input.plan.length > 0) {
+    // Cada rótulo aparece uma vez, na primeira posição; passos posteriores com o mesmo rótulo
+    // (ex.: /fix e "revisar de novo" depois do /pr) entram nesse grupo.
     const groups: { label: string; states: PhaseState[] }[] = []
+    let last: (typeof groups)[number] | undefined
     for (const step of input.plan) {
       const label = phaseLabel(step.detail)
-      const last = groups.at(-1)
-      if (label === null || (last && last.label === label)) {
-        if (last) last.states.push(stepState(step.state))
+      const state = stepState(step.state)
+      if (label === null) {
+        last?.states.push(state)
         continue
       }
-      groups.push({ label, states: [stepState(step.state)] })
+      const group = groups.find((g) => g.label === label)
+      if (group) {
+        group.states.push(state)
+        last = group
+        continue
+      }
+      last = { label, states: [state] }
+      groups.push(last)
     }
     if (groups.length > 0) {
       return groups.map((g) => ({ id: g.label, label: g.label, state: merge(g.states) }))

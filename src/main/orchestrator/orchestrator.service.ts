@@ -26,6 +26,7 @@ import {
   type PlanDecision
 } from '../../shared/orchestrator'
 import { checkAgentFlow, parseAgentKey, type AgentKey, type AgentsState } from '../../shared/agent'
+import { builtinAgent } from '../../shared/agent-presets'
 import type { BoardView, NotionResult } from '../../shared/ipc-contract'
 import type { BoardService, StageChange } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
@@ -64,7 +65,12 @@ export interface OrchestratorDeps {
   board: Pick<BoardService, 'get' | 'applyAutomationMove' | 'flushWrites'>
   agents: Pick<
     AgentsService,
-    'list' | 'assignment' | 'assignments' | 'assignByOrchestrator' | 'limitProblem'
+    | 'list'
+    | 'assignment'
+    | 'assignments'
+    | 'assignByOrchestrator'
+    | 'releaseByOrchestrator'
+    | 'limitProblem'
   >
   flows: {
     hasActive(taskId: string): boolean
@@ -82,6 +88,17 @@ interface Dispatched {
   projectId: string
   agentKey: AgentKey
   at: number
+}
+
+/**
+ * Nome do agente sem a lista carregada (antes da primeira rodada): embutido pelo catálogo, senão o
+ * id. Nunca o id de um embutido, que o histórico mostraria em minúsculas ("implementador").
+ */
+export function agentNameFallback(key: AgentKey): string {
+  const parsed = parseAgentKey(key)
+  if (!parsed) return key
+  if (parsed.scope === 'builtin') return builtinAgent(parsed.id)?.name ?? parsed.id
+  return parsed.id
 }
 
 export class OrchestratorService {
@@ -109,6 +126,7 @@ export class OrchestratorService {
   async state(projectId: string): Promise<OrchestratorState> {
     const config = this.configFor(projectId)
     const ctx = await this.context(projectId)
+    this.agentCache.set(projectId, ctx.plan)
     const loads = this.loadByAgent()
     const keys = new Set(config.lanes.flatMap((l) => l.agents))
     return {
@@ -134,7 +152,6 @@ export class OrchestratorService {
       status: this.status.get(projectId) ?? {
         lastRunAt: null,
         error: null,
-        queued: 0,
         working: 0,
         waiting: [],
         lastActions: 0
@@ -177,7 +194,7 @@ export class OrchestratorService {
           ? [config.enabled ? 'Orquestrador ligado' : 'Orquestrador desligado']
           : []
       changes.push(
-        `Orquestrador: fila ${name(config.queueStageId)}, até ${config.maxActive} ao mesmo tempo, ` +
+        'Orquestrador: ' +
           (config.lanes.length === 0
             ? 'sem etapas de trabalho'
             : config.lanes
@@ -218,6 +235,16 @@ export class OrchestratorService {
     const config = this.configFor(change.projectId)
     if (!config.enabled || this.deps.flows.hasActive(change.taskId)) return
     const agents = this.agentCache.get(change.projectId) ?? new Map()
+    // Etapa sem raia (ex.: Revisado): o agente de uma raia não acompanha a tarefa até lá.
+    if (!config.lanes.some((l) => l.stageId === change.to)) {
+      const current = this.deps.agents.assignment(change.taskId)
+      if (current && !current.manual && config.lanes.some((l) => l.agents.includes(current.key))) {
+        const name = agents.get(current.key)?.name ?? agentNameFallback(current.key)
+        this.deps.agents.releaseByOrchestrator(change.projectId, change.taskId, name)
+        this.dispatched.delete(change.taskId)
+      }
+      return
+    }
     const key = laneAgentOnEnter(
       config,
       change.to,
@@ -226,7 +253,7 @@ export class OrchestratorService {
       this.loadByAgent()
     )
     if (!key) return
-    const name = agents.get(key)?.name ?? parseAgentKey(key)?.id ?? key
+    const name = agents.get(key)?.name ?? agentNameFallback(key)
     this.deps.agents.assignByOrchestrator(change.projectId, change.taskId, key, name)
     this.dispatched.set(change.taskId, {
       projectId: change.projectId,
@@ -278,7 +305,6 @@ export class OrchestratorService {
       assignments: this.deps.agents.assignments(projectId),
       agents: ctx.plan,
       load: this.loadByAgent(),
-      activeTotal: this.activeTotal(projectId),
       busy,
       finishedHere,
       carriedIn
@@ -290,13 +316,12 @@ export class OrchestratorService {
         waiting.push({ taskId, displayId: display.get(taskId) ?? '', reason })
     }
     const name = (key: AgentKey | null): string =>
-      key ? (ctx.plan.get(key)?.name ?? parseAgentKey(key)?.id ?? key) : ''
+      key ? (ctx.plan.get(key)?.name ?? agentNameFallback(key)) : ''
 
     // Mover: atribuição + movimento numa transação só.
     let actions = 0
     const moves = decisions.filter(
-      (d): d is Extract<PlanDecision, { kind: 'pull' | 'handoff' }> =>
-        d.kind === 'pull' || d.kind === 'handoff'
+      (d): d is Extract<PlanDecision, { kind: 'handoff' }> => d.kind === 'handoff'
     )
     if (moves.length > 0) {
       const iso = at.toISOString()
@@ -348,17 +373,9 @@ export class OrchestratorService {
       }
     }
 
-    const queued = cards.filter(
-      (c) =>
-        c.stageId === config.queueStageId &&
-        !c.blocked &&
-        !c.automationPaused &&
-        !busy.has(c.taskId)
-    ).length
     this.setStatus(projectId, {
       lastRunAt: at.toISOString(),
       error: null,
-      queued: Math.max(0, queued - moves.filter((d) => d.kind === 'pull').length),
       working: this.activeTotal(projectId),
       waiting,
       lastActions: actions
@@ -496,7 +513,7 @@ export class OrchestratorService {
     }
     for (const key of laneKeys) {
       if (!infos.some((i) => i.key === key)) {
-        infos.push({ key, name: parseAgentKey(key)?.id ?? key, status: 'missing' })
+        infos.push({ key, name: agentNameFallback(key), status: 'missing' })
       }
     }
     return { stages, bindings: projectFlows.bindings, agents, infos, plan }
@@ -506,7 +523,6 @@ export class OrchestratorService {
     const prev = this.status.get(projectId) ?? {
       lastRunAt: null,
       error: null,
-      queued: 0,
       working: 0,
       waiting: [],
       lastActions: 0

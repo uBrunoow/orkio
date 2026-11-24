@@ -8,6 +8,11 @@ function openLink(href: string | undefined): void {
 }
 
 const COMPONENTS: Components = {
+  // Texto de terceiros (comentários de PR): imagem remota avisaria o endereço ao abrir a tela.
+  // Vira o texto alternativo; nada é carregado.
+  img: ({ alt }) => (
+    <span className="text-muted-foreground">{alt ? `[imagem: ${alt}]` : '[imagem]'}</span>
+  ),
   h1: ({ children }) => <h4 className="mt-3 mb-1 text-sm font-semibold">{children}</h4>,
   h2: ({ children }) => <h4 className="mt-3 mb-1 text-sm font-semibold">{children}</h4>,
   h3: ({ children }) => <h5 className="mt-3 mb-1 text-sm font-medium">{children}</h5>,

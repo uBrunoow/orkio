@@ -246,7 +246,7 @@ export function buildBriefing(input: BriefingInput): string {
     '## Contexto',
     [
       `- Projeto: ${input.project.name}${input.project.repo ? ` (${input.project.repo})` : ''}`,
-      `- Branch de trabalho: ${input.project.branch} (worktree isolado; não faça push nem abra PR)`,
+      `- Branch de trabalho: ${input.project.branch} (worktree isolado). Não faça push nem abra PR: o Orkio faz isso pelo botão “Abrir PR” (ou pelo passo de entrega do fluxo). Se o usuário pedir, diga isso a ele.`,
       input.pr
         ? `- PR: #${input.pr.number} (${input.pr.state}) ${input.pr.url}`
         : '- PR: ainda não existe'

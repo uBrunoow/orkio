@@ -17,6 +17,7 @@ import {
   type GitHubUser
 } from './github.client'
 import type { GitHubDeviceApi, GitHubOAuthToken } from './github.oauth'
+import { isAllowedOrkioSiteOrigin } from './orkio-site'
 
 const SECRET_KEY = 'github'
 const DISCONNECTED: ConnectionStatus = { state: 'disconnected' }
@@ -64,6 +65,77 @@ export interface GitHubConnectorDeps {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>
   /** Client ID da OAuth App (público): monta o link das configurações de acesso da conta. */
   oauthClientId?: string | null
+  /** fetch para o site do Orkio (revisão como orkio[bot]); padrão: o global, na hora da chamada. */
+  fetch?: typeof fetch
+  siteTimeoutMs?: number
+  /**
+   * Origem do site do Orkio (`readOrkioSiteOrigin`), fixada na construção: é o ÚNICO destino
+   * possível do token do usuário fora do GitHub. `null`/ausente → revisão como orkio[bot]
+   * indisponível (`not_configured`).
+   */
+  siteOrigin?: string | null
+  /** `http://127.0.0.1` como site do Orkio: só em build de E2E. */
+  allowLoopbackSite?: boolean
+}
+
+/** Maior que o prazo total do site (15 s): o app não desiste enquanto o site ainda posta. */
+export const ORKIO_SITE_TIMEOUT_MS = 25_000
+export const ORKIO_SITE_TIMEOUT_MESSAGE =
+  'O site do Orkio demorou para responder. Confira a PR antes de tentar de novo: a revisão pode ' +
+  'ter sido publicada.'
+const ORKIO_SITE_MAX_RESPONSE_BYTES = 64 * 1024
+/** Começo da mensagem de erro de rede do POST ao site (o passo do fluxo reconhece por ele). */
+export const ORKIO_SITE_NETWORK_PREFIX = 'Não foi possível falar com o site do Orkio'
+
+/** O que o `GitHubReviewPoster` manda ao site (o token do usuário é acrescentado pelo conector). */
+export interface OrkioSiteReviewPayload {
+  owner: string
+  repo: string
+  number: number
+  review: {
+    event: 'COMMENT' | 'REQUEST_CHANGES'
+    body: string
+    comments: { path: string; line: number; side: 'RIGHT'; body: string }[]
+  }
+}
+
+export interface OrkioSiteResponse {
+  status: number
+  /** JSON da resposta (lido com limite); `null` se vazio, grande demais ou inválido. */
+  body: unknown
+}
+
+/**
+ * Corpo da resposta até `max` bytes (passou disso → ''). O timeout (`signal`) vale também aqui:
+ * abortou durante a leitura → lança.
+ */
+async function readLimitedText(
+  response: Response,
+  max: number,
+  signal: AbortSignal
+): Promise<string> {
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const onAbort = (): void => void reader.cancel().catch(() => undefined)
+  signal.addEventListener('abort', onAbort, { once: true })
+  try {
+    const chunks: Uint8Array[] = []
+    let size = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (signal.aborted) throw new Error('aborted')
+      if (done) break
+      size += value.byteLength
+      if (size > max) {
+        await reader.cancel().catch(() => undefined)
+        return ''
+      }
+      chunks.push(value)
+    }
+    return new TextDecoder().decode(Buffer.concat(chunks))
+  } finally {
+    signal.removeEventListener('abort', onAbort)
+  }
 }
 
 interface ActiveDeviceFlow {
@@ -163,6 +235,12 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     this.flow?.controller.abort()
   }
 
+  /** O build tem a origem do site do Orkio (revisão como orkio[bot])? Sem rede. */
+  hasOrkioSite(): boolean {
+    const origin = this.deps.siteOrigin
+    return Boolean(origin && isAllowedOrkioSiteOrigin(origin, this.deps.allowLoopbackSite === true))
+  }
+
   /** Há conta conectada (credencial salva e legível)? Sem rede. */
   async isConnected(): Promise<boolean> {
     return (await this.load()).kind === 'ok'
@@ -236,6 +314,74 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
       return `https://github.com/settings/connections/applications/${encodeURIComponent(this.deps.oauthClientId)}`
     }
     return 'https://github.com/settings/personal-access-tokens'
+  }
+
+  /**
+   * Revisão publicada como `orkio[bot]`: manda a revisão ao site do PRÓPRIO Orkio
+   * (`POST <origem>/github/review`), que confere o push com o token do usuário e posta com o
+   * GitHub App. Única saída do token do usuário para fora do GitHub: a requisição é montada AQUI
+   * (nunca entregue a um callback), só para a origem fixada na construção (`deps.siteOrigin`,
+   * conferida por `isAllowedOrkioSiteOrigin`: https; http://127.0.0.1 só em build de E2E), sem
+   * seguir redirecionamento, com timeout que cobre a leitura do corpo. Devolve só o status e o JSON
+   * da resposta do site (que nunca ecoa o token).
+   * Erros: `not_configured` (sem origem ou origem recusada), `not_connected`, `network`, `timeout`.
+   */
+  async postReviewViaOrkioSite(payload: OrkioSiteReviewPayload): Promise<OrkioSiteResponse> {
+    const siteOrigin = this.deps.siteOrigin
+    if (
+      !siteOrigin ||
+      !isAllowedOrkioSiteOrigin(siteOrigin, this.deps.allowLoopbackSite === true)
+    ) {
+      throw new GitHubApiError(
+        'not_configured',
+        'Este app não sabe o endereço do site do Orkio (MAIN_VITE_SITE_URL não definido no build).'
+      )
+    }
+    const host = new URL(siteOrigin).host
+    const doFetch: typeof fetch = (...args) => (this.deps.fetch ?? globalThis.fetch)(...args)
+    const timeoutMs = this.deps.siteTimeoutMs ?? ORKIO_SITE_TIMEOUT_MS
+    return this.withAccessToken(async (token) => {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        const response = await doFetch(`${siteOrigin}/github/review`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({
+            owner: payload.owner,
+            repo: payload.repo,
+            number: payload.number,
+            userToken: token,
+            review: payload.review
+          }),
+          // Nunca seguir redirecionamento: o corpo (com o token) iria para outro endereço.
+          redirect: 'error',
+          signal: controller.signal
+        })
+        const text = await readLimitedText(
+          response,
+          ORKIO_SITE_MAX_RESPONSE_BYTES,
+          controller.signal
+        )
+        let body: unknown = null
+        try {
+          body = text ? JSON.parse(text) : null
+        } catch {
+          body = null
+        }
+        return { status: response.status, body }
+      } catch {
+        // Exceção original descartada (pode carregar detalhes da requisição).
+        throw controller.signal.aborted
+          ? new GitHubApiError('timeout', ORKIO_SITE_TIMEOUT_MESSAGE)
+          : new GitHubApiError(
+              'network',
+              `${ORKIO_SITE_NETWORK_PREFIX} (${host}). Verifique sua internet e tente de novo.`
+            )
+      } finally {
+        clearTimeout(timer)
+      }
+    })
   }
 
   /**

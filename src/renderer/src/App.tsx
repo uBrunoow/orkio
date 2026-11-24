@@ -25,7 +25,7 @@ import { TaskScreen } from './features/task/TaskScreen'
 import { IntegrationsPage } from './features/integrations/IntegrationsPage'
 import { SetupPage } from './features/setup/SetupPage'
 import { ProjectsPage } from './features/projects/ProjectsPage'
-import { AboutSection, UpdatesSection } from './features/settings/SettingsPage'
+import { AboutSection, PowerSection, UpdatesSection } from './features/settings/SettingsPage'
 import { SettingsLayout } from './features/settings/SettingsNav'
 import { PageHeader } from './components/PageHeader'
 import { PAGE_WIDTH } from './components/page-width'
@@ -273,6 +273,7 @@ export function App(): React.JSX.Element | null {
             <div className={`flex flex-col gap-6 ${PAGE_WIDTH.form}`}>
               <PageHeader title={SETTINGS_TITLES.updates} />
               <UpdatesSection />
+              <PowerSection />
             </div>
           )
           break
@@ -301,9 +302,14 @@ export function App(): React.JSX.Element | null {
   const crumbs =
     route.name === 'settings'
       ? [
-          ROUTE_TITLES.settings,
+          { label: ROUTE_TITLES.settings, onClick: () => navigate({ name: 'settings' }) },
           ...(route.section === 'board' || route.section === 'agents'
-            ? [linkedProject?.name ?? 'Projeto']
+            ? [
+                {
+                  label: linkedProject?.name ?? 'Projeto',
+                  onClick: linkedProject ? () => toBoard() : undefined
+                }
+              ]
             : []),
           SETTINGS_TITLES[route.section ?? 'integrations']
         ]

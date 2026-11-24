@@ -75,8 +75,24 @@
   border-color: var(--accent);
 }
 
-@media (max-width: 760px) {
-  .nav li:not(:last-child) {
+.navGithub {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.stars {
+  padding-left: 0.45rem;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 860px) {
+  .navText {
+    display: none;
+  }
+  .navGithubText {
     display: none;
   }
 }
@@ -102,7 +118,6 @@
 .footer {
   border-top: 1px solid var(--border);
   padding-block: 2.5rem;
-  margin-top: 4rem;
 }
 
 .footerInner {
@@ -126,7 +141,8 @@
 
 .footerLinks {
   display: flex;
-  gap: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
 }
 
 .footerLinks a {

@@ -1,3 +1,4 @@
+import type { Effort } from '../../shared/agent-runtime'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -17,7 +18,9 @@ afterEach(async () => {
 async function argsOf(extra: {
   appendSystemPrompt?: string | null
   model?: string | null
+  effort?: Effort | null
   resume?: boolean
+  readOnly?: boolean
 }): Promise<string[]> {
   let captured: string[] = []
   const spawn = ((_cmd: string, args: string[]) => {
@@ -88,5 +91,46 @@ describe('ClaudeRun (sessão)', () => {
     const resumed = await argsOf({ resume: true })
     expect(resumed[resumed.indexOf('--resume') + 1]).toBe('s1')
     expect(resumed).not.toContain('--session-id')
+  })
+
+  it('modelo e raciocínio válidos viram --model e --effort', async () => {
+    const args = await argsOf({ model: 'opus', effort: 'high' })
+    expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual([
+      '--model',
+      'opus'
+    ])
+    expect(args.slice(args.indexOf('--effort'), args.indexOf('--effort') + 2)).toEqual([
+      '--effort',
+      'high'
+    ])
+  })
+
+  it('raciocínio desconhecido, modelo malicioso e "default" não viram flag', async () => {
+    const bad = await argsOf({ effort: 'ultra' as never })
+    expect(bad).not.toContain('--effort')
+    expect(bad).not.toContain('ultra')
+    for (const model of ['--x', 'a b', 'opus;rm', 'Opus']) {
+      expect(await argsOf({ model })).not.toContain('--model')
+    }
+    expect(await argsOf({ model: 'default' })).not.toContain('--model')
+    expect(await argsOf({ model: null, effort: null })).not.toContain('--effort')
+  })
+})
+
+describe('ClaudeRun (passo só de leitura)', () => {
+  it('readOnly nega as ferramentas de edição num argumento só; sem ele, nada', async () => {
+    const args = await argsOf({ readOnly: true })
+    const at = args.indexOf('--disallowedTools')
+    expect(at).toBeGreaterThan(0)
+    expect(args[at + 1]).toBe('Edit,Write,MultiEdit,NotebookEdit')
+    // A opção aceita vários valores: o próximo argumento precisa ser outra flag.
+    expect(args[at + 2]?.startsWith('--')).toBe(true)
+    // A ferramenta de permissão do Orkio continua, e nada é aprovado sozinho.
+    expect(args).toContain('mcp__orkio__approve')
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('manual')
+    for (const plain of [await argsOf({}), await argsOf({ readOnly: false })]) {
+      expect(plain).not.toContain('--disallowedTools')
+      expect(plain[plain.indexOf('--permission-mode') + 1]).toBe('acceptEdits')
+    }
   })
 })

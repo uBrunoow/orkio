@@ -59,6 +59,11 @@ function projectTint(id: string): string {
 
 /** Colunas da lista (cabeçalho e linhas). */
 const STATE_COL = 'w-[220px] shrink-0'
+/**
+ * Lista estreita (< 44rem: janela de ~1100 px com as duas colunas laterais): o estado e as ações
+ * descem para a linha de baixo do nome, em vez de espremer o projeto até quebrar letra a letra.
+ */
+const NARROW_HIDDEN = '@max-[44rem]:hidden'
 
 export function ProjectsPage({
   onOpenIntegrations,
@@ -156,7 +161,7 @@ export function ProjectsPage({
           />
         )
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border-soft bg-card">
+        <div className="@container overflow-hidden rounded-xl border border-border-soft bg-card">
           {/* Cabeçalho das colunas (só visual: cada linha já diz o projeto e o estado). */}
           <div
             aria-hidden="true"
@@ -164,8 +169,8 @@ export function ProjectsPage({
           >
             <span className="w-8 shrink-0" />
             <span className="flex-1">Projeto</span>
-            <span className={STATE_COL}>Estado</span>
-            <span className="w-[200px] shrink-0" />
+            <span className={cn(STATE_COL, NARROW_HIDDEN)}>Estado</span>
+            <span className={cn('w-[200px] shrink-0', NARROW_HIDDEN)} />
           </div>
           <ul aria-label="Projetos" aria-busy={projects.revalidating}>
             {list.map((project) => (
@@ -240,7 +245,7 @@ function ProjectRow({
       aria-label={project.name}
       className="flex flex-col gap-2.5 border-b border-border-soft px-4 py-3 last:border-b-0"
     >
-      <div className="flex items-start gap-3.5">
+      <div className="flex flex-wrap items-start gap-x-3.5 gap-y-2.5">
         <span
           aria-hidden="true"
           className={cn(
@@ -251,10 +256,10 @@ function ProjectRow({
           {project.name.slice(0, 1).toUpperCase()}
         </span>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5 @max-[44rem]:basis-[calc(100%-46px)]">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="font-medium text-foreground">{project.name}</span>
-            <span className="font-mono text-[11.5px] break-all text-subtle-foreground">
+            <span className="font-mono text-[11.5px] wrap-anywhere text-subtle-foreground">
               <span>{project.localPath}</span>
               {project.repo && (
                 <>
@@ -311,7 +316,7 @@ function ProjectRow({
           <div
             role="group"
             aria-label={`Confirmar remoção de ${project.name}`}
-            className="flex shrink-0 flex-wrap items-center gap-2 self-center"
+            className="flex shrink-0 flex-wrap items-center gap-2 self-center @max-[44rem]:ml-[46px]"
           >
             <span className="text-xs text-muted-foreground">
               Remover do Orkio? Nenhum arquivo será apagado.
@@ -337,14 +342,16 @@ function ProjectRow({
           </div>
         ) : (
           <>
-            <span className={cn(STATE_COL, 'self-center')}>
+            <span
+              className={cn(STATE_COL, 'self-center @max-[44rem]:ml-[46px] @max-[44rem]:w-auto')}
+            >
               <StatusToken
                 label={health.label}
                 tone={toneOf(health.color)}
                 data-health={project.health.state}
               />
             </span>
-            <div className="flex shrink-0 items-center justify-end gap-1.5 self-center">
+            <div className="flex shrink-0 items-center justify-end gap-1.5 self-center @max-[44rem]:ml-auto">
               {folderProblem ? (
                 // A pasta sumiu ou mudou: reapontar é a correção, fica à vista.
                 <Button variant="outline" disabled={busy !== null} onClick={() => void relocate()}>

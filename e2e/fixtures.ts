@@ -60,6 +60,10 @@ export interface FakeServices {
   githubBranches: string[]
   /** PRs (GET /repos/{o}/{r}/pulls). `updatedDaysAgo` padrão: 1. */
   githubPulls: FakePull[]
+  /** Task 18: arquivos da PR (`GET /pulls/{n}/files`), por número: `filename` + `patch`. */
+  githubPrFiles?: Record<string, { filename: string; patch?: string }[]>
+  /** 'no_scope': todo GraphQL falha com INSUFFICIENT_SCOPES (`data: null`), como um token sem permissão. */
+  githubGraphql?: 'ok' | 'no_scope'
   /** Detalhes via GraphQL por número da PR. */
   githubPrDetails: Record<
     string,
@@ -67,6 +71,10 @@ export interface FakeServices {
       reviewDecision: string | null
       unresolved: number
       checks: string | null
+      /** Cartão da PR: tamanho (GraphQL). */
+      additions?: number
+      deletions?: number
+      changedFiles?: number
       /** 3B: reviews com decisão e pedidos de review (ids estáveis). 5C: autores/revisores. */
       reviews?: {
         id: string
@@ -75,6 +83,15 @@ export interface FakeServices {
         author?: { login: string }
       }[]
       reviewRequests?: { id: string; createdAt: string; requestedReviewer?: { login: string } }[]
+      /** Task 15: threads com texto (query `pullRequest(number: $number)` do Orkio). */
+      threads?: {
+        id: string
+        isResolved: boolean
+        isOutdated?: boolean
+        path: string | null
+        line: number | null
+        comments: { author: string; body: string; createdAt: string; url: string }[]
+      }[]
     }
   >
 }
@@ -89,6 +106,9 @@ export interface FakePull {
   updatedAt?: string
   /** 5C: commit no topo da branch da PR (`head.sha`). */
   sha?: string
+  /** Cartão da PR: quem abriu (`user.login`) e quando (`created_at`). */
+  author?: string
+  createdAt?: string
 }
 
 /** Ids fixos dos bancos e páginas simulados (formato de id do Notion). */
@@ -141,6 +161,21 @@ interface FakeGlobals {
     addedProperties: Record<string, unknown>
     /** 5C: pedidos de review recebidos (POST requested_reviewers). */
     reviewRequests?: { pull: number; reviewers: string[]; teams: string[] }[]
+    /**
+     * Task 18: revisões que o app mandou ao site do Orkio (`POST <site>/github/review`). O token do
+     * usuário não é guardado; só se veio.
+     */
+    siteReviews?: {
+      owner: string
+      repo: string
+      number: number
+      hasUserToken: boolean
+      review: {
+        event: string
+        body: string
+        comments?: { path: string; line: number; side: string; body: string }[]
+      }
+    }[]
     /** Publicações de artefatos (4B): subpáginas criadas e markdown acrescentado. */
     published: {
       kind: 'child_page' | 'section'
@@ -320,6 +355,50 @@ export async function launchOrkio(
           call.status = response.status
           return response
         }
+        // Task 18: site do Orkio (mesma origem do intermediário no build de E2E) posta a revisão
+        // como orkio[bot]. Como o GitHub: a revisão entra nos detalhes da PR e `updated_at` muda.
+        if (url === `${brokerUrl}/github/review` && init?.method === 'POST') {
+          const body = JSON.parse(call.body ?? '{}') as {
+            owner: string
+            repo: string
+            number: number
+            userToken?: string
+            review: NonNullable<FakeGlobals['__notion']['siteReviews']>[number]['review']
+          }
+          const list = (g.__notion.siteReviews ??= [])
+          list.push({
+            owner: body.owner,
+            repo: body.repo,
+            number: body.number,
+            hasUserToken: typeof body.userToken === 'string' && body.userToken.length > 0,
+            review: body.review
+          })
+          const id = 900 + list.length
+          const now = new Date().toISOString()
+          const d = g.__fakes.githubPrDetails[String(body.number)]
+          if (d) {
+            d.reviews = [
+              ...(d.reviews ?? []),
+              ...(body.review.event === 'REQUEST_CHANGES'
+                ? [
+                    {
+                      id: `REV-ORKIO-${id}`,
+                      state: 'CHANGES_REQUESTED' as const,
+                      submittedAt: now,
+                      author: { login: 'orkio[bot]' }
+                    }
+                  ]
+                : [])
+            ]
+            if (body.review.event === 'REQUEST_CHANGES') d.reviewDecision = 'CHANGES_REQUESTED'
+          }
+          g.__fakes.githubPulls = g.__fakes.githubPulls.map((p) =>
+            p.number === body.number ? { ...p, updatedAt: now } : p
+          )
+          return json({
+            url: `https://github.com/${body.owner}/${body.repo}/pull/${body.number}#pullrequestreview-${id}`
+          })
+        }
         if (url.startsWith(brokerUrl)) {
           if (g.__fakes.broker === 'down') throw new TypeError('fetch failed')
           if (g.__fakes.broker === 'invalid_grant') return json({ error: 'invalid_grant' }, 400)
@@ -385,7 +464,9 @@ export async function launchOrkio(
                     .slice(0, 10),
                 closed_at:
                   p.state === 'merged' || p.state === 'closed' ? '2026-01-01T00:00:00Z' : null,
-                head: { ref: p.head, ...(p.sha ? { sha: p.sha } : {}) }
+                head: { ref: p.head, ...(p.sha ? { sha: p.sha } : {}) },
+                ...(p.author ? { user: { login: p.author } } : {}),
+                ...(p.createdAt ? { created_at: p.createdAt } : {})
               }))
           }
           const etag = `W/"${JSON.stringify(body).length}-${JSON.stringify(body)
@@ -436,17 +517,65 @@ export async function launchOrkio(
           )
           return json({ number: n }, 201)
         }
+        // Task 18: arquivos da PR (linhas comentáveis da revisão como orkio[bot]).
+        const filesMatch =
+          /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files\?/.exec(url)
+        if (filesMatch) {
+          call.status = 200
+          return json(g.__fakes.githubPrFiles?.[filesMatch[1]!] ?? [])
+        }
         if (/^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/collaborators\?/.test(url)) {
           return json([{ login: 'ana' }, { login: 'bia' }])
         }
         if (url === 'https://api.github.com/graphql') {
           const query = String((JSON.parse(call.body ?? '{}') as { query?: string }).query)
+          // Reproduz o OAuth sem read:org: o GitHub valida o escopo antes de executar.
+          if (query.includes('on Team') || g.__fakes.githubGraphql === 'no_scope') {
+            return json({
+              data: null,
+              errors: [
+                {
+                  type: 'INSUFFICIENT_SCOPES',
+                  message: 'Your token has not been granted the required scopes (read:org).'
+                }
+              ]
+            })
+          }
+          // Task 15: texto das threads de uma PR (a query do Orkio pede `pullRequest(number: $number)`).
+          if (query.includes('pullRequest(number: $number)')) {
+            const vars = (JSON.parse(call.body ?? '{}') as { variables?: { number?: number } })
+              .variables
+            const d = g.__fakes.githubPrDetails[String(vars?.number)]
+            return json({
+              data: {
+                repository: {
+                  pullRequest: d
+                    ? {
+                        reviewThreads: {
+                          nodes: (d.threads ?? []).map((t) => ({
+                            ...t,
+                            isOutdated: t.isOutdated ?? false,
+                            comments: {
+                              nodes: t.comments.map((c) => ({ ...c, author: { login: c.author } }))
+                            }
+                          }))
+                        },
+                        reviews: { nodes: [] }
+                      }
+                    : null
+                }
+              }
+            })
+          }
           const repository: Record<string, unknown> = {}
           for (const match of query.matchAll(/pr(\d+): pullRequest/g)) {
             const d = g.__fakes.githubPrDetails[match[1]!]
             repository[`pr${match[1]}`] = d
               ? {
                   number: Number(match[1]),
+                  additions: d.additions,
+                  deletions: d.deletions,
+                  changedFiles: d.changedFiles,
                   reviewDecision: d.reviewDecision,
                   reviewThreads: {
                     nodes: [
@@ -957,17 +1086,27 @@ export async function enterApp(page: Page): Promise<void> {
 }
 
 /**
- * Integrações: espera os estados carregarem e abre as linhas já prontas ("Gerenciar"), para os
- * cards de conexão ficarem visíveis como antes da lista.
+ * Integrações: espera os estados carregarem. A grade abre um painel por vez (o primeiro que ainda
+ * não está pronto, sozinho); `openIntegration` abre o card de que o teste precisa.
  */
 export async function expandIntegrations(page: Page): Promise<void> {
-  const list = page.getByRole('list', { name: 'Catálogo de integrações' })
   for (const name of ['Notion', 'GitHub', 'Claude Code']) {
-    const row = list.getByRole('listitem', { name, exact: true })
-    await expect(row.getByTestId('integration-status').first()).not.toContainText('Verificando')
+    const card = page.getByRole('article', { name, exact: true })
+    await expect(card.getByTestId('integration-status')).not.toContainText('Verificando')
   }
-  const manage = list.getByRole('button', { name: /^Gerenciar / })
-  for (let n = await manage.count(); n > 0; n = await manage.count()) await manage.first().click()
+}
+
+/** Abre o painel de configuração de um card de Integrações (se já não estiver aberto). */
+export async function openIntegration(
+  page: Page,
+  name: 'Notion' | 'Bancos e campos' | 'GitHub' | 'Claude Code'
+): Promise<void> {
+  await expandIntegrations(page)
+  const card = page.getByRole('article', { name, exact: true })
+  const close = card.getByRole('button', { name: `Fechar ${name}` })
+  if ((await close.count()) > 0) return
+  await card.getByRole('button', { name: new RegExp(`^(?!Fechar).* ${name}$`) }).click()
+  await expect(close).toBeVisible()
 }
 
 /** Configurações › seção (Integrações, Projetos, Quadro e automações, ...). */
@@ -1008,48 +1147,67 @@ export async function openedUrls(app: ElectronApplication): Promise<string[]> {
  */
 export async function simulateUpdate(
   app: ElectronApplication,
-  update: { version: string } | null
+  update: { version: string } | null,
+  /** Resposta ao diálogo "Reiniciar agora?" (padrão "Depois"). */
+  restart = false
 ): Promise<void> {
-  await app.evaluate((_electron, next) => {
-    type FakeUpdater = {
-      forceDevUpdateConfig: boolean
-      autoDownload: boolean
-      checkForUpdates(): Promise<unknown>
-      quitAndInstall(): void
-      emit(event: string, arg?: unknown): boolean
-    }
-    const g = globalThis as unknown as { __updateInstalls?: number }
-    // O módulo já carregado pelo main (cache do require do Node): o mesmo singleton do app.
-    const Module = (process as unknown as { mainModule: { constructor: unknown } }).mainModule
-      .constructor as { _cache: Record<string, { exports: unknown }> }
-    const key = Object.keys(Module._cache).find((k) =>
-      /[\\/]electron-updater[\\/]out[\\/]main\.js$/.test(k)
-    )
-    if (!key) throw new Error('electron-updater não carregado')
-    const u = (Module._cache[key]!.exports as { autoUpdater: FakeUpdater }).autoUpdater
-    g.__updateInstalls ??= 0
-    u.forceDevUpdateConfig = true
-    u.checkForUpdates = async () => {
-      u.emit('checking-for-update')
-      if (!next) {
-        u.emit('update-not-available', { version: '0.0.0' })
-        return null
+  await app.evaluate(
+    ({ dialog }, [next, answer]) => {
+      type FakeUpdater = {
+        forceDevUpdateConfig: boolean
+        autoDownload: boolean
+        checkForUpdates(): Promise<unknown>
+        quitAndInstall(): void
+        emit(event: string, arg?: unknown): boolean
       }
-      const info = {
-        version: next.version,
-        files: [{ url: `Orkio-${next.version}-win-x64-setup.exe` }]
+      const g = globalThis as unknown as { __updateInstalls?: number; __restartPrompts?: string[] }
+      // Diálogo nativo "Reiniciar agora?": responde sem abrir janela e registra a pergunta.
+      g.__restartPrompts ??= []
+      dialog.showMessageBox = (async (...args: unknown[]) => {
+        const opts = args.at(-1) as { message?: string }
+        g.__restartPrompts!.push(opts.message ?? '')
+        return { response: answer ? 0 : 1, checkboxChecked: false }
+      }) as typeof dialog.showMessageBox
+      // O módulo já carregado pelo main (cache do require do Node): o mesmo singleton do app.
+      const Module = (process as unknown as { mainModule: { constructor: unknown } }).mainModule
+        .constructor as { _cache: Record<string, { exports: unknown }> }
+      const key = Object.keys(Module._cache).find((k) =>
+        /[\\/]electron-updater[\\/]out[\\/]main\.js$/.test(k)
+      )
+      if (!key) throw new Error('electron-updater não carregado')
+      const u = (Module._cache[key]!.exports as { autoUpdater: FakeUpdater }).autoUpdater
+      g.__updateInstalls ??= 0
+      u.forceDevUpdateConfig = true
+      u.checkForUpdates = async () => {
+        u.emit('checking-for-update')
+        if (!next) {
+          u.emit('update-not-available', { version: '0.0.0' })
+          return null
+        }
+        const info = {
+          version: next.version,
+          files: [{ url: `Orkio-${next.version}-win-x64-setup.exe` }]
+        }
+        u.emit('update-available', info)
+        if (u.autoDownload) {
+          u.emit('download-progress', { percent: 50 })
+          u.emit('update-downloaded', info)
+        }
+        return { updateInfo: info }
       }
-      u.emit('update-available', info)
-      if (u.autoDownload) {
-        u.emit('download-progress', { percent: 50 })
-        u.emit('update-downloaded', info)
+      u.quitAndInstall = () => {
+        g.__updateInstalls = (g.__updateInstalls ?? 0) + 1
       }
-      return { updateInfo: info }
-    }
-    u.quitAndInstall = () => {
-      g.__updateInstalls = (g.__updateInstalls ?? 0) + 1
-    }
-  }, update)
+    },
+    [update, restart] as const
+  )
+}
+
+/** Mensagens do diálogo "Reiniciar agora?" mostradas até aqui. */
+export async function restartPrompts(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(
+    () => (globalThis as unknown as { __restartPrompts?: string[] }).__restartPrompts ?? []
+  )
 }
 
 export async function updateInstalls(app: ElectronApplication): Promise<number> {
@@ -1115,6 +1273,12 @@ function fakeClaudeBin(
     )
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ backlog: alva?.mcpBacklog === true }))
   }
+  // Terminal simulado ("Abrir terminal aqui"): registra pasta e argumentos em terminal-calls.log.
+  writeFileSync(
+    join(dir, 'x-terminal-emulator'),
+    ['#!/bin/sh', 'echo "$PWD $*" >> "$(dirname "$0")/terminal-calls.log"', 'exit 0', ''].join('\n')
+  )
+  chmodSync(join(dir, 'x-terminal-emulator'), 0o755)
   // GitHub CLI simulado: pré-checagem (5B) e, na 5C, registra cada chamada em gh-calls.log.
   const gh = alva?.gh ?? 'missing'
   if (gh !== 'missing') {
@@ -1156,6 +1320,12 @@ function installFakeAlvaPlugin(home: string): void {
     join(home, '.claude', 'plugins', 'installed_plugins.json'),
     JSON.stringify({ plugins: { 'alva-flow@alva-flow-marketplace': [{ installPath: plugin }] } })
   )
+}
+
+/** Pastas em que o "Abrir terminal aqui" foi chamado (uma linha por chamada). */
+export function terminalCalls(userDataDir: string): string[] {
+  const file = join(`${userDataDir}-bin`, 'terminal-calls.log')
+  return existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean) : []
 }
 
 /** 5C: chamadas ao GitHub CLI simulado (uma linha por chamada, os argumentos). */
@@ -1214,7 +1384,7 @@ export async function expectTaskHistory(scope: Locator, ...texts: string[]): Pro
  */
 export async function taskTab(
   screen: Locator,
-  name: 'Sessão' | 'Spec' | 'Plano' | 'Mudanças' | 'PR & CI' | 'Detalhes'
+  name: 'Sessão' | 'Spec' | 'Plano' | 'Mudanças' | 'PR & CI' | 'Revisão' | 'Detalhes'
 ): Promise<Locator> {
   if (name === 'Sessão') return screen
   await screen.getByRole('tab', { name, exact: true }).click()

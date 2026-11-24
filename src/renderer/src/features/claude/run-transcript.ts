@@ -4,7 +4,7 @@
  * ("Rodou 6 comandos · Editou 2 arquivos"); pedidos pendentes ficam de fora (têm cartão próprio);
  * permissões negadas/bloqueadas e erros continuam visíveis na ordem em que aconteceram.
  */
-import type { RunLogEvent } from '../../../../shared/agent-run'
+import type { RunLogEvent, RunStatus } from '../../../../shared/agent-run'
 import { plural } from '../../lib/format'
 
 export type StepCategory = 'command' | 'edit' | 'read' | 'search' | 'subagent' | 'tool'
@@ -20,11 +20,35 @@ export interface WorkStep {
   state: StepState
 }
 
+export type SubagentState = 'running' | 'done' | 'failed' | 'background' | 'interrupted'
+
+export interface SubagentRow {
+  id: string
+  title: string
+  type: string | null
+  /** Ferramentas que o subagente chamou (eventos com `parent`). */
+  tools: number
+  state: SubagentState
+  at: string
+}
+
+/** Bloqueio de push ou de `gh` que publica (textos de `POLICY_MESSAGES`, também os antigos). */
+const PUBLISH_BLOCK = /Bloqueado pelo Orkio: (git push|comandos do GitHub CLI que publicam)/
+
 export type TranscriptItem =
   | { kind: 'started'; key: string; model: string | null }
   | { kind: 'message'; key: string; text: string }
   | { kind: 'work'; key: string; steps: WorkStep[]; approvals: number; live: boolean }
-  | { kind: 'receipt'; key: string; tone: 'info' | 'problem'; text: string; count: number }
+  | { kind: 'subagents'; key: string; agents: SubagentRow[] }
+  | {
+      kind: 'receipt'
+      key: string
+      tone: 'info' | 'problem'
+      text: string
+      count: number
+      /** Ação que o recibo oferece (hoje só "Abrir PR", num push/gh bloqueado). */
+      action?: 'open-pr'
+    }
   | { kind: 'notice'; key: string; tone: 'danger' | 'neutral'; text: string }
   | {
       kind: 'result'
@@ -151,24 +175,39 @@ const norm = (text: string): string => text.replace(/\s+/g, ' ').trim()
  * `live`: a execução ainda roda. Fora dela, uma ferramenta sem resultado conta como concluída
  * (o log pode ter perdido o `tool_result`).
  */
-export function buildTranscript(events: readonly RunLogEvent[], live: boolean): TranscriptItem[] {
+export function buildTranscript(
+  events: readonly RunLogEvent[],
+  live: boolean,
+  finalStatus?: RunStatus
+): TranscriptItem[] {
   const items: TranscriptItem[] = []
   const byId = new Map<string, WorkStep>()
   let group: Extract<TranscriptItem, { kind: 'work' }> | null = null
+  let subs: Extract<TranscriptItem, { kind: 'subagents' }> | null = null
+  const agentById = new Map<string, SubagentRow>()
+  // `Task`/`Agent` com evento `subagent` aparecem no cartão dos subagentes, não no grupo de trabalho.
+  const spawned = new Set<string>()
+  for (const e of events) if (e.kind === 'subagent') spawned.add(e.id)
   let lastMessage = ''
   let started = false
 
   const push = (item: TranscriptItem): void => {
     group = null
+    subs = null
     items.push(item)
   }
-  const receipt = (tone: 'info' | 'problem', text: string, key: string): void => {
+  const receipt = (
+    tone: 'info' | 'problem',
+    text: string,
+    key: string,
+    action?: 'open-pr'
+  ): void => {
     const last = items[items.length - 1]
     if (last?.kind === 'receipt' && last.text === text && last.tone === tone) {
       last.count += 1
       return
     }
-    push({ kind: 'receipt', key, tone, text, count: 1 })
+    push({ kind: 'receipt', key, tone, text, count: 1, ...(action ? { action } : {}) })
   }
 
   for (const [i, e] of events.entries()) {
@@ -184,7 +223,35 @@ export function buildTranscript(events: readonly RunLogEvent[], live: boolean): 
         lastMessage = norm(e.text)
         push({ kind: 'message', key, text: e.text })
         break
+      case 'subagent': {
+        const row: SubagentRow = {
+          id: e.id,
+          title: e.title || 'Subagente',
+          type: e.agentType,
+          tools: 0,
+          state: e.background ? 'background' : 'running',
+          at: e.at
+        }
+        agentById.set(e.id, row)
+        if (!subs) {
+          const item: Extract<TranscriptItem, { kind: 'subagents' }> = {
+            kind: 'subagents',
+            key,
+            agents: []
+          }
+          push(item)
+          subs = item
+        }
+        subs.agents.push(row)
+        break
+      }
       case 'tool': {
+        if (e.parent) {
+          const owner = agentById.get(e.parent)
+          if (owner) owner.tools += 1
+          break
+        }
+        if (spawned.has(e.id)) break
         const step: WorkStep = {
           id: e.id,
           tool: e.tool,
@@ -202,6 +269,12 @@ export function buildTranscript(events: readonly RunLogEvent[], live: boolean): 
         break
       }
       case 'tool_result': {
+        const agent = agentById.get(e.id)
+        if (agent) {
+          if (e.error) agent.state = 'failed'
+          else if (agent.state === 'running') agent.state = 'done'
+          break
+        }
         const step = byId.get(e.id)
         if (step) step.state = e.error ? 'failed' : 'ok'
         break
@@ -210,7 +283,12 @@ export function buildTranscript(events: readonly RunLogEvent[], live: boolean): 
         if (e.state === 'allowed') {
           if (group) group.approvals += 1
         } else if (e.state === 'blocked') {
-          receipt('problem', `Bloqueado: ${e.summary}${e.reason ? ` (${e.reason})` : ''}`, key)
+          receipt(
+            'problem',
+            `Bloqueado: ${e.summary}${e.reason ? ` (${e.reason})` : ''}`,
+            key,
+            e.reason && PUBLISH_BLOCK.test(e.reason) ? 'open-pr' : undefined
+          )
         } else if (e.state === 'denied') {
           receipt('problem', `Negado: ${e.summary}`, key)
         }
@@ -253,5 +331,27 @@ export function buildTranscript(events: readonly RunLogEvent[], live: boolean): 
     if (!live) for (const s of item.steps) if (s.state === 'running') s.state = 'ok'
     item.live = live && item === tail && item.steps.some((s) => s.state === 'running')
   }
+  if (!live) {
+    // Sem resultado: só vale como concluído se a execução terminou bem.
+    const stopped = finalStatus === 'cancelled' || finalStatus === 'failed'
+    for (const row of agentById.values()) {
+      if (row.state === 'running') row.state = stopped ? 'interrupted' : 'done'
+    }
+  }
   return items
+}
+
+/** Subagentes ainda trabalhando (para a linha "Esperando N subagentes" acima do campo). */
+export function runningSubagents(items: readonly TranscriptItem[]): SubagentRow[] {
+  return items
+    .flatMap((i) => (i.kind === 'subagents' ? i.agents : []))
+    .filter((a) => a.state === 'running')
+}
+
+/** "Esperando 2 subagentes: Revisar API, Escrever testes" (vazio quando nenhum roda). */
+export function waitingSubagentsLabel(running: readonly SubagentRow[]): string | null {
+  if (running.length === 0) return null
+  return `Esperando ${plural(running.length, 'subagente', 'subagentes')}: ${running
+    .map((a) => a.title)
+    .join(', ')}`
 }

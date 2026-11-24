@@ -256,6 +256,23 @@ export class AgentsService {
     this.insertAssignment(projectId, taskId, key, name, 'orchestrator')
   }
 
+  /**
+   * 8B: a tarefa entrou numa etapa sem raia do orquestrador: o agente que ele (ou uma regra) pôs
+   * sai, para o fluxo da coluna rodar sem as restrições de outra etapa (ex.: o Revisor, que não
+   * entrega, travava o "comentários da PR"). Escolha à mão fica. Síncrono, como o `assign…`.
+   */
+  releaseByOrchestrator(projectId: string, taskId: string, name: string): void {
+    const current = this.assignment(taskId)
+    if (!current || current.manual) return
+    this.deps.db.run('DELETE FROM agent_assignments WHERE task_page_id = ?', taskId)
+    this.taskEvent(projectId, taskId, 'agent_unassigned', {
+      agentKey: current.key,
+      agent: name,
+      by: 'orchestrator'
+    })
+    this.deps.emit(projectId)
+  }
+
   /** Avatares dos cards do quadro. */
   async badges(projectId: string): Promise<Record<string, AgentBadge>> {
     const rows = this.deps.db.all<{ task_page_id: string; agent_key: string }>(
@@ -273,6 +290,7 @@ export class AgentsService {
         name,
         color: view?.profile?.color ?? 'yellow',
         initials: agentInitials(name),
+        ...(view?.profile ? { model: view.profile.model, effort: view.profile.effort } : {}),
         problem: !view
           ? 'O agente desta tarefa não existe mais.'
           : view.status === 'ready'
