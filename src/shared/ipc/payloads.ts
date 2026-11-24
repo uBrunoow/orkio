@@ -20,7 +20,8 @@ import { isRecord } from '../guards'
 import type { NotionColor, NotionMappingField, NotionWorkspaceInput } from '../notion'
 import { MAPPING_FIELDS } from '../notion-mapping'
 import { ORCHESTRATOR_LIMITS, parseOrchestrator, type OrchestratorConfig } from '../orchestrator'
-import { ACTIVITY_KINDS, type ActivityGroup, type ActivityQuery } from '../overview'
+import type { ActivityQuery } from '../overview'
+import { ACTIVITY_GROUPS, type ActivityGroup } from '../task-events'
 import type { CreateProjectInput } from '../projects'
 import { isBranchKind } from '../slug'
 import { parseFlowDef, type Flow, type StageFlow } from '../task-flow'
@@ -502,7 +503,7 @@ export function parseActivityQuery(value: unknown): Parsed<ActivityQuery> {
     query.projectId = value['projectId']
   }
   if (value['group'] !== undefined && value['group'] !== null) {
-    if (typeof value['group'] !== 'string' || !(value['group'] in ACTIVITY_KINDS)) return INVALID
+    if (!(ACTIVITY_GROUPS as readonly unknown[]).includes(value['group'])) return INVALID
     query.group = value['group'] as ActivityGroup
   }
   if (value['beforeId'] !== undefined && value['beforeId'] !== null) {

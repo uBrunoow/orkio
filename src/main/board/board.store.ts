@@ -3,6 +3,13 @@
  * Só ids, etapas, flags e nomes de opção. Nunca título/conteúdo de páginas.
  */
 import type { Db, Tx } from '../db/database'
+import {
+  eventSource,
+  parseDetailJson,
+  parseTaskEvent,
+  type NewTaskEvent
+} from '../../shared/task-events'
+import type { BoardHistoryEntry } from '../../shared/board'
 
 export type StateSource = 'manual' | 'notion' | 'automation'
 
@@ -17,57 +24,13 @@ export interface TaskStateRow {
   automationPaused: boolean
 }
 
-export type TaskEventKind =
-  | 'added'
-  | 'moved'
-  | 'reconciled'
-  | 'blocked'
-  | 'unblocked'
-  | 'sync_ok'
-  | 'sync_failed'
-  | 'rolled_back'
-  /** Evento do git/GitHub processado pelo motor (3B): regra, resultado, motivo. */
-  | 'automation'
-  | 'automation_paused'
-  | 'automation_resumed'
-  /** Execuções do Claude Code (4A). */
-  | 'run_started'
-  | 'run_finished'
-  | 'run_cancelled'
-  | 'run_failed'
-  | 'run_blocked'
-  /** Artefatos (4B): documento anexado (caminho + commit) e publicado no Notion. */
-  | 'artifact_attached'
-  | 'artifact_published'
-  /** Fluxos de tarefa (5A). */
-  | 'flow_started'
-  | 'step_started'
-  | 'step_finished'
-  | 'step_failed'
-  | 'step_skipped'
-  | 'gate_waiting'
-  | 'gate_approved'
-  | 'gate_rejected'
-  /** Você pediu ajustes no gate (o passo de ajustes roda de novo na mesma sessão). */
-  | 'gate_revised'
-  | 'flow_paused'
-  | 'flow_finished'
-  /** Entrega (5C): push/PR/comentário/resolução/pedido de review feitos por fluxo. */
-  | 'delivery'
-  /** Agentes (8A): atribuição da tarefa (à mão ou pela regra da coluna). */
-  | 'agent_assigned'
-  | 'agent_unassigned'
-
-export interface TaskEventRow {
-  id: number
+/** Evento a gravar: o do catálogo (`shared/task-events.ts`) + tarefa, horário e chave. */
+export type TaskEventInput = NewTaskEvent & {
   taskPageId: string
+  projectId: string
   at: string
-  kind: TaskEventKind
-  source: StateSource
-  fromStage: string | null
-  toStage: string | null
-  detail: Record<string, unknown> | null
-  eventKey: string | null
+  /** Idempotência das automações: única por projeto e tarefa. */
+  eventKey?: string | null
 }
 
 /** Valores desejados no Notion (por id de propriedade) e como desfazer localmente. */
@@ -175,9 +138,8 @@ export class BoardStore {
     )
   }
 
-  addEvent(
-    event: Omit<TaskEventRow, 'id' | 'eventKey'> & { projectId: string; eventKey?: string | null }
-  ): void {
+  addEvent(event: TaskEventInput): void {
+    const detail = event.detail as Record<string, unknown>
     this.db.run(
       `INSERT INTO task_events (task_page_id, project_id, at, kind, source, from_stage, to_stage, detail_json, event_key)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -185,10 +147,10 @@ export class BoardStore {
       event.projectId,
       event.at,
       event.kind,
-      event.source,
-      event.fromStage,
-      event.toStage,
-      event.detail ? JSON.stringify(event.detail) : null,
+      eventSource(event),
+      event.fromStage ?? null,
+      event.toStage ?? null,
+      Object.keys(detail).length > 0 ? JSON.stringify(detail) : null,
       event.eventKey ?? null
     )
   }
@@ -208,9 +170,20 @@ export class BoardStore {
     return out
   }
 
-  /** Esta chave de evento (idempotência das automações) já foi processada? */
-  hasEventKey(key: string): boolean {
-    return this.db.get('SELECT 1 AS x FROM task_events WHERE event_key = ?', key) !== undefined
+  /**
+   * Esta chave de evento (idempotência das automações) já foi processada nesta tarefa? A chave só
+   * vale dentro do projeto e da tarefa: a PR #12 de outro projeto, ou a mesma PR em outra tarefa,
+   * é outro evento.
+   */
+  hasEventKey(projectId: string, taskPageId: string, key: string): boolean {
+    return (
+      this.db.get(
+        'SELECT 1 AS x FROM task_events WHERE project_id = ? AND task_page_id = ? AND event_key = ?',
+        projectId,
+        taskPageId,
+        key
+      ) !== undefined
+    )
   }
 
   /** Último movimento manual da tarefa (para conflito com eventos mais antigos). */
@@ -312,34 +285,32 @@ export class BoardStore {
     )
   }
 
-  events(taskPageId: string, limit = 50): TaskEventRow[] {
-    return this.db
-      .all<{
-        id: number
-        task_page_id: string
-        at: string
-        kind: TaskEventKind
-        source: StateSource
-        from_stage: string | null
-        to_stage: string | null
-        detail_json: string | null
-        event_key: string | null
-      }>(
-        'SELECT * FROM task_events WHERE task_page_id = ? ORDER BY id DESC LIMIT ?',
-        taskPageId,
-        limit
-      )
-      .map((r) => ({
-        id: r.id,
-        taskPageId: r.task_page_id,
-        at: r.at,
+  /** Histórico da tarefa, mais novo primeiro. Linhas de tipo desconhecido ficam de fora. */
+  events(taskPageId: string, limit = 50): BoardHistoryEntry[] {
+    const out: BoardHistoryEntry[] = []
+    for (const r of this.db.all<{
+      id: number
+      at: string
+      kind: string
+      source: string
+      from_stage: string | null
+      to_stage: string | null
+      detail_json: string | null
+    }>(
+      'SELECT * FROM task_events WHERE task_page_id = ? ORDER BY id DESC LIMIT ?',
+      taskPageId,
+      limit
+    )) {
+      const event = parseTaskEvent({
         kind: r.kind,
         source: r.source,
         fromStage: r.from_stage,
         toStage: r.to_stage,
-        detail: r.detail_json ? (JSON.parse(r.detail_json) as Record<string, unknown>) : null,
-        eventKey: r.event_key
-      }))
+        detail: parseDetailJson(r.detail_json)
+      })
+      if (event) out.push({ id: r.id, at: r.at, ...event })
+    }
+    return out
   }
 
   // ---------- Escritas pendentes ----------

@@ -3,10 +3,11 @@
  *   tarefas (quadro, 3A) + sinais (2D) → snapshot → eventos (diff com o salvo no SQLite) →
  *   regras → ações (mover pela fila da 3A, notificar) → histórico.
  *
- * Idempotência: cada evento tem uma chave única em task_events. Chave, estado local, escrita
- * pendente no Notion e o novo snapshot são gravados na MESMA transação: um evento nunca dispara
- * duas vezes, nem depois de reiniciar, e uma falha no Notion não perde a mudança (fica pendente).
+ * Idempotência: cada evento tem uma chave única por projeto e tarefa em task_events. Chave, estado
+ * local, escrita pendente no Notion e o novo snapshot são gravados na MESMA transação: um evento
+ * nunca dispara duas vezes, nem depois de reiniciar, e uma falha no Notion não perde a mudança.
  */
+import type { EventPr, TaskEventDetailInput } from '../../shared/task-events'
 import {
   EVENT_LABELS,
   deriveEvents,
@@ -110,7 +111,7 @@ export class AutomationService {
     const at = this.now().toISOString()
     const repo = githubRepoOf(projectById(config, projectId))
     // Só o necessário para montar o link da PR no histórico.
-    const pr = (n: number): Record<string, unknown> =>
+    const pr = (n: number): EventPr =>
       repo ? { number: n, owner: repo.owner, repo: repo.name } : { number: n }
     const notifications: AutomationNotification[] = []
     let eventCount = 0
@@ -121,7 +122,7 @@ export class AutomationService {
         const prev = (previous.get(taskId) as TaskSnapshot | undefined) ?? null
         const fresh = toSnapshot(result.signals[taskId], available)
         const events = deriveEvents(taskId, prev, fresh).filter(
-          (e) => !this.deps.store.hasEventKey(e.key)
+          (e) => !this.deps.store.hasEventKey(projectId, taskId, e.key)
         )
         this.deps.store.saveSnapshot(taskId, projectId, mergeSnapshot(prev, fresh), at)
         if (events.length === 0) continue
@@ -141,7 +142,7 @@ export class AutomationService {
         )
         for (const d of decisions) {
           eventCount++
-          const detail: Record<string, unknown> = {
+          const detail: TaskEventDetailInput<'automation'> = {
             event: d.event.kind,
             ruleId: d.ruleId,
             ruleName: d.ruleName,
@@ -171,7 +172,6 @@ export class AutomationService {
               projectId,
               at,
               kind: 'automation',
-              source: 'automation',
               fromStage: d.from,
               toStage: detail.outcome === 'skipped' ? d.to : null,
               detail,

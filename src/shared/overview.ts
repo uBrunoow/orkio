@@ -9,6 +9,12 @@ import { FLOW_PAUSE_LABEL, type FlowRunView } from './task-flow'
 import type { NotionColor, NotionWorkspaceStatus } from './notion'
 import type { ProjectView } from './projects'
 import { normalizeLabel } from './text'
+import {
+  STAGE_EVENT_KINDS,
+  type ActivityGroup,
+  type TaskEvent,
+  type TaskEventKind
+} from './task-events'
 
 /** Seção do painel da tarefa que o clique abre. */
 export const TASK_SECTIONS = ['flow', 'claude', 'history'] as const
@@ -119,8 +125,6 @@ export interface OverviewSnapshot {
   notices: string[]
 }
 
-export type ActivityGroup = 'board' | 'automation' | 'claude' | 'flow' | 'delivery' | 'notion'
-
 export const ACTIVITY_GROUP_LABEL: Record<ActivityGroup, string> = {
   board: 'Quadro',
   automation: 'Automações',
@@ -130,7 +134,8 @@ export const ACTIVITY_GROUP_LABEL: Record<ActivityGroup, string> = {
   notion: 'Notion'
 }
 
-export interface ActivityItem {
+/** Evento da atividade: o evento tipado do histórico + tarefa, texto e link prontos. */
+export type ActivityItem = TaskEvent & {
   id: number
   at: string
   group: ActivityGroup
@@ -490,13 +495,10 @@ export interface StageEventInput {
   taskPageId: string
   projectId: string
   at: string
-  kind: string
+  kind: TaskEventKind
   fromStage: string | null
   toStage: string | null
 }
-
-/** Eventos que mudam a etapa de uma tarefa. */
-export const STAGE_EVENT_KINDS = ['added', 'moved', 'reconciled', 'rolled_back'] as const
 
 /** Tarefas distintas que entraram na última etapa do quadro desde `since`. */
 export function finishedCount(
@@ -525,7 +527,7 @@ export function stageDwell(
   const entered = new Map<string, string>()
   const durations: number[] = []
   for (const e of [...events].sort((a, b) => a.id - b.id)) {
-    if (!(STAGE_EVENT_KINDS as readonly string[]).includes(e.kind)) continue
+    if (!STAGE_EVENT_KINDS.includes(e.kind)) continue
     const stage = stageByProject.get(e.projectId)
     if (!stage) continue
     if (e.toStage === stage && e.fromStage !== stage) {
@@ -584,63 +586,6 @@ export function costSum(runs: readonly { cost: number | null }[]): WeekStats['co
 }
 
 // ---------- Atividade ----------
-
-/** Tipos de evento de cada grupo da atividade (`sync_ok` fica de fora: é ruído). */
-export const ACTIVITY_KINDS: Record<ActivityGroup, readonly string[]> = {
-  board: [
-    'added',
-    'moved',
-    'reconciled',
-    'blocked',
-    'unblocked',
-    'automation_paused',
-    'automation_resumed',
-    'agent_assigned',
-    'agent_unassigned'
-  ],
-  automation: ['automation', 'moved'],
-  claude: [
-    'run_started',
-    'run_finished',
-    'run_cancelled',
-    'run_failed',
-    'run_blocked',
-    'artifact_attached',
-    'artifact_published'
-  ],
-  flow: [
-    'flow_started',
-    'step_started',
-    'step_finished',
-    'step_failed',
-    'step_skipped',
-    'gate_waiting',
-    'gate_approved',
-    'gate_rejected',
-    'gate_revised',
-    'flow_paused',
-    'flow_finished'
-  ],
-  delivery: ['delivery'],
-  notion: ['sync_failed', 'rolled_back']
-}
-
-/** Grupo de um evento (`null` = fica fora da atividade). */
-export function activityGroup(e: {
-  kind: string
-  source: string
-  detail: Record<string, unknown> | null
-}): ActivityGroup | null {
-  if (e.kind === 'moved') return e.source === 'automation' ? 'automation' : 'board'
-  if (e.kind === 'automation') return e.detail?.['outcome'] === 'noop' ? null : 'automation'
-  for (const [group, kinds] of Object.entries(ACTIVITY_KINDS) as [
-    ActivityGroup,
-    readonly string[]
-  ][]) {
-    if (kinds.includes(e.kind)) return group
-  }
-  return null
-}
 
 export function activitySection(group: ActivityGroup): TaskSection {
   return group === 'claude'

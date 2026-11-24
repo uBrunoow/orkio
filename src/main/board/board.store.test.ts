@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDatabase, type Db } from '../db/database'
-import { BoardStore, type TaskEventKind } from './board.store'
+import type { TaskEventKind } from '../../shared/task-events'
+import { BoardStore, type TaskEventInput } from './board.store'
 
 describe('BoardStore.ruleCounts', () => {
   let dir: string
@@ -35,8 +36,8 @@ describe('BoardStore.ruleCounts', () => {
       source,
       fromStage: null,
       toStage: 's2',
-      detail
-    })
+      detail: detail ?? {}
+    } as TaskEventInput)
 
   it('conta disparos por regra na semana', () => {
     add('2026-11-22T10:00:00.000Z', 'moved', 'automation', { ruleId: 'r1' })

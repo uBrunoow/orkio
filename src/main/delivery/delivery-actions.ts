@@ -10,6 +10,7 @@
  *
  * Cada ação feita vira um evento `delivery` no histórico, com link (branch ou PR).
  */
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import type { ActionConfirm } from '../../shared/task-flow'
 import type { BoardStore } from '../board/board.store'
 import { GitHubApiError } from '../connectors/github/github.client'
@@ -49,15 +50,16 @@ const STAT_LIMIT = 4_000
 
 export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] {
   const now = (): string => (deps.now?.() ?? new Date()).toISOString()
-  const event = (projectId: string, taskId: string, detail: Record<string, unknown>): void =>
+  const event = (
+    projectId: string,
+    taskId: string,
+    detail: Omit<TaskEventDetailInput<'delivery'>, 'by'>
+  ): void =>
     deps.store.addEvent({
       taskPageId: taskId,
       projectId,
       at: now(),
       kind: 'delivery',
-      source: 'manual',
-      fromStage: null,
-      toStage: null,
       detail: { by: 'orkio', ...detail }
     })
 

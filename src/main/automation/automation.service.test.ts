@@ -329,7 +329,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
 
     const h = await history(T1)
     const moves = h.filter((e) => e.kind === 'moved' && e.source === 'automation')
-    expect(moves.map((e) => e.detail?.['ruleId'])).toEqual([
+    expect(moves.map((e) => (e.kind === 'moved' ? e.detail.ruleId : null))).toEqual([
       'default-merged',
       'default-rerequest',
       'default-changes',
@@ -367,6 +367,56 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
     db.run('DELETE FROM signal_snapshots')
     await cycle() // linha de base de novo
     expect(await cycle()).toMatchObject({ moves: 0 })
+  })
+
+  // Bug: a chave (`pr#5:opened`, `branch:local:<nome>`) era única no banco inteiro.
+  it('idempotência por projeto e tarefa: a PR #5 de outro projeto e a mesma PR em outra tarefa disparam', async () => {
+    await cycle() // linha de base
+    // A PR #5 de outro projeto já foi processada antes.
+    new BoardStore(db).addEvent({
+      taskPageId: 'tarefa-de-outro-projeto',
+      projectId: 'p-outro',
+      at: 'x',
+      kind: 'automation',
+      fromStage: null,
+      toStage: null,
+      detail: { event: 'pr.opened', ruleId: null, ruleName: null, outcome: 'no_rule' },
+      eventKey: 'pr#5:opened'
+    })
+    // As duas tarefas citam a mesma PR #5.
+    world.pr[T1] = {}
+    world.pr[T2] = {}
+    expect(await cycle()).toMatchObject({ events: 2, moves: 2 })
+    expect(await stageOf(T1)).toBe('Revisando')
+    expect(await stageOf(T2)).toBe('Revisando')
+    // E cada uma continua sem repetir.
+    expect(await cycle()).toMatchObject({ events: 0, moves: 0 })
+  })
+
+  // Decisão: branch apagada e recriada com o mesmo nome na MESMA tarefa não dispara de novo (o
+  // "começou o trabalho" já aconteceu; recriar costuma ser o push de novo depois de o GitHub apagar
+  // a branch no merge, ou a lista de branches oscilando, e puxaria a tarefa de volta). Outra tarefa
+  // com a mesma branch é outro evento.
+  it('branch recriada na mesma tarefa não dispara de novo; a mesma branch em outra tarefa dispara', async () => {
+    await cycle() // linha de base
+    world.local[T1] = ['feat/x']
+    await cycle()
+    expect(await stageOf(T1)).toBe('Em andamento')
+
+    const view = await board.get('p1')
+    if (!view.ok) throw new Error(view.error.message)
+    const prio = view.value.config!.stages.find((s) => s.name === 'Prioridades')!.id
+    await board.move('p1', T1, prio)
+    await board.move('p1', T2, prio)
+    world.local[T1] = []
+    await cycle()
+    world.local[T1] = ['feat/x']
+    expect(await cycle()).toMatchObject({ events: 0, moves: 0 })
+    expect(await stageOf(T1)).toBe('Prioridades')
+
+    world.local[T2] = ['feat/x']
+    expect(await cycle()).toMatchObject({ events: 1, moves: 1 })
+    expect(await stageOf(T2)).toBe('Em andamento')
   })
 
   it('pausada (tarefa e global) e bloqueada: não move e registra no histórico', async () => {

@@ -3,6 +3,7 @@
  * Notion e reconciliação com o status atual das tarefas. Funções puras (main e renderer).
  */
 import type { AutomationRule } from './automation'
+import type { TaskEvent } from './task-events'
 import type { NotionColor } from './notion'
 import { normalizeLabel } from './text'
 
@@ -334,12 +335,5 @@ export interface BoardSyncEvent {
   canReconnect?: boolean
 }
 
-export interface BoardHistoryEntry {
-  id: number
-  at: string
-  kind: string
-  source: 'manual' | 'notion' | 'automation'
-  fromStage: string | null
-  toStage: string | null
-  detail: Record<string, unknown> | null
-}
+/** Linha do histórico da tarefa: o evento tipado do catálogo (`shared/task-events.ts`). */
+export type BoardHistoryEntry = TaskEvent & { id: number; at: string }

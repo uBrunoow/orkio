@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { BoardStage } from './board'
 import {
-  activityGroup,
   buildRunning,
   costSum,
   finalStageId,
@@ -365,7 +364,7 @@ describe('Semana', () => {
     at: string,
     from: string | null,
     to: string | null,
-    kind = 'moved'
+    kind: StageEventInput['kind'] = 'moved'
   ): StageEventInput => ({
     id,
     taskPageId,
@@ -445,17 +444,6 @@ describe('Semana', () => {
 })
 
 describe('Atividade e formatação', () => {
-  it('agrupa eventos; automação sem efeito e sync_ok ficam de fora', () => {
-    expect(activityGroup({ kind: 'moved', source: 'manual', detail: null })).toBe('board')
-    expect(activityGroup({ kind: 'moved', source: 'automation', detail: null })).toBe('automation')
-    expect(
-      activityGroup({ kind: 'automation', source: 'automation', detail: { outcome: 'noop' } })
-    ).toBeNull()
-    expect(activityGroup({ kind: 'sync_ok', source: 'manual', detail: null })).toBeNull()
-    expect(activityGroup({ kind: 'delivery', source: 'automation', detail: null })).toBe('delivery')
-    expect(activityGroup({ kind: 'gate_waiting', source: 'automation', detail: null })).toBe('flow')
-  })
-
   it('formata tempos em pt-BR', () => {
     const now = new Date('2026-11-20T12:00:00Z')
     expect(formatAgo('2026-11-20T11:59:40Z', now)).toBe('agora')

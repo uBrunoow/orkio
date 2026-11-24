@@ -14,26 +14,24 @@ import {
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { cn } from '@/lib/utils'
 import type { BoardHistoryEntry } from '../../../../shared/board'
+import { eventActor, type EventActor } from '../../../../shared/task-events'
 
 type Actor = { name: string; icon: SvgIcon } | { name: string; agent: true }
 
-/**
- * Quem "fala" em cada evento: o agente (quando o evento traz o nome dele), o Claude Code, o fluxo,
- * o Notion, o GitHub ou você. Puro: só lê `kind`, `source` e `detail` do task_events.
- */
-export function eventActor(e: BoardHistoryEntry): Actor {
-  const agent = e.detail?.['agent']
-  if (typeof agent === 'string' && agent) return { name: agent, agent: true }
-  if (e.kind.startsWith('run_')) return { name: 'Claude Code', icon: ClaudeLogo }
-  if (e.kind === 'gate_approved' || e.kind === 'gate_rejected' || e.kind === 'gate_revised')
-    return { name: 'Você', icon: UserIcon }
-  if (e.kind === 'delivery' || e.kind === 'artifact_published')
-    return { name: 'GitHub', icon: GitHubLogo }
-  if (e.kind.startsWith('flow_') || e.kind.startsWith('step_') || e.kind === 'gate_waiting')
-    return { name: 'Fluxo', icon: AutomationIcon }
-  if (e.source === 'notion' || e.kind === 'sync_ok') return { name: 'Notion', icon: NotionLogo }
-  if (e.source === 'automation') return { name: 'Automação', icon: AutomationIcon }
-  return { name: 'Você', icon: UserIcon }
+const ACTORS: Record<Exclude<EventActor['kind'], 'agent'>, { name: string; icon: SvgIcon }> = {
+  claude: { name: 'Claude Code', icon: ClaudeLogo },
+  you: { name: 'Você', icon: UserIcon },
+  github: { name: 'GitHub', icon: GitHubLogo },
+  notion: { name: 'Notion', icon: NotionLogo },
+  flow: { name: 'Fluxo', icon: AutomationIcon },
+  automation: { name: 'Automação', icon: AutomationIcon },
+  orkio: { name: 'Orkio', icon: AutomationIcon }
+}
+
+/** Quem "fala" em cada evento (a regra está no catálogo, `shared/task-events.ts`). */
+export function actorOf(e: BoardHistoryEntry): Actor {
+  const actor = eventActor(e)
+  return actor.kind === 'agent' ? { name: actor.name, agent: true } : ACTORS[actor.kind]
 }
 
 /**
@@ -55,8 +53,8 @@ export function TaskTimeline({
   return (
     <ul aria-label="Histórico da tarefa" className="flex flex-col">
       {ordered.map((e, i) => {
-        const actor = eventActor(e)
-        const prev = i > 0 ? eventActor(ordered[i - 1]!) : null
+        const actor = actorOf(e)
+        const prev = i > 0 ? actorOf(ordered[i - 1]!) : null
         // Mesmo autor em sequência: só a primeira linha mostra o avatar e o nome.
         const repeated = prev?.name === actor.name
         const link = prUrl(e) ?? branchUrl(e)

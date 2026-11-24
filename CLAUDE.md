@@ -128,6 +128,8 @@ src/
   shared/delivery.ts       # 5C: branches protegidas, checkPushBranch, DeliveryTarget/Settings (puro)
   shared/updates.ts        # 6C: status das atualizações, versões, recorte do CHANGELOG, URL do DMG
   shared/overview.ts       # 6D: tipos e agregações puras (esperando, rodando, PRs, semana...)
+  shared/task-events.ts    # catálogo dos eventos do histórico (`task_events`): detail tipado, source,
+                           # grupo da atividade, sessão, etapa, autor; `parseTaskEvent` (tolerante)
   shared/task-history.ts   # texto/links de um evento do histórico (painel da tarefa e atividade)
   shared/agent.ts          # 8A: perfil do agente (parse/serialize do .md, validação, prompt, checkAgentFlow)
   shared/agent-runtime.ts  # modelo e raciocínio (CLAUDE_MODELS, EFFORTS, isModelName, resolveRuntime)
@@ -499,6 +501,11 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   nativo nem rebuild. Só essa camada conhece `node:sqlite`. Migrações em `MIGRATIONS` (nunca
   edite uma publicada; acrescente). Versão futura → quadro indisponível, nada é apagado.
   Tabelas: `task_state`, `task_events`, `pending_writes`. **Nada de conteúdo de páginas**.
+- **Histórico (`task_events`):** todo tipo de evento está no catálogo `shared/task-events.ts`
+  (`TASK_EVENTS`): formato do `detail`, `source` (`manual`/`notion`/`automation`/`system`; fixo
+  por tipo ou informado por quem grava, conferido no tipo de `addEvent`), grupo da atividade,
+  `inSession`, `stage`, autor. Tipo novo = entrada nova (o `describeEvent` tem `switch` exaustivo).
+  Leitura sempre por `parseTaskEvent` (tipo desconhecido some, campo com tipo errado some).
 - Reconciliação (`shared/board.ts` `reconcile`): pendente → fica; status compatível com a etapa
   salva → fica; senão "Etapa Orkio" compatível ou primeira etapa com o status (evento
   `source='notion'`); nenhuma etapa → "Sem etapa". Depois de confirmar uma escrita, 30 s de
@@ -529,10 +536,14 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   textos ou autores) → `deriveEvents(anterior, novo)` → `evaluate(eventos, regras, estado)`.
   Primeira observação = linha de base (não dispara). Parte desconhecida (GitHub indisponível,
   GraphQL falhou) não gera evento; `mergeSnapshot` mantém o último valor conhecido.
-- Eventos e chaves (únicas em `task_events.event_key`): `branch:<local|remote>:<nome>`,
+- Eventos e chaves (únicas por projeto + tarefa em `task_events.event_key`, SQLite v12; antes eram
+  globais e a PR #12 de outro projeto ou a mesma PR/branch em outra tarefa nunca disparava):
+  `branch:<local|remote>:<nome>`,
   `pr#N:opened|ready|merged`, `pr#N:closed:<closed_at>`, `pr#N:review_request:<id>`,
   `pr#N:review:<id>` (changes_requested/approved), `pr#N:threads:<ids novos>`. Os ids vêm do
   GraphQL da 2D estendido (`timelineItems` REVIEW_REQUESTED_EVENT, `reviews`, `reviewThreads.id`).
+  Branch apagada e recriada com o mesmo nome na mesma tarefa **não** dispara de novo (o começo do
+  trabalho já aconteceu; recriar costuma ser push depois de o GitHub apagar a branch no merge).
 - Ordem: ciclo de vida sem horário (branch, aberta, pronta) → demais por horário do GitHub →
   merge/fechamento. Para cada evento, a **primeira regra habilitada que casar** age; condições
   usam a etapa já atualizada pelo evento anterior. Bloqueada (`notBlocked`), pausada (tarefa ou
@@ -659,8 +670,8 @@ watch`, `gh api` GET/HEAD em `repos/<owner>/<repo>/…` ou GraphQL sem mutation,
 
 - **Tela** (`task/TaskScreen.tsx` com o miolo em `board/TaskPanel.tsx`): fases no topo
   (`TaskPhaseBar`, puro em `task/task-phases.ts`), "Esperando você" no topo, a conversa (`TaskSession`, puro em
-  `task-session.ts`: `task_events` + execuções em ordem, sem `run_*`/`step_started|finished`/
-  `sync_ok`, que a execução já conta) e, no fim, o fluxo, os pedidos de permissão/pergunta,
+  `task-session.ts`: `task_events` + execuções em ordem, sem os eventos com `inSession: false` no
+  catálogo `shared/task-events.ts`, que a execução já conta) e, no fim, o fluxo, os pedidos de permissão/pergunta,
   "Trabalhando há…" e o campo (`claude/SessionComposer.tsx`). Estado em `TaskDetails.tsx`
   (etapa, Mudanças, GitHub, Documentos, Agente, Opções, "Histórico completo" recolhido). Painel da
   fase (`complementary "Detalhes de <ID>"`) em abas Spec · Plano · Mudanças · PR & CI · Revisão ·
@@ -1025,7 +1036,10 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   mergeadas do cache do repositório (`—` sem cache); custo = soma de `agent_runs.cost` conhecidos;
   tempo médio em "Revisado" (etapa com esse nome) por passagem que terminou na semana.
 - **Atividade:** `task_events` dos 7 dias, sem `sync_ok` e sem automação sem efeito; filtro por
-  projeto e grupo (`ACTIVITY_KINDS`), paginação por `beforeId`; texto de `shared/task-history.ts`.
+  projeto e grupo (`ACTIVITY_KINDS`/`activityGroup` de `shared/task-events.ts`), paginação por
+  `beforeId`; texto de `shared/task-history.ts`. `ActivityItem` leva `kind`/`source`/`detail`
+  tipados: telas que contam execuções (`components/executions.ts`) leem o `detail` (`ruleId`,
+  `flowRunId`, `flowId`), nunca o texto.
 - **Evento `overview:changed { waiting }`:** os eventos com `affects: ['overview']` em
   `IPC_EVENTS` chamam `overview.touch()` (debounce 300 ms): `task-flows:changed`, `board:changed`,
   `board:sync-changed` e `claude:run-event` de status/permissão/pergunta. O mesmo total vai para o ícone: `app.setBadgeCount` (Dock/launcher do

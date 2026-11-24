@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlowRunView } from '../../shared/task-flow'
 import type { TaskSignals } from '../../shared/task-signals'
-import { BoardStore } from '../board/board.store'
+import type { TaskEventSource } from '../../shared/task-events'
+import { BoardStore, type TaskEventInput } from '../board/board.store'
 import { emptyConfig, type OrkioConfig } from '../config/orkio-config'
 import { openDatabase, type Db } from '../db/database'
 import { applyWaitingBadge, overlayDotBitmap, waitingDescription } from './badge'
@@ -98,7 +99,7 @@ function event(e: {
   project?: string
   at: string
   kind: Parameters<BoardStore['addEvent']>[0]['kind']
-  source?: 'manual' | 'notion' | 'automation'
+  source?: TaskEventSource
   from?: string | null
   to?: string | null
   detail?: Record<string, unknown> | null
@@ -111,8 +112,8 @@ function event(e: {
     source: e.source ?? 'manual',
     fromStage: e.from ?? null,
     toStage: e.to ?? null,
-    detail: e.detail ?? null
-  })
+    detail: e.detail ?? {}
+  } as TaskEventInput)
 }
 
 beforeEach(() => {

@@ -6,27 +6,12 @@
  */
 import type { AgentRunView } from '../../../../shared/agent-run'
 import type { BoardHistoryEntry } from '../../../../shared/board'
+import { isSessionEvent } from '../../../../shared/task-events'
 
 export type SessionItem =
   | { kind: 'day'; key: string; label: string }
   | { kind: 'event'; key: string; entry: BoardHistoryEntry }
   | { kind: 'run'; key: string; run: AgentRunView; latest: boolean }
-
-/** Eventos que a própria execução (ou o passo dela) já mostra na conversa. */
-const HIDDEN = new Set([
-  'run_started',
-  'run_finished',
-  'run_cancelled',
-  'run_failed',
-  'run_blocked',
-  'step_started',
-  'step_finished',
-  'sync_ok'
-])
-
-export function isSessionEvent(e: BoardHistoryEntry): boolean {
-  return !HIDDEN.has(e.kind)
-}
 
 function dayKey(iso: string): string {
   const d = new Date(iso)

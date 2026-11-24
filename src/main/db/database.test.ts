@@ -273,4 +273,59 @@ describe('migração v4 (4A)', () => {
     db.close()
     await rm(dir, { recursive: true, force: true })
   })
+  it('v11 → v12: origem real nos eventos antigos e chave única por projeto + tarefa', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-db-v12-'))
+    const file = join(dir, 'orkio.db')
+    const old = openDatabase(file, MIGRATIONS.slice(0, 11))
+    const insert = (db: typeof old, task: string, kind: string, source: string, extra = {}) => {
+      const e = {
+        project: 'p',
+        detail: null as string | null,
+        key: null as string | null,
+        ...extra
+      }
+      db.run(
+        'INSERT INTO task_events (task_page_id, project_id, at, kind, source, detail_json, event_key) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        task,
+        e.project,
+        'x',
+        kind,
+        source,
+        e.detail,
+        e.key
+      )
+    }
+    insert(old, 't', 'sync_ok', 'manual')
+    insert(old, 't', 'rolled_back', 'manual', { detail: '{"code":"bad_request"}' })
+    insert(old, 't', 'run_started', 'manual')
+    insert(old, 't', 'gate_approved', 'manual')
+    insert(old, 't', 'moved', 'manual', { detail: '{"flow":"stage_removed","removedStage":"A"}' })
+    insert(old, 't', 'moved', 'manual', { detail: 'não é json' })
+    insert(old, 't', 'moved', 'automation', { key: 'pr#1:opened', detail: '{"ruleId":"r"}' })
+    old.close()
+
+    const db = openDatabase(file, MIGRATIONS.slice(0, 12))
+    expect(db.version).toBe(12)
+    expect(db.all('SELECT id, kind, source FROM task_events ORDER BY id')).toEqual([
+      { id: 1, kind: 'sync_ok', source: 'notion' },
+      { id: 2, kind: 'rolled_back', source: 'notion' },
+      { id: 3, kind: 'run_started', source: 'system' },
+      { id: 4, kind: 'gate_approved', source: 'manual' },
+      { id: 5, kind: 'moved', source: 'system' },
+      { id: 6, kind: 'moved', source: 'manual' },
+      { id: 7, kind: 'moved', source: 'automation' }
+    ])
+    // Ids continuam crescendo depois dos antigos.
+    insert(db, 't', 'added', 'notion')
+    expect(db.get('SELECT MAX(id) AS id FROM task_events')).toEqual({ id: 8 })
+    // A chave antiga continua valendo na tarefa dela...
+    expect(() => insert(db, 't', 'automation', 'automation', { key: 'pr#1:opened' })).toThrow()
+    // ...mas não em outra tarefa nem em outro projeto.
+    insert(db, 't2', 'automation', 'automation', { key: 'pr#1:opened' })
+    insert(db, 't', 'automation', 'automation', { key: 'pr#1:opened', project: 'p2' })
+    insert(db, 't', 'moved', 'system')
+    expect(() => insert(db, 't', 'moved', 'hack')).toThrow()
+    db.close()
+    await rm(dir, { recursive: true, force: true })
+  })
 })

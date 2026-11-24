@@ -6,6 +6,7 @@
  * - Publicar lê o arquivo NAQUELE commit (não o rascunho), redige segredos e envia ao Notion como
  *   seção no fim da página da tarefa ou como subpágina. Precisa da capacidade "Insert content".
  */
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import {
@@ -136,7 +137,10 @@ export class ArtifactsService {
         commit,
         at
       )
-      this.event(taskId, projectId, 'artifact_attached', { path, commit: commit.slice(0, 12) })
+      this.event(taskId, projectId, {
+        kind: 'artifact_attached',
+        detail: { path, commit: commit.slice(0, 12) }
+      })
     })
     return toView(this.row(id))
   }
@@ -188,9 +192,9 @@ export class ArtifactsService {
         at,
         artifactId
       )
-      this.event(row.task_page_id, row.project_id, 'artifact_published', {
-        path: row.path,
-        mode
+      this.event(row.task_page_id, row.project_id, {
+        kind: 'artifact_published',
+        detail: { path: row.path, mode }
       })
     })
     return { artifact: toView(this.row(artifactId)), url }
@@ -205,19 +209,11 @@ export class ArtifactsService {
   private event(
     taskId: string,
     projectId: string,
-    kind: 'artifact_attached' | 'artifact_published',
-    detail: Record<string, unknown>
+    event:
+      | { kind: 'artifact_attached'; detail: TaskEventDetailInput<'artifact_attached'> }
+      | { kind: 'artifact_published'; detail: TaskEventDetailInput<'artifact_published'> }
   ): void {
-    this.deps.store.addEvent({
-      taskPageId: taskId,
-      projectId,
-      at: this.now(),
-      kind,
-      source: 'manual',
-      fromStage: null,
-      toStage: null,
-      detail
-    })
+    this.deps.store.addEvent({ taskPageId: taskId, projectId, at: this.now(), ...event })
   }
 }
 

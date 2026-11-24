@@ -11,21 +11,14 @@
  *
  * `null` = o comando não é de entrega (segue a política normal).
  */
+import type { DeliveryAction } from '../../shared/task-events'
 import { checkPushBranch, sameRepo, type DeliveryTarget } from '../../shared/delivery'
 
 /** Categorias aprovadas uma vez por execução. */
 export type DeliveryKind = 'push' | 'github'
 
-/** O que um comando liberado faz, para o histórico da tarefa. */
-export type DeliveryEvent =
-  | 'push'
-  | 'pr_create'
-  | 'pr_edit'
-  | 'pr_comment'
-  | 'pr_ready'
-  | 'thread_reply'
-  | 'thread_resolve'
-  | 'review_request'
+/** O que um comando liberado faz, para o histórico da tarefa (`review_post` é só do Orkio). */
+export type DeliveryEvent = Exclude<DeliveryAction, 'review_post'>
 
 export type DeliveryVerdict =
   | null

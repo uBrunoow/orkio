@@ -7,6 +7,7 @@
  * - Mover/bloquear: grava localmente na hora (otimista) e enfileira a escrita no Notion
  *   (NotionWriteQueue), que confirma, tenta de novo ou desfaz.
  */
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import { WEEK_MS } from '../../shared/overview'
 import type { StageFlow } from '../../shared/task-flow'
 import { defaultRules } from '../../shared/automation'
@@ -258,10 +259,8 @@ export class BoardService {
             projectId,
             at,
             kind: 'added',
-            source: 'notion',
-            fromStage: null,
             toStage: d.stageId,
-            detail: null
+            detail: {}
           })
         } else if (d.from !== d.stageId) {
           this.deps.store.addEvent({
@@ -269,7 +268,6 @@ export class BoardService {
             projectId,
             at,
             kind: 'reconciled',
-            source: 'notion',
             fromStage: d.from,
             toStage: d.stageId,
             detail: { status: reconcileTasks.find((t) => t.id === d.taskId)?.status?.name ?? null }
@@ -289,9 +287,7 @@ export class BoardService {
             at,
             kind: d.blocked ? 'blocked' : 'unblocked',
             source: 'notion',
-            fromStage: null,
-            toStage: null,
-            detail: null
+            detail: {}
           })
         }
       }
@@ -353,7 +349,7 @@ export class BoardService {
     projectId: string,
     taskId: string,
     stageId: string,
-    event: { key: string; detail: Record<string, unknown> }
+    event: { key: string; detail: TaskEventDetailInput<'moved'> }
   ): boolean {
     return this.applyMove(projectId, taskId, stageId, {
       source: 'automation',
@@ -379,7 +375,7 @@ export class BoardService {
     options: {
       source: 'manual' | 'automation'
       eventKey?: string
-      detail?: Record<string, unknown>
+      detail?: TaskEventDetailInput<'moved'>
       /** Remoção de etapa na 3C: move sem contar como entrada (não dispara fluxos). */
       stageRemoved?: boolean
     }
@@ -404,16 +400,16 @@ export class BoardService {
       updatedAt: at,
       source: options.source
     })
-    const detail = { ...options.detail, ...statusChange }
     this.deps.store.addEvent({
       taskPageId: taskId,
       projectId,
       at,
       kind: 'moved',
-      source: options.source,
+      // Remoção de etapa é do Orkio: não conta como movimento manual (conflito das automações).
+      source: options.stageRemoved ? 'system' : options.source,
       fromStage: before.stageId,
       toStage: stageId,
-      detail: Object.keys(detail).length > 0 ? detail : null,
+      detail: { ...options.detail, ...statusChange },
       eventKey: options.eventKey ?? null
     })
     this.syncDesired(projectId, taskId, board, snapshot, before)
@@ -443,10 +439,7 @@ export class BoardService {
           projectId,
           at,
           kind: paused ? 'automation_paused' : 'automation_resumed',
-          source: 'manual',
-          fromStage: null,
-          toStage: null,
-          detail: null
+          detail: {}
         })
       })
       return this.card(projectId, taskId)
@@ -478,9 +471,7 @@ export class BoardService {
           at,
           kind: blocked ? 'blocked' : 'unblocked',
           source: 'manual',
-          fromStage: null,
-          toStage: null,
-          detail: null
+          detail: {}
         })
         this.syncDesired(projectId, taskId, board, snapshot, before)
       })
@@ -492,15 +483,7 @@ export class BoardService {
   async history(projectId: string, taskId: string): Promise<Result<BoardHistoryEntry[]>> {
     return this.wrap(async () => {
       this.project(projectId)
-      return this.deps.store.events(taskId).map((e) => ({
-        id: e.id,
-        at: e.at,
-        kind: e.kind,
-        source: e.source,
-        fromStage: e.fromStage,
-        toStage: e.toStage,
-        detail: e.detail
-      }))
+      return this.deps.store.events(taskId)
     })
   }
 
@@ -576,10 +559,8 @@ export class BoardService {
       projectId: write.projectId,
       at: this.now().toISOString(),
       kind: 'sync_ok',
-      source: 'manual',
-      fromStage: null,
       toStage: state.stageId,
-      detail: null
+      detail: {}
     })
     this.deps.onSync({
       projectId: write.projectId,
@@ -611,7 +592,6 @@ export class BoardService {
         projectId: write.projectId,
         at,
         kind: 'rolled_back',
-        source: 'manual',
         fromStage: before.stageId,
         toStage: write.rollback.stageId,
         detail: { code: error.code }

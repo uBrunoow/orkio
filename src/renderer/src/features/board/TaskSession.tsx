@@ -16,7 +16,7 @@ import { pendingRequests, type useTaskRuns } from '../claude/useTaskRuns'
 import { buildTranscript, runningSubagents, waitingSubagentsLabel } from '../claude/run-transcript'
 import type { TaskActivity } from '../task-flows/TaskFlowSection'
 import type { FlowStepOrigin } from '../task-flows/flow-plan'
-import { eventActor } from './TaskTimeline'
+import { actorOf } from './TaskTimeline'
 import { buildSession, tailSession, type SessionItem } from './task-session'
 import type { BoardHistoryEntry } from '../../../../shared/board'
 
@@ -340,7 +340,7 @@ function SessionRow({
     )
   }
   const e = item.entry
-  const actor = eventActor(e)
+  const actor = actorOf(e)
   const link = prUrl(e) ?? branchUrl(e)
   return (
     <li data-testid="session-event" className="flex min-w-0 items-center gap-2.5">

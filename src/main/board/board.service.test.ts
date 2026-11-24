@@ -428,6 +428,9 @@ describe('BoardService', () => {
     await queue.idle()
     expect(notion.status[T1]).toBe('Finalizadas')
     expect(events.at(-1)).toMatchObject({ state: 'synced' })
+    // Bug: a confirmação do Notion era gravada como 'manual'.
+    const history = await service.history('p1', T1)
+    expect(history.ok && history.value[0]).toMatchObject({ kind: 'sync_ok', source: 'notion' })
   })
 
   it('Notion recusa → rollback para a etapa anterior, evento e mensagem', async () => {
@@ -446,8 +449,10 @@ describe('BoardService', () => {
     const reopened = await service.get('p1')
     expect(reopened.ok && reopened.value.cards.find((c) => c.taskId === T1)?.stageId).toBe(before)
     const history = await service.history('p1', T1)
+    // Bug: a recusa do Notion era gravada como 'manual'.
     expect(history.ok && history.value[0]).toMatchObject({
       kind: 'rolled_back',
+      source: 'notion',
       detail: { code: 'bad_request' }
     })
   })
@@ -728,6 +733,14 @@ describe('BoardService', () => {
       expect(notion.status[T2]).toBe('Em andamento')
       const events = await service.configEvents('p1')
       expect(events[0]!.changes).toContain('Tarefas de “Prioridades” movidas para “Em andamento”')
+      // Bug: a remoção de etapa contava como movimento manual e barrava automações mais antigas.
+      const history = await service.history('p1', T2)
+      expect(history.ok && history.value.find((e) => e.kind === 'moved')).toMatchObject({
+        kind: 'moved',
+        source: 'system',
+        detail: { flow: 'stage_removed', removedStage: 'Prioridades' }
+      })
+      expect(new BoardStore(db).lastManualMoveAt(T2)).toBeNull()
     })
   })
 })

@@ -107,7 +107,7 @@ export function FlowDetail({
   onEdit(): void
 }): React.JSX.Element {
   const stepName = (id: string): string => flow.steps.find((s) => s.id === id)?.name ?? id
-  const executions = activity ? flowExecutions(activity, flow.name) : null
+  const executions = activity ? flowExecutions(activity, flow) : null
   const last = executions?.[0]
   const commands = [
     ...new Set(

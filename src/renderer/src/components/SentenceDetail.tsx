@@ -9,7 +9,8 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table'
-import type { ActivityGroup, ActivityItem } from '../../../shared/overview'
+import type { ActivityItem } from '../../../shared/overview'
+import type { ActivityGroup } from '../../../shared/task-events'
 import type { Execution } from './executions'
 import { EditIcon } from './icons'
 import { StatusToken } from './StatusToken'

@@ -39,7 +39,8 @@ import {
   type StepEnd,
   type TaskFlowActivity
 } from '../../shared/task-flow'
-import type { BoardStore, TaskEventKind } from '../board/board.store'
+import type { BoardStore, TaskEventInput } from '../board/board.store'
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import type { StageChange } from '../board/board.service'
 import type { RunFinished } from '../claude/run.service'
 import { redactSecrets } from '../claude/redact'
@@ -49,6 +50,19 @@ import type { RuntimeChoice } from '../../shared/agent-runtime'
 import type { Db } from '../db/database'
 import { DomainError, errorName } from '../errors'
 
+/** Eventos do histórico gravados pelo fluxo (todos levam o `flowRunId`). */
+type FlowEventKind =
+  | 'flow_started'
+  | 'step_started'
+  | 'step_finished'
+  | 'step_failed'
+  | 'step_skipped'
+  | 'gate_waiting'
+  | 'gate_approved'
+  | 'gate_rejected'
+  | 'gate_revised'
+  | 'flow_paused'
+  | 'flow_finished'
 export const FLOW_MESSAGES = {
   noBinding: 'A etapa atual da tarefa não tem fluxo ligado (ou ele está desligado).',
   busy: 'Esta tarefa já tem um fluxo em andamento. Termine ou cancele antes de começar outro.',
@@ -493,6 +507,7 @@ export class FlowRunner {
         agent ? JSON.stringify(agent) : null
       )
       this.event(this.row(id), 'flow_started', {
+        flowId: flow.id,
         flow: flow.name,
         ...(agent ? { agent: agent.profile.name, agentKey: agent.key } : {}),
         ...(waits ? { waiting: true } : {})
@@ -1665,14 +1680,19 @@ export class FlowRunner {
     this.deps.notify(title, body, { projectId: row.project_id, taskId: row.task_page_id })
   }
 
-  private event(row: RunRow, kind: TaskEventKind, detail: Record<string, unknown>): void {
+  private event<K extends FlowEventKind>(
+    row: RunRow,
+    kind: K,
+    detail: Omit<TaskEventDetailInput<K>, 'flowRunId' | 'stepName'>
+  ): void {
+    const fields: Record<string, unknown> = { flowRunId: row.id, ...detail }
     // O histórico mostra o nome do passo (o id é chave interna, ex.: "ok").
-    if (typeof detail['step'] === 'string' && detail['stepName'] === undefined) {
+    if (typeof fields['step'] === 'string') {
       try {
         const name = (JSON.parse(row.flow_json) as Flow).steps.find(
-          (s) => s.id === detail['step']
+          (s) => s.id === fields['step']
         )?.name
-        if (name) detail = { ...detail, stepName: name }
+        if (name) fields['stepName'] = name
       } catch {
         // flow_json ilegível: fica só o id.
       }
@@ -1682,11 +1702,8 @@ export class FlowRunner {
       projectId: row.project_id,
       at: this.now(),
       kind,
-      source: 'manual',
-      fromStage: null,
-      toStage: null,
-      detail: { flowRunId: row.id, ...detail }
-    })
+      detail: fields
+    } as TaskEventInput)
   }
 
   private activeRow(taskId: string): RunRow | null {

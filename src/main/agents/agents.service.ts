@@ -12,6 +12,7 @@
  * - Embutidos (8B, `builtin:<id>`): catálogo do app (`shared/agent-presets.ts`), só leitura e já
  *   aprovados; valem em todos os projetos. Para mudar, duplique (vira um perfil comum).
  */
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import { createHash, randomBytes } from 'node:crypto'
 import { DomainError } from '../errors'
 import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
@@ -261,10 +262,9 @@ export class AgentsService {
     const current = this.assignment(taskId)
     if (!current || current.manual) return
     this.deps.db.run('DELETE FROM agent_assignments WHERE task_page_id = ?', taskId)
-    this.taskEvent(projectId, taskId, 'agent_unassigned', {
-      agentKey: current.key,
-      agent: name,
-      by: 'orchestrator'
+    this.taskEvent(projectId, taskId, {
+      kind: 'agent_unassigned',
+      detail: { agentKey: current.key, agent: name, by: 'orchestrator' }
     })
     this.deps.emit(projectId)
   }
@@ -361,10 +361,13 @@ export class AgentsService {
     if (key === null) {
       this.deps.store.transaction(() => {
         this.deps.db.run('DELETE FROM agent_assignments WHERE task_page_id = ?', taskId)
-        this.taskEvent(projectId, taskId, 'agent_unassigned', {
-          agentKey: current,
-          agent: current ? (parseAgentKey(current)?.id ?? '') : '',
-          by: 'manual'
+        this.taskEvent(projectId, taskId, {
+          kind: 'agent_unassigned',
+          detail: {
+            agentKey: current,
+            agent: current ? (parseAgentKey(current)?.id ?? '') : '',
+            by: 'manual'
+          }
         })
       })
       this.deps.emit(projectId)
@@ -470,24 +473,25 @@ export class AgentsService {
       // A tabela só distingue "à mão" de "automático" (o detalhe do evento diz quem).
       by === 'manual' ? 'manual' : 'rule'
     )
-    this.taskEvent(projectId, taskId, 'agent_assigned', { agentKey: key, agent: name, by })
+    this.taskEvent(projectId, taskId, {
+      kind: 'agent_assigned',
+      detail: { agentKey: key, agent: name, by }
+    })
   }
 
   private taskEvent(
     projectId: string,
     taskId: string,
-    kind: 'agent_assigned' | 'agent_unassigned',
-    detail: Record<string, unknown>
+    event:
+      | { kind: 'agent_assigned'; detail: TaskEventDetailInput<'agent_assigned'> }
+      | { kind: 'agent_unassigned'; detail: TaskEventDetailInput<'agent_unassigned'> }
   ): void {
     this.deps.store.addEvent({
       taskPageId: taskId,
       projectId,
       at: this.now().toISOString(),
-      kind,
-      source: detail['by'] === 'manual' ? 'manual' : 'automation',
-      fromStage: null,
-      toStage: null,
-      detail
+      ...event,
+      source: event.detail.by === 'manual' ? 'manual' : 'automation'
     })
   }
 

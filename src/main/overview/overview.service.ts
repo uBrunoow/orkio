@@ -4,12 +4,9 @@
  * Nunca chama APIs: "Atualizar" pede o ciclo das automações (3B), que relê git/GitHub/Notion.
  */
 import {
-  ACTIVITY_KINDS,
   NOTION_PENDING_ATTEMPTS,
   NOTION_REJECT_WINDOW_MS,
-  STAGE_EVENT_KINDS,
   WEEK_MS,
-  activityGroup,
   activitySection,
   buildRunning,
   costSum,
@@ -35,6 +32,15 @@ import {
 import type { FlowRunView } from '../../shared/task-flow'
 import type { PullRequestSummary, TaskSignals } from '../../shared/task-signals'
 import { describeEvent, branchUrl, prUrl } from '../../shared/task-history'
+import {
+  ACTIVITY_KINDS,
+  SETTLES_REJECTION_KINDS,
+  STAGE_EVENT_KINDS,
+  activityGroup,
+  isTaskEventKind,
+  parseDetailJson,
+  parseTaskEvent
+} from '../../shared/task-events'
 import type { RunStatus } from '../../shared/agent-run'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { Db, SqlValue } from '../db/database'
@@ -73,7 +79,7 @@ interface EventRow {
   project_id: string
   at: string
   kind: string
-  source: 'manual' | 'notion' | 'automation'
+  source: string
   from_stage: string | null
   to_stage: string | null
   detail_json: string | null
@@ -203,22 +209,21 @@ export class OverviewService {
       if (items.length >= limit) break
       consumed++
       if (!this.hasProject(config, row.project_id)) continue
-      const detail = row.detail_json
-        ? (JSON.parse(row.detail_json) as Record<string, unknown>)
-        : null
-      const event = {
+      const event = parseTaskEvent({
         kind: row.kind,
         source: row.source,
         fromStage: row.from_stage,
         toStage: row.to_stage,
-        detail
-      }
+        detail: parseDetailJson(row.detail_json)
+      })
+      if (!event) continue
       const group = activityGroup(event)
       if (!group || (query.group && group !== query.group)) continue
       const stages = config.boards[row.project_id]?.stages ?? []
       const stageName = (id: string | null): string =>
         id ? (stages.find((s) => s.id === id)?.name ?? 'etapa removida') : 'Sem etapa'
       items.push({
+        ...event,
         id: row.id,
         at: row.at,
         group,
@@ -287,17 +292,24 @@ export class OverviewService {
     for (const r of this.deps.db.all<EventRow>(
       `SELECT * FROM task_events e WHERE kind = 'rolled_back' AND at >= ?
          AND NOT EXISTS (SELECT 1 FROM task_events l WHERE l.task_page_id = e.task_page_id
-           AND l.id > e.id AND l.kind IN ('moved', 'reconciled', 'sync_ok'))`,
-      since
+           AND l.id > e.id AND l.kind IN (${SETTLES_REJECTION_KINDS.map(() => '?').join(', ')}))`,
+      since,
+      ...SETTLES_REJECTION_KINDS
     )) {
       if (!this.hasProject(config, r.project_id)) continue
-      const detail = r.detail_json ? (JSON.parse(r.detail_json) as Record<string, unknown>) : null
+      const event = parseTaskEvent({
+        kind: r.kind,
+        source: r.source,
+        fromStage: r.from_stage,
+        toStage: r.to_stage,
+        detail: parseDetailJson(r.detail_json)
+      })
       items.push(
         notionWaitingItem(
           {
             type: 'rejected',
             eventId: r.id,
-            code: typeof detail?.['code'] === 'string' ? detail['code'] : null,
+            code: event?.kind === 'rolled_back' ? (event.detail.code ?? null) : null,
             at: r.at
           },
           resolve(r.project_id, r.task_page_id)
@@ -376,16 +388,21 @@ export class OverviewService {
         from,
         ...STAGE_EVENT_KINDS
       )
-      .filter((e) => this.hasProject(config, e.project_id))
-      .map((e): StageEventInput => ({
-        id: e.id,
-        taskPageId: e.task_page_id,
-        projectId: e.project_id,
-        at: e.at,
-        kind: e.kind,
-        fromStage: e.from_stage,
-        toStage: e.to_stage
-      }))
+      .flatMap((e): StageEventInput[] =>
+        this.hasProject(config, e.project_id) && isTaskEventKind(e.kind)
+          ? [
+              {
+                id: e.id,
+                taskPageId: e.task_page_id,
+                projectId: e.project_id,
+                at: e.at,
+                kind: e.kind,
+                fromStage: e.from_stage,
+                toStage: e.to_stage
+              }
+            ]
+          : []
+      )
     const finals = new Map<string, string>()
     const reviews = new Map<string, string>()
     for (const [projectId, board] of Object.entries(config.boards)) {

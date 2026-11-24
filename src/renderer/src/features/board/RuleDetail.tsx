@@ -33,7 +33,7 @@ export function RuleDetail({
 }): React.JSX.Element {
   const name = (id: string): string => stages.find((s) => s.id === id)?.name ?? 'etapa removida'
   const from = rule.conditions?.fromStages ?? []
-  const executions = activity ? ruleExecutions(activity, rule.name) : null
+  const executions = activity ? ruleExecutions(activity, rule.id) : null
   const last = executions?.[0]
 
   const conditions = [

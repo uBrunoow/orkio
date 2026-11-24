@@ -9,6 +9,7 @@
  *   redigidos), mantendo os `keepPerTask` mais recentes por tarefa.
  * - Nada do conteúdo da página vai para o SQLite: só ids, status, datas, custo e resumo técnico.
  */
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -21,7 +22,7 @@ import type {
   RunStatus,
   RunSummary
 } from '../../shared/agent-run'
-import type { BoardStore } from '../board/board.store'
+import type { BoardStore, TaskEventInput } from '../board/board.store'
 import type { Db } from '../db/database'
 import type { Git } from '../git/git'
 import type { DeliveryTarget } from '../../shared/delivery'
@@ -52,6 +53,9 @@ import type {
   WorktreeTask
 } from './worktree.service'
 
+/** Eventos do histórico gravados pelas execuções (todos levam o `runId`). */
+type RunEventKind =
+  'run_started' | 'run_finished' | 'run_cancelled' | 'run_failed' | 'run_blocked' | 'delivery'
 export interface RunHandle {
   start(): Promise<void>
   cancel(): void
@@ -967,22 +971,18 @@ export class RunService {
     }
   }
 
-  private taskEvent(
+  private taskEvent<K extends RunEventKind>(
     run: ActiveRun,
-    kind:
-      'run_started' | 'run_finished' | 'run_cancelled' | 'run_failed' | 'run_blocked' | 'delivery',
-    detail: Record<string, unknown>
+    kind: K,
+    detail: Omit<TaskEventDetailInput<K>, 'runId'>
   ): void {
     this.deps.store.addEvent({
       taskPageId: run.taskId,
       projectId: run.projectId,
       at: this.now().toISOString(),
       kind,
-      source: 'manual',
-      fromStage: null,
-      toStage: null,
       detail: { runId: run.id, ...detail }
-    })
+    } as TaskEventInput)
   }
 
   private async writeBriefing(worktree: string, briefing: string): Promise<void> {

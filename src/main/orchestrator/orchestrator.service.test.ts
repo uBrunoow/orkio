@@ -75,7 +75,7 @@ function place(taskId: string, stageId: string, when: string): void {
     source: 'manual',
     fromStage: null,
     toStage: stageId,
-    detail: null
+    detail: {}
   })
   const card = cards.find((c) => c.taskId === taskId)
   if (card) card.stageId = stageId

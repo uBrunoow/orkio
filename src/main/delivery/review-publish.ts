@@ -191,9 +191,6 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
         projectId,
         at: now(),
         kind: 'delivery',
-        source: 'manual',
-        fromStage: null,
-        toStage: null,
         detail: {
           by: 'orkio',
           action: 'review_post',

@@ -124,7 +124,7 @@ export function mergeSnapshot(previous: TaskSnapshot | null, next: TaskSnapshot)
 // ---------- Eventos ----------
 
 export interface AutomationEvent {
-  /** Chave de idempotência (única em task_events). */
+  /** Chave de idempotência (única por projeto e tarefa em task_events). */
   key: string
   kind: EventKind
   taskId: string

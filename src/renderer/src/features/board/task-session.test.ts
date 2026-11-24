@@ -4,16 +4,25 @@ import type { TaskSignals } from '../../../../shared/task-signals'
 import { taskProgress, type ProgressInput } from './task-progress'
 import { buildSession, dayLabel, tailSession } from './task-session'
 import type { BoardHistoryEntry } from '../../../../shared/board'
+import type { TaskEventKind } from '../../../../shared/task-events'
 
 const NOW = new Date('2026-11-22T15:00:00')
 
 function ev(
   id: number,
   at: string,
-  kind: string,
+  kind: TaskEventKind,
   detail: Record<string, unknown> = {}
 ): BoardHistoryEntry {
-  return { id, at, kind, source: 'manual', fromStage: null, toStage: null, detail }
+  return {
+    id,
+    at,
+    kind,
+    source: 'manual',
+    fromStage: null,
+    toStage: null,
+    detail
+  } as BoardHistoryEntry
 }
 function run(id: string, startedAt: string, over: Partial<AgentRunView> = {}): AgentRunView {
   return {

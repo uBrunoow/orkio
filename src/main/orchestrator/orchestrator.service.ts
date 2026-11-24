@@ -11,6 +11,7 @@
  * - Tarefa que entra numa etapa de trabalho por outro caminho (você, automação) ganha um agente da
  *   etapa (`onStageChanged`), a não ser que você tenha escolhido o agente à mão.
  */
+import { STAGE_ENTRY_KINDS } from '../../shared/task-events'
 import { DomainError } from '../errors'
 import {
   ORCHESTRATOR_LIMITS,
@@ -446,9 +447,11 @@ export class OrchestratorService {
     since: string | null
   ): 'finished_here' | 'carried_in' | null {
     const entry = this.deps.db.get<{ at: string | null }>(
-      `SELECT MAX(at) AS at FROM task_events WHERE task_page_id = ? AND to_stage = ? AND kind IN ('moved', 'reconciled', 'added')`,
+      `SELECT MAX(at) AS at FROM task_events WHERE task_page_id = ? AND to_stage = ?
+       AND kind IN (${STAGE_ENTRY_KINDS.map(() => '?').join(', ')})`,
       taskId,
-      stageId
+      stageId,
+      ...STAGE_ENTRY_KINDS
     )?.at
     if (!entry) return null
     const last = this.deps.db.get<{
