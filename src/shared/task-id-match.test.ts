@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { extractTaskNumbers, mentionsTask, parseDisplayId } from './task-id-match'
+import {
+  displayIdInBranch,
+  extractTaskNumbers,
+  mentionsTask,
+  parseDisplayId
+} from './task-id-match'
+import { taskBranchName } from './slug'
 
 describe('extractTaskNumbers', () => {
   it.each([
@@ -75,5 +81,15 @@ describe('parseDisplayId', () => {
     expect(parseDisplayId('142')).toBeNull()
     expect(parseDisplayId(null)).toBeNull()
     expect(parseDisplayId('ORK-')).toBeNull()
+  })
+})
+
+describe('displayIdInBranch', () => {
+  it('lê o ID das branches que o Orkio cria (e das antigas)', () => {
+    expect(displayIdInBranch(taskBranchName('ORK-2', 'Exportar CSV'))).toBe('ORK-2')
+    expect(displayIdInBranch(taskBranchName('ORK-2', 'Exportar', 'hotfix'))).toBe('ORK-2')
+    expect(displayIdInBranch('ork-14/exportar')).toBe('ORK-14')
+    expect(displayIdInBranch(taskBranchName(null, 'Sem ID'))).toBeNull()
+    expect(displayIdInBranch('feat/ORK-0142-x')).toBeNull()
   })
 })

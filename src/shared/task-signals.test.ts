@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildTaskSignals,
-  diffSignals,
-  type PullRequestSummary,
-  type SignalSources,
-  type TaskSignals
-} from './task-signals'
+import { buildTaskSignals, type PullRequestSummary, type SignalSources } from './task-signals'
 
 const pr = (n: number, over: Partial<PullRequestSummary> = {}): PullRequestSummary => ({
   number: n,
@@ -101,84 +95,6 @@ describe('buildTaskSignals', () => {
     expect(s['t1']?.pr?.number).toBe(5)
     expect(s['t14']?.pr?.number).toBe(5)
     expect(s['t142']?.pr).toBeNull()
-  })
-})
-
-describe('diffSignals', () => {
-  const base = (over: Partial<TaskSignals> = {}): TaskSignals => ({
-    taskId: 't',
-    displayId: 'ORK-1',
-    localBranches: [],
-    remoteBranches: [],
-    pr: null,
-    otherPrs: 0,
-    ...over
-  })
-  const withPr = (over: Partial<NonNullable<TaskSignals['pr']>> = {}) =>
-    base({
-      pr: {
-        ...pr(1),
-        reviewDecision: 'review_required',
-        unresolvedComments: 0,
-        checks: 'pending',
-        ...over
-      }
-    })
-
-  it('primeira observação não gera eventos', () => {
-    expect(diffSignals({}, { t: withPr() })).toEqual([])
-  })
-
-  it('branches criadas e apagadas', () => {
-    expect(
-      diffSignals(
-        { t: base({ localBranches: ['a'] }) },
-        { t: base({ localBranches: ['b'], remoteBranches: ['b'] }) }
-      )
-    ).toEqual([
-      { kind: 'branch_created', taskId: 't', branch: 'b', where: 'local' },
-      { kind: 'branch_deleted', taskId: 't', branch: 'a', where: 'local' },
-      { kind: 'branch_created', taskId: 't', branch: 'b', where: 'remote' }
-    ])
-  })
-
-  it('ciclo da PR: aberta, pronta para review, revisão, checks, merge', () => {
-    expect(diffSignals({ t: base() }, { t: withPr({ state: 'draft' }) })).toEqual([
-      { kind: 'pr_opened', taskId: 't', number: 1, draft: true }
-    ])
-    expect(diffSignals({ t: withPr({ state: 'draft' }) }, { t: withPr() })).toEqual([
-      { kind: 'pr_ready_for_review', taskId: 't', number: 1 }
-    ])
-    expect(
-      diffSignals({ t: withPr() }, { t: withPr({ reviewDecision: 'approved', checks: 'success' }) })
-    ).toEqual([
-      { kind: 'review_changed', taskId: 't', number: 1, from: 'review_required', to: 'approved' },
-      { kind: 'checks_changed', taskId: 't', number: 1, from: 'pending', to: 'success' }
-    ])
-    expect(diffSignals({ t: withPr() }, { t: withPr({ state: 'merged', merged: true }) })).toEqual([
-      { kind: 'pr_merged', taskId: 't', number: 1 }
-    ])
-    expect(diffSignals({ t: withPr() }, { t: withPr({ state: 'closed' }) })).toEqual([
-      { kind: 'pr_closed', taskId: 't', number: 1 }
-    ])
-    expect(diffSignals({ t: withPr({ state: 'closed' }) }, { t: withPr() })).toEqual([
-      { kind: 'pr_reopened', taskId: 't', number: 1 }
-    ])
-  })
-
-  it('detalhe indisponível (null) não conta como mudança', () => {
-    expect(
-      diffSignals(
-        { t: withPr({ reviewDecision: null }) },
-        { t: withPr({ reviewDecision: 'approved' }) }
-      )
-    ).toEqual([])
-  })
-
-  it('PR principal trocada por uma já mergeada', () => {
-    expect(
-      diffSignals({ t: withPr({ number: 1 }) }, { t: withPr({ number: 2, state: 'merged' }) })
-    ).toEqual([{ kind: 'pr_merged', taskId: 't', number: 2 }])
   })
 })
 

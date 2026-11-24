@@ -11,7 +11,6 @@
  * - Tarefa que entra numa etapa de trabalho por outro caminho (você, automação) ganha um agente da
  *   etapa (`onStageChanged`), a não ser que você tenha escolhido o agente à mão.
  */
-import { STAGE_ENTRY_KINDS } from '../../shared/task-events'
 import { DomainError } from '../errors'
 import { FlowError, type FlowRunner } from '../flows/flow-runner'
 import {
@@ -33,12 +32,12 @@ import { agentDisplayName } from '../../shared/agent-presets'
 import type { BoardService, StageChange } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
-import type { Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import type { AgentRuntime, AgentsService } from '../agents/agents.service'
 import type { BoardView } from '../../shared/board'
 import type { Result } from '../../shared/result'
-import { projectById } from '../config/queries'
+import { projectById, projectFlows } from '../config/queries'
+import type { StageRole } from '../../shared/board'
 
 export const ORCHESTRATOR_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista.',
@@ -58,8 +57,7 @@ const STARTING_MS = 2 * 60_000
 
 export interface OrchestratorDeps {
   config: ConfigStore<OrkioConfig>
-  db: Db
-  store: Pick<BoardStore, 'transaction' | 'addConfigEvent'>
+  store: Pick<BoardStore, 'transaction' | 'addConfigEvent' | 'lastEntryAt'>
   board: Pick<BoardService, 'get' | 'applyAutomationMove' | 'flushWrites'>
   agents: Pick<
     AgentsService,
@@ -415,13 +413,7 @@ export class OrchestratorService {
     stageId: string,
     since: string | null
   ): 'finished_here' | 'carried_in' | null {
-    const entry = this.deps.db.get<{ at: string | null }>(
-      `SELECT MAX(at) AS at FROM task_events WHERE task_page_id = ? AND to_stage = ?
-       AND kind IN (${STAGE_ENTRY_KINDS.map(() => '?').join(', ')})`,
-      taskId,
-      stageId,
-      ...STAGE_ENTRY_KINDS
-    )?.at
+    const entry = this.deps.store.lastEntryAt(taskId, stageId)
     if (!entry) return null
     const last = this.deps.flows.lastFlow(taskId)
     if (!last || last.status !== 'finished' || last.result !== 'done' || !last.endedAt) return null
@@ -432,15 +424,19 @@ export class OrchestratorService {
 
   /** Agentes do projeto, fluxos ligados às etapas e a checagem estática de cada agente. */
   private async context(projectId: string): Promise<{
-    stages: { id: string; name: string }[]
+    stages: { id: string; name: string; role?: StageRole }[]
     bindings: OrkioConfig['flows'][string]['bindings']
     agents: AgentsState
     infos: OrchestratorAgentInfo[]
     plan: Map<AgentKey, PlanAgent & { name: string }>
   }> {
     const config = this.deps.config.get()
-    const stages = (config.boards[projectId]?.stages ?? []).map((s) => ({ id: s.id, name: s.name }))
-    const projectFlows = config.flows[projectId] ?? { flows: [], bindings: [] }
+    const stages = (config.boards[projectId]?.stages ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      ...(s.role ? { role: s.role } : {})
+    }))
+    const flows = projectFlows(config, projectId)
     const agents = await this.deps.agents.list(projectId)
     const plan = new Map<AgentKey, PlanAgent & { name: string }>()
     const infos: OrchestratorAgentInfo[] = []
@@ -463,8 +459,8 @@ export class OrchestratorService {
       }
       const deniedByStage: Record<string, string> = {}
       if (a.profile && laneKeys.has(a.key)) {
-        for (const b of projectFlows.bindings) {
-          const flow = projectFlows.flows.find((f) => f.id === b.flowId)
+        for (const b of flows.bindings) {
+          const flow = flows.flows.find((f) => f.id === b.flowId)
           const denied = flow && b.enabled ? checkAgentFlow(a.profile, flow) : null
           if (denied) deniedByStage[b.stageId] = denied
         }
@@ -476,7 +472,7 @@ export class OrchestratorService {
         infos.push({ key, name: agentDisplayName(key), status: 'missing' })
       }
     }
-    return { stages, bindings: projectFlows.bindings, agents, infos, plan }
+    return { stages, bindings: flows.bindings, agents, infos, plan }
   }
 
   private setStatus(projectId: string, patch: Partial<OrchestratorStatus>): void {

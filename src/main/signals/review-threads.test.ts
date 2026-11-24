@@ -6,14 +6,15 @@ import { describe, expect, it, vi } from 'vitest'
 import { SCRATCH_GITIGNORE } from '../../shared/orkio-scratch'
 import { WorktreeError } from '../claude/worktree.service'
 import { createReviewActions } from './review-action'
+import { pendingCount } from '../../shared/review'
 import {
   buildReviewMarkdown,
-  pendingCount,
   parseReviewData,
   REVIEW_LIMITS,
   REVIEW_QUERY,
   ReviewThreadsService
 } from './review-threads'
+import { detailsQuery } from './github-signals.source'
 
 const TOKEN = 'ghp_' + 'a'.repeat(30)
 
@@ -126,6 +127,17 @@ describe('limites sem perda silenciosa', () => {
     const next = parseReviewData(page([], { pageInfo: { hasNextPage: true } }))!
     expect(next.unreadThreads).toBe(1)
     expect(pendingCount(next)).toBe(1)
+  })
+
+  it('aba Revisão e sinais leem a mesma página de threads (antes 50 × 100: contagens divergiam)', () => {
+    const size = `reviewThreads(first: ${REVIEW_LIMITS.threads})`
+    expect(REVIEW_QUERY).toContain(size)
+    expect(detailsQuery([7])).toContain(size)
+    // 60 threads abertas: todas lidas pela aba (antes, 50 lidas e 10 "não lidas").
+    const sixty = Array.from({ length: 60 }, (_, i) => thread({ id: `T${i}` }))
+    const r = parseReviewData(page(sixty, { totalCount: 60 }))!
+    expect(r.threads).toHaveLength(60)
+    expect(r.unreadThreads).toBe(0)
   })
 
   it('o orçamento vai primeiro para as não resolvidas', () => {

@@ -101,12 +101,13 @@ export function CollapsibleHeader({
 export function TaskChanges({
   projectId,
   taskId,
-  stageName,
+  done,
   runs
 }: {
   projectId: string
   taskId: string
-  stageName: string | null
+  /** A tarefa está na etapa concluída (papel `done`): sugere limpar o ambiente. */
+  done: boolean
   runs: ReturnType<typeof useTaskRuns>
 }): React.JSX.Element {
   const state = runs.state
@@ -149,7 +150,7 @@ export function TaskChanges({
               taskId={taskId}
               workspace={state.workspace}
               isBusy={state.activeRunId !== null}
-              suggestCleanup={stageName !== null && /finaliz/i.test(stageName)}
+              suggestCleanup={done}
               onChanged={() => void runs.reload()}
             />
           )}

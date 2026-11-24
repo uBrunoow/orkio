@@ -3,17 +3,14 @@ import type { BoardStage } from './board'
 import {
   buildRunning,
   costSum,
-  finalStageId,
   finishedCount,
   flowWaitingItem,
-  formatAgo,
   formatDuration,
   notionWaitingItem,
   prAttention,
   projectCard,
   pullsInWeek,
   requestWaitingItem,
-  reviewStageId,
   sortWaiting,
   stageDwell,
   taskLabel,
@@ -376,9 +373,8 @@ describe('Semana', () => {
     toStage: to
   })
 
-  it('finalizadas: tarefas distintas que entraram na última etapa na semana', () => {
-    const final = new Map([['p1', finalStageId(STAGES)!]])
-    expect(final.get('p1')).toBe('s4')
+  it('finalizadas: tarefas distintas que entraram na etapa concluída na semana', () => {
+    const final = new Map([['p1', 's4']])
     expect(
       finishedCount(
         [
@@ -395,8 +391,7 @@ describe('Semana', () => {
   })
 
   it('tempo médio em Revisado conta cada passagem que terminou na semana', () => {
-    const review = new Map([['p1', reviewStageId(STAGES)!]])
-    expect(review.get('p1')).toBe('s3')
+    const review = new Map([['p1', 's3']])
     const result = stageDwell(
       [
         ev(1, 'a', '2026-11-10T00:00:00Z', 's2', 's3'),
@@ -415,7 +410,6 @@ describe('Semana', () => {
     expect(result.samples).toBe(3)
     expect(result.avgMs).toBe(((4 + 1 + 2) / 3) * 24 * 60 * 60 * 1000)
     expect(stageDwell([], review, since)).toEqual({ avgMs: null, samples: 0 })
-    expect(reviewStageId([{ ...STAGES[0]!, name: 'Revisão' }])).toBeNull()
   })
 
   it('PRs abertas/mergeadas na semana; sem cache do GitHub = desconhecido', () => {
@@ -446,11 +440,6 @@ describe('Semana', () => {
 
 describe('Atividade e formatação', () => {
   it('formata tempos em pt-BR', () => {
-    const now = new Date('2026-11-20T12:00:00Z')
-    expect(formatAgo('2026-11-20T11:59:40Z', now)).toBe('agora')
-    expect(formatAgo('2026-11-20T11:52:00Z', now)).toBe('há 8 min')
-    expect(formatAgo('2026-11-20T09:00:00Z', now)).toBe('há 3 h')
-    expect(formatAgo('2026-11-17T09:00:00Z', now)).toBe('há 3 d')
     expect(formatDuration(45_000)).toBe('45 s')
     expect(formatDuration(65 * 60_000)).toBe('1 h 05 min')
     expect(formatDuration(1.8 * 24 * 3600_000)).toBe('1,8 d')

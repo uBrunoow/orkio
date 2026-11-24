@@ -14,6 +14,7 @@ import { DECLARED_FLOW_VARS } from '../../shared/flow-outputs'
 import type { BoardStore } from '../board/board.store'
 import type { ConfigStore } from '../storage/config-store'
 import type { OrkioConfig } from '../config/orkio-config'
+import { projectFlows, withProjectFlows } from '../config/queries'
 import { errorName } from '../errors'
 import type { FlowExtractor, FlowRunner, OrkioAction } from './flow-runner'
 import type { Result } from '../../shared/result'
@@ -32,7 +33,7 @@ export class FlowsService {
   ) {}
 
   getProject(projectId: string): Result<TaskFlowsProject> {
-    const pf = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
+    const pf = projectFlows(this.deps.config.get(), projectId)
     return {
       ok: true,
       value: {
@@ -104,14 +105,12 @@ export class FlowsService {
         )
       }
     }
-    const before = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
-    // Fluxo removido: some a ligação da coluna (execuções em curso usam a própria cópia).
-    const bindings = before.bindings.filter((b) => ids.has(b.flowId))
+    const before = projectFlows(this.deps.config.get(), projectId)
     try {
-      await this.deps.config.update((c) => ({
-        ...c,
-        flows: { ...c.flows, [projectId]: { flows, bindings } }
-      }))
+      // Fluxo removido: some a ligação da coluna (execuções em curso usam a própria cópia).
+      await this.deps.config.update((c) =>
+        withProjectFlows(c, projectId, { ...projectFlows(c, projectId), flows })
+      )
     } catch (error) {
       console.error(`[orkio] salvar fluxos: ${errorName(error)}`)
       return fail('storage', 'Não foi possível salvar os fluxos. Tente novamente.')

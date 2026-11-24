@@ -9,7 +9,7 @@ import { FLOW_PAUSES, waitingKind } from './flow-run-state'
 import type { FlowRunView } from './task-flow'
 import type { NotionColor, NotionWorkspaceStatus } from './notion'
 import type { ProjectView } from './projects'
-import { normalizeLabel } from './text'
+import { notionErrorLabel } from './notion-errors'
 import {
   STAGE_EVENT_KINDS,
   type ActivityGroup,
@@ -124,15 +124,6 @@ export interface OverviewSnapshot {
   week: WeekStats
   /** Avisos curtos (ex.: projeto sem dados do GitHub ainda). */
   notices: string[]
-}
-
-export const ACTIVITY_GROUP_LABEL: Record<ActivityGroup, string> = {
-  board: 'Quadro',
-  automation: 'Automações',
-  claude: 'Claude Code',
-  flow: 'Fluxos',
-  delivery: 'Entrega',
-  notion: 'Notion'
 }
 
 /** Evento da atividade: o evento tipado do histórico + tarefa, texto e link prontos. */
@@ -255,13 +246,6 @@ export function requestWaitingItem(req: PendingRequest, task: OverviewTask): Wai
   }
 }
 
-const NOTION_ERROR_LABEL: Record<string, string> = {
-  forbidden: 'a integração não pode editar esta página',
-  not_found: 'página não encontrada',
-  bad_request: 'o Notion recusou o valor',
-  unauthorized: 'reconecte o Notion'
-}
-
 /** Mudança recusada pelo Notion (voltou no quadro) ou presa tentando de novo. */
 export function notionWaitingItem(
   input:
@@ -270,7 +254,7 @@ export function notionWaitingItem(
   task: OverviewTask
 ): WaitingItem {
   if (input.type === 'rejected') {
-    const why = input.code ? NOTION_ERROR_LABEL[input.code] : undefined
+    const why = input.code ? notionErrorLabel(input.code) : undefined
     return {
       key: `notion:rejected:${input.eventId}`,
       kind: 'notion_write',
@@ -519,7 +503,7 @@ export function finishedCount(
 }
 
 /**
- * Tempo médio na etapa de revisão (ex.: "Revisado"): pares entrada → saída, contando só as saídas
+ * Tempo médio na etapa revisada (papel `reviewed`, ex.: "Revisado"): pares entrada → saída, contando só as saídas
  * desde `since`. Retrabalho aparece como várias passagens pela etapa.
  */
 export function stageDwell(
@@ -545,16 +529,6 @@ export function stageDwell(
     avgMs: durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null,
     samples: durations.length
   }
-}
-
-/** Etapa de revisão do projeto: a chamada "Revisado" (do template), sem acento/caixa. */
-export function reviewStageId(stages: readonly BoardStage[]): string | null {
-  return stages.find((s) => normalizeLabel(s.name) === 'revisado')?.id ?? null
-}
-
-/** Última etapa do quadro (maior `order`). */
-export function finalStageId(stages: readonly BoardStage[]): string | null {
-  return [...stages].sort((a, b) => b.order - a.order)[0]?.id ?? null
 }
 
 export function pullsInWeek(
@@ -599,17 +573,6 @@ export function activitySection(group: ActivityGroup): TaskSection {
 }
 
 // ---------- Formatação ----------
-
-/** "agora", "há 5 min", "há 2 h", "há 3 d". */
-export function formatAgo(iso: string, now: Date): string {
-  const ms = Math.max(0, now.getTime() - Date.parse(iso))
-  const min = Math.floor(ms / 60_000)
-  if (min < 1) return 'agora'
-  if (min < 60) return `há ${min} min`
-  const h = Math.floor(min / 60)
-  if (h < 24) return `há ${h} h`
-  return `há ${Math.floor(h / 24)} d`
-}
 
 /** "45 s", "12 min", "1 h 05 min", "1,8 d". */
 export function formatDuration(ms: number): string {

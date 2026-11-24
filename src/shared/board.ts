@@ -7,9 +7,32 @@ import type { TaskEvent } from './task-events'
 import type { NotionColor } from './notion'
 import { normalizeLabel } from './text'
 
+/**
+ * Papel da etapa no trabalho, independente do nome (o usuário pode renomear à vontade). No
+ * máximo uma etapa por papel. Quem precisa de "a coluna de revisão" ou "a etapa final" lê daqui:
+ * regras padrão, ligações Alva, orquestrador, semana da visão geral e as telas.
+ */
+export const STAGE_ROLES = ['queue', 'plan', 'work', 'review', 'reviewed', 'done'] as const
+export type StageRole = (typeof STAGE_ROLES)[number]
+
+export const STAGE_ROLE_LABEL: Record<StageRole, string> = {
+  queue: 'A fazer (fila da lista lateral)',
+  plan: 'Planejamento',
+  work: 'Trabalho',
+  review: 'Em revisão',
+  reviewed: 'Revisada',
+  done: 'Concluída'
+}
+
+export function isStageRole(value: unknown): value is StageRole {
+  return typeof value === 'string' && (STAGE_ROLES as readonly string[]).includes(value)
+}
+
 export interface BoardStage {
   id: string
   name: string
+  /** Papel da etapa (`STAGE_ROLES`); sem papel = etapa comum. */
+  role?: StageRole
   /** Posição (0..n-1). A ordem do array é a fonte da verdade; `order` é normalizado. */
   order: number
   /** Opção do status (mapeado na 2C) que esta etapa representa. O id sobrevive a renomeações. */
@@ -25,33 +48,31 @@ export interface BoardConfig {
   blockedProperty: { id: string; name: string } | null
   /** Regras de automação (3B), avaliadas nesta ordem. Editor completo na 3C. */
   rules: AutomationRule[]
-  /**
-   * Coluna "A fazer" da lista lateral (as tarefas que esperam começar). Ausente, ou etapa que não
-   * existe mais = a primeira coluna do quadro. Editada em Colunas (Quadro e automações).
-   */
-  queueStageId?: string | null
   updatedAt: string
 }
 
-/** Coluna "A fazer" do quadro: a escolhida, se ainda existe; senão a primeira. */
+/** Etapa com o papel, ou `null`. */
+export function stageWithRole(
+  stages: readonly { id: string; role?: StageRole | undefined }[],
+  role: StageRole
+): string | null {
+  return stages.find((s) => s.role === role)?.id ?? null
+}
+
+/**
+ * Coluna "A fazer" da lista lateral (as tarefas que esperam começar): a de papel `queue`; sem
+ * ela, a primeira coluna do quadro.
+ */
 export function queueStageOf(
   config:
-    | { stages: readonly { id: string; order: number }[]; queueStageId?: string | null | undefined }
+    | { stages: readonly { id: string; order: number; role?: StageRole | undefined }[] }
     | null
     | undefined
 ): string | null {
   const stages = config?.stages ?? []
-  const chosen = config?.queueStageId
-  if (chosen && stages.some((s) => s.id === chosen)) return chosen
-  return [...stages].sort((a, b) => a.order - b.order)[0]?.id ?? null
-}
-
-/** `queueStageId` que vale guardar para estas etapas (`null` se a etapa não existe). */
-export function keptQueueStage(
-  queueStageId: string | null | undefined,
-  stages: readonly { id: string }[]
-): { queueStageId: string } | Record<string, never> {
-  return queueStageId && stages.some((s) => s.id === queueStageId) ? { queueStageId } : {}
+  return (
+    stageWithRole(stages, 'queue') ?? [...stages].sort((a, b) => a.order - b.order)[0]?.id ?? null
+  )
 }
 
 /**
@@ -77,13 +98,17 @@ export interface StatusOption {
   color: NotionColor
 }
 
-/** Template padrão: etapa → nome da opção de status no Notion. */
-export const DEFAULT_STAGE_TEMPLATE: readonly { name: string; notionStatus: string }[] = [
-  { name: 'Prioridades', notionStatus: 'Prioridades' },
-  { name: 'Em andamento', notionStatus: 'Em andamento' },
-  { name: 'Revisando', notionStatus: 'Em andamento' },
-  { name: 'Revisado', notionStatus: 'Em andamento' },
-  { name: 'Finalizada', notionStatus: 'Finalizadas' }
+/** Template padrão: etapa (com o papel) → nome da opção de status no Notion. */
+export const DEFAULT_STAGE_TEMPLATE: readonly {
+  name: string
+  notionStatus: string
+  role: StageRole
+}[] = [
+  { name: 'Prioridades', notionStatus: 'Prioridades', role: 'queue' },
+  { name: 'Em andamento', notionStatus: 'Em andamento', role: 'work' },
+  { name: 'Revisando', notionStatus: 'Em andamento', role: 'review' },
+  { name: 'Revisado', notionStatus: 'Em andamento', role: 'reviewed' },
+  { name: 'Finalizada', notionStatus: 'Finalizadas', role: 'done' }
 ]
 
 /** Acha a opção do Notion para um nome: exato normalizado, depois singular/plural simples. */
@@ -116,6 +141,7 @@ export function suggestStages(
     return {
       id: newId(i),
       name: t.name,
+      role: t.role,
       order: i,
       notionStatus: option
         ? { id: option.id, name: option.name }
@@ -302,14 +328,6 @@ export function reconcile(
   })
 }
 
-/** Mover para `to` só escreve o status no Notion se ele for diferente do status atual. */
-export function moveNeedsStatusWrite(
-  to: BoardStage,
-  currentStatus: { id: string | null; name: string } | null
-): boolean {
-  return !stageMatchesStatus(to, currentStatus)
-}
-
 // ---------- Quadro (Etapa 3A) ----------
 
 export type CardSyncState = 'synced' | 'pending' | 'failed'
@@ -361,7 +379,7 @@ export type OrkioStageChoice =
 export const STAGE_LIMITS = { stages: 30, name: 60 } as const
 
 export interface BoardSaveInput {
-  stages: { id: string | null; name: string; notionStatusId: string }[]
+  stages: { id: string | null; name: string; notionStatusId: string; role?: StageRole }[]
   orkioStage: OrkioStageChoice
   /** Autoriza adicionar ao select "Etapa Orkio" as opções que faltam. */
   addMissingOptions: boolean

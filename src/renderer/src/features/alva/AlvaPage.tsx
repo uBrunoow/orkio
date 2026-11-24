@@ -10,6 +10,7 @@ import { Alert } from '../../components/Alert'
 import { CopyIcon, RefreshIcon } from '../../components/icons'
 import { PAGE_WIDTH } from '../../components/page-width'
 import { suggestAlvaTargets, type AlvaTargets } from './alva-targets'
+import { stageWithRole } from '../../../../shared/board'
 import type { BoardView } from '../../../../shared/board'
 
 const STATE: Record<AlvaCheckItem['state'], { label: string; color: 'green' | 'red' | 'yellow' }> =
@@ -39,7 +40,10 @@ export function AlvaPage({
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [planStatus, setPlanStatus] = useState<string>(
-    view.statusOptions.find((o) => /andamento/i.test(o.name))?.id ?? view.statusOptions[0]?.id ?? ''
+    // Sugestão: o status da coluna de trabalho (papel `work`), senão a primeira opção.
+    view.config?.stages.find((s) => s.role === 'work')?.notionStatus.id ??
+      view.statusOptions[0]?.id ??
+      ''
   )
   // Sugestão só depois de saber o que já está ligado (nunca aponta para a coluna de outro fluxo).
   const [targets, setTargets] = useState<AlvaTargets>({
@@ -83,7 +87,7 @@ export function AlvaPage({
     { value: '', label: 'Nenhuma (rodar à mão)' },
     ...(view.config?.stages ?? []).map((s) => ({ value: s.id, label: s.name }))
   ]
-  const hasPlanning = (view.config?.stages ?? []).some((s) => /planejando/i.test(s.name))
+  const hasPlanning = stageWithRole(view.config?.stages ?? [], 'plan') !== null
 
   const create = async (): Promise<void> => {
     setBusy(true)

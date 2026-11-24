@@ -14,7 +14,7 @@
 import { parseAgentKey, type AgentKey } from './agent'
 import { BUILTIN_AGENT_KEYS } from './agent-presets'
 import type { StageFlow } from './task-flow'
-import { normalizeLabel } from './text'
+import { stageWithRole, type StageRole } from './board'
 
 export const ORCHESTRATOR_LIMITS = {
   lanes: 10,
@@ -78,19 +78,19 @@ export function parseOrchestrator(value: unknown): OrchestratorConfig | null {
 }
 
 /**
- * Ponto de partida pelo nome das etapas (template da 3A): "Prioridades" (fila, sem agente) →
- * "Em andamento" (Implementador) → "Revisando" (Revisor) → "Revisado". Sem os nomes, usa a ordem
- * do quadro. Vem desligado: você confere e liga.
+ * Ponto de partida pelo papel das etapas: fila (`queue`, sem agente) → trabalho (`work`,
+ * Implementador) → revisão (`review`, Revisor) → revisada (`reviewed`; sem ela, a concluída). Sem
+ * os papéis, usa a ordem do quadro. Vem desligado: você confere e liga.
  */
 export function suggestOrchestrator(
-  stages: readonly { id: string; name: string }[]
+  stages: readonly { id: string; name: string; role?: StageRole | undefined }[]
 ): OrchestratorConfig {
-  const find = (re: RegExp, fallback: number): string | null =>
-    stages.find((s) => re.test(normalizeLabel(s.name)))?.id ?? stages[fallback]?.id ?? null
-  const queue = find(/prioridade|backlog|a fazer|to ?do|fila/, 0)
-  const dev = find(/andamento|progress|fazendo|doing|implement/, 1)
-  const rev = find(/revisando|review|revisao/, 2)
-  const done = find(/revisado|reviewed|aprovad|pronto|finaliz|done/, 3)
+  const at = (role: StageRole, fallback: number): string | null =>
+    stageWithRole(stages, role) ?? stages[fallback]?.id ?? null
+  const queue = at('queue', 0)
+  const dev = at('work', 1)
+  const rev = at('review', 2)
+  const done = stageWithRole(stages, 'reviewed') ?? at('done', 3)
   const lanes: OrchestratorLane[] = []
   if (dev && dev !== queue) {
     lanes.push({
@@ -388,7 +388,8 @@ export interface OrchestratorState {
   projectId: string
   config: OrchestratorConfig
   validation: OrchestratorValidation
-  stages: { id: string; name: string }[]
+  /** Etapas do quadro com o papel (a sugestão monta o caminho por ele). */
+  stages: { id: string; name: string; role?: StageRole }[]
   /** Etapas com fluxo que roda ao entrar (para o editor avisar). */
   stagesWithFlow: string[]
   agents: OrchestratorAgentLoad[]

@@ -8,7 +8,11 @@ import { BoardService, type BoardNotion } from '../board/board.service'
 import { BoardStore } from '../board/board.store'
 import type { NotionWriteQueue } from '../board/write-queue'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
-import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
+import {
+  encodePropertyWrites,
+  type PropertyWrites,
+  type SimplePropertyValue
+} from '../connectors/notion/notion.schema'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import { AutomationService, type AutomationNotification } from './automation.service'
@@ -77,7 +81,8 @@ class FakeNotion implements BoardNotion {
   async connectionMethod() {
     return 'oauth' as const
   }
-  async updatePage(pageId: string, properties: Record<string, unknown>): Promise<void> {
+  async updatePage(pageId: string, writes: PropertyWrites): Promise<void> {
+    const properties = encodePropertyWrites(writes)
     if (this.offline) throw new ApiError('notion', 'network', 'Sem conexão.')
     this.writes.push({ pageId, properties })
     const st = properties['st'] as { status?: { name: string } } | undefined
@@ -196,7 +201,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
   async function cycle() {
     clock += 60_000
     const r = await automation.run('p1')
-    await queue.idle()
+    await queue.kick()
     return r
   }
 
@@ -259,7 +264,8 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
       stages: first.value.suggestion!.map((s) => ({
         id: s.id,
         name: s.name,
-        notionStatusId: s.notionStatus.id!
+        notionStatusId: s.notionStatus.id!,
+        ...(s.role ? { role: s.role } : {})
       })),
       orkioStage: { mode: 'none' },
       addMissingOptions: false,
@@ -511,7 +517,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
     notion.offline = false
     clock += 10 * 60_000
     queue.kick()
-    await queue.idle()
+    await queue.kick()
     expect(notion.status[T2]).toBe('Finalizadas')
     expect(await cycle()).toMatchObject({ events: 0, moves: 0 })
   })

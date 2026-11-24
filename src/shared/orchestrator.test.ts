@@ -97,7 +97,21 @@ describe('parseOrchestrator', () => {
 })
 
 describe('suggestOrchestrator', () => {
-  it('monta fila → implementação → revisão pelo nome das etapas (desligado)', () => {
+  it('monta fila → implementação → revisão pelo papel das etapas, qualquer que seja o nome', () => {
+    // Antes: regex nos nomes ("revisado|reviewed|…"); renomear desmontava a sugestão.
+    const named = [
+      { id: 'dev', name: 'Codando', role: 'work' as const },
+      { id: 'fila', name: 'Backlog', role: 'queue' as const },
+      { id: 'ok', name: 'Aprovado', role: 'reviewed' as const },
+      { id: 'rev', name: 'Code review', role: 'review' as const }
+    ]
+    expect(suggestOrchestrator(named).lanes).toEqual([
+      { stageId: 'dev', agents: ['builtin:implementador'], next: 'rev' },
+      { stageId: 'rev', agents: ['builtin:revisor'], next: 'ok' }
+    ])
+  })
+
+  it('sem papéis usa a ordem do quadro (desligado)', () => {
     expect(suggestOrchestrator(STAGES)).toEqual({
       ...defaultOrchestrator(),
       lanes: [

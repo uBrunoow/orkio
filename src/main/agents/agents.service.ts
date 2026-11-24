@@ -84,6 +84,11 @@ export interface AgentsServiceDeps {
   localDir: string
   /** Há fluxo ativo na tarefa? (troca de agente fica bloqueada). */
   hasActiveFlow(taskId: string): boolean
+  /** Execuções do agente desde `since` (dono de `agent_runs`: `RunService.agentRunsSince`). */
+  agentRuns(
+    agentKey: AgentKey,
+    since: string
+  ): { count: number; costUsd: number; startedAt: string[] }
   /** Ids das etapas do quadro do projeto. */
   stageIds(projectId: string): string[]
   actor(): string
@@ -191,13 +196,8 @@ export class AgentsService {
   }
 
   usage(key: AgentKey): { runs: number; costUsd: number } {
-    const since = localDayStart(this.now()).toISOString()
-    const r = this.deps.db.get<{ n: number; cost: number | null }>(
-      'SELECT COUNT(*) AS n, SUM(cost) AS cost FROM agent_runs WHERE agent_key = ? AND started_at >= ?',
-      key,
-      since
-    )
-    return { runs: r?.n ?? 0, costUsd: r?.cost ?? 0 }
+    const r = this.deps.agentRuns(key, localDayStart(this.now()).toISOString())
+    return { runs: r.count, costUsd: r.costUsd }
   }
 
   /** Execuções por hora nas últimas `ACTIVITY_HOURS` horas (índice 0 = a mais antiga). */
@@ -205,12 +205,9 @@ export class AgentsService {
     const hour = 3_600_000
     const nowMs = this.now().getTime()
     const out = new Array<number>(ACTIVITY_HOURS).fill(0)
-    for (const r of this.deps.db.all<{ started_at: string }>(
-      'SELECT started_at FROM agent_runs WHERE agent_key = ? AND started_at >= ?',
-      key,
-      new Date(nowMs - ACTIVITY_HOURS * hour).toISOString()
-    )) {
-      const age = Math.floor((nowMs - Date.parse(r.started_at)) / hour)
+    const since = new Date(nowMs - ACTIVITY_HOURS * hour).toISOString()
+    for (const startedAt of this.deps.agentRuns(key, since).startedAt) {
+      const age = Math.floor((nowMs - Date.parse(startedAt)) / hour)
       if (age >= 0 && age < ACTIVITY_HOURS) out[ACTIVITY_HOURS - 1 - age]! += 1
     }
     return out

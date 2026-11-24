@@ -151,10 +151,18 @@ describe('GitHubRepoSignals', () => {
       [2, 'draft'],
       [3, 'merged']
     ])
-    expect(first.requests).toEqual({ notModified: 0, fetched: 3 })
+    const answers = async (): Promise<boolean[]> =>
+      Promise.all(
+        vi.mocked(api.getConditional).mock.results.map(async (r) => {
+          const page = (await r.value) as ConditionalPage
+          return page.notModified
+        })
+      )
+    expect(await answers()).toEqual([false, false, false])
 
     const second = await repo.snapshot()
-    expect(second.requests).toEqual({ notModified: 3, fetched: 0 })
+    // Segunda leitura: as três páginas voltam 304 (ETag), sem novo download.
+    expect((await answers()).slice(3)).toEqual([true, true, true])
     expect(second.pulls).toEqual(first.pulls)
     expect(api.getConditional).toHaveBeenLastCalledWith(
       `${BASE}/pulls?state=closed&sort=updated&direction=desc&per_page=100`,

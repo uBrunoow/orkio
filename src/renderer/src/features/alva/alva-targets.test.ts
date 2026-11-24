@@ -3,14 +3,14 @@ import { ALVA_TEMPLATE_IDS } from '../../../../shared/alva-templates'
 import { suggestAlvaTargets } from './alva-targets'
 
 const STAGES = [
-  { id: 's-plan', name: 'Planejando' },
-  { id: 's-dev', name: 'Em andamento' },
-  { id: 's-rev', name: 'Revisando' },
-  { id: 's-ok', name: 'Revisado' }
+  { id: 's-plan', name: 'Planejando', role: 'plan' as const },
+  { id: 's-dev', name: 'Em andamento', role: 'work' as const },
+  { id: 's-rev', name: 'Revisando', role: 'review' as const },
+  { id: 's-ok', name: 'Revisado', role: 'reviewed' as const }
 ]
 
 describe('suggestAlvaTargets', () => {
-  it('sem nada ligado: as colunas pelo nome', () => {
+  it('sem nada ligado: as colunas pelo papel', () => {
     expect(suggestAlvaTargets(STAGES, { templates: [], boundStages: [] })).toEqual({
       plan: 's-plan',
       deliver: 's-dev',
@@ -37,10 +37,10 @@ describe('suggestAlvaTargets', () => {
     ).toMatchObject({ review: 's-ok', reviewed: null, deliver: 's-dev' })
   })
 
-  it('antes de saber o que está ligado: pelo nome', () => {
-    expect(suggestAlvaTargets([{ id: 'x', name: 'revisando' }], null)).toMatchObject({
-      review: 'x',
-      plan: null
-    })
+  it('antes de saber o que está ligado: pelo papel (o nome não conta)', () => {
+    expect(
+      suggestAlvaTargets([{ id: 'x', name: 'Code review', role: 'review' }], null)
+    ).toMatchObject({ review: 'x', plan: null })
+    expect(suggestAlvaTargets([{ id: 'y', name: 'Revisando' }], null).review).toBeNull()
   })
 })

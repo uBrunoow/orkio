@@ -11,6 +11,7 @@ import {
   type NotionSelf
 } from './notion.client'
 import type { NotionOAuthBroker, NotionTokenSet } from './notion.oauth'
+import { encodePropertyWrites, type PropertyWrites } from './notion.schema'
 import type { AuthOptions, ConnectedAccount } from '../../../shared/connection'
 
 export type NotionCredentials = TokenCredentials | OAuthCredentials<NotionTokenSet>
@@ -195,7 +196,9 @@ export class NotionConnector implements OAuthConnector<NotionCredentials> {
     return this.callApi((token) => this.deps.client.queryDataSource(token, id, options))
   }
 
-  updatePage(id: string, properties: Record<string, unknown>): Promise<void> {
+  /** Escreve propriedades da página (o formato da API sai de `encodePropertyWrites`). */
+  updatePage(id: string, writes: PropertyWrites): Promise<void> {
+    const properties = encodePropertyWrites(writes)
     return this.callApi((token) => this.deps.client.updatePage(token, id, properties))
   }
 

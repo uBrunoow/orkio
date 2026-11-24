@@ -53,3 +53,15 @@ export function parseDisplayId(
   if (!match || !match[1]) return null
   return { prefix: match[1], number: Number(match[2]) }
 }
+
+/**
+ * ID da tarefa no nome de uma branch do Orkio (`taskBranchName`: `feat/ORK-2-slug`; antigas:
+ * `ORK-2/slug`): o começo de um segmento, seguido de `-` ou do fim do segmento. Sem ID → `null`.
+ */
+export function displayIdInBranch(branch: string): string | null {
+  for (const segment of branch.split('/')) {
+    const match = /^([A-Za-z][A-Za-z0-9]*-[1-9]\d{0,8})(?=-|$)/.exec(segment)
+    if (match?.[1]) return match[1].toUpperCase()
+  }
+  return null
+}

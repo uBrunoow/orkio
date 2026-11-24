@@ -674,4 +674,38 @@ describe('RunService', () => {
     await vi.waitFor(() => expect(finished).toHaveLength(2), { timeout: 3000 })
     expect(finished[1]).toMatchObject({ status: 'failed', message: RUN_MESSAGES.timedOut })
   })
+
+  it('consultas dos outros módulos: início/comando, custo da semana, uso do agente, contagens', () => {
+    const add = (
+      id: string,
+      status: string,
+      startedAt: string,
+      cost: number | null,
+      agent: string | null
+    ): void => {
+      db.run(
+        `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, cost, agent_key)
+         VALUES (?, 'task-1', 'p1', 'command', 'revisar', ?, ?, ?, ?)`,
+        id,
+        status,
+        startedAt,
+        cost,
+        agent
+      )
+    }
+    add('a', 'succeeded', '2026-11-19T00:00:00.000Z', 0.4, 'repo:ana')
+    add('b', 'failed', '2026-11-19T01:00:00.000Z', null, 'repo:ana')
+    add('c', 'running', '2026-11-19T02:00:00.000Z', null, null)
+    add('d', 'succeeded', '2026-11-01T00:00:00.000Z', 9, 'repo:ana')
+    expect(service.startInfo(['c', 'x'])).toEqual(
+      new Map([['c', { startedAt: '2026-11-19T02:00:00.000Z', command: 'revisar' }]])
+    )
+    expect(service.costsSince('2026-11-13T00:00:00.000Z')).toEqual([0.4, null])
+    expect(service.agentRunsSince('repo:ana', '2026-11-13T00:00:00.000Z')).toEqual({
+      count: 2,
+      costUsd: 0.4,
+      startedAt: ['2026-11-19T00:00:00.000Z', '2026-11-19T01:00:00.000Z']
+    })
+    expect(service.counts()).toEqual({ total: 4, active: 1 })
+  })
 })

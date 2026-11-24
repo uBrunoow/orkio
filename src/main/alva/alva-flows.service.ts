@@ -11,7 +11,8 @@ import {
   type BacklogTaskInfo
 } from '../../shared/alva'
 import { ALVA_TEMPLATE_IDS, alvaTemplates } from '../../shared/alva-templates'
-import type { FlowStageDraft } from '../../shared/flow'
+import { fromBoardStages, type FlowStageDraft } from '../../shared/flow'
+import { queueStageOf, stageWithRole } from '../../shared/board'
 import type { StageFlow } from '../../shared/task-flow'
 import type { BoardService } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
@@ -20,7 +21,7 @@ import { errorName } from '../errors'
 import type { ConfigStore } from '../storage/config-store'
 import type { AlvaService } from './alva.service'
 import type { Result } from '../../shared/result'
-import { projectById } from '../config/queries'
+import { projectById, projectFlows, withProjectFlows } from '../config/queries'
 
 export interface AlvaStatus {
   precheck: AlvaPrecheck | null
@@ -95,7 +96,7 @@ export class AlvaFlowsService {
   }
 
   status(projectId: string): AlvaStatus {
-    const pf = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
+    const pf = projectFlows(this.deps.config.get(), projectId)
     const ids = Object.values(ALVA_TEMPLATE_IDS) as string[]
     return {
       precheck: this.cache.get(projectId) ?? null,
@@ -130,22 +131,16 @@ export class AlvaFlowsService {
       .filter(([stageId]) => stageId && stages.some((s) => s.id === stageId))
       .map(([stageId, flowId]) => ({ stageId: stageId!, flowId, enabled: true, mode: 'on_enter' }))
     await this.deps.config.update((c) => {
-      const pf = c.flows[projectId] ?? { flows: [], bindings: [] }
+      const pf = projectFlows(c, projectId)
       const takenStages = new Set(wanted.map((w) => w.stageId))
-      return {
-        ...c,
-        flows: {
-          ...c.flows,
-          [projectId]: {
-            ...pf,
-            flows: [...pf.flows.filter((f) => !ids.has(f.id)), ...templates],
-            bindings: [
-              ...pf.bindings.filter((b) => !ids.has(b.flowId) && !takenStages.has(b.stageId)),
-              ...wanted
-            ]
-          }
-        }
-      }
+      return withProjectFlows(c, projectId, {
+        ...pf,
+        flows: [...pf.flows.filter((f) => !ids.has(f.id)), ...templates],
+        bindings: [
+          ...pf.bindings.filter((b) => !ids.has(b.flowId) && !takenStages.has(b.stageId)),
+          ...wanted
+        ]
+      })
     })
     this.deps.store.addConfigEvent(
       projectId,
@@ -163,27 +158,25 @@ export class AlvaFlowsService {
   }
 
   /**
-   * Coluna "Planejando" entre Prioridades e Em andamento, com o status do Notion escolhido.
-   * Usa o mesmo caminho do "Salvar fluxo" (validação da 3C). Devolve o id da etapa nova.
+   * Coluna "Planejando" (papel `plan`) logo depois da coluna "A fazer" (`queueStageOf`), com o
+   * status do Notion escolhido. Usa o mesmo caminho do "Salvar fluxo" (validação da 3C). Devolve
+   * o id da etapa nova.
    */
   async addPlanningStage(projectId: string, notionStatusId: string): Promise<Result<string>> {
     const board = this.deps.config.get().boards[projectId]
     if (!board) return fail('no_board', 'Crie o quadro do projeto antes.')
-    if (board.stages.some((s) => s.name.trim().toLowerCase() === 'planejando')) {
-      return fail('exists', 'O quadro já tem a coluna “Planejando”.')
+    if (stageWithRole(board.stages, 'plan')) {
+      return fail('exists', 'O quadro já tem uma coluna de planejamento.')
     }
     const id = `planejando-${Date.now().toString(36)}`
-    const stages: FlowStageDraft[] = board.stages.map((s) => ({
-      id: s.id,
-      name: s.name,
-      ...(s.color ? { color: s.color } : {}),
-      notionStatusId: s.notionStatus.id
-    }))
-    const after = board.stages.findIndex((s) => /prioridade/i.test(s.name))
-    stages.splice(after >= 0 ? after + 1 : 0, 0, {
+    const stages: FlowStageDraft[] = fromBoardStages(board.stages)
+    const queue = queueStageOf(board)
+    const after = stages.findIndex((s) => s.id === queue)
+    stages.splice(after + 1, 0, {
       id,
       name: 'Planejando',
       color: 'purple',
+      role: 'plan',
       notionStatusId
     })
     try {
@@ -201,10 +194,9 @@ export class AlvaFlowsService {
 
   async setMaxParallel(projectId: string, value: number): Promise<AlvaStatus> {
     const n = clampAlvaParallel(value)
-    await this.deps.config.update((c) => {
-      const pf = c.flows[projectId] ?? { flows: [], bindings: [] }
-      return { ...c, flows: { ...c.flows, [projectId]: { ...pf, alva: { maxParallel: n } } } }
-    })
+    await this.deps.config.update((c) =>
+      withProjectFlows(c, projectId, { ...projectFlows(c, projectId), alva: { maxParallel: n } })
+    )
     return this.status(projectId)
   }
 

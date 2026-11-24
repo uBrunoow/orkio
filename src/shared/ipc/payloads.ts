@@ -13,7 +13,7 @@ import {
 import type { AgentProfile, AgentScope, ProjectAgents } from '../agent'
 import { ATTACHMENT_LIMITS } from '../attachments'
 import { parseRule, type AutomationRule } from '../automation'
-import { STAGE_LIMITS, type BoardSaveInput, type OrkioStageChoice } from '../board'
+import { STAGE_LIMITS, isStageRole, type BoardSaveInput, type OrkioStageChoice } from '../board'
 import type { FlowDraft, FlowStageDraft } from '../flow'
 import { isReviewer } from '../github-names'
 import { isRecord } from '../guards'
@@ -102,15 +102,16 @@ export function parseBoardSaveInput(value: unknown): Parsed<BoardSaveInput> {
   const parsedStages: BoardSaveInput['stages'] = []
   for (const s of stages) {
     if (!isRecord(s)) return INVALID
-    const { id, name, notionStatusId } = s
+    const { id, name, notionStatusId, role } = s
     if (
       !(id === null || isStageId(id)) ||
       !str(name, STAGE_LIMITS.name) ||
-      !isNotionPropertyId(notionStatusId)
+      !isNotionPropertyId(notionStatusId) ||
+      !(role === undefined || isStageRole(role))
     ) {
       return INVALID
     }
-    parsedStages.push({ id, name, notionStatusId })
+    parsedStages.push({ id, name, notionStatusId, ...(role !== undefined ? { role } : {}) })
   }
   const orkioStage = parseOrkioStageChoice(value['orkioStage'])
   if (
@@ -127,9 +128,10 @@ export function parseBoardSaveInput(value: unknown): Parsed<BoardSaveInput> {
 
 function parseStageDraft(value: unknown): Parsed<FlowStageDraft> {
   if (!isRecord(value)) return INVALID
-  const { id, name, notionStatusId, color, missingStatusName } = value
+  const { id, name, notionStatusId, color, missingStatusName, role } = value
   if (
     !isStageId(id) ||
+    !(role === undefined || isStageRole(role)) ||
     !str(name, STAGE_LIMITS.name) ||
     !(
       notionStatusId === null ||
@@ -145,6 +147,7 @@ function parseStageDraft(value: unknown): Parsed<FlowStageDraft> {
     name,
     notionStatusId,
     ...(color !== undefined ? { color: color as NotionColor } : {}),
+    ...(role !== undefined ? { role } : {}),
     ...(missingStatusName !== undefined ? { missingStatusName } : {})
   }
 }
@@ -163,10 +166,7 @@ function parseBinding(value: unknown): Parsed<StageFlow> {
 /** Valida a forma e devolve o rascunho normalizado; as regras (validateFlow) rodam no serviço. */
 export function parseFlowDraft(value: unknown): Parsed<FlowDraft> {
   if (!isRecord(value)) return INVALID
-  const { stages, rules, removals, bindings, queueStageId } = value
-  if (!(queueStageId === undefined || queueStageId === null || isStageId(queueStageId))) {
-    return INVALID
-  }
+  const { stages, rules, removals, bindings } = value
   if (!Array.isArray(stages) || stages.length > STAGE_LIMITS.stages) return INVALID
   if (!Array.isArray(rules) || rules.length > 100) return INVALID
   if (!isRecord(removals)) return INVALID
@@ -190,8 +190,7 @@ export function parseFlowDraft(value: unknown): Parsed<FlowDraft> {
     stages: parsedStages as FlowStageDraft[],
     rules: parsedRules as AutomationRule[],
     removals: parsedRemovals,
-    ...(parsedBindings ? { bindings: parsedBindings } : {}),
-    ...(queueStageId !== undefined ? { queueStageId } : {})
+    ...(parsedBindings ? { bindings: parsedBindings } : {})
   }
 }
 

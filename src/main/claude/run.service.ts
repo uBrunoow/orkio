@@ -501,6 +501,54 @@ export class RunService {
     )
   }
 
+  // ---------- Consultas de quem não é dono de `agent_runs` (visão geral, agentes, diagnóstico) ----------
+
+  /** Início e comando de cada execução (lista "Rodando"). */
+  startInfo(ids: readonly string[]): Map<string, { startedAt: string; command: string | null }> {
+    if (ids.length === 0) return new Map()
+    const rows = this.deps.db.all<{ id: string; started_at: string; command: string | null }>(
+      `SELECT id, started_at, command FROM agent_runs WHERE id IN (${ids.map(() => '?').join(', ')})`,
+      ...ids
+    )
+    return new Map(rows.map((r) => [r.id, { startedAt: r.started_at, command: r.command }]))
+  }
+
+  /** Custo das execuções terminadas desde `since` (`null` = desconhecido). */
+  costsSince(since: string): (number | null)[] {
+    return this.deps.db
+      .all<{ cost: number | null }>(
+        `SELECT cost FROM agent_runs WHERE started_at >= ? AND status IN ('succeeded', 'failed', 'cancelled')`,
+        since
+      )
+      .map((r) => r.cost)
+  }
+
+  /** Execuções do agente desde `since`: quantas, custo somado e quando começaram. */
+  agentRunsSince(
+    agentKey: string,
+    since: string
+  ): { count: number; costUsd: number; startedAt: string[] } {
+    const rows = this.deps.db.all<{ started_at: string; cost: number | null }>(
+      'SELECT started_at, cost FROM agent_runs WHERE agent_key = ? AND started_at >= ?',
+      agentKey,
+      since
+    )
+    return {
+      count: rows.length,
+      costUsd: rows.reduce((sum, r) => sum + (r.cost ?? 0), 0),
+      startedAt: rows.map((r) => r.started_at)
+    }
+  }
+
+  /** Contagens do diagnóstico. */
+  counts(): { total: number; active: number } {
+    const n = (sql: string): number => this.deps.db.get<{ n: number }>(sql)?.n ?? 0
+    return {
+      total: n('SELECT COUNT(*) AS n FROM agent_runs'),
+      active: n("SELECT COUNT(*) AS n FROM agent_runs WHERE status IN ('queued', 'running')")
+    }
+  }
+
   list(taskId: string): AgentRunView[] {
     return this.deps.db
       .all<{ id: string }>(

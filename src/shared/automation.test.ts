@@ -230,6 +230,20 @@ describe('evaluate (regras padrão)', () => {
     expect(defaultRules(STAGES.filter((s) => s.name !== 'Revisado')).warnings).toHaveLength(3)
   })
 
+  it('regras padrão pelo papel: etapas renomeadas continuam ligadas (antes, pelo nome, desligavam)', () => {
+    const renamed = STAGES.map((s) => ({ ...s, name: `${s.name} (time)` }))
+    const { rules, warnings } = defaultRules(renamed)
+    expect(warnings).toEqual([])
+    expect(rules.map((r) => r.action)).toEqual(RULES.map((r) => r.action))
+    // Sem papel nenhum, nada é adivinhado pelo nome.
+    const noRoles = STAGES.map((s) => {
+      const copy = { ...s }
+      delete copy.role
+      return copy
+    })
+    expect(defaultRules(noRoles).rules.every((r) => !r.enabled)).toBe(true)
+  })
+
   it('regras padrão acham a etapa com espaço duplo no nome, como o quadro', () => {
     const spaced = STAGES.map((s) => (s.id === AND ? { ...s, name: 'Em  Andamento' } : s))
     const { rules, warnings } = defaultRules(spaced)

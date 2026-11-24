@@ -21,7 +21,7 @@ import {
   type StageFlow,
   type Step
 } from './task-flow'
-import { normalizeLabel } from './text'
+import { stageWithRole, type StageRole } from './board'
 
 /** `{{chave}}` de uma variável do fluxo (para argumentos, pedidos e mensagens). */
 const v = (key: string): string => `{{${key}}}`
@@ -401,21 +401,13 @@ export function alvaTemplates(): Flow[] {
 }
 
 /**
- * Ligações padrão (ao entrar), sem configurar: "Alva: revisão publicada" em "Revisando" e "Alva:
- * comentários da PR" em "Revisado". Etapas pelo nome, sem acento/caixa (como `defaultRules`).
+ * Ligações padrão (ao entrar), sem configurar: "Alva: revisão publicada" na etapa de papel
+ * `review` (Revisando) e "Alva: comentários da PR" na `reviewed` (Revisado), como `defaultRules`.
  */
-export const ALVA_DEFAULT_STAGES: readonly { flowId: string; stage: string }[] = [
-  { flowId: ALVA_TEMPLATE_IDS.review, stage: 'Revisando' },
-  { flowId: ALVA_TEMPLATE_IDS.reviewed, stage: 'Revisado' }
+export const ALVA_DEFAULT_STAGES: readonly { flowId: string; role: StageRole }[] = [
+  { flowId: ALVA_TEMPLATE_IDS.review, role: 'review' },
+  { flowId: ALVA_TEMPLATE_IDS.reviewed, role: 'reviewed' }
 ]
-
-/** Etapa com o nome (sem acento/caixa) ou `null`. */
-export function stageByName(
-  stages: readonly { id: string; name: string }[],
-  name: string
-): string | null {
-  return stages.find((s) => normalizeLabel(s.name) === normalizeLabel(name))?.id ?? null
-}
 
 /** JSON com as chaves em ordem (comparação que não depende da ordem das chaves). */
 function stableJson(value: unknown): string {
@@ -448,14 +440,14 @@ export function hasAlvaTemplates(pf: Pick<ProjectFlows, 'flows'> | undefined): b
  * - acrescenta os modelos que faltam;
  * - troca as cópias antigas dos modelos (mesmo id) pela versão nova, se mudaram, guardando antes a
  *   cópia atual como `<id>-anterior` ("<nome> (cópia anterior)", sem coluna), para nada se perder;
- * - liga Revisando/Revisado (ao entrar) só se a etapa não tiver fluxo ligado e o modelo ainda não
+ * - liga as etapas de papel `review`/`reviewed` (ao entrar) só se a etapa não tiver fluxo ligado e o modelo ainda não
  *   estiver ligado em outra coluna.
  * Fluxos e ligações criados pelo usuário (outros ids) nunca mudam. Devolve as mudanças em texto
  * (histórico de configuração). Sem modelos Alva no projeto: nada muda.
  */
 export function upgradeAlvaFlows(
   pf: ProjectFlows,
-  stages: readonly { id: string; name: string }[]
+  stages: readonly { id: string; name: string; role?: StageRole | undefined }[]
 ): { flows: ProjectFlows; changes: string[] } {
   if (!hasAlvaTemplates(pf)) return { flows: pf, changes: [] }
   const changes: string[] = []
@@ -494,12 +486,12 @@ export function upgradeAlvaFlows(
   }
   const bindings: StageFlow[] = [...pf.bindings]
   for (const d of ALVA_DEFAULT_STAGES) {
-    const stageId = stageByName(stages, d.stage)
+    const stageId = stageWithRole(stages, d.role)
     if (!stageId) continue
     if (bindings.some((b) => b.stageId === stageId || b.flowId === d.flowId)) continue
     bindings.push({ stageId, flowId: d.flowId, enabled: true, mode: 'on_enter' })
     const name = byId.get(d.flowId)?.name ?? d.flowId
-    const stage = stages.find((s) => s.id === stageId)?.name ?? d.stage
+    const stage = stages.find((s) => s.id === stageId)?.name ?? stageId
     changes.push(`Coluna “${stage}” ganhou o fluxo “${name}” (ao entrar)`)
   }
   return changes.length > 0

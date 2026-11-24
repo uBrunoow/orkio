@@ -3,9 +3,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ALVA_TEMPLATE_IDS, alvaDeliverFlow, alvaTemplates } from '../../shared/alva-templates'
-import type { StatusOption, BoardSaveInput, BoardSyncEvent } from '../../shared/board'
+import {
+  queueStageOf,
+  type StatusOption,
+  type BoardSaveInput,
+  type BoardSyncEvent
+} from '../../shared/board'
+import type { FlowStageDraft } from '../../shared/flow'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
-import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
+import {
+  encodePropertyWrites,
+  type PropertyWrites,
+  type SimplePropertyValue
+} from '../connectors/notion/notion.schema'
 import { openDatabase, type Db, type Tx } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import { BoardService, type StageChange, type BoardNotion } from './board.service'
@@ -112,7 +122,8 @@ class FakeNotion implements BoardNotion {
   }
 
   /** PATCH /pages/{id}. */
-  async updatePage(pageId: string, properties: Record<string, unknown>): Promise<void> {
+  async updatePage(pageId: string, writes: PropertyWrites): Promise<void> {
+    const properties = encodePropertyWrites(writes)
     if (this.offline) throw new ApiError('notion', 'network', 'Sem conexão.')
     if (this.reject) throw new ApiError('notion', 'bad_request', 'Recusado.', 400)
     this.writes.push({ pageId, properties })
@@ -207,7 +218,8 @@ describe('BoardService', () => {
     const stages = (first.value.suggestion ?? first.value.config!.stages).map((s) => ({
       id: s.id,
       name: s.name,
-      notionStatusId: s.notionStatus.id!
+      notionStatusId: s.notionStatus.id!,
+      ...(s.role ? { role: s.role } : {})
     }))
     const saved = await service.save('p1', { ...DEFAULT_INPUT(stages), ...input })
     if (!saved.ok) throw new Error(saved.error.message)
@@ -350,7 +362,7 @@ describe('BoardService', () => {
       }
     ])
     expect(moved).toMatchObject({ ok: true, value: { stageId: rev, sync: { state: 'synced' } } })
-    await queue.idle()
+    await queue.kick()
     expect(notion.writes).toEqual([])
     // Reabrir mantém Revisando (status do Notion continua compatível).
     const again = await service.get('p1', { force: true })
@@ -363,7 +375,7 @@ describe('BoardService', () => {
     const fin = stageId(view, 'Finalizada')
     const moved = await service.move('p1', T1, fin)
     expect(moved).toMatchObject({ ok: true, value: { stageId: fin, sync: { state: 'pending' } } })
-    await queue.idle()
+    await queue.kick()
     expect(notion.writes).toEqual([
       { pageId: T1, properties: { st: { status: { name: 'Finalizadas' } } } }
     ])
@@ -376,7 +388,7 @@ describe('BoardService', () => {
     const view = await createBoard()
     const fin = stageId(view, 'Finalizada')
     await service.move('p1', T1, fin)
-    await queue.idle()
+    await queue.kick()
     // Notion ainda devolve o valor antigo (consistência eventual).
     notion.status[T1] = 'Em andamento'
     const quick = await service.get('p1')
@@ -404,7 +416,7 @@ describe('BoardService', () => {
     const fin = stageId(view, 'Finalizada')
     notion.offline = true
     await service.move('p1', T1, fin)
-    await queue.idle()
+    await queue.kick()
     expect(events.at(-1)).toMatchObject({
       state: 'pending',
       message: expect.stringContaining('Sem conexão')
@@ -425,7 +437,7 @@ describe('BoardService', () => {
     expect(reopened.ok && reopened.value.pendingCount).toBe(1)
     clock += 60_000
     queue.start()
-    await queue.idle()
+    await queue.kick()
     expect(notion.status[T1]).toBe('Finalizadas')
     expect(events.at(-1)).toMatchObject({ state: 'synced' })
     // Bug: a confirmação do Notion era gravada como 'manual'.
@@ -438,7 +450,7 @@ describe('BoardService', () => {
     const before = stageId(view, 'Em andamento')
     notion.reject = 'bad_request'
     await service.move('p1', T1, stageId(view, 'Finalizada'))
-    await queue.idle()
+    await queue.kick()
     await new Promise((r) => setTimeout(r, 0))
     expect(events.at(-1)).toMatchObject({
       taskId: T1,
@@ -470,7 +482,7 @@ describe('BoardService', () => {
     // Recusa do Notion (rollback).
     notion.reject = 'bad_request'
     await service.move('p1', T2, stageId(view, 'Finalizada'))
-    await queue.idle()
+    await queue.kick()
     await new Promise((r) => setTimeout(r, 0))
     expect(seen.map((s) => [s.change.source, s.lastEvent, s.inTransaction])).toEqual([
       ['manual', 'moved', true],
@@ -491,7 +503,7 @@ describe('BoardService', () => {
     const view = await createBoard()
     notion.offline = true
     await service.move('p1', T1, stageId(view, 'Finalizada'))
-    await queue.idle()
+    await queue.kick()
     await service.move('p1', T1, stageId(view, 'Revisando'))
     expect((await service.get('p1')).ok).toBe(false) // offline: não carrega, mas o estado local existe
     notion.offline = false
@@ -499,7 +511,7 @@ describe('BoardService', () => {
     expect(view2.ok && view2.value.pendingCount).toBe(0)
     clock += 60_000
     queue.kick()
-    await queue.idle()
+    await queue.kick()
     expect(notion.writes).toEqual([])
   })
 
@@ -520,7 +532,7 @@ describe('BoardService', () => {
     })
     expect(view.config?.orkioStageProperty).toEqual({ id: 'eo-new', name: 'Etapa Orkio' })
     await service.move('p1', T1, stageId(view, 'Revisando'))
-    await queue.idle()
+    await queue.kick()
     // Status igual (sem escrita de status), só a Etapa Orkio.
     expect(notion.writes.at(-1)).toEqual({
       pageId: T1,
@@ -574,13 +586,13 @@ describe('BoardService', () => {
       ok: true,
       value: { blocked: true }
     })
-    await queue.idle()
+    await queue.kick()
     expect(notion.writes).toEqual([])
 
     await createBoard({ blockedPropertyId: 'blk' })
     await service.get('p1', { force: true })
     await service.setBlocked('p1', T2, true)
-    await queue.idle()
+    await queue.kick()
     expect(notion.writes.at(-1)).toEqual({ pageId: T2, properties: { blk: { checkbox: true } } })
     // Desmarcado direto no Notion → reflete ao atualizar (depois da janela de espera).
     notion.extras[T2] = { blk: { type: 'checkbox', checked: false } }
@@ -624,18 +636,6 @@ describe('BoardService', () => {
     expect(moved).toMatchObject({ ok: true, value: { sync: { state: 'pending' } } })
   })
 
-  it('remover uma etapa: as tarefas dela vão para a primeira etapa compatível', async () => {
-    const view = await createBoard()
-    await service.move('p1', T1, stageId(view, 'Revisado'))
-    const stages = view
-      .config!.stages.filter((s) => s.name !== 'Revisado')
-      .map((s) => ({ id: s.id, name: s.name, notionStatusId: s.notionStatus.id! }))
-    const saved = await service.save('p1', DEFAULT_INPUT(stages))
-    expect(saved.ok && saved.value.cards.find((c) => c.taskId === T1)?.stageId).toBe(
-      stageId(view, 'Em andamento')
-    )
-  })
-
   it('erro desconhecido não vaza detalhes', async () => {
     vi.spyOn(notion, 'statusOptions').mockRejectedValueOnce(new Error('ntn_SECRET'))
     expect(await service.get('p1')).toEqual({
@@ -650,8 +650,9 @@ describe('BoardService', () => {
         stages: view.config!.stages.map((s) => ({
           id: s.id,
           name: s.name,
-          notionStatusId: s.notionStatus.id
-        })),
+          notionStatusId: s.notionStatus.id,
+          ...(s.role ? { role: s.role } : {})
+        })) as FlowStageDraft[],
         rules: view.config!.rules.map((r) => ({ ...r })),
         removals: {} as Record<string, string | null>
       }
@@ -690,36 +691,59 @@ describe('BoardService', () => {
       expect(events[1]!.changes[0]).toMatch(/Quadro criado com 5 etapas/)
     })
 
-    it('coluna "A fazer" (lista lateral) é do quadro: salva, registra e some com a etapa', async () => {
+    it('papel da etapa: renomear não muda nada; o papel troca de etapa e vai ao histórico', async () => {
       const view = await createBoard()
-      const dev = stageId(view, 'Em andamento')
-      const saved = await service.saveFlow('p1', { ...(await flowFrom(view)), queueStageId: dev })
-      expect(saved.ok && saved.value.config!.queueStageId).toBe(dev)
-      expect((await service.configEvents('p1'))[0]!.changes).toEqual([
-        'Coluna “A fazer” da lista lateral: “Em andamento”'
+      expect(view.config!.stages.map((s) => s.role)).toEqual([
+        'queue',
+        'work',
+        'review',
+        'reviewed',
+        'done'
       ])
-      // Sem o campo no rascunho: mantém a salva.
-      const kept = await service.saveFlow('p1', await flowFrom(view))
-      expect(kept.ok && kept.value.config!.queueStageId).toBe(dev)
-      // Etapa removida: a coluna "A fazer" volta a ser a primeira.
+      const dev = stageId(view, 'Em andamento')
       const draft = await flowFrom(view)
-      draft.stages = draft.stages.filter((s) => s.id !== dev)
-      draft.rules = draft.rules.map((r) => ({
-        ...r,
-        enabled: r.action.type === 'move_to_stage' && r.action.stageId === dev ? false : r.enabled,
-        action:
-          r.action.type === 'move_to_stage' && r.action.stageId === dev
-            ? { ...r.action, stageId: stageId(view, 'Revisando') }
-            : r.action,
-        conditions: {
-          ...r.conditions,
-          fromStages: (r.conditions?.fromStages ?? []).filter((id) => id !== dev)
-        }
-      }))
-      draft.removals = { [dev]: stageId(view, 'Prioridades') }
-      const removed = await service.saveFlow('p1', draft)
-      expect(removed).toMatchObject({ ok: true })
-      expect(config.get().boards['p1']).not.toHaveProperty('queueStageId')
+      draft.stages = draft.stages.map((s) =>
+        s.name === 'Revisado'
+          ? { ...s, name: 'Aprovado' }
+          : s.name === 'Prioridades'
+            ? { id: s.id, name: s.name, notionStatusId: s.notionStatusId }
+            : s.id === dev
+              ? { ...s, role: 'queue' as const }
+              : s
+      )
+      // Papel repetido é recusado (no máximo uma etapa por papel).
+      const twice = await flowFrom(view)
+      twice.stages[1] = { ...twice.stages[1]!, role: 'queue' }
+      expect(await service.saveFlow('p1', twice)).toMatchObject({
+        ok: false,
+        error: { code: 'invalid', message: expect.stringMatching(/papel/) }
+      })
+      const saved = await service.saveFlow('p1', draft)
+      if (!saved.ok) throw new Error(saved.error.message)
+      const stages = saved.value.config!.stages
+      expect(stages.find((s) => s.name === 'Aprovado')?.role).toBe('reviewed')
+      expect(queueStageOf(saved.value.config)).toBe(dev)
+      expect((await service.configEvents('p1'))[0]!.changes).toEqual([
+        'Etapa “Prioridades”: sem papel',
+        'Etapa “Em andamento”: papel “A fazer (fila da lista lateral)”',
+        'Etapa “Revisado” renomeada para “Aprovado”'
+      ])
+    })
+
+    it('a tela do Notion (save) salva pelo mesmo caminho: remover etapa com tarefas pede destino', async () => {
+      // Antes: `save` tinha outro validador e as tarefas da etapa removida caíam em "Sem etapa".
+      const view = await createBoard()
+      const fila = stageId(view, 'Prioridades')
+      expect(view.cards.some((c) => c.stageId === fila)).toBe(true)
+      const stages = view
+        .config!.stages.filter((s) => s.id !== fila)
+        .map((s) => ({ id: s.id, name: s.name, notionStatusId: s.notionStatus.id! }))
+      const r = await service.save('p1', DEFAULT_INPUT(stages))
+      expect(r).toMatchObject({
+        ok: false,
+        error: { code: 'invalid', message: expect.stringMatching(/para onde vão/) }
+      })
+      expect(config.get().boards['p1']!.stages.some((s) => s.id === fila)).toBe(true)
     })
 
     it('valida de novo no main: etapa sem status e regra para etapa removida', async () => {
@@ -761,7 +785,7 @@ describe('BoardService', () => {
       expect(saved.ok && saved.value.cards.find((c) => c.taskId === T2)?.stageId).toBe(
         stageId(view, 'Em andamento')
       )
-      await queue.idle()
+      await queue.kick()
       expect(notion.status[T2]).toBe('Em andamento')
       const events = await service.configEvents('p1')
       expect(events[0]!.changes).toContain('Tarefas de “Prioridades” movidas para “Em andamento”')

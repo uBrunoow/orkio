@@ -2,7 +2,7 @@
  * Texto e links de um evento do histórico da tarefa (`task_events`). Puro: usado no painel da
  * tarefa (quadro) e na atividade recente da Visão geral (6D).
  */
-import { EVENT_LABELS } from './automation'
+import { EVENT_META } from './automation'
 import type { TaskEvent } from './task-events'
 import { FLOW_PAUSES } from './flow-run-state'
 
@@ -46,7 +46,7 @@ export function prUrl(e: HistoryEvent): string | null {
 
 /** "PR #45 mergeada" / "Branch criada (ORK-1/x)". */
 function automationEvent(e: Extract<HistoryEvent, { kind: 'moved' | 'automation' }>): string {
-  const label = e.detail.event ? EVENT_LABELS[e.detail.event] : 'Evento'
+  const label = e.detail.event ? EVENT_META[e.detail.event].label : 'Evento'
   const n = prNumber(e)
   return n !== null
     ? `${label} (PR #${n})`

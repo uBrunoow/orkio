@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   findOption,
-  moveNeedsStatusWrite,
   priorityRank,
   queueStageOf,
   reconcile,
@@ -235,14 +234,6 @@ describe('reconcile', () => {
   })
 })
 
-describe('moveNeedsStatusWrite', () => {
-  it('só escreve quando o status do destino é diferente do atual', () => {
-    expect(moveNeedsStatusWrite(REV, { id: 'o-and', name: 'Em andamento' })).toBe(false)
-    expect(moveNeedsStatusWrite(FIN, { id: 'o-and', name: 'Em andamento' })).toBe(true)
-    expect(moveNeedsStatusWrite(PRIO, null)).toBe(true)
-  })
-})
-
 describe('priorityRank', () => {
   it('ordena nomes usuais pt/en, P0…P9 e números; sem prioridade por último', () => {
     const names = ['Baixa', null, 'P1', 'Urgente', 'Média', 'Alta', 'Coisa', '0']
@@ -268,10 +259,11 @@ describe('queueStageOf (coluna "A fazer" da lista lateral)', () => {
   })
   const stages = [stage('b', 1), stage('a', 0)]
 
-  it('a escolhida no quadro; ausente ou removida = a primeira coluna', () => {
-    expect(queueStageOf({ stages, queueStageId: 'b' })).toBe('b')
+  it('a etapa de papel queue; sem ela = a primeira coluna', () => {
+    expect(
+      queueStageOf({ stages: [{ ...stage('b', 1), role: 'queue' as const }, stage('a', 0)] })
+    ).toBe('b')
     expect(queueStageOf({ stages })).toBe('a')
-    expect(queueStageOf({ stages, queueStageId: 'sumiu' })).toBe('a')
     expect(queueStageOf(null)).toBeNull()
   })
 })

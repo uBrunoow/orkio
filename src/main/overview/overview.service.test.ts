@@ -22,6 +22,15 @@ let tasks: Record<string, NotionTask[] | null>
 let signals: Record<string, Record<string, TaskSignals> | null>
 let changed: number[]
 let refreshed: string[]
+/** Execuções (dono: RunService) e branches dos worktrees (dono: WorktreeService), simuladas. */
+let runRows: {
+  id: string
+  startedAt: string
+  command: string | null
+  cost: number | null
+  ended: boolean
+}[]
+let branches: Record<string, string>
 
 function project(id: string, name: string): ProjectView {
   return {
@@ -40,7 +49,18 @@ function project(id: string, name: string): ProjectView {
 
 function service(over: Partial<OverviewDeps> = {}): OverviewService {
   return new OverviewService({
-    db,
+    board: store,
+    runStore: {
+      startInfo: (ids) =>
+        new Map(
+          runRows
+            .filter((r) => ids.includes(r.id))
+            .map((r) => [r.id, { startedAt: r.startedAt, command: r.command }])
+        ),
+      costsSince: (since) =>
+        runRows.filter((r) => r.ended && r.startedAt >= since).map((r) => r.cost)
+    },
+    worktreeBranch: (taskId) => branches[taskId] ?? null,
     config: () => config,
     projects: async () => config.projects.map((p) => project(p.id, p.name)),
     flows: () => flows,
@@ -145,8 +165,20 @@ beforeEach(() => {
       p1: {
         stages: [
           { id: 's1', name: 'Prioridades', order: 0, notionStatus: { id: 'a', name: 'A' } },
-          { id: 's2', name: 'Revisado', order: 1, notionStatus: { id: 'a', name: 'A' } },
-          { id: 's3', name: 'Finalizada', order: 2, notionStatus: { id: 'b', name: 'B' } }
+          {
+            id: 's2',
+            name: 'Revisado',
+            role: 'reviewed',
+            order: 1,
+            notionStatus: { id: 'a', name: 'A' }
+          },
+          {
+            id: 's3',
+            name: 'Finalizada',
+            role: 'done',
+            order: 2,
+            notionStatus: { id: 'b', name: 'B' }
+          }
         ],
         orkioStageProperty: null,
         blockedProperty: null,
@@ -174,6 +206,8 @@ beforeEach(() => {
   signals = {}
   changed = []
   refreshed = []
+  runRows = []
+  branches = {}
 })
 
 afterEach(() => {
@@ -225,23 +259,29 @@ describe('OverviewService', () => {
   })
 
   it('escrita presa tentando de novo entra a partir da 3ª tentativa', () => {
-    db.run(
-      `INSERT INTO pending_writes (task_page_id, project_id, payload_json, rollback_json, attempts, next_attempt_at, last_error_code, created_at)
-       VALUES ('t1', 'p1', '{}', '{"stageId":null,"blocked":false}', 3, 'x', 'network', '2026-11-20T08:00:00.000Z'),
-              ('t2', 'p1', '{}', '{"stageId":null,"blocked":false}', 1, 'x', 'network', '2026-11-20T08:00:00.000Z')`
-    )
+    for (const [task, attempts] of [
+      ['t1', 3],
+      ['t2', 1]
+    ] as const) {
+      store.upsertPending({
+        taskPageId: task,
+        projectId: 'p1',
+        properties: { st: { type: 'status', name: 'A' } },
+        rollback: { stageId: null, blocked: false },
+        now: '2026-11-20T08:00:00.000Z'
+      })
+      store.scheduleRetry(task, attempts, '2026-11-20T09:00:00.000Z', 'network')
+    }
     expect(
       service()
         .waiting()
-        .map((w) => w.key)
-    ).toEqual(['notion:pending:1'])
+        .map((w) => [w.kind, w.task.taskId])
+    ).toEqual([['notion_write', 't1']])
   })
 
   it('sem cache do Notion, o ID vem da branch do worktree e o título fica vazio', () => {
     tasks = {}
-    db.run(
-      `INSERT INTO worktrees (task_page_id, project_id, path, branch, base_ref, created_at) VALUES ('t1', 'p1', '/w', 'ork-1/exportar-csv', 'origin/main', 'x')`
-    )
+    branches = { t1: 'ork-1/exportar-csv' }
     flows = [gateFlow()]
     expect(service().waiting()[0]?.task).toMatchObject({ displayId: 'ORK-1', title: null })
   })
@@ -254,10 +294,16 @@ describe('OverviewService', () => {
     expect(s.waiting()[0]?.task.title).toBe('Exportar CSV')
   })
 
-  it('"Em execução" lê início e comando do SQLite', async () => {
-    db.run(
-      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at) VALUES ('r1', 't1', 'p1', 'command', 'revisar', 'running', '2026-11-20T11:50:00.000Z')`
-    )
+  it('"Em execução" lê início e comando das execuções', async () => {
+    runRows = [
+      {
+        id: 'r1',
+        startedAt: '2026-11-20T11:50:00.000Z',
+        command: 'revisar',
+        cost: null,
+        ended: false
+      }
+    ]
     runs = [{ runId: 'r1', projectId: 'p1', taskId: 't1', status: 'running' }]
     const snap = await service().snapshot()
     expect(snap.running).toEqual([
@@ -327,12 +373,11 @@ describe('OverviewService', () => {
     })
     event({ task: 't1', at: '2026-11-15T00:00:00.000Z', kind: 'moved', from: 's1', to: 's2' })
     event({ task: 't1', at: '2026-11-17T00:00:00.000Z', kind: 'moved', from: 's2', to: 's3' })
-    db.run(
-      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, cost) VALUES
-       ('a', 't1', 'p1', 'prompt', NULL, 'succeeded', '2026-11-19T00:00:00.000Z', 0.4),
-       ('b', 't1', 'p1', 'prompt', NULL, 'failed', '2026-11-19T00:00:00.000Z', NULL),
-       ('c', 't1', 'p1', 'prompt', NULL, 'succeeded', '2026-11-01T00:00:00.000Z', 9)`
-    )
+    runRows = [
+      { id: 'a', startedAt: '2026-11-19T00:00:00.000Z', command: null, cost: 0.4, ended: true },
+      { id: 'b', startedAt: '2026-11-19T00:00:00.000Z', command: null, cost: null, ended: true },
+      { id: 'c', startedAt: '2026-11-01T00:00:00.000Z', command: null, cost: 9, ended: true }
+    ]
     const snap = await service().snapshot()
     const p1 = snap.projects.find((p) => p.projectId === 'p1')!
     expect(p1.stages.map((s) => s.count)).toEqual([1, 0, 1])

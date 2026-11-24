@@ -10,7 +10,6 @@ import {
   activitySection,
   buildRunning,
   costSum,
-  finalStageId,
   finishedCount,
   flowWaitingItem,
   notionWaitingItem,
@@ -18,7 +17,6 @@ import {
   projectCard,
   pullsInWeek,
   requestWaitingItem,
-  reviewStageId,
   sortWaiting,
   stageDwell,
   type ActivityPage,
@@ -26,30 +24,32 @@ import {
   type OverviewSnapshot,
   type OverviewTask,
   type PendingRequest,
-  type StageEventInput,
   type WaitingItem
 } from '../../shared/overview'
 import type { FlowRunView } from '../../shared/task-flow'
+import { stageWithRole } from '../../shared/board'
 import type { PullRequestSummary, TaskSignals } from '../../shared/task-signals'
 import { describeEvent, branchUrl, prUrl } from '../../shared/task-history'
-import {
-  ACTIVITY_KINDS,
-  SETTLES_REJECTION_KINDS,
-  STAGE_EVENT_KINDS,
-  activityGroup,
-  isTaskEventKind,
-  parseDetailJson,
-  parseTaskEvent
-} from '../../shared/task-events'
+import { ACTIVITY_KINDS, activityGroup } from '../../shared/task-events'
+import { displayIdInBranch } from '../../shared/task-id-match'
 import type { RunStatus } from '../../shared/agent-run'
 import type { OrkioConfig } from '../config/orkio-config'
-import type { Db, SqlValue } from '../db/database'
+import type { BoardStore } from '../board/board.store'
+import type { RunService } from '../claude/run.service'
 import type { NotionTask, NotionWorkspaceStatus } from '../../shared/notion'
 import type { ProjectView } from '../../shared/projects'
 import { automationProjectIds } from '../config/queries'
 
 export interface OverviewDeps {
-  db: Db
+  /** Leituras do quadro (dono de `task_state`, `task_events`, `pending_writes`). */
+  board: Pick<
+    BoardStore,
+    'allStates' | 'recentEvents' | 'unsettledRejections' | 'stuckWrites' | 'stageEvents'
+  >
+  /** Leituras das execuções do Claude Code (dono de `agent_runs`: `RunService`). */
+  runStore: Pick<RunService, 'startInfo' | 'costsSince'>
+  /** Branch do worktree da tarefa (dono de `worktrees`: `WorktreeService`), sem rede. */
+  worktreeBranch(taskId: string): string | null
   config(): OrkioConfig
   /** Lista local dos projetos (sem GitHub). */
   projects(): Promise<ProjectView[]>
@@ -73,19 +73,8 @@ export interface OverviewDeps {
   debounceMs?: number
 }
 
-interface EventRow {
-  id: number
-  task_page_id: string
-  project_id: string
-  at: string
-  kind: string
-  source: string
-  from_stage: string | null
-  to_stage: string | null
-  detail_json: string | null
-}
-
-const DISPLAY_ID_IN_BRANCH = /(?:^|\/)([A-Za-z][A-Za-z0-9]*-\d+)(?=\/|-|$)/
+/** Entradas numa etapa podem ser anteriores à semana: o tempo na etapa lê 60 dias. */
+const DWELL_LOOKBACK_MS = 60 * 24 * 60 * 60 * 1000
 
 export class OverviewService {
   /** Último ID/título conhecido de cada tarefa (só memória; sobrevive a invalidações do cache). */
@@ -109,14 +98,14 @@ export class OverviewService {
     const flows = this.deps.flows().filter((f) => this.hasProject(config, f.projectId))
 
     const runRows = this.deps.runs().filter((r) => this.hasProject(config, r.projectId))
-    const runInfo = this.runInfo(runRows.map((r) => r.runId))
+    const runInfo = this.deps.runStore.startInfo(runRows.map((r) => r.runId))
     const running = buildRunning(
       runRows.map((r) => ({
         runId: r.runId,
         projectId: r.projectId,
         taskId: r.taskId,
         state: r.status === 'queued' ? 'queued' : 'running',
-        startedAt: runInfo.get(r.runId)?.started_at ?? now.toISOString(),
+        startedAt: runInfo.get(r.runId)?.startedAt ?? now.toISOString(),
         command: runInfo.get(r.runId)?.command ?? null
       })),
       flows,
@@ -135,22 +124,17 @@ export class OverviewService {
 
     const views = await this.deps.projects().catch(() => [] as ProjectView[])
     const notionHealth = this.deps.notionHealth()
-    const states = this.deps.db.all<{
-      project_id: string
-      stage_id: string | null
-      blocked: number
-      automation_paused: number
-    }>('SELECT project_id, stage_id, blocked, automation_paused FROM task_state')
+    const states = this.deps.board.allStates()
     const projects = views.map((view) =>
       projectCard({
         project: view,
         stages: config.boards[view.id]?.stages ?? null,
         states: states
-          .filter((s) => s.project_id === view.id)
+          .filter((s) => s.projectId === view.id)
           .map((s) => ({
-            stageId: s.stage_id,
-            blocked: s.blocked === 1,
-            automationPaused: s.automation_paused === 1
+            stageId: s.stageId,
+            blocked: s.blocked,
+            automationPaused: s.automationPaused
           })),
         notionHealth,
         automationsPaused: config.automation.paused,
@@ -179,55 +163,36 @@ export class OverviewService {
     const config = this.deps.config()
     const resolve = this.resolver(config)
     const limit = Math.min(Math.max(query.limit ?? 50, 1), 200)
-    const where: string[] = ['at >= ?']
-    const params: SqlValue[] = [new Date(this.now().getTime() - WEEK_MS).toISOString()]
-    if (query.projectId) {
-      where.push('project_id = ?')
-      params.push(query.projectId)
-    }
-    if (query.beforeId) {
-      where.push('id < ?')
-      params.push(query.beforeId)
-    }
     const kinds = query.group
       ? ACTIVITY_KINDS[query.group]
       : [...new Set(Object.values(ACTIVITY_KINDS).flat())]
-    where.push(`kind IN (${kinds.map(() => '?').join(', ')})`)
-    params.push(...kinds)
-    if (query.group === 'board') where.push(`NOT (kind = 'moved' AND source = 'automation')`)
-    if (query.group === 'automation') where.push(`(kind = 'automation' OR source = 'automation')`)
-
     // Lê um pouco a mais: alguns eventos (automação sem efeito) ficam de fora.
-    const rows = this.deps.db.all<EventRow>(
-      `SELECT * FROM task_events WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`,
-      ...params,
-      limit * 2 + 1
-    )
+    const rows = this.deps.board.recentEvents({
+      since: new Date(this.now().getTime() - WEEK_MS).toISOString(),
+      kinds,
+      projectId: query.projectId ?? undefined,
+      beforeId: query.beforeId ?? undefined,
+      group: query.group === 'board' || query.group === 'automation' ? query.group : undefined,
+      limit: limit * 2 + 1
+    })
     const items: ActivityPage['items'] = []
     let consumed = 0
     for (const row of rows) {
       if (items.length >= limit) break
       consumed++
-      if (!this.hasProject(config, row.project_id)) continue
-      const event = parseTaskEvent({
-        kind: row.kind,
-        source: row.source,
-        fromStage: row.from_stage,
-        toStage: row.to_stage,
-        detail: parseDetailJson(row.detail_json)
-      })
-      if (!event) continue
+      if (!row || !this.hasProject(config, row.projectId)) continue
+      const { projectId, taskId, id, at, ...event } = row
       const group = activityGroup(event)
       if (!group || (query.group && group !== query.group)) continue
-      const stages = config.boards[row.project_id]?.stages ?? []
-      const stageName = (id: string | null): string =>
-        id ? (stages.find((s) => s.id === id)?.name ?? 'etapa removida') : 'Sem etapa'
+      const stages = config.boards[projectId]?.stages ?? []
+      const stageName = (sid: string | null): string =>
+        sid ? (stages.find((s) => s.id === sid)?.name ?? 'etapa removida') : 'Sem etapa'
       items.push({
         ...event,
-        id: row.id,
-        at: row.at,
+        id,
+        at,
         group,
-        task: resolve(row.project_id, row.task_page_id),
+        task: resolve(projectId, taskId),
         text: describeEvent(event, stageName),
         link: prUrl(event) ?? branchUrl(event),
         section: activitySection(group)
@@ -289,49 +254,26 @@ export class OverviewService {
     }
     const since = new Date(this.now().getTime() - NOTION_REJECT_WINDOW_MS).toISOString()
     // Recusa do Notion ainda sem nova mudança na tarefa (mover de novo resolve).
-    for (const r of this.deps.db.all<EventRow>(
-      `SELECT * FROM task_events e WHERE kind = 'rolled_back' AND at >= ?
-         AND NOT EXISTS (SELECT 1 FROM task_events l WHERE l.task_page_id = e.task_page_id
-           AND l.id > e.id AND l.kind IN (${SETTLES_REJECTION_KINDS.map(() => '?').join(', ')}))`,
-      since,
-      ...SETTLES_REJECTION_KINDS
-    )) {
-      if (!this.hasProject(config, r.project_id)) continue
-      const event = parseTaskEvent({
-        kind: r.kind,
-        source: r.source,
-        fromStage: r.from_stage,
-        toStage: r.to_stage,
-        detail: parseDetailJson(r.detail_json)
-      })
+    for (const r of this.deps.board.unsettledRejections(since)) {
+      if (!this.hasProject(config, r.projectId)) continue
       items.push(
         notionWaitingItem(
           {
             type: 'rejected',
             eventId: r.id,
-            code: event?.kind === 'rolled_back' ? (event.detail.code ?? null) : null,
+            code: r.kind === 'rolled_back' ? (r.detail.code ?? null) : null,
             at: r.at
           },
-          resolve(r.project_id, r.task_page_id)
+          resolve(r.projectId, r.taskId)
         )
       )
     }
-    for (const w of this.deps.db.all<{
-      id: number
-      task_page_id: string
-      project_id: string
-      attempts: number
-      created_at: string
-    }>(
-      `SELECT id, task_page_id, project_id, attempts, created_at FROM pending_writes
-       WHERE last_error_code IS NOT NULL AND attempts >= ?`,
-      NOTION_PENDING_ATTEMPTS
-    )) {
-      if (!this.hasProject(config, w.project_id)) continue
+    for (const w of this.deps.board.stuckWrites(NOTION_PENDING_ATTEMPTS)) {
+      if (!this.hasProject(config, w.projectId)) continue
       items.push(
         notionWaitingItem(
-          { type: 'retrying', writeId: w.id, attempts: w.attempts, since: w.created_at },
-          resolve(w.project_id, w.task_page_id)
+          { type: 'retrying', writeId: w.id, attempts: w.attempts, since: w.createdAt },
+          resolve(w.projectId, w.taskPageId)
         )
       )
     }
@@ -350,13 +292,8 @@ export class OverviewService {
       if (cached) this.known.set(taskId, { displayId: cached.displayId, title: cached.title })
       let info = this.known.get(taskId) ?? null
       if (!info) {
-        const branch = this.deps.db.get<{ branch: string }>(
-          'SELECT branch FROM worktrees WHERE task_page_id = ?',
-          taskId
-        )?.branch
-        // `ORK-2/slug` (antigo) ou `feat/ORK-2-slug` (novo); sem ID no nome, fica sem ID.
-        const id = branch ? DISPLAY_ID_IN_BRANCH.exec(branch)?.[1] : undefined
-        info = { displayId: id ? id.toUpperCase() : null, title: null }
+        const branch = this.deps.worktreeBranch(taskId)
+        info = { displayId: branch ? displayIdInBranch(branch) : null, title: null }
       }
       return {
         projectId,
@@ -368,58 +305,27 @@ export class OverviewService {
     }
   }
 
-  private runInfo(ids: string[]): Map<string, { started_at: string; command: string | null }> {
-    if (ids.length === 0) return new Map()
-    const rows = this.deps.db.all<{ id: string; started_at: string; command: string | null }>(
-      `SELECT id, started_at, command FROM agent_runs WHERE id IN (${ids.map(() => '?').join(', ')})`,
-      ...ids
-    )
-    return new Map(rows.map((r) => [r.id, r]))
-  }
-
   private week(config: OrkioConfig, now: Date): OverviewSnapshot['week'] {
     const since = new Date(now.getTime() - WEEK_MS).toISOString()
-    // Entradas em "Revisado" podem ser anteriores à semana: lê 60 dias de movimentos.
-    const from = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString()
-    const events = this.deps.db
-      .all<EventRow>(
-        `SELECT id, task_page_id, project_id, at, kind, from_stage, to_stage FROM task_events
-         WHERE at >= ? AND kind IN (${STAGE_EVENT_KINDS.map(() => '?').join(', ')}) ORDER BY id`,
-        from,
-        ...STAGE_EVENT_KINDS
-      )
-      .flatMap((e): StageEventInput[] =>
-        this.hasProject(config, e.project_id) && isTaskEventKind(e.kind)
-          ? [
-              {
-                id: e.id,
-                taskPageId: e.task_page_id,
-                projectId: e.project_id,
-                at: e.at,
-                kind: e.kind,
-                fromStage: e.from_stage,
-                toStage: e.to_stage
-              }
-            ]
-          : []
-      )
+    const from = new Date(now.getTime() - DWELL_LOOKBACK_MS).toISOString()
+    const events = this.deps.board
+      .stageEvents(from)
+      .filter((e) => this.hasProject(config, e.projectId))
     const finals = new Map<string, string>()
     const reviews = new Map<string, string>()
     for (const [projectId, board] of Object.entries(config.boards)) {
-      const last = finalStageId(board.stages)
-      if (last) finals.set(projectId, last)
-      const review = reviewStageId(board.stages)
-      if (review) reviews.set(projectId, review)
+      // Etapas pelo papel (o nome não importa): concluída e revisada.
+      const done = stageWithRole(board.stages, 'done')
+      if (done) finals.set(projectId, done)
+      const reviewed = stageWithRole(board.stages, 'reviewed')
+      if (reviewed) reviews.set(projectId, reviewed)
     }
     const dwell = stageDwell(events, reviews, since)
     const pulls = pullsInWeek(
       config.projects.filter((p) => p.repo).map((p) => this.deps.pulls(p.id)),
       since
     )
-    const runs = this.deps.db.all<{ cost: number | null }>(
-      `SELECT cost FROM agent_runs WHERE started_at >= ? AND status IN ('succeeded', 'failed', 'cancelled')`,
-      since
-    )
+    const runs = this.deps.runStore.costsSince(since).map((cost) => ({ cost }))
     return {
       since,
       finished: finishedCount(events, finals, since),

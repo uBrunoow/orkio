@@ -4,7 +4,12 @@ import { CheckboxField, RadioListField, SelectField, TextField } from '@/compone
 import { Alert } from '../../components/Alert'
 import { Spinner } from '../../components/Spinner'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
-import type { BoardSaveInput, BoardView, OrkioStageChoice } from '../../../../shared/board'
+import type {
+  BoardSaveInput,
+  BoardView,
+  OrkioStageChoice,
+  StageRole
+} from '../../../../shared/board'
 import type { Result } from '../../../../shared/result'
 
 interface DraftStage {
@@ -13,6 +18,8 @@ interface DraftStage {
   name: string
   /** Id da opção de status; `null` = não existe no Notion (bloqueia salvar). */
   optionId: string | null
+  /** Papel do template (quadro novo); etapas salvas mantêm o delas no main. */
+  role?: StageRole
   missingName: string | null
 }
 
@@ -39,6 +46,7 @@ export function BoardSettings({
         key: `k${counter++}`,
         id: s.id,
         name: s.name,
+        ...(s.role ? { role: s.role } : {}),
         optionId: option?.id ?? null,
         missingName: option ? null : s.notionStatus.name
       }
@@ -103,7 +111,12 @@ export function BoardSettings({
           ? { mode: 'create' }
           : { mode: 'none' }
     const result = await onSave({
-      stages: stages.map((s) => ({ id: s.id, name: s.name.trim(), notionStatusId: s.optionId! })),
+      stages: stages.map((s) => ({
+        id: s.id,
+        name: s.name.trim(),
+        notionStatusId: s.optionId!,
+        ...(s.role ? { role: s.role } : {})
+      })),
       orkioStage,
       addMissingOptions: addMissing,
       blockedPropertyId: blockedProperty

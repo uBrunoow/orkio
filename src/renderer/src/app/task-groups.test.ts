@@ -56,11 +56,10 @@ const board = (cards: BoardCard[], queueStageId?: string): BoardView =>
   ({
     projectId: 'p1',
     config: {
-      ...(queueStageId ? { queueStageId } : {}),
       stages: [
         { id: 's2', name: 'Em andamento', order: 1, notionStatus: { id: null, name: 'b' } },
         { id: 's1', name: 'Prioridades', order: 0, notionStatus: { id: null, name: 'a' } }
-      ],
+      ].map((s) => (s.id === queueStageId ? { ...s, role: 'queue' } : s)),
       orkioStageProperty: null,
       blockedProperty: null,
       rules: [],

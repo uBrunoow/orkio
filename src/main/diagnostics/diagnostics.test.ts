@@ -12,6 +12,11 @@ function deps(overrides: Partial<DiagnosticsDeps> = {}): DiagnosticsDeps {
     config: { schemaVersion: 11, readOnly: false },
     db: openDatabase(':memory:'),
     flows: { counts: () => ({ total: 4, active: 1 }) },
+    runs: { counts: () => ({ total: 7, active: 2 }) },
+    board: {
+      counts: () => ({ events: 12, pendingWrites: 5 }),
+      stuckWrites: (min) => (min === 3 ? [{}, {}] : [])
+    },
     connections: async () => [
       {
         name: 'GitHub',
@@ -46,7 +51,12 @@ describe('collectDiagnostics', () => {
     expect(text).toContain('- Versão: 0.2.1')
     expect(text).toMatch(/- Banco local: v\d+/)
     expect(text).toContain('- Integridade do banco: ok')
-    expect(text).toContain('- Escritas pendentes no Notion: 0')
+    // Contagens pelos donos das tabelas (quadro e execuções).
+    expect(text).toContain('- Escritas pendentes no Notion: 5')
+    expect(text).toContain('- Escritas com 3+ tentativas: 2')
+    expect(text).toContain('- Eventos de tarefas: 12')
+    expect(text).toContain('- Execuções do Claude Code: 7')
+    expect(text).toContain('- Claude Code rodando ou na fila: 2')
     expect(text).toContain('- GitHub: conectado')
     expect(text).toContain('- Notion: erro')
     expect(text).toContain('- gh: não encontrado')
@@ -72,6 +82,8 @@ describe('collectDiagnostics', () => {
       deps({
         db: null,
         flows: null,
+        runs: null,
+        board: null,
         toolVersion: async () => {
           throw new Error('boom')
         },

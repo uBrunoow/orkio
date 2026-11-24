@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Timestamp } from '@/components/Timestamp'
-import { EVENT_LABELS, type AutomationRule } from '../../../../shared/automation'
-import { EVENT_PHRASES, describeRule } from '../../../../shared/flow'
+import { EVENT_META, type AutomationRule } from '../../../../shared/automation'
+import { describeRule } from '../../../../shared/flow'
 import type { ActivityItem } from '../../../../shared/overview'
 import { ExecutionsTable, SentenceDetail } from '../../components/SentenceDetail'
 import { StatusToken } from '../../components/StatusToken'
@@ -48,7 +48,7 @@ export function RuleDetail({
       sentence={describeRule(rule, stages)}
       starts={
         <div className="flex flex-col gap-1">
-          <p>Quando {EVENT_PHRASES[rule.trigger]}.</p>
+          <p>Quando {EVENT_META[rule.trigger].phrase}.</p>
           {conditions.map((c) => (
             <p key={c} className="text-xs text-muted-foreground">
               {c}
@@ -85,7 +85,7 @@ export function RuleDetail({
           )
         },
         { label: 'Nome', value: rule.name },
-        { label: 'Evento', value: EVENT_LABELS[rule.trigger] },
+        { label: 'Evento', value: EVENT_META[rule.trigger].label },
         { label: 'Ordem', value: `${index + 1}ª de ${total}` },
         {
           label: 'Última execução',

@@ -189,6 +189,7 @@ beforeEach(async () => {
     config,
     localDir: join(dir, 'agents'),
     hasActiveFlow: (t) => active.has(t),
+    agentRuns: () => ({ count: 0, costUsd: 0, startedAt: [] }),
     stageIds: () => STAGES,
     actor: () => 'bruno',
     emit: () => undefined,
@@ -196,7 +197,6 @@ beforeEach(async () => {
   })
   service = new OrchestratorService({
     config,
-    db,
     store,
     board: {
       get: async () =>
@@ -369,9 +369,10 @@ describe('salvar', () => {
 
     // Salvar de novo (ligado) mantém a data; desligar limpa.
     clock += 60_000
-    expect((await service.save(P, { ...ENABLED, lanes: [...ENABLED.lanes].reverse() })).config.enabledSince).toBe(
-      state.config.enabledSince
-    )
+    expect(
+      (await service.save(P, { ...ENABLED, lanes: [...ENABLED.lanes].reverse() })).config
+        .enabledSince
+    ).toBe(state.config.enabledSince)
     expect((await service.save(P, { ...ENABLED, enabled: false })).config.enabledSince).toBeNull()
   })
 })

@@ -198,7 +198,7 @@ export function TaskPanel({
     <TaskChanges
       projectId={projectId}
       taskId={card.taskId}
-      stageName={card.stageId ? stageName(card.stageId) : null}
+      done={card.stageId !== null && stages.find((s) => s.id === card.stageId)?.role === 'done'}
       runs={runs}
     />
   )

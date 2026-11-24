@@ -10,7 +10,7 @@
 import type { TaskEventDetailInput } from '../../shared/task-events'
 import { WEEK_MS } from '../../shared/overview'
 import type { StageFlow } from '../../shared/task-flow'
-import { defaultRules } from '../../shared/automation'
+import { defaultRules, type AutomationRule } from '../../shared/automation'
 import { upgradeAlvaFlows } from '../../shared/alva-templates'
 import {
   diffFlow,
@@ -20,13 +20,10 @@ import {
   type ConfigEvent
 } from '../../shared/flow'
 import {
-  findOption,
   reconcile,
   stageMatchesStatus,
   suggestStages,
   validateStages,
-  keptQueueStage,
-  queueStageOf,
   type BoardConfig,
   type BoardStage,
   type ReconcileTask,
@@ -38,7 +35,13 @@ import {
   type BoardView
 } from '../../shared/board'
 import type { OrkioConfig } from '../config/orkio-config'
-import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
+import { projectFlows, withProjectFlows } from '../config/queries'
+import {
+  applyPropertyWrites,
+  propertyWritesMatch,
+  type PropertyWrite,
+  type PropertyWrites
+} from '../connectors/notion/notion.schema'
 import type { CachedTasks } from '../notion/notion-workspace.service'
 import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
 import type { BoardStore, PendingWrite } from './board.store'
@@ -47,6 +50,7 @@ import type { Tx } from '../db/database'
 import type { NotionMapping, NotionPropertySummary } from '../../shared/notion'
 import type { Result } from '../../shared/result'
 import { isApiError } from '../net/http'
+import { canReconnect, type NotionConnectionMethod } from '../../shared/notion-errors'
 
 type Err = Extract<Result<never>, { ok: false }>['error']
 
@@ -143,10 +147,7 @@ export class BoardService {
   /** Últimas tarefas lidas por projeto (mover offline usa os valores conhecidos do Notion). */
   private readonly snapshots = new Map<string, Snapshot>()
   /** Escritas confirmadas há pouco: o Notion pode ainda devolver o valor antigo na consulta. */
-  private readonly recent = new Map<
-    string,
-    { properties: Record<string, unknown>; until: number }
-  >()
+  private readonly recent = new Map<string, { properties: PropertyWrites; until: number }>()
   /** Última mensagem de falha transitória por tarefa (exibida no card). */
   private readonly retryMessages = new Map<string, string>()
 
@@ -226,7 +227,7 @@ export class BoardService {
     // "Atualizar" (force) é um pedido explícito pela verdade do Notion: sem janela de espera.
     if (force) this.recent.clear()
     for (const [taskId, recent] of this.recent) {
-      if (recent.until < nowMs || this.notionHas(data.values[taskId], recent.properties)) {
+      if (recent.until < nowMs || propertyWritesMatch(data.values[taskId], recent.properties)) {
         this.recent.delete(taskId)
       } else pending.add(taskId)
     }
@@ -335,7 +336,7 @@ export class BoardService {
       const moved = this.deps.store.transaction(() =>
         this.applyMove(projectId, taskId, stageId, { source: 'manual' })
       )
-      if (moved) this.writes.kick()
+      if (moved) void this.writes.kick()
       return this.card(projectId, taskId)
     })
   }
@@ -362,7 +363,7 @@ export class BoardService {
 
   /** Depois de um ciclo de automações: envia as escritas e avisa a tela. */
   flushWrites(): void {
-    this.writes.kick()
+    void this.writes.kick()
   }
 
   /** As tarefas já foram carregadas nesta sessão (necessário para mover)? */
@@ -477,7 +478,7 @@ export class BoardService {
         })
         this.syncDesired(projectId, taskId, board, snapshot, before)
       })
-      this.writes.kick()
+      void this.writes.kick()
       return this.card(projectId, taskId)
     })
   }
@@ -508,27 +509,26 @@ export class BoardService {
     const state = this.localState(projectId, taskId)
     const task = snapshot.data.tasks.find((t) => t.id === taskId)!
     const values = snapshot.data.values[taskId] ?? {}
-    const properties: Record<string, unknown> = {}
+    const properties: PropertyWrites = {}
     const stage = board.stages.find((s) => s.id === state.stageId)
     if (stage) {
       const status = task.status ? { id: task.status.id ?? null, name: task.status.name } : null
       if (!stageMatchesStatus(stage, status)) {
         const type = snapshot.statusType === 'select' ? 'select' : 'status'
-        properties[snapshot.data.mapping.status.id] = { [type]: { name: stage.notionStatus.name } }
+        properties[snapshot.data.mapping.status.id] = { type, name: stage.notionStatus.name }
       }
       const orkio = board.orkioStageProperty
-      if (orkio) {
-        const current = values[orkio.id]
-        if (!current || current.type === 'checkbox' || current.name !== stage.name) {
-          properties[orkio.id] = { select: { name: stage.name } }
-        }
+      if (orkio && !propertyWritesMatch(values, { [orkio.id]: orkioStage(stage.name) })) {
+        properties[orkio.id] = orkioStage(stage.name)
       }
     }
     const blockedProp = board.blockedProperty
     if (blockedProp) {
       const current = values[blockedProp.id]
       const notionBlocked = current?.type === 'checkbox' ? current.checked : false
-      if (notionBlocked !== state.blocked) properties[blockedProp.id] = { checkbox: state.blocked }
+      if (notionBlocked !== state.blocked) {
+        properties[blockedProp.id] = { type: 'checkbox', checked: state.blocked }
+      }
     }
 
     if (Object.keys(properties).length === 0) {
@@ -608,9 +608,7 @@ export class BoardService {
         })
       }
     })
-    const canReconnect =
-      error.code === 'not_found' &&
-      (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth'
+    const reconnect = canReconnect(error.code, await this.connectionMethod(), 'write')
     this.deps.onSync({
       projectId: write.projectId,
       taskId: write.taskPageId,
@@ -618,15 +616,13 @@ export class BoardService {
       stageId: write.rollback.stageId,
       blocked: write.rollback.blocked,
       message: `O Notion recusou a mudança e o card voltou. ${error.message}`,
-      ...(canReconnect ? { canReconnect: true } : {})
+      ...(reconnect ? { canReconnect: true } : {})
     })
   }
 
   private onRetry(write: PendingWrite, error: { code: string; message: string }): void {
-    const auth =
-      error.code === 'unauthorized' ||
-      error.code === 'invalid_grant' ||
-      error.code === 'not_connected'
+    // Transitório: só a conexão perdida/expirada se resolve reconectando (não depende do método).
+    const auth = canReconnect(error.code, null, 'write')
     const message = auth
       ? `${error.message} A mudança será enviada depois de reconectar.`
       : BOARD_MESSAGES.retrying
@@ -643,12 +639,12 @@ export class BoardService {
     })
   }
 
-  // ---------- Fluxo (3C) ----------
+  // ---------- Salvar a configuração (um caminho só) ----------
 
   /**
-   * Salva etapas + automações do editor de fluxo. Valida de novo aqui (mesma função pura da tela),
-   * move as tarefas das etapas removidas para o destino escolhido (mesmo caminho do movimento
-   * manual, com escrita no Notion se o status mudar) e registra o evento de configuração.
+   * Salva etapas + automações do editor de fluxo (Colunas e Automações). Mesmo caminho do
+   * `save` (`commit`): mesma validação (`validateFlow`, a da tela), mesmas ligações e o mesmo
+   * destino das tarefas das etapas removidas.
    */
   async saveFlow(projectId: string, draft: FlowDraft): Promise<Result<BoardView>> {
     return this.wrap(async () => {
@@ -657,140 +653,52 @@ export class BoardService {
       if (!previous) {
         throw new BoardError({ code: 'not_configured', message: BOARD_MESSAGES.noBoard })
       }
-      const optionsResult = await this.deps.notion.statusOptions()
-      if (!optionsResult.ok) throw new BoardError(optionsResult.error)
-      const { options } = optionsResult.value
-
-      const issues = validateFlow(draft, {
-        statusOptions: options,
-        savedStageIds: previous.stages.map((s) => s.id),
-        taskCounts: this.deps.store.taskCounts(projectId)
-      }).filter((i) => i.level === 'error')
-      if (issues.length > 0) {
-        throw new BoardError({ code: 'invalid', message: issues.map((i) => i.message).join(' ') })
-      }
-
-      // Garante as tarefas em memória para mover as das etapas removidas.
-      if (!this.snapshots.has(projectId)) await this.load(projectId, false)
-
-      const stages = toBoardStages(draft.stages, options)
-      const board: BoardConfig = {
-        ...withoutQueueStage(previous),
+      const options = await this.statusOptionsOrThrow()
+      const stages = this.checkedStages(projectId, draft, previous, options.options)
+      return this.commit(projectId, previous, {
         stages,
         rules: draft.rules,
-        ...keptQueueStage(
-          draft.queueStageId !== undefined ? draft.queueStageId : previous.queueStageId,
-          stages
-        ),
-        updatedAt: this.now().toISOString()
-      }
-      // 5A: ligações etapa → fluxo de tarefa (só para etapas e fluxos que existem).
-      const current = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
-      const flowIds = new Set(current.flows.map((f) => f.id))
-      const bindings = (draft.bindings ?? current.bindings).filter(
-        (b, i, all) =>
-          stages.some((st) => st.id === b.stageId) &&
-          flowIds.has(b.flowId) &&
-          all.findIndex((x) => x.stageId === b.stageId) === i
-      )
-      try {
-        await this.deps.config.update((c) => ({
-          ...c,
-          boards: { ...c.boards, [projectId]: board },
-          flows: { ...c.flows, [projectId]: { ...current, bindings } }
-        }))
-      } catch (e) {
-        throw new BoardError({
-          code: 'storage',
-          message:
-            e instanceof ConfigReadOnlyError ? BOARD_MESSAGES.readOnly : BOARD_MESSAGES.storage
-        })
-      }
-
-      const changes = diffFlow(previous, board)
-      if (queueStageOf(previous) !== queueStageOf(board)) {
-        const name = stages.find((s) => s.id === queueStageOf(board))?.name ?? ''
-        changes.push(`Coluna “A fazer” da lista lateral: “${name}”`)
-      }
-      changes.push(...diffBindings(current.bindings, bindings, stages, current.flows))
-      let moved = 0
-      this.deps.store.transaction(() => {
-        for (const removed of previous.stages) {
-          if (stages.some((s) => s.id === removed.id)) continue
-          const destination = draft.removals[removed.id]
-          const tasks = this.deps.store.tasksInStage(projectId, removed.id)
-          for (const taskId of tasks) {
-            if (
-              !destination ||
-              !this.snapshots.get(projectId)?.data.tasks.some((t) => t.id === taskId)
-            ) {
-              continue
-            }
-            if (
-              this.applyMove(projectId, taskId, destination, {
-                source: 'manual',
-                detail: { flow: 'stage_removed', removedStage: removed.name },
-                stageRemoved: true
-              })
-            ) {
-              moved++
-            }
-          }
-          if (tasks.length > 0 && destination) {
-            const name = stages.find((s) => s.id === destination)?.name ?? ''
-            changes.push(`Tarefas de “${removed.name}” movidas para “${name}”`)
-          }
-        }
-        if (changes.length > 0) {
-          this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
-        }
+        removals: draft.removals,
+        bindings: draft.bindings,
+        orkioStageProperty: previous.orkioStageProperty,
+        blockedProperty: previous.blockedProperty
       })
-      if (moved > 0) this.writes.kick()
-      return this.load(projectId, false)
     })
   }
 
-  async configEvents(projectId: string): Promise<ConfigEvent[]> {
-    this.project(projectId)
-    return this.deps.store.configEvents(projectId)
-  }
-
-  private actor(): string {
-    try {
-      return this.deps.actor?.() || 'você'
-    } catch {
-      return 'você'
-    }
-  }
-
-  // ---------- Configuração ----------
-
+  /**
+   * Cria o quadro (ou ajusta etapas, "Etapa Orkio" e "Bloqueada" pela tela do Notion). Valida como
+   * o editor de fluxo; quadro novo ganha as regras padrão. As mudanças no Notion ("Etapa Orkio")
+   * só acontecem depois da validação.
+   */
   async save(projectId: string, input: BoardSaveInput): Promise<Result<BoardView>> {
     return this.wrap(async () => {
       this.project(projectId)
-      const optionsResult = await this.deps.notion.statusOptions()
-      if (!optionsResult.ok) throw new BoardError(optionsResult.error)
-      const { options, properties } = optionsResult.value
+      const { options, properties } = await this.statusOptionsOrThrow()
       const previous = this.deps.config.get().boards[projectId]
 
-      const draft: BoardStage[] = input.stages.map((s, index) => {
+      // Etapas mantidas guardam cor e papel (a tela do Notion não edita os dois).
+      const draftStages = input.stages.map((s) => {
+        const kept = s.id ? previous?.stages.find((p) => p.id === s.id) : undefined
         const option = options.find((o) => o.id === s.notionStatusId)
-        const keep = s.id ? previous?.stages.find((p) => p.id === s.id) : undefined
+        const role = kept ? kept.role : s.role
         return {
-          id: keep?.id ?? this.newId(),
+          id: kept?.id ?? this.newId(),
           name: s.name,
-          order: index,
-          notionStatus: option
-            ? { id: option.id, name: option.name }
-            : { id: null, name: s.notionStatusId },
-          ...(option ? { color: option.color } : {})
+          ...(kept?.color ? { color: kept.color } : {}),
+          ...(role ? { role } : {}),
+          notionStatusId: option?.id ?? null,
+          ...(option ? {} : { missingStatusName: s.notionStatusId })
         }
       })
-      const { stages, issues } = validateStages(draft, options)
-      const errors = issues.filter((i) => i.level === 'error')
-      if (errors.length > 0) {
-        throw new BoardError({ code: 'invalid', message: errors.map((e) => e.message).join(' ') })
-      }
+      // Regras salvas são conferidas contra as etapas novas; as padrão (quadro novo) são geradas
+      // a partir delas (papel ausente = regra desligada).
+      const stages = this.checkedStages(
+        projectId,
+        { stages: draftStages, rules: previous?.rules ?? [], removals: {} },
+        previous,
+        options
+      )
 
       let orkioStageProperty: BoardConfig['orkioStageProperty'] = null
       const config = this.deps.config.get().notion
@@ -857,48 +765,159 @@ export class BoardService {
         blockedProperty = { id: prop.id, name: prop.name }
       }
 
-      const board: BoardConfig = {
+      return this.commit(projectId, previous, {
         stages,
-        orkioStageProperty,
-        blockedProperty,
-        // Quadro novo ganha as regras padrão; ajustar etapas mantém as regras (editor na 3C).
         rules: previous?.rules ?? defaultRules(stages).rules,
-        ...keptQueueStage(previous?.queueStageId, stages),
-        updatedAt: this.now().toISOString()
+        removals: {},
+        bindings: undefined,
+        orkioStageProperty,
+        blockedProperty
+      })
+    })
+  }
+
+  private async statusOptionsOrThrow(): Promise<{
+    options: StatusOption[]
+    properties: NotionPropertySummary[]
+  }> {
+    const r = await this.deps.notion.statusOptions()
+    if (!r.ok) throw new BoardError(r.error)
+    return { options: r.value.options, properties: r.value.properties }
+  }
+
+  /** A validação única (`validateFlow`, a mesma da tela): erros bloqueiam. */
+  private checkedStages(
+    projectId: string,
+    draft: FlowDraft,
+    previous: BoardConfig | undefined,
+    options: readonly StatusOption[]
+  ): BoardStage[] {
+    const issues = validateFlow(draft, {
+      statusOptions: options,
+      savedStageIds: previous?.stages.map((s) => s.id) ?? [],
+      taskCounts: this.deps.store.taskCounts(projectId)
+    }).filter((i) => i.level === 'error')
+    if (issues.length > 0) {
+      throw new BoardError({ code: 'invalid', message: issues.map((i) => i.message).join(' ') })
+    }
+    return toBoardStages(draft.stages, options)
+  }
+
+  /**
+   * Grava o quadro (já validado) e os efeitos de mudar etapas, iguais para quem salva:
+   * - ligações etapa → fluxo (as do rascunho ou as salvas) pelo escritor único (`withProjectFlows`);
+   * - quadro novo num projeto que já usa os modelos Alva: as etapas de revisão ganham os fluxos
+   *   padrão (calculado dentro da escrita, sobre a config do momento);
+   * - tarefas das etapas removidas vão para o destino escolhido (caminho do movimento manual);
+   * - histórico de configuração.
+   */
+  private async commit(
+    projectId: string,
+    previous: BoardConfig | undefined,
+    next: {
+      stages: BoardStage[]
+      rules: AutomationRule[]
+      removals: FlowDraft['removals']
+      bindings: StageFlow[] | undefined
+      orkioStageProperty: BoardConfig['orkioStageProperty']
+      blockedProperty: BoardConfig['blockedProperty']
+    }
+  ): Promise<BoardView> {
+    const { stages } = next
+    const board: BoardConfig = {
+      stages,
+      orkioStageProperty: next.orkioStageProperty,
+      blockedProperty: next.blockedProperty,
+      rules: next.rules,
+      updatedAt: this.now().toISOString()
+    }
+    // Garante as tarefas em memória para mover as das etapas removidas.
+    const removesStages = previous?.stages.some((p) => !stages.some((s) => s.id === p.id))
+    if (removesStages && !this.snapshots.has(projectId)) await this.load(projectId, false)
+
+    const before = projectFlows(this.deps.config.get(), projectId)
+    let flowChanges: string[] = []
+    try {
+      await this.deps.config.update((c) => {
+        const withBoard = { ...c, boards: { ...c.boards, [projectId]: board } }
+        const current = projectFlows(c, projectId)
+        let flows = { ...current, bindings: next.bindings ?? current.bindings }
+        flowChanges = []
+        if (!previous) {
+          const alva = upgradeAlvaFlows(flows, stages)
+          flows = alva.flows
+          flowChanges = alva.changes
+        }
+        // Projeto sem fluxos e nada a ligar: não cria a entrada.
+        if (!c.flows[projectId] && !next.bindings && flowChanges.length === 0) return withBoard
+        return withProjectFlows(withBoard, projectId, flows)
+      })
+    } catch (e) {
+      throw new BoardError({
+        code: 'storage',
+        message: e instanceof ConfigReadOnlyError ? BOARD_MESSAGES.readOnly : BOARD_MESSAGES.storage
+      })
+    }
+    const after = projectFlows(this.deps.config.get(), projectId)
+
+    const changes = previous
+      ? [
+          ...diffFlow(previous, board),
+          ...diffBindings(before.bindings, after.bindings, stages, after.flows)
+        ]
+      : [
+          `Quadro criado com ${stages.length} etapas e ${board.rules.length} automações`,
+          ...flowChanges
+        ]
+    let moved = 0
+    this.deps.store.transaction(() => {
+      for (const removed of previous?.stages ?? []) {
+        if (stages.some((s) => s.id === removed.id)) continue
+        const destination = next.removals[removed.id]
+        const tasks = this.deps.store.tasksInStage(projectId, removed.id)
+        for (const taskId of tasks) {
+          if (
+            !destination ||
+            !this.snapshots.get(projectId)?.data.tasks.some((t) => t.id === taskId)
+          ) {
+            continue
+          }
+          if (
+            this.applyMove(projectId, taskId, destination, {
+              source: 'manual',
+              detail: { flow: 'stage_removed', removedStage: removed.name },
+              stageRemoved: true
+            })
+          ) {
+            moved++
+          }
+        }
+        if (tasks.length > 0 && destination) {
+          const name = stages.find((s) => s.id === destination)?.name ?? ''
+          changes.push(`Tarefas de “${removed.name}” movidas para “${name}”`)
+        }
       }
-      // Quadro novo num projeto que já usa os modelos Alva: Revisando/Revisado ganham os fluxos
-      // padrão (só colunas sem fluxo; fluxos do usuário não mudam). Calculado dentro da escrita,
-      // sobre a config do momento (nenhuma escrita de fluxos no meio se perde).
-      let alvaChanges: string[] = []
-      try {
-        await this.deps.config.update((c) => {
-          alvaChanges = []
-          const next = { ...c, boards: { ...c.boards, [projectId]: board } }
-          if (previous) return next
-          const alva = upgradeAlvaFlows(c.flows[projectId] ?? { flows: [], bindings: [] }, stages)
-          if (alva.changes.length === 0) return next
-          alvaChanges = alva.changes
-          return { ...next, flows: { ...c.flows, [projectId]: alva.flows } }
-        })
-      } catch (e) {
-        throw new BoardError({
-          code: 'storage',
-          message:
-            e instanceof ConfigReadOnlyError ? BOARD_MESSAGES.readOnly : BOARD_MESSAGES.storage
-        })
-      }
-      const changes = previous
-        ? diffFlow(previous, board)
-        : [
-            `Quadro criado com ${stages.length} etapas e ${board.rules.length} automações`,
-            ...alvaChanges
-          ]
       if (changes.length > 0) {
         this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
       }
-      if (orkioStageProperty) this.deps.notion.invalidateTasks(projectId)
-      return this.load(projectId, orkioStageProperty !== null)
     })
+    if (moved > 0) void this.writes.kick()
+    const propertyChanged = board.orkioStageProperty?.id !== previous?.orkioStageProperty?.id
+    if (propertyChanged && board.orkioStageProperty) this.deps.notion.invalidateTasks(projectId)
+    return this.load(projectId, propertyChanged && board.orkioStageProperty !== null)
+  }
+
+  async configEvents(projectId: string): Promise<ConfigEvent[]> {
+    this.project(projectId)
+    return this.deps.store.configEvents(projectId)
+  }
+
+  private actor(): string {
+    try {
+      return this.deps.actor?.() || 'você'
+    } catch {
+      return 'você'
+    }
   }
 
   // ---------- Auxiliares ----------
@@ -960,37 +979,16 @@ export class BoardService {
   private applyToSnapshot(write: PendingWrite): void {
     const snapshot = this.snapshots.get(write.projectId)
     if (!snapshot) return
-    const values = (snapshot.data.values[write.taskPageId] ??= {})
+    applyPropertyWrites((snapshot.data.values[write.taskPageId] ??= {}), write.properties)
     const task = snapshot.data.tasks.find((t) => t.id === write.taskPageId)
-    for (const [propId, raw] of Object.entries(write.properties)) {
-      const v = raw as Record<string, { name?: string } | boolean>
-      if (typeof v['checkbox'] === 'boolean') {
-        values[propId] = { type: 'checkbox', checked: v['checkbox'] }
-        continue
-      }
-      const type = 'status' in v ? 'status' : 'select'
-      const name = (v[type] as { name?: string } | undefined)?.name ?? null
-      values[propId] = { type, id: null, name }
-      if (task && propId === snapshot.data.mapping.status.id && name) {
-        task.status = { id: null, name, color: task.status?.color ?? 'default' }
-      }
+    const status = write.properties[snapshot.data.mapping.status.id]
+    if (task && status && status.type !== 'checkbox') {
+      task.status = { id: null, name: status.name, color: task.status?.color ?? 'default' }
     }
   }
 
-  private notionHas(
-    values: Record<string, SimplePropertyValue> | undefined,
-    properties: Record<string, unknown>
-  ): boolean {
-    if (!values) return false
-    return Object.entries(properties).every(([propId, raw]) => {
-      const current = values[propId]
-      const v = raw as Record<string, { name?: string } | boolean>
-      if (typeof v['checkbox'] === 'boolean') {
-        return current?.type === 'checkbox' && current.checked === v['checkbox']
-      }
-      const wanted = (v['status'] ?? v['select']) as { name?: string } | undefined
-      return current !== undefined && current.type !== 'checkbox' && current.name === wanted?.name
-    })
+  private connectionMethod(): Promise<NotionConnectionMethod> {
+    return this.deps.notion.connectionMethod().catch(() => null)
   }
 
   private async wrap<T>(run: () => Promise<T>): Promise<Result<T>> {
@@ -999,14 +997,10 @@ export class BoardService {
     } catch (e) {
       if (e instanceof BoardError) return { ok: false, error: e.info }
       if (isApiError(e, 'notion')) {
-        const canReconnect =
-          e.code === 'unauthorized' ||
-          e.code === 'invalid_grant' ||
-          (e.code === 'not_found' &&
-            (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth')
+        const reconnect = canReconnect(e.code, await this.connectionMethod(), 'read')
         return {
           ok: false,
-          error: { code: e.code, message: e.message, ...(canReconnect ? { canReconnect } : {}) }
+          error: { code: e.code, message: e.message, ...(reconnect ? { canReconnect: true } : {}) }
         }
       }
       return { ok: false, error: { code: 'unexpected', message: BOARD_MESSAGES.unknown } }
@@ -1030,14 +1024,6 @@ function propertyIdByName(body: unknown, name: string): string | null {
   if (typeof prop !== 'object' || prop === null) return null
   const id = (prop as { id?: unknown }).id
   return typeof id === 'string' && id ? id : null
-}
-
-/** Para testes e para o painel: nome da opção de status para uma etapa. */
-export function optionForStage(
-  options: readonly StatusOption[],
-  stage: BoardStage
-): StatusOption | null {
-  return findOption(options, stage.notionStatus)
 }
 
 /** Frases do histórico de configuração para as ligações etapa → fluxo (5A). */
@@ -1067,8 +1053,7 @@ function diffBindings(
   return out
 }
 
-function withoutQueueStage(board: BoardConfig): BoardConfig {
-  const rest = { ...board }
-  delete rest.queueStageId
-  return rest
+/** Valor da "Etapa Orkio" (select com o nome da etapa). */
+function orkioStage(name: string): PropertyWrite {
+  return { type: 'select', name }
 }

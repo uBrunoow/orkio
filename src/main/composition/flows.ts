@@ -11,7 +11,7 @@ import type { BoardStore } from '../board/board.store'
 import { buildCatalog } from '../claude/catalog'
 import type { ClaudeServiceDeps } from '../claude/claude.service'
 import type { OrkioConfig } from '../config/orkio-config'
-import { projectById } from '../config/queries'
+import { projectById, projectFlows } from '../config/queries'
 import {
   FlowError,
   FlowRunner,
@@ -92,12 +92,8 @@ export function createFlows(deps: {
   const runner = new FlowRunner({
     db: deps.boardStore.db,
     store: deps.boardStore,
-    flows: (projectId) => deps.configStore.get().flows[projectId] ?? { flows: [], bindings: [] },
-    currentStage: (_projectId, taskId) =>
-      deps.boardStore.db.get<{ stage_id: string | null }>(
-        'SELECT stage_id FROM task_state WHERE task_page_id = ?',
-        taskId
-      )?.stage_id ?? null,
+    flows: (projectId) => projectFlows(deps.configStore.get(), projectId),
+    currentStage: (_projectId, taskId) => deps.boardStore.state(taskId)?.stageId ?? null,
     prepare: async (projectId, taskId) => {
       const r = await claude.service.flowContext(projectId, taskId)
       if (!r.ok) throw new FlowError(r.error.code, r.error.message)

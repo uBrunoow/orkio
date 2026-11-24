@@ -304,10 +304,11 @@ describe('Alva: revisão publicada (Task 18)', () => {
 
 describe('upgradeAlvaFlows (ligações padrão e migração)', () => {
   const stages = [
-    { id: 'st-prio', name: 'Prioridades' },
-    { id: 'st-dev', name: 'Em andamento' },
-    { id: 'st-rev', name: 'revisándo' },
-    { id: 'st-ok', name: 'Revisado' }
+    { id: 'st-prio', name: 'Prioridades', role: 'queue' as const },
+    { id: 'st-dev', name: 'Em andamento', role: 'work' as const },
+    // O nome não importa: vale o papel.
+    { id: 'st-rev', name: 'Em revisão', role: 'review' as const },
+    { id: 'st-ok', name: 'Revisado', role: 'reviewed' as const }
   ]
   const userFlow: Flow = { id: 'meu-fluxo', name: 'Meu fluxo', steps: [] }
 
@@ -318,7 +319,7 @@ describe('upgradeAlvaFlows (ligações padrão e migração)', () => {
     expect(r.flows).toBe(pf)
   })
 
-  it('acrescenta os modelos que faltam e liga Revisando/Revisado vazias (sem acento/caixa)', () => {
+  it('acrescenta os modelos que faltam e liga as etapas de revisão vazias (pelo papel)', () => {
     const old = { ...alvaPlanFlow(), steps: alvaPlanFlow().steps.slice(0, 1) }
     const pf = {
       flows: [old, userFlow],
@@ -342,7 +343,7 @@ describe('upgradeAlvaFlows (ligações padrão e migração)', () => {
     )
     expect(r.changes).toContain('Fluxo “Alva: revisão publicada” criado (modelo Alva)')
     expect(r.changes).toContain(
-      'Coluna “revisándo” ganhou o fluxo “Alva: revisão publicada” (ao entrar)'
+      'Coluna “Em revisão” ganhou o fluxo “Alva: revisão publicada” (ao entrar)'
     )
   })
 

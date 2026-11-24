@@ -25,6 +25,17 @@ let service: AgentsService
 let activeFlows: Set<string>
 let emitted: string[]
 let now: Date
+/** Execuções conhecidas (o dono de `agent_runs` é o RunService; aqui, a consulta simulada). */
+let agentRunRows: { key: string; startedAt: string; cost: number | null }[]
+
+const agentRuns = (key: string, since: string) => {
+  const rows = agentRunRows.filter((r) => r.key === key && r.startedAt >= since)
+  return {
+    count: rows.length,
+    costUsd: rows.reduce((sum, r) => sum + (r.cost ?? 0), 0),
+    startedAt: rows.map((r) => r.startedAt)
+  }
+}
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'orkio-agents-'))
@@ -50,6 +61,7 @@ beforeEach(async () => {
   db = openDatabase(':memory:')
   store = new BoardStore(db)
   activeFlows = new Set()
+  agentRunRows = []
   emitted = []
   now = new Date(2026, 10, 20, 15, 0, 0)
   service = new AgentsService({
@@ -58,6 +70,7 @@ beforeEach(async () => {
     config,
     localDir,
     hasActiveFlow: (taskId) => activeFlows.has(taskId),
+    agentRuns,
     stageIds: () => ['s1', 's2'],
     actor: () => 'bruno',
     emit: (projectId) => emitted.push(projectId),
@@ -260,14 +273,8 @@ describe('atribuição', () => {
 })
 
 describe('limites diários', () => {
-  const run = (id: string, startedAt: Date, cost: number | null): void => {
-    db.run(
-      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, cost, agent_key)
-       VALUES (?, 't1', 'p1', 'command', 'x', 'succeeded', ?, ?, 'repo:ana')`,
-      id,
-      startedAt.toISOString(),
-      cost
-    )
+  const run = (_id: string, startedAt: Date, cost: number | null): void => {
+    agentRunRows.push({ key: 'repo:ana', startedAt: startedAt.toISOString(), cost })
   }
 
   it('conta execuções e custo do dia local', () => {
@@ -292,14 +299,8 @@ describe('limites diários', () => {
 
 describe('atividade (tela Agentes)', () => {
   it('atividade por hora nas últimas 12 h', async () => {
-    const run = (id: string, startedAt: Date, key = 'builtin:revisor'): void => {
-      db.run(
-        `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, cost, agent_key)
-         VALUES (?, 't1', 'p1', 'command', 'x', 'succeeded', ?, NULL, ?)`,
-        id,
-        startedAt.toISOString(),
-        key
-      )
+    const run = (_id: string, startedAt: Date, key = 'builtin:revisor'): void => {
+      agentRunRows.push({ key, startedAt: startedAt.toISOString(), cost: null })
     }
     const ago = (ms: number): Date => new Date(now.getTime() - ms)
     run('a', ago(10 * 60_000))
@@ -356,6 +357,7 @@ describe('agentes embutidos (8B)', () => {
       config: (service as unknown as { deps: { config: never } }).deps.config,
       localDir,
       hasActiveFlow: () => false,
+      agentRuns,
       stageIds: () => ['s1', 's2'],
       actor: () => 'bruno',
       emit: () => undefined,

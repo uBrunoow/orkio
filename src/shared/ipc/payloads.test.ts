@@ -98,9 +98,14 @@ describe('payloads: forma e cópia só com campos conhecidos', () => {
     ).toBe(INVALID)
     expect(parseFlowDraft({ ...draft, rules: [{ id: 'x', trigger: 'pr.hack' }] })).toBe(INVALID)
     expect(parseFlowDraft({ ...draft, removals: { 'stage-2': '../y' } })).toBe(INVALID)
-    expect(parseFlowDraft({ ...draft, queueStageId: '../y' })).toBe(INVALID)
-    const queue = parseFlowDraft({ ...draft, queueStageId: 'stage-2' })
-    expect(queue !== INVALID && queue.queueStageId).toBe('stage-2')
+    const role = (r: unknown) =>
+      parseFlowDraft({
+        ...draft,
+        stages: [{ id: 'stage-1', name: 'A', notionStatusId: null, role: r }]
+      })
+    expect(role('dono')).toBe(INVALID)
+    const queue = role('queue')
+    expect(queue !== INVALID && queue.stages[0]?.role).toBe('queue')
   })
 
   it('claude.start: forma, limites e só os campos conhecidos', () => {

@@ -11,12 +11,8 @@ import { ensureScratch } from '../claude/scratch'
 import { REVIEW_PATH } from '../../shared/orkio-scratch'
 import type { OrkioAction } from '../flows/flow-runner'
 import { errorName } from '../errors'
-import {
-  buildReviewMarkdown,
-  pendingCount,
-  REVIEW_MESSAGES,
-  type ReviewThreadsService
-} from './review-threads'
+import { pendingCount } from '../../shared/review'
+import { buildReviewMarkdown, REVIEW_MESSAGES, type ReviewThreadsService } from './review-threads'
 
 export interface ReviewActionDeps {
   reviews: Pick<ReviewThreadsService, 'get'>

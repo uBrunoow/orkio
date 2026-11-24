@@ -19,13 +19,14 @@ import {
 } from '@/components/form'
 import { cn } from '@/lib/utils'
 import { StatusToken } from '../../components/StatusToken'
-import type { AutomationRule, EventKind } from '../../../../shared/automation'
+import {
+  EVENT_KINDS,
+  EVENT_META,
+  type AutomationRule,
+  type EventKind
+} from '../../../../shared/automation'
 import type { Flow, StageFlow } from '../../../../shared/task-flow'
 import {
-  EVENT_DESCRIPTIONS,
-  EVENT_KINDS,
-  EVENT_LABELS,
-  EVENT_PHRASES,
   FLOW_COLORS,
   describeRule,
   diffFlow,
@@ -55,7 +56,13 @@ import {
 import { useProjectActivity } from '../../components/SentenceDetail'
 import { RuleDetail } from './RuleDetail'
 import type { BoardSettingsTab } from '../../app/routes'
-import { queueStageOf, type BoardView } from '../../../../shared/board'
+import {
+  STAGE_ROLES,
+  STAGE_ROLE_LABEL,
+  isStageRole,
+  type BoardView,
+  type StageRole
+} from '../../../../shared/board'
 import type { NotionColor } from '../../../../shared/notion'
 import type { Result } from '../../../../shared/result'
 
@@ -146,12 +153,12 @@ function RuleSentence({
   stages: readonly { id: string; name: string }[]
 }): React.JSX.Element {
   const full = describeRule(rule, stages)
-  const head = `Quando ${EVENT_PHRASES[rule.trigger]}`
+  const head = `Quando ${EVENT_META[rule.trigger].phrase}`
   if (!full.startsWith(head)) return <>{full}</>
   const rest = full.slice(head.length)
   const trigger = (
     <em className="rounded-[5px] bg-brand-tint px-1.5 py-px not-italic text-brand-tint-foreground">
-      {EVENT_PHRASES[rule.trigger]}
+      {EVENT_META[rule.trigger].phrase}
     </em>
   )
   if (rule.action.type === 'move_to_stage') {
@@ -188,18 +195,11 @@ function initialDraft(view: BoardView): FlowDraft {
   return {
     stages: fromBoardStages(view.config!.stages),
     rules: view.config!.rules.map((r) => structuredClone(r)),
-    removals: {},
-    queueStageId: view.config!.queueStageId ?? null
+    removals: {}
   }
 }
 
-/** Coluna "A fazer" do rascunho (a escolhida, se ainda está no rascunho; senão a primeira). */
-function draftQueueStage(draft: FlowDraft): string | null {
-  return queueStageOf({
-    stages: draft.stages.map((s, order) => ({ id: s.id, order })),
-    queueStageId: draft.queueStageId ?? null
-  })
-}
+const NO_ROLE = 'nenhum'
 
 interface RuleEditing {
   rule: AutomationRule
@@ -308,15 +308,15 @@ export function FlowPage({
         id: st.id,
         name: st.name,
         notionStatus: { name: options.find((o) => o.id === st.notionStatusId)?.name ?? '' },
-        ...(st.color ? { color: st.color } : {})
+        ...(st.color ? { color: st.color } : {}),
+        ...(st.role ? { role: st.role } : {})
       })),
       rules: d.rules
     })
     const flowChanges = diffFlow(named(baseline), named(draft)).length
     const bindingChanges =
       JSON.stringify(baseline.bindings ?? []) === JSON.stringify(draft.bindings ?? []) ? 0 : 1
-    const queueChanges = draftQueueStage(baseline) === draftQueueStage(draft) ? 0 : 1
-    return flowChanges + bindingChanges + queueChanges
+    return flowChanges + bindingChanges
   }, [baseline, draft, options])
 
   const update = (patch: (d: FlowDraft) => FlowDraft): void => {
@@ -325,6 +325,18 @@ export function FlowPage({
   }
   const updateStage = (id: string, patch: Partial<FlowStageDraft>): void =>
     update((d) => ({ ...d, stages: d.stages.map((s) => (s.id === id ? { ...s, ...patch } : s)) }))
+  /** Um papel por etapa: dar o papel a esta tira das outras. */
+  const setStageRole = (id: string, role: StageRole | null): void =>
+    update((d) => ({
+      ...d,
+      stages: d.stages.map((s) => {
+        const mine = s.id === id
+        if (!mine && !(role && s.role === role)) return s
+        const next = { ...s }
+        delete next.role
+        return mine && role ? { ...next, role } : next
+      })
+    }))
   const setStageStatus = (id: string, optionId: string): void =>
     update((d) => ({
       ...d,
@@ -497,7 +509,7 @@ export function FlowPage({
             <RuleSentence rule={rule} stages={draft.stages} />
           </span>
           <span className="font-mono text-2xs text-subtle-foreground">
-            {i + 1}ª na ordem · {EVENT_LABELS[rule.trigger]} ·{' '}
+            {i + 1}ª na ordem · {EVENT_META[rule.trigger].label} ·{' '}
             {firedLabel(view.ruleCountsWeek[rule.id] ?? 0)}
           </span>
         </button>
@@ -549,7 +561,7 @@ export function FlowPage({
       stages={draft.stages}
       onCancel={() => setEditing(null)}
       onApply={(rule) => {
-        const named = { ...rule, name: rule.name.trim() || EVENT_LABELS[rule.trigger] }
+        const named = { ...rule, name: rule.name.trim() || EVENT_META[rule.trigger].label }
         update((d) => ({
           ...d,
           rules: editing.isNew
@@ -841,13 +853,15 @@ export function FlowPage({
                     />
                   </div>
 
-                  <CheckboxField
-                    label="Coluna “A fazer” da lista lateral"
-                    description="As tarefas desta coluna aparecem em “A fazer”, ao lado do quadro. Sem escolha, vale a primeira coluna."
-                    checked={draftQueueStage(draft) === stage.id}
-                    onChange={(checked) =>
-                      update((d) => ({ ...d, queueStageId: checked ? stage.id : null }))
-                    }
+                  <SelectField
+                    label="Papel da coluna"
+                    description="O que esta coluna é no trabalho, qualquer que seja o nome: regras padrão, fluxos Alva, orquestrador e a lista “A fazer” (sem coluna com esse papel, vale a primeira) usam o papel. Uma coluna por papel."
+                    options={[
+                      { value: NO_ROLE, label: 'Sem papel' },
+                      ...STAGE_ROLES.map((r) => ({ value: r, label: STAGE_ROLE_LABEL[r] }))
+                    ]}
+                    value={stage.role ?? NO_ROLE}
+                    onChange={(value) => setStageRole(stage.id, isStageRole(value) ? value : null)}
                   />
 
                   <StageFlowField
@@ -1119,8 +1133,8 @@ function RuleForm({
         label="Quando"
         options={EVENT_KINDS.map((k) => ({
           value: k,
-          label: EVENT_LABELS[k],
-          description: EVENT_DESCRIPTIONS[k]
+          label: EVENT_META[k].label,
+          description: EVENT_META[k].description
         }))}
         value={rule.trigger}
         onChange={(value) => setRule((r) => ({ ...r, trigger: value as EventKind }))}
@@ -1213,7 +1227,7 @@ function RuleForm({
       <TextField
         label="Nome (opcional)"
         value={rule.name}
-        placeholder={EVENT_LABELS[rule.trigger]}
+        placeholder={EVENT_META[rule.trigger].label}
         onChange={(value) => setRule((r) => ({ ...r, name: value }))}
         className="max-w-sm"
       />
@@ -1304,7 +1318,7 @@ function Simulator({ view, draft }: { view: BoardView; draft: FlowDraft }): Reac
         />
         <SelectField
           label="Evento"
-          options={EVENT_KINDS.map((k) => ({ value: k, label: EVENT_LABELS[k] }))}
+          options={EVENT_KINDS.map((k) => ({ value: k, label: EVENT_META[k].label }))}
           value={event}
           onChange={(value) => {
             setEvent(value as EventKind)

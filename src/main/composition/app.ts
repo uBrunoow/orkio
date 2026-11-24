@@ -352,6 +352,8 @@ export function createApp(): OrkioApp {
           config: { schemaVersion: ORKIO_CONFIG_VERSION, readOnly: configStore.readOnly },
           db: boardStore?.db ?? null,
           flows: work?.flows ?? null,
+          runs: work?.claude.runs ?? null,
+          board: boardStore,
           connections: async () => [
             { name: 'Notion', status: await notion.getStatus() },
             { name: 'GitHub', status: await github.getStatus() }
@@ -468,6 +470,7 @@ function createWork(core: {
     config: configStore,
     localDir: core.paths.agents,
     hasActiveFlow: (taskId) => flowRunner().hasActive(taskId),
+    agentRuns: (key, since) => claude.runs.agentRunsSince(key, since),
     stageIds: (projectId) => configStore.get().boards[projectId]?.stages.map((s) => s.id) ?? [],
     actor: core.actor,
     emit: (projectId) => emit('agentsChanged', { projectId })
@@ -622,7 +625,6 @@ function createWork(core: {
   const runner = flows.runner
   const orchestrator = new OrchestratorService({
     config: configStore,
-    db: boardStore.db,
     store: boardStore,
     board,
     agents,
@@ -675,7 +677,9 @@ function createWork(core: {
 
   // Visão geral (6D): agrega o que já está no app; nunca chama APIs sozinha.
   const overview = new OverviewService({
-    db: boardStore.db,
+    board: boardStore,
+    runStore: claude.runs,
+    worktreeBranch: (taskId) => core.worktrees.get(taskId)?.branch ?? null,
     config: () => configStore.get(),
     projects: async () => (await core.projects.list()).projects,
     flows: () => runner.activeViews(),

@@ -116,7 +116,8 @@ src/
   shared/attachments.ts    # anexos: limites, extensões, mensagens (renderer pré-checa, main confere)
   shared/notion-mapping.ts # regras do mapeamento (tipos por campo, obrigatórios) p/ main e renderer
   shared/task-id-match.ts  # casamento puro de IDs (ORK-142) em branches/títulos
-  shared/task-signals.ts   # TaskSignals, buildTaskSignals, diffSignals (base da Etapa 3)
+  shared/task-signals.ts   # TaskSignals, buildTaskSignals (base da Etapa 3)
+  shared/notion-errors.ts  # política dos erros do Notion: isPermanentNotionError, canReconnect, rótulo
   shared/board.ts          # etapas, template, validação e reconciliação do quadro (puras)
   shared/automation.ts     # snapshot, deriveEvents, regras padrão, evaluate (motor puro)
   shared/agent-run.ts      # tipos das execuções do Claude Code (log normalizado, resumo, status)
@@ -157,7 +158,8 @@ src/
     platform/              # paths.ts (`userDataPaths()`: layout do userData), process.ts (`toolEnv`,
                            # `execExitCode`, `spawnDetached`), dialog.ts (`withDialogWindow`),
                            # site.ts (`siteOrigin()`: o endereço do site para tudo)
-    config/queries.ts      # `projectById`, `automationProjectIds` (perguntas à config com nome)
+    config/queries.ts      # `projectById`, `automationProjectIds`, `projectFlows` (leitura) e
+                           # `withProjectFlows` (único escritor de `flows[id]`: ligações válidas)
     connectors/types.ts    # interface Connector
     connectors/stored-connection.ts # base dos conectores: conexão salva (load/save/saveAndReport/
                            # errorKeepingStored), revalidate, token colado, mensagens comuns
@@ -174,7 +176,7 @@ src/
     storage/secure-store.ts  # SEGREDOS (safeStorage)
     storage/atomic-write.ts  # atomicWriteFile (tmp + rename, mode, fsync): SecureStore, ConfigStore, agentes
     storage/config-store.ts  # config NÃO secreta (JSON atômico, schemaVersion, migrações obrigatórias)
-    config/orkio-config.ts   # orkio-config.json (schema v14; `orkioConfigMigrations` v → v+1)
+    config/orkio-config.ts   # orkio-config.json (schema v15; `orkioConfigMigrations` v → v+1)
     config/migrations/     # migrações com dados CONGELADOS da época (regras v4, modelos Alva v12)
     git/git.ts             # git local via execFile (nunca exec/shell)
     projects/              # remote-url.ts (parser puro), projects.service.ts, head-watcher.ts
@@ -386,7 +388,9 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   cache em memória de 60 s (`force` ignora). Não usamos `filter_properties` (ids de
   propriedade vêm codificados; sem como validar sem a API real).
 - OAuth só enxerga o que foi escolhido na autorização: 404/403 em conexão OAuth vira
-  `canReconnect` ("Reconectar com Notion").
+  `canReconnect` ("Reconectar com Notion"). Regra única em `shared/notion-errors.ts`
+  (`canReconnect(code, método, 'read'|'write')`): conexão perdida/expirada sempre; 404 em OAuth
+  sempre; 403 em OAuth só na leitura (na escrita falta **Update content**, reconectar não resolve).
 - Config de build: `MAIN_VITE_NOTION_OAUTH_CLIENT_ID` e `MAIN_VITE_SITE_URL` (o intermediário é
   `<site>/notion/*`; `.env.example`; `.env.e2e` só para o E2E). Sem elas, OAuth fica indisponível.
 
@@ -523,16 +527,24 @@ text-muted-foreground / text-subtle-foreground`, `border-border` (controles) e `
   `TaskSignalsLine`, painel Ambiente): título, autor (login da REST, validado, só em memória e
   fora do snapshot da 3B; avatar = inicial, sem imagem de rede), há quanto tempo, +/− e arquivos
   (GraphQL `additions`/`deletions`/`changedFiles`), revisão e CI. Campo ausente não aparece.
-- `diffSignals` gera eventos (branch criada, PR aberta/mergeada, revisão mudou...) para a Etapa 3.
 
 ## Quadro (Etapa 3A)
 
 - Etapas por projeto em `orkio-config.json` → `boards[projectId]`:
-  `{ stages: [{ id, name, order, notionStatus: { id, name }, color }], orkioStageProperty,
-blockedProperty, rules, queueStageId?, updatedAt }` (`queueStageId`: coluna "A fazer" da lista
-  lateral, checkbox na etapa em Colunas; ausente = a primeira). Template: Prioridades→"Prioridades", Em andamento/Revisando/
+  `{ stages: [{ id, name, role?, order, notionStatus: { id, name }, color }], orkioStageProperty,
+blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em andamento/Revisando/
   Revisado→"Em andamento", Finalizada→"Finalizadas"; a sugestão casa por nome (sem acento/caixa)
   com as opções reais do status. Opção inexistente → erro e não salva; renomeada (mesmo id) → aviso.
+- **Papel da etapa** (`role`, `STAGE_ROLES` em `shared/board.ts`): `queue` (coluna "A fazer" da
+  lista lateral; sem ela, a primeira), `plan`, `work`, `review`, `reviewed`, `done`; no máximo uma
+  etapa por papel ("Papel da coluna" em Colunas). Regras padrão, ligações Alva, orquestrador, semana
+  da visão geral e as telas (Planejando, limpar ambiente na concluída) leem o papel
+  (`stageWithRole`), **nunca o nome**: renomear etapa não muda nada. O template traz os papéis; a
+  migração v14→v15 preencheu pelo nome uma vez (e `queueStageId` virou `queue`).
+- **Salvar a config do quadro** tem um caminho só (`BoardService.commit`): `save` (criar o quadro,
+  tela do Notion) e `saveFlow` (Colunas/Automações) validam com `validateFlow` e têm os mesmos
+  efeitos (ligações pelo `withProjectFlows`, tarefas das etapas removidas para o destino escolhido,
+  histórico; quadro novo ganha as regras padrão e as ligações Alva).
 - **SQLite via `node:sqlite`** (`main/db/database.ts`), arquivo `<userData>/orkio.db`: sem módulo
   nativo nem rebuild. Só essa camada conhece `node:sqlite`. Migrações em `MIGRATIONS` (nunca
   edite uma publicada; acrescente). Versão futura → quadro indisponível, nada é apagado.
@@ -547,7 +559,10 @@ blockedProperty, rules, queueStageId?, updatedAt }` (`queueStageId`: coluna "A f
   `source='notion'`); nenhuma etapa → "Sem etapa". Depois de confirmar uma escrita, 30 s de
   tolerância a leitura atrasada do Notion; "Atualizar" (force) zera essa tolerância.
 - Escrita: `PATCH /v1/pages/{id}` `{ properties: { <id>: { status|select: { name } } } }` (status
-  existente por nome; escrita **não cria** opção de status). Só se o status mudar; "Etapa Orkio" e
+  existente por nome; escrita **não cria** opção de status). O formato da API mora só em
+  `notion.schema.ts` (`PropertyWrites`: `encodePropertyWrites` no conector, `decodePropertyWrites`,
+  `propertyWritesMatch`, `applyPropertyWrites` e `propertyWritesKey`, chave estável para comparar
+  pendências). Só se o status mudar; "Etapa Orkio" e
   checkbox de "Bloqueada" no mesmo PATCH. Precisa da capacidade **Update content** (sem ela: 403;
   reconectar não resolve). 404 em OAuth → "Reconectar com Notion".
 - `NotionWriteQueue`: uma pendência por tarefa (a última vence; o rollback é o da primeira),
@@ -585,8 +600,9 @@ blockedProperty, rules, queueStageId?, updatedAt }` (`queueStageId`: coluna "A f
   usam a etapa já atualizada pelo evento anterior. Bloqueada (`notBlocked`), pausada (tarefa ou
   global) ou movida à mão depois do horário do evento → `automation` com `outcome: skipped` e
   motivo; o evento é consumido (não reaplica ao despausar).
-- Regras em `boards[projectId].rules` (`defaultRules` ao criar o quadro e na migração v3→v4,
-  etapas pelo nome; etapa ausente → regra desligada). Pausa global em `automation.paused`.
+- Regras em `boards[projectId].rules` (`defaultRules` ao criar o quadro, etapas pelo papel; a
+  migração v3→v4 usou os nomes da época; etapa ausente → regra desligada). Gatilhos: registro único
+  `EVENT_META` (`shared/automation.ts`: rótulo, frase, descrição, ordem). Pausa global em `automation.paused`.
 - Execução: `BoardService.applyAutomationMove(tx, …)` é o mesmo caminho do manual
   (`source:'automation'`, detalhe com `ruleId`, evento e `pr {number, owner, repo}`). Pede o `Tx` de
   `store.transaction((tx) => …)` no tipo: chave + estado + escrita pendente + snapshot numa
@@ -944,11 +960,12 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   "Alva: revisão publicada" (`alva-revisao`: /review → `revisao-json`, pedido só leitura
   `REVIEW_JSON_PROMPT` que responde só com `{event, summary, comments}` num bloco ```json →
   `publish_review`) e "Alva: CI vermelho" (manual). Coluna opcional
-  "Planejando" criada pelo mesmo caminho do "Salvar fluxo" com o status escolhido.
-- **Ligações padrão** (`upgradeAlvaFlows`, `ALVA_DEFAULT_STAGES`): "revisão publicada" em Revisando e
-  "comentários da PR" em Revisado (`on_enter`, nome sem acento/caixa como `defaultRules`), só em
+  "Planejando" (papel `plan`, depois da coluna "A fazer") criada pelo mesmo caminho do "Salvar
+  fluxo" com o status escolhido.
+- **Ligações padrão** (`upgradeAlvaFlows`, `ALVA_DEFAULT_STAGES`): "revisão publicada" na etapa de
+  papel `review` e "comentários da PR" na `reviewed` (`on_enter`, pelo papel como `defaultRules`), só em
   coluna sem fluxo e se o modelo não estiver ligado em outra. Valem na tela alva-flow (seletores
-  sugeridos por `features/alva/alva-targets.ts`: o modelo já ligado fica na coluna dele; pelo nome só
+  sugeridos por `features/alva/alva-targets.ts`: o modelo já ligado fica na coluna dele; pelo papel só
   em coluna sem fluxo, `AlvaStatus.boundStages`), no quadro novo de projeto que já tem modelos Alva
   (calculado dentro do `config.update`) e na migração `orkio-config` v11→v12 (acrescenta os modelos
   que faltam e troca as cópias de mesmo id que diferem do modelo, comparadas sem depender da ordem
@@ -1030,7 +1047,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - **Aba Revisão** (`task/ReviewPanel.tsx`, IPC só leitura `signals.reviewThreads`,
   `signals/review-threads.ts`): threads da PR (arquivo:linha, comentários com autor e texto em
   `MarkdownText`, resolvida/desatualizada, link `#discussion_r…` pela allowlist da PR) e revisões de
-  topo com texto. GraphQL só com campos do escopo `repo`, com `totalCount`/`pageInfo`; texto
+  topo com texto. GraphQL só com campos do escopo `repo`, com `totalCount`/`pageInfo` (limites em `REVIEW_LIMITS`,
+  que monta a query; a página de threads é a mesma dos sinais, para as contagens baterem); texto
   redigido (`redactSecrets`), 4000 por comentário e 60 mil no total (orçamento: não resolvidas,
   revisões, resolvidas; `truncated`/`unreadThreads` viram aviso). Cache em memória de 60 s por
   PR (`force` ignora); PR achada pelos sinais. Imagens do markdown viram "[imagem: alt]" (nada
@@ -1090,16 +1108,18 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 
 - **Tela:** a Visão geral saiu na reestruturação. O mesmo `OverviewSnapshot` alimenta a lista
   lateral do projeto atual (`app/task-groups.ts`: esperando, rodando e a fazer da coluna "A fazer" do quadro,
-  `boards[id].queueStageId` escolhida em Colunas, senão a primeira; `queueStageOf`) e o
+  a etapa de papel `queue`, senão a primeira; `queueStageOf`) e o
   sino (`app/WaitingBell.tsx`: esperando você de todos os projetos + PRs com atenção). Semana e
   atividade continuam calculadas no serviço, sem tela por enquanto.
 - **Abertura** (`app/initial-route.ts`): sem projeto, Primeiros passos; com uma tarefa esperando
   você, a tela dela; senão o Quadro. Menu: Quadro · Agentes · Configurações, atalhos Ctrl/Cmd+1…3
   (`keydown` no renderer, `aria-keyshortcuts` no item).
-- **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs**:
+- **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs** nem faz
+  SQL em tabela alheia: consultas com nome dos donos (`BoardStore`: `allStates`, `recentEvents`,
+  `unsettledRejections`, `stuckWrites`, `stageEvents`; `RunService`: `startInfo`, `costsSince`;
+  branch do worktree pelo `WorktreeService`, ID por `displayIdInBranch` de `task-id-match`),
   `flow_runs` (via `FlowRunner.activeViews`), perguntas/permissões em memória
-  (`RunService.waitingRequests`/`activeRuns`), `pending_writes`, `task_events`, `task_state`,
-  `agent_runs`, o último resultado dos sinais (`TaskSignalsService.cached`/`cachedPulls`) e o cache
+  (`RunService.waitingRequests`/`activeRuns`), o último resultado dos sinais (`TaskSignalsService.cached`/`cachedPulls`) e o cache
   em memória das tarefas do Notion (`NotionWorkspaceService.cachedTasks`, mesmo vencido;
   `cachedHealth`). "Atualizar" = `scheduler.runNow` de cada projeto com quadro e vínculo.
 - **Títulos:** cache do Notion → último visto (memória) → ID pela branch do worktree
@@ -1111,9 +1131,9 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   erro a partir da 3ª tentativa. Mais antigo primeiro.
 - **PRs:** abertas ligadas a tarefas com CI vermelho, mudanças pedidas, threads não resolvidas ou
   sem review há `STALE_REVIEW_DAYS` (3) dias (`createdAt` da REST, novo em `PullRequestSummary`).
-- **Semana (7 dias):** finalizadas = entradas na última etapa (tarefas distintas); PRs abertas/
+- **Semana (7 dias):** finalizadas = entradas na etapa de papel `done` (tarefas distintas); PRs abertas/
   mergeadas do cache do repositório (`—` sem cache); custo = soma de `agent_runs.cost` conhecidos;
-  tempo médio em "Revisado" (etapa com esse nome) por passagem que terminou na semana.
+  tempo médio na etapa de papel `reviewed` por passagem que terminou na semana.
 - **Atividade:** `task_events` dos 7 dias, sem `sync_ok` e sem automação sem efeito; filtro por
   projeto e grupo (`ACTIVITY_KINDS`/`activityGroup` de `shared/task-events.ts`), paginação por
   `beforeId`; texto de `shared/task-history.ts`. `ActivityItem` leva `kind`/`source`/`detail`
@@ -1175,10 +1195,10 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   (o texto é do app) e não podem ser salvos (`AgentError('builtin')`); "Duplicar" grava uma cópia
   em `repo`/`local`. Só Implementador e Corretor de PR entregam (`delivery: true`).
 - **Config** (`orkio-config` v11 → `orchestrator[projectId]`): `enabled`, `enabledSince` (o main
-  preenche ao ligar) e `lanes` (a v14 tirou `maxActive` e levou `queueStageId` para o quadro)
+  preenche ao ligar) e `lanes` (a v14 tirou `maxActive` e levou a coluna "A fazer" para o quadro)
   (`{ stageId, agents, next }`). `validateOrchestrator` (mesma no editor e no main): erros bloqueiam
   só com ele ligado; avisos = etapa sem fluxo `on_enter`, perfil a revisar, `checkAgentFlow` negado,
-  ciclo. `suggestOrchestrator` monta o caminho pelo nome das etapas (agentes pelos ids de
+  ciclo. `suggestOrchestrator` monta o caminho pelo papel das etapas (agentes pelos ids de
   `BUILTIN_AGENT_KEYS`). O agente da etapa é o `leastLoaded` (o mesmo na rodada e na entrada).
 - **Rodada** (`OrchestratorService.tick`, uma por projeto por vez): depois de cada ciclo das
   automações (wrapper do `run` do agendador) e `runSoon` (500 ms) quando um fluxo termina

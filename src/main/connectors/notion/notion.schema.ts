@@ -322,6 +322,74 @@ export type SimplePropertyValue =
   | { type: 'select' | 'status'; id: string | null; name: string | null }
   | { type: 'checkbox'; checked: boolean }
 
+/**
+ * Valor que o Orkio escreve numa propriedade da página (por id da propriedade): status/select pelo
+ * nome (a escrita não cria opção de status) ou checkbox. O formato da API mora só aqui:
+ * `encodePropertyWrites` (payload do `PATCH /v1/pages/{id}`), `decodePropertyWrites` (pendência
+ * salva), `propertyWritesKey` (comparar pendências sem depender da ordem), `propertyWritesMatch`
+ * (o Notion já tem?) e `applyPropertyWrites` (valores conhecidos depois de confirmar).
+ */
+export type PropertyWrite =
+  { type: 'status' | 'select'; name: string } | { type: 'checkbox'; checked: boolean }
+
+export type PropertyWrites = Record<string, PropertyWrite>
+
+export function encodePropertyWrites(writes: PropertyWrites): Record<string, unknown> {
+  const payload: Record<string, unknown> = {}
+  for (const id of Object.keys(writes).sort()) {
+    const w = writes[id]!
+    payload[id] = w.type === 'checkbox' ? { checkbox: w.checked } : { [w.type]: { name: w.name } }
+  }
+  return payload
+}
+
+/** Lê o payload salvo (tolerante: propriedade em formato desconhecido some). */
+export function decodePropertyWrites(payload: unknown): PropertyWrites {
+  const writes: PropertyWrites = {}
+  if (!isRecord(payload)) return writes
+  for (const [id, raw] of Object.entries(payload)) {
+    if (!isRecord(raw)) continue
+    if (typeof raw['checkbox'] === 'boolean') {
+      writes[id] = { type: 'checkbox', checked: raw['checkbox'] }
+      continue
+    }
+    for (const type of ['status', 'select'] as const) {
+      const option = raw[type]
+      const name = isRecord(option) ? stringOrNull(option['name']) : null
+      if (name !== null) writes[id] = { type, name }
+    }
+  }
+  return writes
+}
+
+/** Chave estável (ids ordenados): duas pendências iguais têm a mesma chave. */
+export function propertyWritesKey(writes: PropertyWrites): string {
+  return JSON.stringify(encodePropertyWrites(writes))
+}
+
+/** O Notion já tem todos os valores escritos? */
+export function propertyWritesMatch(
+  values: Readonly<Record<string, SimplePropertyValue>> | undefined,
+  writes: PropertyWrites
+): boolean {
+  if (!values) return false
+  return Object.entries(writes).every(([id, w]) => {
+    const current = values[id]
+    if (w.type === 'checkbox') return current?.type === 'checkbox' && current.checked === w.checked
+    return current !== undefined && current.type !== 'checkbox' && current.name === w.name
+  })
+}
+
+/** Os valores conhecidos passam a ser os escritos (o id da opção fica desconhecido). */
+export function applyPropertyWrites(
+  values: Record<string, SimplePropertyValue>,
+  writes: PropertyWrites
+): void {
+  for (const [id, w] of Object.entries(writes)) {
+    values[id] = w.type === 'checkbox' ? w : { type: w.type, id: null, name: w.name }
+  }
+}
+
 /** Valores select/status/checkbox da página, por id da propriedade. */
 export function simplePropertyValues(body: unknown): Record<string, SimplePropertyValue> {
   const result: Record<string, SimplePropertyValue> = {}

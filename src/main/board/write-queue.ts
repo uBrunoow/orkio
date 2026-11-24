@@ -10,28 +10,28 @@
 import { backoffMs } from '../net/rate-queue'
 import type { BoardStore, PendingWrite } from './board.store'
 import { isApiError } from '../net/http'
+import { isPermanentNotionError } from '../../shared/notion-errors'
+import { propertyWritesKey, type PropertyWrites } from '../connectors/notion/notion.schema'
 
 export const WRITE_MAX_BACKOFF_MS = 5 * 60 * 1000
 
 export interface WriteQueueDeps {
   store: BoardStore
-  updatePage(pageId: string, properties: Record<string, unknown>): Promise<void>
+  updatePage(pageId: string, writes: PropertyWrites): Promise<void>
   /** Escrita confirmada pelo Notion. */
   onSynced(write: PendingWrite): void
   /** Escrita recusada pelo Notion: desfazer localmente. */
   onRejected(write: PendingWrite, error: { code: string; message: string }): void
   /** Falha transitória: continua pendente. */
-  onRetry(write: PendingWrite, error: { code: string; message: string }, nextAttemptAt: Date): void
+  onRetry(write: PendingWrite, error: { code: string; message: string }): void
   now?: () => Date
   random?: () => number
   /** Agenda o próximo processamento (padrão: setTimeout). */
   schedule?: (fn: () => void, ms: number) => { cancel(): void }
 }
 
-const PERMANENT = new Set(['bad_request', 'forbidden', 'not_found'])
-
 export function isPermanentWriteError(e: unknown): boolean {
-  return isApiError(e, 'notion') && PERMANENT.has(e.code)
+  return isApiError(e, 'notion') && isPermanentNotionError(e.code)
 }
 
 export class NotionWriteQueue {
@@ -49,7 +49,7 @@ export class NotionWriteQueue {
   /** Começa (ao abrir o app, retoma o que ficou pendente). */
   start(): void {
     this.stopped = false
-    this.kick()
+    void this.kick()
   }
 
   stop(): void {
@@ -58,12 +58,15 @@ export class NotionWriteQueue {
     this.timer = null
   }
 
-  /** Processa agora o que estiver vencido (ex.: logo depois de mover um card). */
-  kick(): void {
-    if (this.stopped) return
+  /**
+   * Processa agora o que estiver vencido (ex.: logo depois de mover um card). A promessa resolve
+   * quando a rodada termina (quem não precisa esperar ignora).
+   */
+  kick(): Promise<void> {
+    if (this.stopped) return Promise.resolve()
     this.timer?.cancel()
     this.timer = null
-    void this.process()
+    return this.process()
   }
 
   /** Força uma nova tentativa imediata de tudo (ex.: "Tentar agora", voltou a rede). */
@@ -76,17 +79,12 @@ export class NotionWriteQueue {
         w.lastErrorCode ?? ''
       )
     }
-    this.kick()
+    void this.kick()
   }
 
   /** Escritas ainda não confirmadas pelo Notion (6C: a atualização espera por elas). */
   pendingCount(): number {
     return this.deps.store.allPending().length
-  }
-
-  /** Espera o processamento em andamento (testes). */
-  async idle(): Promise<void> {
-    while (this.running) await this.running
   }
 
   private process(): Promise<void> {
@@ -108,7 +106,7 @@ export class NotionWriteQueue {
   }
 
   private async send(write: PendingWrite): Promise<void> {
-    const payload = JSON.stringify(write.properties)
+    const key = propertyWritesKey(write.properties)
     try {
       await this.deps.updatePage(write.taskPageId, write.properties)
     } catch (e) {
@@ -117,7 +115,7 @@ export class NotionWriteQueue {
         : { code: 'unexpected', message: 'Algo deu errado ao falar com o Notion.' }
       // Mudou durante o envio? A versão nova será enviada; ignora o resultado desta.
       const current = this.deps.store.pending(write.taskPageId)
-      if (!current || JSON.stringify(current.properties) !== payload) return
+      if (!current || propertyWritesKey(current.properties) !== key) return
       if (isPermanentWriteError(e)) {
         this.deps.store.deletePending(write.taskPageId)
         this.deps.onRejected(current, error)
@@ -127,10 +125,10 @@ export class NotionWriteQueue {
       const wait = Math.min(WRITE_MAX_BACKOFF_MS, backoffMs(attempts - 1, this.random))
       const next = new Date(this.now().getTime() + wait)
       this.deps.store.scheduleRetry(write.taskPageId, attempts, next.toISOString(), error.code)
-      this.deps.onRetry({ ...current, attempts, nextAttemptAt: next.toISOString() }, error, next)
+      this.deps.onRetry({ ...current, attempts, nextAttemptAt: next.toISOString() }, error)
       return
     }
-    if (this.deps.store.deletePendingIfUnchanged(write.taskPageId, payload)) {
+    if (this.deps.store.deletePendingIfUnchanged(write.taskPageId, write.properties)) {
       this.deps.onSynced(write)
     }
   }
@@ -148,6 +146,6 @@ export class NotionWriteQueue {
         return { cancel: () => clearTimeout(t) }
       })
     this.timer?.cancel()
-    this.timer = schedule(() => this.kick(), ms)
+    this.timer = schedule(() => void this.kick(), ms)
   }
 }

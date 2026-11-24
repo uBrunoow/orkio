@@ -9,7 +9,7 @@
  */
 import type { EventPr, TaskEventDetailInput } from '../../shared/task-events'
 import {
-  EVENT_LABELS,
+  EVENT_META,
   deriveEvents,
   evaluate,
   mergeSnapshot,
@@ -201,8 +201,8 @@ export class AutomationService {
     const card = cards?.find((c) => c.taskId === taskId)
     const id = card?.displayId ?? 'Tarefa'
     const what = d.event.pr
-      ? `${EVENT_LABELS[d.event.kind]} (PR #${d.event.pr.number})`
-      : EVENT_LABELS[d.event.kind]
+      ? `${EVENT_META[d.event.kind].label} (PR #${d.event.pr.number})`
+      : EVENT_META[d.event.kind].label
     const stage = stages.find((s) => s.id === d.to)?.name
     return {
       projectId,

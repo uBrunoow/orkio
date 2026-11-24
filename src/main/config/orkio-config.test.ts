@@ -674,14 +674,81 @@ describe('migrações publicadas', () => {
       })
     )
     const { data } = await createOrkioConfigStore(file).load()
-    expect(data.boards['p1']!.queueStageId).toBe('dev')
-    expect(data.boards['p2']).not.toHaveProperty('queueStageId')
+    // Depois da v15, a coluna escolhida é o papel `queue` (e `queueStageId` sai).
+    expect(data.boards['p1']!.stages.find((s) => s.id === 'dev')?.role).toBe('queue')
+    expect(data.boards['p2']!.stages.some((s) => s.role === 'queue')).toBe(false)
+    expect(data.boards['p1']).not.toHaveProperty('queueStageId')
     expect(data.orchestrator['p1']).toEqual({ enabled: true, enabledSince: null, lanes })
     const saved = JSON.parse(await readFile(file, 'utf8')) as {
       orchestrator: Record<string, Record<string, unknown>>
     }
     expect(saved.orchestrator['p1']).not.toHaveProperty('maxActive')
     expect(saved.orchestrator['p1']).not.toHaveProperty('queueStageId')
+  })
+})
+
+describe('v14 → v15: papel das etapas', () => {
+  it('preenche o papel pelo nome (uma vez) e a coluna "A fazer" vira o papel queue', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-cfg-v15-'))
+    const file = join(dir, 'orkio-config.json')
+    const stage = (id: string, name: string) => ({
+      id,
+      name,
+      order: 0,
+      notionStatus: { id: 'o', name: 'A' }
+    })
+    const board = (stages: unknown[], extra: Record<string, unknown> = {}) => ({
+      stages,
+      orkioStageProperty: null,
+      blockedProperty: null,
+      rules: [],
+      ...extra
+    })
+    await writeFile(
+      file,
+      JSON.stringify({
+        schemaVersion: 14,
+        projects: [
+          { ...PROJECT, notionProject: null },
+          { ...PROJECT, id: 'p2', notionProject: null }
+        ],
+        notion: null,
+        boards: {
+          p1: board(
+            [
+              stage('fila', 'Prioridades'),
+              stage('plan', 'PLANEJANDO'),
+              stage('dev', 'Em  andamento'),
+              stage('rev', 'Revisando'),
+              stage('ok', 'revisado'),
+              stage('ok2', 'Revisado'),
+              stage('fim', 'Finalizada')
+            ],
+            { queueStageId: 'fila' }
+          ),
+          // Nomes próprios: nenhum papel (a lista lateral continua na primeira coluna).
+          p2: board([stage('a', 'Backlog'), stage('b', 'Doing')])
+        },
+        automation: { paused: false },
+        flows: {},
+        delivery: {},
+        agents: {},
+        orchestrator: {},
+        updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
+      })
+    )
+    const { data } = await createOrkioConfigStore(file).load()
+    expect(data.boards['p1']!.stages.map((s) => [s.id, s.role ?? null])).toEqual([
+      ['fila', 'queue'],
+      ['plan', 'plan'],
+      ['dev', 'work'],
+      ['rev', 'review'],
+      ['ok', 'reviewed'],
+      ['ok2', null],
+      ['fim', 'done']
+    ])
+    expect(data.boards['p1']).not.toHaveProperty('queueStageId')
+    expect(data.boards['p2']!.stages.every((s) => !s.role)).toBe(true)
   })
 })
 

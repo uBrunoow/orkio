@@ -46,6 +46,7 @@ import type {
 import type { Result } from '../../shared/result'
 import { projectById } from '../config/queries'
 import { isApiError } from '../net/http'
+import { canReconnect } from '../../shared/notion-errors'
 
 /** O que o serviço precisa do conector do Notion (o token fica lá dentro). */
 export interface NotionWorkspaceApi {
@@ -686,16 +687,11 @@ export class NotionWorkspaceService {
       return { ok: true, value: await run() }
     } catch (e) {
       const error = toError(e)
-      // OAuth só enxerga o que foi escolhido na autorização: conteúdo "sumido" ou sem acesso
-      // costuma se resolver reconectando e marcando os bancos.
-      if (
-        (error.code === 'not_found' || error.code === 'forbidden') &&
-        isApiError(e, 'notion') &&
-        (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth'
-      ) {
-        return { ok: false, error: { ...error, canReconnect: true } }
-      }
-      if (error.code === 'unauthorized' || error.code === 'invalid_grant') {
+      // O método só conta para erros da API (404/403 em OAuth).
+      const method = isApiError(e, 'notion')
+        ? await this.deps.notion.connectionMethod().catch(() => null)
+        : null
+      if (canReconnect(error.code, method, 'read')) {
         return { ok: false, error: { ...error, canReconnect: true } }
       }
       return { ok: false, error }

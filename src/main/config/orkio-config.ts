@@ -6,10 +6,11 @@ import type { DeliverySettings } from '../../shared/delivery'
 import { parseProjectAgents, type ProjectAgents } from '../../shared/agent'
 import { parseOrchestrator, type OrchestratorConfig } from '../../shared/orchestrator'
 import { parseRule, type AutomationRule } from '../../shared/automation'
-import { keptQueueStage, type BoardConfig, type BoardStage } from '../../shared/board'
+import { isStageRole, type BoardConfig, type BoardStage } from '../../shared/board'
 import { ConfigStore, type ConfigMigrations } from '../storage/config-store'
 import { migrateV11, type AlvaMigrationNote } from './migrations/v11-alva'
 import { migrateV13 } from './migrations/v13-queue-stage'
+import { migrateV14 } from './migrations/v14-stage-roles'
 import { migrateV3 } from './migrations/v3-default-rules'
 
 export const ORKIO_CONFIG_FILE = 'orkio-config.json'
@@ -30,7 +31,7 @@ import type {
 } from '../../shared/notion'
 import type { ProjectRepo } from '../../shared/projects'
 
-export const ORKIO_CONFIG_VERSION = 14
+export const ORKIO_CONFIG_VERSION = 15
 
 export interface StoredProject {
   id: string
@@ -143,7 +144,10 @@ export function orkioConfigMigrations(
       return rest
     },
     // v13 → v14: coluna "A fazer" vai do orquestrador para o quadro; sai `maxActive`.
-    13: migrateV13
+    13: migrateV13,
+    // v14 → v15: papel das etapas (`role`, pelo nome uma única vez); `queueStageId` vira o papel
+    // `queue`.
+    14: migrateV14
   }
 }
 
@@ -368,6 +372,7 @@ function parseStage(value: unknown, index: number): BoardStage | null {
   if (typeof value['color'] === 'string' && COLORS.includes(value['color'])) {
     stage.color = value['color'] as NotionColor
   }
+  if (isStageRole(value['role'])) stage.role = value['role']
   return stage
 }
 
@@ -377,6 +382,13 @@ export function parseBoard(value: unknown): BoardConfig | null {
   if (stages.some((s) => s === null) || stages.length === 0) return null
   const ids = new Set(stages.map((s) => s!.id))
   if (ids.size !== stages.length) return null
+  // Papel repetido (arquivo editado à mão): fica o da primeira etapa.
+  const roles = new Set<string>()
+  for (const stage of stages as BoardStage[]) {
+    if (!stage.role) continue
+    if (roles.has(stage.role)) delete stage.role
+    else roles.add(stage.role)
+  }
   return {
     stages: stages as BoardStage[],
     orkioStageProperty: nameRef(value['orkioStageProperty']),
@@ -384,10 +396,6 @@ export function parseBoard(value: unknown): BoardConfig | null {
     rules: Array.isArray(value['rules'])
       ? value['rules'].map(parseRule).filter((r): r is AutomationRule => r !== null)
       : [],
-    ...keptQueueStage(
-      typeof value['queueStageId'] === 'string' ? value['queueStageId'] : null,
-      stages as BoardStage[]
-    ),
     updatedAt: typeof value['updatedAt'] === 'string' ? value['updatedAt'] : ''
   }
 }
