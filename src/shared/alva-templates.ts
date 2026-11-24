@@ -98,7 +98,6 @@ export const OPEN_PR_FLOW_IDS = {
   sendBranch: 'builtin:enviar-branch'
 } as const
 
-/** Coluna "Planejando": /spec → (Pequeno termina) → perguntas em aberto → /plan → aprovar plano. */
 export function alvaPlanFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.plan,
@@ -145,11 +144,6 @@ export function alvaPlanFlow(): Flow {
   }
 }
 
-/**
- * Coluna "Em andamento": (sem vínculo: /spec e /plan) → /implement (pula se já Reviewed) →
- * /review → blocker volta para /fix --apply (máx. 2) → ver diff → /commit → push (Orkio, com
- * aprovação) → /pr em modo entrega (o próprio comando pode fazer push da branch e abrir a PR).
- */
 export function alvaDeliverFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.deliver,
@@ -231,12 +225,6 @@ export const REVIEW_PLAN_PROMPT = `Leia .orkio/revisao.md (comentários de revis
 export const REVIEW_APPLY_PROMPT =
   'Plano aprovado. Aplique as correções, rode os testes do projeto, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).'
 
-/**
- * Coluna "Revisado": o Orkio lê os comentários da PR (`.orkio/revisao.md`) → sem comentários,
- * termina → o agente propõe um plano (só leitura) → você aprova, pede ajustes (até 3) ou recusa →
- * o agente aplica, commita e responde as threads (modo entrega) → confere se a PR tem o commit
- * atual → se não, push pelo Orkio → pedir review de novo.
- */
 export function alvaReviewedFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.reviewed,
@@ -322,11 +310,6 @@ export const REVIEW_JSON_PROMPT = [
   `Em "comments", só achados com arquivo e linha do diff da PR (a linha no arquivo novo), no máximo ${REVIEW_COMMENTS_MAX}; os demais vão no "summary". Escreva em pt-BR. Não altere arquivos.`
 ].join('\n')
 
-/**
- * Coluna "Revisando": /review → o agente converte a revisão em JSON (só leitura) → o Orkio mostra
- * o tipo, o resumo e os comentários e, aprovado, publica na PR como `orkio[bot]` (site do Orkio).
- * "Pedir alterações" dispara a regra "Alterações pedidas → Revisado".
- */
 export function alvaReviewPublishFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.review,
@@ -354,7 +337,6 @@ export function alvaReviewPublishFlow(): Flow {
   }
 }
 
-/** Avulso (manual, botão "Rodar fluxo CI vermelho"): /fix --ci --apply → /commit → push. */
 export function alvaCiFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.ci,
@@ -368,7 +350,6 @@ export function alvaCiFlow(): Flow {
   }
 }
 
-/** Botão "Abrir PR": push da branch da tarefa (com o gate) e `/alva-flow:pr` em modo entrega. */
 export function alvaOpenPrFlow(options: { push?: boolean } = {}): Flow {
   return {
     id: OPEN_PR_FLOW_IDS.openPr,
