@@ -787,26 +787,6 @@ export async function launchOrkio(
             return json({ object: 'data_source', id: ids.tasksDs, properties: result })
           }
 
-          const searchFilter = body['filter'] as { value?: string } | undefined
-          if (path === '/search' && searchFilter?.value === 'page') {
-            const pages = [
-              { id: 'eeeeeeee-0000-4000-8000-000000000001', title: 'Arquitetura do Orkio' },
-              { id: 'eeeeeeee-0000-4000-8000-000000000002', title: 'Guia de estilo' }
-            ]
-            const q = typeof body['query'] === 'string' ? body['query'].toLowerCase() : ''
-            return json({
-              object: 'list',
-              has_more: false,
-              next_cursor: null,
-              results: pages
-                .filter((p) => p.title.toLowerCase().includes(q))
-                .map((p) => ({
-                  object: 'page',
-                  id: p.id,
-                  properties: { title: { id: 'title', type: 'title', title: rich(p.title) } }
-                }))
-            })
-          }
           if (path === '/search') {
             const all = [
               { id: ids.projectsDs, title: 'Projetos' },
@@ -1246,7 +1226,7 @@ export async function queueFolderPicks(app: ElectronApplication, paths: string[]
 }
 
 export function alerts(scope: Page | Locator): Locator {
-  return scope.locator('[role="alert"]:not([data-astryx-live-region])')
+  return scope.locator('[role="alert"]')
 }
 
 /** Enfileira caminhos para as próximas aberturas de "Salvar como…" (no main). */

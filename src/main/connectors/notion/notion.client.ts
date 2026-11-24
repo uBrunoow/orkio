@@ -90,8 +90,6 @@ export interface NotionClient {
   updateDataSource(token: string, id: string, properties: Record<string, unknown>): Promise<unknown>
   /** GET /v1/blocks/{id}/children (conteúdo de uma página; paginado). */
   getBlockChildren(token: string, id: string, startCursor?: string | null): Promise<NotionListPage>
-  /** Busca páginas (não data sources) por título. */
-  searchPages(token: string, query: string): Promise<NotionListPage>
   /**
    * Cria uma subpágina com conteúdo em markdown (POST /v1/pages, `markdown_version: v2`).
    * Precisa da capacidade "Insert content".
@@ -231,16 +229,6 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
           method: 'GET'
         })
       )
-    },
-
-    async searchPages(token, query) {
-      const body: Record<string, unknown> = {
-        filter: { property: 'object', value: 'page' },
-        sort: { timestamp: 'last_edited_time', direction: 'descending' },
-        page_size: 50
-      }
-      if (query) body['query'] = query
-      return parseListPage(await dataRequest('/search', token, { method: 'POST', body }))
     },
 
     async createChildPage(token, parentPageId, title, markdown) {

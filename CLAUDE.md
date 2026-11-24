@@ -425,7 +425,7 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   analisa a pasta e devolve um `selectionId` (expira em 10 min). As operações seguintes usam
   `selectionId` ou o id do projeto. Novas operações devem seguir o mesmo modelo.
 - **Git:** só `createGit()` (`git/git.ts`): `execFile('git', args, { cwd, timeout })`, env com
-  `GIT_TERMINAL_PROMPT=0`, `LC_ALL=C`, `GIT_OPTIONAL_LOCKS=0`. Nunca `exec` com string. Erros viram
+  `GIT_TERMINAL_PROMPT=0`, `LC_ALL=C`, `GIT_OPTIONAL_LOCKS=0` e nada interativo (sem `GIT_ASKPASS`/`SSH_ASKPASS` herdados, ssh `BatchMode`, `GCM_INTERACTIVE=never`) em todo comando. Nunca `exec` com string. Erros viram
   `GitError` com mensagem pt-BR (sem repassar stderr cru).
 - **Remotes:** `parseRemoteUrl` (função pura). `ssh-alias` (host sem ponto) e `enterprise` (outro
   domínio) exigem confirmação do usuário. Alias valida em github.com; Enterprise é salvo com

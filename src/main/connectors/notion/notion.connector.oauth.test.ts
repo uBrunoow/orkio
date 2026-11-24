@@ -94,7 +94,6 @@ describe('NotionConnector — OAuth', () => {
       updatePage: vi.fn<NotionClient['updatePage']>(),
       updateDataSource: vi.fn<NotionClient['updateDataSource']>(),
       getBlockChildren: vi.fn<NotionClient['getBlockChildren']>(),
-      searchPages: vi.fn<NotionClient['searchPages']>(),
       createChildPage: vi.fn<NotionClient['createChildPage']>(),
       appendMarkdown: vi.fn<NotionClient['appendMarkdown']>()
     }

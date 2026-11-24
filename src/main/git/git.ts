@@ -120,7 +120,13 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
         env: {
           ...process.env,
           // Nunca pedir credenciais/editor; saída estável em inglês; sem travar o índice.
+          // Sem askpass herdado (ex.: o do VS Code quando o app abre de um terminal dele), sem
+          // passphrase do SSH e sem a janela do Git Credential Manager: fetch e push falham na hora.
           GIT_TERMINAL_PROMPT: '0',
+          GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+          GIT_ASKPASS: '',
+          SSH_ASKPASS: '',
+          GCM_INTERACTIVE: 'never',
           GIT_OPTIONAL_LOCKS: '0',
           LC_ALL: 'C',
           LANG: 'C',
@@ -251,14 +257,7 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
       }
       const ref = `refs/heads/${branch}`
       await git(dir, ['push', '--porcelain', '-u', remote, `${ref}:${ref}`], {
-        timeout: GIT_PUSH_TIMEOUT_MS,
-        env: {
-          // Nunca perguntar: senha, passphrase do SSH, nem a janela do Git Credential Manager.
-          GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
-          GIT_ASKPASS: '',
-          SSH_ASKPASS: '',
-          GCM_INTERACTIVE: 'never'
-        }
+        timeout: GIT_PUSH_TIMEOUT_MS
       })
     },
     async aliases(dir) {
