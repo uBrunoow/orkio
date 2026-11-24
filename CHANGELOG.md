@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.10] - 2026-11-24
+
 ### Adicionado
 
 - Integrações › Orkio bot: mostra se o GitHub App que publica as revisões (orkio[bot]) está
