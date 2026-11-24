@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.9] - 2026-11-24
+
 ### Adicionado
 
 - Modelo e raciocínio: escolha o modelo do Claude Code (padrão, Fable, Opus, Sonnet, Haiku ou
