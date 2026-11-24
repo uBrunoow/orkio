@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,13 +10,15 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import type { ConnectionStatus } from '../../../shared/ipc-contract'
 import { SwitchIcon } from '../components/icons'
+import { initials } from '../lib/initials'
+import { useConnectionStatus } from '../features/integrations/useConnection'
+import type { ConnectionStatus } from '../../../shared/connection'
 
 /**
  * Quem está usando o Orkio. Não existe login no app: a pessoa é a conta conectada do GitHub (nome,
- * login e foto) e, sem GitHub, a do Notion. Nada de e-mail. Relê ao voltar para a janela e quando
- * `refreshKey` muda (ex.: depois de conectar em Integrações).
+ * login e foto) e, sem GitHub, a do Notion. Nada de e-mail. Vem das conexões do App (conectar em
+ * Integrações ou nos Primeiros passos já atualiza; relidas ao voltar para a janela).
  */
 export interface Account {
   name: string
@@ -36,31 +38,10 @@ function fromStatus(s: ConnectionStatus | null, kind: 'github' | 'notion'): Acco
   }
 }
 
-export function useAccount(refreshKey: number): Account | null {
-  const [account, setAccount] = useState<Account | null>(null)
-  useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      void Promise.all([
-        window.orkio.github.getStatus().catch(() => null),
-        window.orkio.notion.getStatus().catch(() => null)
-      ]).then(([github, notion]) => {
-        if (alive) setAccount(fromStatus(github, 'github') ?? fromStatus(notion, 'notion'))
-      })
-    }
-    load()
-    window.addEventListener('focus', load)
-    return () => {
-      alive = false
-      window.removeEventListener('focus', load)
-    }
-  }, [refreshKey])
-  return account
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/)
-  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : '')).toUpperCase()
+export function useAccount(): Account | null {
+  const github = useConnectionStatus('github')
+  const notion = useConnectionStatus('notion')
+  return fromStatus(github, 'github') ?? fromStatus(notion, 'notion')
 }
 
 function AccountAvatar({
@@ -80,10 +61,6 @@ function AccountAvatar({
   )
 }
 
-/**
- * Conta na lateral (rodapé, como no Alva Tasks: avatar, nome e login) e no canto da barra (só o
- * avatar). Os dois abrem o mesmo menu: contas conectadas, configurações e Sair.
- */
 export function AccountMenu({
   account,
   variant,

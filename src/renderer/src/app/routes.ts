@@ -3,27 +3,22 @@
  * uma rota, e toda navegação gera uma chave nova (clicar no item atual remonta a página e sai de
  * qualquer subtela). Pilha simples para "Voltar".
  */
-import type { BoardTaskRef } from '../../../shared/ipc-contract'
-import type { TaskSection } from '../../../shared/overview'
+import type { TaskSection, BoardTaskRef } from '../../../shared/overview'
 
-/** Seções de Configurações (coluna interna). */
 export type SettingsSection = 'integrations' | 'projects' | 'board' | 'agents' | 'updates' | 'about'
 
-/** Abas de Configurações › Quadro e automações. */
 export type BoardSettingsTab = 'columns' | 'rules' | 'flows' | 'delivery'
 
 export type Route =
   /** Primeiros passos; com `projectId`, só os passos que faltam para aquele projeto. */
   | { name: 'setup'; projectId?: string }
   | { name: 'board'; projectId?: string }
-  /** Tela da tarefa (fases, conversa e painel da fase). */
   | { name: 'task'; projectId: string; taskId: string; section?: TaskSection }
   | { name: 'agents' }
   | { name: 'settings'; section?: SettingsSection; tab?: BoardSettingsTab; projectId?: string }
 
 export type RouteName = Route['name']
 
-/** Títulos das telas (barra superior e Command Palette). */
 export const ROUTE_TITLES: Record<RouteName, string> = {
   setup: 'Primeiros passos',
   board: 'Quadro',
@@ -41,7 +36,6 @@ export const SETTINGS_TITLES: Record<SettingsSection, string> = {
   about: 'Sobre e diagnóstico'
 }
 
-/** Rota da tela de uma tarefa (notificação, sino, lista lateral, Command Palette). */
 export function routeForTaskRef(ref: BoardTaskRef): Route {
   return {
     name: 'task',

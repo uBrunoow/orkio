@@ -1,7 +1,88 @@
 /**
- * Integração com o plugin alva-flow (Etapa 5B): tipos compartilhados e as funções puras de
- * leitura das tasks do Backlog.md (frontmatter, status, critérios, perguntas em aberto).
+ * Integração com o plugin alva-flow (Etapa 5B): os nomes do plugin (comandos, status, variáveis,
+ * marcador dos fluxos), tipos compartilhados e as funções puras de leitura das tasks do Backlog.md
+ * (frontmatter, status, critérios, perguntas em aberto). Quem fala do plugin usa as constantes
+ * daqui (pré-checagem, extrator, modelos, fases da tela, problemas do fluxo).
  */
+import type { FlowOutput } from './orkio-actions'
+import { FLOW_NO, FLOW_YES } from './task-flow'
+import type { TaskPhaseId } from './task-phase'
+
+export const ALVA_PLUGIN = 'alva-flow'
+export const ALVA_COMMANDS = ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr'] as const
+export type AlvaCommand = (typeof ALVA_COMMANDS)[number]
+
+/** Nome do comando no catálogo (`alva-flow:spec`). */
+export function alvaCommand(command: AlvaCommand): string {
+  return `${ALVA_PLUGIN}:${command}`
+}
+
+/** Qual comando do plugin é este (`alva-flow:review` → `review`); `null` se não é do plugin. */
+export function alvaCommandOf(command: string): AlvaCommand | null {
+  const prefix = `${ALVA_PLUGIN}:`
+  if (!command.startsWith(prefix)) return null
+  const name = command.slice(prefix.length)
+  return ALVA_COMMANDS.find((c) => c === name) ?? null
+}
+
+/** Fase da tarefa (barra do topo) de cada comando do plugin. */
+export const ALVA_COMMAND_PHASE: Record<AlvaCommand, TaskPhaseId> = {
+  spec: 'spec',
+  plan: 'plan',
+  implement: 'implement',
+  review: 'review',
+  fix: 'review',
+  commit: 'pr',
+  pr: 'pr'
+}
+
+/** Documento do Backlog.md que o comando escreve: a spec (`/spec`) ou o plano (`/plan`). */
+export function backlogDocumentOf(command: string | null): 'spec' | 'plan' | null {
+  const c = command ? alvaCommandOf(command) : null
+  return c === 'spec' || c === 'plan' ? c : null
+}
+
+/** Opção do `/pr` que trata os comentários da PR (sem ela, o `/pr` abre a PR e acompanha o CI). */
+export const ALVA_PR_COMMENTS_FLAG = '--comments'
+
+/** O passo espera o CI do GitHub: o `/pr` do plugin sem `--comments` acompanha os checks até o fim. */
+export function alvaWaitsForCi(command: string, args: string): boolean {
+  return alvaCommandOf(command) === 'pr' && !args.split(/\s+/).includes(ALVA_PR_COMMENTS_FLAG)
+}
+
+/** Marcador (`Flow.tags`) dos fluxos que usam o plugin: pré-checagem, variáveis e limite. */
+export const ALVA_TAG = 'alva'
+/** Prefixo das variáveis do alva-flow nos fluxos. */
+export const ALVA_VAR_PREFIX = 'alva.'
+
+/** Variáveis que a integração grava (no início do fluxo e pelo extrator `alva`). */
+export const ALVA_VARS = {
+  taskId: 'alva.task_id',
+  specArg: 'alva.spec_arg',
+  linked: 'alva.linked',
+  status: 'alva.status',
+  openQuestions: 'alva.open_questions',
+  reviewBlocker: 'alva.review_blocker',
+  size: 'alva.size'
+} as const
+
+/** Id do extrator do alva-flow (lê a task do Backlog.md depois de cada comando). */
+export const ALVA_EXTRACTOR = 'alva'
+
+/** Códigos de falha de passo do alva-flow (a tela de problema reconhece por eles). */
+export const ALVA_FAILURES = {
+  /** O /spec terminou sem criar nem alterar uma task em backlog/tasks/. */
+  noTaskCreated: 'alva_no_task',
+  /** O passo usa `alva.*`, mas a tarefa ainda não tem task do Backlog vinculada. */
+  notLinked: 'alva_not_linked'
+} as const
+
+/** Quantos fluxos Alva podem rodar ao mesmo tempo num projeto com Docker (portas). */
+export const ALVA_MAX_PARALLEL = { min: 1, max: 4, fallback: 1 } as const
+
+export function clampAlvaParallel(value: number): number {
+  return Math.min(ALVA_MAX_PARALLEL.max, Math.max(ALVA_MAX_PARALLEL.min, Math.floor(value)))
+}
 
 export type AlvaCheckState = 'ok' | 'missing' | 'warning'
 
@@ -32,6 +113,24 @@ export const ALVA_STATUSES = [
   'Reviewed',
   'Done'
 ] as const
+export type AlvaTaskStatus = (typeof ALVA_STATUSES)[number]
+/** Status depois de um `/review` limpo (ou de um `/spec` do caminho Pequeno, que já implementa). */
+export const ALVA_REVIEWED: AlvaTaskStatus = 'Reviewed'
+
+/** As variáveis do alva-flow como saídas declaradas (o validador confere os fluxos contra elas). */
+export const ALVA_OUTPUTS: readonly FlowOutput[] = [
+  { key: ALVA_VARS.taskId, about: 'ID da task do Backlog.md vinculada (ex.: TASK-12)' },
+  { key: ALVA_VARS.specArg, about: 'argumento do /spec (o ID, ou o resumo da tarefa sem vínculo)' },
+  { key: ALVA_VARS.linked, values: [FLOW_YES, FLOW_NO], about: 'a tarefa já tem task vinculada' },
+  { key: ALVA_VARS.status, about: 'status da task no Backlog.md' },
+  { key: ALVA_VARS.openQuestions, about: 'perguntas em aberto na spec' },
+  {
+    key: ALVA_VARS.reviewBlocker,
+    values: [FLOW_YES, FLOW_NO],
+    about: 'o /review deixou blocker'
+  },
+  { key: ALVA_VARS.size, values: ['Pequeno', 'Médio', 'Grande'], about: 'tamanho dado pelo /spec' }
+]
 
 /** O que o Orkio lê de uma task do Backlog.md (nada de descrição, plano ou notas). */
 export interface BacklogTaskInfo {
@@ -51,7 +150,6 @@ export interface BacklogTaskDocument {
   info: BacklogTaskInfo
   /** Markdown sem o frontmatter e sem os marcadores HTML; segredos ocultados no main. */
   body: string
-  /** O texto passou do limite e foi cortado. */
   truncated: boolean
   /** Ainda não vinculada: o rascunho que o `/spec` desta tarefa está escrevendo no worktree. */
   draft?: boolean
@@ -72,6 +170,15 @@ export function backlogTaskBody(markdown: string): { body: string; truncated: bo
   const cut = clean.slice(0, BACKLOG_DOC_LIMIT)
   const lastBreak = cut.lastIndexOf('\n')
   return { body: (lastBreak > 0 ? cut.slice(0, lastBreak) : cut).trimEnd(), truncated: true }
+}
+
+/** Spec e plano da task do Backlog.md (abas Spec e Plano): separa no título do plano. */
+const PLAN_HEADING = /^#{1,3}\s+(implementation plan|plano)\b.*$/im
+
+export function splitBacklogBody(body: string): { spec: string; plan: string | null } {
+  const match = PLAN_HEADING.exec(body)
+  if (!match) return { spec: body.trim(), plan: null }
+  return { spec: body.slice(0, match.index).trim(), plan: body.slice(match.index).trim() }
 }
 
 function unquote(v: string): string {
@@ -127,4 +234,17 @@ export function sizeFromSpecResult(resultText: string): 'Médio' | 'Grande' | nu
 /** Arquivo de task do Backlog.md (`task-12 - Titulo.md`) → prefixo do id em minúsculas. */
 export function taskFileId(fileName: string): string | null {
   return /^([A-Za-z]+-\d+(?:\.\d+)*) - .*\.md$/.exec(fileName)?.[1]?.toLowerCase() ?? null
+}
+
+export interface AlvaStatusView {
+  precheck: AlvaPrecheck | null
+  templates: {
+    id: string
+    name: string
+    stageId: string | null
+    mode: 'on_enter' | 'manual' | null
+  }[]
+  /** Colunas que já têm algum fluxo ligado (ids das etapas): a tela não sugere trocar. */
+  boundStages: string[]
+  maxParallel: number
 }

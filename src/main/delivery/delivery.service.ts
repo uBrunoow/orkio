@@ -16,24 +16,28 @@ import {
 import type { StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
 import { GitError } from '../git/git'
+import { DomainError } from '../errors'
 import type { WorktreeRecord } from '../claude/worktree.service'
+import { githubRepoOf } from '../../shared/projects'
 
-export class DeliveryError extends Error {
+export type DeliveryErrorCode =
+  | 'no_project'
+  | 'no_repo'
+  | 'no_worktree'
+  | 'branch'
+  | 'dirty'
+  | 'nothing'
+  | 'credentials'
+  | 'rejected'
+  | 'git'
+
+export class DeliveryError extends DomainError {
+  override name = 'DeliveryError'
   constructor(
-    readonly code:
-      | 'no_project'
-      | 'no_repo'
-      | 'no_worktree'
-      | 'branch'
-      | 'dirty'
-      | 'nothing'
-      | 'credentials'
-      | 'rejected'
-      | 'git',
+    override readonly code: DeliveryErrorCode,
     message: string
   ) {
-    super(message)
-    this.name = 'DeliveryError'
+    super(code, message)
   }
 }
 
@@ -50,13 +54,11 @@ export interface PushPreview {
   commits: { hash: string; subject: string }[]
   /** `git diff --stat` do que vai (contra a branch remota, ou a base se ainda não existe). */
   stat: string
-  /** A branch remota já existe? */
   remoteExists: boolean
   /** Mudanças não commitadas (linhas do `status --porcelain`). */
   pending: string[]
-  /** Motivo para não fazer o push (`null` = pode). */
-  problem: string | null
-  /** Link da branch no GitHub. */
+  /** Motivo para não fazer o push (`null` = pode), com o código do `DeliveryError` que o push lança. */
+  problem: { code: DeliveryErrorCode; message: string } | null
   branchUrl: string
 }
 
@@ -79,7 +81,7 @@ export class DeliveryService {
     const project = this.deps.project(projectId)
     if (!project) throw new DeliveryError('no_project', DELIVERY_SERVICE_MESSAGES.noProject)
     const repo = project.repo
-    if (!repo || repo.host !== 'github.com' || !repo.verified) {
+    if (!repo || !githubRepoOf(project)) {
       throw new DeliveryError('no_repo', DELIVERY_MESSAGES.noRepo)
     }
     const wt = this.deps.worktree(taskId)
@@ -141,11 +143,14 @@ export class DeliveryService {
       git.diffStat(dir, `${base}...HEAD`).catch(() => ({ stat: '', files: [] }))
     ])
     const current = await git.currentBranch(dir).catch(() => null)
-    const problem =
-      checkPushBranch(t.branch, t) ??
-      checkPushBranch(current ?? '', t) ??
-      (pending.length > 0 ? DELIVERY_MESSAGES.dirty : null) ??
-      (commits.length === 0 ? DELIVERY_MESSAGES.nothing : null)
+    const branchProblem = checkPushBranch(t.branch, t) ?? checkPushBranch(current ?? '', t)
+    const problem: PushPreview['problem'] = branchProblem
+      ? { code: 'branch', message: branchProblem }
+      : pending.length > 0
+        ? { code: 'dirty', message: DELIVERY_MESSAGES.dirty }
+        : commits.length === 0
+          ? { code: 'nothing', message: DELIVERY_MESSAGES.nothing }
+          : null
     const target: DeliveryTarget = {
       owner: t.owner,
       repo: t.repo,
@@ -177,15 +182,7 @@ export class DeliveryService {
     taskId: string
   ): Promise<{ commits: number; branchUrl: string; target: DeliveryTarget }> {
     const p = await this.preview(projectId, taskId)
-    if (p.problem) {
-      const code =
-        p.problem === DELIVERY_MESSAGES.dirty
-          ? 'dirty'
-          : p.problem === DELIVERY_MESSAGES.nothing
-            ? 'nothing'
-            : 'branch'
-      throw new DeliveryError(code, p.problem)
-    }
+    if (p.problem) throw new DeliveryError(p.problem.code, p.problem.message)
     const wt = this.deps.worktree(taskId)!
     try {
       await this.deps.git.push(wt.path, p.target.remote, p.target.branch)
@@ -205,14 +202,6 @@ export class DeliveryService {
     const wt = this.deps.worktree(taskId)
     if (!wt) return null
     return this.deps.git.headCommit(wt.path).catch(() => null)
-  }
-
-  /** Contexto do modo entrega lido no começo do passo: aliases e `push.default`. */
-  async policyInputs(
-    dir: string
-  ): Promise<{ gitAliases: Record<string, string>; pushDefault: string | null }> {
-    const gitAliases = await this.deps.git.aliases(dir).catch(() => ({}))
-    return { gitAliases, pushDefault: await this.deps.git.configValue(dir, 'push.default') }
   }
 }
 

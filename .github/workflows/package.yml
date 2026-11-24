@@ -1,5 +1,5 @@
-# Empacota o app para macOS (dmg + zip, arm64 e x64) e Windows (nsis x64), roda o smoke test do
-# pacote e sobe os arquivos como artefatos do job.
+# Empacota o app para macOS (dmg + zip, arm64 e x64), Windows (nsis x64) e Linux (AppImage + deb,
+# x64), roda o smoke test do pacote e sobe os arquivos como artefatos do job.
 # - Manual (workflow_dispatch): só empacota, NÃO publica. Baixe os arquivos na página da execução.
 # - release.yml (workflow_call com publish: true): publica no rascunho do release deste repositório.
 # Segredos: só no `env` do passo que precisa; nunca `set -x` nem `echo` de valores.
@@ -33,7 +33,9 @@ jobs:
       # Não são segredos (vão dentro do binário): `vars`, com `secrets` como alternativa.
       MAIN_VITE_GITHUB_CLIENT_ID: ${{ vars.MAIN_VITE_GITHUB_CLIENT_ID || secrets.MAIN_VITE_GITHUB_CLIENT_ID }}
       MAIN_VITE_NOTION_OAUTH_CLIENT_ID: ${{ vars.MAIN_VITE_NOTION_OAUTH_CLIENT_ID || secrets.MAIN_VITE_NOTION_OAUTH_CLIENT_ID }}
-      MAIN_VITE_NOTION_OAUTH_BROKER_URL: ${{ vars.MAIN_VITE_NOTION_OAUTH_BROKER_URL || secrets.MAIN_VITE_NOTION_OAUTH_BROKER_URL }}
+      # Endereço do site (intermediário do Notion em /notion/*). Enquanto a variável antiga existir no
+      # repositório, ela vale como reserva (só a origem é usada).
+      MAIN_VITE_SITE_URL: ${{ vars.MAIN_VITE_SITE_URL || secrets.MAIN_VITE_SITE_URL || vars.MAIN_VITE_NOTION_OAUTH_BROKER_URL || secrets.MAIN_VITE_NOTION_OAUTH_BROKER_URL }}
     defaults:
       run:
         shell: bash
@@ -51,7 +53,7 @@ jobs:
       - name: Variáveis de build
         run: |
           missing=""
-          for name in MAIN_VITE_GITHUB_CLIENT_ID MAIN_VITE_NOTION_OAUTH_CLIENT_ID MAIN_VITE_NOTION_OAUTH_BROKER_URL; do
+          for name in MAIN_VITE_GITHUB_CLIENT_ID MAIN_VITE_NOTION_OAUTH_CLIENT_ID MAIN_VITE_SITE_URL; do
             if [ -z "${!name}" ]; then missing="$missing $name"; fi
           done
           if [ -n "$missing" ]; then
@@ -59,7 +61,7 @@ jobs:
               echo "::error::Faltam variáveis de build:$missing (Settings → Secrets and variables → Actions → Variables)."
               exit 1
             fi
-            echo "::warning::Faltam variáveis de build:$missing. O login com GitHub/Notion fica indisponível neste pacote."
+            echo "::warning::Faltam variáveis de build:$missing. O login com GitHub/Notion e a revisão como orkio[bot] ficam indisponíveis neste pacote."
           fi
 
       - name: Modo de assinatura (macOS)

@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
-import type {
-  ConnectionStatus,
-  NotionWorkspaceStatus,
-  ProjectView
-} from '../../../../shared/ipc-contract'
 import { setupPending, setupSteps, type SetupInput } from './setup-steps'
+import type { ConnectionStatus } from '../../../../shared/connection'
+import type { NotionWorkspaceStatus } from '../../../../shared/notion'
+import type { ProjectView } from '../../../../shared/projects'
 
 const connected = (handle: string): ConnectionStatus => ({
   state: 'connected',
-  account: { userName: handle, handle } as never,
+  account: { userName: handle, handle },
   connectedAt: ''
 })
 const claudeOk: ClaudeCodeStatus = {
@@ -27,12 +25,28 @@ const project = {
   localPath: '/home/x/www/orkio',
   notionProject: { id: 'n', name: 'Orkio' }
 } as ProjectView
-const workspace = {
-  config: {} as never,
+const prop = (name: string, type: string): { id: string; name: string; type: string } => ({
+  id: name,
+  name,
+  type
+})
+const workspace: NotionWorkspaceStatus = {
+  config: {
+    projectsDataSource: { id: 'ds-p', name: 'Projetos' },
+    tasksDataSource: { id: 'ds-t', name: 'Tarefas' },
+    mapping: {
+      title: prop('Nome', 'title'),
+      status: prop('Status', 'status'),
+      project: prop('Projeto', 'relation')
+    },
+    updatedAt: ''
+  },
   health: 'ok',
   messages: [],
   connection: 'oauth'
-} as NotionWorkspaceStatus
+}
+
+const BOARD = { config: {} } as SetupInput['board']
 
 const empty: SetupInput = {
   github: { state: 'disconnected' },
@@ -40,7 +54,7 @@ const empty: SetupInput = {
   claude: null,
   project: null,
   workspace: null,
-  boardConfigured: false
+  board: null
 }
 
 const states = (input: SetupInput): string[] => setupSteps(input).map((s) => `${s.id}:${s.state}`)
@@ -92,10 +106,10 @@ describe('setupSteps', () => {
       claude: claudeOk,
       project,
       workspace,
-      boardConfigured: false
+      board: null
     }
     expect(setupPending(setupSteps(almost))).toBe(1)
-    expect(setupPending(setupSteps({ ...almost, boardConfigured: true }))).toBe(0)
+    expect(setupPending(setupSteps({ ...almost, board: BOARD }))).toBe(0)
     expect(setupPending(setupSteps({ ...almost, github: { state: 'disconnected' } }))).toBe(2)
   })
 
@@ -106,9 +120,21 @@ describe('setupSteps', () => {
       claude: claudeOk,
       project,
       workspace,
-      boardConfigured: true
+      board: BOARD
     })
     expect(all.at(-1)).toMatchObject({ id: 'first-task', state: 'current' })
+  })
+
+  it('quadro só conta com página do Notion vinculada (a mesma regra no aviso e na tela)', () => {
+    const steps = setupSteps({
+      github: connected('u'),
+      notion: connected('Ana'),
+      claude: claudeOk,
+      project: { ...project, notionProject: null },
+      workspace,
+      board: BOARD
+    })
+    expect(steps.find((s) => s.id === 'board')?.state).not.toBe('done')
   })
 
   it('sem página do Notion vinculada, o passo 5 continua pendente', () => {

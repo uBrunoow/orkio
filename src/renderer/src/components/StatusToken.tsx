@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils'
  */
 export type StatusTone = 'success' | 'warning' | 'danger' | 'running' | 'neutral'
 
-export const DOT_CLASS: Record<StatusTone, string> = {
+const DOT_CLASS: Record<StatusTone, string> = {
   success: 'bg-ok',
   warning: 'bg-warn',
   danger: 'bg-danger',
@@ -18,7 +18,6 @@ export const DOT_CLASS: Record<StatusTone, string> = {
   neutral: 'bg-subtle-foreground'
 }
 
-/** Ponto de estado (7 px, como no mockup). */
 export function StatusDot({
   tone,
   className
@@ -52,20 +51,4 @@ export function StatusToken({
       </span>
     </span>
   )
-}
-
-/** Ponte para mapas antigos que falam em cor de Token: converte para o estado do mapa único. */
-export function toneOf(color: string | undefined): StatusTone {
-  switch (color) {
-    case 'green':
-      return 'success'
-    case 'yellow':
-      return 'warning'
-    case 'red':
-      return 'danger'
-    case 'orange':
-      return 'running'
-    default:
-      return 'neutral'
-  }
 }

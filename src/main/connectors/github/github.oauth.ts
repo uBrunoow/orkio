@@ -3,11 +3,14 @@
  *
  * Não precisa de client secret nem de redirect: o app pede um código, o usuário o digita em
  * github.com/login/device e o app consulta o endpoint de token até a autorização. Por isso o
- * GitHub NÃO usa o intermediário (broker/) do Notion.
+ * GitHub NÃO usa o intermediário do Notion (rotas /notion/* do site).
  */
+import { ApiError, genericStatusError, requestJson, unexpectedError } from '../../net/http'
 import { isRecord, stringOrNull } from '../../net/parse'
 import type { DeviceAuthorization, DevicePollResult } from '../../oauth/device-flow'
-import { GITHUB_USER_AGENT, GitHubApiError } from './github.client'
+import { GITHUB_USER_AGENT } from './github.client'
+
+const GITHUB = { service: 'github' } as const
 
 export const GITHUB_DEVICE_CODE_URL = 'https://github.com/login/device/code'
 export const GITHUB_ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token'
@@ -49,7 +52,8 @@ export interface GitHubDeviceApiDeps {
   timeoutMs?: number
 }
 
-const CONFIG_ERROR = new GitHubApiError(
+const CONFIG_ERROR = new ApiError(
+  'github',
   'oauth_config',
   'O login com GitHub está mal configurado nesta versão do Orkio (OAuth App sem Device Flow ou client ID inválido). Use um token ou avise quem mantém o app.'
 )
@@ -58,48 +62,24 @@ export function createGitHubDeviceApi(
   config: GitHubOAuthConfig,
   deps: GitHubDeviceApiDeps = {}
 ): GitHubDeviceApi {
-  const doFetch: typeof fetch = (...args) => (deps.fetch ?? globalThis.fetch)(...args)
   const timeoutMs = deps.timeoutMs ?? GITHUB_OAUTH_TIMEOUT_MS
 
   async function post(url: string, payload: Record<string, string>): Promise<unknown> {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    let response: Response
-    try {
-      response = await doFetch(url, {
+    const response = await requestJson(
+      {
+        url,
         method: 'POST',
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
           'User-Agent': GITHUB_USER_AGENT
         },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      })
-    } catch {
-      throw controller.signal.aborted
-        ? new GitHubApiError('timeout', 'O GitHub demorou demais para responder. Tente novamente.')
-        : new GitHubApiError(
-            'network',
-            'Não foi possível falar com o GitHub. Verifique sua conexão com a internet.'
-          )
-    } finally {
-      clearTimeout(timer)
-    }
-
-    if (response.status >= 500) {
-      throw new GitHubApiError(
-        'server',
-        `O GitHub está instável agora (erro ${response.status}). Tente novamente em instantes.`,
-        response.status
-      )
-    }
-    let body: unknown = null
-    try {
-      body = await response.json()
-    } catch {
-      // tratado abaixo
-    }
+        body: JSON.stringify(payload)
+      },
+      { ...GITHUB, fetch: deps.fetch, timeoutMs }
+    )
+    if (response.status >= 500) throw genericStatusError(GITHUB, response.status)
+    const body = response.body
     // Erros do Device Flow vêm com HTTP 200 e campo `error`; client ID inválido costuma ser 4xx.
     if (!response.ok && !(isRecord(body) && typeof body['error'] === 'string')) throw CONFIG_ERROR
     return body
@@ -113,9 +93,7 @@ export function createGitHubDeviceApi(
       })
       if (isRecord(body) && typeof body['error'] === 'string') throw errorForCode(body['error'])
       const parsed = parseDeviceCodeResponse(body)
-      if (!parsed) {
-        throw new GitHubApiError('unexpected', 'Resposta inesperada do GitHub. Tente novamente.')
-      }
+      if (!parsed) throw unexpectedError(GITHUB, 200)
       return parsed
     },
 
@@ -166,9 +144,7 @@ export function isGitHubDevicePage(value: string): boolean {
 }
 
 export function parseTokenPollResponse(body: unknown): DevicePollResult<GitHubOAuthToken> {
-  if (!isRecord(body)) {
-    throw new GitHubApiError('unexpected', 'Resposta inesperada do GitHub. Tente novamente.')
-  }
+  if (!isRecord(body)) throw unexpectedError(GITHUB, 200)
   const accessToken = stringOrNull(body['access_token'])
   if (accessToken) {
     const scope = typeof body['scope'] === 'string' ? body['scope'] : ''
@@ -207,7 +183,7 @@ export function parseTokenPollResponse(body: unknown): DevicePollResult<GitHubOA
   }
 }
 
-function errorForCode(error: string): GitHubApiError {
+function errorForCode(error: string): ApiError {
   if (
     error === 'device_flow_disabled' ||
     error === 'incorrect_client_credentials' ||
@@ -218,10 +194,12 @@ function errorForCode(error: string): GitHubApiError {
     return CONFIG_ERROR
   }
   if (error === 'slow_down' || error === 'rate_limited') {
-    return new GitHubApiError(
+    return new ApiError(
+      'github',
       'rate_limited',
       'Muitas tentativas de login seguidas. Aguarde alguns minutos e tente de novo.'
     )
   }
-  return new GitHubApiError('unexpected', 'O GitHub recusou o login. Tente novamente.')
+  // Recusa sem motivo conhecido: não é transitória (o polling para e mostra a mensagem).
+  return new ApiError('github', 'invalid', 'O GitHub recusou o login. Tente novamente.')
 }

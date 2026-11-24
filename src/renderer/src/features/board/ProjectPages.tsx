@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import type { BoardView, ProjectView } from '../../../../shared/ipc-contract'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
 import type { BoardSettingsTab } from '../../app/routes'
@@ -8,6 +7,8 @@ import { TaskFlowsPage } from '../task-flows/TaskFlowsPage'
 import { BoardSettings } from './BoardSettings'
 import { FlowPage } from './FlowPage'
 import { useBoard, type UseBoard } from './useBoard'
+import type { BoardView } from '../../../../shared/board'
+import type { ProjectView } from '../../../../shared/projects'
 
 type ConfiguredView = BoardView & { config: NonNullable<BoardView['config']> }
 
@@ -22,7 +23,6 @@ function NoProject({ onOpenProjects }: { onOpenProjects(): void }): React.JSX.El
   )
 }
 
-/** Carrega o quadro do projeto e mostra carregando/erro/sem quadro de um jeito só. */
 function WithBoard({
   projectId,
   onOpenBoard,
@@ -67,10 +67,6 @@ function WithBoard({
   return <>{children(board.view as ConfiguredView, board)}</>
 }
 
-/**
- * Configurações › Quadro e automações: abas Colunas · Automações · Fluxos · Entrega sobre o mesmo
- * rascunho do fluxo do projeto (3C), com os fluxos de tarefa (5A) e os modelos do alva-flow (5B).
- */
 export function BoardSettingsPage({
   project,
   tab,

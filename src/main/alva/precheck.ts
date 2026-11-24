@@ -3,15 +3,20 @@
  * no repositório. Só lê metadados: versão do plugin, existência de arquivos, nome/status dos MCPs
  * (`claude mcp list`), código de saída do `gh auth status`. Nunca guarda nem loga a saída.
  */
+import { statSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { AlvaCheckItem, AlvaPrecheck } from '../../shared/alva'
+import {
+  ALVA_COMMANDS,
+  ALVA_PLUGIN,
+  alvaCommand,
+  type AlvaCheckItem,
+  type AlvaPrecheck
+} from '../../shared/alva'
 import { parseInstalledPlugins } from '../claude/catalog'
 import { compareVersions } from '../claude/detect'
 
-export const ALVA_PLUGIN = 'alva-flow'
-export const ALVA_COMMANDS = ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr'] as const
 const MIN_COMPOSE = '2.24.4'
 const COMPOSE_FILES = [
   'docker/docker-compose.dev.yml',
@@ -20,6 +25,16 @@ const COMPOSE_FILES = [
   'compose.yml',
   'docker-compose.yml'
 ]
+
+/**
+ * O projeto usa Docker Compose (algum arquivo de compose conhecido)? Leitura local e síncrona, sem
+ * depender da pré-checagem: o limite de fluxos Alva em paralelo pergunta isto ao reabrir o app.
+ */
+export function hasComposeFile(projectDir: string): boolean {
+  return COMPOSE_FILES.some(
+    (f) => statSync(join(projectDir, f), { throwIfNoEntry: false })?.isFile() === true
+  )
+}
 
 export type ExecResult = { code: number; stdout: string }
 export type Exec = (
@@ -100,7 +115,6 @@ export async function runPrecheck(
   const claudeDir = join(deps.home ?? homedir(), '.claude')
   const items: AlvaCheckItem[] = []
 
-  // 1. Plugin + versão + comandos.
   let pluginVersion: string | null = null
   const installed = await readText(join(claudeDir, 'plugins', 'installed_plugins.json'))
   const entry = installed
@@ -115,9 +129,7 @@ export async function runPrecheck(
       pluginVersion = null
     }
   }
-  const missingCommands = ALVA_COMMANDS.filter(
-    (c) => !commandsInCatalog.includes(`${ALVA_PLUGIN}:${c}`)
-  )
+  const missingCommands = ALVA_COMMANDS.filter((c) => !commandsInCatalog.includes(alvaCommand(c)))
   if (!entry && missingCommands.length === ALVA_COMMANDS.length) {
     items.push({
       id: 'plugin',
@@ -131,7 +143,7 @@ export async function runPrecheck(
       id: 'plugin',
       label: 'Plugin alva-flow',
       state: 'missing',
-      detail: `Faltam comandos: ${missingCommands.map((c) => `/${ALVA_PLUGIN}:${c}`).join(', ')}.`,
+      detail: `Faltam comandos: ${missingCommands.map((c) => `/${alvaCommand(c)}`).join(', ')}.`,
       fix: '/plugin update alva-flow@alva-flow-marketplace'
     })
   } else {
@@ -143,7 +155,6 @@ export async function runPrecheck(
     })
   }
 
-  // 2. Backlog.md no repositório.
   const hasConfig = await isFile(join(projectDir, 'backlog', 'config.yml'))
   const hasTasks = await isDir(join(projectDir, 'backlog', 'tasks'))
   items.push(
@@ -163,7 +174,7 @@ export async function runPrecheck(
         }
   )
 
-  // 3. MCP do Backlog.md: escopo do usuário (vale em qualquer worktree) ou só no projeto.
+  // MCP do Backlog.md: escopo do usuário (vale em qualquer worktree) ou só no projeto.
   const findBacklog = async (cwd: string): Promise<'ok' | 'pending' | 'failed' | null> => {
     const r = await deps
       .exec('claude', ['mcp', 'list'], { cwd, timeoutMs: 60_000 })
@@ -209,7 +220,7 @@ export async function runPrecheck(
     )
   }
 
-  // 4. gh instalado e autenticado (só o código de saída).
+  // gh instalado e autenticado (só o código de saída).
   const ghVersion = await deps
     .exec('gh', ['--version'], { cwd: deps.neutralDir, timeoutMs: 15_000 })
     .catch(() => null)
@@ -238,7 +249,7 @@ export async function runPrecheck(
     )
   }
 
-  // 5. python3 (scripts de CI e comentários do /pr).
+  // python3 (scripts de CI e comentários do /pr).
   const py = await deps
     .exec('python3', ['--version'], { cwd: deps.neutralDir, timeoutMs: 15_000 })
     .catch(() => null)
@@ -253,7 +264,6 @@ export async function runPrecheck(
         }
   )
 
-  // 6. Makefile com test e lint.
   const makefile = await readText(join(projectDir, 'Makefile'))
   if (makefile === null) {
     items.push({
@@ -278,7 +288,6 @@ export async function runPrecheck(
     )
   }
 
-  // 7. Docker (só se o projeto tem compose).
   let hasDocker = false
   for (const f of COMPOSE_FILES) if (await isFile(join(projectDir, f))) hasDocker = true
   if (hasDocker) {

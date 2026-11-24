@@ -3,7 +3,6 @@ import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } fro
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
-  NOTION_FAKE,
   createUserDataDir,
   cspViolations,
   NOTION_TASK_IDS,
@@ -15,7 +14,10 @@ import {
   type OrkioApp,
   navTo,
   taskScreen,
-  taskTab
+  taskTab,
+  FAKE_REPO,
+  seedConfig,
+  FAKE_CLAUDE
 } from './fixtures'
 
 /**
@@ -113,46 +115,12 @@ test.beforeAll(() => {
   // Mudança NÃO commitada do usuário na pasta principal: o Orkio não pode tocar nela.
   writeFileSync(join(repoDir(), 'README.md'), '# e2e\n\nrascunho do usuário\n')
 
-  writeFileSync(
-    join(userDataDir, 'orkio-config.json'),
-    JSON.stringify({
-      schemaVersion: 2,
-      notion: {
-        projectsDataSource: { id: NOTION_FAKE.projectsDs, name: 'Projetos' },
-        tasksDataSource: { id: NOTION_FAKE.tasksDs, name: 'Tarefas' },
-        mapping: {
-          title: { id: 'title', name: 'Nome', type: 'title' },
-          status: { id: 'st%3A', name: 'Status', type: 'status' },
-          uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
-          project: { id: 'rel', name: 'Projeto', type: 'relation' },
-          priority: { id: 'pri', name: 'Prioridade', type: 'select' },
-          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
-        },
-        updatedAt: '2026-11-19T00:00:00.000Z'
-      },
-      projects: [
-        {
-          id: 'proj-claude',
-          name: 'orkio-app',
-          localPath: repoDir(),
-          repo: {
-            host: 'github.com',
-            owner: 'acme',
-            name: 'orkio-app',
-            remoteName: 'origin',
-            defaultBranch: 'main',
-            visibility: 'private',
-            canPush: true,
-            archived: false,
-            verified: true
-          },
-          createdAt: '2026-11-01T00:00:00.000Z',
-          updatedAt: '2026-11-01T00:00:00.000Z',
-          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
-        }
-      ]
-    })
-  )
+  seedConfig(userDataDir, {
+    id: 'proj-claude',
+    name: 'orkio-app',
+    localPath: repoDir(),
+    repo: FAKE_REPO
+  })
 })
 
 test.afterAll(async () => {
@@ -165,7 +133,7 @@ test('card do Claude Code: versão e login, sem e-mail nem credenciais', async (
   const { page } = await open()
   await openIntegration(page, 'Claude Code')
   const claudeCard = page.getByRole('region', { name: 'Claude Code' })
-  await expect(claudeCard.getByTestId('claude-version')).toHaveText('2.1.331')
+  await expect(claudeCard.getByTestId('claude-version')).toHaveText(FAKE_CLAUDE.version)
   await expect(claudeCard).toContainText('Logado (assinatura)')
   await expect(page.locator('body')).not.toContainText('nao-mostrar@example.com')
 

@@ -1,17 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import { PUBLISH_REVIEW_MESSAGES } from '../../shared/review-publish'
 import type { ActionConfirm } from '../../shared/task-flow'
-import { GitHubApiError } from '../connectors/github/github.client'
-import {
-  ORKIO_SITE_NETWORK_PREFIX,
-  ORKIO_SITE_TIMEOUT_MESSAGE
-} from '../connectors/github/github.connector'
 import { REVIEW_MESSAGES, ReviewPostError } from '../connectors/github/review-poster'
+import { SIGNALS_FAILURE } from './action-helpers'
 import {
   createPublishReviewAction,
   PUBLISH_ACTION_MESSAGES,
+  PUBLISH_FAILURES,
   type PublishReviewDeps
 } from './review-publish'
+import { ApiError } from '../net/http'
 
 const JSON_ANSWER = JSON.stringify({
   event: 'REQUEST_CHANGES',
@@ -87,36 +85,44 @@ describe('publish_review: antes do gate', () => {
   })
 
   it('problemas viram falha do passo (nada é publicado)', async () => {
-    const cases: [Partial<PublishReviewDeps>, string][] = [
+    const cases: [Partial<PublishReviewDeps>, string, string][] = [
       [
         { poster: { isConfigured: () => false, diffLines: vi.fn(), postReview: vi.fn() } },
+        PUBLISH_FAILURES.noSite,
         PUBLISH_ACTION_MESSAGES.noSite
       ],
-      [{ finalText: async () => null }, PUBLISH_REVIEW_MESSAGES.noAnswer],
-      [{ finalText: async () => 'Revisei.' }, PUBLISH_REVIEW_MESSAGES.notJson],
+      [{ finalText: async () => null }, PUBLISH_FAILURES.invalid, PUBLISH_REVIEW_MESSAGES.noAnswer],
+      [
+        { finalText: async () => 'Revisei.' },
+        PUBLISH_FAILURES.invalid,
+        PUBLISH_REVIEW_MESSAGES.notJson
+      ],
       [
         { finalText: async () => JSON.stringify({ event: 'APPROVE', summary: 'ok' }) },
+        PUBLISH_FAILURES.invalid,
         PUBLISH_REVIEW_MESSAGES.badEvent
       ],
-      [{ repo: () => null }, PUBLISH_ACTION_MESSAGES.noRepo],
+      [{ repo: () => null }, PUBLISH_FAILURES.noRepo, PUBLISH_ACTION_MESSAGES.noRepo],
       [
         { signals: async () => ({ ok: false, error: { code: 'x', message: 'x' } }) as never },
-        PUBLISH_ACTION_MESSAGES.signals
+        SIGNALS_FAILURE.code,
+        SIGNALS_FAILURE.message
       ],
       [
         { signals: async () => ({ ok: true, value: { signals: {} } }) as never },
+        PUBLISH_FAILURES.noPr,
         PUBLISH_ACTION_MESSAGES.noPr
       ]
     ]
-    for (const [over, message] of cases) {
+    for (const [over, code, message] of cases) {
       const { action, ctx, posted } = setup(over)
-      expect(await action.confirm!(ctx)).toEqual({ problem: message })
+      expect(await action.confirm!(ctx)).toEqual({ problem: { code, message } })
       expect(posted).toEqual([])
     }
     // Sem execução no fluxo.
     const { action, ctx } = setup()
     expect(await action.confirm!({ ...ctx, lastRunId: null })).toEqual({
-      problem: PUBLISH_REVIEW_MESSAGES.noAnswer
+      problem: { code: PUBLISH_FAILURES.invalid, message: PUBLISH_REVIEW_MESSAGES.noAnswer }
     })
     // Caminho inválido (prepareReview) e erro ao ler o diff.
     const bad = setup({
@@ -128,7 +134,10 @@ describe('publish_review: antes do gate', () => {
         })
     })
     expect(await bad.action.confirm!(bad.ctx)).toEqual({
-      problem: `${PUBLISH_ACTION_MESSAGES.invalidPrefix} ${REVIEW_MESSAGES.badComment}`
+      problem: {
+        code: PUBLISH_FAILURES.invalid,
+        message: `${PUBLISH_ACTION_MESSAGES.invalidPrefix} ${REVIEW_MESSAGES.badComment}`
+      }
     })
     const diffFail = setup({
       poster: {
@@ -140,7 +149,7 @@ describe('publish_review: antes do gate', () => {
       }
     })
     expect(await diffFail.action.confirm!(diffFail.ctx)).toEqual({
-      problem: REVIEW_MESSAGES.notFound
+      problem: { code: 'review_not_found', message: REVIEW_MESSAGES.notFound }
     })
   })
 })
@@ -156,8 +165,7 @@ describe('publish_review: aprovar', () => {
     const { action, ctx, info, posted, events, automation } = await confirmed()
     const r = await action.run({ ...ctx, confirmed: info })
     expect(r).toEqual({
-      ok: true,
-      vars: { 'review.posted': 'sim', 'review.event': 'REQUEST_CHANGES' }
+      ok: true
     })
     expect(posted).toEqual([
       [
@@ -218,7 +226,11 @@ describe('publish_review: aprovar', () => {
 
   it('sem confirmação guardada: não posta', async () => {
     const { action, ctx, posted } = setup()
-    expect(await action.run(ctx)).toEqual({ ok: false, message: PUBLISH_ACTION_MESSAGES.noConfirm })
+    expect(await action.run(ctx)).toEqual({
+      ok: false,
+      code: PUBLISH_FAILURES.noConfirm,
+      message: PUBLISH_ACTION_MESSAGES.noConfirm
+    })
     expect(posted).toEqual([])
   })
 
@@ -237,12 +249,15 @@ describe('publish_review: aprovar', () => {
     const r1 = await action.run({ ...ctx, confirmed: info })
     expect(r1).toEqual({
       ok: false,
-      message: `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint} https://github.com/apps/orkio/installations/new`
+      code: PUBLISH_FAILURES.notInstalled,
+      message: `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint}`,
+      link: 'https://github.com/apps/orkio/installations/new'
     })
 
-    error = new ReviewPostError('not_configured', REVIEW_MESSAGES.notConfigured)
+    error = new ReviewPostError('app_not_configured', REVIEW_MESSAGES.notConfigured)
     expect(await action.run({ ...ctx, confirmed: info })).toEqual({
       ok: false,
+      code: PUBLISH_FAILURES.notConfigured,
       message: PUBLISH_ACTION_MESSAGES.notConfigured
     })
 
@@ -250,25 +265,26 @@ describe('publish_review: aprovar', () => {
     error = new ReviewPostError('no_site', REVIEW_MESSAGES.noSite)
     expect(await action.run({ ...ctx, confirmed: info })).toEqual({
       ok: false,
+      code: PUBLISH_FAILURES.noSite,
       message: PUBLISH_ACTION_MESSAGES.noSite
     })
 
-    error = new ReviewPostError('timeout', ORKIO_SITE_TIMEOUT_MESSAGE)
+    // Decide pelo código do erro (`site_timeout`), não pelo texto da mensagem.
+    error = new ReviewPostError('site_timeout', 'Qualquer texto do conector.')
     expect(await action.run({ ...ctx, confirmed: info })).toEqual({
       ok: false,
-      message: ORKIO_SITE_TIMEOUT_MESSAGE
+      code: PUBLISH_FAILURES.maybePosted,
+      message: 'Qualquer texto do conector.'
     })
     const again = (await action.confirm!(ctx)) as ActionConfirm
     expect(again.warning).toBe(PUBLISH_ACTION_MESSAGES.maybePosted)
 
     // Rede caiu no POST ao site: também pode ter publicado.
-    error = new ReviewPostError(
-      'network',
-      `${ORKIO_SITE_NETWORK_PREFIX} (orkio.example). Verifique sua internet e tente de novo.`
-    )
+    error = new ReviewPostError('site_network', 'Sem conexão com o site.')
     const fresh = await confirmed({ poster })
     expect(await fresh.action.run({ ...fresh.ctx, confirmed: fresh.info })).toEqual({
       ok: false,
+      code: PUBLISH_FAILURES.maybePosted,
       message: PUBLISH_ACTION_MESSAGES.networkMaybePosted
     })
     expect(((await fresh.action.confirm!(fresh.ctx)) as ActionConfirm).warning).toBe(
@@ -279,15 +295,17 @@ describe('publish_review: aprovar', () => {
     const other = await confirmed({ poster })
     expect(await other.action.run({ ...other.ctx, confirmed: other.info })).toEqual({
       ok: false,
+      code: 'review_network',
       message: 'Sem conexão com o GitHub.'
     })
     expect(((await other.action.confirm!(other.ctx)) as ActionConfirm).warning).toBeUndefined()
 
     // Erro inesperado: mensagem genérica (nunca a exceção crua).
-    error = new GitHubApiError('unexpected', 'segredo ghp_x')
+    error = new ApiError('github', 'unexpected', 'segredo ghp_x')
     const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     expect(await action.run({ ...ctx, confirmed: info })).toEqual({
       ok: false,
+      code: PUBLISH_FAILURES.failed,
       message: PUBLISH_ACTION_MESSAGES.generic
     })
     expect(spy.mock.calls.flat().join(' ')).not.toContain('ghp_x')

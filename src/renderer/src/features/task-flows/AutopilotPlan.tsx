@@ -1,7 +1,9 @@
-import type { FlowRunView } from '../../../../shared/task-flow'
 import { DoneIcon, DotIcon, ProblemIcon, TodoIcon } from '@/components/icons'
 import { cn } from '@/lib/utils'
-import { flowPlan, planProgress, type PlanState } from './flow-plan'
+import { planProgress, type PlanState, type PlanStep } from './flow-plan'
+
+export const AUTOPILOT_TEXT =
+  'Piloto automático: o Orkio manda cada passo para o Claude Code e segue sozinho. Ele para quando precisar de você.'
 
 const STATE: Record<PlanState, { label: string; icon: typeof DoneIcon; className: string }> = {
   done: { label: 'feito', icon: DoneIcon, className: 'text-ok' },
@@ -13,13 +15,7 @@ const STATE: Record<PlanState, { label: string; icon: typeof DoneIcon; className
   unreached: { label: 'não precisou', icon: TodoIcon, className: 'text-subtle-foreground' }
 }
 
-/**
- * Plano do piloto automático: os passos do fluxo como a lista de tarefas de uma sessão do Claude
- * Code (feito, agora, esperando você, a seguir). A conversa de cada passo fica logo acima, na
- * sessão; aqui é o mapa de onde o fluxo está e do que ainda vai acontecer sem você digitar nada.
- */
-export function AutopilotPlan({ run }: { run: FlowRunView }): React.JSX.Element {
-  const plan = flowPlan(run)
+export function AutopilotPlan({ plan }: { plan: readonly PlanStep[] }): React.JSX.Element {
   const { done, total } = planProgress(plan)
   return (
     <div

@@ -1,13 +1,13 @@
 /**
- * Mesmos casos de broker/src/index.test.ts (Cloudflare Worker), contra a lógica portada para o
- * site. `handleRequest` faz o papel do roteador: no site, quem roteia é o Next (app/notion/*,
- * app/health); aqui chamamos os mesmos handlers que as rotas usam.
+ * Intermediário OAuth do Notion. `handleRequest` faz o papel do roteador do Next (app/notion/*,
+ * app/health): chama os mesmos handlers que as rotas usam.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { GET as healthGet } from '@/app/health/route'
 import { GET as tokenGet } from '@/app/notion/token/route'
 import { GET as refreshGet } from '@/app/notion/refresh/route'
-import { NOTION_TOKEN_URL, handleBroker, json, type BrokerEnv } from './notion-broker'
+import { NOTION_OAUTH_REDIRECT_URI, NOTION_VERSION } from './contract'
+import { NOTION_TOKEN_URL, handleBroker, type BrokerEnv } from './notion-broker'
 
 type Env = BrokerEnv
 
@@ -19,14 +19,27 @@ async function handleRequest(
   const { pathname } = new URL(request.url)
   if (pathname === '/health') return healthGet()
   if (pathname !== '/notion/token' && pathname !== '/notion/refresh') {
-    return json(404, { error: 'not_found' }) // no site: a página 404 do Next
+    throw new Error(`rota fora do intermediário: ${pathname}`)
   }
   if (request.method !== 'POST') return pathname === '/notion/token' ? tokenGet() : refreshGet()
   return handleBroker(pathname === '/notion/token' ? 'token' : 'refresh', request, env, fetchImpl)
 }
 
+// Nada é logado em nenhum caminho do intermediário (corpo, tokens, headers): o teste confere o
+// comportamento em todos os casos deste arquivo (a regra de lint `no-console` cobre o texto).
+let logs: ReturnType<typeof vi.spyOn>[] = []
+beforeEach(() => {
+  logs = (['log', 'info', 'warn', 'error', 'debug'] as const).map((m) =>
+    vi.spyOn(console, m).mockImplementation(() => undefined)
+  )
+})
+afterEach(() => {
+  for (const spy of logs) expect(spy).not.toHaveBeenCalled()
+  vi.restoreAllMocks()
+})
+
 const SECRET = 'secret_CLIENT_SECRET_NEVER_IN_RESPONSES'
-const REDIRECT = 'http://localhost:47821/oauth/notion/callback'
+const REDIRECT = NOTION_OAUTH_REDIRECT_URI
 const ENV: Env = {
   NOTION_CLIENT_ID: 'client-123',
   NOTION_CLIENT_SECRET: SECRET,
@@ -85,7 +98,7 @@ describe('broker — POST /notion/token', () => {
     expect(url).toBe(NOTION_TOKEN_URL)
     const headers = init?.headers as Record<string, string>
     expect(headers['Authorization']).toBe(`Basic ${btoa(`client-123:${SECRET}`)}`)
-    expect(headers['Notion-Version']).toBe('2026-03-11')
+    expect(headers['Notion-Version']).toBe(NOTION_VERSION)
     expect(JSON.parse(String(init?.body))).toEqual({
       grant_type: 'authorization_code',
       code: 'code-1',
@@ -188,12 +201,9 @@ describe('broker — POST /notion/refresh', () => {
   })
 })
 
-describe('broker — proteção geral', () => {
-  it('rotas, métodos e content-type', async () => {
+describe('intermediário — proteção geral', () => {
+  it('métodos e content-type', async () => {
     const upstream = notion(NOTION_OK)
-    expect((await handleRequest(new Request('https://b.example/x'), ENV, upstream)).status).toBe(
-      404
-    )
     const get = await handleRequest(new Request('https://b.example/notion/token'), ENV, upstream)
     expect(get.status).toBe(405)
     expect(get.headers.get('allow')).toBe('POST')

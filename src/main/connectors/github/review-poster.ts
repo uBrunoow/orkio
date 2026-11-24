@@ -12,20 +12,29 @@
  *
  * Erros viram `ReviewPostError` com mensagem pt-BR (nunca a exceção crua nem corpos de resposta).
  */
-import { sanitizeReviewText } from '../../../shared/review-publish'
-import { redactSecrets } from '../../claude/redact'
+import { isOwner, isRepo } from '../../../shared/github-names'
+import {
+  REVIEW_COMMENT_MAX,
+  REVIEW_COMMENTS_MAX,
+  REVIEW_PATH_MAX,
+  REVIEW_SUMMARY_MAX,
+  sanitizeReviewText,
+  type PublishReviewEvent
+} from '../../../shared/review-publish'
+import { redactSecrets } from '../../platform/redact'
+import { isApiError } from '../../net/http'
 import { isRecord } from '../../net/parse'
-import { GitHubApiError, type ConditionalPage } from './github.client'
-import type { OrkioSiteResponse, OrkioSiteReviewPayload } from './github.connector'
+import type { ConditionalPage } from './github.client'
+import {
+  NO_SITE_MESSAGE,
+  type OrkioSiteResponse,
+  type OrkioSiteReviewPayload
+} from './github.connector'
+import { parseOrkioSiteResponse } from './orkio-site'
+import { reviewUrlOrNull } from '../../../shared/site-contract'
 
-export const REVIEW_BODY_MAX = 20_000
-export const REVIEW_COMMENTS_MAX = 50
-export const REVIEW_COMMENT_MAX = 4_000
-export const REVIEW_PATH_MAX = 1_000
 /** Páginas de `GET /pulls/{n}/files` (100 por página; o GitHub para em 3000 arquivos). */
 const PR_FILES_MAX_PAGES = 30
-
-export type ReviewEvent = 'COMMENT' | 'REQUEST_CHANGES'
 
 export interface ReviewComment {
   /** Caminho do arquivo no repositório (relativo, como no diff da PR). */
@@ -36,14 +45,14 @@ export interface ReviewComment {
 }
 
 export interface ReviewInput {
-  event: ReviewEvent
+  event: PublishReviewEvent
   body: string
   comments: ReviewComment[]
 }
 
 /** Revisão validada, redigida e pronta para o site. */
 export interface PreparedReview {
-  event: ReviewEvent
+  event: PublishReviewEvent
   body: string
   comments: { path: string; line: number; side: 'RIGHT'; body: string }[]
 }
@@ -56,24 +65,30 @@ export interface PostedReview {
 export type ReviewPostErrorCode =
   /** Pedido inválido (evento, owner/repo/número, textos, limites, linha fora do diff). */
   | 'invalid'
-  /** O site respondeu que não tem o GitHub App configurado (ou não tem a rota). */
-  | 'not_configured'
+  /** O site respondeu que não tem o GitHub App configurado. */
+  | 'app_not_configured'
+  /** O site publicado não tem a rota (versão antiga do site). */
+  | 'site_outdated'
   /** Este build do app não sabe o endereço do site (sem `MAIN_VITE_SITE_URL` ou origem recusada). */
   | 'no_site'
   /** App não instalado no repositório (ou sem acesso às PRs): `details.installUrl`. */
   | 'not_installed'
   /** A conta conectada não tem push no repositório. */
   | 'forbidden'
-  /** Nenhuma conta do GitHub conectada. */
   | 'not_connected'
   | 'rate_limited'
   /** GitHub ou site instável (5xx, resposta estranha). */
   | 'upstream'
   | 'network'
   | 'timeout'
+  /**
+   * Tempo esgotado ou queda de rede no POST da revisão ao site: o pedido pode ter chegado (e a
+   * revisão, saído). Diferente de `timeout`/`network` das leituras ao GitHub antes de postar.
+   */
+  | 'site_timeout'
+  | 'site_network'
   /** O GitHub recusou a revisão (422: linha fora do diff, PR fechada...). */
   | 'rejected'
-  /** PR não existe. */
   | 'not_found'
 
 export class ReviewPostError extends Error {
@@ -89,9 +104,8 @@ export class ReviewPostError extends Error {
 
 export const REVIEW_MESSAGES = {
   notConfigured: 'O GitHub App do Orkio ainda não está configurado no site.',
-  noSite:
-    'Este app não sabe o endereço do site do Orkio (MAIN_VITE_SITE_URL não definido no build). ' +
-    'Em dev, defina em .env.development e reinicie o pnpm dev.',
+  noSite: NO_SITE_MESSAGE,
+  siteOutdated: 'O site do Orkio ainda não publica revisões (versão antiga do site).',
   notInstalled:
     'O GitHub App do Orkio não está instalado neste repositório (ou não tem acesso às PRs). ' +
     'Instale o App no repositório e tente de novo.',
@@ -101,7 +115,7 @@ export const REVIEW_MESSAGES = {
   approveRefused: 'O Orkio nunca aprova PRs: a revisão só pode comentar ou pedir alterações.',
   invalidTarget: 'Repositório ou número da PR inválido.',
   emptyBody: 'A revisão precisa de um resumo.',
-  bodyTooLong: `O resumo da revisão passa de ${REVIEW_BODY_MAX.toLocaleString('pt-BR')} caracteres.`,
+  bodyTooLong: `O resumo da revisão passa de ${REVIEW_SUMMARY_MAX.toLocaleString('pt-BR')} caracteres.`,
   tooManyComments: `A revisão tem mais de ${REVIEW_COMMENTS_MAX} comentários de linha.`,
   badComment:
     'Um comentário de linha é inválido (arquivo, linha ou texto vazio, ou texto com mais de ' +
@@ -111,20 +125,7 @@ export const REVIEW_MESSAGES = {
   badRequest: 'O site do Orkio recusou a revisão como inválida.'
 } as const
 
-/** Login de usuário/organização: letras, dígitos, `-` e `_` (contas gerenciadas), até 100. */
-const OWNER_SLUG = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,99}$/
-const REPO_SLUG = /^[A-Za-z0-9._-]{1,100}$/
-export const INSTALL_URL =
-  /^https:\/\/github\.com\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new$/
 const MAX_PR_NUMBER = 2 ** 31
-
-export function isValidOwner(owner: string): boolean {
-  return OWNER_SLUG.test(owner)
-}
-
-export function isValidRepo(repo: string): boolean {
-  return REPO_SLUG.test(repo) && repo !== '.' && repo !== '..'
-}
 
 function invalid(message: string): ReviewPostError {
   return new ReviewPostError('invalid', message)
@@ -134,8 +135,8 @@ function checkTarget(owner: unknown, repo: unknown, number: unknown): void {
   if (
     typeof owner !== 'string' ||
     typeof repo !== 'string' ||
-    !isValidOwner(owner) ||
-    !isValidRepo(repo) ||
+    !isOwner(owner) ||
+    !isRepo(repo) ||
     typeof number !== 'number' ||
     !Number.isSafeInteger(number) ||
     number < 1 ||
@@ -172,7 +173,6 @@ function cleanText(text: string): string {
  * Valida, limpa (`sanitizeReviewText`: sem HTML nem imagens, para o gate mostrar exatamente o
  * que vai), redige e normaliza uma revisão (aceita `unknown`: o fluxo lê `.orkio/review.json`).
  * Lança `ReviewPostError('invalid')`; APPROVE (ou qualquer outro evento) é sempre recusado.
- * Use antes do gate para mostrar exatamente o que será postado.
  */
 export function prepareReview(input: unknown): PreparedReview {
   if (!isRecord(input)) throw invalid(REVIEW_MESSAGES.emptyBody)
@@ -185,7 +185,7 @@ export function prepareReview(input: unknown): PreparedReview {
   if (typeof rawBody !== 'string') throw invalid(REVIEW_MESSAGES.emptyBody)
   const body = cleanText(rawBody)
   if (body.length === 0) throw invalid(REVIEW_MESSAGES.emptyBody)
-  if (body.length > REVIEW_BODY_MAX) throw invalid(REVIEW_MESSAGES.bodyTooLong)
+  if (body.length > REVIEW_SUMMARY_MAX) throw invalid(REVIEW_MESSAGES.bodyTooLong)
 
   const rawComments = input['comments'] ?? []
   if (!Array.isArray(rawComments)) throw invalid(REVIEW_MESSAGES.badComment)
@@ -321,25 +321,30 @@ export class GitHubReviewPoster {
     return parseSiteResponse(response, owner, repo, number)
   }
 
-  /** Erros do conector → `ReviewPostError` (mensagens dele já são pt-BR e sem token). */
+  /**
+   * Erros do conector → `ReviewPostError` (mensagens dele já são pt-BR e sem token). Rede/tempo no
+   * POST ao site (serviço `site`) viram `site_network`/`site_timeout`: o pedido pode ter chegado.
+   */
   private async github<T>(call: () => Promise<T>): Promise<T> {
     try {
       return await call()
     } catch (error) {
       if (error instanceof ReviewPostError) throw error
-      if (error instanceof GitHubApiError) {
-        if (error.code === 'not_connected')
-          throw new ReviewPostError('not_connected', error.message)
-        if (error.code === 'network') throw new ReviewPostError('network', error.message)
-        if (error.code === 'timeout') throw new ReviewPostError('timeout', error.message)
-        if (error.code === 'rate_limited') throw new ReviewPostError('rate_limited', error.message)
-        if (error.code === 'not_found') {
-          throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
-        }
-        // O conector só diz `not_configured` quando o build não tem (ou recusa) a origem do site:
-        // é problema deste app, não do site.
-        if (error.code === 'not_configured') {
-          throw new ReviewPostError('no_site', REVIEW_MESSAGES.noSite)
+      if (isApiError(error)) {
+        const site = error.service === 'site'
+        switch (error.code) {
+          case 'not_connected':
+            throw new ReviewPostError('not_connected', error.message)
+          case 'no_site':
+            throw new ReviewPostError('no_site', REVIEW_MESSAGES.noSite)
+          case 'network':
+            throw new ReviewPostError(site ? 'site_network' : 'network', error.message)
+          case 'timeout':
+            throw new ReviewPostError(site ? 'site_timeout' : 'timeout', error.message)
+          case 'rate_limited':
+            throw new ReviewPostError('rate_limited', error.message)
+          case 'not_found':
+            throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
         }
       }
       throw new ReviewPostError('upstream', REVIEW_MESSAGES.upstream)
@@ -354,60 +359,33 @@ export function parseSiteResponse(
   repo: string,
   number: number
 ): PostedReview {
-  const body = isRecord(response.body) ? response.body : {}
-  const code = typeof body['error'] === 'string' ? body['error'] : null
-  if (response.status === 200) {
-    return { url: reviewUrlOrNull(body['url'], owner, repo, number) }
-  }
-  if (code === 'not_installed') {
-    const installUrl = body['installUrl']
-    throw new ReviewPostError(
-      'not_installed',
-      REVIEW_MESSAGES.notInstalled,
-      typeof installUrl === 'string' && INSTALL_URL.test(installUrl) ? { installUrl } : {}
-    )
-  }
-  if (code === 'forbidden') throw new ReviewPostError('forbidden', REVIEW_MESSAGES.forbidden)
-  // Site sem a rota (versão antiga): 404 sem código conhecido também é "não configurado".
-  if (code === 'not_configured' || (response.status === 404 && code === null)) {
-    throw new ReviewPostError('not_configured', REVIEW_MESSAGES.notConfigured)
-  }
-  if (code === 'rate_limited' || response.status === 429) {
-    throw new ReviewPostError('rate_limited', REVIEW_MESSAGES.rateLimited)
-  }
-  if (code === 'bad_request') {
-    if (body['reason'] === 'rejected') {
-      throw new ReviewPostError('rejected', REVIEW_MESSAGES.rejected)
-    }
-    if (body['reason'] === 'pr_not_found') {
-      throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
-    }
-    throw invalid(REVIEW_MESSAGES.badRequest)
-  }
-  throw new ReviewPostError('upstream', REVIEW_MESSAGES.upstream)
-}
-
-/** Só o link de revisão de uma PR em github.com. */
-function reviewUrlOrNull(
-  value: unknown,
-  owner: string,
-  repo: string,
-  number: number
-): string | null {
-  if (typeof value !== 'string') return null
-  try {
-    const url = new URL(value)
-    return url.protocol === 'https:' &&
-      url.hostname === 'github.com' &&
-      !url.port &&
-      !url.username &&
-      !url.password &&
-      !url.search &&
-      url.pathname.toLowerCase() === `/${owner}/${repo}/pull/${number}`.toLowerCase() &&
-      /^(#pullrequestreview-\d+)?$/.test(url.hash)
-      ? url.toString()
-      : null
-  } catch {
-    return null
+  const result = parseOrkioSiteResponse(response)
+  switch (result.kind) {
+    case 'ok':
+      return { url: reviewUrlOrNull(result.body['url'], owner, repo, number) }
+    case 'not_installed':
+      throw new ReviewPostError(
+        'not_installed',
+        REVIEW_MESSAGES.notInstalled,
+        result.installUrl ? { installUrl: result.installUrl } : {}
+      )
+    case 'forbidden':
+      throw new ReviewPostError('forbidden', REVIEW_MESSAGES.forbidden)
+    case 'app_not_configured':
+      throw new ReviewPostError('app_not_configured', REVIEW_MESSAGES.notConfigured)
+    case 'site_outdated':
+      throw new ReviewPostError('site_outdated', REVIEW_MESSAGES.siteOutdated)
+    case 'rate_limited':
+      throw new ReviewPostError('rate_limited', REVIEW_MESSAGES.rateLimited)
+    case 'bad_request':
+      if (result.reason === 'rejected') {
+        throw new ReviewPostError('rejected', REVIEW_MESSAGES.rejected)
+      }
+      if (result.reason === 'pr_not_found') {
+        throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
+      }
+      throw invalid(REVIEW_MESSAGES.badRequest)
+    case 'upstream':
+      throw new ReviewPostError('upstream', REVIEW_MESSAGES.upstream)
   }
 }

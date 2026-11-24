@@ -4,14 +4,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
-import type {
-  ConnectionStatus,
-  NotionDataSourceList,
-  NotionMappingField,
-  NotionResult,
-  NotionTasksSchemaInfo,
-  NotionWorkspaceStatus
-} from '../../../../shared/ipc-contract'
 import {
   MAPPING_FIELDS,
   REQUIRED_FIELDS,
@@ -21,26 +13,26 @@ import {
 } from '../../../../shared/notion-mapping'
 import { Alert } from '../../components/Alert'
 import { DatabaseIcon, RefreshIcon } from '../../components/icons'
-import { CardHeader } from '../integrations/connection-ui'
-import { tokenColor } from './notion-colors'
+import { PanelHeader } from '../../components/PanelHeader'
 import type { UseNotionWorkspace } from './useNotionWorkspace'
-import { StatusToken, toneOf } from '../../components/StatusToken'
+import { StatusToken } from '../../components/StatusToken'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { ipcResult } from '../../lib/ipc'
+import { NOTION_COLOR_TONE, WORKSPACE_HEALTH } from '../../lib/status-text'
+import type { ConnectionStatus } from '../../../../shared/connection'
+import type {
+  NotionDataSourceList,
+  NotionMappingField,
+  NotionTasksSchemaInfo,
+  NotionWorkspaceStatus
+} from '../../../../shared/notion'
+import type { ResultError } from '../../../../shared/result'
+import { StepCircle } from '../../components/StepCircle'
 
 const hint = 'text-xs text-muted-foreground'
 
-type NotionError = Extract<NotionResult<never>, { ok: false }>['error']
+type NotionError = ResultError
 type MappingDraft = Partial<Record<NotionMappingField, string | null>>
-
-const HEALTH: Record<
-  NotionWorkspaceStatus['health'],
-  { label: string; color: 'default' | 'green' | 'yellow' | 'red' }
-> = {
-  checking: { label: 'Verificando…', color: 'default' },
-  ok: { label: 'OK', color: 'green' },
-  warning: { label: 'Atenção', color: 'yellow' },
-  broken: { label: 'Revisar mapeamento', color: 'red' },
-  unverified: { label: 'Não verificado', color: 'yellow' }
-}
 
 const TYPE_LABELS: Record<string, string> = {
   title: 'título',
@@ -73,7 +65,9 @@ export function NotionWorkspaceCard({
   const [editing, setEditing] = useState(false)
   const { status } = workspace
   const connected = notionStatus?.state === 'connected'
-  const health = status?.config ? HEALTH[workspace.revalidating ? 'checking' : status.health] : null
+  const health = status?.config
+    ? WORKSPACE_HEALTH[workspace.revalidating ? 'checking' : status.health]
+    : null
 
   return (
     <section
@@ -81,19 +75,13 @@ export function NotionWorkspaceCard({
       aria-busy={workspace.revalidating}
       className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
     >
-      <CardHeader
+      <PanelHeader
         titleId="notion-workspace-title"
         title="Bancos do Notion"
         description="Onde ficam seus Projetos e Tarefas. O Orkio lê as tarefas e só escreve o status quando você (ou uma automação) move um card."
         icon={<DatabaseIcon className="size-5 text-foreground" />}
         badge={
-          health && !editing ? (
-            <StatusToken
-              label={health.label}
-              tone={toneOf(health.color)}
-              data-testid="workspace-health"
-            />
-          ) : null
+          health && !editing ? <StatusToken {...health} data-testid="workspace-health" /> : null
         }
       />
 
@@ -150,8 +138,7 @@ function Summary({
         <Alert tone={tone}>
           <div className="flex flex-col gap-1">
             {status.messages.map((m) => (
-              // Esta tela já é Integrações: o card do Notion está logo acima.
-              <p key={m}>{m.replace(' em Integrações', ' acima')}</p>
+              <p key={m}>{m}</p>
             ))}
           </div>
         </Alert>
@@ -210,7 +197,7 @@ function Wizard({
 
   useEffect(() => {
     let active = true
-    void call(() => window.orkio.notionWorkspace.listDataSources()).then((result) => {
+    void ipcResult(() => window.orkio.notionWorkspace.listDataSources()).then((result) => {
       if (!active) return
       if (result.ok) setList(result.value)
       else setListError(result.error)
@@ -232,7 +219,7 @@ function Wizard({
     if (!tasksId || !projectsId) return
     setLoadingSchema(true)
     setSchemaError(null)
-    const result = await call(() =>
+    const result = await ipcResult(() =>
       window.orkio.notionWorkspace.getTasksSchema(tasksId, projectsId)
     )
     setLoadingSchema(false)
@@ -261,7 +248,7 @@ function Wizard({
     if (!tasksId || !projectsId) return
     setSaving(true)
     setSaveError(null)
-    const result = await call(() =>
+    const result = await ipcResult(() =>
       window.orkio.notionWorkspace.save({
         projectsDataSourceId: projectsId,
         tasksDataSourceId: tasksId,
@@ -498,7 +485,6 @@ const FIELD_WIDTH = 'max-w-md'
 
 const WIZARD_STEPS = ['Projetos', 'Tarefas', 'Mapeamento'] as const
 
-/** Passos do assistente: círculo numerado (feito = ✓ verde, atual = borda laranja). */
 function WizardSteps({ active }: { active: number }): React.JSX.Element {
   return (
     <ol aria-label="Configurar bancos do Notion" className="flex flex-wrap items-center gap-2">
@@ -512,17 +498,7 @@ function WizardSteps({ active }: { active: number }): React.JSX.Element {
             className="flex items-center gap-2"
           >
             {i > 0 && <span aria-hidden="true" className="h-px w-6 bg-border" />}
-            <span
-              aria-hidden="true"
-              className={cn(
-                'grid size-[22px] place-items-center rounded-full border font-mono text-2xs',
-                done && 'border-ok-tint-border bg-ok-tint text-ok',
-                current && 'border-brand text-brand',
-                !done && !current && 'border-border text-subtle-foreground'
-              )}
-            >
-              {done ? '✓' : i + 1}
-            </span>
+            <StepCircle number={i + 1} state={done ? 'done' : current ? 'current' : 'todo'} />
             <span className={cn('text-xs', current ? 'text-foreground' : 'text-muted-foreground')}>
               {label}
             </span>
@@ -556,47 +532,9 @@ function StatusPreview({
       <p className={hint}>Opções de status:</p>
       <div role="group" aria-label="Opções de status" className="flex flex-wrap gap-x-3 gap-y-1.5">
         {property.options.map((o) => (
-          <StatusToken key={o.id || o.name} label={o.name} tone={toneOf(tokenColor(o.color))} />
+          <StatusToken key={o.id || o.name} label={o.name} tone={NOTION_COLOR_TONE[o.color]} />
         ))}
       </div>
     </div>
   )
-}
-
-export function ErrorAlert({
-  error,
-  onReconnect
-}: {
-  error: NotionError
-  onReconnect: (() => Promise<unknown>) | undefined
-}): React.JSX.Element {
-  return (
-    <Alert
-      tone="danger"
-      {...(error.canReconnect && onReconnect
-        ? {
-            action: (
-              <Button size="sm" variant="outline" onClick={() => void onReconnect()}>
-                Reconectar com Notion
-              </Button>
-            )
-          }
-        : {})}
-    >
-      {error.message}
-    </Alert>
-  )
-}
-
-const IPC_FAILURE: NotionError = {
-  code: 'ipc',
-  message: 'Não foi possível falar com o processo principal do Orkio. Reinicie o app.'
-}
-
-export async function call<T>(fn: () => Promise<NotionResult<T>>): Promise<NotionResult<T>> {
-  try {
-    return await fn()
-  } catch {
-    return { ok: false, error: IPC_FAILURE }
-  }
 }

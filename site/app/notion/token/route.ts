@@ -1,7 +1,6 @@
 import { brokerPost } from '@/lib/broker-route'
-import { methodNotAllowed } from '@/lib/notion-broker'
+import { methodNotAllowed } from '@/lib/http'
 
-// Intermediário OAuth do Notion: Node, sempre dinâmico, nunca em cache.
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 

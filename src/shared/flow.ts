@@ -5,7 +5,7 @@
  */
 import {
   EVENT_KINDS,
-  EVENT_LABELS,
+  EVENT_META,
   defaultRules,
   evaluate,
   type AutomationDecision,
@@ -14,39 +14,17 @@ import {
 } from './automation'
 import {
   DEFAULT_STAGE_TEMPLATE,
+  STAGE_ROLE_LABEL,
   findOption,
-  normalizeOptionName,
+  isStageRole,
   stageMatchesStatus,
   type BoardStage,
+  type StageRole,
   type StatusOption
 } from './board'
 import type { StageFlow } from './task-flow'
-import type { NotionColor } from './ipc-contract'
-
-export const EVENT_DESCRIPTIONS: Record<EventKind, string> = {
-  'branch.created': 'Uma branch com o ID da tarefa foi criada (local ou no GitHub).',
-  'pr.opened': 'Uma PR com o ID da tarefa foi aberta (não rascunho).',
-  'pr.ready_for_review': 'A PR saiu de rascunho e ficou pronta para review.',
-  'pr.review_requested': 'Alguém pediu review, inclusive de novo depois de correções.',
-  'pr.changes_requested': 'Uma review pediu alterações.',
-  'pr.review_comments_unresolved': 'Apareceram comentários de review não resolvidos.',
-  'pr.approved': 'Uma review aprovou a PR.',
-  'pr.merged': 'A PR foi mergeada.',
-  'pr.closed_unmerged': 'A PR foi fechada sem merge.'
-}
-
-/** Frase do gatilho ("a PR é aberta"), para "Quando …". */
-export const EVENT_PHRASES: Record<EventKind, string> = {
-  'branch.created': 'uma branch da tarefa é criada',
-  'pr.opened': 'a PR é aberta',
-  'pr.ready_for_review': 'a PR fica pronta para review',
-  'pr.review_requested': 'pedem review',
-  'pr.changes_requested': 'a review pede alterações',
-  'pr.review_comments_unresolved': 'há comentários de review não resolvidos',
-  'pr.approved': 'a PR é aprovada',
-  'pr.merged': 'a PR é mergeada',
-  'pr.closed_unmerged': 'a PR é fechada sem merge'
-}
+import type { NotionColor } from './notion'
+import { normalizeLabel } from './text'
 
 export const FLOW_COLORS: readonly NotionColor[] = [
   'default',
@@ -65,6 +43,8 @@ export interface FlowStageDraft {
   id: string
   name: string
   color?: NotionColor
+  /** Papel da etapa (`STAGE_ROLES`): no máximo uma etapa por papel. */
+  role?: StageRole
   /** Id da opção do status do Notion; `null` = não escolhida/inexistente. */
   notionStatusId: string | null
   /** Nome desejado quando a opção não existe (importação, padrão). */
@@ -79,8 +59,6 @@ export interface FlowDraft {
   /** 5A: fluxo de tarefa de cada coluna. Ausente = mantém as ligações salvas. */
   bindings?: StageFlow[]
 }
-
-// ---------- Frases ----------
 
 function list(names: string[]): string {
   if (names.length <= 1) return names.join('')
@@ -104,16 +82,15 @@ export function describeRule(
     rule.conditions?.onlyForward ? 'Só avança.' : '',
     rule.notify && rule.action.type === 'move_to_stage' ? 'Com notificação.' : ''
   ].filter(Boolean)
-  return `Quando ${EVENT_PHRASES[rule.trigger]}${where}, ${action}.${extras.length ? ` ${extras.join(' ')}` : ''}`
+  return `Quando ${EVENT_META[rule.trigger].phrase}${where}, ${action}.${extras.length ? ` ${extras.join(' ')}` : ''}`
 }
-
-// ---------- Validação ----------
 
 export interface FlowIssue {
   level: 'error' | 'warning'
   kind:
     | 'stage_status'
     | 'stage_name'
+    | 'stage_role'
     | 'rule_missing_stage'
     | 'rule_incomplete'
     | 'removal_destination'
@@ -150,7 +127,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
   const stageIds = draft.stages.map((s) => s.id)
   const stageName = (id: string): string => draft.stages.find((s) => s.id === id)?.name ?? id
 
-  // Etapas.
   if (draft.stages.length === 0) {
     issues.push({
       level: 'error',
@@ -159,8 +135,18 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
     })
   }
   const seen = new Set<string>()
+  const roles = new Set<StageRole>()
   for (const stage of draft.stages) {
     const name = stage.name.trim()
+    if (stage.role && roles.has(stage.role)) {
+      issues.push({
+        level: 'error',
+        kind: 'stage_role',
+        stageId: stage.id,
+        message: `Duas etapas com o papel “${STAGE_ROLE_LABEL[stage.role]}”. Deixe só uma.`
+      })
+    }
+    if (stage.role) roles.add(stage.role)
     if (!name) {
       issues.push({
         level: 'error',
@@ -168,7 +154,7 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
         stageId: stage.id,
         message: 'Dê um nome a cada etapa.'
       })
-    } else if (seen.has(normalizeOptionName(name))) {
+    } else if (seen.has(normalizeLabel(name))) {
       issues.push({
         level: 'error',
         kind: 'stage_name',
@@ -176,7 +162,7 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
         message: `Há duas etapas chamadas “${name}”.`
       })
     }
-    seen.add(normalizeOptionName(name))
+    seen.add(normalizeLabel(name))
     if (!stage.notionStatusId || !ctx.statusOptions.some((o) => o.id === stage.notionStatusId)) {
       issues.push({
         level: 'error',
@@ -189,7 +175,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
     }
   }
 
-  // Remoções com tarefas precisam de destino.
   for (const id of ctx.savedStageIds) {
     if (stageIds.includes(id)) continue
     const count = ctx.taskCounts[id] ?? 0
@@ -204,7 +189,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
     }
   }
 
-  // Regras: referências e campos.
   draft.rules.forEach((rule, i) => {
     const label = `A regra ${ordinal(i)} (“${rule.name}”)`
     if (rule.action.type === 'move_to_stage' && !stageIds.includes(rule.action.stageId)) {
@@ -241,7 +225,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
     }
   })
 
-  // Conflitos, ciclos e regras inalcançáveis (só regras ativas de mover).
   const moves = draft.rules
     .map((rule, index) => ({ rule, index }))
     .filter(
@@ -269,7 +252,7 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
           kind: 'conflict',
           ruleId: y.rule.id,
           message:
-            `Conflito: quando ${EVENT_PHRASES[x.rule.trigger]} em ${list(overlap.map(stageName))}, ` +
+            `Conflito: quando ${EVENT_META[x.rule.trigger].phrase} em ${list(overlap.map(stageName))}, ` +
             `a regra ${ordinal(x.index)} (→ ${stageName(x.rule.action.stageId)}) vence a ${ordinal(y.index)} ` +
             `(→ ${stageName(y.rule.action.stageId)}) pela ordem.`
         })
@@ -285,7 +268,7 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
           kind: 'cycle',
           ruleId: y.rule.id,
           message:
-            `Ciclo: quando ${EVENT_PHRASES[x.rule.trigger]}, a regra ${ordinal(x.index)} leva ` +
+            `Ciclo: quando ${EVENT_META[x.rule.trigger].phrase}, a regra ${ordinal(x.index)} leva ` +
             `${stageName(yTo)} → ${stageName(xTo)} e a ${ordinal(y.index)} leva ${stageName(xTo)} → ${stageName(yTo)}.`
         })
       }
@@ -313,8 +296,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
 
   return issues
 }
-
-// ---------- Simulação ----------
 
 export interface SimulationInput {
   stageId: string | null
@@ -373,6 +354,7 @@ export function toBoardStages(
     return {
       id: s.id,
       name: s.name.trim(),
+      ...(s.role ? { role: s.role } : {}),
       order: i,
       notionStatus: option
         ? { id: option.id, name: option.name }
@@ -387,22 +369,23 @@ export function fromBoardStages(stages: readonly BoardStage[]): FlowStageDraft[]
     id: s.id,
     name: s.name,
     ...(s.color ? { color: s.color } : {}),
+    ...(s.role ? { role: s.role } : {}),
     notionStatusId: s.notionStatus.id,
     ...(s.notionStatus.id ? {} : { missingStatusName: s.notionStatus.name })
   }))
 }
 
-// ---------- Diferenças (histórico de configuração) ----------
+type DiffStage = {
+  id: string
+  name: string
+  notionStatus: { name: string }
+  color?: string
+  role?: StageRole
+}
 
 export function diffFlow(
-  before: {
-    stages: readonly { id: string; name: string; notionStatus: { name: string }; color?: string }[]
-    rules: readonly AutomationRule[]
-  },
-  after: {
-    stages: readonly { id: string; name: string; notionStatus: { name: string }; color?: string }[]
-    rules: readonly AutomationRule[]
-  }
+  before: { stages: readonly DiffStage[]; rules: readonly AutomationRule[] },
+  after: { stages: readonly DiffStage[]; rules: readonly AutomationRule[] }
 ): string[] {
   const changes: string[] = []
   for (const s of after.stages) {
@@ -429,6 +412,13 @@ export function diffFlow(
       )
     }
     if ((old.color ?? '') !== (s.color ?? '')) changes.push(`Etapa “${s.name}”: cor alterada`)
+    if (old.role !== s.role) {
+      changes.push(
+        s.role
+          ? `Etapa “${s.name}”: papel “${STAGE_ROLE_LABEL[s.role]}”`
+          : `Etapa “${s.name}”: sem papel`
+      )
+    }
   }
   for (const s of before.stages) {
     if (!after.stages.some((a) => a.id === s.id)) changes.push(`Etapa “${s.name}” removida`)
@@ -470,11 +460,9 @@ export function diffFlow(
   return changes
 }
 
-// ---------- Restaurar padrão ----------
-
 /**
- * As 5 etapas do template (reaproveitando as existentes com o mesmo nome, para as tarefas
- * continuarem nelas) e as regras padrão.
+ * As 5 etapas do template (reaproveitando as existentes com o mesmo papel, ou sem papel e com o
+ * mesmo nome, para as tarefas continuarem nelas) e as regras padrão.
  */
 export function restoreDefaultFlow(
   current: readonly FlowStageDraft[],
@@ -482,13 +470,14 @@ export function restoreDefaultFlow(
   newId: () => string
 ): Pick<FlowDraft, 'stages' | 'rules'> {
   const stages: FlowStageDraft[] = DEFAULT_STAGE_TEMPLATE.map((t) => {
-    const existing = current.find(
-      (s) => normalizeOptionName(s.name) === normalizeOptionName(t.name)
-    )
+    const existing =
+      current.find((s) => s.role === t.role) ??
+      current.find((s) => !s.role && normalizeLabel(s.name) === normalizeLabel(t.name))
     const option = findOption(options, { name: t.notionStatus })
     return {
       id: existing?.id ?? newId(),
       name: t.name,
+      role: t.role,
       ...(option ? { color: option.color } : {}),
       notionStatusId: option?.id ?? null,
       ...(option ? {} : { missingStatusName: t.notionStatus })
@@ -497,8 +486,6 @@ export function restoreDefaultFlow(
   return { stages, rules: defaultRules(toBoardStages(stages, options)).rules }
 }
 
-// ---------- Exportar / importar ----------
-
 export const FLOW_FILE_FORMAT = 'orkio-flow'
 export const FLOW_FILE_VERSION = 1
 
@@ -506,7 +493,14 @@ export interface FlowFile {
   format: typeof FLOW_FILE_FORMAT
   version: number
   exportedAt: string
-  stages: { key: string; name: string; color?: NotionColor; notionStatus: string }[]
+  stages: {
+    key: string
+    name: string
+    color?: NotionColor
+    /** Opcional (arquivos antigos não têm). */
+    role?: StageRole
+    notionStatus: string
+  }[]
   rules: (Omit<AutomationRule, 'action' | 'conditions'> & {
     conditions?: { fromStages?: string[]; notBlocked?: boolean; onlyForward?: boolean }
     action: { type: 'move_to_stage'; stage: string } | { type: 'notify'; message: string }
@@ -528,6 +522,7 @@ export function exportFlow(
       key: key(s.id),
       name: s.name,
       ...(s.color ? { color: s.color } : {}),
+      ...(s.role ? { role: s.role } : {}),
       notionStatus:
         options.find((o) => o.id === s.notionStatusId)?.name ?? s.missingStatusName ?? ''
     })),
@@ -611,10 +606,14 @@ export function importFlow(
       typeof s['color'] === 'string' && (FLOW_COLORS as readonly string[]).includes(s['color'])
         ? (s['color'] as NotionColor)
         : undefined
+    // Papel repetido no arquivo: fica o primeiro.
+    const role =
+      isStageRole(s['role']) && !stages.some((x) => x.role === s['role']) ? s['role'] : undefined
     stages.push({
       id,
       name: s['name'],
       ...(color ? { color } : {}),
+      ...(role ? { role } : {}),
       notionStatusId: option?.id ?? null,
       ...(option ? {} : { missingStatusName: s['notionStatus'] })
     })
@@ -676,4 +675,13 @@ export function importFlow(
   return { ok: true, draft: { stages, rules }, warnings }
 }
 
-export { EVENT_KINDS, EVENT_LABELS }
+export interface ConfigEvent {
+  id: number
+  at: string
+  /** Usuário do sistema operacional. */
+  actor: string
+  changes: string[]
+}
+
+export type FlowFileResult =
+  { ok: true; content: unknown } | { ok: false; cancelled: boolean; message?: string }

@@ -66,9 +66,15 @@ describe('authorizeViaLoopback', () => {
     expect(res.body).not.toContain('abc123')
     await expect(flow).resolves.toEqual({ code: 'abc123' })
 
-    // Servidor encerrado depois do login.
-    await new Promise((r) => setTimeout(r, 20))
-    await expect(get(`${redirectUri}?code=x&state=${STATE}`)).rejects.toThrow()
+    // Servidor encerrado depois do login (fecha logo depois de responder).
+    await expect
+      .poll(() =>
+        get(`${redirectUri}?code=x&state=${STATE}`).then(
+          () => 'aberto',
+          () => 'fechado'
+        )
+      )
+      .toBe('fechado')
   })
 
   it('state diferente → 400 e continua aguardando o redirect certo', async () => {
@@ -111,9 +117,15 @@ describe('authorizeViaLoopback', () => {
   it('tempo esgotado → timeout e porta liberada', async () => {
     const { port, flow } = await setup({ timeoutMs: 50 })
     await expect(flow).rejects.toMatchObject({ code: 'timeout' })
-    await new Promise((r) => setTimeout(r, 20))
-    blocker = createServer()
-    await new Promise<void>((r) => blocker!.listen(port, '127.0.0.1', r))
+    // A porta volta a ficar livre (o fechamento termina logo depois do timeout).
+    await vi.waitFor(async () => {
+      const server = createServer()
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(port, '127.0.0.1', resolve)
+      })
+      blocker = server
+    })
   })
 
   it('cancelar via AbortSignal → cancelled', async () => {

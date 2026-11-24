@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { IconCheck, IconSelector } from '@tabler/icons-react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   Command,
@@ -14,13 +13,28 @@ import { CheckboxField, Field, SegmentedControl, TextAreaField, TextField } from
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
 import { StatusToken } from '../../components/StatusToken'
-import type { CatalogGroup, EditorId, RunMode, RunPreparation } from '../../../../shared/agent-run'
+import type { EditorId, RunMode, RunPreparation } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
-import { DiffView } from '../../components/DiffView'
-import { CleanIcon, DiffIcon, EditorIcon, PlayIcon, RefreshIcon } from '../../components/icons'
+import {
+  CheckIcon,
+  CleanIcon,
+  DiffIcon,
+  EditorIcon,
+  PlayIcon,
+  RefreshIcon,
+  SwitchIcon
+} from '../../components/icons'
 import { plural } from '../../lib/format'
-import { isBranchKind, type BranchKind } from '../../../../shared/slug'
+import {
+  BRANCH_KINDS,
+  isBranchKind,
+  withBranchKind,
+  type BranchKind
+} from '../../../../shared/slug'
 import type { PendingPermission, useTaskRuns } from './useTaskRuns'
+import { TaskDiffView } from '../task/TaskDiffView'
+import { useCatalog } from './useCatalog'
+import { ipcResult } from '../../lib/ipc'
 
 export interface RunInitial {
   mode: RunMode
@@ -29,7 +43,6 @@ export interface RunInitial {
 }
 export const EMPTY_INITIAL: RunInitial = { mode: 'prompt', command: '', text: '' }
 
-/** "Nova sessão": modo, comando do catálogo, briefing editável e "Rodar como" (4A). */
 export function Composer({
   prep,
   initial,
@@ -51,23 +64,24 @@ export function Composer({
   const [error, setError] = useState<string | null>(null)
   // 8A: com agente na tarefa, roda como ele (instruções e modelo) a menos que você desmarque.
   const [asAgent, setAsAgent] = useState(prep.agent !== null)
-  // Branch nova: o tipo (feat/fix/hotfix) troca só o começo do nome sugerido.
   const [kind, setKind] = useState<BranchKind>('feat')
-  const branch = prep.branchIsNew ? prep.branch.replace(/^[a-z]+\//, `${kind}/`) : prep.branch
+  const branch = prep.branchIsNew ? withBranchKind(prep.branch, kind) : prep.branch
 
   const start = async (): Promise<void> => {
     setStarting(true)
     setError(null)
-    const r = await window.orkio.claude.start({
-      projectId,
-      taskId: prep.taskId,
-      mode,
-      command: mode === 'command' ? command.replace(/^\//, '').trim() : null,
-      text,
-      briefing,
-      asAgent,
-      ...(prep.branchIsNew ? { branchKind: kind } : {})
-    })
+    const r = await ipcResult(() =>
+      window.orkio.claude.start({
+        projectId,
+        taskId: prep.taskId,
+        mode,
+        command: mode === 'command' ? command.replace(/^\//, '').trim() : null,
+        text,
+        briefing,
+        asAgent,
+        ...(prep.branchIsNew ? { branchKind: kind } : {})
+      })
+    )
     setStarting(false)
     if (r.ok) onStarted(r.value)
     else setError(r.error.message)
@@ -94,11 +108,7 @@ export function Composer({
             onChange={(v) => {
               if (isBranchKind(v)) setKind(v)
             }}
-            options={[
-              { value: 'feat', label: 'feat/' },
-              { value: 'fix', label: 'fix/' },
-              { value: 'hotfix', label: 'hotfix/' }
-            ]}
+            options={BRANCH_KINDS.map((k) => ({ value: k, label: `${k}/` }))}
           />
         )}
         <SegmentedControl
@@ -217,7 +227,6 @@ export function PermissionCard({
   )
 }
 
-/** Ambiente da tarefa: editores, diff e limpar (4A). */
 export function Workspace({
   projectId,
   taskId,
@@ -233,32 +242,16 @@ export function Workspace({
   suggestCleanup: boolean
   onChanged(): void
 }): React.JSX.Element {
-  const [diff, setDiff] = useState<{
-    diff: string
-    truncated: boolean
-    untracked: string[]
-  } | null>(null)
+  const [showDiff, setShowDiff] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmFiles, setConfirmFiles] = useState<string[] | null>(null)
 
   const openEditor = async (editor: EditorId): Promise<void> => {
-    const r = await window.orkio.claude.openEditor(projectId, taskId, editor)
+    const r = await ipcResult(() => window.orkio.claude.openEditor(projectId, taskId, editor))
     setError(r.ok ? null : r.error.message)
   }
-  const loadDiff = async (): Promise<void> => {
-    if (diff !== null) {
-      setDiff(null)
-      return
-    }
-    const r = await window.orkio.claude.diff(projectId, taskId)
-    if (!r.ok) {
-      setError(r.error.message)
-      return
-    }
-    setDiff(r.value)
-  }
   const cleanup = async (force: boolean): Promise<void> => {
-    const r = await window.orkio.claude.cleanup(projectId, taskId, force)
+    const r = await ipcResult(() => window.orkio.claude.cleanup(projectId, taskId, force))
     if (r.ok) {
       setConfirmFiles(null)
       setError(null)
@@ -293,9 +286,9 @@ export function Workspace({
           <EditorIcon />
           Abrir no VS Code
         </Button>
-        <Button size="sm" variant="outline" onClick={() => void loadDiff()}>
+        <Button size="sm" variant="outline" onClick={() => setShowDiff((v) => !v)}>
           <DiffIcon />
-          {diff === null ? 'Ver diff' : 'Esconder diff'}
+          {showDiff ? 'Esconder diff' : 'Ver diff'}
         </Button>
         {!isBusy && (
           <Button
@@ -337,23 +330,11 @@ export function Workspace({
           </div>
         </div>
       )}
-      {diff !== null && (
-        <DiffView
-          label="Diff da pasta de trabalho"
-          diff={diff.diff}
-          truncated={diff.truncated}
-          untracked={diff.untracked}
-        />
-      )}
+      {showDiff && <TaskDiffView label="Diff da pasta de trabalho" />}
     </div>
   )
 }
 
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
-}
-
-/** Catálogo agrupado por origem (usuário, projeto, plugin), com busca e recarregar. */
 function CommandPicker({
   projectId,
   taskId,
@@ -367,26 +348,12 @@ function CommandPicker({
   value: string
   onChange(value: string): void
 }): React.JSX.Element {
-  const [groups, setGroups] = useState<CatalogGroup[] | null>(null)
-  const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
-
-  const load = async (): Promise<void> => {
-    setLoading(true)
-    const r = await window.orkio.claude.catalog(projectId, taskId)
-    setLoading(false)
-    setGroups(r.ok ? r.value : [])
-  }
-  // Carrega ao abrir (efeito assíncrono: o setState acontece depois do await).
-  useEffect(() => {
-    let active = true
-    void window.orkio.claude.catalog(projectId, taskId).then((r) => {
-      if (active) setGroups(r.ok ? r.value : [])
-    })
-    return () => {
-      active = false
-    }
-  }, [projectId, taskId])
+  // Catálogo da tarefa ("Recarregar" lê de novo); falha = vazio (cai na lista de reserva).
+  const catalog = useCatalog(projectId, taskId)
+  const groups = catalog.groups
+  const loading = catalog.loading && groups !== null
+  const load = catalog.reload
 
   const options: { title: string | null; commands: { name: string; description?: string }[] }[] =
     groups && groups.length > 0
@@ -421,10 +388,7 @@ function CommandPicker({
                   <span className={cn('truncate', !value && 'font-sans text-muted-foreground')}>
                     {value ? `/${value}` : 'Escolha um comando…'}
                   </span>
-                  <IconSelector
-                    aria-hidden="true"
-                    className="size-3.5 shrink-0 text-subtle-foreground"
-                  />
+                  <SwitchIcon className="size-3.5 shrink-0 text-subtle-foreground" />
                 </button>
               </PopoverTrigger>
               <PopoverContent
@@ -461,8 +425,7 @@ function CommandPicker({
                                 </span>
                               )}
                             </span>
-                            <IconCheck
-                              aria-hidden="true"
+                            <CheckIcon
                               className={cn(
                                 'size-3.5',
                                 c.name === value ? 'opacity-100' : 'opacity-0'

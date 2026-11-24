@@ -14,7 +14,6 @@ export function overlayDotBitmap(size = 16): Buffer {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const d = Math.hypot(x - c, y - c)
-      // Borda suavizada em 1 px.
       const alpha = Math.max(0, Math.min(1, radius - d))
       const i = (y * size + x) * 4
       buf[i] = b

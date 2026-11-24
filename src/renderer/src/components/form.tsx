@@ -204,7 +204,6 @@ export function SelectField({
   )
 }
 
-/** Caixa de seleção com rótulo clicável e descrição opcional. */
 export function CheckboxField({
   label,
   description,
@@ -245,7 +244,6 @@ export function CheckboxField({
   )
 }
 
-/** Interruptor com rótulo (papel `switch`). */
 export function SwitchField({
   label,
   description,
@@ -282,7 +280,6 @@ export interface RadioOption {
   disabled?: boolean
 }
 
-/** Lista de opções (papel `radiogroup`, cada uma `radio`). */
 export function RadioListField({
   label,
   labelHidden,
@@ -337,7 +334,6 @@ export interface SegmentOption {
   iconOnly?: boolean
 }
 
-/** Alternância de visualização (Kanban/Lista, Cards/Linhas): botões `radio` numa caixa só. */
 export function SegmentedControl({
   label,
   options,

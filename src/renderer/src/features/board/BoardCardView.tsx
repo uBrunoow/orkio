@@ -1,4 +1,4 @@
-import { PrHoverCard } from './PrHoverCard'
+import { PrHoverCard } from '../../components/PrHoverCard'
 import { Fragment } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -9,7 +9,6 @@ import {
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
-import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import {
   GitBranchIcon,
   LockIcon,
@@ -17,25 +16,23 @@ import {
   PauseIcon,
   PullRequestIcon
 } from '../../components/icons'
-import { useTaskFlowState } from '../task-flows/active-flows'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { StatusToken } from '../../components/StatusToken'
 import { cardDetail, cardStatus } from './card-status'
 import { useTaskActivity } from './task-activity'
+import type { BoardCard, BoardStage } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 export interface CardActions {
   onOpen(taskId: string): void
   onMove(taskId: string, stageId: string): void
   onToggleBlocked(taskId: string, blocked: boolean): void
   onToggleAutomation(taskId: string, paused: boolean): void
-  /** Abre a tarefa em tela cheia (Ctrl/Cmd+Enter no card). */
-  onExpand?(taskId: string): void
 }
 
 export type CardMenuItem = { label: string; onClick(): void } | { type: 'divider' }
 
-/** Itens do menu "Ações de …" (card do quadro e linha da lista). */
 export function cardMenuItems(
   card: BoardCard,
   stages: readonly BoardStage[],
@@ -61,7 +58,6 @@ export function cardMenuItems(
   ]
 }
 
-/** Botão "Ações de …" com o menu do card (o mesmo no quadro e na lista). */
 export function CardActionsMenu({
   label,
   items,
@@ -98,11 +94,9 @@ export function CardActionsMenu({
   )
 }
 
-/** Caixa do card do kanban (mockup `.kc`): também usada no "fantasma" do arrasto. */
 export const CARD_CLASS =
   'flex flex-col gap-1.5 rounded-[9px] border border-border-soft bg-card px-[11px] py-2.5'
 
-/** Conteúdo do card (no quadro e no "fantasma" do arrasto): ID · agente · estado, título, metadados. */
 export function BoardCardBody({
   card,
   stages,
@@ -115,15 +109,18 @@ export function BoardCardBody({
   actions: CardActions | null
 }): React.JSX.Element {
   const label = card.displayId ?? card.title
-  const flow = useTaskFlowState(card.taskId)
   const agent = useAgentBadge(card.taskId)
-  const status = cardStatus(card, flow, signals)
+  const activity = useTaskActivity(card.taskId)
+  const status = cardStatus(card, activity, signals)
   const branches = signals
     ? [...new Set([...signals.localBranches, ...signals.remoteBranches])]
     : []
   const pr = signals?.pr ?? null
-  const activity = useTaskActivity(card.taskId)
-  const detail = cardDetail({ ...activity, pr: null })
+  const detail = cardDetail({
+    waiting: activity.waiting?.what ?? null,
+    running: activity.running?.label ?? null,
+    pr: null
+  })
   const hasMeta =
     Boolean(detail) ||
     card.blocked ||
@@ -212,7 +209,6 @@ export function BoardCardItem({
   stages,
   signals,
   actions,
-  isSelected,
   cardRef,
   onPointerDown
 }: {
@@ -220,7 +216,6 @@ export function BoardCardItem({
   stages: readonly BoardStage[]
   signals: TaskSignals | undefined
   actions: CardActions
-  isSelected: boolean
   cardRef: (el: HTMLDivElement | null) => void
   onPointerDown: (e: React.PointerEvent, taskId: string) => void
 }): React.JSX.Element {
@@ -230,13 +225,11 @@ export function BoardCardItem({
       role="listitem"
       tabIndex={0}
       aria-label={`${card.displayId ?? ''} ${card.title}`.trim()}
-      aria-current={isSelected ? 'true' : undefined}
       data-task-id={card.taskId}
       data-sync={card.sync.state}
       className={cn(
         CARD_CLASS,
-        'group shrink-0 cursor-grab touch-none transition-colors outline-none select-none hover:border-border focus-visible:ring-2 focus-visible:ring-ring/40',
-        isSelected && 'border-brand'
+        'group shrink-0 cursor-grab touch-none transition-colors outline-none select-none hover:border-border focus-visible:ring-2 focus-visible:ring-ring/40'
       )}
       onPointerDown={(e) => onPointerDown(e, card.taskId)}
       onKeyDown={(e) => {

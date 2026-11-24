@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { RunLogEvent, TaskRunsState } from '../../../../shared/agent-run'
+import { ipcCall, ipcResult } from '../../lib/ipc'
+import {
+  isRunLive,
+  type RunEventMessage,
+  type RunLogEvent,
+  type TaskRunsState
+} from '../../../../shared/agent-run'
 
 export interface PendingPermission {
   kind: 'permission'
@@ -43,16 +49,29 @@ export function pendingRequests(
   return out
 }
 
-/** Execuções da tarefa + log ao vivo da execução selecionada (ativa ou a mais recente). */
-export function useTaskRuns(projectId: string, taskId: string) {
+export type TaskRuns = ReturnType<typeof useTaskRuns>
+
+/**
+ * Execuções da tarefa + log ao vivo da execução selecionada (ativa ou a mais recente). Única
+ * assinatura de `claude.onRunEvent` da tela da tarefa: `onEvent` recebe cada evento desta tarefa.
+ */
+export function useTaskRuns(
+  projectId: string,
+  taskId: string,
+  onEvent?: (message: RunEventMessage) => void
+) {
   const [state, setState] = useState<TaskRunsState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [log, setLog] = useState<RunLogEvent[]>([])
   const selected = useRef<string | null>(null)
+  const listener = useRef(onEvent)
+  useEffect(() => {
+    listener.current = onEvent
+  })
 
   const reload = useCallback(async () => {
-    const r = await window.orkio.claude.state(projectId, taskId)
+    const r = await ipcResult(() => window.orkio.claude.state(projectId, taskId))
     if (r.ok) {
       setState(r.value)
       setError(null)
@@ -65,14 +84,13 @@ export function useTaskRuns(projectId: string, taskId: string) {
   const select = useCallback(async (runId: string | null) => {
     selected.current = runId
     setSelectedRunId(runId)
-    setLog(runId ? await window.orkio.claude.readLog(runId) : [])
+    setLog(runId ? await ipcCall(() => window.orkio.claude.readLog(runId), []) : [])
   }, [])
 
-  // Carga inicial: seleciona a ativa ou a mais recente.
   useEffect(() => {
     let active = true
     void (async () => {
-      const r = await window.orkio.claude.state(projectId, taskId)
+      const r = await ipcResult(() => window.orkio.claude.state(projectId, taskId))
       if (!active) return
       if (!r.ok) {
         setError(r.error.message)
@@ -82,7 +100,7 @@ export function useTaskRuns(projectId: string, taskId: string) {
       const runId = r.value.activeRunId ?? r.value.runs[0]?.id ?? null
       selected.current = runId
       setSelectedRunId(runId)
-      const events = runId ? await window.orkio.claude.readLog(runId) : []
+      const events = runId ? await ipcCall(() => window.orkio.claude.readLog(runId), []) : []
       if (active) setLog(events)
     })()
     return () => {
@@ -90,16 +108,12 @@ export function useTaskRuns(projectId: string, taskId: string) {
     }
   }, [projectId, taskId])
 
-  // Eventos ao vivo desta tarefa.
   useEffect(
     () =>
       window.orkio.claude.onRunEvent((m) => {
         if (m.taskId !== taskId) return
-        // Execução nova na tarefa (ex.: passo de um fluxo): passa a mostrar o log dela.
         const isNew =
-          m.runId !== selected.current &&
-          m.event.kind === 'status' &&
-          (m.event.status === 'queued' || m.event.status === 'running')
+          m.runId !== selected.current && m.event.kind === 'status' && isRunLive(m.event.status)
         if (selected.current === null || isNew) {
           selected.current = m.runId
           setSelectedRunId(m.runId)
@@ -108,6 +122,7 @@ export function useTaskRuns(projectId: string, taskId: string) {
           setLog((prev) => [...prev, m.event])
         }
         if (m.event.kind === 'status') void reload()
+        listener.current?.(m)
       }),
     [taskId, reload]
   )

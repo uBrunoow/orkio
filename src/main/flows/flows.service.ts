@@ -2,26 +2,21 @@
  * Configuração dos fluxos de tarefa (5A) e fachada do FlowRunner para o IPC. O main valida de
  * novo com `validateTaskFlow` (a mesma função do editor); erros bloqueiam, avisos não.
  */
-import type { ClaudeResult } from '../../shared/agent-run'
 import {
   validateTaskFlow,
   type Flow,
   type FlowRunView,
-  type ProjectFlows
+  type TaskFlowsProject
 } from '../../shared/task-flow'
 import { DEFAULT_DELIVERY_SETTINGS, type DeliverySettings } from '../../shared/delivery'
+import { DECLARED_FLOW_VARS } from '../../shared/flow-outputs'
 import type { BoardStore } from '../board/board.store'
 import type { ConfigStore } from '../storage/config-store'
 import type { OrkioConfig } from '../config/orkio-config'
-import { errorName } from '../ipc/payload'
-import { FlowError, type FlowExtractor, type FlowRunner, type OrkioAction } from './flow-runner'
-
-export interface FlowsProjectView extends ProjectFlows {
-  extractors: { id: string; label: string }[]
-  actions: { id: string; label: string; pending?: string }[]
-  /** Ajustes de entrega do projeto (5C). */
-  delivery: DeliverySettings
-}
+import { projectFlows, withProjectFlows } from '../config/queries'
+import { errorName } from '../errors'
+import type { FlowExtractor, FlowRunner, OrkioAction } from './flow-runner'
+import type { Result } from '../../shared/result'
 
 export class FlowsService {
   constructor(
@@ -36,18 +31,14 @@ export class FlowsService {
     }
   ) {}
 
-  getProject(projectId: string): ClaudeResult<FlowsProjectView> {
-    const pf = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
+  getProject(projectId: string): Result<TaskFlowsProject> {
+    const pf = projectFlows(this.deps.config.get(), projectId)
     return {
       ok: true,
       value: {
         ...pf,
         extractors: this.deps.extractors.map((e) => ({ id: e.id, label: e.label })),
-        actions: this.deps.actions.map((a) => ({
-          id: a.id,
-          label: a.label,
-          ...(a.pending ? { pending: a.pending } : {})
-        })),
+        actions: this.deps.actions.map((a) => ({ id: a.id, label: a.label })),
         delivery: this.deps.config.get().delivery[projectId] ?? DEFAULT_DELIVERY_SETTINGS
       }
     }
@@ -60,7 +51,7 @@ export class FlowsService {
   async setDelivery(
     projectId: string,
     settings: DeliverySettings
-  ): Promise<ClaudeResult<FlowsProjectView>> {
+  ): Promise<Result<TaskFlowsProject>> {
     if (!this.deps.config.get().projects.some((p) => p.id === projectId)) {
       return fail('not_found', 'Projeto não encontrado. Atualize a lista.')
     }
@@ -92,7 +83,7 @@ export class FlowsService {
     return this.getProject(projectId)
   }
 
-  async saveFlows(projectId: string, flows: Flow[]): Promise<ClaudeResult<FlowsProjectView>> {
+  async saveFlows(projectId: string, flows: Flow[]): Promise<Result<TaskFlowsProject>> {
     if (!this.deps.config.get().projects.some((p) => p.id === projectId)) {
       return fail('not_found', 'Projeto não encontrado. Atualize a lista.')
     }
@@ -103,7 +94,8 @@ export class FlowsService {
       const errors = validateTaskFlow(flow, {
         commands: null,
         extractors: this.deps.extractors.map((e) => e.id),
-        actions: this.deps.actions.map((a) => a.id)
+        actions: this.deps.actions.map((a) => a.id),
+        declaredVars: DECLARED_FLOW_VARS
       }).filter((i) => i.level === 'error')
       if (errors.length > 0) {
         return fail(
@@ -112,14 +104,12 @@ export class FlowsService {
         )
       }
     }
-    const before = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
-    // Fluxo removido: some a ligação da coluna (execuções em curso usam a própria cópia).
-    const bindings = before.bindings.filter((b) => ids.has(b.flowId))
+    const before = projectFlows(this.deps.config.get(), projectId)
     try {
-      await this.deps.config.update((c) => ({
-        ...c,
-        flows: { ...c.flows, [projectId]: { flows, bindings } }
-      }))
+      // Fluxo removido: some a ligação da coluna (execuções em curso usam a própria cópia).
+      await this.deps.config.update((c) =>
+        withProjectFlows(c, projectId, { ...projectFlows(c, projectId), flows })
+      )
     } catch (error) {
       console.error(`[orkio] salvar fluxos: ${errorName(error)}`)
       return fail('storage', 'Não foi possível salvar os fluxos. Tente novamente.')
@@ -139,24 +129,9 @@ export class FlowsService {
   runs(taskId: string): FlowRunView[] {
     return this.deps.runner.list(taskId)
   }
-
-  active(projectId: string): Record<string, 'running' | 'needs_you'> {
-    return this.deps.runner.activeForProject(projectId)
-  }
-
-  act(fn: () => Promise<FlowRunView>): Promise<ClaudeResult<FlowRunView>> {
-    return fn().then(
-      (value) => ({ ok: true as const, value }),
-      (error: unknown) => {
-        if (error instanceof FlowError) return fail<FlowRunView>(error.code, error.message)
-        console.error(`[orkio] fluxo: ${errorName(error)}`)
-        return fail<FlowRunView>('unexpected', 'Algo deu errado no fluxo. Tente novamente.')
-      }
-    )
-  }
 }
 
-function fail<T>(code: string, message: string): ClaudeResult<T> {
+function fail<T>(code: string, message: string): Result<T> {
   return { ok: false, error: { code, message } }
 }
 

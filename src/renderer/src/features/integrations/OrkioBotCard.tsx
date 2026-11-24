@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import type { OrkioBotRepoState, OrkioBotStatus } from '../../../../shared/ipc-contract'
 import { ExternalLinkIcon, RefreshIcon } from '../../components/icons'
 import { StatusDot, type StatusTone } from '../../components/StatusToken'
+import type { OrkioBotRepoState, OrkioBotStatus } from '../../../../shared/orkio-bot'
+import { formatTime } from '../../lib/format'
+import { ipcCall } from '../../lib/ipc'
 
 /**
  * orkio[bot]: o GitHub App que publica as revisões dos agentes nas PRs. Consulta (só leitura, pelo
@@ -19,10 +21,10 @@ export function useOrkioBot(enabled: boolean): {
   const [checking, setChecking] = useState(false)
   const fetchStatus = useCallback(
     (force: boolean) =>
-      window.orkio.github
-        .orkioBot({ force })
-        .then(setStatus)
-        .catch(() => undefined),
+      ipcCall(() => window.orkio.github.orkioBot({ force }), null).then((s) => {
+        // Falha do IPC: fica o último estado.
+        if (s) setStatus(s)
+      }),
     []
   )
   useEffect(() => {
@@ -104,11 +106,7 @@ export function OrkioBotPanel({ bot }: { bot: ReturnType<typeof useOrkioBot> }):
         </Button>
         {status?.checkedAt && !checking && (
           <span className="text-subtle-foreground">
-            Conferido às{' '}
-            {new Date(status.checkedAt).toLocaleTimeString('pt-BR', {
-              hour: '2-digit',
-              minute: '2-digit'
-            })}
+            Conferido às {formatTime(status.checkedAt)}
           </span>
         )}
       </div>

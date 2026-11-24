@@ -5,7 +5,7 @@ const ABSOLUTE = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyl
 const DAY = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short' })
 
 /** "há 3 min", "ontem", "12 de nov." (passado de 7 dias); a data completa no title. */
-export function formatRelative(at: Date, now = Date.now()): string {
+function formatRelative(at: Date, now = Date.now()): string {
   const diff = (at.getTime() - now) / 1000
   const abs = Math.abs(diff)
   if (abs < 45) return 'agora'
@@ -15,14 +15,11 @@ export function formatRelative(at: Date, now = Date.now()): string {
   return DAY.format(at)
 }
 
-/** Data relativa que se atualiza a cada minuto, com a absoluta no tooltip nativo. */
 export function Timestamp({
   value,
   className
 }: {
   value: string | number | Date
-  /** Mantido por compatibilidade (sempre relativo). */
-  format?: 'auto'
   className?: string
 }): React.JSX.Element {
   const date = value instanceof Date ? value : new Date(value)

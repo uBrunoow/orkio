@@ -4,7 +4,8 @@
  * ("Rodou 6 comandos · Editou 2 arquivos"); pedidos pendentes ficam de fora (têm cartão próprio);
  * permissões negadas/bloqueadas e erros continuam visíveis na ordem em que aconteceram.
  */
-import type { RunLogEvent, RunStatus } from '../../../../shared/agent-run'
+import type { PermissionBlockCode, RunLogEvent, RunStatus } from '../../../../shared/agent-run'
+import { toolCategory, type ToolCategory } from '../../../../shared/claude-tools'
 import { plural } from '../../lib/format'
 
 export type StepCategory = 'command' | 'edit' | 'read' | 'search' | 'subagent' | 'tool'
@@ -15,7 +16,6 @@ export interface WorkStep {
   tool: string
   summary: string
   category: StepCategory
-  /** Arquivo editado (só ferramentas de edição). */
   file: string | null
   state: StepState
 }
@@ -32,8 +32,8 @@ export interface SubagentRow {
   at: string
 }
 
-/** Bloqueio de push ou de `gh` que publica (textos de `POLICY_MESSAGES`, também os antigos). */
-const PUBLISH_BLOCK = /Bloqueado pelo Orkio: (git push|comandos do GitHub CLI que publicam)/
+/** Bloqueio de push ou de `gh` que publica fora do modo entrega: o recibo oferece "Abrir PR". */
+const PUBLISH_BLOCK: ReadonlySet<PermissionBlockCode> = new Set(['push', 'gh'])
 
 export type TranscriptItem =
   | { kind: 'started'; key: string; model: string | null }
@@ -61,28 +61,20 @@ export type TranscriptItem =
       costUsd: number | null
     }
 
+const STEP_CATEGORY: Record<ToolCategory, StepCategory> = {
+  edit: 'edit',
+  read: 'read',
+  search: 'search',
+  web: 'search',
+  command: 'command',
+  subagent: 'subagent',
+  plan: 'tool',
+  question: 'tool'
+}
+
 export function categoryOf(tool: string): StepCategory {
-  switch (tool) {
-    case 'Bash':
-      return 'command'
-    case 'Edit':
-    case 'MultiEdit':
-    case 'Write':
-    case 'NotebookEdit':
-      return 'edit'
-    case 'Read':
-      return 'read'
-    case 'Grep':
-    case 'Glob':
-    case 'WebFetch':
-    case 'WebSearch':
-      return 'search'
-    case 'Task':
-    case 'Agent':
-      return 'subagent'
-    default:
-      return 'tool'
-  }
+  const c = toolCategory(tool)
+  return c ? STEP_CATEGORY[c] : 'tool'
 }
 
 const VERB: Record<string, string> = {
@@ -287,7 +279,7 @@ export function buildTranscript(
             'problem',
             `Bloqueado: ${e.summary}${e.reason ? ` (${e.reason})` : ''}`,
             key,
-            e.reason && PUBLISH_BLOCK.test(e.reason) ? 'open-pr' : undefined
+            e.code && PUBLISH_BLOCK.has(e.code) ? 'open-pr' : undefined
           )
         } else if (e.state === 'denied') {
           receipt('problem', `Negado: ${e.summary}`, key)
@@ -332,7 +324,6 @@ export function buildTranscript(
     item.live = live && item === tail && item.steps.some((s) => s.state === 'running')
   }
   if (!live) {
-    // Sem resultado: só vale como concluído se a execução terminou bem.
     const stopped = finalStatus === 'cancelled' || finalStatus === 'failed'
     for (const row of agentById.values()) {
       if (row.state === 'running') row.state = stopped ? 'interrupted' : 'done'
@@ -341,7 +332,6 @@ export function buildTranscript(
   return items
 }
 
-/** Subagentes ainda trabalhando (para a linha "Esperando N subagentes" acima do campo). */
 export function runningSubagents(items: readonly TranscriptItem[]): SubagentRow[] {
   return items
     .flatMap((i) => (i.kind === 'subagents' ? i.agents : []))

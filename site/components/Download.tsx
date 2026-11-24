@@ -62,10 +62,6 @@ function publishedDate(iso: string | null): string | null {
     : d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
-/**
- * Botão principal (hero e fechamento): o arquivo deste computador, direto do último release. Sem
- * release ou sem sistema conhecido, leva aos cartões de download.
- */
 export function DownloadButton({
   d,
   release,
@@ -107,7 +103,6 @@ const SYSTEMS: { id: 'mac' | 'windows' | 'linux'; kinds: DownloadKind[] }[] = [
   { id: 'linux', kinds: ['linux-appimage', 'linux-deb'] }
 ]
 
-/** Um cartão por sistema, com cada arquivo do release (o deste computador em destaque). */
 export function DownloadCards({
   d,
   release,

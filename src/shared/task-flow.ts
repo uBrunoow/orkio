@@ -7,6 +7,11 @@
  */
 
 import { isEffort, isModelName, type Effort } from './agent-runtime'
+import { toolsIn } from './claude-tools'
+import type { DeliverySettings } from './delivery'
+import type { PublishReviewEvent } from './review-publish'
+import { isRecord } from './guards'
+import { normalizeLabel } from './text'
 
 export type StepId = string
 
@@ -91,7 +96,7 @@ export const GATE_SHOWS: readonly GateShow[] = ['diff', 'summary', 'backlog', 'r
 /** Limite de voltas de "Pedir ajustes" num gate. */
 export const MAX_REVISE = 10
 /** Ferramentas que um passo só de leitura não recebe (`--disallowedTools`). */
-export const READ_ONLY_DENIED_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'] as const
+export const READ_ONLY_DENIED_TOOLS = toolsIn('edit')
 /** Tamanho máximo do pedido em texto de um passo e do texto de "Pedir ajustes". */
 export const MAX_PROMPT_CHARS = 8000
 
@@ -131,13 +136,15 @@ export interface ProjectFlows {
   alva?: { maxParallel: number }
 }
 
+/** Valores de variável "sim/não" gravados pelas ações e extratores (ex.: `pr.pushed`). */
+export const FLOW_YES = 'sim'
+export const FLOW_NO = 'nao'
+
 /** Alvo especial de um salto: encerra o fluxo (concluído). */
 export const FLOW_END = '$fim'
 
 /** Trava de segurança: passos executados (inclui saltos avaliados) num mesmo fluxo. */
 export const MAX_EXECUTED_STEPS = 50
-
-// ---------- Estado e motor ----------
 
 export interface FlowState {
   vars: Record<string, string>
@@ -227,7 +234,6 @@ export type StepEnd =
   | { outcome: 'failed' | 'cancelled' }
   | { outcome: 'approved' | 'rejected' }
 
-/** Depois de um passo terminar: segue, salta (gate recusado), pausa (falha) ou conclui. */
 export function afterStep(
   flow: Flow,
   state: FlowState,
@@ -282,7 +288,6 @@ export function retryStep(flow: Flow, state: FlowState, stepId: StepId): FlowDec
   return { kind: 'run', stepId, state: visit(state, stepId) }
 }
 
-/** O passo roda um pedido em texto (`prompt`) em vez de um comando do catálogo? */
 export function isPromptStep(step: ClaudeCommandStep): boolean {
   return (step.prompt ?? '').trim() !== ''
 }
@@ -320,8 +325,6 @@ export function reviseGate(flow: Flow, state: FlowState, gateId: StepId): Revise
   return resolveFrom(flow, target, s)
 }
 
-// ---------- Template dos argumentos ----------
-
 export interface TemplateContext {
   briefingPath: string
   taskId: string
@@ -335,7 +338,6 @@ const KNOWN_VARS = new Set(['briefing_path', 'task_id', 'task_title', 'notion_ur
 /** Variáveis de integrações (ex.: `alva.task_id`), gravadas por extratores ou no início do fluxo. */
 const NAMESPACED_VAR = /^[a-z][a-z0-9_]*\.[a-z0-9_.]+$/
 
-/** Chave de variável do fluxo (aceita namespace com ponto, ex.: `alva.task_id`). */
 export const VAR_KEY = /^[a-z][a-z0-9_.]{0,39}$/
 
 export function renderArgs(
@@ -384,8 +386,6 @@ function templateVars(template: string): string[] {
   return [...template.matchAll(TEMPLATE_VAR)].map((m) => m[1]!)
 }
 
-// ---------- Validação ----------
-
 export interface FlowIssue {
   level: 'error' | 'warning'
   stepId: StepId | null
@@ -397,6 +397,11 @@ export interface FlowValidationContext {
   commands: ReadonlySet<string> | null
   extractors: readonly string[]
   actions: readonly string[]
+  /**
+   * Variáveis com namespace que as ações e extratores do Orkio gravam (`shared/flow-outputs.ts`).
+   * Chave de um namespace desses que ninguém grava (ex.: `pr.pushd`) é aviso: ficaria vazia.
+   */
+  declaredVars: ReadonlySet<string>
 }
 
 const STEP_ID = /^[a-z0-9][a-z0-9_-]{0,39}$/
@@ -405,6 +410,25 @@ function hasVisitsLimit(c: Condition): boolean {
   if (c.type === 'visits') return true
   if (c.type === 'all') return c.of.some(hasVisitsLimit)
   return false
+}
+
+function conditionVars(c: Condition): string[] {
+  if (c.type === 'var') return [c.key]
+  if (c.type === 'all' || c.type === 'any') return c.of.flatMap(conditionVars)
+  return []
+}
+
+/** Chave com namespace do Orkio (`pr.`, `review.`, `alva.`…) que nenhuma ação ou extrator grava. */
+function undeclaredVar(key: string, declared: ReadonlySet<string>): boolean {
+  const dot = key.indexOf('.')
+  if (dot <= 0 || declared.has(key)) return false
+  const ns = key.slice(0, dot + 1)
+  for (const d of declared) if (d.startsWith(ns)) return true
+  return false
+}
+
+function templateKey(name: string): string {
+  return name.startsWith('flow.') ? name.slice(5) : name
 }
 
 function conditionSteps(c: Condition): StepId[] {
@@ -428,6 +452,11 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
   const index = new Map(flow.steps.map((s, i) => [s.id, i]))
   flow.steps.forEach((step, i) => {
     const label = `Passo “${step.name || step.id}”`
+    const checkVar = (key: string): void => {
+      if (undeclaredVar(key, ctx.declaredVars)) {
+        warn(step.id, `${label}: nenhuma ação do Orkio grava a variável ${key} (fica vazia).`)
+      }
+    }
     if (!STEP_ID.test(step.id)) {
       err(step.id, `${label}: a chave deve ter letras minúsculas, números, - ou _.`)
     }
@@ -473,7 +502,7 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
         for (const v of [...templateVars(step.args), ...templateVars(step.prompt ?? '')]) {
           if (!KNOWN_VARS.has(v) && !v.startsWith('flow.') && !NAMESPACED_VAR.test(v)) {
             warn(step.id, `${label}: variável desconhecida {{${v}}} (fica vazia).`)
-          }
+          } else if (!KNOWN_VARS.has(v)) checkVar(templateKey(v))
         }
         if (step.model !== undefined && !isModelName(step.model)) {
           err(step.id, `${label}: modelo inválido (use letras minúsculas, números, ponto e hífen).`)
@@ -491,7 +520,7 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
         for (const v of templateVars(step.message)) {
           if (!v.startsWith('flow.') && !NAMESPACED_VAR.test(v)) {
             warn(step.id, `${label}: a mensagem cita {{${v}}}, que o gate não conhece.`)
-          }
+          } else checkVar(templateKey(v))
         }
         if (step.onReject !== 'stop') target(step.onReject, 'recusar')
         if (step.timeoutMin !== null && !(step.timeoutMin >= 1 && step.timeoutMin <= 43_200)) {
@@ -529,6 +558,7 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
         }
         break
       case 'branch': {
+        for (const key of conditionVars(step.when)) checkVar(key)
         const thenAt = target(step.then, '“então”')
         const elseAt = step.else !== undefined ? target(step.else, '“senão”') : null
         for (const ref of conditionSteps(step.when)) {
@@ -554,8 +584,6 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
   return issues
 }
 
-// ---------- Helpers de UI ----------
-
 export const STEP_TYPE_LABEL: Record<StepType, string> = {
   claude_command: 'Comando do Claude Code',
   gate: 'Aprovação (gate)',
@@ -565,10 +593,7 @@ export const STEP_TYPE_LABEL: Record<StepType, string> = {
 
 export function newStepId(flow: Flow, base: string): StepId {
   const clean =
-    base
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
+    normalizeLabel(base)
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
       .slice(0, 30) || 'passo'
@@ -576,8 +601,6 @@ export function newStepId(flow: Flow, base: string): StepId {
   if (!used.has(clean)) return clean
   for (let n = 2; ; n++) if (!used.has(`${clean}-${n}`)) return `${clean}-${n}`
 }
-
-// ---------- Execução (visão para a UI) ----------
 
 export type FlowRunStatus =
   'running' | 'waiting_gate' | 'paused' | 'awaiting_decision' | 'finished' | 'cancelled'
@@ -614,6 +637,17 @@ export type FlowPauseReason =
   /** Limite diário do agente (8A): "Retomar" passa por cima uma vez. */
   | 'agent_daily_limit'
 
+/**
+ * Por que um passo falhou: código estável de quem lançou (`DeliveryError`, `FlowError`, fim da
+ * execução, ação, extrator...) e a mensagem pt-BR. A tela de problema decide pelo código.
+ */
+export interface StepFailure {
+  code: string
+  message: string
+  /** Link para resolver (ex.: instalar o GitHub App), já validado por quem falhou. */
+  link?: string
+}
+
 export interface FlowStepView {
   seq: number
   stepId: StepId
@@ -623,6 +657,10 @@ export interface FlowStepView {
   startedAt: string
   endedAt: string | null
   message: string | null
+  /** Código da falha (`StepFailure.code`); `null` em passos sem falha e em linhas antigas. */
+  code: string | null
+  /** Link da falha (`StepFailure.link`); `null` quando ela não trouxe. */
+  link: string | null
   costUsd: number | null
 }
 
@@ -675,26 +713,128 @@ export interface ActionConfirm {
 
 /** Revisão mostrada no gate do `publish_review` (já redigida; aprovar posta exatamente isto). */
 export interface ConfirmReview {
-  event: 'COMMENT' | 'REQUEST_CHANGES'
+  event: PublishReviewEvent
   summary: string
   /** `inDiff: false` = fora do diff da PR: não é publicado. */
   comments: { path: string; line: number; body: string; inDiff: boolean }[]
   pr: { owner: string; repo: string; number: number }
 }
 
-export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {
-  step_failed: 'Um passo falhou',
-  interrupted: 'O Orkio foi fechado no meio do passo',
-  loop_guard: 'Limite de passos atingido (possível loop)',
-  gate_timeout: 'A aprovação expirou',
-  left_stage: 'A tarefa saiu da etapa do fluxo',
-  needs_choice: 'O fluxo precisa de uma escolha sua',
-  waiting_slot: 'Aguardando outro fluxo do projeto terminar',
-  waiting_agent: 'Aguardando o agente terminar outra tarefa',
-  agent_daily_limit: 'O agente atingiu o limite de hoje'
+/** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
+export interface TaskFlowsProject extends ProjectFlows {
+  extractors: { id: string; label: string }[]
+  actions: { id: string; label: string }[]
+  /** Ajustes de entrega do projeto (5C). */
+  delivery: DeliverySettings
 }
 
-/** Fluxo ativo (não terminado) espera uma ação sua? */
-export function needsYou(status: FlowRunStatus): boolean {
-  return status === 'waiting_gate' || status === 'paused' || status === 'awaiting_decision'
+/**
+ * Resultado de "Abrir PR". `mode: 'pr'` = push + /alva-flow:pr (a PR sai do fluxo). `mode: 'push'` =
+ * só o push (sem task do Backlog.md vinculada): `compareUrl` abre "Criar a PR" no GitHub (o
+ * link é montado no main). Em ambos o fluxo começou; o gate do push aparece na conversa.
+ */
+export interface OpenPrResult {
+  /** `false`: nada a enviar e sem alva-flow, então não há fluxo; só o `compareUrl`. */
+  started: boolean
+  mode: 'pr' | 'push'
+  compareUrl: string | null
+}
+
+const str = (v: unknown): v is string => typeof v === 'string'
+
+export function parseCondition(v: unknown, depth = 0): Condition | null {
+  if (!isRecord(v) || depth > 5) return null
+  switch (v['type']) {
+    case 'step':
+      return str(v['step']) && (v['is'] === 'ok' || v['is'] === 'failed' || v['is'] === 'cancelled')
+        ? { type: 'step', step: v['step'], is: v['is'] }
+        : null
+    case 'var': {
+      const op = v['op']
+      if (!str(v['key']) || (op !== 'eq' && op !== 'neq' && op !== 'exists')) return null
+      return { type: 'var', key: v['key'], op, ...(str(v['value']) ? { value: v['value'] } : {}) }
+    }
+    case 'visits':
+      return str(v['step']) && typeof v['lt'] === 'number' && v['lt'] >= 1
+        ? { type: 'visits', step: v['step'], lt: Math.floor(v['lt']) }
+        : null
+    case 'all':
+    case 'any': {
+      if (!Array.isArray(v['of'])) return null
+      const of = v['of'].map((c) => parseCondition(c, depth + 1))
+      return of.every((c): c is Condition => c !== null) ? { type: v['type'], of } : null
+    }
+    default:
+      return null
+  }
+}
+
+export function parseStep(v: unknown): Step | null {
+  if (!isRecord(v) || !str(v['id']) || !str(v['name'])) return null
+  const base = { id: v['id'], name: v['name'] }
+  switch (v['type']) {
+    case 'claude_command':
+      if (!str(v['command']) || !str(v['args']) || typeof v['timeoutMin'] !== 'number') return null
+      return {
+        ...base,
+        type: 'claude_command',
+        command: v['command'],
+        args: v['args'],
+        ...(str(v['prompt']) ? { prompt: v['prompt'] } : {}),
+        ...(v['readOnly'] === true ? { readOnly: true } : {}),
+        timeoutMin: v['timeoutMin'],
+        ...(isRecord(v['extract']) && str(v['extract']['extractor'])
+          ? { extract: { extractor: v['extract']['extractor'] } }
+          : {}),
+        ...(v['delivery'] === true ? { delivery: true } : {}),
+        ...(typeof v['includeBriefing'] === 'boolean'
+          ? { includeBriefing: v['includeBriefing'] }
+          : {}),
+        ...(isModelName(v['model']) ? { model: v['model'] } : {}),
+        ...(isEffort(v['effort']) ? { effort: v['effort'] } : {})
+      }
+    case 'gate': {
+      const show = GATE_SHOWS.find((x) => x === v['show'])
+      if (!str(v['message']) || !show) return null
+      const revise = v['revise']
+      return {
+        ...base,
+        type: 'gate',
+        message: v['message'],
+        show,
+        onReject: str(v['onReject']) ? v['onReject'] : 'stop',
+        timeoutMin: typeof v['timeoutMin'] === 'number' ? v['timeoutMin'] : null,
+        ...(isRecord(revise) && str(revise['step']) && typeof revise['max'] === 'number'
+          ? { revise: { step: revise['step'], max: revise['max'] } }
+          : {})
+      }
+    }
+    case 'orkio_action':
+      return str(v['action']) ? { ...base, type: 'orkio_action', action: v['action'] } : null
+    case 'branch': {
+      const when = parseCondition(v['when'])
+      if (!when || !str(v['then'])) return null
+      return {
+        ...base,
+        type: 'branch',
+        when,
+        then: v['then'],
+        ...(str(v['else']) ? { else: v['else'] } : {})
+      }
+    }
+    default:
+      return null
+  }
+}
+
+export function parseFlowDef(v: unknown): Flow | null {
+  if (!isRecord(v) || !str(v['id']) || !v['id'] || !str(v['name']) || !Array.isArray(v['steps'])) {
+    return null
+  }
+  const steps = v['steps'].map(parseStep)
+  if (!steps.every((s): s is Step => s !== null)) return null
+  const tags = Array.isArray(v['tags'])
+    ? v['tags'].filter((t): t is string => str(t) && /^[a-z0-9_-]{1,20}$/.test(t)).slice(0, 5)
+    : []
+  return { id: v['id'], name: v['name'], steps, ...(tags.length > 0 ? { tags } : {}) }
 }

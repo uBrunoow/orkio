@@ -20,16 +20,19 @@ import {
   type Flow,
   type FlowDecision
 } from './task-flow'
+import { ALVA_COMMANDS, ALVA_EXTRACTOR, alvaCommand } from './alva'
+import { DECLARED_FLOW_VARS } from './flow-outputs'
+import { ORKIO_ACTIONS } from './orkio-actions'
 
+/** O registro real: comandos do plugin, extrator e ações do Orkio, e as saídas declaradas. */
 const CTX = {
-  commands: new Set(
-    ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr'].map((c) => `alva-flow:${c}`)
-  ),
-  extractors: ['alva'],
-  actions: ['noop', 'push', 'verify_pushed', 'request_review', 'review_snapshot', 'publish_review']
+  commands: new Set(ALVA_COMMANDS.map(alvaCommand)),
+  extractors: [ALVA_EXTRACTOR],
+  actions: Object.keys(ORKIO_ACTIONS),
+  declaredVars: DECLARED_FLOW_VARS
 }
 
-/** Roda o motor: `outcomes[stepId]` dá as variáveis que o extrator gravaria a cada execução. */
+/** Roda o motor: `onStep` dá as variáveis que o extrator/ação gravaria a cada execução. */
 function simulate(
   flow: Flow,
   initial: Record<string, string>,
@@ -46,6 +49,11 @@ function simulate(
     trail.push(id)
     count[id] = (count[id] ?? 0) + 1
     const r = onStep(id, count[id]!)
+    // Só o que um produtor real grava (ações e extrator do alva-flow): uma chave renomeada no
+    // produtor quebra a simulação em vez de seguir verde com o nome antigo.
+    for (const key of Object.keys(r.vars ?? {})) {
+      if (key.includes('.')) expect(DECLARED_FLOW_VARS, key).toContain(key)
+    }
     const step = flow.steps.find((s) => s.id === id)!
     d =
       step.type === 'gate'
@@ -301,10 +309,11 @@ describe('Alva: revisão publicada (Task 18)', () => {
 
 describe('upgradeAlvaFlows (ligações padrão e migração)', () => {
   const stages = [
-    { id: 'st-prio', name: 'Prioridades' },
-    { id: 'st-dev', name: 'Em andamento' },
-    { id: 'st-rev', name: 'revisándo' },
-    { id: 'st-ok', name: 'Revisado' }
+    { id: 'st-prio', name: 'Prioridades', role: 'queue' as const },
+    { id: 'st-dev', name: 'Em andamento', role: 'work' as const },
+    // O nome não importa: vale o papel.
+    { id: 'st-rev', name: 'Em revisão', role: 'review' as const },
+    { id: 'st-ok', name: 'Revisado', role: 'reviewed' as const }
   ]
   const userFlow: Flow = { id: 'meu-fluxo', name: 'Meu fluxo', steps: [] }
 
@@ -315,7 +324,7 @@ describe('upgradeAlvaFlows (ligações padrão e migração)', () => {
     expect(r.flows).toBe(pf)
   })
 
-  it('acrescenta os modelos que faltam e liga Revisando/Revisado vazias (sem acento/caixa)', () => {
+  it('acrescenta os modelos que faltam e liga as etapas de revisão vazias (pelo papel)', () => {
     const old = { ...alvaPlanFlow(), steps: alvaPlanFlow().steps.slice(0, 1) }
     const pf = {
       flows: [old, userFlow],
@@ -339,7 +348,7 @@ describe('upgradeAlvaFlows (ligações padrão e migração)', () => {
     )
     expect(r.changes).toContain('Fluxo “Alva: revisão publicada” criado (modelo Alva)')
     expect(r.changes).toContain(
-      'Coluna “revisándo” ganhou o fluxo “Alva: revisão publicada” (ao entrar)'
+      'Coluna “Em revisão” ganhou o fluxo “Alva: revisão publicada” (ao entrar)'
     )
   })
 

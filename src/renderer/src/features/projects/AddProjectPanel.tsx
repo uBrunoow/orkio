@@ -2,18 +2,17 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { CheckboxField, RadioListField, TextField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
+import { Alert } from '../../components/Alert'
+import { ActionLink } from './ActionLink'
 import type {
   CreateProjectInput,
   ProjectError,
   ProjectMutationResult,
   ProjectSelection
-} from '../../../../shared/ipc-contract'
-import { Alert } from '../../components/Alert'
-import { ActionLink } from './ActionLink'
+} from '../../../../shared/projects'
 
 const mono = 'font-mono text-xs text-muted-foreground'
 
-/** Segundo passo do "Adicionar projeto": confirma remote, host e nome. */
 export function AddProjectPanel({
   selection,
   onCreate,

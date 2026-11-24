@@ -281,8 +281,9 @@ describe('UpdateService', () => {
     const t = setup({ restart: true })
     t.updater.next = { version: '1.1.0' }
     await t.service.check()
-    await vi.waitFor(() => expect(t.updater.installs).toEqual([[false, true]]))
+    // A pergunta sai junto com o fim da checagem (os casos "não pergunta" abaixo contam com isso).
     expect(t.asked).toEqual(['1.1.0'])
+    await vi.waitFor(() => expect(t.updater.installs).toEqual([[false, true]]))
     expect(t.shutdown).toHaveBeenCalledOnce()
   })
 
@@ -301,7 +302,6 @@ describe('UpdateService', () => {
     t.setBusy([{ kind: 'claude', label: 'Claude Code rodando em ORK-1' }])
     t.updater.next = { version: '1.1.0' }
     await t.service.check()
-    await new Promise((r) => setImmediate(r))
     expect(t.asked).toEqual([])
     expect(t.updater.installs).toHaveLength(0)
   })
@@ -310,7 +310,6 @@ describe('UpdateService', () => {
     const t = setup({ platform: 'darwin', macSigned: false, restart: true })
     t.updater.next = { version: '1.1.0' }
     await t.service.check()
-    await new Promise((r) => setImmediate(r))
     expect(t.asked).toEqual([])
   })
 
@@ -389,12 +388,10 @@ describe('UpdateService', () => {
   it('canal Beta liga allowPrerelease e checa de novo; Estável desliga', async () => {
     const t = setup()
     await t.service.setChannel('beta')
-    await new Promise((r) => setImmediate(r))
     expect(t.settings.channel).toBe('beta')
-    expect(t.updater.checks.at(-1)?.allowPrerelease).toBe(true)
+    await vi.waitFor(() => expect(t.updater.checks.at(-1)?.allowPrerelease).toBe(true))
     await t.service.setChannel('stable')
-    await new Promise((r) => setImmediate(r))
-    expect(t.updater.checks.at(-1)?.allowPrerelease).toBe(false)
+    await vi.waitFor(() => expect(t.updater.checks.at(-1)?.allowPrerelease).toBe(false))
     expect(t.updater.allowDowngrade).toBe(false)
   })
 
@@ -406,9 +403,8 @@ describe('UpdateService', () => {
   it('O que há de novo: uma vez depois de atualizar; instalação nova só registra', async () => {
     const updated = setup({ version: '1.1.0', settings: { lastSeenVersion: '1.0.0' } })
     expect(updated.service.whatsNew()).toEqual({ version: '1.1.0', notes: '### Novo\n- Coisa' })
-    await new Promise((r) => setImmediate(r))
     // Uma vez: na próxima abertura não aparece mais, mesmo sem clicar em "Entendi".
-    expect(updated.settings.lastSeenVersion).toBe('1.1.0')
+    await vi.waitFor(() => expect(updated.settings.lastSeenVersion).toBe('1.1.0'))
     // Mesma sessão (a tela remontou): continua mostrando até "Entendi".
     expect(updated.service.whatsNew()?.version).toBe('1.1.0')
     await updated.service.markWhatsNewSeen()
@@ -416,8 +412,7 @@ describe('UpdateService', () => {
 
     const fresh = setup({ version: '1.1.0', settings: { lastSeenVersion: null } })
     expect(fresh.service.whatsNew()).toBeNull()
-    await new Promise((r) => setImmediate(r))
-    expect(fresh.settings.lastSeenVersion).toBe('1.1.0')
+    await vi.waitFor(() => expect(fresh.settings.lastSeenVersion).toBe('1.1.0'))
 
     // Config só leitura (dados de uma versão mais nova): não mostra (não teria como lembrar).
     const readOnly = setup({ version: '1.1.0', writable: false })

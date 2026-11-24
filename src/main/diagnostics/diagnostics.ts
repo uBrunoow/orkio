@@ -4,33 +4,62 @@
  * só leitura), as conexões (só o estado), versões de git/gh/claude e quantas pastas de trabalho e
  * logs existem. O texto final passa por `redactSecrets` mesmo assim.
  */
+import { readdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { formatDiagnostics, type DiagnosticSection } from '../../shared/diagnostics'
-import type { ConnectionStatus } from '../../shared/ipc-contract'
-import { redactSecrets } from '../claude/redact'
+import { redactSecrets } from '../platform/redact'
 import type { Db } from '../db/database'
+import { NOTION_PENDING_ATTEMPTS } from '../../shared/overview'
+import type { ConnectionStatus } from '../../shared/connection'
+import type { UserDataPaths } from '../platform/paths'
 
 export interface DiagnosticsDeps {
   app: { version: string; packaged: boolean }
   runtime: { electron: string; node: string; chrome: string }
   os: { platform: string; arch: string; release: string }
   config: { schemaVersion: number; readOnly: boolean }
+  /** Banco local (versão e `quick_check`); as contagens vêm dos donos das tabelas. */
   db: Db | null
+  /** Contagens pelos donos das tabelas (`null` = sem banco): fluxos, execuções e quadro. */
+  flows: { counts(): { total: number; active: number } } | null
+  runs: { counts(): { total: number; active: number } } | null
+  board: {
+    counts(): { events: number; pendingWrites: number }
+    stuckWrites(minAttempts: number): readonly unknown[]
+  } | null
   connections: () => Promise<{ name: string; status: ConnectionStatus }[]>
   /** `<cmd> --version` (primeira linha) ou `null` se não estiver instalado. */
   toolVersion: (cmd: 'git' | 'gh' | 'claude') => Promise<string | null>
-  /** Quantas entradas há numa pasta do userData (`worktrees/<projeto>/*`, `runs/*`). */
-  countEntries: (what: 'worktrees' | 'runs') => Promise<number | null>
+  paths: Pick<UserDataPaths, 'worktrees' | 'runs'>
+  listDir?: (dir: string) => Promise<string[]>
   projects: () => { total: number; withBoard: number }
   automation: () => { polling: number; failing: number }
   now?: () => Date
 }
 
-function count(db: Db, sql: string): number | null {
+/** Escritas com esta quantidade de tentativas contam como presas (a mesma regra do sino). */
+const STUCK_ATTEMPTS = NOTION_PENDING_ATTEMPTS
+
+/** Uma contagem que falhou vira "—" (o resto do diagnóstico sai). */
+function safe<T>(read: () => T): T | null {
   try {
-    return db.get<{ n: number }>(sql)?.n ?? 0
+    return read()
   } catch {
     return null
   }
+}
+
+/** Worktrees (`worktrees/<projeto>/<ID>`) e logs (`runs/<id>.jsonl`); pasta ausente = 0. */
+async function countEntries(
+  paths: DiagnosticsDeps['paths'],
+  listDir: (dir: string) => Promise<string[]>
+): Promise<{ worktrees: number; runs: number }> {
+  const list = (dir: string): Promise<string[]> => listDir(dir).catch(() => [])
+  let worktrees = 0
+  for (const project of await list(paths.worktrees)) {
+    worktrees += (await list(join(paths.worktrees, project))).length
+  }
+  return { worktrees, runs: (await list(paths.runs)).length }
 }
 
 function connectionState(s: ConnectionStatus): string {
@@ -42,14 +71,15 @@ function connectionState(s: ConnectionStatus): string {
 
 export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string> {
   const now = (deps.now ?? (() => new Date()))()
-  const [connections, git, gh, claude, worktrees, runs] = await Promise.all([
+  const [connections, git, gh, claude, entries] = await Promise.all([
     deps.connections().catch(() => []),
     deps.toolVersion('git').catch(() => null),
     deps.toolVersion('gh').catch(() => null),
     deps.toolVersion('claude').catch(() => null),
-    deps.countEntries('worktrees').catch(() => null),
-    deps.countEntries('runs').catch(() => null)
+    countEntries(deps.paths, deps.listDir ?? ((dir) => readdir(dir))).catch(() => null)
   ])
+  const worktrees = entries?.worktrees ?? null
+  const runs = entries?.runs ?? null
 
   const db = deps.db
   let integrity: string | null = null
@@ -63,6 +93,10 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string>
   }
   const projects = deps.projects()
   const automation = deps.automation()
+  const flowCounts = safe(() => deps.flows?.counts() ?? null)
+  const runCounts = safe(() => deps.runs?.counts() ?? null)
+  const boardCounts = safe(() => deps.board?.counts() ?? null)
+  const stuck = safe(() => deps.board?.stuckWrites(STUCK_ATTEMPTS).length ?? null)
 
   const sections: DiagnosticSection[] = [
     {
@@ -83,9 +117,9 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string>
         ['Config só leitura (versão futura)', deps.config.readOnly],
         ['Banco local', db ? `v${db.version}` : 'indisponível'],
         ['Integridade do banco', integrity],
-        ['Eventos de tarefas', db ? count(db, 'SELECT COUNT(*) AS n FROM task_events') : null],
-        ['Execuções do Claude Code', db ? count(db, 'SELECT COUNT(*) AS n FROM agent_runs') : null],
-        ['Execuções de fluxo', db ? count(db, 'SELECT COUNT(*) AS n FROM flow_runs') : null],
+        ['Eventos de tarefas', boardCounts?.events ?? null],
+        ['Execuções do Claude Code', runCounts?.total ?? null],
+        ['Execuções de fluxo', flowCounts?.total ?? null],
         ['Pastas de trabalho (worktrees)', worktrees],
         ['Logs de execução', runs]
       ]
@@ -93,32 +127,10 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string>
     {
       title: 'Agora',
       rows: [
-        [
-          'Claude Code rodando ou na fila',
-          db
-            ? count(
-                db,
-                "SELECT COUNT(*) AS n FROM agent_runs WHERE status IN ('queued', 'running')"
-              )
-            : null
-        ],
-        [
-          'Fluxos em andamento',
-          db
-            ? count(
-                db,
-                "SELECT COUNT(*) AS n FROM flow_runs WHERE status IN ('running', 'waiting_gate', 'paused', 'awaiting_decision')"
-              )
-            : null
-        ],
-        [
-          'Escritas pendentes no Notion',
-          db ? count(db, 'SELECT COUNT(*) AS n FROM pending_writes') : null
-        ],
-        [
-          'Escritas com 3+ tentativas',
-          db ? count(db, 'SELECT COUNT(*) AS n FROM pending_writes WHERE attempts >= 3') : null
-        ],
+        ['Claude Code rodando ou na fila', runCounts?.active ?? null],
+        ['Fluxos em andamento', flowCounts?.active ?? null],
+        ['Escritas pendentes no Notion', boardCounts?.pendingWrites ?? null],
+        [`Escritas com ${STUCK_ATTEMPTS}+ tentativas`, stuck],
         ['Projetos', projects.total],
         ['Projetos com quadro', projects.withBoard],
         ['Projetos com automação ativa', automation.polling],

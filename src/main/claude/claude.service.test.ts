@@ -3,10 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ClaudeCodeStatus } from '../../shared/agent-run'
-import type { NotionTask } from '../../shared/ipc-contract'
-import { isSendMessageRequest, isStartRunRequest } from '../ipc/claude.ipc'
 import { CLAUDE_MESSAGES, ClaudeService, type ClaudeServiceDeps } from './claude.service'
+import { RunBusyError } from './run.service'
+import type { RunRequest, RunSpec } from './run-spec'
+import { TerminalError } from './terminal'
 import { WorktreeError } from './worktree.service'
+import type { NotionTask } from '../../shared/notion'
 
 const TASK: NotionTask = {
   id: 'task-1',
@@ -33,23 +35,22 @@ function para(text: string, extra: Record<string, unknown> = {}): Record<string,
 
 function setup(over: Partial<ClaudeServiceDeps> = {}) {
   const runs = {
-    start: vi.fn(async () => ({ id: 'run-1' })),
+    start: vi.fn<(spec: RunSpec) => Promise<{ id: string }>>(async () => ({ id: 'run-1' })),
     list: vi.fn(() => []),
     lastSession: vi.fn(() => null as string | null),
     isRunning: vi.fn(() => false),
-    cancel: vi.fn(() => {
-      throw new Error('not found')
-    })
+    cancel: vi.fn(() => undefined),
+    onFinished: vi.fn(() => () => undefined)
   }
   const worktrees = {
     get: vi.fn(() => null as null | { path: string; branch: string; baseRef: string }),
     ensure: vi.fn(async () => ({})),
+    findTaskBranch: vi.fn(async () => ({ branch: 'ORK-7/exportar', where: 'local' }) as const),
     remove: vi.fn(async () => undefined),
     linkedBranches: vi.fn(() => [] as { branch: string }[])
   }
   const deps: ClaudeServiceDeps = {
     config: {
-      update: vi.fn(async () => undefined),
       get: () =>
         ({
           projects: [
@@ -60,8 +61,7 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
               repo: { owner: 'o', name: 'app', remoteName: 'origin', defaultBranch: 'main' },
               notionProject: null
             }
-          ],
-          claudeContexts: {}
+          ]
         }) as never
     },
     worktrees: worktrees as never,
@@ -97,10 +97,32 @@ function setup(over: Partial<ClaudeServiceDeps> = {}) {
     openEditor: vi.fn(async () => undefined),
     openTerminal: vi.fn(async () => undefined),
     artifacts: {} as never,
+    deliveryTarget: () => {
+      throw new Error(CLAUDE_MESSAGES.noRepo)
+    },
+    flowActive: () => false,
+    flowBusy: () => false,
+    flowMessage: async () => ({ used: false }),
+    agentFor: async () => null,
+    agentInfo: async () => null,
     ...over
   }
-  return { service: new ClaudeService(deps), deps, runs, worktrees }
+  /** O `RunSpec` da última execução iniciada. */
+  const lastSpec = (): RunSpec => runs.start.mock.calls.at(-1)![0]
+  return { service: new ClaudeService(deps), deps, runs, worktrees, lastSpec }
 }
+
+const flowRequest = (over: Partial<RunRequest> = {}): RunRequest => ({
+  projectId: 'p1',
+  taskId: 'task-1',
+  input: { kind: 'command', name: 'revisar', args: 'ORK-7' },
+  session: { kind: 'new', briefing: 'b', includeBriefing: true },
+  access: { tools: 'full', github: 'read' },
+  agent: null,
+  runtime: null,
+  timeoutMin: 5,
+  ...over
+})
 
 describe('ClaudeService', () => {
   it('prepara o briefing com página, campos e a branch existente da tarefa', async () => {
@@ -150,7 +172,7 @@ describe('ClaudeService', () => {
       error: { message: 'Não achei um terminal neste computador.' }
     })
     ;(deps.openTerminal as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('no_workspace')
+      new TerminalError('no_workspace')
     )
     expect(await service.openTerminal('p1', 'task-1')).toMatchObject({
       ok: false,
@@ -261,59 +283,17 @@ describe('ClaudeService', () => {
     })
   })
 
-  it('cancelar execução que já terminou não lança', () => {
-    const { service } = setup()
-    expect(() => service.cancel('run-x')).not.toThrow()
-  })
-
-  it('valida o payload de start vindo do renderer', () => {
-    const base = {
-      projectId: 'p1',
-      taskId: 'task-1',
-      mode: 'prompt',
-      command: null,
-      text: 'x',
-      briefing: 'b'
-    }
-    expect(isStartRunRequest(base)).toBe(true)
-    expect(isStartRunRequest({ ...base, projectId: '../x' })).toBe(false)
-    expect(isStartRunRequest({ ...base, mode: 'shell' })).toBe(false)
-    expect(isStartRunRequest({ ...base, briefing: 'x'.repeat(300_000) })).toBe(false)
-  })
-
-  it('briefing ignora o contexto do projeto salvo na config', async () => {
-    const getBlockChildren = vi.fn(async () => ({ results: [], nextCursor: null }))
-    const { service } = setup({
-      config: {
-        update: vi.fn(async () => undefined),
-        get: () =>
-          ({
-            projects: [
-              {
-                id: 'p1',
-                name: 'app',
-                localPath: '/repo',
-                repo: { owner: 'o', name: 'app', remoteName: 'origin', defaultBranch: 'main' },
-                notionProject: null
-              }
-            ],
-            claudeContexts: {
-              p1: { instructions: 'NAO-DEVE-APARECER', notionPages: [{ id: 'x', name: 'X' }] }
-            }
-          }) as never
-      },
-      getBlockChildren
+  it('tarefa já com execução: RunBusyError vira o código busy', async () => {
+    const { service, runs } = setup()
+    runs.start.mockRejectedValueOnce(new RunBusyError())
+    expect(await service.startRun(flowRequest())).toMatchObject({
+      ok: false,
+      error: { code: 'busy' }
     })
-    const r = await service.prepare('p1', 'task-1')
-    expect(r.ok).toBe(true)
-    if (!r.ok) return
-    expect(r.value.briefing).not.toContain('NAO-DEVE-APARECER')
-    expect(r.value.briefing).not.toContain('Contexto do projeto')
-    expect(getBlockChildren).not.toHaveBeenCalledWith('x', expect.anything())
   })
 
   it('com fluxo ativo na tarefa, a execução manual é bloqueada (o fluxo roda os comandos)', async () => {
-    const { service, runs } = setup({ flowActive: (taskId) => taskId === 'task-1' })
+    const { service, runs, lastSpec } = setup({ flowActive: (taskId) => taskId === 'task-1' })
     const r = await service.start({
       projectId: 'p1',
       taskId: 'task-1',
@@ -325,40 +305,29 @@ describe('ClaudeService', () => {
     expect(r).toMatchObject({ ok: false, error: { code: 'flow_active' } })
     expect(runs.start).not.toHaveBeenCalled()
     // O passo do fluxo usa o mesmo caminho e devolve o id da execução.
-    const fromFlow = await service.startForFlow({
-      projectId: 'p1',
-      taskId: 'task-1',
-      command: 'revisar',
-      args: 'ORK-7',
-      briefing: 'b',
+    expect(await service.startRun(flowRequest())).toEqual({ ok: true, value: 'run-1' })
+    expect(lastSpec()).toMatchObject({
+      input: { kind: 'command', name: 'revisar', args: 'ORK-7' },
+      session: { kind: 'new', briefing: 'b', includeBriefing: true },
       timeoutMin: 5
     })
-    expect(fromFlow).toEqual({ ok: true, value: 'run-1' })
-    expect(runs.start).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: 'command', command: 'revisar', text: 'ORK-7', timeoutMin: 5 })
-    )
   })
 
   it('mensagem da sessão: continua a última sessão sem repetir o briefing', async () => {
-    const { service, runs, deps } = setup()
+    const { service, runs, deps, lastSpec } = setup()
     runs.lastSession.mockReturnValue('sess-9')
     const r = await service.send({ projectId: 'p1', taskId: 'task-1', text: '  Rode os testes  ' })
     expect(r.ok).toBe(true)
-    expect(runs.start).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mode: 'prompt',
-        command: null,
-        text: 'Rode os testes',
-        briefing: '',
-        resumeSessionId: 'sess-9'
-      })
-    )
+    expect(lastSpec()).toMatchObject({
+      input: { kind: 'prompt', text: 'Rode os testes' },
+      session: { kind: 'resume', id: 'sess-9' }
+    })
     // Sem sessão nova, nada do Notion é lido.
     expect(deps.getBlockChildren).not.toHaveBeenCalled()
   })
 
-  it('mensagem com runtime segue no --resume; sem suporte a effort, o effort é descartado', async () => {
-    const { service, runs } = setup()
+  it('modelo/raciocínio: mensagem > agente > padrão, resolvidos uma vez; CLI sem effort corta', async () => {
+    const { service, runs, lastSpec } = setup()
     runs.lastSession.mockReturnValue('sess-9')
     await service.send({
       projectId: 'p1',
@@ -366,106 +335,92 @@ describe('ClaudeService', () => {
       text: 'oi',
       runtime: { model: 'opus', effort: 'high' }
     })
-    expect(runs.start).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        resumeSessionId: 'sess-9',
-        runtime: { model: 'opus', effort: 'high' }
-      })
-    )
+    expect(lastSpec().runtime).toEqual({ model: 'opus', effort: 'high' })
+    const agent = { key: 'a', name: 'A', prompt: 'p', model: 'sonnet', effort: 'max' as const }
+    // null do passo = padrão de propósito; o agente define o resto.
+    await service.startRun(flowRequest({ agent, runtime: { model: null } }))
+    expect(lastSpec().runtime).toEqual({ model: null, effort: 'max' })
+    // "default" vira sem flag; inválido (defesa em profundidade) nem chega ao CLI.
+    await service.startRun(flowRequest({ runtime: { model: 'default' } }))
+    expect(lastSpec().runtime).toEqual({ model: null, effort: null })
+    await service.startRun(flowRequest({ runtime: { model: '--x', effort: 'ultra' as never } }))
+    expect(lastSpec().runtime).toEqual({ model: null, effort: null })
+
     const old = setup({ detect: vi.fn(async () => ({ ...READY, supportsEffort: false })) })
-    old.runs.lastSession.mockReturnValue('sess-9')
-    await old.service.send({
-      projectId: 'p1',
-      taskId: 'task-1',
-      text: 'oi',
-      runtime: { model: 'opus', effort: 'high' }
-    })
-    expect(old.runs.start).toHaveBeenLastCalledWith(
-      expect.objectContaining({ runtime: { model: 'opus' } })
-    )
-    const agent = { key: 'a', name: 'A', prompt: 'p', model: null, effort: 'max' as const }
-    await old.service.startForFlow({
-      projectId: 'p1',
-      taskId: 'task-1',
-      command: 'revisar',
-      args: '',
-      briefing: '',
-      timeoutMin: 5,
-      agent,
-      runtime: { effort: 'low' }
-    })
-    expect(old.runs.start).toHaveBeenLastCalledWith(
-      expect.objectContaining({ agent: { ...agent, effort: null }, runtime: {} })
-    )
+    await old.service.startRun(flowRequest({ agent, runtime: { effort: 'low' } }))
+    expect(old.lastSpec().runtime).toEqual({ model: 'sonnet', effort: null })
   })
 
-  it('startForFlow com reply: continua a sessão e leva o runtime do passo', async () => {
-    const { service, runs } = setup()
-    runs.lastSession.mockReturnValue('sess-3')
-    const r = await service.startForFlow({
-      projectId: 'p1',
-      taskId: 'task-1',
-      command: 'revisar',
-      args: '',
-      briefing: '',
-      timeoutMin: 5,
-      reply: 'x',
-      runtime: { model: 'opus' }
-    })
-    expect(r.ok).toBe(true)
-    expect(runs.start).toHaveBeenLastCalledWith(
-      expect.objectContaining({ resumeSessionId: 'sess-3', text: 'x', runtime: { model: 'opus' } })
-    )
-  })
-
-  it('startForFlow com pedido em texto: continua a sessão (sem briefing) ou começa com ele; só leitura vai junto', async () => {
-    const { service, runs } = setup()
-    const input = {
-      projectId: 'p1',
-      taskId: 'task-1',
-      command: '',
-      args: '',
-      briefing: '# Briefing ORK-7',
-      timeoutMin: 5,
-      prompt: 'Leia .orkio/revisao.md',
-      readOnly: true
-    }
+  it('sessão "a mais recente": continua; sem sessão, começa com o briefing ou explica', async () => {
+    const { service, runs, lastSpec } = setup()
+    const fresh = { kind: 'new', briefing: '# Briefing ORK-7', includeBriefing: true } as const
     runs.lastSession.mockReturnValue('sess-4')
-    expect((await service.startForFlow(input)).ok).toBe(true)
-    expect(runs.start).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        mode: 'prompt',
-        command: null,
-        text: 'Leia .orkio/revisao.md',
-        briefing: '',
-        resumeSessionId: 'sess-4',
-        readOnly: true
-      })
-    )
+    const prompt = { kind: 'prompt', text: 'Leia .orkio/revisao.md' } as const
+    expect(
+      (
+        await service.startRun(
+          flowRequest({ input: prompt, session: { kind: 'latest', orNew: fresh } })
+        )
+      ).ok
+    ).toBe(true)
+    expect(lastSpec().session).toEqual({ kind: 'resume', id: 'sess-4' })
     runs.lastSession.mockReturnValue(null)
-    expect((await service.startForFlow({ ...input, readOnly: false })).ok).toBe(true)
-    const call = runs.start.mock.calls.at(-1) as unknown as [Record<string, unknown>]
-    expect(call[0]).toMatchObject({
-      mode: 'prompt',
-      briefing: '# Briefing ORK-7',
-      includeBriefing: true,
-      resumeSessionId: null
+    await service.startRun(
+      flowRequest({ input: prompt, session: { kind: 'latest', orNew: fresh } })
+    )
+    expect(lastSpec().session).toEqual(fresh)
+    expect(
+      await service.startRun(
+        flowRequest({ input: prompt, session: { kind: 'latest', orNew: null } })
+      )
+    ).toMatchObject({ ok: false, error: { code: 'no_session' } })
+  })
+
+  it('GitHub: leitura com o repositório verificado; entrega com o alvo; só leitura nunca entrega', async () => {
+    const target = {
+      owner: 'o',
+      repo: 'app',
+      remote: 'origin',
+      branch: 'ORK-7/exportar',
+      defaultBranch: 'main',
+      displayId: 'ORK-7'
+    }
+    const { service, lastSpec } = setup({
+      deliveryTarget: () => ({ target, requirePushApproval: true })
     })
-    expect(call[0]['readOnly']).toBeUndefined()
+    await service.startRun(flowRequest())
+    expect(lastSpec().access).toEqual({ tools: 'full', github: { mode: 'read', target } })
+    await service.startRun(flowRequest({ access: { tools: 'full', github: 'deliver' } }))
+    expect(lastSpec().access).toEqual({
+      tools: 'full',
+      github: { mode: 'deliver', target, requirePushApproval: true }
+    })
+    await service.startRun(flowRequest({ access: { tools: 'read_only', github: 'read' } }))
+    expect(lastSpec().access).toEqual({ tools: 'read_only', github: { mode: 'read', target } })
+    // Sem repositório verificado: leitura vira "nada"; entrega falha com a mensagem.
+    const none = setup({
+      deliveryTarget: () => {
+        throw new Error('Sem repositório verificado.')
+      }
+    })
+    await none.service.startRun(flowRequest())
+    expect(none.lastSpec().access).toEqual({ tools: 'full', github: null })
+    expect(
+      await none.service.startRun(flowRequest({ access: { tools: 'full', github: 'deliver' } }))
+    ).toMatchObject({
+      ok: false,
+      error: { code: 'no_repo', message: 'Sem repositório verificado.' }
+    })
   })
 
   it('mensagem da sessão: sem sessão (ou "nova sessão") começa com o briefing; /comando vira comando', async () => {
-    const { service, runs } = setup()
+    const { service, runs, lastSpec } = setup()
     runs.lastSession.mockReturnValue('sess-9')
     await service.send({ projectId: 'p1', taskId: 'task-1', text: '/revisar ORK-7', fresh: true })
-    const call = runs.start.mock.calls[0] as unknown as [Record<string, unknown>]
-    expect(call[0]).toMatchObject({
-      mode: 'command',
-      command: 'revisar',
-      text: 'ORK-7',
-      resumeSessionId: null
-    })
-    expect(String(call[0]['briefing'])).toContain('Exportar CSV')
+    expect(lastSpec().input).toEqual({ kind: 'command', name: 'revisar', args: 'ORK-7' })
+    const session = lastSpec().session
+    expect(session.kind).toBe('new')
+    expect(session.kind === 'new' && session.briefing).toContain('Exportar CSV')
     expect(
       await service.send({ projectId: 'p1', taskId: 'task-1', text: '/../x; rm' })
     ).toMatchObject({ ok: false, error: { code: 'invalid' } })
@@ -485,36 +440,6 @@ describe('ClaudeService', () => {
     expect((await waiting.service.send({ projectId: 'p1', taskId: 'task-1', text: 'oi' })).ok).toBe(
       true
     )
-  })
-
-  it('passo do fluxo com resposta: continua a sessão (--resume) só com o texto; sem sessão, explica', async () => {
-    const { service, runs } = setup()
-    runs.lastSession.mockReturnValue('sess-7')
-    const flowInput = {
-      projectId: 'p1',
-      taskId: 'task-1',
-      command: 'alva-flow:spec',
-      args: 'ORK-7',
-      briefing: 'b',
-      timeoutMin: 5,
-      reply: 'Formato: CSV'
-    }
-    expect(await service.startForFlow(flowInput)).toEqual({ ok: true, value: 'run-1' })
-    expect(runs.start).toHaveBeenCalledWith(
-      expect.objectContaining({
-        mode: 'prompt',
-        command: null,
-        text: 'Formato: CSV',
-        briefing: '',
-        resumeSessionId: 'sess-7',
-        timeoutMin: 5
-      })
-    )
-    runs.lastSession.mockReturnValue(null)
-    expect(await service.startForFlow(flowInput)).toMatchObject({
-      ok: false,
-      error: { code: 'no_session' }
-    })
   })
 
   describe('anexos da mensagem', () => {
@@ -543,8 +468,9 @@ describe('ClaudeService', () => {
       expect(r.ok).toBe(true)
       const files = await readdir(join(wt, '.orkio', 'attachments'))
       expect(files).toHaveLength(2)
-      const call = runs.start.mock.calls[0] as unknown as [{ text: string }]
-      expect(call[0].text).toMatch(
+      const call = runs.start.mock.calls[0]!
+      const input = call[0].input
+      expect(input.kind === 'prompt' && input.text).toMatch(
         /^veja\n\nAnexos \(leia com a ferramenta Read\): \.orkio\/attachments\/[0-9a-f]{8}-nota\.md, \.orkio\/attachments\/[0-9a-f]{8}-f\.png$/
       )
       expect(JSON.stringify(call[0])).not.toContain('segredo-xyz')
@@ -650,34 +576,5 @@ describe('ClaudeService', () => {
       expect(r).toMatchObject({ ok: false, error: { code: 'flow_running' } })
       expect(await readdir(join(wt, '.orkio', 'attachments'))).toEqual([])
     })
-
-    it('valida o payload dos anexos no IPC', () => {
-      const base = { projectId: 'p1', taskId: 'task-1', text: 'x' }
-      const ok = { name: 'a.md', mime: 'text/markdown', data: new Uint8Array(3) }
-      expect(isSendMessageRequest({ ...base, attachments: [ok] })).toBe(true)
-      expect(isSendMessageRequest({ ...base, attachments: Array(6).fill(ok) })).toBe(false)
-      expect(
-        isSendMessageRequest({ ...base, attachments: [{ ...ok, name: 'a'.repeat(121) }] })
-      ).toBe(false)
-      expect(isSendMessageRequest({ ...base, attachments: [{ ...ok, data: 'abc' }] })).toBe(false)
-      expect(
-        isSendMessageRequest({
-          ...base,
-          attachments: [{ ...ok, data: new Uint8Array(11 * 1024 * 1024) }]
-        })
-      ).toBe(false)
-      expect(isSendMessageRequest({ ...base, attachments: [{ ...ok, path: '/etc/passwd' }] })).toBe(
-        false
-      )
-    })
-  })
-
-  it('valida o payload da mensagem vinda do renderer', () => {
-    const base = { projectId: 'p1', taskId: 'task-1', text: 'x' }
-    expect(isSendMessageRequest(base)).toBe(true)
-    expect(isSendMessageRequest({ ...base, fresh: true, asAgent: false })).toBe(true)
-    expect(isSendMessageRequest({ ...base, taskId: '../x' })).toBe(false)
-    expect(isSendMessageRequest({ ...base, fresh: 'sim' })).toBe(false)
-    expect(isSendMessageRequest({ ...base, text: 'x'.repeat(300_000) })).toBe(false)
   })
 })

@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { tokenColor } from '../notion-workspace/notion-colors'
-import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
+import { stageDotClass } from './stage-dot'
 import { ColumnCollapseIcon, ColumnExpandIcon } from '../../components/icons'
 import { BoardCardBody, BoardCardItem, CARD_CLASS, type CardActions } from './BoardCardView'
+import type { BoardCard, BoardStage } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 /** Movimento mínimo (px) para virar arrasto: cliques e o menu do card continuam funcionando. */
 const DRAG_THRESHOLD = 5
@@ -32,20 +33,12 @@ export function BoardColumns({
   stages,
   cards,
   signals,
-  selectedTaskId,
-  actions,
-  endInset = null
+  actions
 }: {
   stages: readonly BoardStage[]
   cards: readonly BoardCard[]
   signals: Record<string, TaskSignals>
-  selectedTaskId: string | null
   actions: CardActions
-  /**
-   * Largura da folha da tarefa aberta sobre as colunas: um espaço no fim do quadro, para dar para
-   * rolar as últimas colunas (e a "Sem etapa") para fora de baixo da folha.
-   */
-  endInset?: string | null
 }): React.JSX.Element {
   const [drag, setDrag] = useState<DragState | null>(null)
   // Colunas recolhidas (só nesta sessão da tela): viram uma faixa estreita com nome e contagem.
@@ -122,7 +115,6 @@ export function BoardColumns({
       teardown.current?.()
       const card = cards.find((c) => c.taskId === taskId)
       if (started && target && card && card.stageId !== target) actions.onMove(taskId, target)
-      // Clique simples (sem arrasto) abre os detalhes.
       if (!started) actions.onOpen(taskId)
       setDrag(null)
     }
@@ -144,7 +136,7 @@ export function BoardColumns({
     const taskId = el.dataset['taskId'] ?? ''
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
-      actions.onExpand?.(taskId)
+      actions.onOpen(taskId)
       return
     }
     if (e.ctrlKey || e.metaKey) return
@@ -239,7 +231,6 @@ export function BoardColumns({
               role="listitem"
               aria-label={column.name}
               data-stage-id={column.id}
-              // Colunas não encolhem: o quadro rola na horizontal.
               className={cn(
                 'group/col flex h-full w-[268px] shrink-0 flex-col gap-2 rounded-[10px] transition-colors',
                 isTarget && 'bg-muted/60'
@@ -249,7 +240,6 @@ export function BoardColumns({
                 <span aria-hidden="true" className={cn('size-[7px] shrink-0 rounded-full', dot)} />
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    {/* O nome da coluna não quebra nem encolhe; o status do Notion encolhe. */}
                     <h3 className="shrink-0 text-sm font-normal whitespace-nowrap text-muted-foreground">
                       {column.name}
                     </h3>
@@ -291,7 +281,6 @@ export function BoardColumns({
                     stages={stages}
                     signals={signals[card.taskId]}
                     actions={actions}
-                    isSelected={selectedTaskId === card.taskId}
                     cardRef={(el) => {
                       if (el) cardEls.current.set(card.taskId, el)
                       else cardEls.current.delete(card.taskId)
@@ -313,7 +302,6 @@ export function BoardColumns({
             </div>
           )
         })}
-        {endInset && <div aria-hidden="true" className="shrink-0" style={{ width: endInset }} />}
       </div>
       {drag && dragged && (
         <div
@@ -337,32 +325,4 @@ export function BoardColumns({
       )}
     </>
   )
-}
-
-/** Ponto da coluna com a cor escolhida para a etapa (Etapas e automações); sem cor, neutro. */
-export function stageDotColor(
-  stage: Pick<BoardStage, 'color'>
-): 'tertiary' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'gray' {
-  const c = stage.color ? tokenColor(stage.color) : 'default'
-  return c === 'default' ? 'tertiary' : c
-}
-
-/**
- * Classe de fundo do ponto da etapa. O tema não tem roxo nem rosa: roxo usa o azul de informação e
- * rosa o vermelho de perigo.
- */
-const DOT_BG: Record<ReturnType<typeof stageDotColor>, string> = {
-  tertiary: 'bg-subtle-foreground',
-  gray: 'bg-muted-foreground',
-  red: 'bg-danger',
-  orange: 'bg-brand',
-  yellow: 'bg-warn',
-  green: 'bg-ok',
-  blue: 'bg-info',
-  purple: 'bg-purple',
-  pink: 'bg-pink'
-}
-
-export function stageDotClass(stage: Pick<BoardStage, 'color'>): string {
-  return DOT_BG[stageDotColor(stage)]
 }

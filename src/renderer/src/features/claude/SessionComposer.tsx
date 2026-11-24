@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
@@ -8,13 +8,16 @@ import { runtimeLabel, type RuntimeChoice } from '../../../../shared/agent-runti
 import { Alert } from '../../components/Alert'
 import { CloseIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/icons'
 import { formatBytes } from '../../lib/format'
-import { ATTACH_ACCEPT, checkNewAttachments, type PendingAttachment } from './attachments-ui'
+import { ATTACHMENT_ACCEPT } from '../../../../shared/attachments'
+import { checkNewAttachments, type PendingAttachment } from './attachments-ui'
 import { RuntimePicker, useSupportsEffort } from './RuntimePicker'
+import { isMac } from '../../lib/platform'
+import { useTaskView } from '../task/task-view'
+import { useCatalog } from './useCatalog'
+import { ipcResult } from '../../lib/ipc'
 
-const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
-const SEND_KEY = `${IS_MAC ? '⌘' : 'Ctrl'} ⏎ enviar`
+const SEND_KEY = `${isMac() ? '⌘' : 'Ctrl'} ⏎ enviar`
 
-/** Comandos do catálogo que começam com o que foi digitado depois da barra. */
 export function matchCommands(
   commands: readonly CatalogCommand[],
   typed: string,
@@ -51,22 +54,22 @@ export function SessionComposer({
   state: TaskRunsState | null
   /** Um passo de fluxo está rodando (ou vai começar sozinho): a mensagem interrompe e segue. */
   flowRunning: boolean
-  /** Passo que o piloto automático (fluxo) está rodando agora. */
   autopilotStep?: string | null
   onSent(state: TaskRunsState): void
-  /** Abre o formulário completo (briefing editável, modo, comando, rodar como). */
   onNewSession(): void
 }): React.JSX.Element {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [catalog, setCatalog] = useState<CatalogCommand[] | null>(null)
+  const [wantsCatalog, setWantsCatalog] = useState(false)
   const [runtime, setRuntime] = useState<Partial<RuntimeChoice>>({})
   const supportsEffort = useSupportsEffort()
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [attachError, setAttachError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
+  // O campo é da tela da tarefa: "Pedir ajuste…" no gate leva até ele.
+  const { setComposer } = useTaskView()
   const fileInput = useRef<HTMLInputElement>(null)
   const nextKey = useRef(0)
 
@@ -77,16 +80,13 @@ export function SessionComposer({
 
   const slash = /^\/(\S*)$/.exec(text)
   const typed = slash ? slash[1]! : null
-  useEffect(() => {
-    if (typed === null || catalog !== null) return
-    let active = true
-    void window.orkio.claude.catalog(projectId, taskId).then((r) => {
-      if (active) setCatalog(r.ok ? r.value.flatMap((g) => g.commands) : [])
-    })
-    return () => {
-      active = false
-    }
-  }, [typed, catalog, projectId, taskId])
+  // O catálogo só é lido quando você digita "/" pela primeira vez.
+  if (typed !== null && !wantsCatalog) setWantsCatalog(true)
+  const { groups } = useCatalog(wantsCatalog ? projectId : null, taskId)
+  const catalog = useMemo(
+    () => (wantsCatalog && groups ? groups.flatMap((g) => g.commands) : null),
+    [wantsCatalog, groups]
+  )
   const suggestions = useMemo(
     () => (typed !== null && catalog ? matchCommands(catalog, typed) : []),
     [typed, catalog]
@@ -128,13 +128,15 @@ export function SessionComposer({
         return
       }
     }
-    const r = await window.orkio.claude.send({
-      projectId,
-      taskId,
-      text: message,
-      ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
-      ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {})
-    })
+    const r = await ipcResult(() =>
+      window.orkio.claude.send({
+        projectId,
+        taskId,
+        text: message,
+        ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
+        ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {})
+      })
+    )
     setSending(false)
     if (r.ok) {
       setText('')
@@ -226,7 +228,10 @@ export function SessionComposer({
         )}
         <div className="flex items-end gap-2">
           <textarea
-            ref={ref}
+            ref={(el) => {
+              ref.current = el
+              setComposer(el)
+            }}
             aria-label={`Mensagem para ${who}`}
             placeholder={
               working
@@ -244,7 +249,7 @@ export function SessionComposer({
             type="file"
             multiple
             hidden
-            accept={ATTACH_ACCEPT}
+            accept={ATTACHMENT_ACCEPT}
             data-testid="attach-input"
             onChange={(e) => {
               addFiles(e.target.files)

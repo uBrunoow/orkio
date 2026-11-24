@@ -15,8 +15,20 @@ import {
   type OrkioApp,
   alerts
 } from './fixtures'
+import { ORKIO_API } from '../src/shared/ipc/api'
+import { isCallSpec, isEventSpec } from '../src/shared/ipc/define'
+import { NOTION_VERSION } from '../src/shared/site-contract'
 
 const TOKEN = 'ntn_E2E_SECRET_TOKEN_abcdef123456'
+
+function declaredShape(spec: object): unknown {
+  return Object.fromEntries(
+    Object.entries(spec).map(([key, entry]) => [
+      key,
+      isCallSpec(entry) || isEventSpec(entry) ? 'function' : declaredShape(entry as object)
+    ])
+  )
+}
 
 // Os testes compartilham o mesmo userData: rodam em ordem e dependem do anterior.
 test.describe.configure({ mode: 'serial' })
@@ -54,103 +66,27 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
   const { page } = await open('401')
 
   await expect(page.getByRole('heading', { name: 'Integrações' })).toBeVisible()
-  await expect(notionCard(page).getByText('Desconectado')).toBeVisible()
+  await expect(notionCard(page).getByText('Não conectado')).toBeVisible()
 
-  const isolation = await page.evaluate(() => ({
-    require: typeof (window as unknown as { require?: unknown }).require,
-    process: typeof (window as unknown as { process?: unknown }).process,
-    api: Object.keys(window.orkio),
-    notion: Object.keys(window.orkio.notion),
-    github: Object.keys(window.orkio.github),
-    projects: Object.keys(window.orkio.projects),
-    notionWorkspace: Object.keys(window.orkio.notionWorkspace),
-    signals: Object.keys(window.orkio.signals),
-    board: Object.keys(window.orkio.board),
-    automation: Object.keys(window.orkio.automation),
-    flow: Object.keys(window.orkio.flow),
-    overview: Object.keys(window.orkio.overview),
-    power: Object.keys(window.orkio.power)
-  }))
+  const isolation = await page.evaluate(() => {
+    // Forma de `window.orkio`: só funções e grupos de funções (nada de ipcRenderer cru).
+    const shape = (value: unknown): unknown =>
+      typeof value === 'function'
+        ? 'function'
+        : typeof value === 'object' && value !== null
+          ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, shape(v)]))
+          : typeof value
+    return {
+      require: typeof (window as unknown as { require?: unknown }).require,
+      process: typeof (window as unknown as { process?: unknown }).process,
+      api: shape(window.orkio)
+    }
+  })
+  // A API exposta é exatamente a declarada em `shared/ipc/api.ts` (métodos e eventos).
   expect(isolation).toEqual({
     require: 'undefined',
     process: 'undefined',
-    api: [
-      'notion',
-      'github',
-      'notionWorkspace',
-      'board',
-      'flow',
-      'automation',
-      'alva',
-      'agents',
-      'taskFlows',
-      'claude',
-      'signals',
-      'projects',
-      'power',
-      'updates',
-      'overview',
-      'openExternal'
-    ],
-    overview: ['get', 'refresh', 'activity', 'onChanged'],
-    power: ['keepAwake', 'setKeepAwake'],
-    notion: [
-      'getStatus',
-      'connect',
-      'disconnect',
-      'testConnection',
-      'getAuthOptions',
-      'startOAuth',
-      'cancelOAuth'
-    ],
-    github: [
-      'getStatus',
-      'connect',
-      'disconnect',
-      'testConnection',
-      'getAuthOptions',
-      'startDeviceFlow',
-      'waitDeviceFlow',
-      'cancelDeviceFlow',
-      'orkioBot'
-    ],
-    projects: [
-      'list',
-      'revalidate',
-      'pickFolder',
-      'create',
-      'relocate',
-      'remove',
-      'onBranchChanged'
-    ],
-    notionWorkspace: [
-      'getStatus',
-      'revalidate',
-      'listDataSources',
-      'getTasksSchema',
-      'save',
-      'clear',
-      'listProjectChoices',
-      'link',
-      'unlink',
-      'listTasks',
-      'searchTasks'
-    ],
-    signals: ['get', 'reviewThreads'],
-    board: [
-      'get',
-      'save',
-      'move',
-      'setBlocked',
-      'history',
-      'retryNow',
-      'setAutomationPaused',
-      'onChanged',
-      'onOpenTask',
-      'onSyncChanged'
-    ],
-    automation: ['status', 'runNow', 'setPaused'],
-    flow: ['save', 'events', 'exportFile', 'importFile']
+    api: declaredShape(ORKIO_API)
   })
 
   // O login com Notion (OAuth) é a ação principal; o token fica atrás de "Usar token".
@@ -159,10 +95,13 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
 
   // Fontes locais, logo e botão primário.
   await notionCard(page).getByLabel('Token do Notion').fill('x')
-  await page.waitForTimeout(300) // fim da transição de cor do botão
+  // Espera a transição de cor do botão terminar (as animações CSS dele, não um tempo fixo).
   await notionCard(page)
     .getByRole('button', { name: 'Conectar', exact: true })
-    .evaluate((el) => el.setAttribute('data-primary-probe', ''))
+    .evaluate(async (el) => {
+      await Promise.all(el.getAnimations().map((a) => a.finished))
+      el.setAttribute('data-primary-probe', '')
+    })
   const visual = await page.evaluate(async () => {
     await Promise.all([
       document.fonts.load('300 30px Jost'),
@@ -256,11 +195,11 @@ test('token válido → conectado, salvo criptografado, token fora do renderer',
   // Depois de conectar, o assistente dos bancos também consulta o Notion (/search).
   const calls = await externalCalls(app)
   expect(calls.filter((c) => c.url === 'https://api.notion.com/v1/users/me').at(-1)).toMatchObject({
-    version: '2026-03-11',
+    version: NOTION_VERSION,
     auth: `Bearer ${TOKEN}`
   })
   expect(
-    calls.every((c) => !c.url.startsWith('https://api.notion.com') || c.version === '2026-03-11')
+    calls.every((c) => !c.url.startsWith('https://api.notion.com') || c.version === NOTION_VERSION)
   ).toBe(true)
 
   expect(secretFiles()).toEqual(['notion.bin'])
@@ -310,7 +249,7 @@ test('desconectar pede confirmação e apaga o token do disco', async () => {
     .click()
 
   await expect(notionCard(page).getByRole('button', { name: 'Conectar com Notion' })).toBeVisible()
-  await expect(notionCard(page).getByText('Desconectado')).toBeVisible()
+  await expect(notionCard(page).getByText('Não conectado')).toBeVisible()
   expect(secretFiles()).toEqual([])
   expect(await cspViolations(page)).toEqual([])
   await close()

@@ -6,8 +6,9 @@
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
 import { isProtectedBranch, type DeliveryTarget } from '../../shared/delivery'
-import { isValidBranchName } from '../branches/task-branches.store'
-import { parsePorcelainLine } from '../../shared/agent-run'
+import { isBranchName } from '../../shared/github-names'
+import { isCommandName, isRunLive, parsePorcelainLine } from '../../shared/agent-run'
+import { isScratchPath } from '../../shared/orkio-scratch'
 import type {
   ArtifactCandidate,
   ArtifactPublishMode,
@@ -16,11 +17,8 @@ import type {
   ClaudeCodeStatus,
   ClaudeDiff,
   TaskBranchesView,
-  ClaudeResult,
   EditorId,
-  PermissionAnswer,
   RunLogEvent,
-  RunMode,
   RunPreparation,
   SendMessageRequest,
   StartRunRequest,
@@ -29,22 +27,39 @@ import type {
   UncommittedFile
 } from '../../shared/agent-run'
 import { blocksToMarkdown, buildBriefing, type NotionBlock } from '../../shared/briefing'
-import type { NotionResult, NotionTask, TaskSignalsResult } from '../../shared/ipc-contract'
 import { taskBranchName } from '../../shared/slug'
-import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
+import { parseDisplayId } from '../../shared/task-id-match'
 import type { OrkioConfig, StoredProject } from '../config/orkio-config'
 import type { Git } from '../git/git'
-import { errorName } from '../ipc/payload'
-import { NotionApiError } from '../connectors/notion/notion.client'
+import { DomainError, errorName } from '../errors'
 import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
-import { redactSecrets } from './redact'
-import type { RuntimeChoice } from '../../shared/agent-runtime'
-import { RUN_MESSAGES, type RunAgent, type RunService } from './run.service'
+import { redactSecrets } from '../platform/redact'
+import { isEffort, isModelName, resolveRuntime } from '../../shared/agent-runtime'
+import { RunBusyError, type RunService } from './run.service'
+import type {
+  GithubDeliver,
+  GithubRead,
+  RunAgent,
+  RunRequest,
+  RunSession,
+  RunSpec
+} from './run-spec'
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { attachmentNote, checkAttachments, saveAttachments } from './attachments'
-import { WorktreeError, type WorktreeProject, type WorktreeService } from './worktree.service'
+import { TerminalError } from './terminal'
+import {
+  WorktreeError,
+  type WorktreeProject,
+  type WorktreeRecord,
+  type WorktreeService
+} from './worktree.service'
+import type { Result } from '../../shared/result'
+import type { NotionTask } from '../../shared/notion'
+import type { TaskSignalsResult } from '../../shared/task-signals'
+import { projectById } from '../config/queries'
+import { isApiError } from '../net/http'
 
 export const CLAUDE_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista de projetos.',
@@ -72,33 +87,28 @@ export const CLAUDE_MESSAGES = {
   generic: 'Algo deu errado. Tente novamente.'
 } as const
 
-/** Limites da leitura da página: profundidade e total de blocos. */
 const MAX_DEPTH = 3
 const MAX_BLOCKS = 400
 const MAX_DIFF_CHARS = 400_000
-const COMMAND_NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
 
 export interface ClaudeServiceDeps {
   /**
    * Modo entrega (5C): alvo da entrega (repositório + branch da tarefa) e o ajuste do projeto.
    * Lança erro com mensagem pt-BR se não houver repositório verificado/ambiente.
    */
-  deliveryTarget?(
+  deliveryTarget(
     projectId: string,
     taskId: string
   ): { target: DeliveryTarget; requirePushApproval: boolean }
-  config: {
-    get(): OrkioConfig
-    update(fn: (c: OrkioConfig) => OrkioConfig): Promise<unknown>
-  }
+  config: { get(): OrkioConfig }
   worktrees: WorktreeService
   runs: RunService
   git: Pick<
     Git,
     'statusPorcelain' | 'diffText' | 'diffShortstat' | 'localBranches' | 'remoteBranches'
   >
-  listTasks(projectId: string): Promise<NotionResult<{ tasks: NotionTask[] }>>
-  signals(projectId: string): Promise<NotionResult<TaskSignalsResult>>
+  listTasks(projectId: string): Promise<Result<{ tasks: NotionTask[] }>>
+  signals(projectId: string): Promise<Result<TaskSignalsResult>>
   /** Leitura dos blocos de uma página (o token fica no conector). */
   getBlockChildren(
     id: string,
@@ -107,35 +117,35 @@ export interface ClaudeServiceDeps {
   detect(): Promise<ClaudeCodeStatus>
   artifacts: ArtifactsService
   /** 5A: a tarefa tem fluxo ativo? (bloqueia a execução manual). */
-  flowActive?: (taskId: string) => boolean
+  flowActive(taskId: string): boolean
   /**
    * 5A: o fluxo está rodando (ou vai começar sozinho) um passo agora? Bloqueia a mensagem da
    * sessão; um fluxo esperando você (gate, pausa, escolha) aceita a conversa.
    */
-  flowBusy?: (taskId: string) => boolean
+  flowBusy(taskId: string): boolean
   /**
    * Mensagem do campo com um fluxo ativo: o fluxo usa (escolha, interromper o passo, responder e
    * continuar) → `used`; erro esperado (pt-BR) → `error`; senão vai para o Claude como sempre.
    */
-  flowMessage?: (
+  flowMessage(
     taskId: string,
     text: string,
     note?: string
-  ) => Promise<{ used: boolean } | { error: string }>
+  ): Promise<{ used: boolean } | { error: string }>
   /** Abre a pasta no editor (execFile, sem shell). */
   openEditor(editor: EditorId, path: string): Promise<void>
-  /** Abre o terminal do sistema na pasta (rejeita se não achar um terminal). */
+  /** Abre o terminal do sistema na pasta (`TerminalError` se a pasta sumiu ou não há terminal). */
   openTerminal(path: string): Promise<void>
   /**
    * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
    * pt-BR quando há agente, mas ele não pode rodar (sem aprovação, limite do dia, comando negado).
    */
-  agentFor?: (projectId: string, taskId: string, command: string | null) => Promise<RunAgent | null>
+  agentFor(projectId: string, taskId: string, command: string | null): Promise<RunAgent | null>
   /** 8A: o que o formulário mostra ("Rodar como Ana" ou por que não dá). */
-  agentInfo?: (
+  agentInfo(
     projectId: string,
     taskId: string
-  ) => Promise<{ name: string; problem: string | null } | null>
+  ): Promise<{ name: string; problem: string | null } | null>
 }
 
 export class ClaudeService {
@@ -149,25 +159,29 @@ export class ClaudeService {
     return this.status
   }
 
-  /** Chamado a cada evento das execuções: guarda os comandos vistos no `init`. */
   onRunEvent(event: RunLogEvent): void {
     if (event.kind === 'init' && event.commands.length > 0) this.commands = [...event.commands]
   }
 
-  state(projectId: string, taskId: string): Promise<ClaudeResult<TaskRunsState>> {
+  state(projectId: string, taskId: string): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       this.project(projectId)
       return ok(await this.taskState(taskId))
     })
   }
 
-  prepare(projectId: string, taskId: string): Promise<ClaudeResult<RunPreparation>> {
+  prepare(projectId: string, taskId: string): Promise<Result<RunPreparation>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       const task = await this.task(projectId, taskId)
       const parsed = parseDisplayId(task.displayId)
       const state = await this.taskState(taskId)
-      const existing = state.workspace?.branch ?? (await this.existingBranch(project, task))
+      const existing =
+        state.workspace?.branch ??
+        (await this.deps.worktrees
+          .findTaskBranch(this.worktreeProject(project), task)
+          .then((f) => f?.branch ?? null)
+          .catch(() => null))
       const branch = existing ?? taskBranchName(parsed ? task.displayId : null, task.title)
 
       let pageMarkdown = ''
@@ -210,7 +224,7 @@ export class ClaudeService {
         },
         pr
       })
-      const agent = (await this.deps.agentInfo?.(projectId, taskId).catch(() => null)) ?? null
+      const agent = await this.deps.agentInfo(projectId, taskId).catch(() => null)
       return ok({
         ...state,
         agent,
@@ -227,23 +241,27 @@ export class ClaudeService {
     })
   }
 
-  start(req: StartRunRequest): Promise<ClaudeResult<TaskRunsState>> {
+  start(req: StartRunRequest): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       // 5A: com fluxo ativo, quem roda o Claude Code na tarefa é o fluxo.
-      if (this.deps.flowActive?.(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.flowActive)
-      let agent: RunAgent | null = null
-      if (req.asAgent !== false && this.deps.agentFor) {
-        try {
-          agent = await this.deps.agentFor(
-            req.projectId,
-            req.taskId,
-            req.mode === 'command' ? req.command : null
-          )
-        } catch (error) {
-          return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
-        }
-      }
-      const started = await this.startRun(req, undefined, true, false, agent)
+      if (this.deps.flowActive(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.flowActive)
+      const command = req.mode === 'command' ? (req.command ?? '') : null
+      const agent = await this.agentForRun(req.projectId, req.taskId, req.asAgent, command)
+      if (!agent.ok) return agent
+      const started = await this.startRun({
+        projectId: req.projectId,
+        taskId: req.taskId,
+        input:
+          command !== null
+            ? { kind: 'command', name: command, args: req.text }
+            : { kind: 'prompt', text: req.text },
+        session: { kind: 'new', briefing: req.briefing, includeBriefing: true },
+        access: { tools: 'full', github: 'read' },
+        agent: agent.value,
+        runtime: null,
+        timeoutMin: null,
+        ...(req.branchKind ? { branchKind: req.branchKind } : {})
+      })
       if (!started.ok) return started
       return ok(await this.taskState(req.taskId))
     })
@@ -254,7 +272,7 @@ export class ClaudeService {
    * mesmo worktree, sem repetir o briefing) ou, sem sessão (ou com `fresh`), começa uma com o
    * briefing do Notion. `/comando args` roda o comando instalado.
    */
-  send(req: SendMessageRequest): Promise<ClaudeResult<TaskRunsState>> {
+  send(req: SendMessageRequest): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       const text = req.text.trim()
       if (!text) return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
@@ -273,13 +291,7 @@ export class ClaudeService {
       const save = async (): Promise<string> => {
         if (files.length === 0) return ''
         if (saved.length > 0) return attachmentNote(saved)
-        const project = this.project(req.projectId)
-        const task = await this.task(req.projectId, req.taskId)
-        const wt = await this.deps.worktrees.ensure(
-          this.worktreeProject(project),
-          { id: task.id, displayId: task.displayId, title: task.title },
-          {}
-        )
+        const { worktree: wt } = await this.ensureForTask(req.projectId, req.taskId)
         wtPath = wt.path
         saved = await saveAttachments(wt.path, files)
         return attachmentNote(saved)
@@ -302,193 +314,96 @@ export class ClaudeService {
     })
   }
 
-  private async cliRefusal(): Promise<ClaudeResult<never> | null> {
+  private async cliRefusal(): Promise<Result<never> | null> {
+    const cli = await this.readyCli()
+    return cli.ok ? null : cli
+  }
+
+  private async readyCli(): Promise<Result<ClaudeCodeStatus>> {
     const status = await this.getStatus(true)
     if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
     if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
     if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
-    return null
+    return ok(status)
+  }
+
+  private async agentForRun(
+    projectId: string,
+    taskId: string,
+    asAgent: boolean | undefined,
+    command: string | null
+  ): Promise<Result<RunAgent | null>> {
+    if (asAgent === false) return ok(null)
+    try {
+      return ok(await this.deps.agentFor(projectId, taskId, command))
+    } catch (error) {
+      return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
+    }
   }
 
   private async sendChecked(
     req: SendMessageRequest,
-    userText: string,
+    text: string,
     hasFiles: boolean,
     save: () => Promise<string>
-  ): Promise<ClaudeResult<TaskRunsState>> {
-    {
-      const text = userText
-      // Como no Claude Code: a mensagem não espera o piloto automático; o fluxo a usa (escolha,
-      // interromper o passo e continuar com ela, responder e continuar).
-      if (this.deps.flowMessage) {
-        const note = hasFiles && (this.deps.flowActive?.(req.taskId) ?? false) ? await save() : ''
-        const used = await this.deps.flowMessage(req.taskId, userText, note)
-        if ('error' in used) return fail('flow_message', used.error)
-        if (used.used) return ok(await this.taskState(req.taskId))
-      }
-      const busy = this.deps.flowBusy ?? this.deps.flowActive
-      if (busy?.(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
-      // Execução avulsa no meio de um turno: interrompe e continua a sessão com a mensagem.
-      const current = (await this.taskState(req.taskId)).activeRunId
-      if (current) await this.cancelAndWait(current)
-      const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text)
-      const mode: RunMode = slash ? 'command' : 'prompt'
-      const command = slash ? slash[1]! : null
-      let args = slash ? (slash[2] ?? '').trim() : text
-      const session = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
-      let briefing = ''
-      if (!session) {
-        const prep = await this.prepare(req.projectId, req.taskId)
-        if (!prep.ok) return prep
-        briefing = prep.value.briefing
-      }
-      let agent: RunAgent | null = null
-      if (req.asAgent !== false && this.deps.agentFor) {
-        try {
-          agent = await this.deps.agentFor(req.projectId, req.taskId, command)
-        } catch (error) {
-          return fail('agent', error instanceof Error ? error.message : 'Agente indisponível.')
-        }
-      }
-      args += await save()
-      const started = await this.startRun(
-        { projectId: req.projectId, taskId: req.taskId, mode, command, text: args, briefing },
-        undefined,
-        true,
-        false,
-        agent,
-        session,
-        req.runtime ?? null
-      )
-      if (!started.ok) return started
-      return ok(await this.taskState(req.taskId))
+  ): Promise<Result<TaskRunsState>> {
+    // Como no Claude Code: a mensagem não espera o piloto automático; o fluxo a usa (escolha,
+    // interromper o passo e continuar com ela, responder e continuar).
+    const note = hasFiles && this.deps.flowActive(req.taskId) ? await save() : ''
+    const used = await this.deps.flowMessage(req.taskId, text, note)
+    if ('error' in used) return fail('flow_message', used.error)
+    if (used.used) return ok(await this.taskState(req.taskId))
+    if (this.deps.flowBusy(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
+    // Execução avulsa no meio de um turno: interrompe e continua a sessão com a mensagem.
+    const current = (await this.taskState(req.taskId)).activeRunId
+    if (current) await this.cancelAndWait(current)
+    const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text)
+    const command = slash ? slash[1]! : null
+    let args = slash ? (slash[2] ?? '').trim() : text
+    const last = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
+    let session: RunSession
+    if (last) session = { kind: 'resume', id: last }
+    else {
+      const prep = await this.prepare(req.projectId, req.taskId)
+      if (!prep.ok) return prep
+      session = { kind: 'new', briefing: prep.value.briefing, includeBriefing: true }
     }
+    const agent = await this.agentForRun(req.projectId, req.taskId, req.asAgent, command)
+    if (!agent.ok) return agent
+    args += await save()
+    const started = await this.startRun({
+      projectId: req.projectId,
+      taskId: req.taskId,
+      input:
+        command !== null
+          ? { kind: 'command', name: command, args }
+          : { kind: 'prompt', text: args },
+      session,
+      access: { tools: 'full', github: 'read' },
+      agent: agent.value,
+      runtime: req.runtime ?? null,
+      timeoutMin: null
+    })
+    if (!started.ok) return started
+    return ok(await this.taskState(req.taskId))
   }
 
-  /** Passo `claude_command` de um fluxo (5A): mesma execução da 4A; devolve o id ou o erro. */
-  startForFlow(input: {
-    projectId: string
-    taskId: string
-    command: string
-    args: string
-    briefing: string
-    timeoutMin: number
-    includeBriefing?: boolean
-    /** Modo entrega (5C): só nesta execução. */
-    delivery?: boolean
-    /** Agente (8A) do fluxo (cópia do perfil feita no início do fluxo). */
-    agent?: RunAgent | null
-    /** "Responder e continuar": manda este texto na sessão mais recente da tarefa (`--resume`). */
-    reply?: string
-    /**
-     * Pedido em texto (passo sem comando): continua a sessão mais recente da tarefa com ele, ou
-     * começa uma com o briefing quando ainda não há sessão.
-     */
-    prompt?: string
-    /** Passo só de leitura: sem as ferramentas de edição. */
-    readOnly?: boolean
-    /** Modelo/raciocínio do passo: vencem os do agente. */
-    runtime?: Partial<RuntimeChoice> | null
-  }): Promise<ClaudeResult<string>> {
-    const readOnly = input.readOnly === true
-    if (input.reply !== undefined) {
-      const session = this.deps.runs.lastSession(input.taskId)
-      if (!session) {
-        return Promise.resolve(fail('no_session', CLAUDE_MESSAGES.noSession))
-      }
-      return this.wrap(() =>
-        this.startRun(
-          {
-            projectId: input.projectId,
-            taskId: input.taskId,
-            mode: 'prompt',
-            command: null,
-            text: input.reply!,
-            briefing: ''
-          },
-          input.timeoutMin,
-          true,
-          input.delivery === true,
-          input.agent ?? null,
-          session,
-          input.runtime ?? null,
-          readOnly
-        )
-      )
-    }
-    if (input.prompt !== undefined) {
-      const session = this.deps.runs.lastSession(input.taskId)
-      return this.wrap(() =>
-        this.startRun(
-          {
-            projectId: input.projectId,
-            taskId: input.taskId,
-            mode: 'prompt',
-            command: null,
-            text: input.prompt!,
-            briefing: session ? '' : input.briefing
-          },
-          input.timeoutMin,
-          // Sessão retomada já leu o briefing; sessão nova recebe (a não ser que o passo recuse).
-          session ? true : input.includeBriefing !== false,
-          input.delivery === true,
-          input.agent ?? null,
-          session,
-          input.runtime ?? null,
-          readOnly
-        )
-      )
-    }
-    return this.wrap(() =>
-      this.startRun(
-        {
-          projectId: input.projectId,
-          taskId: input.taskId,
-          mode: 'command',
-          command: input.command,
-          text: input.args,
-          briefing: input.briefing
-        },
-        input.timeoutMin,
-        input.includeBriefing !== false,
-        input.delivery === true,
-        input.agent ?? null,
-        null,
-        input.runtime ?? null,
-        readOnly
-      )
-    )
+  /**
+   * Garante o worktree da tarefa (cria ou recria) e devolve o caminho. Para ações do Orkio que
+   * gravam no ambiente (ex.: `review_snapshot`). Lança com a causa (mensagem pt-BR) para o passo:
+   * projeto/tarefa não existem ou o Notion não respondeu (`DomainError`), erro do worktree
+   * (`WorktreeError`).
+   */
+  async ensureWorktreePath(projectId: string, taskId: string): Promise<string> {
+    return (await this.ensureForTask(projectId, taskId)).worktree.path
   }
 
   /** Contexto de um fluxo (5A): briefing do Notion, ID e URL da tarefa. */
-  /**
-   * Garante o worktree da tarefa (cria ou recria) e devolve o caminho. Para ações do Orkio que
-   * gravam no ambiente (ex.: `review_snapshot`); `null` se projeto/tarefa não existem; erro do
-   * worktree é lançado.
-   */
-  async ensureWorktreePath(projectId: string, taskId: string): Promise<string | null> {
-    let project
-    let task
-    try {
-      project = this.project(projectId)
-      task = await this.task(projectId, taskId)
-    } catch {
-      return null
-    }
-    // Erros do WorktreeService (mensagem pt-BR) sobem para o passo do fluxo.
-    const wt = await this.deps.worktrees.ensure(
-      this.worktreeProject(project),
-      { id: task.id, displayId: task.displayId, title: task.title },
-      {}
-    )
-    return wt.path
-  }
-
   flowContext(
     projectId: string,
     taskId: string
   ): Promise<
-    ClaudeResult<{ briefing: string; displayId: string; title: string; notionUrl: string | null }>
+    Result<{ briefing: string; displayId: string; title: string; notionUrl: string | null }>
     // displayId '' = tarefa sem ID do Notion (as variáveis do fluxo ficam vazias).
   > {
     return this.wrap(async () => {
@@ -506,73 +421,84 @@ export class ClaudeService {
     })
   }
 
-  private async startRun(
-    req: StartRunRequest,
-    timeoutMin?: number,
-    includeBriefing = true,
-    delivery = false,
-    agent: RunAgent | null = null,
-    resumeSessionId: string | null = null,
-    runtime: Partial<RuntimeChoice> | null = null,
-    readOnly = false
-  ): Promise<ClaudeResult<string>> {
-    const project = this.project(req.projectId)
-    const status = await this.getStatus(true)
-    if (!status.installed) return fail('not_installed', CLAUDE_MESSAGES.notInstalled)
-    if (status.loggedIn === false) return fail('not_logged_in', CLAUDE_MESSAGES.notLoggedIn)
-    if (!status.meetsMinimum) return fail('too_old', CLAUDE_MESSAGES.tooOld)
-    if (req.mode === 'command' && !(req.command && COMMAND_NAME.test(req.command))) {
-      return fail('invalid', CLAUDE_MESSAGES.invalidCommand)
-    }
-    if (req.mode === 'prompt' && !req.text.trim()) {
-      return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
-    }
-    const task = await this.task(req.projectId, req.taskId)
-    const wtProject = this.worktreeProject(project)
-    const taskRef = { id: task.id, displayId: task.displayId, title: task.title }
-    await this.deps.worktrees.ensure(
-      wtProject,
-      taskRef,
-      req.branchKind ? { kind: req.branchKind } : {}
-    )
-    let deliveryInput: { target: DeliveryTarget; requirePushApproval: boolean } | null = null
-    let githubRead: DeliveryTarget | null = null
-    if (delivery) {
-      if (!this.deps.deliveryTarget) return fail('no_repo', CLAUDE_MESSAGES.noRepo)
-      try {
-        deliveryInput = this.deps.deliveryTarget(req.projectId, req.taskId)
-      } catch (error) {
-        return fail('no_repo', error instanceof Error ? error.message : CLAUDE_MESSAGES.noRepo)
+  /**
+   * A única entrada das execuções (manual, mensagem, passo de fluxo): resolve o pedido uma vez
+   * (sessão, worktree, alvo do GitHub, modelo/raciocínio cortados pela versão do CLI) e roda.
+   */
+  startRun(request: RunRequest): Promise<Result<string>> {
+    return this.wrap(async () => {
+      this.project(request.projectId)
+      const cli = await this.readyCli()
+      if (!cli.ok) return cli
+      const { input } = request
+      if (input.kind === 'command' && !isCommandName(input.name)) {
+        return fail('invalid', CLAUDE_MESSAGES.invalidCommand)
       }
-    } else {
+      if (input.kind === 'prompt' && !input.text.trim()) {
+        return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
+      }
+      let session: RunSession
+      if (request.session.kind === 'latest') {
+        const last = this.deps.runs.lastSession(request.taskId)
+        if (last) session = { kind: 'resume', id: last }
+        else if (request.session.orNew) session = request.session.orNew
+        else return fail('no_session', CLAUDE_MESSAGES.noSession)
+      } else session = request.session
+      const { project, wtProject, task } = await this.ensureForTask(
+        request.projectId,
+        request.taskId,
+        request.branchKind
+      )
       // Fora da entrega, o repositório só libera a leitura da PR; sem ele, nada muda.
-      try {
-        githubRead = this.deps.deliveryTarget?.(req.projectId, req.taskId).target ?? null
-      } catch {
-        githubRead = null
+      const read = (): GithubRead => {
+        try {
+          const t = this.deps.deliveryTarget(request.projectId, request.taskId)
+          return { mode: 'read', target: t.target }
+        } catch {
+          return null
+        }
       }
-    }
-    const view = await this.deps.runs.start({
-      project: { ...wtProject, name: project.name },
-      task: taskRef,
-      mode: req.mode,
-      command: req.mode === 'command' ? req.command : null,
-      text: req.text,
-      briefing: req.briefing,
-      ...(timeoutMin ? { timeoutMin } : {}),
-      includeBriefing,
-      delivery: deliveryInput,
-      githubRead,
-      agent: agent && !status.supportsEffort ? { ...agent, effort: null } : agent,
-      // CLI sem `--effort`: o raciocínio some (o seletor também some na UI).
-      runtime:
-        runtime && !status.supportsEffort
-          ? { ...(runtime.model !== undefined ? { model: runtime.model } : {}) }
-          : runtime,
-      resumeSessionId,
-      ...(readOnly ? { readOnly: true } : {})
+      let access: RunSpec['access']
+      if (request.access.tools === 'read_only') access = { tools: 'read_only', github: read() }
+      else if (request.access.github === 'read') access = { tools: 'full', github: read() }
+      else {
+        let deliver: GithubDeliver
+        try {
+          const t = this.deps.deliveryTarget(request.projectId, request.taskId)
+          deliver = { mode: 'deliver', ...t }
+        } catch (error) {
+          return fail('no_repo', error instanceof Error ? error.message : CLAUDE_MESSAGES.noRepo)
+        }
+        access = { tools: 'full', github: deliver }
+      }
+      // Mensagem/passo > agente > padrão. No agente, `null` = sem preferência (não bloqueia).
+      const agent = request.agent
+      const resolved = resolveRuntime(
+        request.runtime,
+        agent
+          ? {
+              ...(agent.model !== null ? { model: agent.model } : {}),
+              ...(agent.effort !== null ? { effort: agent.effort } : {})
+            }
+          : undefined
+      )
+      const view = await this.deps.runs.start({
+        project: { ...wtProject, name: project.name },
+        task,
+        input,
+        session,
+        access,
+        agent,
+        runtime: {
+          // De novo, antes de chegar ao CLI: nome fora do padrão ou raciocínio desconhecido some;
+          // CLI sem `--effort`, o raciocínio some (o seletor também some na UI).
+          model: isModelName(resolved.model) ? resolved.model : null,
+          effort: cli.value.supportsEffort && isEffort(resolved.effort) ? resolved.effort : null
+        },
+        timeoutMin: request.timeoutMin
+      })
+      return ok(view.id)
     })
-    return ok(view.id)
   }
 
   /** Cancela e espera a execução terminar (até 15 s), para a próxima continuar a sessão. */
@@ -587,32 +513,12 @@ export class ClaudeService {
         off()
         resolve()
       }
-      this.cancel(runId)
+      this.deps.runs.cancel(runId)
     })
   }
 
-  cancel(runId: string): void {
-    try {
-      this.deps.runs.cancel(runId)
-    } catch {
-      // Já terminou: nada a cancelar.
-    }
-  }
-
-  answerPermission(runId: string, requestId: string, answer: PermissionAnswer): void {
-    this.deps.runs.answerPermission(runId, requestId, answer)
-  }
-
-  answerQuestion(runId: string, requestId: string, answers: Record<string, string>): void {
-    this.deps.runs.answerQuestion(runId, requestId, answers)
-  }
-
-  async readLog(runId: string): Promise<RunLogEvent[]> {
-    return this.deps.runs.readLog(runId)
-  }
-
   /** "Limpar ambiente": remove o worktree (a branch fica). Mudanças pendentes pedem `force`. */
-  cleanup(projectId: string, taskId: string, force: boolean): Promise<ClaudeResult<TaskRunsState>> {
+  cleanup(projectId: string, taskId: string, force: boolean): Promise<Result<TaskRunsState>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       if (this.deps.runs.isRunning(taskId)) {
@@ -623,7 +529,7 @@ export class ClaudeService {
     })
   }
 
-  openEditor(projectId: string, taskId: string, editor: EditorId): Promise<ClaudeResult<null>> {
+  openEditor(projectId: string, taskId: string, editor: EditorId): Promise<Result<null>> {
     return this.wrap(async () => {
       this.project(projectId)
       const wt = this.deps.worktrees.get(taskId)
@@ -638,7 +544,7 @@ export class ClaudeService {
     })
   }
 
-  openTerminal(projectId: string, taskId: string): Promise<ClaudeResult<null>> {
+  openTerminal(projectId: string, taskId: string): Promise<Result<null>> {
     return this.wrap(async () => {
       this.project(projectId)
       const wt = this.deps.worktrees.get(taskId)
@@ -646,7 +552,7 @@ export class ClaudeService {
       try {
         await this.deps.openTerminal(wt.path)
       } catch (error) {
-        if (error instanceof Error && error.message === 'no_workspace') {
+        if (error instanceof TerminalError && error.code === 'no_workspace') {
           return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
         }
         console.error(`[orkio] terminal: ${errorName(error)}`)
@@ -656,11 +562,10 @@ export class ClaudeService {
     })
   }
 
-  /** Documentos candidatos (alterados no worktree) e artefatos já anexados. */
   artifacts(
     projectId: string,
     taskId: string
-  ): Promise<ClaudeResult<{ candidates: ArtifactCandidate[]; attached: ArtifactView[] }>> {
+  ): Promise<Result<{ candidates: ArtifactCandidate[]; attached: ArtifactView[] }>> {
     return this.wrap(async () => {
       this.project(projectId)
       const attached = this.deps.artifacts.list(taskId)
@@ -676,7 +581,7 @@ export class ClaudeService {
     taskId: string,
     path: string,
     runId: string | null
-  ): Promise<ClaudeResult<ArtifactView>> {
+  ): Promise<Result<ArtifactView>> {
     return this.wrap(async () => {
       this.project(projectId)
       return ok(await this.deps.artifacts.attach(projectId, taskId, path, runId))
@@ -688,30 +593,29 @@ export class ClaudeService {
     projectId: string,
     artifactId: string,
     mode: ArtifactPublishMode
-  ): Promise<ClaudeResult<{ artifact: ArtifactView; url: string | null }>> {
+  ): Promise<Result<{ artifact: ArtifactView; url: string | null }>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       return ok(await this.deps.artifacts.publish(artifactId, mode, project.localPath))
     })
   }
 
-  /** Catálogo de comandos; usa a pasta do worktree da tarefa (ou do projeto) para os do projeto. */
-  catalog(projectId: string, taskId: string): Promise<ClaudeResult<CatalogGroup[]>> {
+  /** `taskId` `null` = catálogo da pasta do projeto (editor de fluxos, sem tarefa). */
+  catalog(projectId: string, taskId: string | null): Promise<Result<CatalogGroup[]>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
-      const dir = this.deps.worktrees.get(taskId)?.path ?? project.localPath
+      const dir = (taskId && this.deps.worktrees.get(taskId)?.path) || project.localPath
       return ok(await buildCatalog({ projectDir: dir }))
     })
   }
 
-  /** Branches ligadas à tarefa e as do projeto para escolher ("Vincular branch"). */
-  branches(projectId: string, taskId: string): Promise<ClaudeResult<TaskBranchesView>> {
+  branches(projectId: string, taskId: string): Promise<Result<TaskBranchesView>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       const linked = this.deps.worktrees
         .linkedBranches(projectId, taskId)
         .map((l) => ({ branch: l.branch, source: l.source }))
-      const remote = project.repo?.remoteName ?? 'origin'
+      const remote = project.repo.remoteName
       const [local, remotes] = await Promise.all([
         this.deps.git.localBranches(project.localPath).catch(() => [] as string[]),
         this.deps.git.remoteBranches(project.localPath, remote).catch(() => [] as string[])
@@ -725,15 +629,11 @@ export class ClaudeService {
   }
 
   /** Liga uma branch existente à tarefa (sinais, PR, automações e a próxima pasta de trabalho). */
-  linkBranch(
-    projectId: string,
-    taskId: string,
-    branch: string
-  ): Promise<ClaudeResult<TaskBranchesView>> {
+  linkBranch(projectId: string, taskId: string, branch: string): Promise<Result<TaskBranchesView>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
       const b = branch.trim()
-      if (!isValidBranchName(b)) return fail('invalid', CLAUDE_MESSAGES.invalidBranch)
+      if (!isBranchName(b)) return fail('invalid', CLAUDE_MESSAGES.invalidBranch)
       if (isProtectedBranch(b, project.repo?.defaultBranch ?? null)) {
         return fail('protected', CLAUDE_MESSAGES.protectedBranch(b))
       }
@@ -746,7 +646,7 @@ export class ClaudeService {
     projectId: string,
     taskId: string,
     branch: string
-  ): Promise<ClaudeResult<TaskBranchesView>> {
+  ): Promise<Result<TaskBranchesView>> {
     return this.wrap(async () => {
       this.project(projectId)
       this.deps.worktrees.unlinkBranch(projectId, taskId, branch)
@@ -754,17 +654,16 @@ export class ClaudeService {
     })
   }
 
-  diff(projectId: string, taskId: string): Promise<ClaudeResult<ClaudeDiff>> {
+  diff(projectId: string, taskId: string): Promise<Result<ClaudeDiff>> {
     return this.wrap(async () => {
       this.project(projectId)
       const wt = this.deps.worktrees.get(taskId)
       if (!wt) return fail('no_workspace', CLAUDE_MESSAGES.noWorkspace)
       const text = await this.deps.git.diffText(wt.path, wt.baseRef)
       const status = await this.deps.git.statusPorcelain(wt.path)
-      const untracked = status.filter((l) => l.startsWith('??')).map((l) => l.slice(3))
-      const uncommitted = status
-        .map(parsePorcelainLine)
-        .filter((f): f is UncommittedFile => f !== null && !f.path.startsWith('.orkio/'))
+      const files = status.map(parsePorcelainLine).filter((f): f is UncommittedFile => f !== null)
+      const untracked = files.filter((f) => f.status === 'untracked').map((f) => f.path)
+      const uncommitted = files.filter((f) => !isScratchPath(f.path))
       const cut = text.slice(0, MAX_DIFF_CHARS)
       const shortstat = await this.deps.git.diffShortstat(wt.path, wt.baseRef).catch(() => null)
       return ok({
@@ -780,13 +679,29 @@ export class ClaudeService {
     })
   }
 
-  // ---------- Interno ----------
-
   private project(projectId: string): StoredProject & { repo: NonNullable<StoredProject['repo']> } {
-    const project = this.deps.config.get().projects.find((p) => p.id === projectId)
+    const project = projectById(this.deps.config.get(), projectId)
     if (!project) throw new ClaudeFailure('not_found', CLAUDE_MESSAGES.projectNotFound)
     if (!project.repo) throw new ClaudeFailure('no_repo', CLAUDE_MESSAGES.noRepo)
     return project as StoredProject & { repo: NonNullable<StoredProject['repo']> }
+  }
+
+  private async ensureForTask(
+    projectId: string,
+    taskId: string,
+    kind?: StartRunRequest['branchKind']
+  ): Promise<{
+    project: StoredProject & { repo: NonNullable<StoredProject['repo']> }
+    wtProject: WorktreeProject
+    task: { id: string; displayId: string | null; title: string }
+    worktree: WorktreeRecord
+  }> {
+    const project = this.project(projectId)
+    const wtProject = this.worktreeProject(project)
+    const t = await this.task(projectId, taskId)
+    const task = { id: t.id, displayId: t.displayId, title: t.title }
+    const worktree = await this.deps.worktrees.ensure(wtProject, task, kind ? { kind } : {})
+    return { project, wtProject, task, worktree }
   }
 
   private worktreeProject(
@@ -810,7 +725,7 @@ export class ClaudeService {
 
   private async taskState(taskId: string): Promise<TaskRunsState> {
     const runs = this.deps.runs.list(taskId)
-    const active = runs.find((r) => r.status === 'queued' || r.status === 'running')
+    const active = runs.find((r) => isRunLive(r.status))
     const wt = this.deps.worktrees.get(taskId)
     let workspace: TaskWorkspace | null = null
     if (wt) {
@@ -823,31 +738,6 @@ export class ClaudeService {
     return { runs, activeRunId: active?.id ?? null, workspace }
   }
 
-  /**
-   * Branch local/remota já existente para a tarefa (só para exibir antes de rodar): a registrada
-   * para ela (`task_branches`) ou, com ID do Notion, a que tem o ID no nome. O worktree usa a mesma
-   * ordem ao criar.
-   */
-  private async existingBranch(project: StoredProject, task: NotionTask): Promise<string | null> {
-    const parsed = parseDisplayId(task.displayId)
-    const linked = this.deps.worktrees.linkedBranches(project.id, task.id).map((l) => l.branch)
-    if (!parsed && linked.length === 0) return null
-    const matches = (b: string): boolean =>
-      linked.includes(b) || (!!parsed && mentionsTask(b, parsed.prefix, parsed.number))
-    try {
-      const local = await this.deps.git.localBranches(project.localPath)
-      const hit = linked.find((b) => local.includes(b)) ?? local.find(matches)
-      if (hit) return hit
-      const remote = project.repo?.remoteName ?? 'origin'
-      // Os nomes já vêm sem o "<remote>/" (git.remoteBranches).
-      const remotes = await this.deps.git.remoteBranches(project.localPath, remote)
-      return linked.find((b) => remotes.includes(b)) ?? remotes.find(matches) ?? null
-    } catch {
-      return null
-    }
-  }
-
-  /** Blocos da página (filhos até MAX_DEPTH, no máximo MAX_BLOCKS no total). */
   private async pageBlocks(pageId: string): Promise<NotionBlock[]> {
     let budget = MAX_BLOCKS
     const load = async (id: string, depth: number): Promise<NotionBlock[]> => {
@@ -872,42 +762,35 @@ export class ClaudeService {
     return load(pageId, 0)
   }
 
-  private async wrap<T>(run: () => Promise<ClaudeResult<T>>): Promise<ClaudeResult<T>> {
+  private async wrap<T>(run: () => Promise<Result<T>>): Promise<Result<T>> {
     try {
       return await run()
     } catch (error) {
       if (error instanceof ClaudeFailure) return fail(error.code, error.message)
       if (error instanceof ArtifactError) return fail(error.code, error.message)
-      if (error instanceof NotionApiError) {
+      if (isApiError(error, 'notion')) {
         return fail(error.code, error.message)
       }
       if (error instanceof WorktreeError) {
         return fail(error.code, error.message, error.files.length ? error.files : undefined)
       }
-      if (error instanceof Error && error.message === RUN_MESSAGES.busy) {
-        return fail('busy', error.message)
-      }
+      if (error instanceof RunBusyError) return fail(error.code, error.message)
       console.error(`[orkio] claude: ${errorName(error)}`)
       return fail('unexpected', CLAUDE_MESSAGES.generic)
     }
   }
 }
 
-class ClaudeFailure extends Error {
-  constructor(
-    readonly code: string,
-    message: string
-  ) {
-    super(message)
-    this.name = 'ClaudeFailure'
-  }
+/** Erro esperado do serviço (projeto/tarefa/repositório): `wrap` devolve como `Result` de falha. */
+class ClaudeFailure extends DomainError {
+  override name = 'ClaudeFailure'
 }
 
-function ok<T>(value: T): ClaudeResult<T> {
+function ok<T>(value: T): Result<T> {
   return { ok: true, value }
 }
 
-function fail<T>(code: string, message: string, files?: string[]): ClaudeResult<T> {
+function fail<T>(code: string, message: string, files?: string[]): Result<T> {
   return { ok: false, error: { code, message, ...(files ? { files } : {}) } }
 }
 

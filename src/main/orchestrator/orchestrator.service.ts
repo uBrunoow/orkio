@@ -11,6 +11,8 @@
  * - Tarefa que entra numa etapa de trabalho por outro caminho (você, automação) ganha um agente da
  *   etapa (`onStageChanged`), a não ser que você tenha escolhido o agente à mão.
  */
+import { DomainError } from '../errors'
+import { FlowError, type FlowRunner } from '../flows/flow-runner'
 import {
   ORCHESTRATOR_LIMITS,
   defaultOrchestrator,
@@ -25,15 +27,18 @@ import {
   type PlanCard,
   type PlanDecision
 } from '../../shared/orchestrator'
-import { checkAgentFlow, parseAgentKey, type AgentKey, type AgentsState } from '../../shared/agent'
-import { builtinAgent } from '../../shared/agent-presets'
-import type { BoardView, NotionResult } from '../../shared/ipc-contract'
+import { checkAgentFlow, type AgentKey, type AgentsState } from '../../shared/agent'
+import { agentDisplayName } from '../../shared/agent-presets'
 import type { BoardService, StageChange } from '../board/board.service'
+import { isStageEntry } from '../board/stage-entry'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
-import type { Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import type { AgentRuntime, AgentsService } from '../agents/agents.service'
+import type { BoardView } from '../../shared/board'
+import type { Result } from '../../shared/result'
+import { projectById, projectFlows } from '../config/queries'
+import type { StageRole } from '../../shared/board'
 
 export const ORCHESTRATOR_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista.',
@@ -43,25 +48,16 @@ export const ORCHESTRATOR_MESSAGES = {
   startFailed: 'o fluxo da etapa não começou'
 } as const
 
-export class OrchestratorError extends Error {
-  constructor(
-    readonly code: string,
-    message: string
-  ) {
-    super(message)
-    this.name = 'OrchestratorError'
-  }
+export class OrchestratorError extends DomainError {
+  override name = 'OrchestratorError'
 }
 
-/** Status de fluxo que ocupam o agente (inclui esperas e pausas: o trabalho é dele). */
-const ACTIVE_SQL = `('running', 'waiting_gate', 'paused', 'awaiting_decision')`
 /** Quanto tempo uma tarefa recém-movida conta como "começando" até o fluxo aparecer. */
 const STARTING_MS = 2 * 60_000
 
 export interface OrchestratorDeps {
   config: ConfigStore<OrkioConfig>
-  db: Db
-  store: Pick<BoardStore, 'transaction' | 'addConfigEvent'>
+  store: Pick<BoardStore, 'transaction' | 'addConfigEvent' | 'lastEntryAt'>
   board: Pick<BoardService, 'get' | 'applyAutomationMove' | 'flushWrites'>
   agents: Pick<
     AgentsService,
@@ -72,8 +68,7 @@ export interface OrchestratorDeps {
     | 'releaseByOrchestrator'
     | 'limitProblem'
   >
-  flows: {
-    hasActive(taskId: string): boolean
+  flows: Pick<FlowRunner, 'hasActive' | 'activeCountByAgent' | 'activeTasks' | 'lastFlow'> & {
     /** "Rodar fluxo": o fluxo ligado à etapa atual. Lança `FlowError` com mensagem pt-BR. */
     startManual(projectId: string, taskId: string): Promise<unknown>
   }
@@ -88,17 +83,6 @@ interface Dispatched {
   projectId: string
   agentKey: AgentKey
   at: number
-}
-
-/**
- * Nome do agente sem a lista carregada (antes da primeira rodada): embutido pelo catálogo, senão o
- * id. Nunca o id de um embutido, que o histórico mostraria em minúsculas ("implementador").
- */
-export function agentNameFallback(key: AgentKey): string {
-  const parsed = parseAgentKey(key)
-  if (!parsed) return key
-  if (parsed.scope === 'builtin') return builtinAgent(parsed.id)?.name ?? parsed.id
-  return parsed.id
 }
 
 export class OrchestratorService {
@@ -120,8 +104,6 @@ export class OrchestratorService {
   configFor(projectId: string): OrchestratorConfig {
     return this.deps.config.get().orchestrator[projectId] ?? defaultOrchestrator()
   }
-
-  // ---------- Tela ----------
 
   async state(projectId: string): Promise<OrchestratorState> {
     const config = this.configFor(projectId)
@@ -161,7 +143,7 @@ export class OrchestratorService {
 
   /** Salva (o main valida de novo com a mesma função do editor). */
   async save(projectId: string, config: OrchestratorConfig): Promise<OrchestratorState> {
-    const project = this.deps.config.get().projects.find((p) => p.id === projectId)
+    const project = projectById(this.deps.config.get(), projectId)
     if (!project) throw new OrchestratorError('not_found', ORCHESTRATOR_MESSAGES.projectNotFound)
     if (!this.deps.config.get().boards[projectId]) {
       throw new OrchestratorError('no_board', ORCHESTRATOR_MESSAGES.noBoard)
@@ -213,8 +195,6 @@ export class OrchestratorService {
     return this.state(projectId)
   }
 
-  // ---------- Gatilhos ----------
-
   /** Rodada logo (um fluxo terminou, a config mudou). Junta pedidos próximos. */
   runSoon(projectId: string, ms = 500): void {
     if (!this.configFor(projectId).enabled || this.soon.has(projectId)) return
@@ -230,8 +210,7 @@ export class OrchestratorService {
    * numa etapa de trabalho por outro caminho ganha um agente da etapa.
    */
   onStageChanged(change: StageChange): void {
-    if (change.source !== 'manual' && change.source !== 'automation') return
-    if (!change.to) return
+    if (!isStageEntry(change)) return
     const config = this.configFor(change.projectId)
     if (!config.enabled || this.deps.flows.hasActive(change.taskId)) return
     const agents = this.agentCache.get(change.projectId) ?? new Map()
@@ -239,7 +218,7 @@ export class OrchestratorService {
     if (!config.lanes.some((l) => l.stageId === change.to)) {
       const current = this.deps.agents.assignment(change.taskId)
       if (current && !current.manual && config.lanes.some((l) => l.agents.includes(current.key))) {
-        const name = agents.get(current.key)?.name ?? agentNameFallback(current.key)
+        const name = agentDisplayName(current.key, agents)
         this.deps.agents.releaseByOrchestrator(change.projectId, change.taskId, name)
         this.dispatched.delete(change.taskId)
       }
@@ -253,7 +232,7 @@ export class OrchestratorService {
       this.loadByAgent()
     )
     if (!key) return
-    const name = agents.get(key)?.name ?? agentNameFallback(key)
+    const name = agentDisplayName(key, agents)
     this.deps.agents.assignByOrchestrator(change.projectId, change.taskId, key, name)
     this.dispatched.set(change.taskId, {
       projectId: change.projectId,
@@ -262,9 +241,6 @@ export class OrchestratorService {
     })
   }
 
-  // ---------- Rodada ----------
-
-  /** Uma rodada por projeto de cada vez (chamadas durante uma rodada esperam a mesma). */
   tick(projectId: string): Promise<void> {
     const current = this.running.get(projectId)
     if (current) return current
@@ -315,23 +291,21 @@ export class OrchestratorService {
       if (waiting.length < 20)
         waiting.push({ taskId, displayId: display.get(taskId) ?? '', reason })
     }
-    const name = (key: AgentKey | null): string =>
-      key ? (ctx.plan.get(key)?.name ?? agentNameFallback(key)) : ''
+    const name = (key: AgentKey | null): string => (key ? agentDisplayName(key, ctx.plan) : '')
 
-    // Mover: atribuição + movimento numa transação só.
     let actions = 0
     const moves = decisions.filter(
       (d): d is Extract<PlanDecision, { kind: 'handoff' }> => d.kind === 'handoff'
     )
     if (moves.length > 0) {
       const iso = at.toISOString()
-      this.deps.store.transaction(() => {
+      this.deps.store.transaction((tx) => {
         for (const d of moves) {
           try {
             if (d.agent) {
               this.deps.agents.assignByOrchestrator(projectId, d.taskId, d.agent, name(d.agent))
             }
-            const moved = this.deps.board.applyAutomationMove(projectId, d.taskId, d.to, {
+            const moved = this.deps.board.applyAutomationMove(tx, projectId, d.taskId, d.to, {
               key: `orchestrator:${d.kind}:${d.taskId}:${d.to}:${iso}`,
               detail: {
                 orchestrator: d.kind,
@@ -366,9 +340,7 @@ export class OrchestratorService {
         // Mensagens do FlowError são pt-BR e curtas; qualquer outra coisa vira texto genérico.
         wait(
           d.taskId,
-          error instanceof Error && error.name === 'FlowError'
-            ? error.message
-            : ORCHESTRATOR_MESSAGES.startFailed
+          error instanceof FlowError ? error.message : ORCHESTRATOR_MESSAGES.startFailed
         )
       }
     }
@@ -383,16 +355,8 @@ export class OrchestratorService {
     if (actions > 0 || waiting.length > 0) this.deps.emit(projectId)
   }
 
-  // ---------- Consultas ----------
-
-  /** Fluxos ativos por agente (todos os projetos) + tarefas recém-movidas ainda sem fluxo. */
   private loadByAgent(): Map<AgentKey, number> {
-    const out = new Map<AgentKey, number>()
-    for (const r of this.deps.db.all<{ agent_key: string; n: number }>(
-      `SELECT agent_key, COUNT(*) AS n FROM flow_runs WHERE agent_key IS NOT NULL AND status IN ${ACTIVE_SQL} GROUP BY agent_key`
-    )) {
-      out.set(r.agent_key, r.n)
-    }
+    const out = new Map<AgentKey, number>(this.deps.flows.activeCountByAgent())
     for (const d of this.dispatched.values()) {
       out.set(d.agentKey, (out.get(d.agentKey) ?? 0) + 1)
     }
@@ -400,42 +364,28 @@ export class OrchestratorService {
   }
 
   private busyTasks(projectId: string): Set<string> {
-    const out = new Set(
-      this.deps.db
-        .all<{ task_page_id: string }>(
-          `SELECT DISTINCT task_page_id FROM flow_runs WHERE project_id = ? AND status IN ${ACTIVE_SQL}`,
-          projectId
-        )
-        .map((r) => r.task_page_id)
-    )
+    const out = new Set(this.deps.flows.activeTasks(projectId).map((t) => t.taskId))
     for (const [taskId, d] of this.dispatched) if (d.projectId === projectId) out.add(taskId)
     return out
   }
 
-  /** Tarefas do projeto com agente trabalhando (fluxo ativo) ou começando. */
   private activeTotal(projectId: string): number {
     const tasks = new Set(
-      this.deps.db
-        .all<{ task_page_id: string }>(
-          `SELECT DISTINCT task_page_id FROM flow_runs WHERE project_id = ? AND agent_key IS NOT NULL AND status IN ${ACTIVE_SQL}`,
-          projectId
-        )
-        .map((r) => r.task_page_id)
+      this.deps.flows
+        .activeTasks(projectId)
+        .filter((t) => t.agentKey !== null)
+        .map((t) => t.taskId)
     )
     for (const [taskId, d] of this.dispatched) if (d.projectId === projectId) tasks.add(taskId)
     return tasks.size
   }
 
-  /** Tira as tarefas recém-movidas cujo fluxo já apareceu (ou que passaram do tempo). */
   private purgeDispatched(): void {
     const nowMs = this.now().getTime()
     for (const [taskId, d] of this.dispatched) {
-      const started = this.deps.db.get<{ n: number }>(
-        'SELECT COUNT(*) AS n FROM flow_runs WHERE task_page_id = ? AND started_at >= ?',
-        taskId,
-        new Date(d.at).toISOString()
-      )
-      if ((started?.n ?? 0) > 0 || nowMs - d.at > STARTING_MS) this.dispatched.delete(taskId)
+      const last = this.deps.flows.lastFlow(taskId)
+      const started = last !== null && last.startedAt >= new Date(d.at).toISOString()
+      if (started || nowMs - d.at > STARTING_MS) this.dispatched.delete(taskId)
     }
   }
 
@@ -448,39 +398,29 @@ export class OrchestratorService {
     stageId: string,
     since: string | null
   ): 'finished_here' | 'carried_in' | null {
-    const entry = this.deps.db.get<{ at: string | null }>(
-      `SELECT MAX(at) AS at FROM task_events WHERE task_page_id = ? AND to_stage = ? AND kind IN ('moved', 'reconciled', 'added')`,
-      taskId,
-      stageId
-    )?.at
+    const entry = this.deps.store.lastEntryAt(taskId, stageId)
     if (!entry) return null
-    const last = this.deps.db.get<{
-      stage_id: string | null
-      status: string
-      result: string | null
-      started_at: string
-      ended_at: string | null
-    }>(
-      'SELECT stage_id, status, result, started_at, ended_at FROM flow_runs WHERE task_page_id = ? ORDER BY started_at DESC LIMIT 1',
-      taskId
-    )
-    if (!last || last.status !== 'finished' || last.result !== 'done' || !last.ended_at) return null
-    if (!since || last.ended_at < since) return null
-    if (last.started_at >= entry) return last.stage_id === stageId ? 'finished_here' : null
-    return last.ended_at >= entry ? 'carried_in' : null
+    const last = this.deps.flows.lastFlow(taskId)
+    if (!last || last.status !== 'finished' || last.result !== 'done' || !last.endedAt) return null
+    if (!since || last.endedAt < since) return null
+    if (last.startedAt >= entry) return last.stageId === stageId ? 'finished_here' : null
+    return last.endedAt >= entry ? 'carried_in' : null
   }
 
-  /** Agentes do projeto, fluxos ligados às etapas e a checagem estática de cada agente. */
   private async context(projectId: string): Promise<{
-    stages: { id: string; name: string }[]
+    stages: { id: string; name: string; role?: StageRole }[]
     bindings: OrkioConfig['flows'][string]['bindings']
     agents: AgentsState
     infos: OrchestratorAgentInfo[]
     plan: Map<AgentKey, PlanAgent & { name: string }>
   }> {
     const config = this.deps.config.get()
-    const stages = (config.boards[projectId]?.stages ?? []).map((s) => ({ id: s.id, name: s.name }))
-    const projectFlows = config.flows[projectId] ?? { flows: [], bindings: [] }
+    const stages = (config.boards[projectId]?.stages ?? []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      ...(s.role ? { role: s.role } : {})
+    }))
+    const flows = projectFlows(config, projectId)
     const agents = await this.deps.agents.list(projectId)
     const plan = new Map<AgentKey, PlanAgent & { name: string }>()
     const infos: OrchestratorAgentInfo[] = []
@@ -503,8 +443,8 @@ export class OrchestratorService {
       }
       const deniedByStage: Record<string, string> = {}
       if (a.profile && laneKeys.has(a.key)) {
-        for (const b of projectFlows.bindings) {
-          const flow = projectFlows.flows.find((f) => f.id === b.flowId)
+        for (const b of flows.bindings) {
+          const flow = flows.flows.find((f) => f.id === b.flowId)
           const denied = flow && b.enabled ? checkAgentFlow(a.profile, flow) : null
           if (denied) deniedByStage[b.stageId] = denied
         }
@@ -513,10 +453,10 @@ export class OrchestratorService {
     }
     for (const key of laneKeys) {
       if (!infos.some((i) => i.key === key)) {
-        infos.push({ key, name: agentNameFallback(key), status: 'missing' })
+        infos.push({ key, name: agentDisplayName(key), status: 'missing' })
       }
     }
-    return { stages, bindings: projectFlows.bindings, agents, infos, plan }
+    return { stages, bindings: flows.bindings, agents, infos, plan }
   }
 
   private setStatus(projectId: string, patch: Partial<OrchestratorStatus>): void {
@@ -535,14 +475,12 @@ function agentCount(n: number): string {
   return n === 1 ? '1 agente' : `${n} agentes`
 }
 
-function toPlanCards(view: Extract<NotionResult<BoardView>, { ok: true }>): PlanCard[] {
-  return view.value.cards.map((c, index) => ({
+function toPlanCards(view: Extract<Result<BoardView>, { ok: true }>): PlanCard[] {
+  return view.value.cards.map((c) => ({
     taskId: c.taskId,
     displayId: c.displayId ?? 'Tarefa',
     stageId: c.stageId,
-    priority: c.priority?.name ?? null,
     blocked: c.blocked,
-    automationPaused: c.automationPaused,
-    index
+    automationPaused: c.automationPaused
   }))
 }

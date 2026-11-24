@@ -3,16 +3,6 @@
  * validação de mapeamento de propriedades, e leitura de páginas de Projetos/Tarefas.
  * Nada aqui faz rede.
  */
-import type {
-  NotionColor,
-  NotionDataSourceSummary,
-  NotionMapping,
-  NotionMappingField,
-  NotionPropertyRef,
-  NotionPropertySummary,
-  NotionProjectPage,
-  NotionTask
-} from '../../../shared/ipc-contract'
 import {
   FIELD_TYPES,
   MAPPING_FIELDS,
@@ -22,6 +12,17 @@ import {
   sameId
 } from '../../../shared/notion-mapping'
 import { httpsUrlOrNull, isRecord, stringOrNull } from '../../net/parse'
+import type {
+  NotionColor,
+  NotionDataSourceSummary,
+  NotionMapping,
+  NotionMappingField,
+  NotionPropertyRef,
+  NotionPropertySummary,
+  NotionProjectPage,
+  NotionTask
+} from '../../../shared/notion'
+import { normalizeLabel } from '../../../shared/text'
 
 export { FIELD_TYPES, REQUIRED_FIELDS, candidatesFor, fieldLabel, sameId }
 
@@ -53,8 +54,6 @@ const FIELD_NAMES: Record<NotionMappingField, readonly string[]> = {
   priority: ['prioridade', 'priority', 'prio', 'urgencia', 'urgency'],
   assignee: ['responsavel', 'responsaveis', 'assignee', 'assignees', 'owner', 'dono', 'atribuido']
 }
-
-// ---------- Leitura ----------
 
 export function plainText(value: unknown): string {
   if (!Array.isArray(value)) return ''
@@ -116,13 +115,8 @@ export function parseDataSource(body: unknown): NotionDataSourceSchema | null {
   return { id: summary.id, title: summary.title, properties }
 }
 
-// ---------- Sugestão de mapeamento ----------
-
 export function normalizeName(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
+  return normalizeLabel(value)
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
 }
@@ -165,7 +159,6 @@ export function suggestMapping(
         p,
         score:
           nameScore(field, p.name) * 10 +
-          // Tipo preferido do campo (ex.: status antes de select) desempata.
           (FIELD_TYPES[field].length - FIELD_TYPES[field].indexOf(p.type))
       }))
       .sort((a, b) => b.score - a.score)
@@ -186,8 +179,6 @@ export function suggestMapping(
 export function toRef(p: NotionPropertySummary): NotionPropertyRef {
   return { id: p.id, name: p.name, type: p.type }
 }
-
-// ---------- Validação do mapeamento salvo ----------
 
 export interface MappingCheck {
   /** Erros que impedem ler tarefas (propriedade sumiu, mudou de tipo, relação errada). */
@@ -245,8 +236,6 @@ export function checkMapping(
   return { errors, warnings, mapping: updated }
 }
 
-// ---------- Páginas ----------
-
 /** Valor de uma propriedade da página, achado pelo id da propriedade (estável a renomeações). */
 function propertyValue(
   page: Record<string, unknown>,
@@ -260,7 +249,6 @@ function propertyValue(
   return null
 }
 
-/** Ids das páginas numa propriedade relation (ex.: o projeto da tarefa). */
 export function relationIds(body: unknown, propertyId: string): string[] {
   if (!isRecord(body)) return []
   const value = propertyValue(body, propertyId)
@@ -324,7 +312,74 @@ export type SimplePropertyValue =
   | { type: 'select' | 'status'; id: string | null; name: string | null }
   | { type: 'checkbox'; checked: boolean }
 
-/** Valores select/status/checkbox da página, por id da propriedade. */
+/**
+ * Valor que o Orkio escreve numa propriedade da página (por id da propriedade): status/select pelo
+ * nome (a escrita não cria opção de status) ou checkbox. O formato da API mora só aqui:
+ * `encodePropertyWrites` (payload do `PATCH /v1/pages/{id}`), `decodePropertyWrites` (pendência
+ * salva), `propertyWritesKey` (comparar pendências sem depender da ordem), `propertyWritesMatch`
+ * (o Notion já tem?) e `applyPropertyWrites` (valores conhecidos depois de confirmar).
+ */
+export type PropertyWrite =
+  { type: 'status' | 'select'; name: string } | { type: 'checkbox'; checked: boolean }
+
+export type PropertyWrites = Record<string, PropertyWrite>
+
+export function encodePropertyWrites(writes: PropertyWrites): Record<string, unknown> {
+  const payload: Record<string, unknown> = {}
+  for (const id of Object.keys(writes).sort()) {
+    const w = writes[id]!
+    payload[id] = w.type === 'checkbox' ? { checkbox: w.checked } : { [w.type]: { name: w.name } }
+  }
+  return payload
+}
+
+/** Lê o payload salvo (tolerante: propriedade em formato desconhecido some). */
+export function decodePropertyWrites(payload: unknown): PropertyWrites {
+  const writes: PropertyWrites = {}
+  if (!isRecord(payload)) return writes
+  for (const [id, raw] of Object.entries(payload)) {
+    if (!isRecord(raw)) continue
+    if (typeof raw['checkbox'] === 'boolean') {
+      writes[id] = { type: 'checkbox', checked: raw['checkbox'] }
+      continue
+    }
+    for (const type of ['status', 'select'] as const) {
+      const option = raw[type]
+      const name = isRecord(option) ? stringOrNull(option['name']) : null
+      if (name !== null) writes[id] = { type, name }
+    }
+  }
+  return writes
+}
+
+/** Chave estável (ids ordenados): duas pendências iguais têm a mesma chave. */
+export function propertyWritesKey(writes: PropertyWrites): string {
+  return JSON.stringify(encodePropertyWrites(writes))
+}
+
+/** O Notion já tem todos os valores escritos? */
+export function propertyWritesMatch(
+  values: Readonly<Record<string, SimplePropertyValue>> | undefined,
+  writes: PropertyWrites
+): boolean {
+  if (!values) return false
+  return Object.entries(writes).every(([id, w]) => {
+    const current = values[id]
+    if (w.type === 'checkbox') return current?.type === 'checkbox' && current.checked === w.checked
+    return current !== undefined && current.type !== 'checkbox' && current.name === w.name
+  })
+}
+
+/** Os valores conhecidos passam a ser os escritos (o id da opção fica desconhecido). */
+export function applyPropertyWrites(
+  values: Record<string, SimplePropertyValue>,
+  writes: PropertyWrites
+): void {
+  for (const [id, w] of Object.entries(writes)) {
+    values[id] = w.type === 'checkbox' ? w : { type: w.type, id: null, name: w.name }
+  }
+}
+
 export function simplePropertyValues(body: unknown): Record<string, SimplePropertyValue> {
   const result: Record<string, SimplePropertyValue> = {}
   const props = isRecord(body) ? body['properties'] : null
@@ -365,8 +420,6 @@ function optionValue(value: Record<string, unknown> | null, withId = false): Not
     : { name, color: color(option['color']) }
 }
 
-// ---------- Similaridade de nomes (vínculo projeto local ↔ Notion) ----------
-
 /** Coeficiente de Dice sobre bigramas dos nomes normalizados (0..1). */
 export function nameSimilarity(a: string, b: string): number {
   const x = normalizeName(a).replace(/ /g, '')
@@ -393,6 +446,3 @@ export function nameSimilarity(a: string, b: string): number {
   }
   return (2 * overlap) / (bx.length + by.length)
 }
-
-export const NOTION_ID_PATTERN =
-  /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i

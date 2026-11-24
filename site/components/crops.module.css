@@ -1,6 +1,5 @@
 /* Recortes do app: mesma moldura da janela do hero (barra + conteúdo encostado), parados. */
 
-/* Vidro discreto: fundo translúcido sobre a luz da seção, borda clara em cima. */
 .crop {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--text) 10%, var(--border));
@@ -48,8 +47,6 @@
   font-family: var(--font-mono), ui-monospace, monospace;
   font-size: 0.75rem;
 }
-
-/* agentes: raias ligadas por um conector entre elas */
 
 .lanes {
   display: grid;
@@ -132,8 +129,6 @@
   transform: rotate(90deg);
 }
 
-/* fluxo */
-
 .flowName {
   color: var(--muted);
 }
@@ -194,8 +189,6 @@
 .step[data-state='gate'] .state {
   color: var(--accent-tint-text);
 }
-
-/* revisão: a thread com o trecho de código */
 
 .reviewHead {
   display: flex;
@@ -301,8 +294,6 @@
   color: var(--success);
   transform: translateY(2px);
 }
-
-/* campo da sessão */
 
 .picker {
   display: grid;

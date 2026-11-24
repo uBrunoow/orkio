@@ -1,21 +1,28 @@
-import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
+import { readFile, rename } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
+import { atomicWriteFile } from './atomic-write'
 
 /**
  * Armazenamento de configuração NÃO secreta (JSON em userData). Segredos vão no SecureStore.
  *
  * - Escrita atômica: arquivo temporário + fsync + rename; escritas serializadas.
- * - `schemaVersion` + migrações encadeadas (v → v+1).
+ * - `schemaVersion` + migrações encadeadas (v → v+1), obrigatórias: faltar uma é erro ao criar.
  * - Arquivo corrompido/inválido: vira backup (`<nome>.corrupt-<data>.json`) e começamos vazio,
  *   com aviso. Nunca derruba o app.
  * - Versão mais nova que a suportada: não sobrescreve (modo só leitura), com aviso.
  */
 
+/** `migrations[v]` converte dados da versão v para v+1. */
+export type ConfigMigrations = Record<
+  number,
+  (data: Record<string, unknown>) => Record<string, unknown>
+>
+
 export interface ConfigStoreOptions<T> {
   file: string
   currentVersion: number
-  /** `migrations[v]` converte dados da versão v para v+1. */
-  migrations?: Record<number, (data: Record<string, unknown>) => Record<string, unknown>>
+  /** Uma para cada versão de 0 até `currentVersion - 1`: faltando uma, o store nem é criado. */
+  migrations: ConfigMigrations
   /** Valida e normaliza a versão atual. `null` = inválido. Pode devolver aviso (ex.: itens descartados). */
   validate(data: Record<string, unknown>): { value: T; warning?: string } | null
   empty(): T
@@ -28,12 +35,26 @@ export class ConfigStore<T extends object> {
   private writing: Promise<void> = Promise.resolve()
   /** true quando o arquivo é de uma versão mais nova do Orkio: não sobrescrevemos. */
   readOnly = false
+  /** Aviso da carga (ex.: arquivo corrompido recuperado, modo só leitura), mostrado em Projetos. */
+  loadWarning: string | undefined
 
   constructor(private readonly options: ConfigStoreOptions<T>) {
+    const missing = missingMigrations(options.migrations, options.currentVersion)
+    // Erro de programação, não de dados: sem a migração, a carga apagaria a config de todos.
+    if (missing.length > 0) {
+      throw new Error(`ConfigStore: faltam as migrações ${missing.join(', ')} (v → v+1).`)
+    }
     this.data = options.empty()
   }
 
+  /** Carrega (uma vez, por quem cria o store). O aviso também fica em `loadWarning`. */
   async load(): Promise<{ data: T; warning?: string }> {
+    const result = await this.read()
+    this.loadWarning = result.warning
+    return result
+  }
+
+  private async read(): Promise<{ data: T; warning?: string }> {
     const { file, currentVersion } = this.options
     this.loaded = true
     let raw: string
@@ -77,8 +98,7 @@ export class ConfigStore<T extends object> {
 
     let migrated: Record<string, unknown> = parsed
     for (let v = version; v < currentVersion; v++) {
-      const migrate = this.options.migrations?.[v]
-      if (!migrate) return this.recoverFromCorruption()
+      const migrate = this.options.migrations[v]!
       try {
         migrated = { ...migrate(migrated), schemaVersion: v + 1 }
       } catch {
@@ -115,7 +135,9 @@ export class ConfigStore<T extends object> {
       null,
       2
     )
-    const run = this.writing.then(() => atomicWrite(this.options.file, snapshot))
+    const run = this.writing.then(() =>
+      atomicWriteFile(this.options.file, snapshot, { mode: 0o644, fsync: true })
+    )
     // A fila continua mesmo se uma escrita falhar; o erro vai para quem chamou.
     this.writing = run.catch(() => {})
     return run
@@ -141,28 +163,18 @@ export class ConfigStore<T extends object> {
   }
 }
 
+export function missingMigrations(migrations: ConfigMigrations, currentVersion: number): number[] {
+  const missing: number[] = []
+  for (let v = 0; v < currentVersion; v++) {
+    if (typeof migrations[v] !== 'function') missing.push(v)
+  }
+  return missing
+}
+
 export class ConfigReadOnlyError extends Error {
   constructor() {
     super('As configurações estão em modo somente leitura.')
     this.name = 'ConfigReadOnlyError'
-  }
-}
-
-async function atomicWrite(file: string, content: string): Promise<void> {
-  await mkdir(dirname(file), { recursive: true })
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`
-  try {
-    const handle = await open(tmp, 'w', 0o644)
-    try {
-      await handle.writeFile(content, 'utf8')
-      await handle.sync()
-    } finally {
-      await handle.close()
-    }
-    await rename(tmp, file)
-  } catch (error) {
-    await rm(tmp, { force: true })
-    throw error
   }
 }
 

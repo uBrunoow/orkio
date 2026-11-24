@@ -2,7 +2,6 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Alert } from './Alert'
 
-/** Vazio: título (h2), texto e ação opcional, numa caixa tracejada discreta. */
 export function EmptyState({
   title,
   description,
@@ -28,9 +27,6 @@ export function EmptyState({
   )
 }
 
-/**
- * Estados de página/seção iguais em todo o app: carregando, vazio e erro.
- */
 export function PageState(
   props:
     | { kind: 'loading'; label: string; rows?: number }

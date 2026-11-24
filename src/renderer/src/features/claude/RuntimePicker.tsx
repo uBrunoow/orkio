@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -14,11 +14,11 @@ import {
   type RuntimeChoice
 } from '../../../../shared/agent-runtime'
 import { BrainIcon, CheckIcon } from '../../components/icons'
+import { useClaudeStatus } from './useClaudeStatus'
 
 const MODEL_ERROR = 'Use letras minúsculas, números, ponto e hífen.'
 const DEFAULT_LABEL = 'Padrão do Claude Code'
 
-/** Rótulo do que está escolhido (ou do herdado, quando nada foi escolhido). */
 export function pickerLabel(value: Partial<RuntimeChoice>, inheritLabel?: string): string {
   if (value.model === undefined && value.effort === undefined) return inheritLabel ?? DEFAULT_LABEL
   return runtimeLabel({ model: value.model ?? null, effort: value.effort ?? null })
@@ -193,18 +193,5 @@ export function RuntimePicker({
 
 /** O CLI instalado aceita `--effort`? (sem resposta = não mostra o raciocínio). */
 export function useSupportsEffort(): boolean {
-  const [supports, setSupports] = useState(false)
-  useEffect(() => {
-    let active = true
-    void window.orkio.claude
-      .status()
-      .then((s) => {
-        if (active) setSupports(s.supportsEffort)
-      })
-      .catch(() => undefined)
-    return () => {
-      active = false
-    }
-  }, [])
-  return supports
+  return useClaudeStatus().status?.supportsEffort ?? false
 }

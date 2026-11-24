@@ -10,12 +10,20 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 
 export type SqlValue = SQLInputValue
 
+declare const TX: unique symbol
+/**
+ * Prova de que o código roda dentro de `transaction` (só ela cria um). Quem precisa gravar junto
+ * com outras escritas pede um `Tx` no tipo, em vez de pedir por comentário.
+ */
+export type Tx = { readonly [TX]: true }
+const TX_TOKEN = Object.freeze({}) as Tx
+
 export interface Db {
   exec(sql: string): void
   run(sql: string, ...params: SqlValue[]): { changes: number; lastInsertRowid: number }
   get<T>(sql: string, ...params: SqlValue[]): T | undefined
   all<T>(sql: string, ...params: SqlValue[]): T[]
-  transaction<T>(fn: () => T): T
+  transaction<T>(fn: (tx: Tx) => T): T
   readonly version: number
   close(): void
 }
@@ -220,6 +228,44 @@ export const MIGRATIONS: readonly string[] = [
   // estão (sem total bruto; o `cost` delas é o acumulado de então).
   `
   ALTER TABLE agent_runs ADD COLUMN session_cost_total REAL;
+  `,
+  // v12: histórico com a origem real (`system` novo; `sync_ok`/`rolled_back` vinham como
+  // 'manual'; execuções, fluxos e entrega são do próprio Orkio; remoção de etapa não é movimento
+  // manual) e a chave de idempotência das automações única por projeto + tarefa (antes era única
+  // no banco inteiro: a PR #12 de outro projeto ou a mesma PR em outra tarefa nunca disparava).
+  // As chaves existentes ficam: já eram únicas no banco, então continuam únicas por tarefa.
+  `
+  CREATE TABLE task_events_v12 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_page_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('manual', 'notion', 'automation', 'system')),
+    from_stage TEXT,
+    to_stage TEXT,
+    detail_json TEXT,
+    event_key TEXT
+  );
+  INSERT INTO task_events_v12
+    (id, task_page_id, project_id, at, kind, source, from_stage, to_stage, detail_json, event_key)
+  SELECT id, task_page_id, project_id, at, kind,
+    CASE
+      WHEN kind IN ('sync_ok', 'rolled_back') THEN 'notion'
+      WHEN kind IN ('run_started', 'run_finished', 'run_cancelled', 'run_failed', 'run_blocked',
+        'flow_started', 'step_started', 'step_finished', 'step_failed', 'gate_waiting',
+        'flow_paused', 'flow_finished', 'delivery') THEN 'system'
+      WHEN kind = 'moved' AND (CASE WHEN json_valid(detail_json)
+        THEN json_extract(detail_json, '$.flow') END) = 'stage_removed' THEN 'system'
+      ELSE source
+    END,
+    from_stage, to_stage, detail_json, event_key
+  FROM task_events;
+  DROP TABLE task_events;
+  ALTER TABLE task_events_v12 RENAME TO task_events;
+  CREATE INDEX task_events_task ON task_events (task_page_id, id);
+  CREATE UNIQUE INDEX task_events_key ON task_events (project_id, task_page_id, event_key)
+    WHERE event_key IS NOT NULL;
   `
 ]
 
@@ -244,13 +290,12 @@ export function openDatabase(file: string, migrations: readonly string[] = MIGRA
     },
     get: <T>(sql: string, ...params: SqlValue[]) => db.prepare(sql).get(...params) as T | undefined,
     all: <T>(sql: string, ...params: SqlValue[]) => db.prepare(sql).all(...params) as T[],
-    transaction<T>(fn: () => T): T {
-      // Transações aninhadas viram parte da externa.
-      if (depth > 0) return fn()
+    transaction<T>(fn: (tx: Tx) => T): T {
+      if (depth > 0) return fn(TX_TOKEN)
       depth++
       db.exec('BEGIN IMMEDIATE')
       try {
-        const result = fn()
+        const result = fn(TX_TOKEN)
         db.exec('COMMIT')
         return result
       } catch (error) {

@@ -1,6 +1,8 @@
 # CI do app desktop (Electron). Roda na PR e é chamado pelo release.yml (workflow_call) antes de
 # empacotar. Sem `push` na main: o merge já dispara o release, que roda este mesmo CI; rodar também
-# no push duplicava tudo a cada merge. Mudanças só no site/ (site.yml) ou só em docs não rodam.
+# no push duplicava tudo a cada merge. Mudanças só fora do app (site, docs, README) não rodam: a
+# mesma lista `paths-ignore` do release-on-merge.yml e do release-label.yml (test/workflows.test.ts
+# confere). O site tem o site.yml, que também roda quando muda o lado app do contrato.
 name: CI
 
 on:
@@ -47,7 +49,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install-deps
-      # O E2E "app ↔ site" (@site) roda no workflow do site.
+      # O E2E "app ↔ site" (@site) roda no site.yml (que dispara também com o lado app do contrato).
       - run: xvfb-run -a pnpm e2e --trace off --grep-invert @site
 
   # App empacotado (Linux, só pasta): abre na tela inicial e a ponte MCP roda de dentro do asar.

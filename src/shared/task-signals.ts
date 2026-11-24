@@ -3,6 +3,7 @@
  * Base das automações da Etapa 3: aqui só calculamos (`buildTaskSignals`) e comparamos
  * (`diffSignals`). Funções puras, sem Node/DOM.
  */
+import type { ProjectAction } from './projects'
 import { normalizePageId } from './slug'
 import { extractTaskNumbers, parseDisplayId } from './task-id-match'
 
@@ -174,7 +175,7 @@ export function buildTaskSignals(
       ...(sources.pulls ?? []).filter((p) => linked.has(p.headRef)),
       ...(pullsByPage.get(normalizePageId(task.id)) ?? [])
     ])
-    // Sem nenhum caminho que ligue algo à tarefa: sem sinais (igual a antes para tarefa sem ID).
+    // Sem nenhum caminho que ligue algo à tarefa: sem sinais.
     if (!parsed && linked.size === 0 && pullSet.size === 0) continue
     const pulls = [...pullSet].sort(comparePulls)
     const main = pulls[0]
@@ -206,92 +207,29 @@ export function buildTaskSignals(
   return result
 }
 
-export type SignalEvent =
-  | { kind: 'branch_created'; taskId: string; branch: string; where: 'local' | 'remote' }
-  | { kind: 'branch_deleted'; taskId: string; branch: string; where: 'local' | 'remote' }
-  | { kind: 'pr_opened'; taskId: string; number: number; draft: boolean }
-  | { kind: 'pr_ready_for_review'; taskId: string; number: number }
-  | { kind: 'pr_merged'; taskId: string; number: number }
-  | { kind: 'pr_closed'; taskId: string; number: number }
-  | { kind: 'pr_reopened'; taskId: string; number: number }
-  | {
-      kind: 'review_changed'
-      taskId: string
-      number: number
-      from: ReviewDecision | null
-      to: ReviewDecision | null
-    }
-  | {
-      kind: 'checks_changed'
-      taskId: string
-      number: number
-      from: ChecksState | null
-      to: ChecksState | null
-    }
+/** Situação da parte do GitHub nos sinais. */
+export type SignalsGitHubState =
+  | 'ok'
+  | 'disconnected'
+  | 'no_repo'
+  | 'enterprise'
+  | 'no_access'
+  | 'sso'
+  | 'restricted'
+  | 'rate_limited'
+  | 'unverified'
 
-/**
- * Eventos entre dois cálculos de sinais (base da Etapa 3; ainda não usado por automações).
- * Tarefas ausentes em `before` não geram eventos (primeira observação não é mudança).
- */
-export function diffSignals(
-  before: Readonly<Record<string, TaskSignals>>,
-  after: Readonly<Record<string, TaskSignals>>
-): SignalEvent[] {
-  const events: SignalEvent[] = []
-  for (const [taskId, next] of Object.entries(after)) {
-    const prev = before[taskId]
-    if (!prev) continue
-    for (const where of ['local', 'remote'] as const) {
-      const a = new Set(where === 'local' ? prev.localBranches : prev.remoteBranches)
-      const b = new Set(where === 'local' ? next.localBranches : next.remoteBranches)
-      for (const branch of b)
-        if (!a.has(branch)) events.push({ kind: 'branch_created', taskId, branch, where })
-      for (const branch of a)
-        if (!b.has(branch)) events.push({ kind: 'branch_deleted', taskId, branch, where })
-    }
-    const p = prev.pr
-    const n = next.pr
-    if (!n) continue
-    if (!p || p.number !== n.number) {
-      if (n.state === 'open' || n.state === 'draft') {
-        events.push({ kind: 'pr_opened', taskId, number: n.number, draft: n.state === 'draft' })
-      } else if (n.state === 'merged') {
-        events.push({ kind: 'pr_merged', taskId, number: n.number })
-      }
-      continue
-    }
-    if (p.state !== n.state) {
-      if (n.state === 'merged') events.push({ kind: 'pr_merged', taskId, number: n.number })
-      else if (n.state === 'closed') events.push({ kind: 'pr_closed', taskId, number: n.number })
-      else if (p.state === 'draft' && n.state === 'open') {
-        events.push({ kind: 'pr_ready_for_review', taskId, number: n.number })
-      } else if (p.state === 'closed' || p.state === 'merged') {
-        events.push({ kind: 'pr_reopened', taskId, number: n.number })
-      }
-    }
-    // Só compara detalhes conhecidos dos dois lados (null = indisponível, não "mudou").
-    if (
-      p.reviewDecision !== n.reviewDecision &&
-      p.reviewDecision !== null &&
-      n.reviewDecision !== null
-    ) {
-      events.push({
-        kind: 'review_changed',
-        taskId,
-        number: n.number,
-        from: p.reviewDecision,
-        to: n.reviewDecision
-      })
-    }
-    if (p.checks !== n.checks && p.checks !== null && n.checks !== null) {
-      events.push({
-        kind: 'checks_changed',
-        taskId,
-        number: n.number,
-        from: p.checks,
-        to: n.checks
-      })
-    }
-  }
-  return events
+export interface TaskSignalsResult {
+  /** Por id da página da tarefa no Notion. */
+  signals: Record<string, TaskSignals>
+  github: SignalsGitHubState
+  /** Branches locais lidas? (pasta/git indisponível → false) */
+  local: boolean
+  /** Avisos curtos em pt-BR (sem GitHub, sem acesso, detalhes indisponíveis...). */
+  messages: string[]
+  /** Link sugerido (autorizar SSO, pedir aprovação da organização). */
+  action?: ProjectAction
+  /** Tarefas cujo ID não tem prefixo (não dá para casar com branches/PRs). */
+  tasksWithoutPrefix: number
+  fetchedAt: string
 }

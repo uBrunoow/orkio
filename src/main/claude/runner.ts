@@ -3,8 +3,9 @@
  * dele) via spawn SEM shell, cwd = worktree, entrada/saída `stream-json`.
  *
  * Permissões em camadas: `--permission-mode acceptEdits` (editar no worktree), `--settings` com
- * `blockWritesOutsideWorkingDirectories` e deny de push/gh, e `--permission-prompt-tool` apontando
- * para o servidor MCP do Orkio (bridge/permission-mcp.ts), que pergunta ao main.
+ * `blockWritesOutsideWorkingDirectories` e o deny gerado da tabela do GitHub/push
+ * (`github-rules.ts`), e `--permission-prompt-tool` apontando para o servidor MCP do Orkio
+ * (bridge/permission-mcp.ts), que pergunta ao main. Os argumentos saem de `buildCliArgs(spec)`.
  */
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import { createServer, type Server, type Socket } from 'node:net'
@@ -14,22 +15,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { RunLogEvent } from '../../shared/agent-run'
-import { isEffort, isModelName, type Effort } from '../../shared/agent-runtime'
+import { isEffort, isModelName } from '../../shared/agent-runtime'
 import { READ_ONLY_DENIED_TOOLS } from '../../shared/task-flow'
-import { redactSecrets, sanitizeEnv } from './redact'
+import {
+  BRIDGE_ENV,
+  BRIDGE_PROMPT_TOOL,
+  BRIDGE_SERVER,
+  decodeBridgeRequest,
+  type BridgeDecision,
+  type BridgeRequest
+} from './bridge/protocol'
+import { cliDenyInDelivery, cliDenyOutsideDelivery } from './github-rules'
+import { redactSecrets, sanitizeEnv } from '../platform/redact'
+import { deliveryOf, type RunSpec } from './run-spec'
 import { parseStreamLine } from './stream'
 
 export type SpawnFn = typeof nodeSpawn
-
-export interface BridgeRequest {
-  toolName: string
-  input: Record<string, unknown>
-  toolUseId: string | null
-}
-
-export type BridgeDecision =
-  | { behavior: 'allow'; updatedInput?: Record<string, unknown> }
-  | { behavior: 'deny'; message: string }
+export type { BridgeDecision, BridgeRequest }
 
 /** Socket local de uso único entre o servidor MCP (bridge) e o main. */
 export class PermissionBroker {
@@ -71,33 +73,28 @@ export class PermissionBroker {
   }
 
   private async answer(line: string): Promise<BridgeDecision> {
-    let msg: Record<string, unknown>
-    try {
-      msg = JSON.parse(line) as Record<string, unknown>
-    } catch {
-      return { behavior: 'deny', message: 'Pedido inválido.' }
-    }
-    const token = typeof msg['token'] === 'string' ? Buffer.from(msg['token']) : Buffer.alloc(0)
+    const msg = decodeBridgeRequest(line)
+    if (!msg) return { behavior: 'deny', message: 'Pedido inválido.' }
+    const token = Buffer.from(msg.token)
     const expected = Buffer.from(this.token)
     if (token.length !== expected.length || !timingSafeEqual(token, expected)) {
       return { behavior: 'deny', message: 'Pedido não autorizado.' }
     }
-    const input = msg['input']
-    return this.onRequest({
-      toolName: typeof msg['toolName'] === 'string' ? msg['toolName'] : '',
-      input: typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {},
-      toolUseId: typeof msg['toolUseId'] === 'string' ? msg['toolUseId'] : null
-    }).catch((): BridgeDecision => ({ behavior: 'deny', message: 'Falha ao decidir a permissão.' }))
+    return this.onRequest(msg.request).catch((): BridgeDecision => ({
+      behavior: 'deny',
+      message: 'Falha ao decidir a permissão.'
+    }))
   }
 }
 
 export interface RunnerOptions {
   claudeCommand: string
+  /** A execução (sessão, ferramentas, GitHub, agente, modelo): vira os argumentos do CLI. */
+  spec: RunSpec
   cwd: string
   prompt: string
+  /** Id da sessão (o da sessão retomada, no `--resume`). */
   sessionId: string
-  /** Continua esta sessão (`--resume`, mesmo id) em vez de começar uma nova. */
-  resume?: boolean
   broker: PermissionBroker
   /** Executável do Node do Electron e o script do servidor MCP de permissões. */
   nodePath: string
@@ -105,19 +102,6 @@ export interface RunnerOptions {
   /** Pasta para o mcp-config temporário (0600, apagado no fim). */
   tmpDir: string
   env: NodeJS.ProcessEnv
-  /** Modo entrega (5C): regras `deny` do modo entrega em vez das padrão. */
-  delivery?: boolean
-  /** Agente (8A): instruções acrescentadas ao system prompt (o briefing continua no prompt). */
-  appendSystemPrompt?: string | null
-  /** Agente (8A): alias do modelo (`sonnet`, `opus`, `haiku`); ausente = padrão do usuário. */
-  model?: string | null
-  /** Raciocínio (`--effort`); só vai um valor válido (o main já checou o suporte do CLI). */
-  effort?: Effort | null
-  /**
-   * Passo só de leitura: o CLI não recebe as ferramentas de edição (`--disallowedTools`) e roda em
-   * `--permission-mode manual` (nada aprovado sozinho).
-   */
-  readOnly?: boolean
   onEvent(event: RunLogEvent): void
   onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   spawn?: SpawnFn
@@ -125,44 +109,10 @@ export interface RunnerOptions {
 
 /**
  * Fora do modo entrega: o CLI nega o que escreve no GitHub mesmo se o usuário tiver uma regra de
- * "permitir" no `~/.claude`. Ler a PR (`gh pr view`, `gh api` GET/GraphQL sem mutation) passa pela
- * política do Orkio (`isGhRead`, só o repositório do projeto).
+ * "permitir" no `~/.claude`. Ler a PR passa pela política do Orkio (`isGhRead`).
  */
 export const RUN_SETTINGS = {
-  permissions: {
-    blockWritesOutsideWorkingDirectories: true,
-    deny: [
-      'Bash(git push *)',
-      ...[
-        'create',
-        'edit',
-        'comment',
-        'merge',
-        'close',
-        'reopen',
-        'ready',
-        'review',
-        'checkout',
-        'lock',
-        'unlock',
-        'revert',
-        'update-branch'
-      ].map((a) => `Bash(gh pr ${a}*)`),
-      'Bash(gh release *)',
-      'Bash(gh api *-X*)',
-      'Bash(gh api *--method*)',
-      'Bash(gh api *--input*)',
-      'Bash(gh api *mutation*)',
-      'Bash(gh api repos/* -f *)',
-      'Bash(gh api repos/* -F *)',
-      'Bash(gh api repos/* --field*)',
-      'Bash(gh api repos/* --raw-field*)',
-      'Bash(gh api /repos/* -f *)',
-      'Bash(gh api /repos/* -F *)',
-      'Bash(gh api /repos/* --field*)',
-      'Bash(gh api /repos/* --raw-field*)'
-    ]
-  }
+  permissions: { blockWritesOutsideWorkingDirectories: true, deny: cliDenyOutsideDelivery() }
 }
 
 /**
@@ -170,20 +120,44 @@ export const RUN_SETTINGS = {
  * permissão); o CLI continua negando o que nunca é permitido.
  */
 export const DELIVERY_RUN_SETTINGS = {
-  permissions: {
-    blockWritesOutsideWorkingDirectories: true,
-    deny: [
-      'Bash(git push --force *)',
-      'Bash(git push -f *)',
-      'Bash(git push --force-with-lease *)',
-      'Bash(git push --delete *)',
-      'Bash(git push --mirror *)',
-      'Bash(gh pr merge *)',
-      'Bash(gh pr close *)',
-      'Bash(gh release *)',
-      'Bash(gh repo *)'
-    ]
-  }
+  permissions: { blockWritesOutsideWorkingDirectories: true, deny: cliDenyInDelivery() }
+}
+
+/** Argumentos do `claude` para uma execução (puro). */
+export function buildCliArgs(
+  spec: Pick<RunSpec, 'session' | 'access' | 'agent' | 'runtime'>,
+  run: { sessionId: string; mcpConfig: string }
+): string[] {
+  const readOnly = spec.access.tools === 'read_only'
+  const { model, effort } = spec.runtime
+  return [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--input-format',
+    'stream-json',
+    ...(spec.session.kind === 'resume'
+      ? ['--resume', spec.session.id]
+      : ['--session-id', run.sessionId]),
+    // Lista num argumento só, separada por vírgula; a opção aceita vários valores, então vem
+    // antes de outra flag (nada solto depois dela).
+    ...(readOnly ? ['--disallowedTools', READ_ONLY_DENIED_TOOLS.join(',')] : []),
+    '--permission-mode',
+    // Só leitura: nada é aprovado sozinho (nem comandos de arquivo no shell); tudo passa pela
+    // ferramenta de permissão do Orkio.
+    readOnly ? 'manual' : 'acceptEdits',
+    '--settings',
+    JSON.stringify(deliveryOf(spec) ? DELIVERY_RUN_SETTINGS : RUN_SETTINGS),
+    '--mcp-config',
+    run.mcpConfig,
+    '--permission-prompt-tool',
+    BRIDGE_PROMPT_TOOL,
+    ...(spec.agent?.prompt ? ['--append-system-prompt', spec.agent.prompt] : []),
+    // Nada que pareça outra flag chega ao CLI: valida aqui, de novo, antes de montar os args.
+    ...(isModelName(model) ? ['--model', model] : []),
+    ...(isEffort(effort) ? ['--effort', effort] : [])
+  ]
 }
 
 export class ClaudeRun {
@@ -202,45 +176,20 @@ export class ClaudeRun {
       this.mcpConfig,
       JSON.stringify({
         mcpServers: {
-          orkio: {
+          [BRIDGE_SERVER]: {
             command: o.nodePath,
             args: [o.bridgeScript],
             env: {
               ELECTRON_RUN_AS_NODE: '1',
-              ORKIO_BRIDGE_SOCKET: o.broker.socketPath,
-              ORKIO_BRIDGE_TOKEN: o.broker.token
+              [BRIDGE_ENV.socket]: o.broker.socketPath,
+              [BRIDGE_ENV.token]: o.broker.token
             }
           }
         }
       }),
       { mode: 0o600 }
     )
-    const args = [
-      '-p',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--input-format',
-      'stream-json',
-      ...(o.resume ? ['--resume', o.sessionId] : ['--session-id', o.sessionId]),
-      // Lista num argumento só, separada por vírgula; a opção aceita vários valores, então vem
-      // antes de outra flag (nada solto depois dela).
-      ...(o.readOnly ? ['--disallowedTools', READ_ONLY_DENIED_TOOLS.join(',')] : []),
-      '--permission-mode',
-      // Só leitura: nada é aprovado sozinho (nem comandos de arquivo no shell); tudo passa pela
-      // ferramenta de permissão do Orkio.
-      o.readOnly ? 'manual' : 'acceptEdits',
-      '--settings',
-      JSON.stringify(o.delivery ? DELIVERY_RUN_SETTINGS : RUN_SETTINGS),
-      '--mcp-config',
-      this.mcpConfig,
-      '--permission-prompt-tool',
-      'mcp__orkio__approve',
-      ...(o.appendSystemPrompt ? ['--append-system-prompt', o.appendSystemPrompt] : []),
-      // Nada que pareça outra flag chega ao CLI: valida aqui, de novo, antes de montar os args.
-      ...(isModelName(o.model) && o.model !== 'default' ? ['--model', o.model] : []),
-      ...(isEffort(o.effort) ? ['--effort', o.effort] : [])
-    ]
+    const args = buildCliArgs(o.spec, { sessionId: o.sessionId, mcpConfig: this.mcpConfig })
     const spawn = o.spawn ?? nodeSpawn
     const child = spawn(o.claudeCommand, args, {
       cwd: o.cwd,
@@ -279,7 +228,6 @@ export class ClaudeRun {
     )
   }
 
-  /** Cancela: SIGINT → SIGTERM (5 s) → SIGKILL (10 s). */
   cancel(): void {
     const child = this.child
     if (!child || this.ended) return

@@ -1,32 +1,10 @@
-import { PrHoverCard } from '../board/PrHoverCard'
+import { PrHoverCard } from '../../components/PrHoverCard'
 import { Button } from '@/components/ui/button'
-import type { TaskSignals } from '../../../../shared/ipc-contract'
-import type { ChecksState, PullRequestState, ReviewDecision } from '../../../../shared/task-signals'
-import { StatusToken, toneOf } from '../../components/StatusToken'
+import type { TaskSignals } from '../../../../shared/task-signals'
+import { StatusToken } from '../../components/StatusToken'
+import { prPills } from '../../lib/status-text'
 import { GitBranchIcon, PullRequestIcon } from '../../components/icons'
 
-type Color = 'default' | 'gray' | 'green' | 'yellow' | 'red' | 'purple'
-
-const PR_STATE: Record<PullRequestState, { label: string; color: Color }> = {
-  draft: { label: 'Rascunho', color: 'gray' },
-  open: { label: 'Aberta', color: 'green' },
-  merged: { label: 'Mergeada', color: 'purple' },
-  closed: { label: 'Fechada', color: 'red' }
-}
-
-const REVIEW: Record<ReviewDecision, { label: string; color: Color }> = {
-  approved: { label: 'Aprovada', color: 'green' },
-  changes_requested: { label: 'Alterações pedidas', color: 'red' },
-  review_required: { label: 'Revisão pendente', color: 'yellow' }
-}
-
-const CHECKS: Record<ChecksState, { label: string; color: Color }> = {
-  success: { label: 'CI ok', color: 'green' },
-  failure: { label: 'CI falhou', color: 'red' },
-  pending: { label: 'CI rodando', color: 'gray' }
-}
-
-/** Branch (local/remota) e PR de uma tarefa. Nada é renderizado sem sinais. */
 export function TaskSignalsLine({
   signals
 }: {
@@ -64,28 +42,14 @@ export function TaskSignalsLine({
               <PullRequestIcon />#{pr.number}
             </Button>
           </PrHoverCard>
-          <StatusToken
-            label={PR_STATE[pr.state].label}
-            tone={toneOf(PR_STATE[pr.state].color)}
-            data-testid="pr-state"
-          />
-          {pr.reviewDecision && pr.state !== 'merged' && pr.state !== 'closed' && (
+          {prPills(pr).map(({ kind, label, tone }) => (
             <StatusToken
-              label={REVIEW[pr.reviewDecision].label}
-              tone={toneOf(REVIEW[pr.reviewDecision].color)}
-              data-testid="pr-review"
+              key={kind}
+              label={label}
+              tone={tone}
+              {...(kind === 'ci' ? {} : { 'data-testid': `pr-${kind}` })}
             />
-          )}
-          {pr.unresolvedComments !== null && pr.unresolvedComments > 0 && (
-            <StatusToken
-              label={`${pr.unresolvedComments} ${pr.unresolvedComments === 1 ? 'comentário' : 'comentários'}`}
-              tone="warning"
-              data-testid="pr-comments"
-            />
-          )}
-          {pr.checks && pr.state !== 'merged' && pr.state !== 'closed' && (
-            <StatusToken label={CHECKS[pr.checks].label} tone={toneOf(CHECKS[pr.checks].color)} />
-          )}
+          ))}
           {signals.otherPrs > 0 && (
             <span className="text-xs text-subtle-foreground">
               +{signals.otherPrs} {signals.otherPrs === 1 ? 'PR' : 'PRs'}

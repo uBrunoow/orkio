@@ -1,23 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { BoardStage } from './board'
 import {
-  activityGroup,
   buildRunning,
   costSum,
-  finalStageId,
   finishedCount,
   flowWaitingItem,
-  formatAgo,
-  formatDuration,
   notionWaitingItem,
   prAttention,
   projectCard,
   pullsInWeek,
   requestWaitingItem,
-  reviewStageId,
   sortWaiting,
   stageDwell,
-  taskLabel,
   type OverviewTask,
   type StageEventInput
 } from './overview'
@@ -73,6 +67,8 @@ function flow(over: Partial<FlowRunView> = {}): FlowRunView {
         stepId: 'rev',
         runId: 'run1',
         status: 'running',
+        code: null,
+        link: null,
         startedAt: '2026-11-20T10:01:00.000Z',
         endedAt: null,
         message: null,
@@ -365,7 +361,7 @@ describe('Semana', () => {
     at: string,
     from: string | null,
     to: string | null,
-    kind = 'moved'
+    kind: StageEventInput['kind'] = 'moved'
   ): StageEventInput => ({
     id,
     taskPageId,
@@ -376,9 +372,8 @@ describe('Semana', () => {
     toStage: to
   })
 
-  it('finalizadas: tarefas distintas que entraram na última etapa na semana', () => {
-    const final = new Map([['p1', finalStageId(STAGES)!]])
-    expect(final.get('p1')).toBe('s4')
+  it('finalizadas: tarefas distintas que entraram na etapa concluída na semana', () => {
+    const final = new Map([['p1', 's4']])
     expect(
       finishedCount(
         [
@@ -395,8 +390,7 @@ describe('Semana', () => {
   })
 
   it('tempo médio em Revisado conta cada passagem que terminou na semana', () => {
-    const review = new Map([['p1', reviewStageId(STAGES)!]])
-    expect(review.get('p1')).toBe('s3')
+    const review = new Map([['p1', 's3']])
     const result = stageDwell(
       [
         ev(1, 'a', '2026-11-10T00:00:00Z', 's2', 's3'),
@@ -415,7 +409,6 @@ describe('Semana', () => {
     expect(result.samples).toBe(3)
     expect(result.avgMs).toBe(((4 + 1 + 2) / 3) * 24 * 60 * 60 * 1000)
     expect(stageDwell([], review, since)).toEqual({ avgMs: null, samples: 0 })
-    expect(reviewStageId([{ ...STAGES[0]!, name: 'Revisão' }])).toBeNull()
   })
 
   it('PRs abertas/mergeadas na semana; sem cache do GitHub = desconhecido', () => {
@@ -441,30 +434,5 @@ describe('Semana', () => {
       known: 2,
       total: 3
     })
-  })
-})
-
-describe('Atividade e formatação', () => {
-  it('agrupa eventos; automação sem efeito e sync_ok ficam de fora', () => {
-    expect(activityGroup({ kind: 'moved', source: 'manual', detail: null })).toBe('board')
-    expect(activityGroup({ kind: 'moved', source: 'automation', detail: null })).toBe('automation')
-    expect(
-      activityGroup({ kind: 'automation', source: 'automation', detail: { outcome: 'noop' } })
-    ).toBeNull()
-    expect(activityGroup({ kind: 'sync_ok', source: 'manual', detail: null })).toBeNull()
-    expect(activityGroup({ kind: 'delivery', source: 'automation', detail: null })).toBe('delivery')
-    expect(activityGroup({ kind: 'gate_waiting', source: 'automation', detail: null })).toBe('flow')
-  })
-
-  it('formata tempos em pt-BR', () => {
-    const now = new Date('2026-11-20T12:00:00Z')
-    expect(formatAgo('2026-11-20T11:59:40Z', now)).toBe('agora')
-    expect(formatAgo('2026-11-20T11:52:00Z', now)).toBe('há 8 min')
-    expect(formatAgo('2026-11-20T09:00:00Z', now)).toBe('há 3 h')
-    expect(formatAgo('2026-11-17T09:00:00Z', now)).toBe('há 3 d')
-    expect(formatDuration(45_000)).toBe('45 s')
-    expect(formatDuration(65 * 60_000)).toBe('1 h 05 min')
-    expect(formatDuration(1.8 * 24 * 3600_000)).toBe('1,8 d')
-    expect(taskLabel({ displayId: null, title: null })).toBe('Tarefa do Notion')
   })
 })

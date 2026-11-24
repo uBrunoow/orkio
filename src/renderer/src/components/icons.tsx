@@ -29,7 +29,6 @@ import {
   IconListCheck,
   IconLayoutKanban,
   IconLock,
-  IconCloudUpload,
   IconSettings,
   IconArrowUp,
   IconPointFilled,
@@ -44,6 +43,7 @@ import {
   IconPencil,
   IconChevronLeft,
   IconChevronRight,
+  IconLoader2,
   IconPlugConnected,
   IconPuzzle,
   IconRefresh,
@@ -56,10 +56,8 @@ import {
   IconEraser,
   IconSelector,
   IconArrowLeft,
-  IconMessage,
   IconShieldCheck,
   IconHelpCircle,
-  IconFlag,
   IconInfoCircle,
   IconTool,
   IconFileText,
@@ -74,10 +72,10 @@ export type SvgIcon = FunctionComponent<SVGProps<SVGSVGElement>>
 function adapt(TablerComponent: TablerIcon): SvgIcon {
   const Adapted: SvgIcon = ({ className, ...props }) => (
     <TablerComponent
+      aria-hidden="true"
       {...(props as TablerIconProps)}
       className={cn('size-4 shrink-0', className)}
       stroke={1.75}
-      aria-hidden="true"
     />
   )
   Adapted.displayName = TablerComponent.displayName ?? 'TablerIcon'
@@ -102,7 +100,6 @@ export const GitBranchIcon = adapt(IconGitBranch)
 export const PullRequestIcon = adapt(IconGitPullRequest)
 export const BoardIcon = adapt(IconLayoutKanban)
 export const LockIcon = adapt(IconLock)
-export const SyncIcon = adapt(IconCloudUpload)
 export const SettingsIcon = adapt(IconSettings)
 export const ArrowUpIcon = adapt(IconArrowUp)
 export const ArrowDownIcon = adapt(IconArrowDown)
@@ -113,6 +110,8 @@ export const UserIcon = adapt(IconUser)
 export const EditIcon = adapt(IconPencil)
 export const ColumnCollapseIcon = adapt(IconChevronLeft)
 export const ColumnExpandIcon = adapt(IconChevronRight)
+export const ChevronRightIcon = ColumnExpandIcon
+export const SpinnerIcon = adapt(IconLoader2)
 export const PauseIcon = adapt(IconPlayerPause)
 export const AutomationIcon = adapt(IconBolt)
 export const TerminalIcon = adapt(IconTerminal2)
@@ -124,18 +123,14 @@ export const CleanIcon = adapt(IconEraser)
 export const AgentsIcon = adapt(IconRobot)
 export const SwitchIcon = adapt(IconSelector)
 export const BackIcon = adapt(IconArrowLeft)
-export const MessageIcon = adapt(IconMessage)
 export const PermissionIcon = adapt(IconShieldCheck)
 export const QuestionIcon = adapt(IconHelpCircle)
-export const FinishIcon = adapt(IconFlag)
 export const InfoIcon = adapt(IconInfoCircle)
 export const ToolIcon = adapt(IconTool)
 export const ReadIcon = adapt(IconFileText)
-/** Ponto de estado (StatusToken). */
 export const BellIcon = adapt(IconBell)
 export const DotIcon = adapt(IconPointFilled)
 
-/** Marca do Claude (estrela de raios), desenhada em currentColor. */
 /** Símbolo oficial do Claude (cor herdada do contexto, como as logos do Notion e do GitHub). */
 export const ClaudeLogo: SvgIcon = (props) => (
   <svg
@@ -159,28 +154,5 @@ export const CopyIcon = adapt(IconCopy)
 export const MoreIcon = adapt(IconDots)
 export const GridIcon = adapt(IconLayoutGrid)
 
-/** Ponto de estado colorido pelo tema (itens da lista lateral, onde o ícone não recebe cor). */
-function toneDot(color: string, name: string): SvgIcon {
-  const Dot: SvgIcon = (props) => (
-    <svg
-      viewBox="0 0 24 24"
-      aria-hidden="true"
-      {...props}
-      className={cn('size-4 shrink-0', props.className)}
-    >
-      <circle cx="12" cy="12" r="4" fill={color} />
-    </svg>
-  )
-  Dot.displayName = name
-  return Dot
-}
-
-export const TONE_DOT_ICONS = {
-  success: toneDot('var(--ok)', 'SuccessDot'),
-  warning: toneDot('var(--warn)', 'WarningDot'),
-  danger: toneDot('var(--danger)', 'DangerDot'),
-  running: toneDot('var(--brand)', 'RunningDot'),
-  neutral: toneDot('var(--subtle-foreground)', 'NeutralDot')
-} as const
 export const BrainIcon = adapt(IconBrain)
 export const CheckIcon = adapt(IconCheck)

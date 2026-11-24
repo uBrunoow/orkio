@@ -9,9 +9,6 @@
     },
     {
       "path": "./tsconfig.e2e.json"
-    },
-    {
-      "path": "./tsconfig.broker.json"
     }
   ]
 }

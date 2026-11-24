@@ -14,28 +14,25 @@
  *
  * Não é entrega (push/PR): o agente Revisor (`delivery: false`) pode rodar este passo.
  */
-import type { NotionResult, TaskSignalsResult } from '../../shared/ipc-contract'
+import { ORKIO_ACTIONS } from '../../shared/orkio-actions'
 import { parseReviewAnswer } from '../../shared/review-publish'
-import type { ActionConfirm, ConfirmReview } from '../../shared/task-flow'
+import type { ActionConfirm, ConfirmReview, StepFailure } from '../../shared/task-flow'
 import type { BoardStore } from '../board/board.store'
-import {
-  ORKIO_SITE_NETWORK_PREFIX,
-  ORKIO_SITE_TIMEOUT_MESSAGE
-} from '../connectors/github/github.connector'
 import {
   REVIEW_MESSAGES,
   ReviewPostError,
   prepareReview,
   type GitHubReviewPoster
 } from '../connectors/github/review-poster'
-import type { OrkioAction } from '../flows/flow-runner'
-import { errorName } from '../ipc/payload'
+import type { ActionResult, OrkioAction } from '../flows/flow-runner'
+import { errorName } from '../errors'
+import { deliveryEvent, openPullFor, type SignalsFetch } from './action-helpers'
 
 export interface PublishReviewDeps {
   poster: Pick<GitHubReviewPoster, 'isConfigured' | 'diffLines' | 'postReview'>
   /** Texto final de uma execução do Claude Code (log normalizado e redigido). */
   finalText(runId: string): Promise<string | null>
-  signals(projectId: string, force: boolean): Promise<NotionResult<TaskSignalsResult>>
+  signals: SignalsFetch
   /** Repositório do projeto no github.com (`null` = sem repositório ou outro host). */
   repo(projectId: string): { owner: string; repo: string } | null
   store: Pick<BoardStore, 'addEvent'>
@@ -52,30 +49,75 @@ export const PUBLISH_ACTION_MESSAGES = {
   noRepo:
     'O projeto não está ligado a um repositório do github.com: não há onde publicar a revisão.',
   noPr: 'Esta tarefa não tem PR aberta no GitHub: não há onde publicar a revisão.',
-  signals: 'Não deu para conferir a PR no GitHub agora. Tente de novo em instantes.',
   invalidPrefix: 'A revisão em JSON é inválida:',
   noConfirm: 'A revisão não foi confirmada. Retome para ver a revisão e aprovar de novo.',
   generic: 'Não foi possível publicar a revisão. Tente de novo.',
   maybePosted:
     'A tentativa anterior demorou para responder: a revisão pode já estar na PR. Abra a PR e confira antes de publicar de novo.',
-  installHint: 'Instale o App neste link e retome:',
+  installHint: 'Instale o App pelo link e retome.',
   networkMaybePosted:
     'A conexão com o site do Orkio caiu durante a publicação. Confira a PR antes de tentar de novo: a revisão pode ter sido publicada.'
 } as const
 
+/**
+ * Códigos de falha do passo (a tela de problema reconhece os `review_*` que têm explicação
+ * própria); os outros erros do `ReviewPostError` viram `review_<código>`.
+ */
+export const PUBLISH_FAILURES = {
+  invalid: 'review_invalid',
+  notInstalled: 'review_not_installed',
+  notConfigured: 'review_not_configured',
+  noSite: 'review_no_site',
+  maybePosted: 'review_maybe_posted',
+  noRepo: 'review_no_repo',
+  noPr: 'review_no_pr',
+  noConfirm: 'review_no_confirm',
+  failed: 'review_failed'
+} as const
+
+const fail = (code: string, message: string): StepFailure => ({ code, message })
+
 export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction {
   /** Tarefas cuja última tentativa estourou o prazo do site (só em memória; o passo registra). */
   const maybePosted = new Set<string>()
-  const now = (): string => (deps.now?.() ?? new Date()).toISOString()
+
+  function postFailure(error: ReviewPostError, taskId: string): StepFailure {
+    switch (error.code) {
+      // O pedido pode ter chegado ao site (e a revisão, saído): o próximo gate avisa.
+      case 'site_timeout':
+        maybePosted.add(taskId)
+        return fail(PUBLISH_FAILURES.maybePosted, error.message)
+      case 'site_network':
+        maybePosted.add(taskId)
+        return fail(PUBLISH_FAILURES.maybePosted, PUBLISH_ACTION_MESSAGES.networkMaybePosted)
+      case 'not_installed': {
+        const link = error.details.installUrl
+        return link
+          ? {
+              code: PUBLISH_FAILURES.notInstalled,
+              message: `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint}`,
+              link
+            }
+          : fail(PUBLISH_FAILURES.notInstalled, REVIEW_MESSAGES.notInstalled)
+      }
+      case 'app_not_configured':
+        return fail(PUBLISH_FAILURES.notConfigured, PUBLISH_ACTION_MESSAGES.notConfigured)
+      case 'no_site':
+        return fail(PUBLISH_FAILURES.noSite, PUBLISH_ACTION_MESSAGES.noSite)
+      default:
+        return fail(`review_${error.code}`, error.message)
+    }
+  }
 
   return {
-    id: 'publish_review',
-    label: 'Publicar revisão na PR (orkio[bot])',
+    ...ORKIO_ACTIONS.publish_review,
     async confirm({ projectId, taskId, lastRunId }) {
-      if (!deps.poster.isConfigured()) return { problem: PUBLISH_ACTION_MESSAGES.noSite }
+      if (!deps.poster.isConfigured()) {
+        return { problem: fail(PUBLISH_FAILURES.noSite, PUBLISH_ACTION_MESSAGES.noSite) }
+      }
       const text = lastRunId ? await deps.finalText(lastRunId) : null
       const parsed = parseReviewAnswer(text)
-      if (!parsed.ok) return { problem: parsed.message }
+      if (!parsed.ok) return { problem: fail(PUBLISH_FAILURES.invalid, parsed.message) }
       let prepared
       try {
         prepared = prepareReview({
@@ -85,18 +127,21 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
         })
       } catch (error) {
         if (error instanceof ReviewPostError) {
-          return { problem: `${PUBLISH_ACTION_MESSAGES.invalidPrefix} ${error.message}` }
+          return {
+            problem: fail(
+              PUBLISH_FAILURES.invalid,
+              `${PUBLISH_ACTION_MESSAGES.invalidPrefix} ${error.message}`
+            )
+          }
         }
         throw error
       }
       const target = deps.repo(projectId)
-      if (!target) return { problem: PUBLISH_ACTION_MESSAGES.noRepo }
-      const r = await deps.signals(projectId, true)
-      if (!r.ok) return { problem: PUBLISH_ACTION_MESSAGES.signals }
-      const pr = r.value.signals[taskId]?.pr ?? null
-      if (!pr || (pr.state !== 'open' && pr.state !== 'draft')) {
-        return { problem: PUBLISH_ACTION_MESSAGES.noPr }
-      }
+      if (!target) return { problem: fail(PUBLISH_FAILURES.noRepo, PUBLISH_ACTION_MESSAGES.noRepo) }
+      const found = await openPullFor(deps.signals, projectId, taskId)
+      if ('failure' in found) return { problem: found.failure }
+      const pr = found.pr
+      if (!pr) return { problem: fail(PUBLISH_FAILURES.noPr, PUBLISH_ACTION_MESSAGES.noPr) }
       let files: Map<string, Set<number>>
       try {
         files =
@@ -104,7 +149,7 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
             ? await deps.poster.diffLines(target.owner, target.repo, pr.number)
             : new Map()
       } catch (error) {
-        if (error instanceof ReviewPostError) return { problem: error.message }
+        if (error instanceof ReviewPostError) return { problem: postFailure(error, taskId) }
         throw error
       }
       const review: ConfirmReview = {
@@ -138,9 +183,11 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
       }
       return info
     },
-    async run({ projectId, taskId, confirmed }) {
+    async run({ projectId, taskId, confirmed }): Promise<ActionResult> {
       const r = confirmed?.review
-      if (!r) return { ok: false, message: PUBLISH_ACTION_MESSAGES.noConfirm }
+      if (!r) {
+        return { ok: false, ...fail(PUBLISH_FAILURES.noConfirm, PUBLISH_ACTION_MESSAGES.noConfirm) }
+      }
       const comments = r.comments
         .filter((c) => c.inDiff)
         .map(({ path, line, body }) => ({ path, line, body }))
@@ -154,47 +201,16 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
           })
         ).url
       } catch (error) {
-        if (error instanceof ReviewPostError) {
-          if (error.code === 'timeout' && error.message === ORKIO_SITE_TIMEOUT_MESSAGE) {
-            maybePosted.add(taskId)
-          }
-          // Rede caiu no POST ao site: o pedido pode ter chegado (e a revisão, saído).
-          if (error.code === 'network' && error.message.startsWith(ORKIO_SITE_NETWORK_PREFIX)) {
-            maybePosted.add(taskId)
-            return { ok: false, message: PUBLISH_ACTION_MESSAGES.networkMaybePosted }
-          }
-          if (error.code === 'not_installed') {
-            const link = error.details.installUrl
-            return {
-              ok: false,
-              message: link
-                ? `${REVIEW_MESSAGES.notInstalled} ${PUBLISH_ACTION_MESSAGES.installHint} ${link}`
-                : REVIEW_MESSAGES.notInstalled
-            }
-          }
-          if (error.code === 'not_configured') {
-            return { ok: false, message: PUBLISH_ACTION_MESSAGES.notConfigured }
-          }
-          if (error.code === 'no_site') {
-            return { ok: false, message: PUBLISH_ACTION_MESSAGES.noSite }
-          }
-          return { ok: false, message: error.message }
-        }
+        if (error instanceof ReviewPostError) return { ok: false, ...postFailure(error, taskId) }
         console.error(`[orkio] publicar revisão: ${errorName(error)}`)
-        return { ok: false, message: PUBLISH_ACTION_MESSAGES.generic }
+        return { ok: false, ...fail(PUBLISH_FAILURES.failed, PUBLISH_ACTION_MESSAGES.generic) }
       }
       maybePosted.delete(taskId)
       const reviewId = url ? Number(/#pullrequestreview-(\d+)$/.exec(url)?.[1] ?? NaN) : NaN
-      deps.store.addEvent({
-        taskPageId: taskId,
-        projectId,
-        at: now(),
-        kind: 'delivery',
-        source: 'manual',
-        fromStage: null,
-        toStage: null,
-        detail: {
-          by: 'orkio',
+      deliveryEvent(
+        deps,
+        { projectId, taskId },
+        {
           action: 'review_post',
           owner: r.pr.owner,
           repo: r.pr.repo,
@@ -203,9 +219,9 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
           pr: { number: r.pr.number, owner: r.pr.owner, repo: r.pr.repo },
           ...(Number.isSafeInteger(reviewId) && reviewId > 0 ? { reviewId } : {})
         }
-      })
+      )
       deps.runAutomation?.(projectId)
-      return { ok: true, vars: { 'review.posted': 'sim', 'review.event': r.event } }
+      return { ok: true }
     }
   }
 }

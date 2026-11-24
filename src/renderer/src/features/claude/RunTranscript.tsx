@@ -18,10 +18,8 @@ import {
 } from '../../components/icons'
 import { StatusToken } from '../../components/StatusToken'
 import { formatDuration, formatUsd, plural } from '../../lib/format'
-import { Spinner } from '@/components/Spinner'
-import { PullRequestIcon } from '../../components/icons'
-import { CollapsibleHeader } from '../board/TaskDetails'
-import { OpenPrFeedback, useOpenPr } from '../board/OpenPrButton'
+import { CollapsibleHeader } from '../../components/CollapsibleHeader'
+import { OpenPrButton, OpenPrFeedback } from '../task/OpenPrButton'
 import { SubagentGroup } from './SubagentGroup'
 import {
   failedLabel,
@@ -44,7 +42,6 @@ const CATEGORY_ICON: Record<StepCategory, SvgIcon> = {
 /** Mais recentes primeiro quando o log é longo; o resto abre em "Mostrar anteriores". */
 const TAIL = 40
 
-/** Caixa das chamadas de ferramenta (mockup `.tools`): borda suave, fundo da superfície, mono. */
 const TOOLS_BOX =
   'rounded-lg border border-border-soft bg-surface px-2.5 py-2 font-mono text-xs text-muted-foreground'
 
@@ -140,8 +137,7 @@ function Receipt({
   tone: 'info' | 'problem'
   text: string
   count: number
-  /** "Abrir PR" no recibo de push/gh bloqueado (só quando a tarefa pode abrir PR). */
-  openPr?: { projectId: string; taskId: string }
+  openPr?: boolean
 }): React.JSX.Element {
   const problem = tone === 'problem'
   const ReceiptIcon = problem ? PermissionIcon : InfoIcon
@@ -159,26 +155,12 @@ function Receipt({
         {text}
         {count > 1 ? ` (×${count})` : ''}
       </p>
-      {openPr && <ReceiptOpenPr {...openPr} />}
-    </div>
-  )
-}
-
-function ReceiptOpenPr({
-  projectId,
-  taskId
-}: {
-  projectId: string
-  taskId: string
-}): React.JSX.Element {
-  const pr = useOpenPr(projectId, taskId)
-  return (
-    <div className="flex shrink-0 flex-col items-end gap-1">
-      <Button size="sm" variant="outline" disabled={pr.busy} onClick={() => void pr.start()}>
-        {pr.busy ? <Spinner /> : <PullRequestIcon />}
-        Abrir PR
-      </Button>
-      <OpenPrFeedback state={pr} />
+      {openPr && (
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <OpenPrButton size="sm" hint={false} />
+          <OpenPrFeedback />
+        </div>
+      )}
     </div>
   )
 }
@@ -211,10 +193,6 @@ function ResultFooter({
   )
 }
 
-/**
- * Sessão do Claude Code como conversa: respostas em markdown, ferramentas agrupadas numa frase,
- * recibos de permissão, avisos de falha e o fechamento com turnos, tempo e custo.
- */
 export function RunTranscript({
   items,
   tail = TAIL,
@@ -222,8 +200,8 @@ export function RunTranscript({
 }: {
   items: readonly TranscriptItem[]
   tail?: number
-  /** Tarefa que pode abrir PR agora (sem PR aberta, com ambiente): recibos de push/gh ganham o botão. */
-  openPr?: { projectId: string; taskId: string }
+  /** A tarefa pode abrir PR agora (sem PR aberta, com ambiente): recibos de push/gh ganham o botão. */
+  openPr?: boolean
 }): React.JSX.Element {
   const [showAll, setShowAll] = useState(false)
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -268,7 +246,7 @@ export function RunTranscript({
                 tone={item.tone}
                 text={item.text}
                 count={item.count}
-                {...(item.action === 'open-pr' && openPr ? { openPr } : {})}
+                openPr={item.action === 'open-pr' && openPr === true}
               />
             )}
             {item.kind === 'notice' &&

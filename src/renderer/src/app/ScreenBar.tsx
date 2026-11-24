@@ -23,10 +23,8 @@ export function ScreenBarEnd({ children }: { children: React.ReactNode }): React
   return end ? createPortal(children, end) : null
 }
 
-/** Um trecho do caminho; com `onClick`, leva para lá. */
 export type Crumb = string | { label: string; onClick?: (() => void) | undefined }
 
-/** Botão de um trecho do caminho (cinza, sublinha ao passar o mouse). */
 export function CrumbLink({
   label,
   onClick
@@ -46,10 +44,6 @@ export function CrumbLink({
   )
 }
 
-/**
- * Caminho em cinza ("Configurações › Integrações"); o último trecho em branco, peso médio. Os
- * trechos com destino são botões (navegação `Caminho`).
- */
 export function Crumbs({ parts }: { parts: readonly Crumb[] }): React.JSX.Element {
   const items = parts.map((p) => (typeof p === 'string' ? { label: p } : p))
   const last = items.at(-1)
@@ -68,7 +62,6 @@ export function Crumbs({ parts }: { parts: readonly Crumb[] }): React.JSX.Elemen
   )
 }
 
-/** Moldura do conteúdo: a barra (caminho padrão do App + encaixes) e a tela embaixo. */
 export function ScreenFrame({
   crumbs,
   bell,

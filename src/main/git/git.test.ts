@@ -23,6 +23,28 @@ describe('createGit com execFile simulado', () => {
     expect(options).not.toHaveProperty('shell')
   })
 
+  it('fetch e push nunca pedem credencial: sem askpass herdado (ex.: o do VS Code), ssh em BatchMode', async () => {
+    const prev = process.env['GIT_ASKPASS']
+    process.env['GIT_ASKPASS'] = '/usr/share/code/askpass.sh'
+    try {
+      const execFile = vi.fn<ExecFileFn>(async () => ({ stdout: '', stderr: '' }))
+      const git = createGit({ execFile })
+      await git.fetch('/repo', 'origin', 'main')
+      await git.push('/repo', 'origin', 'feat/ORK-1-x')
+      for (const [, , options] of execFile.mock.calls) {
+        expect(options.env).toMatchObject({
+          GIT_ASKPASS: '',
+          SSH_ASKPASS: '',
+          GCM_INTERACTIVE: 'never',
+          GIT_SSH_COMMAND: 'ssh -o BatchMode=yes'
+        })
+      }
+    } finally {
+      if (prev === undefined) delete process.env['GIT_ASKPASS']
+      else process.env['GIT_ASKPASS'] = prev
+    }
+  })
+
   it('git ausente no PATH → git_not_found', async () => {
     const git = createGit({
       execFile: async () => {

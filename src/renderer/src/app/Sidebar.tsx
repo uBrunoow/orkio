@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,67 +9,26 @@ import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '../components/StatusToken'
 import { formatKeys } from './CommandMenu'
-import type { ProjectView } from '../../../shared/ipc-contract'
 import { AgentsIcon, BoardIcon, SearchIcon, SettingsIcon, SwitchIcon } from '../components/icons'
 import { OrkioLogo } from '../components/OrkioLogo/OrkioLogo'
 import { ROUTE_TITLES, type Route } from './routes'
 import { SHORTCUTS } from './shortcuts'
 import type { SidebarTask, TaskGroups } from './task-groups'
+import type { ProjectView } from '../../../shared/projects'
+import { isMac } from '../lib/platform'
+import { ProjectAvatar } from '../components/ProjectAvatar'
+import { useUpdates } from '../features/settings/useUpdates'
 
-const isMac = (): boolean => navigator.userAgent.includes('Mac')
-
-/** `aria-keyshortcuts` e o atalho visível (Kbd) de uma tela do menu. */
 function shortcutOf(route: Route['name']): { aria: string; keys: string } | null {
   const keys = SHORTCUTS.find((s) => s.route.name === route)?.keys
   if (!keys) return null
   return { aria: keys.replace('mod', isMac() ? 'Meta' : 'Control'), keys }
 }
 
-/** Versão do app (rodapé da marca). Só leitura; sem versão, nada aparece. */
 function useAppVersion(): string | null {
-  const [version, setVersion] = useState<string | null>(null)
-  useEffect(() => {
-    let alive = true
-    void window.orkio.updates
-      .status()
-      .then((s) => alive && setVersion(s.currentVersion))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [])
-  return version
+  return useUpdates().status?.currentVersion ?? null
 }
 
-/** Cor do quadradinho do projeto (iniciais), estável pelo id. */
-const PROJECT_TINTS = [
-  'bg-brand text-black',
-  'bg-info text-black',
-  'bg-ok text-black',
-  'bg-warn text-black',
-  'bg-danger text-black'
-]
-function projectTint(id: string): string {
-  let h = 0
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return PROJECT_TINTS[h % PROJECT_TINTS.length]!
-}
-
-function ProjectSquare({ project }: { project: ProjectView }): React.JSX.Element {
-  return (
-    <span
-      aria-hidden="true"
-      className={cn(
-        'grid size-[18px] shrink-0 place-items-center rounded-[5px] text-[10px] font-semibold',
-        projectTint(project.id)
-      )}
-    >
-      {project.name.slice(0, 1).toUpperCase()}
-    </span>
-  )
-}
-
-/** Linha de tarefa: ponto do estado, ID em mono apagado e o título. */
 function TaskRow({
   task,
   isSelected,
@@ -103,7 +61,6 @@ function TaskRow({
   )
 }
 
-/** Grupo de tarefas com título em caixa-alta pequena e a contagem (mockup). */
 function Section({
   title,
   count,
@@ -127,10 +84,6 @@ function Section({
   )
 }
 
-/**
- * Lista lateral (mockup + Alva Tasks): marca e versão, projeto atual, "Buscar tarefa", as tarefas
- * do projeto pelo que fazer agora e, embaixo, as três telas com o atalho e a conta.
- */
 export function Sidebar({
   route,
   project,
@@ -145,7 +98,6 @@ export function Sidebar({
   onContinueSetup,
   account
 }: {
-  /** Conta da pessoa no rodapé (`AccountMenu`). */
   account: React.ReactNode
   route: Route
   project: ProjectView | null
@@ -225,7 +177,7 @@ export function Sidebar({
           aria-label={`Projeto atual: ${project ? project.name : 'nenhum'}. Trocar projeto`}
           className="flex w-full items-center gap-2 rounded-lg border border-border bg-card px-2 py-[7px] text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40"
         >
-          {project && <ProjectSquare project={project} />}
+          {project && <ProjectAvatar size="sm" project={project} />}
           <span className="min-w-0 flex-1 truncate text-foreground">
             {project ? project.name : 'Nenhum projeto'}
           </span>
@@ -234,7 +186,7 @@ export function Sidebar({
         <DropdownMenuContent align="start" className="w-(--radix-dropdown-menu-trigger-width)">
           {(projects ?? []).map((p) => (
             <DropdownMenuItem key={p.id} onSelect={() => onChooseProject(p.id)}>
-              <ProjectSquare project={p} />
+              <ProjectAvatar size="sm" project={p} />
               <span className="truncate">
                 {p.id === project?.id ? `${p.name} (atual)` : p.name}
               </span>

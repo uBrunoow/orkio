@@ -12,8 +12,11 @@
  * - Embutidos (8B, `builtin:<id>`): catálogo do app (`shared/agent-presets.ts`), só leitura e já
  *   aprovados; valem em todos os projetos. Para mudar, duplique (vira um perfil comum).
  */
-import { createHash, randomBytes } from 'node:crypto'
-import { lstat, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import type { TaskEventDetailInput } from '../../shared/task-events'
+import { createHash } from 'node:crypto'
+import { DomainError } from '../errors'
+import { lstat, readdir, readFile } from 'node:fs/promises'
+import { atomicWriteFile } from '../storage/atomic-write'
 import { join, relative, resolve, sep } from 'node:path'
 import {
   AGENT_ID,
@@ -21,6 +24,8 @@ import {
   AGENT_LIMITS,
   agentInitials,
   agentKey,
+  commandAllowed,
+  isUsableAgent,
   localDayStart,
   parseAgentFile,
   parseAgentKey,
@@ -35,13 +40,17 @@ import {
   type ProjectAgents,
   type WritableAgentScope
 } from '../../shared/agent'
-import { BUILTIN_AGENTS, builtinAgent } from '../../shared/agent-presets'
+import { BUILTIN_AGENTS, agentDisplayName, builtinAgent } from '../../shared/agent-presets'
 import type { BoardStore } from '../board/board.store'
 import type { StageChange } from '../board/board.service'
+import { isStageEntry } from '../board/stage-entry'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
-import { redactSecrets } from '../claude/redact'
+import { redactSecrets } from '../platform/redact'
+import { projectById } from '../config/queries'
+import { toRunAgent, type RunAgent } from '../claude/run-spec'
+import { AGENTS_DIR, SCRATCH_DIR } from '../../shared/orkio-scratch'
 
 export const AGENT_MESSAGES = {
   notFound: 'Agente não encontrado. Atualize a tela.',
@@ -50,7 +59,7 @@ export const AGENT_MESSAGES = {
   secret:
     'As instruções parecem conter um segredo (token, chave ou senha). Remova antes de salvar.',
   idChanged: 'O id de um agente não muda depois de criado. Use “Duplicar” para criar outro.',
-  symlink: 'A pasta .orkio/agents do projeto é um link simbólico; o Orkio não grava nela.',
+  symlink: `A pasta ${AGENTS_DIR} do projeto é um link simbólico; o Orkio não grava nela.`,
   writeFailed: 'Não foi possível gravar o perfil do agente. Confira as permissões da pasta.',
   busy: 'Esta tarefa tem um fluxo em andamento. Cancele ou espere terminar para trocar o agente.',
   invalid: 'O perfil deste agente tem erros. Corrija na tela Agentes.',
@@ -59,17 +68,13 @@ export const AGENT_MESSAGES = {
   stale: 'O perfil mudou desde que você abriu. Atualize a tela e revise de novo.',
   builtin:
     'Os agentes embutidos não podem ser alterados. Use “Duplicar” para criar uma cópia editável.',
-  badStage: 'Etapa não encontrada no quadro deste projeto.'
+  badStage: 'Etapa não encontrada no quadro deste projeto.',
+  gone: 'O agente desta tarefa não existe mais.',
+  unavailable: 'Agente indisponível.'
 } as const
 
-export class AgentError extends Error {
-  constructor(
-    readonly code: string,
-    message: string
-  ) {
-    super(message)
-    this.name = 'AgentError'
-  }
+export class AgentError extends DomainError {
+  override name = 'AgentError'
 }
 
 /** Agente pronto para uma execução (a cópia do perfil vai junto com o fluxo). */
@@ -86,7 +91,11 @@ export interface AgentsServiceDeps {
   localDir: string
   /** Há fluxo ativo na tarefa? (troca de agente fica bloqueada). */
   hasActiveFlow(taskId: string): boolean
-  /** Ids das etapas do quadro do projeto. */
+  /** Execuções do agente desde `since` (dono de `agent_runs`: `RunService.agentRunsSince`). */
+  agentRuns(
+    agentKey: AgentKey,
+    since: string
+  ): { count: number; costUsd: number; startedAt: string[] }
   stageIds(projectId: string): string[]
   actor(): string
   emit(projectId: string): void
@@ -113,8 +122,6 @@ export class AgentsService {
   private now(): Date {
     return this.deps.now?.() ?? new Date()
   }
-
-  // ---------- Leitura ----------
 
   async list(projectId: string): Promise<AgentsState> {
     const project = this.project(projectId)
@@ -174,8 +181,54 @@ export class AgentsService {
     const key = this.assignedKey(taskId)
     if (!key) return null
     const view = await this.get(projectId, key)
-    if (!view) throw new AgentError('not_found', 'O agente desta tarefa não existe mais.')
+    if (!view) throw new AgentError('not_found', AGENT_MESSAGES.gone)
     return this.usable(view)
+  }
+
+  /**
+   * Agente da tarefa para o "Rodar" manual (como vai para a execução). `null` = sem agente. Lança
+   * `AgentError` (pt-BR) quando ele não pode rodar: sem aprovação, limite do dia ou comando fora
+   * da lista dele.
+   */
+  async runAgentFor(
+    projectId: string,
+    taskId: string,
+    command: string | null
+  ): Promise<RunAgent | null> {
+    const runtime = await this.runtimeFor(projectId, taskId)
+    if (!runtime) return null
+    const limit = this.limitProblem(runtime)
+    if (limit) throw new AgentError('limit', limit)
+    if (command && !commandAllowed(runtime.profile, command)) {
+      throw new AgentError(
+        'denied',
+        `${runtime.profile.name} não tem permissão para o comando /${command}.`
+      )
+    }
+    return toRunAgent(runtime)
+  }
+
+  /**
+   * O que o formulário mostra: "Rodar como <agente>" (`problem: null`) ou por que ele não pode
+   * rodar agora. `null` = tarefa sem agente.
+   */
+  async problemFor(
+    projectId: string,
+    taskId: string
+  ): Promise<{ name: string; problem: string | null } | null> {
+    const key = this.assignedKey(taskId)
+    if (!key) return null
+    const view = await this.get(projectId, key)
+    if (!view?.profile) return { name: key, problem: AGENT_MESSAGES.gone }
+    try {
+      const runtime = await this.runtimeFor(projectId, taskId)
+      return { name: view.profile.name, problem: runtime ? this.limitProblem(runtime) : null }
+    } catch (error) {
+      return {
+        name: view.profile.name,
+        problem: error instanceof AgentError ? error.message : AGENT_MESSAGES.unavailable
+      }
+    }
   }
 
   /** Mensagem do limite diário atingido (main), ou `null`. */
@@ -193,13 +246,8 @@ export class AgentsService {
   }
 
   usage(key: AgentKey): { runs: number; costUsd: number } {
-    const since = localDayStart(this.now()).toISOString()
-    const r = this.deps.db.get<{ n: number; cost: number | null }>(
-      'SELECT COUNT(*) AS n, SUM(cost) AS cost FROM agent_runs WHERE agent_key = ? AND started_at >= ?',
-      key,
-      since
-    )
-    return { runs: r?.n ?? 0, costUsd: r?.cost ?? 0 }
+    const r = this.deps.agentRuns(key, localDayStart(this.now()).toISOString())
+    return { runs: r.count, costUsd: r.costUsd }
   }
 
   /** Execuções por hora nas últimas `ACTIVITY_HOURS` horas (índice 0 = a mais antiga). */
@@ -207,12 +255,9 @@ export class AgentsService {
     const hour = 3_600_000
     const nowMs = this.now().getTime()
     const out = new Array<number>(ACTIVITY_HOURS).fill(0)
-    for (const r of this.deps.db.all<{ started_at: string }>(
-      'SELECT started_at FROM agent_runs WHERE agent_key = ? AND started_at >= ?',
-      key,
-      new Date(nowMs - ACTIVITY_HOURS * hour).toISOString()
-    )) {
-      const age = Math.floor((nowMs - Date.parse(r.started_at)) / hour)
+    const since = new Date(nowMs - ACTIVITY_HOURS * hour).toISOString()
+    for (const startedAt of this.deps.agentRuns(key, since).startedAt) {
+      const age = Math.floor((nowMs - Date.parse(startedAt)) / hour)
       if (age >= 0 && age < ACTIVITY_HOURS) out[ACTIVITY_HOURS - 1 - age]! += 1
     }
     return out
@@ -231,7 +276,6 @@ export class AgentsService {
     return r ? { key: r.agent_key, manual: r.assigned_by === 'manual' } : null
   }
 
-  /** Atribuições do projeto (tarefa → agente), para o orquestrador. */
   assignments(projectId: string): Map<string, { key: AgentKey; manual: boolean }> {
     const out = new Map<string, { key: AgentKey; manual: boolean }>()
     for (const r of this.deps.db.all<{
@@ -265,15 +309,13 @@ export class AgentsService {
     const current = this.assignment(taskId)
     if (!current || current.manual) return
     this.deps.db.run('DELETE FROM agent_assignments WHERE task_page_id = ?', taskId)
-    this.taskEvent(projectId, taskId, 'agent_unassigned', {
-      agentKey: current.key,
-      agent: name,
-      by: 'orchestrator'
+    this.taskEvent(projectId, taskId, {
+      kind: 'agent_unassigned',
+      detail: { agentKey: current.key, agent: name, by: 'orchestrator' }
     })
     this.deps.emit(projectId)
   }
 
-  /** Avatares dos cards do quadro. */
   async badges(projectId: string): Promise<Record<string, AgentBadge>> {
     const rows = this.deps.db.all<{ task_page_id: string; agent_key: string }>(
       'SELECT task_page_id, agent_key FROM agent_assignments WHERE project_id = ?',
@@ -284,7 +326,7 @@ export class AgentsService {
     const out: Record<string, AgentBadge> = {}
     for (const r of rows) {
       const view = agents.find((a) => a.key === r.agent_key)
-      const name = view?.profile?.name ?? parseAgentKey(r.agent_key)?.id ?? '?'
+      const name = view?.profile?.name ?? agentDisplayName(r.agent_key, this.names)
       out[r.task_page_id] = {
         key: r.agent_key,
         name,
@@ -292,7 +334,7 @@ export class AgentsService {
         initials: agentInitials(name),
         ...(view?.profile ? { model: view.profile.model, effort: view.profile.effort } : {}),
         problem: !view
-          ? 'O agente desta tarefa não existe mais.'
+          ? AGENT_MESSAGES.gone
           : view.status === 'ready'
             ? null
             : this.statusMessage(view)
@@ -300,8 +342,6 @@ export class AgentsService {
     }
     return out
   }
-
-  // ---------- Escrita ----------
 
   /**
    * Cria (`isNew`) ou atualiza um perfil. O id não muda depois de criado. Perfil do repositório
@@ -365,10 +405,13 @@ export class AgentsService {
     if (key === null) {
       this.deps.store.transaction(() => {
         this.deps.db.run('DELETE FROM agent_assignments WHERE task_page_id = ?', taskId)
-        this.taskEvent(projectId, taskId, 'agent_unassigned', {
-          agentKey: current,
-          agent: current ? (parseAgentKey(current)?.id ?? '') : '',
-          by: 'manual'
+        this.taskEvent(projectId, taskId, {
+          kind: 'agent_unassigned',
+          detail: {
+            agentKey: current,
+            agent: current ? agentDisplayName(current, this.names) : '',
+            by: 'manual'
+          }
         })
       })
       this.deps.emit(projectId)
@@ -376,16 +419,18 @@ export class AgentsService {
     }
     const view = await this.get(projectId, key)
     if (!view) throw new AgentError('not_found', AGENT_MESSAGES.notFound)
-    if (view.status === 'invalid' || view.status === 'archived') {
-      throw new AgentError(view.status, this.statusMessage(view))
+    if (!isUsableAgent(view)) {
+      throw new AgentError(
+        view.status === 'archived' ? 'archived' : 'invalid',
+        this.statusMessage(view)
+      )
     }
     this.deps.store.transaction(() =>
-      this.insertAssignment(projectId, taskId, key, view.profile!.name, 'manual')
+      this.insertAssignment(projectId, taskId, key, view.profile.name, 'manual')
     )
     this.deps.emit(projectId)
   }
 
-  /** Regras "tarefas que entram em <etapa> vão para <agente>". */
   async setRules(projectId: string, rules: ProjectAgents['assignOnEnter']): Promise<AgentsState> {
     this.project(projectId)
     const stages = new Set(this.deps.stageIds(projectId))
@@ -396,7 +441,7 @@ export class AgentsService {
       if (seen.has(r.stageId)) throw new AgentError('invalid', 'Uma etapa só pode ter um agente.')
       seen.add(r.stageId)
       const view = await this.get(projectId, r.agentKey)
-      if (!view?.profile || view.status === 'invalid' || view.status === 'archived') {
+      if (!view || !isUsableAgent(view)) {
         throw new AgentError('invalid', 'Escolha um agente válido para cada etapa.')
       }
       names.push(view.profile.name)
@@ -422,17 +467,14 @@ export class AgentsService {
    * ainda não tem agente) ANTES de o fluxo da coluna começar. Só entrada real (manual/automação).
    */
   onStageChanged(change: StageChange): void {
-    if (change.source !== 'manual' && change.source !== 'automation') return
-    if (!change.to) return
+    if (!isStageEntry(change)) return
     const rule = this.rules(change.projectId).find((r) => r.stageId === change.to)
     if (!rule) return
     if (this.assignedKey(change.taskId) || this.deps.hasActiveFlow(change.taskId)) return
-    const name = this.names.get(rule.agentKey) ?? parseAgentKey(rule.agentKey)?.id ?? ''
+    const name = agentDisplayName(rule.agentKey, this.names)
     this.insertAssignment(change.projectId, change.taskId, rule.agentKey, name, 'rule')
     this.deps.emit(change.projectId)
   }
-
-  // ---------- Interno ----------
 
   private usable(view: AgentView): AgentRuntime {
     if (view.status !== 'ready' || !view.profile) {
@@ -474,24 +516,25 @@ export class AgentsService {
       // A tabela só distingue "à mão" de "automático" (o detalhe do evento diz quem).
       by === 'manual' ? 'manual' : 'rule'
     )
-    this.taskEvent(projectId, taskId, 'agent_assigned', { agentKey: key, agent: name, by })
+    this.taskEvent(projectId, taskId, {
+      kind: 'agent_assigned',
+      detail: { agentKey: key, agent: name, by }
+    })
   }
 
   private taskEvent(
     projectId: string,
     taskId: string,
-    kind: 'agent_assigned' | 'agent_unassigned',
-    detail: Record<string, unknown>
+    event:
+      | { kind: 'agent_assigned'; detail: TaskEventDetailInput<'agent_assigned'> }
+      | { kind: 'agent_unassigned'; detail: TaskEventDetailInput<'agent_unassigned'> }
   ): void {
     this.deps.store.addEvent({
       taskPageId: taskId,
       projectId,
       at: this.now().toISOString(),
-      kind,
-      source: detail['by'] === 'manual' ? 'manual' : 'automation',
-      fromStage: null,
-      toStage: null,
-      detail
+      ...event,
+      source: event.detail.by === 'manual' ? 'manual' : 'automation'
     })
   }
 
@@ -512,20 +555,20 @@ export class AgentsService {
   }
 
   private project(projectId: string): { localPath: string } {
-    const p = this.deps.config.get().projects.find((x) => x.id === projectId)
+    const p = projectById(this.deps.config.get(), projectId)
     if (!p) throw new AgentError('not_found', AGENT_MESSAGES.projectNotFound)
     return p
   }
 
   private repoDir(localPath: string): string {
-    return join(localPath, '.orkio', 'agents')
+    return join(localPath, ...AGENTS_DIR.split('/'))
   }
 
   private toView(projectId: string, e: FileEntry, assigned: number): AgentView {
     const key = agentKey(e.scope, e.id)
     const file =
       e.scope === 'repo'
-        ? `.orkio/agents/${e.id}.md`
+        ? `${AGENTS_DIR}/${e.id}.md`
         : e.scope === 'local'
           ? `agents/${e.id}.md (este computador)`
           : 'Embutido no Orkio'
@@ -596,7 +639,6 @@ export class AgentsService {
     return out
   }
 
-  /** Lê `<dir>/<id>.md`: só arquivo comum (sem link), até 16 KB. `null` = não existe. */
   private async readOne(scope: AgentScope, dir: string, id: string): Promise<FileEntry | null> {
     if (!AGENT_ID.test(id)) return null
     const file = join(dir, `${id}.md`)
@@ -634,10 +676,13 @@ export class AgentsService {
       // Nada de seguir links: .orkio e .orkio/agents precisam ser pastas de verdade no projeto.
       const root = resolve(projectPath)
       const target = resolve(dir)
-      if (!target.startsWith(root + sep) || relative(root, target) !== join('.orkio', 'agents')) {
+      if (
+        !target.startsWith(root + sep) ||
+        relative(root, target) !== join(...AGENTS_DIR.split('/'))
+      ) {
         throw new AgentError('write_failed', AGENT_MESSAGES.writeFailed)
       }
-      for (const p of [join(root, '.orkio'), target]) {
+      for (const p of [join(root, SCRATCH_DIR), target]) {
         const st = await lstat(p).catch(() => null)
         if (st?.isSymbolicLink()) throw new AgentError('symlink', AGENT_MESSAGES.symlink)
         if (st && !st.isDirectory())
@@ -647,14 +692,9 @@ export class AgentsService {
     const file = join(dir, `${id}.md`)
     const st = await lstat(file).catch(() => null)
     if (st?.isSymbolicLink()) throw new AgentError('symlink', AGENT_MESSAGES.symlink)
-    const tmp = join(dir, `.${id}.md.${randomBytes(6).toString('hex')}.tmp`)
     try {
-      await mkdir(dir, { recursive: true })
-      await writeFile(tmp, text, { encoding: 'utf8', mode: 0o644 })
-      await rename(tmp, file)
-    } catch (error) {
-      await rm(tmp, { force: true }).catch(() => undefined)
-      if (error instanceof AgentError) throw error
+      await atomicWriteFile(file, text, { mode: 0o644, fsync: false })
+    } catch {
       throw new AgentError('write_failed', AGENT_MESSAGES.writeFailed)
     }
   }
@@ -671,7 +711,6 @@ function hashOf(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
 }
 
-/** Tira espaços das pontas e lixo das listas antes de validar/gravar. */
 function normalize(p: AgentProfile): AgentProfile {
   return {
     ...p,

@@ -16,7 +16,6 @@ export interface SelectOption {
   label: string
   description?: string
   disabled?: boolean
-  /** Agrupa as opções (cabeçalho do grupo na lista). */
   group?: string
 }
 

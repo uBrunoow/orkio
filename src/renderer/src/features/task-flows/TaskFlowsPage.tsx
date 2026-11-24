@@ -1,5 +1,7 @@
-import { useEffect, useId, useMemo, useState } from 'react'
-import { useProjectActivity } from '../../components/SentenceDetail'
+import { useId, useMemo, useState } from 'react'
+import { useProjectActivity } from '../overview/useProjectActivity'
+import { useProjectFlows } from './useProjectFlows'
+import { useCatalog } from '../claude/useCatalog'
 import { FlowDetail } from './FlowDetail'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,8 +21,9 @@ import {
 } from '@/components/form'
 import { cn } from '@/lib/utils'
 import type { CatalogGroup } from '../../../../shared/agent-run'
-import type { TaskFlowsProject } from '../../../../shared/ipc-contract'
+import { DECLARED_FLOW_VARS } from '../../../../shared/flow-outputs'
 import {
+  GATE_SHOWS,
   MAX_REVISE,
   STEP_TYPE_LABEL,
   newStepId,
@@ -28,7 +31,8 @@ import {
   type Condition,
   type Flow,
   type Step,
-  type StepType
+  type StepType,
+  type TaskFlowsProject
 } from '../../../../shared/task-flow'
 import { Alert } from '../../components/Alert'
 import { PageState } from '../../components/PageState'
@@ -36,8 +40,10 @@ import { SaveBar } from '../../components/SaveBar'
 import { plural } from '../../lib/format'
 import { RuntimePicker, useSupportsEffort } from '../claude/RuntimePicker'
 import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../components/icons'
+import { GATE_SHOW_TEXT, stepSummary } from './step-text'
+import { ipcResult } from '../../lib/ipc'
+import { useBoard } from '../board/useBoard'
 
-/** Chip mono (categoria do passo, contagem de erros). */
 function Chip({
   tone = 'neutral',
   children
@@ -105,47 +111,33 @@ function emptyStep(flow: Flow, type: StepType): Step {
  * com formulário por tipo. Comandos vêm do catálogo da 4B. A validação é a mesma do main.
  */
 export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.Element {
-  const [project, setProject] = useState<TaskFlowsProject | null>(null)
+  const projectFlows = useProjectFlows(projectId)
+  const project = projectFlows.value
   const [flows, setFlows] = useState<Flow[]>([])
-  // Última versão salva: base do contador de alterações e do "Descartar".
   const [saved, setSaved] = useState<Flow[]>([])
   const [selected, setSelected] = useState<string | null>(null)
-  const [catalog, setCatalog] = useState<CatalogGroup[] | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
-  // Fluxo aberto no editor (os outros aparecem em frase, fase 6). Novo fluxo já abre editando.
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [stageNames, setStageNames] = useState<Record<string, string>>({})
   const flowActivity = useProjectActivity(projectId, 'flow')
 
-  useEffect(() => {
-    let active = true
-    void window.orkio.taskFlows.getProject(projectId).then((r) => {
-      if (!active) return
-      if (r.ok) {
-        setProject(r.value)
-        setFlows(r.value.flows)
-        setSaved(r.value.flows)
-        setSelected(r.value.flows[0]?.id ?? null)
-      } else setMessage({ tone: 'error', text: r.error.message })
-    })
-    // Nomes das colunas para a frase "Quando a tarefa entra em…".
-    void window.orkio.board
-      .get(projectId)
-      .then((r) => {
-        if (active && r.ok)
-          setStageNames(
-            Object.fromEntries((r.value.config?.stages ?? []).map((st) => [st.id, st.name]))
-          )
-      })
-      .catch(() => undefined)
-    void window.orkio.claude.catalog(projectId, 'projeto').then((r) => {
-      if (active) setCatalog(r.ok ? r.value : [])
-    })
-    return () => {
-      active = false
-    }
-  }, [projectId])
+  // O salvo acompanha a fonte (outra tela criou fluxos Alva, releitura ao abrir) enquanto você
+  // não tiver mudanças a salvar.
+  const loaded = project?.flows
+  const [shown, setShown] = useState<Flow[] | null>(null)
+  if (loaded && loaded !== shown && countFlowChanges(saved, flows) === 0) {
+    setShown(loaded)
+    setFlows(loaded)
+    setSaved(loaded)
+    setSelected((id) => (id && loaded.some((f) => f.id === id) ? id : (loaded[0]?.id ?? null)))
+  }
+  const board = useBoard(projectId).view
+  const stageNames = useMemo(
+    () => Object.fromEntries((board?.config?.stages ?? []).map((st) => [st.id, st.name])),
+    [board]
+  )
+  // Catálogo do Claude Code no projeto (sem tarefa: a pasta do projeto); falha = vazio.
+  const catalog: CatalogGroup[] | null = useCatalog(projectId, null).groups
 
   const commands = useMemo(
     () => (catalog ? new Set(catalog.flatMap((g) => g.commands.map((c) => c.name))) : null),
@@ -155,7 +147,8 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
     () => ({
       commands,
       extractors: project?.extractors.map((e) => e.id) ?? [],
-      actions: project?.actions.map((a) => a.id) ?? []
+      actions: project?.actions.map((a) => a.id) ?? [],
+      declaredVars: DECLARED_FLOW_VARS
     }),
     [commands, project]
   )
@@ -164,7 +157,13 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
     [flows, ctx]
   )
 
-  if (!project) return <Skeleton className="h-60" aria-label="Carregando fluxos" />
+  if (!project) {
+    return projectFlows.error ? (
+      <Alert tone="danger">{projectFlows.error.message}</Alert>
+    ) : (
+      <Skeleton className="h-60" aria-label="Carregando fluxos" />
+    )
+  }
 
   const flow = flows.find((f) => f.id === selected) ?? null
   const hasErrors = [...issuesByFlow.values()].some((l) => l.some((i) => i.level === 'error'))
@@ -175,9 +174,13 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
 
   const save = async (): Promise<void> => {
     setSaving(true)
-    const r = await window.orkio.taskFlows.saveFlows(projectId, flows)
+    const r = await ipcResult(() => window.orkio.taskFlows.saveFlows(projectId, flows))
     setSaving(false)
-    if (r.ok) setSaved(flows)
+    if (r.ok) {
+      setSaved(flows)
+      setShown(r.value.flows)
+      projectFlows.set(r.value)
+    }
     setMessage(
       r.ok ? { tone: 'ok', text: 'Fluxos salvos.' } : { tone: 'error', text: r.error.message }
     )
@@ -261,7 +264,6 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
                 flow={flow}
                 bindings={project.bindings.filter((b) => b.flowId === flow.id && b.enabled)}
                 stageName={(id) => stageNames[id] ?? 'coluna removida'}
-                actionLabel={(id) => project.actions.find((a) => a.id === id)?.label ?? id}
                 activity={flowActivity}
                 onEdit={() => setEditingId(flow.id)}
               />
@@ -310,7 +312,6 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
   )
 }
 
-/** Quantos fluxos mudaram desde o último salvar (novos, removidos ou editados). */
 function countFlowChanges(saved: readonly Flow[], current: readonly Flow[]): number {
   const before = new Map(saved.map((f) => [f.id, JSON.stringify(f)]))
   const now = new Set(current.map((f) => f.id))
@@ -318,42 +319,6 @@ function countFlowChanges(saved: readonly Flow[], current: readonly Flow[]): num
   for (const f of current) if (before.get(f.id) !== JSON.stringify(f)) n++
   for (const id of before.keys()) if (!now.has(id)) n++
   return n
-}
-
-/** Uma linha que resume o passo (lista de passos). */
-function stepSummary(step: Step): string {
-  switch (step.type) {
-    case 'claude_command':
-      return [
-        step.prompt !== undefined
-          ? `pedido: “${step.prompt.trim() || '…'}”`
-          : `/${step.command || '…'} ${step.args}`.trim(),
-        `${step.timeoutMin} min`,
-        ...(step.readOnly ? ['só leitura'] : []),
-        ...(step.delivery ? ['modo entrega'] : [])
-      ].join(' · ')
-    case 'gate':
-      return [
-        `“${step.message}”`,
-        step.show === 'diff'
-          ? 'mostra o diff'
-          : step.show === 'summary'
-            ? 'mostra o resumo'
-            : step.show === 'backlog'
-              ? 'mostra a spec e o plano'
-              : step.show === 'result'
-                ? 'mostra o resultado'
-                : null,
-        `recusar → ${step.onReject === 'stop' ? 'encerra' : step.onReject}`,
-        step.revise ? `ajustes → ${step.revise.step} (até ${step.revise.max})` : null
-      ]
-        .filter(Boolean)
-        .join(' · ')
-    case 'orkio_action':
-      return step.action
-    case 'branch':
-      return `ir para ${step.then}${step.else ? ` · senão ${step.else}` : ' · senão segue'}`
-  }
 }
 
 function FlowEditor({
@@ -386,7 +351,6 @@ function FlowEditor({
     onChange({ ...flow, steps })
     setSelectedIndex(i + delta)
   }
-  // Novo passo entra depois do selecionado (ou no fim) e já fica aberto.
   const add = (type: StepType): void => {
     const at = flow.steps.length === 0 ? 0 : index + 1
     const steps = [...flow.steps]
@@ -577,7 +541,6 @@ function StepForm({
   catalog: CatalogGroup[] | null
   project: TaskFlowsProject
   stepOptions: { value: string; label: string }[]
-  /** Passos do Claude Code (alvo de "Pedir ajustes"). */
   claudeSteps: { value: string; label: string }[]
   onChange(step: Step): void
 }): React.JSX.Element {
@@ -735,13 +698,7 @@ function StepForm({
           <div className="grid gap-3 sm:grid-cols-3">
             <SelectField
               label="Mostrar ao aprovar"
-              options={[
-                { value: 'diff', label: 'Diff da pasta de trabalho' },
-                { value: 'summary', label: 'Resumo da última execução' },
-                { value: 'backlog', label: 'Spec e plano (task do Backlog)' },
-                { value: 'result', label: 'Resultado do Claude Code (texto final)' },
-                { value: 'none', label: 'Nada' }
-              ]}
+              options={GATE_SHOWS.map((value) => ({ value, label: GATE_SHOW_TEXT[value].option }))}
               value={step.show}
               onChange={(v: string) => onChange({ ...step, show: v as typeof step.show })}
             />

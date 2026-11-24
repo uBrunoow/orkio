@@ -9,53 +9,58 @@
  *   redigidos), mantendo os `keepPerTask` mais recentes por tarefa.
  * - Nada do conteúdo da página vai para o SQLite: só ids, status, datas, custo e resumo técnico.
  */
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import type {
-  AgentRunView,
-  PermissionAnswer,
-  RunLogEvent,
-  RunMode,
-  RunStatus,
-  RunSummary
-} from '../../shared/agent-run'
-import type { BoardStore } from '../board/board.store'
-import type { Db } from '../db/database'
-import type { Git } from '../git/git'
-import type { DeliveryTarget } from '../../shared/delivery'
-import type { DeliveryEvent, DeliveryKind } from './delivery-policy'
 import {
-  CLAUDE_MODELS,
-  EFFORT_LABELS,
-  isEffort,
-  isModelName,
-  resolveRuntime,
-  type Effort,
-  type RuntimeChoice
-} from '../../shared/agent-runtime'
+  ACTIVE_RUN_STATUSES,
+  type AgentRunView,
+  type PermissionAnswer,
+  type RunLogEvent,
+  type RunMode,
+  type RunStatus,
+  type RunSummary
+} from '../../shared/agent-run'
+import { BRIEFING_PATH, isScratchPath } from '../../shared/orkio-scratch'
+import type { BoardStore, TaskEventInput } from '../board/board.store'
+import type { Db } from '../db/database'
+import { DomainError } from '../errors'
+import type { Git } from '../git/git'
+import type { DeliveryEvent, DeliveryKind } from './delivery-policy'
+import { CLAUDE_MODELS, EFFORT_LABELS } from '../../shared/agent-runtime'
 import {
   DELIVERY_ALLOWED,
-  evaluatePermission,
+  decidePermission,
   isInside,
   type AllowRule,
   type DeliveryAction,
   type PolicyAliases
 } from './policy'
-import { envFileValues, isEnvFile, redactSecrets, redactValues } from './redact'
+import { envFileValues, isEnvFile, redactSecrets, redactValues } from '../platform/redact'
+import {
+  deliveryOf,
+  runInputRecord,
+  type RunInput,
+  type RunSession,
+  type RunSpec
+} from './run-spec'
 import { PermissionBroker, type BridgeDecision, type BridgeRequest } from './runner'
-import type {
-  WorktreeProject,
-  WorktreeRecord,
-  WorktreeService,
-  WorktreeTask
-} from './worktree.service'
+import { ensureScratch } from './scratch'
+import { summarizeTool } from './stream'
+import type { WorktreeRecord, WorktreeService } from './worktree.service'
 
+export type { RunAgent, RunSpec } from './run-spec'
+
+type RunEventKind =
+  'run_started' | 'run_finished' | 'run_cancelled' | 'run_failed' | 'run_blocked' | 'delivery'
 export interface RunHandle {
   start(): Promise<void>
   cancel(): void
 }
+
+const ACTIVE_RUN_SQL = `(${ACTIVE_RUN_STATUSES.map((s) => `'${s}'`).join(', ')})`
 
 export interface RunServiceDeps {
   db: Db
@@ -64,28 +69,20 @@ export interface RunServiceDeps {
   git: Pick<Git, 'diffStat' | 'commitsSince'>
   /** Cria o processo do Claude Code (real: ClaudeRun; testes: falso). */
   createRun(options: {
+    /** A execução: o processo monta os argumentos do CLI dela (`buildCliArgs`). */
+    spec: RunSpec
     cwd: string
     prompt: string
+    /** Id da sessão (o da sessão retomada, no `--resume`). */
     sessionId: string
-    /** Continua a sessão `sessionId` (`--resume`). */
-    resume: boolean
     broker: PermissionBroker
-    /** Modo entrega (5C): troca as regras `deny` do CLI pelas do modo entrega. */
-    delivery: boolean
-    /** Agente (8A): `--append-system-prompt` e `--model`. */
-    appendSystemPrompt: string | null
-    model: string | null
-    /** Raciocínio (`--effort`); `null` = padrão. */
-    effort: Effort | null
-    /** Passo só de leitura: sem as ferramentas de edição (`--disallowedTools`). */
-    readOnly: boolean
     onEvent(event: RunLogEvent): void
     onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   }): RunHandle
   /** Aliases do git/gh e `push.default`, lidos no começo da execução (política). */
-  policyInputs?(dir: string): Promise<{ aliases: PolicyAliases; pushDefault: string | null }>
-  /** Branch atual do worktree, lida antes de avaliar um push. */
-  currentBranch?(dir: string): Promise<string | null>
+  policyInputs(dir: string): Promise<{ aliases: PolicyAliases; pushDefault: string | null }>
+  /** Branch atual do worktree; a política pede quando precisa (push no modo entrega). */
+  currentBranch(dir: string): Promise<string | null>
   /** Número da PR aberta da branch (sinais da 2D), para o link no histórico. */
   prFor?(projectId: string, branch: string): number | null
   runsDir: string
@@ -101,59 +98,6 @@ export interface RunServiceDeps {
   newId?: () => string
 }
 
-export interface StartRunInput {
-  project: WorktreeProject & { name: string }
-  task: WorktreeTask
-  mode: RunMode
-  /** Comando instalado (sem a barra), quando mode = 'command'. */
-  command: string | null
-  /** Texto livre (prompt) ou argumentos do comando. */
-  text: string
-  briefing: string
-  /** Tempo limite (min): ao estourar, cancela e a execução termina como falha. */
-  timeoutMin?: number
-  /** Comando: junta o briefing ao texto (padrão). Falso = só os argumentos; o arquivo continua. */
-  includeBriefing?: boolean
-  /** Modo entrega (5C): só em passo de fluxo marcado; vale só nesta execução. */
-  delivery?: { target: DeliveryTarget; requirePushApproval: boolean } | null
-  /**
-   * Repositório do projeto fora do modo entrega: libera só a leitura do GitHub (`gh pr view`,
-   * `gh api` GET) nesse repositório. `null` = sem repositório verificado (gh segue bloqueado).
-   */
-  githubRead?: DeliveryTarget | null
-  /**
-   * Agente (8A): instruções no system prompt e modelo. Não muda nenhuma permissão: a política,
-   * o modo entrega e as aprovações são os mesmos de uma execução sem agente.
-   */
-  agent?: RunAgent | null
-  /**
-   * Modelo/raciocínio da mensagem ou do passo: vencem os do agente. `null` num campo = padrão do
-   * Claude Code de propósito; campo ausente = vale o do agente.
-   */
-  runtime?: Partial<RuntimeChoice> | null
-  /**
-   * Continua a conversa desta sessão do Claude Code (`--resume`), no mesmo worktree. O prompt
-   * vai como está (sem o briefing, que a sessão já leu).
-   */
-  resumeSessionId?: string | null
-  /**
-   * Passo só de leitura de um fluxo: o Claude Code não recebe as ferramentas de edição. A política
-   * do Orkio (shell pergunta, push bloqueado) continua a mesma.
-   */
-  readOnly?: boolean
-}
-
-export interface RunAgent {
-  key: string
-  name: string
-  /** Texto do `--append-system-prompt` (`buildAgentPrompt`). */
-  prompt: string
-  /** Alias do modelo; `null` = padrão do usuário. */
-  model: string | null
-  /** Raciocínio (`--effort`); `null` = padrão. */
-  effort: Effort | null
-}
-
 /** Fim de uma execução, para quem a pediu (5A: fluxos). */
 export interface RunFinished {
   runId: string
@@ -165,7 +109,11 @@ export interface RunFinished {
   costUsd: number | null
   /** Motivo curto quando não foi sucesso (ex.: tempo esgotado). */
   message: string | null
+  /** Código do motivo (`null` = sucesso); o fluxo guarda no passo para a tela de problema. */
+  code: RunEndCode | null
 }
+
+export type RunEndCode = 'timed_out' | 'claude_error' | 'start_failed' | 'cancelled'
 
 interface Pending {
   resolve(decision: BridgeDecision): void
@@ -202,13 +150,19 @@ interface ActiveRun {
   timedOut: boolean
   /** Valores lidos de arquivos .env do worktree: escondidos em tudo que vai para o log. */
   secrets: Set<string>
-  /** Modo entrega (5C) e categorias já aprovadas nesta execução. */
-  delivery: StartRunInput['delivery'] | null
-  githubRead: DeliveryTarget | null
+  spec: RunSpec
+  /** Categorias do modo entrega (5C) já aprovadas nesta execução. */
   granted: Set<DeliveryKind>
   aliases: PolicyAliases
   pushDefault: string | null
   start: () => Promise<void>
+}
+
+export class RunBusyError extends DomainError {
+  constructor() {
+    super('busy', RUN_MESSAGES.busy)
+    this.name = 'RunBusyError'
+  }
 }
 
 export const RUN_MESSAGES = {
@@ -223,7 +177,6 @@ export const RUN_MESSAGES = {
 const TEST_COMMAND =
   /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|e2e|vitest|jest)\b|\b(vitest|jest|pytest|go test|cargo test|playwright test)\b/
 
-/** Primeira pergunta do AskUserQuestion (e quantas há), para listas curtas. */
 function questionSummary(input: Record<string, unknown>): string {
   const questions = Array.isArray(input['questions']) ? (input['questions'] as unknown[]) : []
   const first = questions[0] as Record<string, unknown> | undefined
@@ -249,7 +202,7 @@ export class RunService {
     this.questionTimeoutMs = deps.questionTimeoutMs ?? 24 * 60 * 60_000
     // Execuções que ficaram "em andamento" (app fechado/derrubado): o processo não existe mais.
     deps.db.run(
-      `UPDATE agent_runs SET status = 'failed', ended_at = ? WHERE status IN ('queued', 'running')`,
+      `UPDATE agent_runs SET status = 'failed', ended_at = ? WHERE status IN ${ACTIVE_RUN_SQL}`,
       this.now().toISOString()
     )
   }
@@ -258,35 +211,23 @@ export class RunService {
     return this.deps.now?.() ?? new Date()
   }
 
-  /** Comando final enviado ao Claude: comando instalado + argumentos, e o briefing junto. */
-  static composePrompt(
-    mode: RunMode,
-    command: string | null,
-    text: string,
-    briefing: string,
-    includeBriefing = true
-  ): string {
-    const brief = `Briefing da tarefa (também em .orkio/briefing.md no worktree):\n\n${briefing}`
-    if (mode === 'command' && command) {
-      const line = `/${command}${text.trim() ? ` ${text.trim()}` : ''}`
+  /**
+   * Texto enviado ao Claude: o pedido ou o comando instalado + argumentos e, numa sessão nova com
+   * `includeBriefing`, o briefing junto. Sessão retomada já leu o briefing: só o pedido.
+   */
+  static composePrompt(input: RunInput, session: RunSession): string {
+    const brief = `Briefing da tarefa (também em ${BRIEFING_PATH} no worktree):\n\n${
+      session.kind === 'new' ? session.briefing : ''
+    }`
+    const withBriefing = session.kind === 'new' && session.includeBriefing
+    if (input.kind === 'command') {
+      const args = input.args.trim()
+      const line = `/${input.name}${args ? ` ${args}` : ''}`
       // Sem o briefing: o comando recebe só os argumentos ($ARGUMENTS), ex.: um task-ID.
-      return includeBriefing ? `${line}\n\n${brief}` : line
+      return withBriefing ? `${line}\n\n${brief}` : line
     }
-    // Resposta numa sessão que já leu o briefing: só o texto.
-    if (!includeBriefing) return text.trim()
-    return `${text.trim()}\n\n---\n\n${brief}`
-  }
-
-  /** Execuções rodando ou na fila (6C: a atualização não reinicia por cima delas). */
-  activeList(): { projectId: string; taskId: string; queued: boolean }[] {
-    return [
-      ...[...this.active.values()].map((r) => ({
-        projectId: r.projectId,
-        taskId: r.taskId,
-        queued: false
-      })),
-      ...this.queue.map((r) => ({ projectId: r.projectId, taskId: r.taskId, queued: true }))
-    ]
+    if (!withBriefing) return input.text.trim()
+    return `${input.text.trim()}\n\n---\n\n${brief}`
   }
 
   /** Pedidos esperando você (perguntas e permissões), em memória; para a Visão geral (6D). */
@@ -315,14 +256,28 @@ export class RunService {
     )
   }
 
-  /** Execuções na fila ou rodando (em memória); para a Visão geral (6D). */
-  activeRuns(): { runId: string; projectId: string; taskId: string; status: RunStatus }[] {
-    return [...this.active.values(), ...this.queue].map((r) => ({
+  /**
+   * Execuções rodando ou na fila (em memória): Visão geral (6D), manter acordado, atualização (6C:
+   * não reinicia por cima delas) e desligamento.
+   */
+  activeRuns(): {
+    runId: string
+    projectId: string
+    taskId: string
+    status: RunStatus
+    queued: boolean
+  }[] {
+    const view = (r: ActiveRun, queued: boolean) => ({
       runId: r.id,
       projectId: r.projectId,
       taskId: r.taskId,
-      status: r.status
-    }))
+      status: r.status,
+      queued
+    })
+    return [
+      ...[...this.active.values()].map((r) => view(r, false)),
+      ...this.queue.map((r) => view(r, true))
+    ]
   }
 
   isRunning(taskId: string): boolean {
@@ -330,48 +285,36 @@ export class RunService {
   }
 
   /** Inicia (ou enfileira) uma execução. O worktree precisa ter sido preparado antes. */
-  async start(input: StartRunInput): Promise<AgentRunView> {
-    if (this.isRunning(input.task.id)) throw new Error(RUN_MESSAGES.busy)
-    const worktree = this.deps.worktrees.get(input.task.id)
+  async start(spec: RunSpec): Promise<AgentRunView> {
+    if (this.isRunning(spec.task.id)) throw new RunBusyError()
+    const worktree = this.deps.worktrees.get(spec.task.id)
     if (!worktree) throw new Error('Prepare o ambiente da tarefa antes de rodar.')
     const id = this.deps.newId?.() ?? randomUUID()
     const startedAt = this.now().toISOString()
-    const resume = !!input.resumeSessionId
-    const sessionId = input.resumeSessionId || randomUUID()
-    // Mensagem/passo > agente > padrão. No agente, `null` = sem preferência (não bloqueia).
-    const resolved = resolveRuntime(
-      input.runtime ?? undefined,
-      input.agent
-        ? {
-            ...(input.agent.model !== null ? { model: input.agent.model } : {}),
-            ...(input.agent.effort !== null ? { effort: input.agent.effort } : {})
-          }
-        : undefined
-    )
-    // De novo, antes de chegar ao CLI: nome fora do padrão ou raciocínio desconhecido some.
-    const runtime: RuntimeChoice = {
-      model: isModelName(resolved.model) ? resolved.model : null,
-      effort: isEffort(resolved.effort) ? resolved.effort : null
-    }
+    const resume = spec.session.kind === 'resume'
+    const sessionId = spec.session.kind === 'resume' ? spec.session.id : randomUUID()
+    const { runtime, agent } = spec
+    const record = runInputRecord(spec.input)
+    const delivery = deliveryOf(spec)
     this.deps.db.run(
       `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text, agent_key, session_id)
        VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
       id,
-      input.task.id,
-      input.project.id,
-      input.mode,
-      input.command,
+      spec.task.id,
+      spec.project.id,
+      record.mode,
+      record.command,
       startedAt,
-      redactSecrets(input.text).slice(0, 20_000),
-      input.agent?.key ?? null,
+      redactSecrets(record.text).slice(0, 20_000),
+      agent?.key ?? null,
       sessionId
     )
     await mkdir(this.deps.runsDir, { recursive: true })
 
     const run: ActiveRun = {
       id,
-      projectId: input.project.id,
-      taskId: input.task.id,
+      projectId: spec.project.id,
+      taskId: spec.task.id,
       handle: null,
       worktree,
       status: 'queued',
@@ -380,14 +323,13 @@ export class RunService {
       tests: new Set(),
       costUsd: null,
       sessionCostTotal: null,
-      resumedSession: input.resumeSessionId || null,
+      resumedSession: resume ? sessionId : null,
       ok: null,
       resultText: '',
       timer: null,
       timedOut: false,
       secrets: new Set(),
-      delivery: input.delivery ?? null,
-      githubRead: input.githubRead ?? null,
+      spec,
       granted: new Set(),
       aliases: {},
       pushDefault: null,
@@ -395,36 +337,38 @@ export class RunService {
         run.status = 'running'
         this.setStatus(run, 'running')
         this.taskEvent(run, 'run_started', {
-          mode: input.mode,
-          command: input.command,
+          mode: record.mode,
+          command: record.command,
           ...(resume ? { resumed: true } : {}),
-          ...(input.agent ? { agent: input.agent.name, agentKey: input.agent.key } : {})
+          ...(agent ? { agent: agent.name, agentKey: agent.key } : {})
         })
-        // Briefing também em arquivo (fora do git: .git/info/exclude do worktree).
-        await this.writeBriefing(worktree.path, input.briefing).catch(() => undefined)
+        // Briefing também em arquivo, na pasta de rascunho (fora do git).
+        if (spec.session.kind === 'new') {
+          await this.writeBriefing(worktree.path, spec.session.briefing).catch(() => undefined)
+        }
         this.collectEnvSecrets(run, worktree.path)
-        const inputs = await this.deps.policyInputs?.(worktree.path).catch(() => null)
+        const inputs = await this.deps.policyInputs(worktree.path).catch(() => null)
         if (inputs) {
           run.aliases = inputs.aliases
           run.pushDefault = inputs.pushDefault
         }
-        if (run.delivery) {
-          const t = run.delivery.target
+        if (delivery) {
+          const t = delivery.target
           this.log(run, {
             kind: 'text',
             text: `Modo entrega ligado neste passo: push só de ${t.branch} (${t.remote}) e GitHub CLI só em ${t.owner}/${t.repo}.`
           })
         }
-        if (input.readOnly) {
+        if (spec.access.tools === 'read_only') {
           this.log(run, {
             kind: 'info',
             text: 'Só leitura neste passo: o Claude Code não pode editar arquivos e todo comando pede sua aprovação.'
           })
         }
-        if (input.agent) {
+        if (agent) {
           this.log(run, {
             kind: 'text',
-            text: `Rodando como ${input.agent.name}: instruções do agente no início da conversa. As permissões são as mesmas do Orkio.`
+            text: `Rodando como ${agent.name}: instruções do agente no início da conversa. As permissões são as mesmas do Orkio.`
           })
         }
         if (runtime.model || runtime.effort) {
@@ -439,27 +383,17 @@ export class RunService {
         const broker = new PermissionBroker((req) => this.onPermission(run, req))
         await broker.open()
         run.handle = this.deps.createRun({
+          spec,
           cwd: worktree.path,
-          prompt: RunService.composePrompt(
-            input.mode,
-            input.command,
-            input.text,
-            input.briefing,
-            input.includeBriefing !== false && !resume
-          ),
+          prompt: RunService.composePrompt(spec.input, spec.session),
           sessionId,
-          resume,
           broker,
-          delivery: !!run.delivery,
-          appendSystemPrompt: input.agent?.prompt ?? null,
-          model: runtime.model,
-          effort: runtime.effort,
-          readOnly: input.readOnly === true,
           onEvent: (event) => this.onEvent(run, event),
           onExit: (result) => void this.onExit(run, result)
         })
         await run.handle.start()
-        if (input.timeoutMin && input.timeoutMin > 0) {
+        const timeoutMin = spec.timeoutMin
+        if (timeoutMin && timeoutMin > 0) {
           run.timer = setTimeout(() => {
             run.timedOut = true
             run.cancelled = true
@@ -470,7 +404,7 @@ export class RunService {
               })
             }
             run.handle?.cancel()
-          }, input.timeoutMin * 60_000)
+          }, timeoutMin * 60_000)
         }
       }
     }
@@ -482,15 +416,10 @@ export class RunService {
 
   /** Ao fechar o app: cancela tudo (o processo do Claude Code não sobrevive ao Orkio). */
   cancelAll(): void {
-    for (const id of [...this.queue.map((r) => r.id), ...this.active.keys()]) {
-      try {
-        this.cancel(id)
-      } catch {
-        // já terminou
-      }
-    }
+    for (const id of [...this.queue.map((r) => r.id), ...this.active.keys()]) this.cancel(id)
   }
 
+  /** Cancela a execução (na fila ou rodando); já terminada = nada a fazer. */
   cancel(runId: string): void {
     const queued = this.queue.findIndex((r) => r.id === runId)
     if (queued >= 0) {
@@ -500,14 +429,13 @@ export class RunService {
       return
     }
     const run = this.active.get(runId)
-    if (!run) throw new Error(RUN_MESSAGES.notFound)
+    if (!run) return
     run.cancelled = true
     for (const [requestId, p] of run.pending)
       this.resolvePending(run, requestId, p, { behavior: 'deny', message: RUN_MESSAGES.cancelled })
     run.handle?.cancel()
   }
 
-  /** Resposta do usuário a um pedido de permissão. */
   answerPermission(runId: string, requestId: string, answer: PermissionAnswer): void {
     const run = this.active.get(runId)
     const p = run?.pending.get(requestId)
@@ -561,7 +489,6 @@ export class RunService {
     )
   }
 
-  /** Sessão do Claude Code mais recente da tarefa (para continuar a conversa), ou `null`. */
   lastSession(taskId: string): string | null {
     return (
       this.deps.db.get<{ session_id: string }>(
@@ -569,6 +496,52 @@ export class RunService {
         taskId
       )?.session_id ?? null
     )
+  }
+
+  // ---------- Consultas de quem não é dono de `agent_runs` (visão geral, agentes, diagnóstico) ----------
+
+  /** Início e comando de cada execução (lista "Rodando"). */
+  startInfo(ids: readonly string[]): Map<string, { startedAt: string; command: string | null }> {
+    if (ids.length === 0) return new Map()
+    const rows = this.deps.db.all<{ id: string; started_at: string; command: string | null }>(
+      `SELECT id, started_at, command FROM agent_runs WHERE id IN (${ids.map(() => '?').join(', ')})`,
+      ...ids
+    )
+    return new Map(rows.map((r) => [r.id, { startedAt: r.started_at, command: r.command }]))
+  }
+
+  /** Custo das execuções terminadas desde `since` (`null` = desconhecido). */
+  costsSince(since: string): (number | null)[] {
+    return this.deps.db
+      .all<{ cost: number | null }>(
+        `SELECT cost FROM agent_runs WHERE started_at >= ? AND status IN ('succeeded', 'failed', 'cancelled')`,
+        since
+      )
+      .map((r) => r.cost)
+  }
+
+  agentRunsSince(
+    agentKey: string,
+    since: string
+  ): { count: number; costUsd: number; startedAt: string[] } {
+    const rows = this.deps.db.all<{ started_at: string; cost: number | null }>(
+      'SELECT started_at, cost FROM agent_runs WHERE agent_key = ? AND started_at >= ?',
+      agentKey,
+      since
+    )
+    return {
+      count: rows.length,
+      costUsd: rows.reduce((sum, r) => sum + (r.cost ?? 0), 0),
+      startedAt: rows.map((r) => r.started_at)
+    }
+  }
+
+  counts(): { total: number; active: number } {
+    const n = (sql: string): number => this.deps.db.get<{ n: number }>(sql)?.n ?? 0
+    return {
+      total: n('SELECT COUNT(*) AS n FROM agent_runs'),
+      active: n(`SELECT COUNT(*) AS n FROM agent_runs WHERE status IN ${ACTIVE_RUN_SQL}`)
+    }
   }
 
   list(taskId: string): AgentRunView[] {
@@ -632,50 +605,44 @@ export class RunService {
     }
   }
 
-  // ---------- Interno ----------
-
   private pump(): void {
     while (this.active.size < this.maxParallel && this.queue.length > 0) {
       const run = this.queue.shift()!
       this.active.set(run.id, run)
       run.start().catch(() => {
-        void this.finish(run, 'failed', 'Não foi possível iniciar o Claude Code.')
+        void this.finish(run, 'failed', 'Não foi possível iniciar o Claude Code.', 'start_failed')
       })
     }
   }
 
   private async onPermission(run: ActiveRun, req: BridgeRequest): Promise<BridgeDecision> {
     if (run.cancelled) return { behavior: 'deny', message: RUN_MESSAGES.cancelled }
-    const command = typeof req.input['command'] === 'string' ? req.input['command'] : ''
-    const currentBranch =
-      run.delivery && req.toolName === 'Bash' && /\bpush\b/.test(command)
-        ? await this.deps.currentBranch?.(run.worktree.path).catch(() => null)
-        : null
-    const decision = evaluatePermission(
+    const delivery = deliveryOf(run.spec)
+    const github = run.spec.access.github
+    const decision = await decidePermission(
       { tool: req.toolName, input: req.input },
       {
         worktree: run.worktree.path,
         allowRules: this.allowRules(run.projectId),
         aliases: run.aliases,
-        repo: run.delivery ? null : run.githubRead,
-        delivery: run.delivery
+        repo: github?.mode === 'read' ? github.target : null,
+        readOnly: run.spec.access.tools === 'read_only',
+        delivery: delivery
           ? {
-              target: run.delivery.target,
-              requirePushApproval: run.delivery.requirePushApproval,
+              target: delivery.target,
+              requirePushApproval: delivery.requirePushApproval,
               granted: run.granted,
-              pushDefault: run.pushDefault,
-              currentBranch: currentBranch ?? null
+              pushDefault: run.pushDefault
             }
           : null
+      },
+      {
+        currentBranch: () => this.deps.currentBranch(run.worktree.path)
       }
     )
     const requestId = req.toolUseId ?? randomUUID()
     const summary =
-      req.toolName === 'Bash' && typeof req.input['command'] === 'string'
-        ? req.input['command'].slice(0, 300)
-        : typeof req.input['file_path'] === 'string'
-          ? req.input['file_path']
-          : req.toolName
+      summarizeTool(req.toolName, req.input, run.worktree.path).summary || req.toolName
     if (decision.decision === 'allow') {
       if (decision.reason) {
         this.log(run, {
@@ -697,7 +664,8 @@ export class RunService {
         tool: req.toolName,
         summary,
         state: 'blocked',
-        reason: decision.reason
+        reason: decision.reason,
+        code: decision.code
       })
       this.taskEvent(run, 'run_blocked', { tool: req.toolName, reason: decision.reason })
       return { behavior: 'deny', message: decision.reason }
@@ -831,10 +799,15 @@ export class RunService {
         : status === 'cancelled'
           ? RUN_MESSAGES.cancelled
           : undefined
-    await this.finish(run, status, message)
+    await this.finish(run, status, message, status === 'failed' ? 'claude_error' : undefined)
   }
 
-  private async finish(run: ActiveRun, status: RunStatus, message?: string): Promise<void> {
+  private async finish(
+    run: ActiveRun,
+    status: RunStatus,
+    message?: string,
+    failedCode: RunEndCode = 'claude_error'
+  ): Promise<void> {
     if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled') return
     if (run.timer) clearTimeout(run.timer)
     // Tempo esgotado: cancelado por nós, mas para quem pediu é falha.
@@ -842,6 +815,13 @@ export class RunService {
       status = 'failed'
       message = RUN_MESSAGES.timedOut
     }
+    const code: RunEndCode | null = run.timedOut
+      ? 'timed_out'
+      : status === 'failed'
+        ? failedCode
+        : status === 'cancelled'
+          ? 'cancelled'
+          : null
     run.status = status
     this.active.delete(run.id)
     let summary: RunSummary | null = null
@@ -849,7 +829,7 @@ export class RunService {
       const diff = await this.deps.git.diffStat(run.worktree.path, run.worktree.baseRef)
       const commits = await this.deps.git.commitsSince(run.worktree.path, run.worktree.baseRef)
       summary = {
-        files: diff.files.filter((f) => !f.startsWith('.orkio/')),
+        files: diff.files.filter((f) => !isScratchPath(f)),
         diffStat: diff.stat,
         commits,
         tests: [...run.tests]
@@ -884,7 +864,8 @@ export class RunService {
       resultText: scrubText(run.resultText, run.secrets),
       summary,
       costUsd: run.costUsd,
-      message: message ?? null
+      message: message ?? null,
+      code
     }
     for (const listener of this.finishListeners) {
       try {
@@ -948,7 +929,7 @@ export class RunService {
 
   /** Histórico: cada push/PR/comentário/resolução liberado no modo entrega (com link). */
   private deliveryEvents(run: ActiveRun, actions: DeliveryAction[], command: string): void {
-    const t = run.delivery?.target
+    const t = deliveryOf(run.spec)?.target
     if (!t) return
     const seen = new Set<DeliveryEvent>()
     for (const a of actions) {
@@ -967,32 +948,25 @@ export class RunService {
     }
   }
 
-  private taskEvent(
+  private taskEvent<K extends RunEventKind>(
     run: ActiveRun,
-    kind:
-      'run_started' | 'run_finished' | 'run_cancelled' | 'run_failed' | 'run_blocked' | 'delivery',
-    detail: Record<string, unknown>
+    kind: K,
+    detail: Omit<TaskEventDetailInput<K>, 'runId'>
   ): void {
     this.deps.store.addEvent({
       taskPageId: run.taskId,
       projectId: run.projectId,
       at: this.now().toISOString(),
       kind,
-      source: 'manual',
-      fromStage: null,
-      toStage: null,
       detail: { runId: run.id, ...detail }
-    })
+    } as TaskEventInput)
   }
 
   private async writeBriefing(worktree: string, briefing: string): Promise<void> {
-    await mkdir(join(worktree, '.orkio'), { recursive: true })
-    await writeFile(join(worktree, '.orkio', 'briefing.md'), briefing, 'utf8')
-    // Exclusão local do git (no worktree, `.git` é um arquivo; usamos o .gitignore local da pasta).
-    await writeFile(join(worktree, '.orkio', '.gitignore'), '*\n', 'utf8')
+    await ensureScratch(worktree)
+    await writeFile(join(worktree, BRIEFING_PATH), briefing, 'utf8')
   }
 
-  /** Mantém só os `keepPerTask` logs mais recentes da tarefa. */
   private async prune(taskId: string): Promise<void> {
     const old = this.deps.db.all<{ id: string }>(
       'SELECT id FROM agent_runs WHERE task_page_id = ? ORDER BY started_at DESC LIMIT -1 OFFSET ?',

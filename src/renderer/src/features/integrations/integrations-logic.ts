@@ -1,19 +1,17 @@
 /** Regras puras da tela de Integrações (busca e qual painel fica aberto). */
-
-export function normalize(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-}
+import { normalizeLabel } from '../../../../shared/text'
+import type { OrkioBotRepoState } from '../../../../shared/orkio-bot'
+import type { StatusText } from '../../lib/status-text'
 
 /** A busca casa com nome, categoria ou seção (sem acento nem caixa). */
 export function matchesQuery(
   card: { name: string; category: string; section: string },
   query: string
 ): boolean {
-  const needle = normalize(query.trim())
-  return !needle || normalize(`${card.name} ${card.category} ${card.section}`).includes(needle)
+  const needle = normalizeLabel(query)
+  return !needle || normalizeLabel(`${card.name} ${card.category} ${card.section}`).includes(needle)
 }
 
-/** O primeiro card (na ordem da página) que ainda não está pronto. */
 export function firstPendingId(
   cards: ReadonlyArray<{ id: string; pending: boolean }>
 ): string | null {
@@ -38,9 +36,9 @@ export function effectiveOpenId(
 export function orkioBotSummary(
   s: {
     github: 'connected' | 'disconnected'
-    repos: ReadonlyArray<{ status: { state: string } }>
+    repos: ReadonlyArray<{ status: Pick<OrkioBotRepoState, 'state'> }>
   } | null
-): { label: string; tone: 'success' | 'warning' | 'neutral' } {
+): StatusText {
   if (!s) return { label: 'Verificando', tone: 'neutral' }
   if (s.github === 'disconnected') return { label: 'Conecte o GitHub antes', tone: 'neutral' }
   if (s.repos.length === 0) return { label: 'Nenhum projeto com GitHub', tone: 'neutral' }

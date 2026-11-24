@@ -3,7 +3,6 @@
  * pausa global (ex.: depois de um 429 com Retry-After, ninguém sai antes da hora).
  */
 export interface RateQueueOptions {
-  /** Requisições simultâneas. */
   concurrency?: number
   /** Intervalo mínimo entre o início de duas requisições (ms). */
   minIntervalMs?: number
@@ -26,7 +25,6 @@ export class RateQueue {
     this.now = options.now ?? Date.now
   }
 
-  /** Executa `task` quando houver vaga respeitando o ritmo. */
   run<T>(task: () => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       this.waiting.push(() => {

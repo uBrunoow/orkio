@@ -4,26 +4,19 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
-import { StatusToken, toneOf } from '../../components/StatusToken'
-import type { AlvaCheckItem, AlvaPrecheck } from '../../../../shared/alva'
-import type { AlvaStatusView, BoardView } from '../../../../shared/ipc-contract'
+import { StatusToken } from '../../components/StatusToken'
+import { ALVA_CHECK } from '../../lib/status-text'
+import type { AlvaStatusView } from '../../../../shared/alva'
+import { useSources } from '../../app/sources'
+import { useAlvaPrecheck } from './useAlvaPrecheck'
 import { Alert } from '../../components/Alert'
 import { CopyIcon, RefreshIcon } from '../../components/icons'
 import { PAGE_WIDTH } from '../../components/page-width'
 import { suggestAlvaTargets, type AlvaTargets } from './alva-targets'
+import { stageWithRole } from '../../../../shared/board'
+import type { BoardView } from '../../../../shared/board'
+import { ipcResult } from '../../lib/ipc'
 
-const STATE: Record<AlvaCheckItem['state'], { label: string; color: 'green' | 'red' | 'yellow' }> =
-  {
-    ok: { label: 'OK', color: 'green' },
-    // Falta configurar é aviso (o resto do Orkio funciona), não erro.
-    missing: { label: 'Falta', color: 'yellow' },
-    warning: { label: 'Atenção', color: 'yellow' }
-  }
-
-/**
- * Tela "alva-flow" (5B): pré-checagem do projeto, criação dos fluxos Alva (templates editáveis no
- * "Fluxos de tarefa"), coluna opcional "Planejando" e limite de fluxos Alva em paralelo.
- */
 export function AlvaPage({
   projectId,
   view,
@@ -33,13 +26,15 @@ export function AlvaPage({
   view: BoardView
   onBoardChanged(): void
 }): React.JSX.Element {
-  const [precheck, setPrecheck] = useState<AlvaPrecheck | null>(null)
-  const [checking, setChecking] = useState(false)
+  const { precheck, checking, recheck } = useAlvaPrecheck(projectId)
+  const { projectFlows } = useSources()
   const [status, setStatus] = useState<AlvaStatusView | null>(null)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [planStatus, setPlanStatus] = useState<string>(
-    view.statusOptions.find((o) => /andamento/i.test(o.name))?.id ?? view.statusOptions[0]?.id ?? ''
+    view.config?.stages.find((s) => s.role === 'work')?.notionStatus.id ??
+      view.statusOptions[0]?.id ??
+      ''
   )
   // Sugestão só depois de saber o que já está ligado (nunca aponta para a coluna de outro fluxo).
   const [targets, setTargets] = useState<AlvaTargets>({
@@ -56,10 +51,7 @@ export function AlvaPage({
 
   useEffect(() => {
     let active = true
-    void window.orkio.alva.precheck(projectId).then((r) => {
-      if (active && r.ok) setPrecheck(r.value)
-    })
-    void window.orkio.alva.status(projectId).then((r) => {
+    void ipcResult(() => window.orkio.alva.status(projectId)).then((r) => {
       if (active && r.ok) setStatus(r.value)
     })
     return () => {
@@ -72,25 +64,19 @@ export function AlvaPage({
     if (status && !touched.current) setTargets(suggestAlvaTargets(stages ?? [], status))
   }, [status, stages])
 
-  const recheck = async (): Promise<void> => {
-    setChecking(true)
-    const r = await window.orkio.alva.precheck(projectId, { force: true })
-    setChecking(false)
-    if (r.ok) setPrecheck(r.value)
-  }
-
   const stageOptions = [
     { value: '', label: 'Nenhuma (rodar à mão)' },
     ...(view.config?.stages ?? []).map((s) => ({ value: s.id, label: s.name }))
   ]
-  const hasPlanning = (view.config?.stages ?? []).some((s) => /planejando/i.test(s.name))
+  const hasPlanning = stageWithRole(view.config?.stages ?? [], 'plan') !== null
 
   const create = async (): Promise<void> => {
     setBusy(true)
-    const r = await window.orkio.alva.createTemplates(projectId, targets)
+    const r = await ipcResult(() => window.orkio.alva.createTemplates(projectId, targets))
     setBusy(false)
     if (r.ok) {
       setStatus(r.value)
+      void projectFlows.reload(projectId)
       setMessage({
         tone: 'ok',
         text: 'Fluxos Alva criados. Edite em Fluxo do projeto → Fluxos de tarefa.'
@@ -100,10 +86,11 @@ export function AlvaPage({
 
   const addPlanning = async (): Promise<void> => {
     setBusy(true)
-    const r = await window.orkio.alva.addPlanningStage(projectId, planStatus)
+    const r = await ipcResult(() => window.orkio.alva.addPlanningStage(projectId, planStatus))
     setBusy(false)
     if (r.ok) {
       choose({ plan: r.value })
+      void projectFlows.reload(projectId)
       setMessage({ tone: 'ok', text: 'Coluna “Planejando” criada.' })
       onBoardChanged()
     } else setMessage({ tone: 'error', text: r.error.message })
@@ -160,8 +147,8 @@ export function AlvaPage({
                 className="flex items-start gap-4 border-b border-border-soft px-4 py-3 last:border-b-0"
               >
                 <StatusToken
-                  tone={toneOf(STATE[i.state].color)}
-                  label={STATE[i.state].label}
+                  tone={ALVA_CHECK[i.state].tone}
+                  label={ALVA_CHECK[i.state].label}
                   className="mt-0.5 w-20 shrink-0"
                 />
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -281,9 +268,11 @@ export function AlvaPage({
           options={[1, 2, 3, 4].map((n) => ({ value: String(n), label: String(n) }))}
           value={String(status.maxParallel)}
           onChange={(v: string) =>
-            void window.orkio.alva.setMaxParallel(projectId, Number(v)).then((r) => {
-              if (r.ok) setStatus(r.value)
-            })
+            void ipcResult(() => window.orkio.alva.setMaxParallel(projectId, Number(v))).then(
+              (r) => {
+                if (r.ok) setStatus(r.value)
+              }
+            )
           }
         />
       )}
@@ -300,7 +289,6 @@ export function AlvaPage({
   )
 }
 
-/** Copia o comando de correção para colar no terminal. */
 function CopyButton({ text, label }: { text: string; label: string }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
   return (

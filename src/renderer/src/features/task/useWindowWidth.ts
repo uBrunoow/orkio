@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 
-/** Largura da janela (layout da tela da tarefa). */
 export function useWindowWidth(): number {
   const [width, setWidth] = useState(() => window.innerWidth)
   useEffect(() => {

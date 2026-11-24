@@ -45,7 +45,6 @@
   --accent: #1e1e21;
   --accent-foreground: #f2f2f0;
 
-  /* Estados */
   --ok: #3dd68c;
   --ok-tint: #12301f;
   --ok-tint-border: #1f5a38;
@@ -61,7 +60,6 @@
   --purple: #c9a2ff;
   --pink: #ff8fa3;
 
-  /* Lateral */
   --sidebar: #111113;
   --sidebar-foreground: #8f8f94;
   --sidebar-accent: #1e1e21;

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  GITHUB_DEVICE_GRANT_TYPE,
   createGitHubDeviceApi,
   isGitHubDevicePage,
   parseTokenPollResponse,
@@ -86,9 +85,8 @@ describe('createGitHubDeviceApi', () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       client_id: CONFIG.clientId,
       device_code: 'dev-1',
-      grant_type: GITHUB_DEVICE_GRANT_TYPE
+      grant_type: 'urn:ietf:params:oauth:grant-type:device_code' // RFC 8628
     })
-    expect(GITHUB_DEVICE_GRANT_TYPE).toBe('urn:ietf:params:oauth:grant-type:device_code')
   })
 
   it('pollToken: 5xx e rede viram erros transitórios', async () => {
@@ -133,12 +131,12 @@ describe('parseTokenPollResponse', () => {
     }
   )
 
-  it('erro desconhecido → unexpected, sem detalhes do GitHub na mensagem', () => {
+  it('erro desconhecido → invalid (para o polling), sem detalhes do GitHub na mensagem', () => {
     expect(() =>
       parseTokenPollResponse({ error: 'weird', error_description: 'segredo interno' })
     ).toThrow(
       expect.objectContaining({
-        code: 'unexpected',
+        code: 'invalid',
         message: expect.not.stringContaining('segredo')
       })
     )

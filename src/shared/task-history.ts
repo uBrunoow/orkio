@@ -1,17 +1,18 @@
 /**
- * Texto e links de um evento do histórico da tarefa (`task_events`). Puro: usado no painel da
- * tarefa (quadro) e na atividade recente da Visão geral (6D).
+ * Texto e links de um evento do histórico da tarefa (`task_events`). Puro: usado no histórico da
+ * tarefa e na atividade recente.
  */
-import { EVENT_LABELS, type EventKind } from './automation'
-import type { BoardHistoryEntry } from './ipc-contract'
+import { EVENT_META } from './automation'
+import type { TaskEvent } from './task-events'
+import { FLOW_PAUSES } from './flow-run-state'
 
-type HistoryEvent = Pick<BoardHistoryEntry, 'kind' | 'source' | 'fromStage' | 'toStage' | 'detail'>
+type HistoryEvent = TaskEvent
 
 /** Link da branch (entrega sem PR conhecida): github.com/<owner>/<repo>/tree/<branch>. */
 export function branchUrl(e: HistoryEvent): string | null {
   if (e.kind !== 'delivery') return null
-  const { owner, repo, branch } = (e.detail ?? {}) as Record<string, unknown>
-  return typeof owner === 'string' && typeof repo === 'string' && typeof branch === 'string'
+  const { owner, repo, branch } = e.detail
+  return owner !== undefined && repo !== undefined && branch !== undefined
     ? `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/tree/${branch
         .split('/')
         .map(encodeURIComponent)
@@ -19,9 +20,12 @@ export function branchUrl(e: HistoryEvent): string | null {
     : null
 }
 
+function prOf(e: HistoryEvent): { number: number; owner?: string; repo?: string } | null {
+  return 'pr' in e.detail ? (e.detail.pr ?? null) : null
+}
+
 export function prNumber(e: HistoryEvent): number | null {
-  const pr = e.detail?.['pr'] as { number?: unknown } | undefined
-  return typeof pr?.number === 'number' ? pr.number : null
+  return prOf(e)?.number ?? null
 }
 
 /**
@@ -29,94 +33,125 @@ export function prNumber(e: HistoryEvent): number | null {
  * publicada como orkio[bot] (`reviewId`) aponta para a própria revisão na PR.
  */
 export function prUrl(e: HistoryEvent): string | null {
-  const pr = e.detail?.['pr'] as { number?: unknown; owner?: unknown; repo?: unknown } | undefined
-  const reviewId = e.detail?.['reviewId']
+  const pr = prOf(e)
+  const reviewId = e.kind === 'delivery' ? e.detail.reviewId : undefined
   const anchor =
-    typeof reviewId === 'number' && Number.isSafeInteger(reviewId) && reviewId > 0
+    reviewId !== undefined && Number.isSafeInteger(reviewId) && reviewId > 0
       ? `#pullrequestreview-${reviewId}`
       : ''
-  return typeof pr?.number === 'number' &&
-    typeof pr.owner === 'string' &&
-    typeof pr.repo === 'string'
+  return pr && pr.owner !== undefined && pr.repo !== undefined
     ? `https://github.com/${encodeURIComponent(pr.owner)}/${encodeURIComponent(pr.repo)}/pull/${pr.number}${anchor}`
     : null
 }
 
 /** "PR #45 mergeada" / "Branch criada (ORK-1/x)". */
-function automationEvent(e: HistoryEvent): string {
-  const kind = e.detail?.['event']
-  const label =
-    typeof kind === 'string' && kind in EVENT_LABELS ? EVENT_LABELS[kind as EventKind] : 'Evento'
+function automationEvent(e: Extract<HistoryEvent, { kind: 'moved' | 'automation' }>): string {
+  const label = e.detail.event ? EVENT_META[e.detail.event].label : 'Evento'
   const n = prNumber(e)
-  const branch = e.detail?.['branch'] as { name?: unknown } | undefined
   return n !== null
     ? `${label} (PR #${n})`
-    : typeof branch?.name === 'string'
-      ? `${label} (${branch.name})`
+    : e.detail.branch
+      ? `${label} (${e.detail.branch.name})`
       : label
 }
 
 /** " por Ana" quando um agente fez a ação (8A). */
 function by(e: HistoryEvent): string {
-  return typeof e.detail?.['agent'] === 'string' && e.detail['agent']
-    ? ` por ${e.detail['agent']}`
-    : ''
+  const agent = 'agent' in e.detail ? e.detail.agent : undefined
+  return agent ? ` por ${agent}` : ''
 }
 
 /** Nome do passo (eventos novos) ou o id (eventos gravados antes do nome). */
-function stepLabel(e: HistoryEvent): string {
-  return String(e.detail?.['stepName'] ?? e.detail?.['step'] ?? '')
+function stepLabel(detail: { step?: string | null; stepName?: string }): string {
+  return detail.stepName ?? detail.step ?? ''
 }
 
-/** Motivos de pausa do fluxo em português (o código fica no `detail`). */
-const PAUSE_REASON: Record<string, string> = {
-  step_failed: 'o passo falhou',
-  interrupted: 'o Orkio foi fechado no meio do passo',
-  loop_guard: 'passos demais (trava de segurança)',
-  gate_timeout: 'a aprovação expirou',
-  left_stage: 'a tarefa saiu da etapa do fluxo',
-  needs_choice: 'falta você escolher',
-  waiting_slot: 'esperando outro fluxo terminar',
-  waiting_agent: 'esperando o agente ficar livre',
-  agent_daily_limit: 'o agente chegou ao limite do dia'
+function deliveryText(e: Extract<HistoryEvent, { kind: 'delivery' }>): string {
+  const who = e.detail.by === 'claude' ? 'Claude Code (modo entrega)' : 'Orkio'
+  const branch = e.detail.branch ?? ''
+  const n = prNumber(e)
+  const pr = n !== null ? ` na PR #${n}` : ''
+  switch (e.detail.action) {
+    case 'push':
+      return `Push de ${branch} pelo ${who}`
+    case 'pr_create':
+      return `PR aberta pelo ${who} (${branch})`
+    case 'pr_edit':
+      return `PR atualizada pelo ${who}${pr}`
+    case 'pr_ready':
+      return `PR marcada como pronta pelo ${who}${pr}`
+    case 'pr_comment':
+      return `Comentário${pr} pelo ${who}`
+    case 'thread_reply':
+      return `Resposta a comentário de review${pr} pelo ${who}`
+    case 'thread_resolve':
+      return `Conversa de review resolvida${pr} pelo ${who}`
+    case 'review_request':
+      return `Review pedido${pr} pelo ${who}`
+    case 'review_post':
+      return `Revisão publicada${pr} como orkio[bot] (${
+        e.detail.reviewEvent === 'REQUEST_CHANGES' ? 'pedir alterações' : 'comentário'
+      })`
+    case undefined:
+      return `Entrega pelo ${who}`
+    default:
+      return unreachable(e.detail.action)
+  }
+}
+
+function agentAssigned(e: Extract<HistoryEvent, { kind: 'agent_assigned' }>): string {
+  const agent = e.detail.agent ?? ''
+  switch (e.detail.by) {
+    case 'rule':
+      return `Atribuída a ${agent} pela regra da coluna`
+    case 'orchestrator':
+      return `Atribuída a ${agent} pelo orquestrador`
+    case 'manual':
+    case undefined:
+      return `Atribuída a ${agent}`
+    default:
+      return unreachable(e.detail.by)
+  }
 }
 
 export function describeEvent(e: HistoryEvent, stageName: (id: string | null) => string): string {
-  const rule = typeof e.detail?.['ruleName'] === 'string' ? `“${e.detail['ruleName']}”` : null
-  if (
-    e.kind === 'moved' &&
-    e.source === 'automation' &&
-    typeof e.detail?.['orchestrator'] === 'string'
-  ) {
-    const reason =
-      e.detail['orchestrator'] === 'pull' ? 'puxada da fila' : 'fluxo da etapa concluído'
-    return `Orquestrador (${reason}): ${stageName(e.fromStage)} → ${stageName(e.toStage)}${by(e)}`
-  }
-  if (e.kind === 'moved' && e.source === 'automation') {
-    return `${automationEvent(e)} → regra ${rule ?? ''}: ${stageName(e.fromStage)} → ${stageName(e.toStage)}`
-  }
-  if (e.kind === 'automation') {
-    const outcome = e.detail?.['outcome']
-    if (outcome === 'skipped') {
-      return `${automationEvent(e)}: regra ${rule ?? ''} ignorada (${String(e.detail?.['reason'] ?? '')})`
-    }
-    if (outcome === 'noop') return `${automationEvent(e)}: já estava em ${stageName(e.fromStage)}`
-    if (outcome === 'notify') return `${automationEvent(e)}: notificação (regra ${rule ?? ''})`
-    return automationEvent(e)
-  }
+  const path = `${stageName(e.fromStage)} → ${stageName(e.toStage)}`
   switch (e.kind) {
+    case 'moved': {
+      if (e.source !== 'automation') {
+        return `Movida de ${stageName(e.fromStage)} para ${stageName(e.toStage)}`
+      }
+      if (e.detail.orchestrator) {
+        const reason =
+          e.detail.orchestrator === 'pull' ? 'puxada da fila' : 'fluxo da etapa concluído'
+        return `Orquestrador (${reason}): ${path}${by(e)}`
+      }
+      return `${automationEvent(e)} → regra ${rule(e.detail.ruleName)}: ${path}`
+    }
+    case 'automation':
+      switch (e.detail.outcome) {
+        case 'skipped':
+          return `${automationEvent(e)}: regra ${rule(e.detail.ruleName)} ignorada (${e.detail.reason ?? ''})`
+        case 'noop':
+          return `${automationEvent(e)}: já estava em ${stageName(e.fromStage)}`
+        case 'notify':
+          return `${automationEvent(e)}: notificação (regra ${rule(e.detail.ruleName)})`
+        case 'move':
+        case 'no_rule':
+        case undefined:
+          return automationEvent(e)
+        default:
+          return unreachable(e.detail.outcome)
+      }
     case 'automation_paused':
       return 'Automações pausadas nesta tarefa'
     case 'automation_resumed':
       return 'Automações retomadas nesta tarefa'
     case 'added':
       return `Entrou no quadro em ${stageName(e.toStage)}`
-    case 'moved':
-      return `Movida de ${stageName(e.fromStage)} para ${stageName(e.toStage)}`
     case 'reconciled': {
-      const status =
-        typeof e.detail?.['status'] === 'string' ? ` (status “${e.detail['status']}”)` : ''
-      return `Reposicionada pelo Notion: ${stageName(e.fromStage)} → ${stageName(e.toStage)}${status}`
+      const status = e.detail.status ? ` (status “${e.detail.status}”)` : ''
+      return `Reposicionada pelo Notion: ${path}${status}`
     }
     case 'blocked':
       return e.source === 'notion' ? 'Marcada como bloqueada no Notion' : 'Marcada como bloqueada'
@@ -127,88 +162,65 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     case 'run_started':
       return `Claude Code iniciou uma execução${by(e)}`
     case 'run_finished':
-      return `Claude Code terminou (${filesChanged(Number(e.detail?.['files'] ?? 0))})`
+      return `Claude Code terminou (${filesChanged(e.detail.files ?? 0)})`
     case 'run_cancelled':
       return 'Execução do Claude Code cancelada'
     case 'run_failed':
       return 'Execução do Claude Code falhou'
+    case 'run_blocked':
+      return `Claude Code bloqueado: ${e.detail.reason ?? 'ação não permitida'}`
     case 'flow_started':
-      return `Fluxo iniciado: ${String(e.detail?.['flow'] ?? '')}${by(e)}`
+      return `Fluxo iniciado: ${e.detail.flow ?? ''}${by(e)}`
     case 'agent_assigned':
-      return e.detail?.['by'] === 'rule'
-        ? `Atribuída a ${String(e.detail?.['agent'] ?? '')} pela regra da coluna`
-        : e.detail?.['by'] === 'orchestrator'
-          ? `Atribuída a ${String(e.detail?.['agent'] ?? '')} pelo orquestrador`
-          : `Atribuída a ${String(e.detail?.['agent'] ?? '')}`
+      return agentAssigned(e)
     case 'agent_unassigned':
-      return e.detail?.['by'] === 'orchestrator' && e.detail?.['agent']
-        ? `${String(e.detail['agent'])} saiu da tarefa (etapa sem agente do orquestrador)`
+      return e.detail.by === 'orchestrator' && e.detail.agent
+        ? `${e.detail.agent} saiu da tarefa (etapa sem agente do orquestrador)`
         : 'Atribuição de agente removida'
     case 'step_started':
-      return `Passo começou: ${stepLabel(e)}`
+      return `Passo começou: ${stepLabel(e.detail)}`
     case 'step_finished':
-      return `Passo concluído: ${stepLabel(e)}`
+      return `Passo concluído: ${stepLabel(e.detail)}`
     case 'step_failed':
-      return `Passo falhou: ${stepLabel(e)}`
+      return `Passo falhou: ${stepLabel(e.detail)}`
     case 'step_skipped':
-      return `Passo pulado: ${stepLabel(e)}`
+      return `Passo pulado: ${stepLabel(e.detail)}`
     case 'gate_waiting':
-      return `Esperando sua aprovação: ${stepLabel(e)}`
+      return `Esperando sua aprovação: ${stepLabel(e.detail)}`
     case 'gate_approved':
-      return `Aprovação concedida: ${stepLabel(e)}`
+      return `Aprovação concedida: ${stepLabel(e.detail)}`
     case 'gate_rejected':
-      return `Aprovação recusada: ${stepLabel(e)}`
+      return `Aprovação recusada: ${stepLabel(e.detail)}`
     case 'gate_revised':
-      return `Ajustes pedidos: ${stepLabel(e)}`
+      return `Ajustes pedidos: ${stepLabel(e.detail)}`
     case 'flow_paused':
-      return `Fluxo parado: ${PAUSE_REASON[String(e.detail?.['reason'] ?? '')] ?? 'motivo desconhecido'}`
+      return `Fluxo parado: ${e.detail.reason ? FLOW_PAUSES[e.detail.reason].label : 'motivo desconhecido'}`
     case 'flow_finished':
-      return e.detail?.['result'] === 'cancelled'
+      return e.detail.result === 'cancelled'
         ? 'Fluxo cancelado'
-        : e.detail?.['result'] === 'rejected'
+        : e.detail.result === 'rejected'
           ? 'Fluxo encerrado (recusado)'
           : 'Fluxo concluído'
     case 'artifact_attached':
-      return `Documento anexado: ${String(e.detail?.['path'] ?? '')}`
+      return `Documento anexado: ${e.detail.path ?? ''}`
     case 'artifact_published':
-      return `Documento publicado no Notion: ${String(e.detail?.['path'] ?? '')}`
-    case 'delivery': {
-      const by = e.detail?.['by'] === 'claude' ? 'Claude Code (modo entrega)' : 'Orkio'
-      const branch = typeof e.detail?.['branch'] === 'string' ? e.detail['branch'] : ''
-      const n = prNumber(e)
-      const pr = n !== null ? ` na PR #${n}` : ''
-      switch (e.detail?.['action']) {
-        case 'push':
-          return `Push de ${branch} pelo ${by}`
-        case 'pr_create':
-          return `PR aberta pelo ${by} (${branch})`
-        case 'pr_edit':
-          return `PR atualizada pelo ${by}${pr}`
-        case 'pr_ready':
-          return `PR marcada como pronta pelo ${by}${pr}`
-        case 'pr_comment':
-          return `Comentário${pr} pelo ${by}`
-        case 'thread_reply':
-          return `Resposta a comentário de review${pr} pelo ${by}`
-        case 'thread_resolve':
-          return `Conversa de review resolvida${pr} pelo ${by}`
-        case 'review_request':
-          return `Review pedido${pr} pelo ${by}`
-        case 'review_post':
-          return `Revisão publicada${pr} como orkio[bot] (${
-            e.detail?.['reviewEvent'] === 'REQUEST_CHANGES' ? 'pedir alterações' : 'comentário'
-          })`
-        default:
-          return `Entrega pelo ${by}`
-      }
-    }
-    case 'run_blocked':
-      return `Claude Code bloqueado: ${String(e.detail?.['reason'] ?? 'ação não permitida')}`
+      return `Documento publicado no Notion: ${e.detail.path ?? ''}`
+    case 'delivery':
+      return deliveryText(e)
     case 'rolled_back':
       return `O Notion recusou a mudança; voltou para ${stageName(e.toStage)}`
     default:
-      return e.kind
+      return unreachable(e)
   }
+}
+
+/** Switch exaustivo: um tipo novo no catálogo sem texto aqui é erro de compilação. */
+function unreachable(value: never): string {
+  return String(value)
+}
+
+function rule(name: string | null | undefined): string {
+  return name ? `“${name}”` : ''
 }
 
 function filesChanged(n: number): string {

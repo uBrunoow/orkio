@@ -1,42 +1,51 @@
 /**
- * Regras do "modo entrega" (Etapa 5C) para comandos do Claude Code. Funções puras, chamadas pela
- * política (`policy.ts`) só quando a execução é de um passo de fluxo marcado com `delivery`.
+ * Veredito dos comandos de GitHub e `git push` do Claude Code (Etapa 5C), a partir da tabela de
+ * `github-rules.ts`. Funções puras, chamadas pela política (`policy.ts`): no modo entrega, `read`
+ * e `write` passam (com o evento) e `never` não; fora dele, só `read` (`isGhRead`).
  *
  * - `git push`: só a branch da tarefa, só o remote do projeto, sem força/remoção/mirror/tags.
- * - `gh pr create|view|edit|checks|comment|diff|list|status|ready`, `gh run view|list|watch`,
- *   `gh label list`: liberados (com `-R` só do próprio repositório).
- * - `gh api`: só `repos/<owner>/<repo>/…` do projeto ou GraphQL com o mesmo repositório; escrita
- *   só em PR/comentários/revisores; nunca DELETE; mutations do GraphQL só da allowlist.
- * - `gh pr merge|close|review|checkout…`, `gh release`, `gh repo`: bloqueados.
+ * - `gh pr|run|label`: a ação da tabela (com `-R`/URL só do próprio repositório).
+ * - `gh api`: só `repos/<owner>/<repo>/…` do projeto ou GraphQL com o mesmo repositório.
+ * - `gh release`, `gh repo`: nunca.
  *
- * `null` = o comando não é de entrega (segue a política normal).
+ * `null` = o comando não é de GitHub/push (segue a política normal).
  */
 import { checkPushBranch, sameRepo, type DeliveryTarget } from '../../shared/delivery'
+import {
+  GH_API_MUTATIONS,
+  GH_API_NEVER_METHODS,
+  GH_API_READ_METHODS,
+  GH_API_ROUTES,
+  GH_NEVER_FAMILIES,
+  GH_NEVER_TEXT,
+  PUSH_OPTIONS,
+  PUSH_REFSPEC_NEVER,
+  PUSH_SHORT,
+  ghRule,
+  type DeliveryEvent,
+  type PushNeverReason
+} from './github-rules'
+
+export type { DeliveryEvent }
 
 /** Categorias aprovadas uma vez por execução. */
 export type DeliveryKind = 'push' | 'github'
 
-/** O que um comando liberado faz, para o histórico da tarefa. */
-export type DeliveryEvent =
-  | 'push'
-  | 'pr_create'
-  | 'pr_edit'
-  | 'pr_comment'
-  | 'pr_ready'
-  | 'thread_reply'
-  | 'thread_resolve'
-  | 'review_request'
-
 export type DeliveryVerdict =
   | null
   | { ok: false; reason: string }
-  | { ok: true; kind: DeliveryKind; event: DeliveryEvent | null }
+  /** A branch atual precisa ser lida antes de decidir (ver `decidePermission`). */
+  | { ok: false; needs: 'currentBranch' }
+  | { ok: true; kind: DeliveryKind; access: 'read' | 'write'; event: DeliveryEvent | null }
 
 export interface DeliveryPolicyContext {
   target: DeliveryTarget
   /** `git config push.default` (`matching` torna `git push` sem refspec perigoso). */
   pushDefault: string | null
-  /** Branch atual do worktree, lida logo antes de avaliar (para `git push`/`HEAD`). */
+  /**
+   * Branch atual do worktree (para `git push` sem refspec/`HEAD`). `undefined` = ainda não lida: a
+   * política devolve `needs` e quem chama lê e pergunta de novo.
+   */
   currentBranch?: string | null
 }
 
@@ -53,19 +62,18 @@ export const DELIVERY_POLICY_MESSAGES = {
   noBranch: `${B} não deu para saber a branch atual do ambiente; informe a branch da tarefa no push.`,
   otherRepo: (r: string) => `${B} o GitHub CLI só pode agir no repositório do projeto (${r}).`,
   ghHost: `${B} só github.com é permitido.`,
-  ghSub: (c: string) =>
-    `${B} “gh ${c}” não é permitido (merge, fechar, revisar, release e repo ficam com você).`,
+  ghSub: (c: string) => `${B} “gh ${c}” não é permitido (${GH_NEVER_TEXT} ficam com você).`,
   ghHead: (b: string) => `${B} a PR só pode partir da branch da tarefa (“${b}”).`,
   apiDelete: `${B} gh api com método DELETE não é permitido.`,
   apiWrite: (p: string) => `${B} gh api só escreve em PR, comentários e revisores (pedido: ${p}).`,
   apiField: (f: string) =>
     `${B} gh api com “${f}” não é permitido (fechar PR, aprovar/reprovar revisão).`,
   apiFile: `${B} consulta GraphQL em arquivo (@arquivo/--input) não pode ser conferida.`,
+  apiGetFields: `${B} gh api com GET e campos (-f/-F) não é permitido: ponha os parâmetros na URL (…?state=open).`,
   apiMutation: (m: string) => `${B} a mutation “${m}” do GraphQL não é permitida.`,
   apiEndpoint: `${B} gh api sem endpoint.`
 } as const
 
-/** Opções globais do git que levam valor (`-C dir`, `-c k=v`, …). */
 const GIT_GLOBAL_WITH_VALUE = new Set([
   '-C',
   '-c',
@@ -77,7 +85,6 @@ const GIT_GLOBAL_WITH_VALUE = new Set([
   '--super-prefix'
 ])
 
-/** Divide `git <globais> <subcomando> <resto>`. */
 export function gitParse(args: readonly string[]): {
   globals: string[]
   sub: string | null
@@ -99,7 +106,6 @@ export function deliveryVerdict(
   name: string,
   args: readonly string[],
   ctx: DeliveryPolicyContext,
-  _worktree: string,
   /** Outros comandos da mesma linha (para detectar troca de branch antes do push). */
   siblings: readonly { name: string; args: readonly string[] }[] = []
 ): DeliveryVerdict {
@@ -112,27 +118,20 @@ export function deliveryVerdict(
   return null
 }
 
-// ---------------------------------------------------------------- git push
+const PUSH_REASON: Record<PushNeverReason, (opt: string) => string> = {
+  force: () => DELIVERY_POLICY_MESSAGES.force,
+  del: () => DELIVERY_POLICY_MESSAGES.del,
+  option: (opt) => DELIVERY_POLICY_MESSAGES.pushOption(opt)
+}
 
-const PUSH_FLAGS = new Set([
-  '-u',
-  '--set-upstream',
-  '--porcelain',
-  '-q',
-  '--quiet',
-  '-v',
-  '--verbose',
-  '--progress',
-  '--no-progress',
-  '--no-verify',
-  '--verify',
-  '-n',
-  '--dry-run',
-  '--atomic',
-  '--no-atomic'
-])
-const FORCE = /^(--force|--force-with-lease|--force-if-includes|--no-force-if-includes)(=.*)?$/
-const DELETE = /^(--delete|--prune|--mirror|--all|--branches|--tags|--follow-tags)$/
+/** Opção do `git push` pela tabela: `null` = permitida; senão o motivo. */
+function pushOptionReason(opt: string): string | null {
+  const long = opt.includes('=') ? opt.slice(0, opt.indexOf('=')) : opt
+  const rule = PUSH_OPTIONS[long]
+  if (!rule) return DELIVERY_POLICY_MESSAGES.pushOption(opt)
+  return rule.access === 'never' ? PUSH_REASON[rule.reason](opt) : null
+}
+
 /** Comandos que trocam/renomeiam a branch atual (antes de um `git push` sem refspec). */
 const MOVES_HEAD = new Set([
   'checkout',
@@ -143,7 +142,7 @@ const MOVES_HEAD = new Set([
   'worktree'
 ])
 
-export function gitPushVerdict(
+function gitPushVerdict(
   globals: readonly string[],
   rest: readonly string[],
   ctx: DeliveryPolicyContext,
@@ -170,33 +169,21 @@ export function gitPushVerdict(
       onlyPositionals = true
       continue
     }
-    if (FORCE.test(a)) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.force }
-    if (DELETE.test(a)) {
-      return {
-        ok: false,
-        reason:
-          a === '--delete' || a === '--prune'
-            ? DELIVERY_POLICY_MESSAGES.del
-            : DELIVERY_POLICY_MESSAGES.pushOption(a)
-      }
-    }
-    if (PUSH_FLAGS.has(a)) continue
     if (a === '-o' || a === '--push-option') {
       i++
       continue
     }
     if (a.startsWith('--push-option=')) continue
-    if (/^-[a-zA-Z]+$/.test(a)) {
-      // Opções curtas (também juntas, `-uf`): cada letra precisa ser permitida.
-      for (const c of a.slice(1)) {
-        if (c === 'f') return { ok: false, reason: DELIVERY_POLICY_MESSAGES.force }
-        if (c === 'd') return { ok: false, reason: DELIVERY_POLICY_MESSAGES.del }
-        if (!'uqvn'.includes(c))
-          return { ok: false, reason: DELIVERY_POLICY_MESSAGES.pushOption(`-${c}`) }
-      }
+    if (a.startsWith('--')) {
+      const reason = pushOptionReason(a)
+      if (reason) return { ok: false, reason }
       continue
     }
-    return { ok: false, reason: DELIVERY_POLICY_MESSAGES.pushOption(a) }
+    for (const c of a.slice(1)) {
+      const long = PUSH_SHORT[c]
+      const reason = long ? pushOptionReason(long) : DELIVERY_POLICY_MESSAGES.pushOption(`-${c}`)
+      if (reason) return { ok: false, reason }
+    }
   }
 
   const [remote, ...refspecs] = positionals
@@ -208,6 +195,7 @@ export function gitPushVerdict(
   )
   const current = (): DeliveryVerdict | string => {
     if (movesHead) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.ambiguous }
+    if (ctx.currentBranch === undefined) return { ok: false, needs: 'currentBranch' }
     if (!ctx.currentBranch) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.noBranch }
     return ctx.currentBranch
   }
@@ -218,12 +206,11 @@ export function gitPushVerdict(
     const b = current()
     if (typeof b !== 'string') return b
     const reason = checkPushBranch(b, ctx.target)
-    return reason
-      ? { ok: false, reason: `${B} ${reason}` }
-      : { ok: true, kind: 'push', event: 'push' }
+    return reason ? { ok: false, reason: `${B} ${reason}` } : PUSH_OK
   }
   for (const spec of refspecs) {
-    if (spec.startsWith('+')) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.force }
+    const never = PUSH_REFSPEC_NEVER.find((r) => spec.startsWith(r.prefix))
+    if (never) return { ok: false, reason: PUSH_REASON[never.reason](spec) }
     if (spec.includes('*')) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.refs }
     const colon = spec.indexOf(':')
     const src = colon >= 0 ? spec.slice(0, colon) : spec
@@ -241,26 +228,11 @@ export function gitPushVerdict(
     const reason = checkPushBranch(dst.replace(/^refs\/heads\//, ''), ctx.target)
     if (reason) return { ok: false, reason: `${B} ${reason}` }
   }
-  return { ok: true, kind: 'push', event: 'push' }
+  return PUSH_OK
 }
 
-// ---------------------------------------------------------------- gh
+const PUSH_OK: DeliveryVerdict = { ok: true, kind: 'push', access: 'write', event: 'push' }
 
-const PR_ALLOWED: Record<string, DeliveryEvent | null> = {
-  create: 'pr_create',
-  edit: 'pr_edit',
-  comment: 'pr_comment',
-  ready: 'pr_ready',
-  view: null,
-  checks: null,
-  diff: null,
-  list: null,
-  status: null
-}
-const RUN_ALLOWED = new Set(['view', 'list', 'watch'])
-const LABEL_ALLOWED = new Set(['list'])
-
-/** Valores de uma opção (`-R x`, `--repo x`, `--repo=x`). */
 function optionValues(args: readonly string[], short: string | null, long: string): string[] {
   const out: string[] = []
   for (let i = 0; i < args.length; i++) {
@@ -273,7 +245,6 @@ function optionValues(args: readonly string[], short: string | null, long: strin
   return out
 }
 
-/** `owner/repo`, `github.com/owner/repo` ou URL → é o repositório do projeto? */
 function repoArgOk(value: string, target: DeliveryTarget): boolean {
   const clean = value
     .replace(/^https?:\/\//, '')
@@ -287,21 +258,23 @@ function repoArgOk(value: string, target: DeliveryTarget): boolean {
 }
 
 export function ghVerdict(args: readonly string[], target: DeliveryTarget): DeliveryVerdict {
-  const sub = args[0] ?? ''
+  const family = args[0] ?? ''
   const fullName = `${target.owner}/${target.repo}`
-  if (sub === 'release' || sub === 'repo') {
-    return { ok: false, reason: DELIVERY_POLICY_MESSAGES.ghSub(sub) }
+  if (family === 'api') return ghApiVerdict(args.slice(1), target)
+  const action = args[1] ?? ''
+  const rule = ghRule(family, action)
+  if (!rule) return null
+  const label = (GH_NEVER_FAMILIES as readonly string[]).includes(family)
+    ? family
+    : `${family} ${action}`.trim()
+  if (rule.access === 'never') {
+    return { ok: false, reason: DELIVERY_POLICY_MESSAGES.ghSub(label) }
   }
-  if (sub === 'api') return ghApiVerdict(args.slice(1), target)
-  if (sub !== 'pr' && sub !== 'run' && sub !== 'label') return null
   for (const r of optionValues(args, '-R', '--repo')) {
     if (!repoArgOk(r, target))
       return { ok: false, reason: DELIVERY_POLICY_MESSAGES.otherRepo(fullName) }
   }
-  const action = args[1] ?? ''
-  const label = `${sub} ${action}`.trim()
-  if (sub === 'pr') {
-    if (!(action in PR_ALLOWED)) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.ghSub(label) }
+  if (family === 'pr') {
     if (action === 'create') {
       for (const h of optionValues(args, '-H', '--head')) {
         const branch = h.includes(':') ? h.slice(h.indexOf(':') + 1) : h
@@ -320,38 +293,20 @@ export function ghVerdict(args: readonly string[], target: DeliveryTarget): Deli
         return { ok: false, reason: DELIVERY_POLICY_MESSAGES.otherRepo(fullName) }
       }
     }
-    return { ok: true, kind: 'github', event: PR_ALLOWED[action] ?? null }
   }
-  const allowed = sub === 'run' ? RUN_ALLOWED : LABEL_ALLOWED
-  if (!allowed.has(action)) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.ghSub(label) }
-  return { ok: true, kind: 'github', event: null }
+  return rule.access === 'read'
+    ? { ok: true, kind: 'github', access: 'read', event: null }
+    : { ok: true, kind: 'github', access: 'write', event: rule.event }
 }
 
 /**
- * Leitura do GitHub fora do modo entrega: `gh pr view|diff|checks|list|status`, `gh run
- * view|list|watch`, `gh label list` e `gh api` só com GET/HEAD em `repos/<owner>/<repo>/…` do
- * projeto ou GraphQL sem mutation. Mesmas checagens de repositório do modo entrega; nada que
- * escreva passa (todo comando que escreve tem evento, e mutation é recusada à parte).
+ * Leitura do GitHub fora do modo entrega: as formas `read` da tabela (`github-rules.ts`), só no
+ * repositório do projeto. Escrita nunca passa por aqui, com ou sem evento no histórico.
  */
 export function isGhRead(args: readonly string[], target: DeliveryTarget): boolean {
-  const sub = args[0] ?? ''
-  if (!['pr', 'run', 'label', 'api'].includes(sub)) return false
-  if (sub === 'api') {
-    const call = ghApiParse(args.slice(1))
-    if (call.input || !call.endpoint) return false
-    if (call.endpoint.replace(/^\//, '') === 'graphql') {
-      const query = call.fields.find(([k]) => k === 'query')?.[1]
-      if (query === undefined || query.startsWith('@') || /\bmutation\b/.test(query)) return false
-    } else {
-      const method = call.method ?? (call.fields.length > 0 ? 'POST' : 'GET')
-      if (method !== 'GET' && method !== 'HEAD') return false
-    }
-  }
   const v = ghVerdict(args, target)
-  return v !== null && v.ok && v.event === null
+  return v !== null && v.ok && v.access === 'read'
 }
-
-// ---------------------------------------------------------------- gh api
 
 const API_WITH_VALUE = new Set([
   '-X',
@@ -410,21 +365,6 @@ export function ghApiParse(args: readonly string[]): GhApiCall {
   return call
 }
 
-/** Mutations do GraphQL permitidas e o evento que cada uma gera. */
-const MUTATIONS: Record<string, DeliveryEvent | null> = {
-  addPullRequestReviewThreadReply: 'thread_reply',
-  resolveReviewThread: 'thread_resolve',
-  unresolveReviewThread: null,
-  addComment: 'pr_comment',
-  addPullRequestReviewComment: 'pr_comment',
-  updatePullRequestReviewComment: 'pr_comment',
-  updateIssueComment: 'pr_comment',
-  requestReviews: 'review_request',
-  markPullRequestReadyForReview: 'pr_ready',
-  updatePullRequest: 'pr_edit'
-}
-
-/** Campos do primeiro nível da operação (`{ campo(args) { … } }`), ignorando strings. */
 export function topLevelFields(query: string): string[] {
   const body = query.replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/#[^\n]*/g, '')
   const out: string[] = []
@@ -443,7 +383,7 @@ export function topLevelFields(query: string): string[] {
   return out
 }
 
-export function ghApiVerdict(args: readonly string[], target: DeliveryTarget): DeliveryVerdict {
+function ghApiVerdict(args: readonly string[], target: DeliveryTarget): DeliveryVerdict {
   const call = ghApiParse(args)
   const fullName = `${target.owner}/${target.repo}`
   if (!call.endpoint) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiEndpoint }
@@ -451,7 +391,9 @@ export function ghApiVerdict(args: readonly string[], target: DeliveryTarget): D
     return { ok: false, reason: DELIVERY_POLICY_MESSAGES.ghHost }
   }
   const method = call.method ?? (call.fields.length > 0 || call.input ? 'POST' : 'GET')
-  if (method === 'DELETE') return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiDelete }
+  if ((GH_API_NEVER_METHODS as readonly string[]).includes(method)) {
+    return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiDelete }
+  }
   const field = (k: string): string[] => call.fields.filter(([key]) => key === k).map(([, v]) => v)
 
   if (call.endpoint.replace(/^\//, '') === 'graphql') {
@@ -485,12 +427,13 @@ export function ghApiVerdict(args: readonly string[], target: DeliveryTarget): D
       if (fields.length === 0)
         return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiMutation('?') }
       for (const f of fields) {
-        if (!(f in MUTATIONS)) return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiMutation(f) }
-        event = event ?? MUTATIONS[f] ?? null
+        if (!Object.hasOwn(GH_API_MUTATIONS, f))
+          return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiMutation(f) }
+        event = event ?? GH_API_MUTATIONS[f] ?? null
       }
-      return { ok: true, kind: 'github', event }
+      return { ok: true, kind: 'github', access: 'write', event }
     }
-    return { ok: true, kind: 'github', event: null }
+    return { ok: true, kind: 'github', access: 'read', event: null }
   }
 
   const path = call.endpoint
@@ -503,21 +446,15 @@ export function ghApiVerdict(args: readonly string[], target: DeliveryTarget): D
   if (!m || !sameRepo(m[1]!, m[2]!, target)) {
     return { ok: false, reason: DELIVERY_POLICY_MESSAGES.otherRepo(fullName) }
   }
-  if (method === 'GET' || method === 'HEAD') return { ok: true, kind: 'github', event: null }
+  if ((GH_API_READ_METHODS as readonly string[]).includes(method)) {
+    // Leitura é sem campos nem arquivo (com campos o `gh` monta um corpo; o CLI nega também).
+    if (call.fields.length > 0 || call.input) {
+      return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiGetFields }
+    }
+    return { ok: true, kind: 'github', access: 'read', event: null }
+  }
   const rest = m[3] ?? ''
-  const rules: [RegExp, string[], DeliveryEvent][] = [
-    [/^\/pulls$/, ['POST'], 'pr_create'],
-    [/^\/pulls\/\d+$/, ['PATCH'], 'pr_edit'],
-    [/^\/pulls\/\d+\/comments$/, ['POST'], 'pr_comment'],
-    [/^\/pulls\/\d+\/comments\/\d+\/replies$/, ['POST'], 'thread_reply'],
-    [/^\/pulls\/comments\/\d+$/, ['PATCH'], 'pr_comment'],
-    [/^\/pulls\/\d+\/reviews$/, ['POST'], 'pr_comment'],
-    [/^\/pulls\/\d+\/requested_reviewers$/, ['POST'], 'review_request'],
-    [/^\/issues\/\d+\/comments$/, ['POST'], 'pr_comment'],
-    [/^\/issues\/comments\/\d+$/, ['PATCH'], 'pr_comment'],
-    [/^\/issues\/\d+\/labels$/, ['POST', 'PUT'], 'pr_edit']
-  ]
-  const rule = rules.find(([re, methods]) => re.test(rest) && methods.includes(method))
+  const rule = GH_API_ROUTES.find((r) => r.route.test(rest) && r.methods.includes(method))
   if (!rule)
     return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiWrite(`${method} ${rest || '/'}`) }
   // Fechar a PR ou aprovar/reprovar revisão: ficam com a pessoa.
@@ -527,12 +464,12 @@ export function ghApiVerdict(args: readonly string[], target: DeliveryTarget): D
   if (field('event').some((v) => /^(APPROVE|REQUEST_CHANGES)$/i.test(v))) {
     return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiField('event') }
   }
-  if (rule[2] === 'pr_create') {
+  if (rule.event === 'pr_create') {
     for (const h of field('head')) {
       const branch = h.includes(':') ? h.slice(h.indexOf(':') + 1) : h
       if (branch !== target.branch)
         return { ok: false, reason: DELIVERY_POLICY_MESSAGES.ghHead(target.branch) }
     }
   }
-  return { ok: true, kind: 'github', event: rule[2] }
+  return { ok: true, kind: 'github', access: 'write', event: rule.event }
 }

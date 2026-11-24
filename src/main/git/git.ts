@@ -4,6 +4,7 @@
  */
 import { execFile as nodeExecFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { isBranchName } from '../../shared/github-names'
 
 export const GIT_TIMEOUT_MS = 10_000
 
@@ -60,14 +61,11 @@ export interface Git {
   isDirty(root: string): Promise<boolean>
   /** Branch padrão conhecida localmente (refs/remotes/<remote>/HEAD), se houver. */
   remoteDefaultBranch(root: string, remote: string): Promise<string | null>
-  /** Nomes das branches locais (refs/heads). */
   localBranches(root: string): Promise<string[]>
-  // ---------- Worktrees (4A) ----------
   /** `git fetch <remote> <branch>` (sem credenciais interativas: GIT_TERMINAL_PROMPT=0). */
   fetch(root: string, remote: string, branch: string): Promise<void>
   /** Branches remotas conhecidas localmente (refs/remotes/<remote>/…), sem o prefixo do remote. */
   remoteBranches(root: string, remote: string): Promise<string[]>
-  /** O ref existe? (ex.: `origin/main`, `refs/heads/x`) */
   refExists(root: string, ref: string): Promise<boolean>
   /** `git worktree add`: nova branch a partir de `base`, ou branch existente (`newBranch: false`). */
   worktreeAdd(
@@ -80,7 +78,6 @@ export interface Git {
   worktreeRemove(root: string, path: string, force: boolean): Promise<void>
   /** Worktrees registrados (inclui a pasta principal) e a branch em uso em cada um. */
   worktreeList(root: string): Promise<{ path: string; branch: string | null }[]>
-  /** `git status --porcelain` (linhas). */
   statusPorcelain(dir: string): Promise<string[]>
   /** `git diff --stat <base>` (texto) e arquivos alterados desde `base`, incluindo não commitados. */
   diffStat(dir: string, base: string): Promise<{ stat: string; files: string[] }>
@@ -88,13 +85,11 @@ export interface Git {
   commitsSince(dir: string, base: string): Promise<{ hash: string; subject: string }[]>
   /** Commit atual (hash completo). */
   headCommit(dir: string): Promise<string>
-  /** Conteúdo de um arquivo num commit (`git show <commit>:<path>`). */
   fileAtCommit(root: string, commit: string, path: string): Promise<string>
   /** `git diff <base>` (commits + mudanças no worktree), texto puro, sem cor. */
   diffText(dir: string, base: string): Promise<string>
   /** Linhas adicionadas/removidas contra a base (`git diff --numstat`; binários não contam). */
   diffShortstat(dir: string, base: string): Promise<{ added: number; removed: number }>
-  // ---------- Entrega (5C) ----------
   /**
    * `git push --porcelain -u <remote> refs/heads/<b>:refs/heads/<b>`. Nunca força. Sem prompts
    * (GIT_TERMINAL_PROMPT=0, ssh BatchMode): credencial pedida → GitError('credentials').
@@ -125,7 +120,13 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
         env: {
           ...process.env,
           // Nunca pedir credenciais/editor; saída estável em inglês; sem travar o índice.
+          // Sem askpass herdado (ex.: o do VS Code quando o app abre de um terminal dele), sem
+          // passphrase do SSH e sem a janela do Git Credential Manager: fetch e push falham na hora.
           GIT_TERMINAL_PROMPT: '0',
+          GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+          GIT_ASKPASS: '',
+          SSH_ASKPASS: '',
+          GCM_INTERACTIVE: 'never',
           GIT_OPTIONAL_LOCKS: '0',
           LC_ALL: 'C',
           LANG: 'C',
@@ -251,19 +252,12 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
       return (await git(dir, ['rev-parse', 'HEAD'])).trim()
     },
     async push(dir, remote, branch) {
-      if (!isSafeRefName(branch) || !/^[A-Za-z0-9._-]+$/.test(remote)) {
+      if (!isBranchName(branch) || !/^[A-Za-z0-9._-]+$/.test(remote)) {
         throw new GitError('failed', 'Branch ou remote inválido para o push.')
       }
       const ref = `refs/heads/${branch}`
       await git(dir, ['push', '--porcelain', '-u', remote, `${ref}:${ref}`], {
-        timeout: GIT_PUSH_TIMEOUT_MS,
-        env: {
-          // Nunca perguntar: senha, passphrase do SSH, nem a janela do Git Credential Manager.
-          GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
-          GIT_ASKPASS: '',
-          SSH_ASKPASS: '',
-          GCM_INTERACTIVE: 'never'
-        }
+        timeout: GIT_PUSH_TIMEOUT_MS
       })
     },
     async aliases(dir) {
@@ -362,17 +356,6 @@ export function toGitError(error: unknown): GitError {
     )
   }
   return new GitError('failed', 'O git retornou um erro ao ler esta pasta.')
-}
-
-/** Nome de branch seguro para usar como argumento (sem opções, refspec, `..` nem espaços). */
-export function isSafeRefName(name: string): boolean {
-  return (
-    /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(name) &&
-    !name.includes('..') &&
-    !name.endsWith('/') &&
-    !name.endsWith('.lock') &&
-    !name.includes('//')
-  )
 }
 
 /** Soma de `git diff --numstat` (linhas `adicionadas<TAB>removidas<TAB>arquivo`; binário = `-`). */

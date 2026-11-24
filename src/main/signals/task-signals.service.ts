@@ -5,20 +5,23 @@
  * Falhas não quebram: sem GitHub → só local, com aviso; sem acesso/SSO/rate limit/rede →
  * mantém o último resultado remoto conhecido (se houver) e explica.
  */
-import type {
-  NotionResult,
-  NotionTasksResult,
-  ProjectAction,
-  SignalsGitHubState,
-  TaskSignalsResult
-} from '../../shared/ipc-contract'
 import { parseDisplayId } from '../../shared/task-id-match'
-import { buildTaskSignals, type PullRequestSummary } from '../../shared/task-signals'
+import {
+  buildTaskSignals,
+  type PullRequestSummary,
+  type SignalsGitHubState,
+  type TaskSignalsResult
+} from '../../shared/task-signals'
 import type { OrkioConfig } from '../config/orkio-config'
-import { GitHubApiError } from '../connectors/github/github.client'
 import type { Git } from '../git/git'
 import type { ConfigStore } from '../storage/config-store'
 import { GitHubRepoSignals, type GitHubSignalsApi } from './github-signals.source'
+import type { Result } from '../../shared/result'
+import type { NotionTasksResult } from '../../shared/notion'
+import type { ProjectAction } from '../../shared/projects'
+import { projectById } from '../config/queries'
+import { githubRepoOf } from '../../shared/projects'
+import { isApiError } from '../net/http'
 
 export interface SignalsGitHub extends GitHubSignalsApi {
   isConnected(): Promise<boolean>
@@ -30,7 +33,7 @@ export interface TaskSignalsDeps {
   git: Pick<Git, 'localBranches'>
   github: SignalsGitHub
   /** Tarefas do projeto (NotionWorkspaceService.listTasks, com o cache da 2C). */
-  listTasks(projectId: string): Promise<NotionResult<NotionTasksResult>>
+  listTasks(projectId: string): Promise<Result<NotionTasksResult>>
   /** Branches registradas para cada tarefa do projeto (`task_branches`): ligam sem o ID no nome. */
   linkedBranches?: (projectId: string) => ReadonlyMap<string, readonly string[]>
   now?: () => Date
@@ -69,8 +72,8 @@ export class TaskSignalsService {
   async get(
     projectId: string,
     options: { force?: boolean } = {}
-  ): Promise<NotionResult<TaskSignalsResult>> {
-    const project = this.deps.store.get().projects.find((p) => p.id === projectId)
+  ): Promise<Result<TaskSignalsResult>> {
+    const project = projectById(this.deps.store.get(), projectId)
     if (!project) {
       return { ok: false, error: { code: 'not_found', message: SIGNALS_MESSAGES.projectNotFound } }
     }
@@ -85,7 +88,6 @@ export class TaskSignalsService {
     const messages: string[] = []
     let action: ProjectAction | undefined
 
-    // Git local.
     let localBranches: string[] = []
     let local = true
     try {
@@ -95,16 +97,15 @@ export class TaskSignalsService {
       messages.push(SIGNALS_MESSAGES.local)
     }
 
-    // GitHub.
     let github: SignalsGitHubState = 'ok'
     let remoteBranches: string[] | null = null
     let pulls: PullRequestSummary[] | null = null
     let details = new Map()
-    const repo = project.repo
-    if (!repo) {
+    const repo = githubRepoOf(project)
+    if (!project.repo) {
       github = 'no_repo'
       messages.push(SIGNALS_MESSAGES.noRepo)
-    } else if (repo.host.toLowerCase() !== 'github.com' && !repo.verified) {
+    } else if (!repo) {
       github = 'enterprise'
       messages.push(SIGNALS_MESSAGES.enterprise)
     } else if (!(await this.deps.github.isConnected().catch(() => false))) {
@@ -140,7 +141,6 @@ export class TaskSignalsService {
         }
       }
       if (pulls) {
-        // Detalhes (GraphQL) só das PRs que casam com alguma tarefa.
         const linked = buildTaskSignals(tasks, {
           localBranches: [],
           remoteBranches: [],
@@ -175,7 +175,7 @@ export class TaskSignalsService {
 
   /** PRs do repositório no último resultado do GitHub (abertas e fechadas há até 30 dias). */
   cachedPulls(projectId: string): PullRequestSummary[] | null {
-    const repo = this.deps.store.get().projects.find((p) => p.id === projectId)?.repo
+    const repo = githubRepoOf(projectById(this.deps.store.get(), projectId))
     if (!repo) return null
     return (
       this.remotes.get(`${projectId}:${repo.owner}/${repo.name}`.toLowerCase())?.last?.pulls ?? null
@@ -184,7 +184,7 @@ export class TaskSignalsService {
 
   /** PR aberta (ou rascunho) mais recente da branch, pelo último resultado conhecido (sem rede). */
   prForBranch(projectId: string, branch: string): PullRequestSummary | null {
-    const repo = this.deps.store.get().projects.find((p) => p.id === projectId)?.repo
+    const repo = githubRepoOf(projectById(this.deps.store.get(), projectId))
     if (!repo) return null
     const last = this.remotes.get(`${projectId}:${repo.owner}/${repo.name}`.toLowerCase())?.last
     return (
@@ -210,8 +210,7 @@ export class TaskSignalsService {
   private async failure(
     e: unknown
   ): Promise<{ state: SignalsGitHubState; message: string; action?: ProjectAction }> {
-    if (!(e instanceof GitHubApiError))
-      return { state: 'unverified', message: SIGNALS_MESSAGES.unknown }
+    if (!isApiError(e, 'github')) return { state: 'unverified', message: SIGNALS_MESSAGES.unknown }
     switch (e.code) {
       case 'not_connected':
         return { state: 'disconnected', message: SIGNALS_MESSAGES.disconnected }

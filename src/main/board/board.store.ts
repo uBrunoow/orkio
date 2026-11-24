@@ -2,7 +2,27 @@
  * Acesso ao SQLite do quadro: estado local das tarefas, histórico e escritas pendentes.
  * Só ids, etapas, flags e nomes de opção. Nunca título/conteúdo de páginas.
  */
-import type { Db } from '../db/database'
+import type { Db, Tx } from '../db/database'
+import type { SqlValue } from '../db/database'
+import {
+  STAGE_ENTRY_KINDS,
+  STAGE_EVENT_KINDS,
+  SETTLES_REJECTION_KINDS,
+  eventSource,
+  isTaskEventKind,
+  parseDetailJson,
+  parseTaskEvent,
+  type NewTaskEvent,
+  type TaskEvent,
+  type TaskEventKind
+} from '../../shared/task-events'
+import type { BoardHistoryEntry } from '../../shared/board'
+import type { StageEventInput } from '../../shared/overview'
+import {
+  decodePropertyWrites,
+  propertyWritesKey,
+  type PropertyWrites
+} from '../connectors/notion/notion.schema'
 
 export type StateSource = 'manual' | 'notion' | 'automation'
 
@@ -13,61 +33,15 @@ export interface TaskStateRow {
   blocked: boolean
   updatedAt: string
   source: StateSource
-  /** Automações pausadas nesta tarefa (3B). */
   automationPaused: boolean
 }
 
-export type TaskEventKind =
-  | 'added'
-  | 'moved'
-  | 'reconciled'
-  | 'blocked'
-  | 'unblocked'
-  | 'sync_ok'
-  | 'sync_failed'
-  | 'rolled_back'
-  /** Evento do git/GitHub processado pelo motor (3B): regra, resultado, motivo. */
-  | 'automation'
-  | 'automation_paused'
-  | 'automation_resumed'
-  /** Execuções do Claude Code (4A). */
-  | 'run_started'
-  | 'run_finished'
-  | 'run_cancelled'
-  | 'run_failed'
-  | 'run_blocked'
-  /** Artefatos (4B): documento anexado (caminho + commit) e publicado no Notion. */
-  | 'artifact_attached'
-  | 'artifact_published'
-  /** Fluxos de tarefa (5A). */
-  | 'flow_started'
-  | 'step_started'
-  | 'step_finished'
-  | 'step_failed'
-  | 'step_skipped'
-  | 'gate_waiting'
-  | 'gate_approved'
-  | 'gate_rejected'
-  /** Você pediu ajustes no gate (o passo de ajustes roda de novo na mesma sessão). */
-  | 'gate_revised'
-  | 'flow_paused'
-  | 'flow_finished'
-  /** Entrega (5C): push/PR/comentário/resolução/pedido de review feitos por fluxo. */
-  | 'delivery'
-  /** Agentes (8A): atribuição da tarefa (à mão ou pela regra da coluna). */
-  | 'agent_assigned'
-  | 'agent_unassigned'
-
-export interface TaskEventRow {
-  id: number
+export type TaskEventInput = NewTaskEvent & {
   taskPageId: string
+  projectId: string
   at: string
-  kind: TaskEventKind
-  source: StateSource
-  fromStage: string | null
-  toStage: string | null
-  detail: Record<string, unknown> | null
-  eventKey: string | null
+  /** Idempotência das automações: única por projeto e tarefa. */
+  eventKey?: string | null
 }
 
 /** Valores desejados no Notion (por id de propriedade) e como desfazer localmente. */
@@ -75,7 +49,7 @@ export interface PendingWrite {
   id: number
   taskPageId: string
   projectId: string
-  properties: Record<string, unknown>
+  properties: PropertyWrites
   rollback: { stageId: string | null; blocked: boolean }
   attempts: number
   nextAttemptAt: string
@@ -110,7 +84,7 @@ function toPending(row: PendingDbRow): PendingWrite {
     id: row.id,
     taskPageId: row.task_page_id,
     projectId: row.project_id,
-    properties: JSON.parse(row.payload_json) as Record<string, unknown>,
+    properties: decodePropertyWrites(JSON.parse(row.payload_json)),
     rollback: JSON.parse(row.rollback_json) as PendingWrite['rollback'],
     attempts: row.attempts,
     nextAttemptAt: row.next_attempt_at,
@@ -119,44 +93,65 @@ function toPending(row: PendingDbRow): PendingWrite {
   }
 }
 
+function toStateRow(r: StateDbRow): TaskStateRow {
+  return {
+    taskPageId: r.task_page_id,
+    projectId: r.project_id,
+    stageId: r.stage_id,
+    blocked: r.blocked === 1,
+    updatedAt: r.updated_at,
+    source: r.source,
+    automationPaused: r.automation_paused === 1
+  }
+}
+
+interface EventDbRow {
+  id: number
+  task_page_id: string
+  project_id: string
+  at: string
+  kind: string
+  source: string
+  from_stage: string | null
+  to_stage: string | null
+  detail_json: string | null
+}
+
+export type ProjectHistoryEntry = BoardHistoryEntry & { projectId: string; taskId: string }
+
+/** Leitura sempre pelo catálogo: tipo desconhecido (outra versão) vira `null`. */
+function toEvent(r: EventDbRow): TaskEvent | null {
+  return parseTaskEvent({
+    kind: r.kind,
+    source: r.source,
+    fromStage: r.from_stage,
+    toStage: r.to_stage,
+    detail: parseDetailJson(r.detail_json)
+  })
+}
+
+function toHistoryEntry(r: EventDbRow): ProjectHistoryEntry | null {
+  const event = toEvent(r)
+  return event
+    ? { id: r.id, at: r.at, projectId: r.project_id, taskId: r.task_page_id, ...event }
+    : null
+}
+
 export class BoardStore {
   constructor(readonly db: Db) {}
 
-  transaction<T>(fn: () => T): T {
+  transaction<T>(fn: (tx: Tx) => T): T {
     return this.db.transaction(fn)
   }
 
   states(projectId: string): Map<string, TaskStateRow> {
     const rows = this.db.all<StateDbRow>('SELECT * FROM task_state WHERE project_id = ?', projectId)
-    return new Map(
-      rows.map((r) => [
-        r.task_page_id,
-        {
-          taskPageId: r.task_page_id,
-          projectId: r.project_id,
-          stageId: r.stage_id,
-          blocked: r.blocked === 1,
-          updatedAt: r.updated_at,
-          source: r.source,
-          automationPaused: r.automation_paused === 1
-        }
-      ])
-    )
+    return new Map(rows.map((r) => [r.task_page_id, toStateRow(r)]))
   }
 
   state(taskPageId: string): TaskStateRow | null {
     const r = this.db.get<StateDbRow>('SELECT * FROM task_state WHERE task_page_id = ?', taskPageId)
-    return r
-      ? {
-          taskPageId: r.task_page_id,
-          projectId: r.project_id,
-          stageId: r.stage_id,
-          blocked: r.blocked === 1,
-          updatedAt: r.updated_at,
-          source: r.source,
-          automationPaused: r.automation_paused === 1
-        }
-      : null
+    return r ? toStateRow(r) : null
   }
 
   upsertState(row: Omit<TaskStateRow, 'automationPaused'>): void {
@@ -175,9 +170,8 @@ export class BoardStore {
     )
   }
 
-  addEvent(
-    event: Omit<TaskEventRow, 'id' | 'eventKey'> & { projectId: string; eventKey?: string | null }
-  ): void {
+  addEvent(event: TaskEventInput): void {
+    const detail = event.detail as Record<string, unknown>
     this.db.run(
       `INSERT INTO task_events (task_page_id, project_id, at, kind, source, from_stage, to_stage, detail_json, event_key)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -185,15 +179,14 @@ export class BoardStore {
       event.projectId,
       event.at,
       event.kind,
-      event.source,
-      event.fromStage,
-      event.toStage,
-      event.detail ? JSON.stringify(event.detail) : null,
+      eventSource(event),
+      event.fromStage ?? null,
+      event.toStage ?? null,
+      Object.keys(detail).length > 0 ? JSON.stringify(detail) : null,
       event.eventKey ?? null
     )
   }
 
-  /** Movimentos feitos por cada automação desde `sinceIso` (disparos da semana). */
   ruleCounts(projectId: string, sinceIso: string): Record<string, number> {
     const out: Record<string, number> = {}
     for (const r of this.db.all<{ rule_id: string | null; n: number }>(
@@ -208,9 +201,20 @@ export class BoardStore {
     return out
   }
 
-  /** Esta chave de evento (idempotência das automações) já foi processada? */
-  hasEventKey(key: string): boolean {
-    return this.db.get('SELECT 1 AS x FROM task_events WHERE event_key = ?', key) !== undefined
+  /**
+   * Esta chave de evento (idempotência das automações) já foi processada nesta tarefa? A chave só
+   * vale dentro do projeto e da tarefa: a PR #12 de outro projeto, ou a mesma PR em outra tarefa,
+   * é outro evento.
+   */
+  hasEventKey(projectId: string, taskPageId: string, key: string): boolean {
+    return (
+      this.db.get(
+        'SELECT 1 AS x FROM task_events WHERE project_id = ? AND task_page_id = ? AND event_key = ?',
+        projectId,
+        taskPageId,
+        key
+      ) !== undefined
+    )
   }
 
   /** Último movimento manual da tarefa (para conflito com eventos mais antigos). */
@@ -236,9 +240,6 @@ export class BoardStore {
     )
   }
 
-  // ---------- Fluxo (3C) ----------
-
-  /** Tarefas por etapa (estado local). */
   taskCounts(projectId: string): Record<string, number> {
     const rows = this.db.all<{ stage_id: string | null; n: number }>(
       'SELECT stage_id, COUNT(*) AS n FROM task_state WHERE project_id = ? GROUP BY stage_id',
@@ -285,8 +286,6 @@ export class BoardStore {
       }))
   }
 
-  // ---------- Snapshots dos sinais (3B) ----------
-
   snapshots(projectId: string): Map<string, unknown> {
     return new Map(
       this.db
@@ -312,37 +311,133 @@ export class BoardStore {
     )
   }
 
-  events(taskPageId: string, limit = 50): TaskEventRow[] {
+  /** Histórico da tarefa, mais novo primeiro. Linhas de tipo desconhecido ficam de fora. */
+  events(taskPageId: string, limit = 50): BoardHistoryEntry[] {
     return this.db
-      .all<{
-        id: number
-        task_page_id: string
-        at: string
-        kind: TaskEventKind
-        source: StateSource
-        from_stage: string | null
-        to_stage: string | null
-        detail_json: string | null
-        event_key: string | null
-      }>(
+      .all<EventDbRow>(
         'SELECT * FROM task_events WHERE task_page_id = ? ORDER BY id DESC LIMIT ?',
         taskPageId,
         limit
       )
-      .map((r) => ({
-        id: r.id,
-        taskPageId: r.task_page_id,
-        at: r.at,
-        kind: r.kind,
-        source: r.source,
-        fromStage: r.from_stage,
-        toStage: r.to_stage,
-        detail: r.detail_json ? (JSON.parse(r.detail_json) as Record<string, unknown>) : null,
-        eventKey: r.event_key
-      }))
+      .flatMap((r) => {
+        const event = toEvent(r)
+        return event ? [{ id: r.id, at: r.at, ...event }] : []
+      })
   }
 
-  // ---------- Escritas pendentes ----------
+  /**
+   * Eventos de todos os projetos desde `since`, mais novos primeiro (atividade). `group` só
+   * estreita a busca: `board` sem os movimentos das automações, `automation` só o que elas fizeram.
+   * Quem chama ainda confere o grupo do evento (`activityGroup`). Linha de tipo desconhecido vem
+   * como `null` (conta para a paginação).
+   */
+  recentEvents(query: {
+    since: string
+    kinds: readonly TaskEventKind[]
+    projectId?: string | undefined
+    beforeId?: number | undefined
+    group?: 'board' | 'automation' | undefined
+    limit: number
+  }): (ProjectHistoryEntry | null)[] {
+    const where: string[] = ['at >= ?']
+    const params: SqlValue[] = [query.since]
+    if (query.projectId) {
+      where.push('project_id = ?')
+      params.push(query.projectId)
+    }
+    if (query.beforeId) {
+      where.push('id < ?')
+      params.push(query.beforeId)
+    }
+    where.push(`kind IN (${query.kinds.map(() => '?').join(', ')})`)
+    params.push(...query.kinds)
+    if (query.group === 'board') where.push(`NOT (kind = 'moved' AND source = 'automation')`)
+    if (query.group === 'automation') where.push(`(kind = 'automation' OR source = 'automation')`)
+    return this.db
+      .all<EventDbRow>(
+        `SELECT * FROM task_events WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ?`,
+        ...params,
+        query.limit
+      )
+      .map(toHistoryEntry)
+  }
+
+  /** Recusas do Notion desde `since` sem nova mudança da tarefa depois (mover de novo resolve). */
+  unsettledRejections(since: string): ProjectHistoryEntry[] {
+    return this.db
+      .all<EventDbRow>(
+        `SELECT * FROM task_events e WHERE kind = 'rolled_back' AND at >= ?
+         AND NOT EXISTS (SELECT 1 FROM task_events l WHERE l.task_page_id = e.task_page_id
+           AND l.id > e.id AND l.kind IN (${SETTLES_REJECTION_KINDS.map(() => '?').join(', ')}))`,
+        since,
+        ...SETTLES_REJECTION_KINDS
+      )
+      .flatMap((r) => {
+        const e = toHistoryEntry(r)
+        return e ? [e] : []
+      })
+  }
+
+  /** Mudanças de etapa desde `from`, em ordem (semana: finalizadas e tempo na etapa). */
+  stageEvents(from: string): StageEventInput[] {
+    return this.db
+      .all<EventDbRow>(
+        `SELECT * FROM task_events
+         WHERE at >= ? AND kind IN (${STAGE_EVENT_KINDS.map(() => '?').join(', ')}) ORDER BY id`,
+        from,
+        ...STAGE_EVENT_KINDS
+      )
+      .flatMap((e): StageEventInput[] =>
+        isTaskEventKind(e.kind)
+          ? [
+              {
+                id: e.id,
+                taskPageId: e.task_page_id,
+                projectId: e.project_id,
+                at: e.at,
+                kind: e.kind,
+                fromStage: e.from_stage,
+                toStage: e.to_stage
+              }
+            ]
+          : []
+      )
+  }
+
+  /** Última entrada da tarefa nesta etapa (movida, reconciliada ou criada nela). */
+  lastEntryAt(taskPageId: string, stageId: string): string | null {
+    return (
+      this.db.get<{ at: string | null }>(
+        `SELECT MAX(at) AS at FROM task_events WHERE task_page_id = ? AND to_stage = ?
+         AND kind IN (${STAGE_ENTRY_KINDS.map(() => '?').join(', ')})`,
+        taskPageId,
+        stageId,
+        ...STAGE_ENTRY_KINDS
+      )?.at ?? null
+    )
+  }
+
+  allStates(): TaskStateRow[] {
+    return this.db.all<StateDbRow>('SELECT * FROM task_state').map(toStateRow)
+  }
+
+  stuckWrites(minAttempts: number): PendingWrite[] {
+    return this.db
+      .all<PendingDbRow>(
+        `SELECT * FROM pending_writes WHERE last_error_code IS NOT NULL AND attempts >= ?
+         ORDER BY id`,
+        minAttempts
+      )
+      .map(toPending)
+  }
+
+  counts(): { events: number; pendingWrites: number } {
+    const n = (sql: string): number => this.db.get<{ n: number }>(sql)?.n ?? 0
+    return {
+      events: n('SELECT COUNT(*) AS n FROM task_events'),
+      pendingWrites: n('SELECT COUNT(*) AS n FROM pending_writes')
+    }
+  }
 
   pending(taskPageId: string): PendingWrite | null {
     const row = this.db.get<PendingDbRow>(
@@ -369,7 +464,7 @@ export class BoardStore {
   upsertPending(input: {
     taskPageId: string
     projectId: string
-    properties: Record<string, unknown>
+    properties: PropertyWrites
     rollback: PendingWrite['rollback']
     now: string
   }): void {
@@ -378,7 +473,7 @@ export class BoardStore {
       this.db.run(
         `UPDATE pending_writes SET payload_json = ?, attempts = 0, next_attempt_at = ?,
          last_error_code = NULL WHERE task_page_id = ?`,
-        JSON.stringify(input.properties),
+        propertyWritesKey(input.properties),
         input.now,
         input.taskPageId
       )
@@ -390,7 +485,7 @@ export class BoardStore {
        VALUES (?, ?, ?, ?, 0, ?, ?)`,
       input.taskPageId,
       input.projectId,
-      JSON.stringify(input.properties),
+      propertyWritesKey(input.properties),
       JSON.stringify(input.rollback),
       input.now,
       input.now
@@ -401,15 +496,17 @@ export class BoardStore {
     this.db.run('DELETE FROM pending_writes WHERE task_page_id = ?', taskPageId)
   }
 
-  /** Remove só se ainda for a mesma versão (o usuário pode ter movido de novo durante o envio). */
-  deletePendingIfUnchanged(taskPageId: string, payloadJson: string): boolean {
-    return (
-      this.db.run(
-        'DELETE FROM pending_writes WHERE task_page_id = ? AND payload_json = ?',
-        taskPageId,
-        payloadJson
-      ).changes > 0
-    )
+  /**
+   * Remove só se ainda for a mesma versão (o usuário pode ter movido de novo durante o envio).
+   * Compara pela chave estável (`propertyWritesKey`), não pelo texto salvo.
+   */
+  deletePendingIfUnchanged(taskPageId: string, writes: PropertyWrites): boolean {
+    const current = this.pending(taskPageId)
+    if (!current || propertyWritesKey(current.properties) !== propertyWritesKey(writes)) {
+      return false
+    }
+    this.deletePending(taskPageId)
+    return true
   }
 
   scheduleRetry(taskPageId: string, attempts: number, nextAttemptAt: string, code: string): void {

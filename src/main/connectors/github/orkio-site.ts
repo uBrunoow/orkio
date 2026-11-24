@@ -1,44 +1,72 @@
 /**
- * Origem do site do Orkio para a revisão como `orkio[bot]` (`POST /github/review`).
- *
- * O token OAuth do usuário vai para lá, então as regras são estritas:
- * - `MAIN_VITE_SITE_URL` em primeiro lugar; a origem do intermediário do Notion
- *   (`MAIN_VITE_NOTION_OAUTH_BROKER_URL`) só quando não há site (o intermediário ainda pode ser o
- *   Worker da Cloudflare, que não tem a rota `/github/review`);
- * - só `https:`; `http:` apenas em `127.0.0.1` e só em build de E2E (`--mode e2e`). Nunca
- *   `localhost` nem http no app empacotado;
- * - sem usuário/senha na URL.
+ * Contrato da resposta do site do Orkio (`POST /github/review` e `/github/installation`,
+ * `site/lib/github-app.ts`; códigos em `shared/site-contract.ts`): um leitor só, usado pela revisão (`review-poster.ts`) e pelo cartão do
+ * orkio[bot] (`orkio-bot.ts`). Decide pelo código de erro do corpo (`error`); o status só vale
+ * quando não há código (site sem a rota, limitador da Vercel, resposta estranha). Nada do corpo
+ * vira mensagem: cada leitor tem os próprios textos.
  */
-export interface OrkioSiteEnv {
-  MODE?: string | undefined
-  MAIN_VITE_NOTION_OAUTH_BROKER_URL?: string | undefined
-  MAIN_VITE_SITE_URL?: string | undefined
+import { isInstallUrl } from '../../../shared/github-names'
+import {
+  isReviewRejectReason,
+  isSiteGitHubError,
+  type ReviewRejectReason,
+  type SiteGitHubError
+} from '../../../shared/site-contract'
+import { isRecord } from '../../net/parse'
+import type { OrkioSiteResponse } from './github.connector'
+
+export type OrkioSiteResult =
+  /** `installUrl`: o link de instalação do App, se o site mandou um válido. */
+  | { kind: 'ok'; body: Record<string, unknown>; installUrl: string | null }
+  /** `not_installed` (412): o GitHub App não está no repositório; link de instalação validado. */
+  | { kind: 'not_installed'; installUrl: string | null }
+  /** `forbidden` (403): a conta do usuário não tem acesso/push no repositório. */
+  | { kind: 'forbidden' }
+  /** `not_configured` (503): o GitHub App do Orkio não está configurado NO SITE. */
+  | { kind: 'app_not_configured' }
+  /** 404/405 sem código: site publicado antes desta rota. */
+  | { kind: 'site_outdated' }
+  | { kind: 'rate_limited' }
+  /** `bad_request` (400): pedido recusado; `reason` quando o GitHub recusou ou a PR não existe. */
+  | { kind: 'bad_request'; reason: ReviewRejectReason | null }
+  /** `upstream` (502), 5xx ou qualquer outra coisa. */
+  | { kind: 'upstream' }
+
+export function parseOrkioSiteResponse(response: OrkioSiteResponse): OrkioSiteResult {
+  const body = isRecord(response.body) ? response.body : {}
+  const raw = body['error']
+  const hasCode = typeof raw === 'string'
+  const url = body['installUrl']
+  const installUrl = isInstallUrl(url) ? url : null
+  if (response.status === 200 && !hasCode) return { kind: 'ok', body, installUrl }
+  if (isSiteGitHubError(raw)) return fromCode(raw, body, installUrl)
+  // Sem código conhecido: decide pelo status.
+  if (!hasCode && (response.status === 404 || response.status === 405)) {
+    return { kind: 'site_outdated' }
+  }
+  if (response.status === 429) return { kind: 'rate_limited' }
+  return { kind: 'upstream' }
 }
 
-/** A origem passa nas regras? `allowLoopbackHttp` só em build de E2E. */
-export function isAllowedOrkioSiteOrigin(origin: string, allowLoopbackHttp: boolean): boolean {
-  let url: URL
-  try {
-    url = new URL(origin)
-  } catch {
-    return false
+function fromCode(
+  code: SiteGitHubError,
+  body: Record<string, unknown>,
+  installUrl: string | null
+): OrkioSiteResult {
+  switch (code) {
+    case 'not_installed':
+      return { kind: 'not_installed', installUrl }
+    case 'forbidden':
+      return { kind: 'forbidden' }
+    case 'not_configured':
+      return { kind: 'app_not_configured' }
+    case 'rate_limited':
+      return { kind: 'rate_limited' }
+    case 'bad_request': {
+      const reason = body['reason']
+      return { kind: 'bad_request', reason: isReviewRejectReason(reason) ? reason : null }
+    }
+    case 'upstream':
+      return { kind: 'upstream' }
   }
-  if (url.origin !== origin || url.username || url.password) return false
-  if (url.protocol === 'https:') return true
-  return allowLoopbackHttp && url.protocol === 'http:' && url.hostname === '127.0.0.1'
-}
-
-/** Origem do site a partir da config de build, ou `null` (revisão como `orkio[bot]` indisponível). */
-export function readOrkioSiteOrigin(env: OrkioSiteEnv): string | null {
-  const raw = (env.MAIN_VITE_SITE_URL || env.MAIN_VITE_NOTION_OAUTH_BROKER_URL || '').trim()
-  if (!raw) return null
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return null
-  }
-  if (url.username || url.password) return null
-  const origin = url.origin
-  return isAllowedOrkioSiteOrigin(origin, env.MODE === 'e2e') ? origin : null
 }

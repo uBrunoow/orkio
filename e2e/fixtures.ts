@@ -17,28 +17,37 @@ import {
   type Locator,
   type Page
 } from '@playwright/test'
+import { isInstallUrl } from '../src/shared/github-names'
+import { REVIEW_APPLY_PROMPT, REVIEW_JSON_PROMPT } from '../src/shared/alva-templates'
 
 export const ROOT = resolve(__dirname, '..')
-/** Mesmo valor de .env.e2e (o build de E2E usa --mode e2e). */
-export const E2E_BROKER_URL = 'https://orkio-oauth-broker.e2e.invalid'
+/** Endereço do site no build de E2E (`MAIN_VITE_SITE_URL` do `.env.e2e`; `--mode e2e`). */
+export const E2E_SITE_URL = (() => {
+  const line = /^MAIN_VITE_SITE_URL=(.+)$/m.exec(readFileSync(join(ROOT, '.env.e2e'), 'utf8'))
+  if (!line) throw new Error('.env.e2e sem MAIN_VITE_SITE_URL')
+  return line[1]!.trim()
+})()
+/** Link de instalação do App que o site simulado devolve: no formato que o app aceita. */
+const E2E_INSTALL_URL = 'https://github.com/apps/orkio/installations/new'
+if (!isInstallUrl(E2E_INSTALL_URL)) throw new Error('E2E_INSTALL_URL fora do formato do app')
 
 /**
  * Simulação dos serviços externos, dentro do processo main:
  * - `notion`: resposta de GET /v1/users/me ('ok' | '401' | '503'). Em 'ok', só aceita os
  *   tokens listados em `validTokens` (se houver) — o resto recebe 401.
  * - `browser`: o que o "usuário" faz na página de autorização do Notion.
- * - `broker`: resposta do intermediário OAuth.
+ * - `notionOAuth`: resposta do intermediário OAuth do Notion (`<site>/notion/*`).
  */
 export interface FakeServices {
   notion: 'ok' | '401' | '503'
   validTokens: string[] | null
   browser: 'approve' | 'deny' | 'ignore'
-  broker: 'ok' | 'invalid_grant' | 'down'
+  notionOAuth: 'ok' | 'invalid_grant' | 'down'
   /**
-   * 6A: base de um intermediário DE VERDADE (o site local, `next start`). Com ela, as chamadas do
-   * app ao intermediário do build E2E vão por HTTP real para lá, em vez da simulação.
+   * 6A: base de um site DE VERDADE (o site local, `next start`). Com ela, as chamadas do app ao
+   * site do build E2E (`/notion/*`, `/github/*`) vão por HTTP real para lá, em vez da simulação.
    */
-  brokerTarget: string | null
+  siteTarget: string | null
   /** GitHub Device Flow: o que o "usuário" faz em github.com/login/device. */
   githubDevice: 'approve' | 'pending' | 'deny' | 'expire'
   /** GET api.github.com/user. */
@@ -126,8 +135,8 @@ export const DEFAULT_FAKES: FakeServices = {
   notion: 'ok',
   validTokens: null,
   browser: 'approve',
-  broker: 'ok',
-  brokerTarget: null,
+  notionOAuth: 'ok',
+  siteTarget: null,
   githubDevice: 'approve',
   githubUser: 'ok',
   githubRepos: {},
@@ -226,6 +235,59 @@ export function removeDir(dir: string): void {
   rmSync(`${dir}-home`, { recursive: true, force: true })
 }
 
+/** Mapeamento das propriedades do Notion simulado (ids das propriedades de `NOTION_FAKE.tasksDs`). */
+export const NOTION_MAPPING = {
+  title: { id: 'title', name: 'Nome', type: 'title' },
+  status: { id: 'st%3A', name: 'Status', type: 'status' },
+  uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
+  project: { id: 'rel', name: 'Projeto', type: 'relation' },
+  priority: { id: 'pri', name: 'Prioridade', type: 'select' },
+  assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
+} as const
+
+/** Repositório `acme/orkio-app` do GitHub simulado, como o Orkio grava no projeto. */
+export const FAKE_REPO = {
+  host: 'github.com',
+  owner: 'acme',
+  name: 'orkio-app',
+  remoteName: 'origin',
+  defaultBranch: 'main',
+  visibility: 'private',
+  canPush: true,
+  archived: false,
+  verified: true
+} as const
+
+/**
+ * Grava em `userDataDir` a config v2 (da 2C) com os bancos do Notion já escolhidos e um projeto
+ * vinculado à página "Orkio Desktop": o ponto de partida dos specs a partir do quadro.
+ */
+export function seedConfig(
+  userDataDir: string,
+  project: { id: string; name: string; localPath: string; repo: typeof FAKE_REPO | null }
+): void {
+  writeFileSync(
+    join(userDataDir, 'orkio-config.json'),
+    JSON.stringify({
+      schemaVersion: 2,
+      notion: {
+        projectsDataSource: { id: NOTION_FAKE.projectsDs, name: 'Projetos' },
+        tasksDataSource: { id: NOTION_FAKE.tasksDs, name: 'Tarefas' },
+        mapping: NOTION_MAPPING,
+        updatedAt: '2026-11-19T00:00:00.000Z'
+      },
+      projects: [
+        {
+          ...project,
+          createdAt: '2026-11-01T00:00:00.000Z',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
+        }
+      ]
+    })
+  )
+}
+
 /**
  * Abre o app (out/) com um userData isolado e substitui, no processo main, `fetch` e
  * `shell.openExternal` pelos simuladores acima. O código do app não tem modo de teste.
@@ -288,7 +350,7 @@ export async function launchOrkio(
   app.process().stderr?.on('data', (d: Buffer) => logs.push(String(d)))
 
   await app.evaluate(
-    ({ safeStorage, shell, dialog }, { initial, brokerUrl, ids }) => {
+    ({ safeStorage, shell, dialog }, { initial, siteUrl, ids, contract }) => {
       const g = globalThis as unknown as FakeGlobals
       if (process.platform === 'linux' && !safeStorage.isEncryptionAvailable()) {
         safeStorage.setUsePlainTextEncryption(true)
@@ -301,7 +363,6 @@ export async function launchOrkio(
         const next = g.__savePaths.shift()
         return next ? { canceled: false, filePath: next } : { canceled: true, filePath: '' }
       }) as typeof dialog.showSaveDialog
-      // Seletor de pasta do sistema → fila controlada pelo teste.
       dialog.showOpenDialog = (async () => {
         const next = g.__picks.shift()
         return next ? { canceled: false, filePaths: [next] } : { canceled: true, filePaths: [] }
@@ -324,7 +385,6 @@ export async function launchOrkio(
       const json = (body: unknown, status = 200): Response =>
         new Response(JSON.stringify(body), { status })
 
-      // "Navegador": registra a URL e, para a página de autorização do Notion, simula o usuário.
       shell.openExternal = async (url: string) => {
         g.__opened.push(url)
         const parsed = new URL(url)
@@ -334,8 +394,11 @@ export async function launchOrkio(
         if (g.__fakes.browser === 'ignore') return
         if (g.__fakes.browser === 'deny') redirect.searchParams.set('error', 'access_denied')
         else redirect.searchParams.set('code', 'e2e-auth-code')
-        // Redirect de verdade para o servidor local do app.
-        setTimeout(() => void realFetch(redirect.toString()).catch(() => {}), 50)
+        // Redirect de verdade para o servidor local do app (já escutando: ele só abre o navegador
+        // depois do listen). Como um navegador, não espera a resposta; uma falha vai para o log.
+        void realFetch(redirect.toString()).catch((e: unknown) =>
+          console.error('[e2e] redirect do OAuth falhou:', e)
+        )
       }
 
       globalThis.fetch = async (input, init) => {
@@ -350,27 +413,24 @@ export async function launchOrkio(
         } as FakeGlobals['__calls'][number]
         g.__calls.push(call)
 
-        // Intermediário OAuth.
-        if (url.startsWith(brokerUrl) && g.__fakes.brokerTarget) {
-          const target = `${g.__fakes.brokerTarget}${url.slice(brokerUrl.length)}`
+        if (url.startsWith(siteUrl) && g.__fakes.siteTarget) {
+          const target = `${g.__fakes.siteTarget}${url.slice(siteUrl.length)}`
           const response = await realFetch(target, init)
           call.status = response.status
           return response
         }
-        // Task 18: site do Orkio (mesma origem do intermediário no build de E2E) posta a revisão
-        // como orkio[bot]. Como o GitHub: a revisão entra nos detalhes da PR e `updated_at` muda.
-        // Site do Orkio: o orkio[bot] está instalado no repositório? (Integrações › Orkio bot)
-        if (url === `${brokerUrl}/github/installation` && init?.method === 'POST') {
+        // Site do Orkio simulado: o orkio[bot] está instalado no repositório? (Integrações ›
+        // Orkio bot). Formato de `site/lib/github-app.ts` (o E2E @site usa o site de verdade).
+        if (url === `${siteUrl}/github/installation` && init?.method === 'POST') {
           const body = JSON.parse(call.body ?? '{}') as { owner: string; repo: string }
           const installed = (g.__fakes.orkioBotInstalled ?? []).includes(
             `${body.owner}/${body.repo}`
           )
-          return json({
-            installed,
-            installUrl: 'https://github.com/apps/orkio/installations/new'
-          })
+          return json({ installed, installUrl: contract.installUrl })
         }
-        if (url === `${brokerUrl}/github/review` && init?.method === 'POST') {
+        // Task 18: o site posta a revisão como orkio[bot]. Como o GitHub: a revisão entra nos
+        // detalhes da PR e `updated_at` muda.
+        if (url === `${siteUrl}/github/review` && init?.method === 'POST') {
           const body = JSON.parse(call.body ?? '{}') as {
             owner: string
             repo: string
@@ -412,9 +472,10 @@ export async function launchOrkio(
             url: `https://github.com/${body.owner}/${body.repo}/pull/${body.number}#pullrequestreview-${id}`
           })
         }
-        if (url.startsWith(brokerUrl)) {
-          if (g.__fakes.broker === 'down') throw new TypeError('fetch failed')
-          if (g.__fakes.broker === 'invalid_grant') return json({ error: 'invalid_grant' }, 400)
+        if (url.startsWith(`${siteUrl}/notion/`)) {
+          if (g.__fakes.notionOAuth === 'down') throw new TypeError('fetch failed')
+          if (g.__fakes.notionOAuth === 'invalid_grant')
+            return json({ error: 'invalid_grant' }, 400)
           // Geração do token: na renovação, a seguinte à do refresh token recebido.
           const previous = /nrt_E2E_OAUTH_REFRESH_(\d+)/.exec(call.body ?? '')
           g.__tokenSeq = previous ? Number(previous[1]) + 1 : g.__tokenSeq + 1
@@ -430,7 +491,6 @@ export async function launchOrkio(
           })
         }
 
-        // GitHub: Device Flow (github.com) e API REST (api.github.com).
         if (url === 'https://github.com/login/device/code') {
           return json({
             device_code: 'e2e-device-code',
@@ -447,7 +507,6 @@ export async function launchOrkio(
           if (mode === 'expire') return json({ error: 'expired_token' })
           return json({ access_token: 'gho_E2E_DEVICE_TOKEN', token_type: 'bearer', scope: 'repo' })
         }
-        // Sinais (2D): branches e PRs com ETag; detalhes via GraphQL.
         const listMatch =
           /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/(branches|pulls)\?(.*)$/.exec(url)
         if (listMatch) {
@@ -495,7 +554,6 @@ export async function launchOrkio(
             headers: { 'content-type': 'application/json', etag }
           })
         }
-        // 5C: pedir review (POST) e colaboradores do repositório.
         const reviewersMatch =
           /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/requested_reviewers$/.exec(
             url
@@ -530,7 +588,6 @@ export async function launchOrkio(
           )
           return json({ number: n }, 201)
         }
-        // Task 18: arquivos da PR (linhas comentáveis da revisão como orkio[bot]).
         const filesMatch =
           /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files\?/.exec(url)
         if (filesMatch) {
@@ -542,6 +599,8 @@ export async function launchOrkio(
         }
         if (url === 'https://api.github.com/graphql') {
           const query = String((JSON.parse(call.body ?? '{}') as { query?: string }).query)
+          // Cada query do Orkio tem nome (`query ReviewThreads(...)`): o simulado responde por ele.
+          const operation = /^\s*query\s+(\w+)/.exec(query)?.[1]
           // Reproduz o OAuth sem read:org: o GitHub valida o escopo antes de executar.
           if (query.includes('on Team') || g.__fakes.githubGraphql === 'no_scope') {
             return json({
@@ -554,8 +613,8 @@ export async function launchOrkio(
               ]
             })
           }
-          // Task 15: texto das threads de uma PR (a query do Orkio pede `pullRequest(number: $number)`).
-          if (query.includes('pullRequest(number: $number)')) {
+          // Task 15: texto das threads de uma PR.
+          if (operation === 'ReviewThreads') {
             const vars = (JSON.parse(call.body ?? '{}') as { variables?: { number?: number } })
               .variables
             const d = g.__fakes.githubPrDetails[String(vars?.number)]
@@ -580,6 +639,13 @@ export async function launchOrkio(
               }
             })
           }
+          if (operation !== 'PullRequestDetails') {
+            return json({
+              data: null,
+              errors: [{ message: `operação desconhecida: ${operation}` }]
+            })
+          }
+          // Sinais: detalhes de várias PRs numa query só, uma por alias (`pr12: pullRequest(...)`).
           const repository: Record<string, unknown> = {}
           for (const match of query.matchAll(/pr(\d+): pullRequest/g)) {
             const d = g.__fakes.githubPrDetails[match[1]!]
@@ -668,7 +734,6 @@ export async function launchOrkio(
           )
         }
 
-        // API do Notion.
         if (url === 'https://api.notion.com/v1/users/me') {
           const token = (headers['Authorization'] ?? '').replace(/^Bearer /, '')
           const { notion, validTokens } = g.__fakes
@@ -695,7 +760,6 @@ export async function launchOrkio(
           return json({ object: 'user', id: 'u1', type: 'person', name: 'Ada Lovelace' })
         }
 
-        // Bancos do Notion (data sources). Exige um token aceito em /users/me.
         if (url.startsWith('https://api.notion.com/v1/')) {
           const token = (headers['Authorization'] ?? '').replace(/^Bearer /, '')
           const { notion, validTokens, notionTasks } = g.__fakes
@@ -714,7 +778,6 @@ export async function launchOrkio(
             { id: 'o3', name: 'Concluída', color: 'green' }
           ]
 
-          // Publicação de artefatos (4B): subpágina com markdown e markdown no fim da página.
           if (path === '/pages' && init?.method === 'POST') {
             if (g.__fakes.notionWrites === 'reject') {
               return json({ object: 'error', code: 'restricted_resource' }, 403)
@@ -746,7 +809,6 @@ export async function launchOrkio(
             return json({ object: 'page_markdown', id: mdPatch[1] })
           }
 
-          // Escrita numa página (3A).
           const pagePatch = /^\/pages\/([0-9a-f-]+)$/.exec(path)
           if (pagePatch && init?.method === 'PATCH') {
             if (g.__fakes.notionWrites === 'reject') {
@@ -768,7 +830,6 @@ export async function launchOrkio(
             }
             return json({ object: 'page', id: pageId })
           }
-          // Nova propriedade no data source de Tarefas (3A: "Etapa Orkio").
           if (path === `/data_sources/${ids.tasksDs}` && init?.method === 'PATCH') {
             const props = (body['properties'] ?? {}) as Record<string, Record<string, unknown>>
             const result: Record<string, unknown> = {}
@@ -792,27 +853,6 @@ export async function launchOrkio(
             return json({ object: 'data_source', id: ids.tasksDs, properties: result })
           }
 
-          // Busca de páginas (4B: referências do contexto do projeto).
-          const searchFilter = body['filter'] as { value?: string } | undefined
-          if (path === '/search' && searchFilter?.value === 'page') {
-            const pages = [
-              { id: 'eeeeeeee-0000-4000-8000-000000000001', title: 'Arquitetura do Orkio' },
-              { id: 'eeeeeeee-0000-4000-8000-000000000002', title: 'Guia de estilo' }
-            ]
-            const q = typeof body['query'] === 'string' ? body['query'].toLowerCase() : ''
-            return json({
-              object: 'list',
-              has_more: false,
-              next_cursor: null,
-              results: pages
-                .filter((p) => p.title.toLowerCase().includes(q))
-                .map((p) => ({
-                  object: 'page',
-                  id: p.id,
-                  properties: { title: { id: 'title', type: 'title', title: rich(p.title) } }
-                }))
-            })
-          }
           if (path === '/search') {
             const all = [
               { id: ids.projectsDs, title: 'Projetos' },
@@ -897,7 +937,6 @@ export async function launchOrkio(
               next_cursor: null
             })
           }
-          // Conteúdo da página da tarefa (4A: briefing).
           const children = /^\/blocks\/([0-9a-f-]+)\/children/.exec(path)
           if (children) {
             const para = (text: string): unknown => ({
@@ -1055,7 +1094,12 @@ export async function launchOrkio(
         return json({ object: 'error', code: 'not_found' }, 404)
       }
     },
-    { initial: { ...DEFAULT_FAKES, ...fakes }, brokerUrl: E2E_BROKER_URL, ids: NOTION_FAKE }
+    {
+      initial: { ...DEFAULT_FAKES, ...fakes },
+      siteUrl: E2E_SITE_URL,
+      ids: NOTION_FAKE,
+      contract: { installUrl: E2E_INSTALL_URL }
+    }
   )
 
   const page = await app.firstWindow()
@@ -1091,7 +1135,6 @@ export async function enterApp(page: Page): Promise<void> {
   const setup = page.getByRole('list', { name: 'Primeiros passos' })
   const nav = page.getByRole('navigation', { name: 'Navegação principal' })
   await expect(setup.or(nav)).toBeVisible()
-  // Sem projeto: o app abre nos Primeiros passos; "Fazer depois" leva ao app.
   if (await setup.isVisible()) {
     await page.getByRole('button', { name: 'Fazer depois' }).click()
   }
@@ -1174,7 +1217,6 @@ export async function simulateUpdate(
         emit(event: string, arg?: unknown): boolean
       }
       const g = globalThis as unknown as { __updateInstalls?: number; __restartPrompts?: string[] }
-      // Diálogo nativo "Reiniciar agora?": responde sem abrir janela e registra a pergunta.
       g.__restartPrompts ??= []
       dialog.showMessageBox = (async (...args: unknown[]) => {
         const opts = args.at(-1) as { message?: string }
@@ -1249,12 +1291,8 @@ export async function queueFolderPicks(app: ElectronApplication, paths: string[]
   }, paths)
 }
 
-/**
- * Alertas visíveis do app. Ignora a região `aria-live` global da Astryx (sempre presente,
- * vazia e escondida), que também tem role="alert".
- */
 export function alerts(scope: Page | Locator): Locator {
-  return scope.locator('[role="alert"]:not([data-astryx-live-region])')
+  return scope.locator('[role="alert"]')
 }
 
 /** Enfileira caminhos para as próximas aberturas de "Salvar como…" (no main). */
@@ -1263,6 +1301,24 @@ export async function queueSavePaths(app: ElectronApplication, paths: string[]):
     ;(globalThis as unknown as FakeGlobals).__savePaths.push(...next)
   }, paths)
 }
+
+/**
+ * Versão do `claude` simulado (`--version`; aceita `--effort`) e os trechos dos pedidos do Orkio
+ * que escolhem o cenário dele. Vão para `fake-claude.json` ao lado da cópia do script.
+ */
+export const FAKE_CLAUDE = {
+  version: '2.1.331',
+  markers: {
+    /** Cabeçalho do briefing no prompt (`run.service`). */
+    briefing: 'Briefing da tarefa',
+    /** Seção do briefing (`shared/briefing`). */
+    criteria: 'Critérios de aceite',
+    /** Passo de plano da revisão da PR (cita o arquivo da revisão). */
+    reviewFile: 'revisao.md',
+    reviewApply: REVIEW_APPLY_PROMPT.split('.')[0]!,
+    reviewJson: REVIEW_JSON_PROMPT.split(' no JSON')[0]!
+  }
+} as const
 
 /** Pasta com o `claude` simulado (e2e/fake-claude) e o estado de login dele. */
 function fakeClaudeBin(
@@ -1285,14 +1341,13 @@ function fakeClaudeBin(
       )
     )
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ backlog: alva?.mcpBacklog === true }))
+    writeFileSync(join(dir, 'fake-claude.json'), JSON.stringify(FAKE_CLAUDE))
   }
-  // Terminal simulado ("Abrir terminal aqui"): registra pasta e argumentos em terminal-calls.log.
   writeFileSync(
     join(dir, 'x-terminal-emulator'),
     ['#!/bin/sh', 'echo "$PWD $*" >> "$(dirname "$0")/terminal-calls.log"', 'exit 0', ''].join('\n')
   )
   chmodSync(join(dir, 'x-terminal-emulator'), 0o755)
-  // GitHub CLI simulado: pré-checagem (5B) e, na 5C, registra cada chamada em gh-calls.log.
   const gh = alva?.gh ?? 'missing'
   if (gh !== 'missing') {
     writeFileSync(

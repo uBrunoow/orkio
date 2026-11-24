@@ -1,5 +1,9 @@
-import type { BoardTaskRef } from '../../../shared/ipc-contract'
-import { PR_REASON_LABEL, type OverviewSnapshot, type OverviewTask } from '../../../shared/overview'
+import {
+  PR_REASON_LABEL,
+  type OverviewSnapshot,
+  type OverviewTask,
+  type BoardTaskRef
+} from '../../../shared/overview'
 import {
   DropdownMenu,
   DropdownMenuContent,

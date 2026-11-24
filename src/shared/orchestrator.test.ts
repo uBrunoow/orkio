@@ -4,7 +4,7 @@ import {
   laneAgentOnEnter,
   parseOrchestrator,
   planTick,
-  priorityRank,
+  leastLoaded,
   suggestOrchestrator,
   validateOrchestrator,
   type OrchestratorAgentInfo,
@@ -24,8 +24,6 @@ const STAGES = [
 const CONFIG: OrchestratorConfig = {
   enabled: true,
   enabledSince: '2026-11-01T00:00:00.000Z',
-  queueStageId: 'fila',
-  maxActive: 2,
   lanes: [
     { stageId: 'dev', agents: ['builtin:implementador', 'repo:ana'], next: 'rev' },
     { stageId: 'rev', agents: ['builtin:revisor'], next: 'ok' }
@@ -52,10 +50,8 @@ function card(taskId: string, stageId: string | null, over: Partial<PlanCard> = 
     taskId,
     displayId: taskId.toUpperCase(),
     stageId,
-    priority: null,
     blocked: false,
     automationPaused: false,
-    index: 0,
     ...over
   }
 }
@@ -77,7 +73,7 @@ function input(over: Partial<PlanInput> = {}): PlanInput {
 }
 
 describe('parseOrchestrator', () => {
-  it('lê tolerante: descarta etapa repetida, agente inválido e limita o teto', () => {
+  it('lê tolerante: descarta etapa repetida, agente inválido e campos antigos', () => {
     expect(
       parseOrchestrator({
         enabled: true,
@@ -93,8 +89,6 @@ describe('parseOrchestrator', () => {
     ).toEqual({
       enabled: true,
       enabledSince: null,
-      queueStageId: 'fila',
-      maxActive: 10,
       lanes: [{ stageId: 'dev', agents: ['repo:ana'], next: 'rev' }]
     })
     expect(parseOrchestrator('x')).toBeNull()
@@ -103,10 +97,23 @@ describe('parseOrchestrator', () => {
 })
 
 describe('suggestOrchestrator', () => {
-  it('monta fila → implementação → revisão pelo nome das etapas (desligado)', () => {
+  it('monta fila → implementação → revisão pelo papel das etapas, qualquer que seja o nome', () => {
+    // Antes: regex nos nomes ("revisado|reviewed|…"); renomear desmontava a sugestão.
+    const named = [
+      { id: 'dev', name: 'Codando', role: 'work' as const },
+      { id: 'fila', name: 'Backlog', role: 'queue' as const },
+      { id: 'ok', name: 'Aprovado', role: 'reviewed' as const },
+      { id: 'rev', name: 'Code review', role: 'review' as const }
+    ]
+    expect(suggestOrchestrator(named).lanes).toEqual([
+      { stageId: 'dev', agents: ['builtin:implementador'], next: 'rev' },
+      { stageId: 'rev', agents: ['builtin:revisor'], next: 'ok' }
+    ])
+  })
+
+  it('sem papéis usa a ordem do quadro (desligado)', () => {
     expect(suggestOrchestrator(STAGES)).toEqual({
       ...defaultOrchestrator(),
-      queueStageId: 'fila',
       lanes: [
         { stageId: 'dev', agents: ['builtin:implementador'], next: 'rev' },
         { stageId: 'rev', agents: ['builtin:revisor'], next: 'ok' }
@@ -143,7 +150,6 @@ describe('validateOrchestrator', () => {
     const { errors } = validateOrchestrator(
       {
         ...CONFIG,
-        queueStageId: null,
         lanes: [
           { stageId: 'sumiu', agents: ['repo:ana'], next: null },
           { stageId: 'dev', agents: [], next: 'dev' },
@@ -195,19 +201,29 @@ describe('validateOrchestrator', () => {
   })
 })
 
-describe('priorityRank', () => {
-  it('ordena nomes usuais pt/en, P0…P9 e números; sem prioridade por último', () => {
-    const names = ['Baixa', null, 'P1', 'Urgente', 'Média', 'Alta', 'Coisa', '0']
-    expect([...names].sort((a, b) => priorityRank(a) - priorityRank(b))).toEqual([
-      'Urgente',
-      '0',
-      'P1',
-      'Alta',
-      'Média',
-      'Baixa',
-      'Coisa',
-      null
-    ])
+describe('leastLoaded (orquestrador e entrada na etapa)', () => {
+  const agents = new Map([
+    ['a', agent('a', { capacity: 2 })],
+    ['b', agent('b', { capacity: 1 })],
+    ['cheio', agent('cheio', { limitProblem: 'limite do dia' })],
+    ['revisar', agent('revisar', { ready: false })]
+  ])
+
+  it('menor carga relativa; empate pela ordem; limite do dia só como último recurso', () => {
+    expect(leastLoaded(['a', 'b'], agents, new Map([['a', 1]]))).toBe('b')
+    expect(leastLoaded(['b', 'a'], agents, new Map([['b', 1]]))).toBe('a')
+    expect(leastLoaded(['b', 'a'], agents, new Map())).toBe('b')
+    expect(leastLoaded(['cheio', 'a'], agents, new Map([['a', 5]]))).toBe('a')
+    expect(leastLoaded(['cheio'], agents, new Map())).toBe('cheio')
+    expect(leastLoaded(['revisar'], agents, new Map())).toBeNull()
+  })
+
+  it('needFree: só quem tem vaga e sem limite; unknownCounts: desconhecido entra com carga 0', () => {
+    expect(leastLoaded(['b', 'cheio'], agents, new Map([['b', 1]]), { needFree: true })).toBeNull()
+    expect(leastLoaded(['nunca-visto'], agents, new Map())).toBeNull()
+    expect(
+      leastLoaded(['nunca-visto', 'a'], agents, new Map([['a', 1]]), { unknownCounts: true })
+    ).toBe('nunca-visto')
   })
 })
 
@@ -220,10 +236,7 @@ describe('planTick', () => {
   it('nunca puxa da fila: quem começa uma tarefa é você', () => {
     const decisions = planTick(
       input({
-        cards: [
-          card('nova', 'fila', { index: 0 }),
-          card('urgente', 'fila', { index: 1, priority: 'Urgente' })
-        ]
+        cards: [card('nova', 'fila'), card('urgente', 'fila')]
       })
     )
     expect(decisions).toEqual([])

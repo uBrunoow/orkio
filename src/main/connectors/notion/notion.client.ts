@@ -5,54 +5,33 @@
  * Retry-After, fila de rate limit e mensagens de erro sem dependência extra.
  */
 
+import {
+  ApiError,
+  defaultSleep,
+  fetchWithTimeout,
+  genericStatusError,
+  rateLimitedError,
+  readJson,
+  sendWithShortRetry,
+  unexpectedError,
+  type HttpResponse
+} from '../../net/http'
 import { httpsUrlOrNull, isRecord, parseRetryAfterMs, stringOrNull } from '../../net/parse'
 import { RateQueue, backoffMs } from '../../net/rate-queue'
+import { NOTION_VERSION } from '../../../shared/site-contract'
 
-// Reexportado para quem já importava daqui.
-export { parseRetryAfterMs }
+/** Versão da API do Notion: a mesma do site (contrato em `shared/site-contract.ts`). */
+export { NOTION_VERSION }
 
 export const NOTION_API_BASE_URL = 'https://api.notion.com/v1'
-/** Versão da API do Notion (header Notion-Version). Atualize só aqui. */
-export const NOTION_VERSION = '2026-03-11'
 export const NOTION_REQUEST_TIMEOUT_MS = 10_000
-/** Esperamos e repetimos uma vez se o Notion pedir até este tempo; acima disso, devolvemos erro. */
-export const NOTION_MAX_RETRY_WAIT_MS = 5_000
 /** Leituras de dados (bancos/tarefas): até 3 novas tentativas em 429, esperando até 30 s. */
 export const NOTION_DATA_MAX_RETRIES = 3
 export const NOTION_DATA_MAX_WAIT_MS = 30_000
 /** Máximo aceito pela API em `page_size`. */
 export const NOTION_MAX_PAGE_SIZE = 100
 
-export type NotionErrorCode =
-  | 'unauthorized'
-  | 'forbidden'
-  | 'rate_limited'
-  | 'timeout'
-  | 'network'
-  | 'server'
-  | 'unexpected'
-  /** Nenhuma conta do Notion conectada (local, sem rede). */
-  | 'not_connected'
-  /** Recurso não existe ou não está compartilhado com a integração (404). */
-  | 'not_found'
-  /** O Notion recusou a consulta (400: filtro/propriedade inválidos). */
-  | 'bad_request'
-  /** OAuth: código ou refresh token inválido, expirado ou revogado (reconectar). */
-  | 'invalid_grant'
-  /** OAuth: client ID/secret do app recusados pelo Notion (problema de configuração). */
-  | 'oauth_config'
-
-/** Erro com mensagem segura para o usuário (pt-BR). Nunca contém o token nem a exceção original. */
-export class NotionApiError extends Error {
-  constructor(
-    readonly code: NotionErrorCode,
-    message: string,
-    readonly status?: number
-  ) {
-    super(message)
-    this.name = 'NotionApiError'
-  }
-}
+const NOTION = { service: 'notion' } as const
 
 /** Dono do token, normalizado a partir de GET /v1/users/me. */
 export interface NotionSelf {
@@ -100,9 +79,7 @@ export interface NotionClient {
     token: string,
     options?: { query?: string; startCursor?: string | null }
   ): Promise<NotionListPage>
-  /** GET /v1/data_sources/{id} (schema). */
   getDataSource(token: string, id: string): Promise<unknown>
-  /** POST /v1/data_sources/{id}/query. */
   queryDataSource(token: string, id: string, options?: NotionQueryOptions): Promise<NotionListPage>
   /**
    * PATCH /v1/pages/{id} com `{ properties }` (ex.: `{ "<id>": { status: { name } } }`).
@@ -113,8 +90,6 @@ export interface NotionClient {
   updateDataSource(token: string, id: string, properties: Record<string, unknown>): Promise<unknown>
   /** GET /v1/blocks/{id}/children (conteúdo de uma página; paginado). */
   getBlockChildren(token: string, id: string, startCursor?: string | null): Promise<NotionListPage>
-  /** Busca páginas (não data sources) por título. */
-  searchPages(token: string, query: string): Promise<NotionListPage>
   /**
    * Cria uma subpágina com conteúdo em markdown (POST /v1/pages, `markdown_version: v2`).
    * Precisa da capacidade "Insert content".
@@ -140,49 +115,46 @@ interface RequestOptions {
 }
 
 export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
-  // Resolve fetch na hora da chamada para respeitar substituições de globalThis.fetch.
-  const doFetch: typeof fetch = (...args) => (deps.fetch ?? globalThis.fetch)(...args)
-  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const sleep = deps.sleep ?? defaultSleep
   const timeoutMs = deps.timeoutMs ?? NOTION_REQUEST_TIMEOUT_MS
 
   const queue = deps.queue ?? new RateQueue({ concurrency: 2, minIntervalMs: 350 })
   const random = deps.random ?? Math.random
 
-  async function send(path: string, token: string, options: RequestOptions): Promise<Response> {
-    return fetchWithTimeout(doFetch, `${NOTION_API_BASE_URL}${path}`, token, timeoutMs, options)
-  }
-
-  async function readJson(response: Response): Promise<unknown> {
-    try {
-      return await response.json()
-    } catch {
-      throw unexpected(response.status)
+  function send(path: string, token: string, options: RequestOptions): Promise<HttpResponse> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      'Notion-Version': NOTION_VERSION,
+      Accept: 'application/json'
     }
+    if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+    return fetchWithTimeout(
+      {
+        url: `${NOTION_API_BASE_URL}${path}`,
+        method: options.method ?? 'GET',
+        headers,
+        ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {})
+      },
+      { ...NOTION, fetch: deps.fetch, timeoutMs }
+    )
   }
 
   /** GET /users/me: fora da fila, uma nova tentativa em 429 se a espera for curta. */
   async function request(path: string, token: string): Promise<unknown> {
-    for (let attempt = 0; ; attempt++) {
-      const response = await send(path, token, { kind: 'self' })
-      if (response.ok) return readJson(response)
-
-      if (response.status === 429) {
-        const waitMs = parseRetryAfterMs(response.headers.get('retry-after'))
-        if (attempt === 0 && waitMs !== null && waitMs <= NOTION_MAX_RETRY_WAIT_MS) {
-          await sleep(waitMs)
-          continue
-        }
-        throw rateLimited(waitMs)
-      }
-
-      throw errorForStatus(response.status, 'self')
-    }
+    const { response, wait } = await sendWithShortRetry(
+      () => send(path, token, { kind: 'self' }),
+      (r) => {
+        if (r.status !== 429) return null
+        const waitMs = parseRetryAfterMs(r.headers.get('retry-after'))
+        return { ms: waitMs ?? Number.POSITIVE_INFINITY, waitMs }
+      },
+      sleep
+    )
+    if (wait) throw rateLimitedError(NOTION, wait.waitMs)
+    if (!response.ok) throw errorForStatus(response.status, 'self')
+    return readJson(response, NOTION)
   }
 
-  /**
-   * Leituras de dados: passam pela fila (concorrência baixa + intervalo mínimo). Em 429, pausa a
-   * fila inteira pelo Retry-After (ou backoff exponencial) e tenta de novo, até 3 vezes.
-   */
   async function dataRequest(
     path: string,
     token: string,
@@ -191,7 +163,7 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
     for (let attempt = 0; ; attempt++) {
       const kind = options.kind === 'write' || options.kind === 'insert' ? options.kind : 'data'
       const response = await queue.run(() => send(path, token, { ...options, kind }))
-      if (response.ok) return readJson(response)
+      if (response.ok) return readJson(response, NOTION)
 
       if (response.status === 429) {
         const retryAfter = parseRetryAfterMs(response.headers.get('retry-after'))
@@ -200,7 +172,7 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
           queue.pause(waitMs)
           continue
         }
-        throw rateLimited(waitMs)
+        throw rateLimitedError(NOTION, waitMs)
       }
 
       throw errorForStatus(response.status, kind)
@@ -259,16 +231,6 @@ export function createNotionClient(deps: NotionClientDeps = {}): NotionClient {
       )
     },
 
-    async searchPages(token, query) {
-      const body: Record<string, unknown> = {
-        filter: { property: 'object', value: 'page' },
-        sort: { timestamp: 'last_edited_time', direction: 'descending' },
-        page_size: 50
-      }
-      if (query) body['query'] = query
-      return parseListPage(await dataRequest('/search', token, { method: 'POST', body }))
-    },
-
     async createChildPage(token, parentPageId, title, markdown) {
       const body = await dataRequest('/pages', token, {
         method: 'POST',
@@ -313,51 +275,11 @@ export function parseListPage(body: unknown): NotionListPage {
   return { results: body['results'], nextCursor }
 }
 
-async function fetchWithTimeout(
-  doFetch: typeof fetch,
-  url: string,
-  token: string,
-  timeoutMs: number,
-  options: RequestOptions = {}
-): Promise<Response> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  const headers: Record<string, string> = {
-    Authorization: `Bearer ${token}`,
-    'Notion-Version': NOTION_VERSION,
-    Accept: 'application/json'
-  }
-  const init: RequestInit = { method: options.method ?? 'GET', headers, signal: controller.signal }
-  if (options.body !== undefined) {
-    headers['Content-Type'] = 'application/json'
-    init.body = JSON.stringify(options.body)
-  }
-  try {
-    return await doFetch(url, init)
-  } catch {
-    // Não propagamos a exceção original: ela pode carregar detalhes da requisição.
-    if (controller.signal.aborted) {
-      throw new NotionApiError(
-        'timeout',
-        'O Notion demorou demais para responder. Verifique sua conexão e tente novamente.'
-      )
-    }
-    throw new NotionApiError(
-      'network',
-      'Não foi possível falar com o Notion. Verifique sua conexão com a internet.'
-    )
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-function errorForStatus(
-  status: number,
-  kind: 'self' | 'data' | 'write' | 'insert'
-): NotionApiError {
+function errorForStatus(status: number, kind: 'self' | 'data' | 'write' | 'insert'): ApiError {
   if (kind === 'insert') {
     if (status === 403) {
-      return new NotionApiError(
+      return new ApiError(
+        'notion',
         'forbidden',
         'O Notion não deixou o Orkio publicar: a conexão precisa da capacidade “Insert content” ' +
           '(Inserir conteúdo) e acesso a esta página.',
@@ -365,14 +287,16 @@ function errorForStatus(
       )
     }
     if (status === 404) {
-      return new NotionApiError(
+      return new ApiError(
+        'notion',
         'not_found',
         'O Notion não encontrou a página da tarefa: ela foi apagada ou não está compartilhada com o Orkio.',
         status
       )
     }
     if (status === 400) {
-      return new NotionApiError(
+      return new ApiError(
+        'notion',
         'bad_request',
         'O Notion recusou o conteúdo (grande ou complexo demais). Tente como subpágina ou divida o documento.',
         status
@@ -381,7 +305,8 @@ function errorForStatus(
   }
   if (kind === 'write') {
     if (status === 403) {
-      return new NotionApiError(
+      return new ApiError(
+        'notion',
         'forbidden',
         'O Notion não deixou o Orkio editar: a conexão precisa da capacidade “Update content” ' +
           '(Inserir/atualizar conteúdo) e acesso a esta página.',
@@ -389,21 +314,24 @@ function errorForStatus(
       )
     }
     if (status === 404) {
-      return new NotionApiError(
+      return new ApiError(
+        'notion',
         'not_found',
         'O Notion não encontrou a página: ela foi apagada ou não está mais compartilhada com o Orkio.',
         status
       )
     }
     if (status === 400) {
-      return new NotionApiError(
+      return new ApiError(
+        'notion',
         'bad_request',
         'O Notion recusou a alteração (a opção de status pode não existir mais). Revise o quadro.',
         status
       )
     }
     if (status === 409) {
-      return new NotionApiError(
+      return new ApiError(
+        'notion',
         'server',
         'O Notion detectou uma edição simultânea. Vamos tentar de novo.',
         status
@@ -411,14 +339,16 @@ function errorForStatus(
     }
   }
   if (status === 401) {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'unauthorized',
       'Token inválido ou revogado. Gere um novo token no Notion e cole aqui.',
       status
     )
   }
   if (kind === 'data' && status === 404) {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'not_found',
       'O Notion não encontrou esse conteúdo. Ele pode ter sido apagado ou não está mais ' +
         'compartilhado com o Orkio.',
@@ -426,52 +356,34 @@ function errorForStatus(
     )
   }
   if (kind === 'data' && status === 403) {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'forbidden',
       'O Orkio não tem permissão para ler esse conteúdo no Notion. Compartilhe-o com o Orkio.',
       status
     )
   }
   if (kind === 'data' && status === 400) {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'bad_request',
       'O Notion recusou a consulta. Revise o mapeamento dos bancos em Integrações.',
       status
     )
   }
   if (status === 403) {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'forbidden',
       'Este token não tem permissão para ler seu usuário no Notion. Verifique as capacidades do token.',
       status
     )
   }
-  if (status >= 500) {
-    return new NotionApiError(
-      'server',
-      `O Notion está instável agora (erro ${status}). Tente novamente em instantes.`,
-      status
-    )
-  }
-  return unexpected(status)
+  return genericStatusError(NOTION, status)
 }
 
-function unexpected(status: number): NotionApiError {
-  return new NotionApiError(
-    'unexpected',
-    `Resposta inesperada do Notion (HTTP ${status}). Tente novamente.`,
-    status
-  )
-}
-
-function rateLimited(waitMs: number | null): NotionApiError {
-  const seconds = waitMs === null ? null : Math.max(1, Math.ceil(waitMs / 1000))
-  const when = seconds === null ? 'em alguns segundos' : `em ${seconds} s`
-  return new NotionApiError(
-    'rate_limited',
-    `O Notion limitou as requisições. Tente novamente ${when}.`,
-    429
-  )
+function unexpected(status: number): ApiError {
+  return unexpectedError(NOTION, status)
 }
 
 /**

@@ -5,7 +5,7 @@ import type {
   ConnectorId,
   DeviceFlowStartResult,
   TokenCredentials
-} from '../../shared/ipc-contract'
+} from '../../shared/connection'
 
 export type {
   AuthOptions,
@@ -23,7 +23,7 @@ export type {
 export type OAuthCredentials<TTokens> = { kind: 'oauth'; tokens: TTokens }
 
 /**
- * Contrato de toda integração externa (Notion hoje; GitHub e Claude Code depois).
+ * Contrato de toda integração externa (Notion e GitHub).
  *
  * Regras:
  * - Roda apenas no processo main.

@@ -75,7 +75,6 @@ export interface UpdateServiceDeps {
   }
   /** Contagem síncrona do que está rodando (0 = ocioso). */
   busyCount(): number
-  /** O que está rodando, com nomes para mostrar. */
   busyItems(): Promise<BusyItem[]>
   /** Mesmo desligamento do fechamento normal (cancela execuções e espera saírem). */
   shutdownWork(): Promise<void>
@@ -137,7 +136,7 @@ export class UpdateService {
     this.listen()
   }
 
-  /** Liga o agendamento: primeira checagem em 10 s, depois a cada ~4 h (±10%). */
+  /** Liga o agendamento: primeira checagem em 5 s, depois a cada ~4 h (±10%). */
   start(): void {
     if (this.started) return
     this.started = true
@@ -272,8 +271,6 @@ export class UpdateService {
   releaseNotes(): ReleaseNotes | null {
     return this.deps.releaseNotes()
   }
-
-  // ---------- interno ----------
 
   private mode(): UpdateMode {
     const u = this.deps.updater

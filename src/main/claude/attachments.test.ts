@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { SCRATCH_GITIGNORE } from '../../shared/orkio-scratch'
 import {
   attachmentNote,
   checkAttachments,
@@ -82,7 +83,7 @@ describe('anexos', () => {
     expect(paths[1]).toMatch(/^\.orkio\/attachments\/[0-9a-f]{8}-foto\.jpg$/)
     expect(await readFile(join(dir, paths[0]!), 'utf8')).toBe('# nota')
     expect((await stat(join(dir, paths[0]!))).mode & 0o777).toBe(0o600)
-    expect(await readFile(join(dir, '.orkio', '.gitignore'), 'utf8')).toBe('*\n')
+    expect(await readFile(join(dir, '.orkio', '.gitignore'), 'utf8')).toBe(SCRATCH_GITIGNORE)
     await expect(saveAttachments(dir, [{ name: 'x.png', data: enc('<html>') }])).rejects.toThrow()
   })
 

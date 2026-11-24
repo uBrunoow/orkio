@@ -2,11 +2,14 @@
  * Atualizações automáticas (Etapa 6C): tipos do status mostrado ao renderer e funções puras
  * (versões, recorte do CHANGELOG, notas em blocos simples, URL do DMG). Sem Node/DOM.
  */
+import { changelogNotes } from './changelog.mjs'
+import { artifactFileName, macDmg } from './release-artifacts.mjs'
 
-/** Repositório público do Orkio, onde ficam os releases (6B). Precisa bater com o `publish` do electron-builder. */
+/** Repositório público do Orkio, onde ficam os releases (6B); o `publish` do `electron-builder.ts` lê daqui. */
 export const RELEASES_REPO = { owner: 'uBrunoow', repo: 'orkio' } as const
 
-export type UpdateChannel = 'stable' | 'beta'
+export const UPDATE_CHANNELS = ['stable', 'beta'] as const
+export type UpdateChannel = (typeof UPDATE_CHANNELS)[number]
 
 /**
  * - `auto`: Windows e macOS assinado (baixa em segundo plano, instala ao sair ou ao reiniciar).
@@ -43,7 +46,8 @@ export interface UpdateStatus {
   channelNote: string | null
 }
 
-export type UpdateInstallMode = 'if_idle' | 'now' | 'when_idle' | 'cancel_wait'
+export const UPDATE_INSTALL_MODES = ['if_idle', 'now', 'when_idle', 'cancel_wait'] as const
+export type UpdateInstallMode = (typeof UPDATE_INSTALL_MODES)[number]
 
 export type UpdateInstallResult =
   | { state: 'installing' }
@@ -56,8 +60,6 @@ export interface ReleaseNotes {
   version: string
   notes: string
 }
-
-// ---------- Versões ----------
 
 interface ParsedVersion {
   core: [number, number, number]
@@ -100,23 +102,12 @@ export function isPrerelease(version: string): boolean {
   return (parseVersion(version)?.pre.length ?? 0) > 0
 }
 
-// ---------- CHANGELOG ----------
-
 /**
- * Seção de uma versão num CHANGELOG no formato Keep a Changelog (`## [X.Y.Z] - AAAA-MM-DD`).
- * Devolve o texto entre o título da versão e o próximo `## `, sem espaços nas pontas.
+ * Seção de uma versão no CHANGELOG (`## [X.Y.Z] - AAAA-MM-DD`; leitor único em `changelog.mts`, o
+ * mesmo das notas do release). Seção vazia ou ausente → `null`.
  */
 export function changelogSection(markdown: string, version: string): string | null {
-  const wanted = version.replace(/^v/, '')
-  const lines = markdown.split(/\r?\n/)
-  let start = -1
-  for (let i = 0; i < lines.length; i++) {
-    const m = /^##\s+\[?v?([^\]\s]+)\]?/.exec(lines[i]!)
-    if (!m) continue
-    if (start >= 0) return lines.slice(start, i).join('\n').trim() || null
-    if (m[1] === wanted) start = i + 1
-  }
-  return start >= 0 ? lines.slice(start).join('\n').trim() || null : null
+  return changelogNotes(markdown, version.replace(/^v/, '')) || null
 }
 
 /** Blocos simples para mostrar as notas com componentes (nada de HTML). */
@@ -154,7 +145,6 @@ export function noteBlocks(markdown: string): NoteBlock[] {
   return blocks.filter((b) => b.text.length > 0)
 }
 
-/** Tira a marcação em linha (negrito, código, links → texto). */
 function plainInline(text: string): string {
   return text
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -164,36 +154,27 @@ function plainInline(text: string): string {
     .trim()
 }
 
-// ---------- Download manual (macOS sem assinatura) ----------
-
-const RELEASE_FILE = /^[A-Za-z0-9._-]+$/
-
 /**
- * URL do DMG da arquitetura no repo de releases. `files` vem do `latest-mac.yml`
- * (`Orkio-X.Y.Z-mac-arm64.dmg`). Sem DMG da arquitetura: a página do release.
+ * URL do DMG da arquitetura no repo de releases: o nome vem do manifesto (`release-artifacts.mts`)
+ * e precisa estar em `files` (do `latest-mac.yml`). Sem ele: a página do release.
  */
 export function macDownloadUrl(version: string, files: readonly string[], arch: string): string {
   const { owner, repo } = RELEASES_REPO
   const tag = `v${version.replace(/^v/, '')}`
   const base = `https://github.com/${owner}/${repo}/releases`
-  const names = files.map((f) => f.split('/').pop() ?? '').filter((f) => RELEASE_FILE.test(f))
-  const dmgs = names.filter((f) => f.toLowerCase().endsWith('.dmg'))
-  const archName = arch === 'arm64' ? 'arm64' : 'x64'
-  const match =
-    dmgs.find((f) => f.includes(`-mac-${archName}.`)) ??
-    dmgs.find((f) => f.includes(`-${archName}.`)) ??
-    // Só há um DMG (universal ou sem arch no nome): serve para as duas.
-    (dmgs.length === 1 ? dmgs[0] : undefined)
-  if (!match || !parseVersion(tag)) return `${base}/tag/${encodeURIComponent(tag)}`
-  return `${base}/download/${tag}/${match}`
+  const dmg = macDmg(arch)
+  const name = dmg ? artifactFileName(dmg, version) : null
+  const names = files.map((f) => f.split('/').pop() ?? '')
+  if (!name || !names.includes(name) || !parseVersion(tag)) {
+    return `${base}/tag/${encodeURIComponent(tag)}`
+  }
+  return `${base}/download/${tag}/${name}`
 }
 
 /** Allowlist do shell: só downloads e páginas de versão do repo público de releases. */
 export const RELEASES_PATH_PATTERN = new RegExp(
   `^/${RELEASES_REPO.owner}/${RELEASES_REPO.repo}/releases/(download/v[0-9A-Za-z.-]+/[A-Za-z0-9._-]+\\.dmg|tag/v[0-9A-Za-z.-]+)$`
 )
-
-// ---------- Erros ----------
 
 /** Mensagem amigável para falhas do feed (nunca a exceção crua, que pode ter URLs). */
 export function friendlyUpdateError(error: unknown): string {
@@ -219,4 +200,10 @@ export function friendlyUpdateError(error: unknown): string {
   if (/sha512 checksum mismatch|signature|code sign/i.test(text))
     return 'O arquivo baixado não passou na verificação. O Orkio tenta de novo mais tarde.'
   return 'Não foi possível procurar atualizações agora. O Orkio tenta de novo mais tarde.'
+}
+
+/** Configurações > Sobre. Links do site só se o build souber o endereço. */
+export interface AboutInfo {
+  version: string
+  links: { site: string; privacy: string; terms: string } | null
 }

@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { BoardCard, BoardView, NotionResult } from '../../shared/ipc-contract'
 import type { OrchestratorConfig } from '../../shared/orchestrator'
 import { AgentsService } from '../agents/agents.service'
 import type { StageChange } from '../board/board.service'
@@ -10,15 +9,18 @@ import { BoardStore } from '../board/board.store'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
-import { OrchestratorService, agentNameFallback } from './orchestrator.service'
+import { OrchestratorService } from './orchestrator.service'
+import type { BoardCard, BoardView } from '../../shared/board'
+import type { Result } from '../../shared/result'
+import { isLive } from '../../shared/flow-run-state'
+import type { FlowRunStatus } from '../../shared/task-flow'
+import type { LastFlow } from '../flows/flow-runner'
 
 const P = 'p1'
 const STAGES = ['fila', 'dev', 'rev', 'ok']
 const ENABLED: OrchestratorConfig = {
   enabled: true,
   enabledSince: null,
-  queueStageId: 'fila',
-  maxActive: 2,
   lanes: [
     { stageId: 'dev', agents: ['builtin:implementador'], next: 'rev' },
     { stageId: 'rev', agents: ['builtin:revisor'], next: 'ok' }
@@ -74,33 +76,52 @@ function place(taskId: string, stageId: string, when: string): void {
     source: 'manual',
     fromStage: null,
     toStage: stageId,
-    detail: null
+    detail: {}
   })
   const card = cards.find((c) => c.taskId === taskId)
   if (card) card.stageId = stageId
   else cards.push(makeCard(taskId, stageId))
 }
 
+/** Execuções de fluxo que o executor (fake) responde ao orquestrador. */
+interface FakeRun extends LastFlow {
+  taskId: string
+  agentKey: string | null
+}
+let runs: FakeRun[]
+
 function flowRun(
   taskId: string,
   stageId: string | null,
   startedAt: string,
   endedAt: string | null,
-  over: { status?: string; result?: string | null; agent?: string | null } = {}
+  over: { status?: FlowRunStatus; result?: LastFlow['result']; agent?: string | null } = {}
 ): void {
-  db.run(
-    `INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, stage_id, status, state_json, started_at, ended_at, result, agent_key)
-     VALUES (?, ?, ?, 'f', '{}', ?, ?, '{}', ?, ?, ?, ?)`,
-    `${taskId}-${startedAt}`,
+  runs.push({
     taskId,
-    P,
     stageId,
-    over.status ?? 'finished',
+    status: over.status ?? 'finished',
+    result: over.result === undefined ? 'done' : over.result,
     startedAt,
     endedAt,
-    over.result === undefined ? 'done' : over.result,
-    over.agent ?? null
-  )
+    agentKey: over.agent ?? null
+  })
+}
+
+const fakeFlows = {
+  activeCountByAgent: (): Map<string, number> => {
+    const out = new Map<string, number>()
+    for (const r of runs) {
+      if (r.agentKey && isLive(r.status)) out.set(r.agentKey, (out.get(r.agentKey) ?? 0) + 1)
+    }
+    return out
+  },
+  activeTasks: () =>
+    runs.filter((r) => isLive(r.status)).map((r) => ({ taskId: r.taskId, agentKey: r.agentKey })),
+  lastFlow: (taskId: string): LastFlow | null =>
+    runs
+      .filter((r) => r.taskId === taskId)
+      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0] ?? null
 }
 
 async function enable(over: Partial<OrchestratorConfig> = {}): Promise<void> {
@@ -159,6 +180,7 @@ beforeEach(async () => {
   cards = []
   started = []
   active = new Set()
+  runs = []
   pending = []
   clock = Date.parse(at(30))
   agents = new AgentsService({
@@ -167,6 +189,7 @@ beforeEach(async () => {
     config,
     localDir: join(dir, 'agents'),
     hasActiveFlow: (t) => active.has(t),
+    agentRuns: () => ({ count: 0, costUsd: 0, startedAt: [] }),
     stageIds: () => STAGES,
     actor: () => 'bruno',
     emit: () => undefined,
@@ -174,15 +197,14 @@ beforeEach(async () => {
   })
   service = new OrchestratorService({
     config,
-    db,
     store,
     board: {
       get: async () =>
         ({
           ok: true,
           value: { cards, config: {} } as unknown as BoardView
-        }) as NotionResult<BoardView>,
-      applyAutomationMove: (projectId, taskId, stageId, event) => {
+        }) as Result<BoardView>,
+      applyAutomationMove: (_tx, projectId, taskId, stageId, event) => {
         const from = cards.find((c) => c.taskId === taskId)?.stageId ?? null
         if (from === stageId) return false
         place(taskId, stageId, new Date(clock).toISOString())
@@ -205,6 +227,7 @@ beforeEach(async () => {
     },
     agents,
     flows: {
+      ...fakeFlows,
       hasActive: (t) => active.has(t),
       startManual: async (_p, t) => {
         started.push(`${t}:${agents.assignedKey(t)}`)
@@ -330,14 +353,6 @@ describe('entrada por outro caminho', () => {
   })
 })
 
-describe('agentNameFallback', () => {
-  it('embutido pelo catálogo; outros pelo id', () => {
-    expect(agentNameFallback('builtin:implementador')).toBe('Implementador')
-    expect(agentNameFallback('repo:ana')).toBe('ana')
-    expect(agentNameFallback('lixo')).toBe('lixo')
-  })
-})
-
 describe('salvar', () => {
   it('valida no main, registra quando ligou e o histórico de configuração', async () => {
     await expect(service.save(P, { ...ENABLED, lanes: [] })).rejects.toMatchObject({
@@ -354,9 +369,10 @@ describe('salvar', () => {
 
     // Salvar de novo (ligado) mantém a data; desligar limpa.
     clock += 60_000
-    expect((await service.save(P, { ...ENABLED, maxActive: 3 })).config.enabledSince).toBe(
-      state.config.enabledSince
-    )
+    expect(
+      (await service.save(P, { ...ENABLED, lanes: [...ENABLED.lanes].reverse() })).config
+        .enabledSince
+    ).toBe(state.config.enabledSince)
     expect((await service.save(P, { ...ENABLED, enabled: false })).config.enabledSince).toBeNull()
   })
 })

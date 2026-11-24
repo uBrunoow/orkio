@@ -35,6 +35,14 @@ function makeStore(
   })
 }
 
+describe('ConfigStore: migrações obrigatórias', () => {
+  it('faltando a migração v → v+1, o store nem é criado (antes: backup + config vazia)', () => {
+    expect(() => makeStore('/tmp/nao-usado.json', { migrations: { 0: (d) => d } })).toThrow(
+      /faltam as migrações 1/
+    )
+  })
+})
+
 describe('ConfigStore', () => {
   let dir: string
   let file: string

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import type { DeliveryTarget } from '../../shared/delivery'
-import { checkPushBranch, isProtectedBranch } from '../../shared/delivery'
 import { topLevelFields, type DeliveryKind } from './delivery-policy'
 import {
   DELIVERY_ALLOWED,
@@ -59,31 +58,6 @@ const allowed = (command: string, c?: PolicyContext) => {
   expect(d.decision, command).toBe('allow')
   return d
 }
-
-describe('entrega: branches protegidas', () => {
-  it('padrão, main/master/develop/production/release* nunca; só a branch da tarefa', () => {
-    for (const b of [
-      'main',
-      'MASTER',
-      'develop',
-      'production',
-      'release/1.2',
-      'hotfix-x',
-      'trunk-x'
-    ])
-      expect(isProtectedBranch(b, 'trunk-x'), b).toBe(true)
-    expect(checkPushBranch(BRANCH, target)).toBeNull()
-    expect(checkPushBranch('ORK-7/outra', target)).toMatch(/Só a branch da tarefa/)
-    expect(checkPushBranch('main', target)).toMatch(/protegida/)
-    expect(checkPushBranch('-f', target)).toMatch(/inválido/)
-    // A branch da tarefa vai mesmo sem o ID no nome (vinculada à mão, banco sem ID).
-    expect(checkPushBranch('feature/x', { ...target, branch: 'feature/x' })).toBeNull()
-    // hotfix/<nome> é tipo de branch de tarefa; hotfix sozinho, hotfix-x e release* não.
-    expect(checkPushBranch('hotfix/login', { ...target, branch: 'hotfix/login' })).toBeNull()
-    for (const b of ['hotfix', 'hotfix-1.2', 'hotfix_x', 'release/2.0'])
-      expect(checkPushBranch(b, { ...target, branch: b }), b).toMatch(/protegida/)
-  })
-})
 
 describe('modo entrega: git push', () => {
   it('push da branch da tarefa: liberado (com o registro do evento)', () => {
@@ -221,7 +195,7 @@ describe('modo entrega: git push', () => {
       'gh pr list --state open',
       'gh run view 123 --log-failed',
       'gh api repos/{owner}/{repo}/pulls/14/reviews',
-      'gh api -X GET repos/acme/app/pulls/14/comments -f per_page=100',
+      'gh api -X GET repos/acme/app/pulls/14/comments?per_page=100',
       `gh api graphql -f query='query { repository(owner: "acme", name: "app") { pullRequest(number: 14) { reviewThreads(first: 50) { nodes { isResolved } } } } }'`
     ]) {
       allowed(cmd, c)
@@ -232,6 +206,8 @@ describe('modo entrega: git push', () => {
       'gh pr review 14 --approve',
       'gh pr merge 14',
       'gh api repos/acme/app/pulls/14/comments -f body=oi',
+      // GET com campos: o CLI nega (não há como distinguir de um POST com campos); vai na URL.
+      'gh api -X GET repos/acme/app/pulls/14/comments -f per_page=100',
       'gh api -X PATCH repos/acme/app/pulls/14 -f state=closed',
       'gh api --input body.json repos/acme/app/pulls/14/reviews',
       `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "x"}) { clientMutationId } }'`,

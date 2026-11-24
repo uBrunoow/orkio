@@ -8,7 +8,7 @@ import { BUILTIN_AGENTS } from '../../shared/agent-presets'
 import { BoardStore } from '../board/board.store'
 import { createOrkioConfigStore } from '../config/orkio-config'
 import { openDatabase, type Db } from '../db/database'
-import { AgentError, AgentsService } from './agents.service'
+import { AGENT_MESSAGES, AgentError, AgentsService } from './agents.service'
 
 const ANA: AgentProfile = defaultAgent({
   id: 'ana',
@@ -22,16 +22,28 @@ let localDir: string
 let db: Db
 let store: BoardStore
 let service: AgentsService
+let config: ReturnType<typeof createOrkioConfigStore>
 let activeFlows: Set<string>
 let emitted: string[]
 let now: Date
+/** Execuções conhecidas (o dono de `agent_runs` é o RunService; aqui, a consulta simulada). */
+let agentRunRows: { key: string; startedAt: string; cost: number | null }[]
+
+const agentRuns = (key: string, since: string) => {
+  const rows = agentRunRows.filter((r) => r.key === key && r.startedAt >= since)
+  return {
+    count: rows.length,
+    costUsd: rows.reduce((sum, r) => sum + (r.cost ?? 0), 0),
+    startedAt: rows.map((r) => r.startedAt)
+  }
+}
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'orkio-agents-'))
   projectDir = join(dir, 'projeto')
   localDir = join(dir, 'userData', 'agents')
   await mkdir(projectDir, { recursive: true })
-  const config = createOrkioConfigStore(join(dir, 'orkio-config.json'))
+  config = createOrkioConfigStore(join(dir, 'orkio-config.json'))
   await config.load()
   await config.update((c) => ({
     ...c,
@@ -50,6 +62,7 @@ beforeEach(async () => {
   db = openDatabase(':memory:')
   store = new BoardStore(db)
   activeFlows = new Set()
+  agentRunRows = []
   emitted = []
   now = new Date(2026, 10, 20, 15, 0, 0)
   service = new AgentsService({
@@ -58,6 +71,7 @@ beforeEach(async () => {
     config,
     localDir,
     hasActiveFlow: (taskId) => activeFlows.has(taskId),
+    agentRuns,
     stageIds: () => ['s1', 's2'],
     actor: () => 'bruno',
     emit: (projectId) => emitted.push(projectId),
@@ -259,15 +273,62 @@ describe('atribuição', () => {
   })
 })
 
+describe('"Rodar como <agente>" (runAgentFor / problemFor)', () => {
+  beforeEach(async () => {
+    await service.save({
+      projectId: 'p1',
+      scope: 'repo',
+      profile: { ...ANA, model: 'sonnet', commands: ['revisar'] },
+      isNew: true
+    })
+  })
+
+  it('sem agente: null nos dois', async () => {
+    expect(await service.runAgentFor('p1', 't1', null)).toBeNull()
+    expect(await service.problemFor('p1', 't1')).toBeNull()
+  })
+
+  it('agente pronto: vai para a execução com instruções e modelo; formulário sem problema', async () => {
+    await service.assign('p1', 't1', 'repo:ana')
+    expect(await service.runAgentFor('p1', 't1', 'revisar')).toMatchObject({
+      key: 'repo:ana',
+      name: 'Ana',
+      model: 'sonnet',
+      prompt: expect.stringContaining('Testes sempre.')
+    })
+    expect(await service.problemFor('p1', 't1')).toEqual({ name: 'Ana', problem: null })
+  })
+
+  it('comando fora da lista e limite do dia: recusa ao rodar; o limite aparece no formulário', async () => {
+    await service.assign('p1', 't1', 'repo:ana')
+    await expect(service.runAgentFor('p1', 't1', 'entregar')).rejects.toMatchObject({
+      code: 'denied'
+    })
+    for (let i = 0; i < ANA.limits.stepsPerDay; i++) {
+      agentRunRows.push({ key: 'repo:ana', startedAt: now.toISOString(), cost: null })
+    }
+    await expect(service.runAgentFor('p1', 't1', null)).rejects.toMatchObject({ code: 'limit' })
+    expect((await service.problemFor('p1', 't1'))?.problem).toMatch(/limite de hoje/)
+  })
+
+  it('perfil mudou no repositório ou sumiu: o formulário diz por quê', async () => {
+    await service.assign('p1', 't1', 'repo:ana')
+    await writeFile(repoFile(), serializeAgent({ ...ANA, instructions: 'Outra coisa' }))
+    expect(await service.problemFor('p1', 't1')).toEqual({
+      name: 'Ana',
+      problem: AGENT_MESSAGES.needsReview
+    })
+    await rm(repoFile())
+    expect(await service.problemFor('p1', 't1')).toEqual({
+      name: 'repo:ana',
+      problem: AGENT_MESSAGES.gone
+    })
+  })
+})
+
 describe('limites diários', () => {
-  const run = (id: string, startedAt: Date, cost: number | null): void => {
-    db.run(
-      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, cost, agent_key)
-       VALUES (?, 't1', 'p1', 'command', 'x', 'succeeded', ?, ?, 'repo:ana')`,
-      id,
-      startedAt.toISOString(),
-      cost
-    )
+  const run = (_id: string, startedAt: Date, cost: number | null): void => {
+    agentRunRows.push({ key: 'repo:ana', startedAt: startedAt.toISOString(), cost })
   }
 
   it('conta execuções e custo do dia local', () => {
@@ -291,28 +352,21 @@ describe('limites diários', () => {
 })
 
 describe('atividade (tela Agentes)', () => {
-  it('atividade por hora nas últimas 12 h', async () => {
-    const run = (id: string, startedAt: Date, key = 'builtin:revisor'): void => {
-      db.run(
-        `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, cost, agent_key)
-         VALUES (?, 't1', 'p1', 'command', 'x', 'succeeded', ?, NULL, ?)`,
-        id,
-        startedAt.toISOString(),
-        key
-      )
+  it('atividade por hora na janela de ACTIVITY_HOURS (a hora atual por último)', async () => {
+    const run = (_id: string, startedAt: Date, key = 'builtin:revisor'): void => {
+      agentRunRows.push({ key, startedAt: startedAt.toISOString(), cost: null })
     }
     const ago = (ms: number): Date => new Date(now.getTime() - ms)
     run('a', ago(10 * 60_000))
     run('b', ago(10 * 60_000))
     run('c', ago(5 * 3_600_000 + 60_000))
     run('d', ago(60_000), 'builtin:qa')
-    run('e', ago(13 * 3_600_000))
+    run('e', ago((ACTIVITY_HOURS + 1) * 3_600_000)) // fora da janela
     const { agents } = await service.list('p1')
     const rev = agents.find((a) => a.key === 'builtin:revisor')!
-    expect(ACTIVITY_HOURS).toBe(12)
-    expect(rev.activity).toHaveLength(12)
-    expect(rev.activity[11]).toBe(2)
-    expect(rev.activity[6]).toBe(1)
+    expect(rev.activity).toHaveLength(ACTIVITY_HOURS)
+    expect(rev.activity[ACTIVITY_HOURS - 1]).toBe(2)
+    expect(rev.activity[ACTIVITY_HOURS - 1 - 5]).toBe(1)
     expect(rev.activity.reduce((x, y) => x + y, 0)).toBe(3)
   })
 })
@@ -345,6 +399,34 @@ describe('agentes embutidos (8B)', () => {
     expect(await readFile(repoFile('implementador-time'), 'utf8')).toContain(
       'Implementador do time'
     )
+  })
+
+  it('regra da coluna e "tirar" mostram o nome do embutido, mesmo sem a lista carregada', async () => {
+    await service.setRules('p1', [{ stageId: 's2', agentKey: 'builtin:implementador' }])
+    // App recém-aberto: ninguém chamou list/get ainda (antes: o histórico mostrava "implementador").
+    const fresh = new AgentsService({
+      db,
+      store,
+      config,
+      localDir,
+      hasActiveFlow: () => false,
+      agentRuns,
+      stageIds: () => ['s1', 's2'],
+      actor: () => 'bruno',
+      emit: () => undefined,
+      now: () => now
+    })
+    fresh.onStageChanged({ projectId: 'p1', taskId: 't1', from: 's1', to: 's2', source: 'manual' })
+    expect(store.events('t1')[0]?.detail).toEqual({
+      agentKey: 'builtin:implementador',
+      agent: 'Implementador',
+      by: 'rule'
+    })
+    await fresh.assign('p1', 't1', null)
+    expect(store.events('t1')[0]).toMatchObject({
+      kind: 'agent_unassigned',
+      detail: { agentKey: 'builtin:implementador', agent: 'Implementador' }
+    })
   })
 
   it('o orquestrador atribui na transação, com histórico e sem marcar como "à mão"', async () => {

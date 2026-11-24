@@ -4,8 +4,9 @@
  */
 import { isAbsolute, relative } from 'node:path'
 import type { RunLogEvent } from '../../shared/agent-run'
+import { toolInfo, toolPath } from '../../shared/claude-tools'
 import { contextWindowFor, inputTokensOf } from '../../shared/context-usage'
-import { redactSecrets } from './redact'
+import { redactSecrets } from '../platform/redact'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -18,48 +19,35 @@ function short(text: string, max = 200): string {
   return one.length > max ? `${one.slice(0, max - 1)}…` : one
 }
 
-/** Caminho relativo ao worktree (para exibir); fora dele, o absoluto. */
 export function displayPath(path: string, worktree: string): string {
   if (!isAbsolute(path)) return path
   const rel = relative(worktree, path)
   return rel && !rel.startsWith('..') && !isAbsolute(rel) ? rel : path
 }
 
-/** Resumo curto de uma chamada de ferramenta (sem conteúdo de arquivos). */
+/**
+ * Resumo curto de uma chamada de ferramenta (sem conteúdo de arquivos), pelo catálogo
+ * (`shared/claude-tools.ts`). Ferramentas de arquivo (lidas ou escritas) levam `file`: um `.env`
+ * lido ou escrito passa a ter os valores escondidos do log.
+ */
 export function summarizeTool(
   tool: string,
   input: unknown,
   worktree: string
 ): { summary: string; file?: string } {
-  const i = isRecord(input) ? input : {}
-  const path = str(i['file_path']) ?? str(i['notebook_path']) ?? str(i['path'])
-  switch (tool) {
-    case 'Bash':
-      return { summary: short(redactSecrets(str(i['command']) ?? '')) }
-    case 'Edit':
-    case 'MultiEdit':
-    case 'Write':
-    case 'NotebookEdit': {
-      const file = path ? displayPath(path, worktree) : '?'
-      return { summary: file, file }
-    }
-    case 'Read':
-      return { summary: path ? displayPath(path, worktree) : '?' }
-    case 'Grep':
-    case 'Glob':
-      return { summary: short(str(i['pattern']) ?? '') }
-    case 'WebFetch':
-      return { summary: short(str(i['url']) ?? '') }
-    case 'WebSearch':
-      return { summary: short(str(i['query']) ?? '') }
-    case 'Task':
-    case 'Agent':
-      return { summary: short(str(i['description']) ?? '') }
-    case 'Skill':
-      return { summary: short(str(i['skill']) ?? str(i['command']) ?? '') }
-    default:
-      return { summary: '' }
+  const info = toolInfo(tool)
+  if (!info) return { summary: '' }
+  const path = toolPath(tool, input)
+  if (info.file) {
+    const file = path ? displayPath(path, worktree) : '?'
+    return path ? { summary: file, file } : { summary: file }
   }
+  const i = isRecord(input) ? input : {}
+  for (const k of info.summaryKeys ?? []) {
+    const v = str(i[k])
+    if (v !== null) return { summary: short(info.category === 'command' ? redactSecrets(v) : v) }
+  }
+  return { summary: path ? displayPath(path, worktree) : '' }
 }
 
 /** Uma linha do stream → zero ou mais eventos do log. Linha inválida vira `info`. */

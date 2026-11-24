@@ -8,33 +8,34 @@
  * - Texto passa por `redactSecrets`, com corte por comentário e no total; só em memória (cache de
  *   60 s); nada no SQLite nem no snapshot da 3B.
  */
-import { pendingCount } from '../../shared/review'
 import type {
   ReviewComment,
   ReviewSummary,
   ReviewThread,
   ReviewThreadsResult
 } from '../../shared/review'
-import { redactSecrets } from '../claude/redact'
+import { redactSecrets } from '../platform/redact'
 import { isRecord } from '../net/parse'
 
-export { pendingCount }
-
+/**
+ * Limites da leitura. `threads` é também o tamanho da página de threads dos sinais
+ * (`detailsQuery`): a aba Revisão e o "comentários não resolvidos" contam sobre as mesmas threads.
+ */
 export const REVIEW_LIMITS = {
   commentChars: 4_000,
   totalChars: 60_000,
-  threads: 50,
+  threads: 100,
   commentsPerThread: 20,
   reviews: 20,
   cacheMs: 60_000
 } as const
 
 export const REVIEW_QUERY =
-  'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { ' +
+  'query ReviewThreads($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { ' +
   'pullRequest(number: $number) { ' +
-  'reviewThreads(first: 50) { totalCount pageInfo { hasNextPage } nodes { id isResolved isOutdated path line ' +
-  'comments(first: 20) { totalCount nodes { author { login } body createdAt url } } } } ' +
-  'reviews(last: 20) { nodes { state body submittedAt author { login } } } } } }'
+  `reviewThreads(first: ${REVIEW_LIMITS.threads}) { totalCount pageInfo { hasNextPage } nodes { id isResolved isOutdated path line ` +
+  `comments(first: ${REVIEW_LIMITS.commentsPerThread}) { totalCount nodes { author { login } body createdAt url } } } } ` +
+  `reviews(last: ${REVIEW_LIMITS.reviews}) { nodes { state body submittedAt author { login } } } } } }`
 
 export const REVIEW_MESSAGES = {
   noPr: 'Esta tarefa não tem PR no GitHub. Rode o /pr antes de ler a revisão.',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { changelogNotes } from '../src/shared/changelog.mjs'
 import {
-  extractNotes,
   isPrerelease,
   nextVersion,
   parseReleaseArgs,
@@ -71,10 +71,10 @@ describe('releaseChangelog', () => {
     const out = releaseChangelog(CHANGELOG, '0.1.1', '2026-11-21')
     expect(out).toContain('## [Não lançado]\n\n## [0.1.1] - 2026-11-21\n\n### Adicionado')
     expect(out).toContain('- Um bug.\n\n## [0.1.0] - 2026-11-20')
-    expect(extractNotes(out, '0.1.1')).toBe(
+    expect(changelogNotes(out, '0.1.1')).toBe(
       '### Adicionado\n\n- Coisa nova.\n\n### Corrigido\n\n- Um bug.'
     )
-    expect(extractNotes(out, '0.1.0')).toBe('- Primeira.')
+    expect(changelogNotes(out, '0.1.0')).toBe('- Primeira.')
   })
 
   it('recusa seção vazia (só subtítulos), ausente ou versão repetida', () => {
@@ -84,10 +84,10 @@ describe('releaseChangelog', () => {
     expect(() => releaseChangelog(CHANGELOG, '0.1.0', '2026-11-21')).toThrow(/já tem/)
   })
 
-  it('extractNotes não confunde 0.1.1 com 0.1.10 e devolve null se não houver', () => {
+  it('changelogNotes não confunde 0.1.1 com 0.1.10 e devolve null se não houver', () => {
     const text = '## [0.1.10] - x\n\n- dez\n\n## [0.1.1] - y\n\n- um\n'
-    expect(extractNotes(text, '0.1.1')).toBe('- um')
-    expect(extractNotes(text, '0.2.0')).toBeNull()
+    expect(changelogNotes(text, '0.1.1')).toBe('- um')
+    expect(changelogNotes(text, '0.2.0')).toBeNull()
   })
 
   it('o CHANGELOG do repositório está no formato esperado', async () => {
@@ -97,7 +97,7 @@ describe('releaseChangelog', () => {
     const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
       version: string
     }
-    expect(extractNotes(text, pkg.version)).toBeTruthy()
+    expect(changelogNotes(text, pkg.version)).toBeTruthy()
   })
 })
 

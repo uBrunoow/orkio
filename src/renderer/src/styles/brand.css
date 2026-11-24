@@ -1,28 +1,8 @@
 /*
- * Exceção documentada às regras da Astryx: só a marca Orkio (logo/wordmark e títulos de
- * destaque em Jost, BRAND.md). Usa apenas tokens do tema; nada de cor/medida de layout fixa.
+ * Camada da marca Orkio: bloco de código e diff (o logo tem o próprio CSS). Usa apenas tokens do
+ * tema; nada de cor/medida de layout fixa.
  */
 @layer orkio-brand {
-  .orkio-display {
-    font-family: 'Jost', var(--font-sans), sans-serif;
-    font-weight: 300;
-  }
-
-  .orkio-slogan {
-    font-family: 'Jost', var(--font-sans), sans-serif;
-    font-weight: 400;
-    letter-spacing: 0.4em;
-    text-transform: uppercase;
-    color: var(--brand);
-  }
-
-  .orkio-mono,
-  .orkio-mono-input,
-  .orkio-mono-input input {
-    font-family: var(--font-mono);
-  }
-
-  /* Bloco de código do texto do Claude (markdown): mono, quebra linha, fundo elevado do tema. */
   .orkio-codeblock {
     display: block;
     white-space: pre-wrap;
@@ -33,7 +13,6 @@
     font-family: var(--font-mono);
   }
 
-  /* Diff do ambiente (DiffView): linhas coloridas pelos tons de estado do tema. */
   .orkio-diff {
     overflow: hidden;
     border-radius: var(--radius);
@@ -69,14 +48,6 @@
 
   .orkio-diff-del {
     background: var(--danger-tint);
-  }
-
-  .orkio-diff-stat-add {
-    color: var(--ok);
-  }
-
-  .orkio-diff-stat-del {
-    color: var(--danger);
   }
 }
 

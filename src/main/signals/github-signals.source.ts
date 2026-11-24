@@ -13,12 +13,14 @@ import type {
   ReviewDecision
 } from '../../shared/task-signals'
 import {
-  GitHubApiError,
   parseBranchItem,
   parsePullItem,
   type ConditionalPage
 } from '../connectors/github/github.client'
 import { isRecord } from '../net/parse'
+import { isAuthorLogin } from '../../shared/github-names'
+import { REVIEW_LIMITS } from './review-threads'
+import { isApiError } from '../net/http'
 
 export interface GitHubSignalsApi {
   getConditional(path: string, etag: string | null): Promise<ConditionalPage>
@@ -54,8 +56,6 @@ export interface RepoSnapshot {
   branches: string[]
   branchesTruncated: boolean
   pulls: PullRequestSummary[]
-  /** Quantas requisições voltaram 304 / 200 (diagnóstico e testes). */
-  requests: { notModified: number; fetched: number }
 }
 
 export class GitHubRepoSignals {
@@ -77,26 +77,20 @@ export class GitHubRepoSignals {
 
   /** Lê branches e PRs (abertas + fechadas nos últimos 30 dias). */
   async snapshot(): Promise<RepoSnapshot> {
-    const requests = { notModified: 0, fetched: 0 }
-
     const branchPages = await this.walk(
       `${this.base}/branches?per_page=100`,
-      SIGNALS_LIMITS.branchPages,
-      requests
+      SIGNALS_LIMITS.branchPages
     )
     const branches = branchPages.items.map(parseBranchItem).filter((b): b is string => b !== null)
 
     const open = await this.walk(
       `${this.base}/pulls?state=open&per_page=100`,
-      SIGNALS_LIMITS.openPullPages,
-      requests
+      SIGNALS_LIMITS.openPullPages
     )
     const cutoff = this.now() - SIGNALS_LIMITS.closedWindowMs
     const closed = await this.walk(
       `${this.base}/pulls?state=closed&sort=updated&direction=desc&per_page=100`,
       SIGNALS_LIMITS.closedPullPages,
-      requests,
-      // Ordenadas por atualização: para quando a página já passou da janela.
       (items) => {
         const last = parsePullItem(items[items.length - 1])
         return last !== null && Date.parse(last.updatedAt) < cutoff
@@ -113,13 +107,12 @@ export class GitHubRepoSignals {
       seen.add(item.number)
       pulls.push(item)
     }
-    return { branches, branchesTruncated: branchPages.truncated, pulls, requests }
+    return { branches, branchesTruncated: branchPages.truncated, pulls }
   }
 
   private async walk(
     firstPath: string,
     maxPages: number,
-    requests: RepoSnapshot['requests'],
     stop?: (items: unknown[]) => boolean
   ): Promise<{ items: unknown[]; truncated: boolean }> {
     const items: unknown[] = []
@@ -130,17 +123,14 @@ export class GitHubRepoSignals {
       const result = await this.api.getConditional(path, cached?.etag ?? null)
       let page: CachedPage
       if (result.notModified && cached) {
-        requests.notModified++
         page = cached
       } else if (result.notModified) {
         // 304 sem cache (não deveria acontecer): pede de novo sem ETag.
         const fresh = await this.api.getConditional(path, null)
         if (fresh.notModified) break
-        requests.fetched++
         page = { etag: fresh.etag, body: fresh.body, nextPath: fresh.nextPath }
         this.pages.set(path, page)
       } else {
-        requests.fetched++
         page = { etag: result.etag, body: result.body, nextPath: result.nextPath }
         this.pages.set(path, page)
       }
@@ -192,7 +182,7 @@ export class GitHubRepoSignals {
           : null
       } catch (error) {
         this.detailsWarning =
-          error instanceof GitHubApiError && error.code === 'forbidden'
+          isApiError(error, 'github') && error.code === 'forbidden'
             ? error.message
             : 'Não foi possível carregar revisões e comentários das PRs agora. Mostrando o que já se sabe.'
         break
@@ -215,7 +205,7 @@ export function detailsQuery(numbers: readonly number[]): string {
     .map(
       (n) =>
         `pr${n}: pullRequest(number: ${n}) { number additions deletions changedFiles reviewDecision ` +
-        `reviewThreads(first: 100) { nodes { id isResolved } } ` +
+        `reviewThreads(first: ${REVIEW_LIMITS.threads}) { nodes { id isResolved } } ` +
         `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
         // 3B: ids estáveis para eventos idempotentes (pedidos de review e reviews com decisão).
         `timelineItems(itemTypes: [REVIEW_REQUESTED_EVENT], last: 20) { nodes { ... on ReviewRequestedEvent { id createdAt requestedReviewer { ... on User { login } } } } } ` +
@@ -223,7 +213,7 @@ export function detailsQuery(numbers: readonly number[]): string {
         `reviews(last: 20, states: [APPROVED, CHANGES_REQUESTED]) { nodes { id state submittedAt author { login } } } }`
     )
     .join(' ')
-  return `query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`
+  return `query PullRequestDetails($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`
 }
 
 const REVIEW: Record<string, ReviewDecision> = {
@@ -240,15 +230,12 @@ const CHECKS: Record<string, ChecksState> = {
   EXPECTED: 'pending'
 }
 
-const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(\[bot\])?$/
-
-/** Revisor pedido: login de usuário, ou `team:<slug>` para times. */
+/**
+ * Revisor pedido: só login de usuário (a query pede `... on User`; time exigiria `read:org` e chega
+ * sem nome).
+ */
 function reviewerOf(value: unknown): string | null {
-  if (!isRecord(value)) return null
-  if (typeof value['login'] === 'string' && LOGIN.test(value['login'])) return value['login']
-  if (typeof value['slug'] === 'string' && /^[A-Za-z0-9._-]{1,100}$/.test(value['slug']))
-    return `team:${value['slug']}`
-  return null
+  return isRecord(value) && isAuthorLogin(value['login']) ? value['login'] : null
 }
 
 export function parseDetails(
@@ -310,7 +297,7 @@ export function parseDetails(
                     id: r['id'],
                     state,
                     at,
-                    author: typeof author === 'string' && LOGIN.test(author) ? author : null
+                    author: isAuthorLogin(author) ? author : null
                   } as const
                 ]
               : []

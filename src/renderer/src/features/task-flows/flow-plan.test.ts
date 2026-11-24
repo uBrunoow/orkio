@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FlowRunView, FlowStepView, Step } from '../../../../shared/task-flow'
-import {
-  finalText,
-  flowPlan,
-  flowStepIndex,
-  gateOutcomes,
-  gateResultRunId,
-  planProgress
-} from './flow-plan'
+import { flowPlan, flowStepIndex, gateOutcomes, gateResultRunId, planProgress } from './flow-plan'
 
 const steps: Step[] = [
   {
@@ -48,6 +41,8 @@ function step(
     stepId,
     runId,
     status,
+    code: null,
+    link: null,
     startedAt: `2026-11-23T10:0${seq}:00Z`,
     endedAt: status === 'running' || status === 'waiting' ? null : `2026-11-23T10:0${seq}:30Z`,
     message: null,
@@ -95,7 +90,9 @@ describe('flowPlan', () => {
     ])
     expect(plan[0]!.detail).toBe('/alva-flow:spec')
     expect(plan[2]!.detail).toBe('Sua aprovação')
-    expect(plan[3]!.detail).toBe('Ação do Orkio: push')
+    expect(plan[3]!.detail).toBe('Ação do Orkio: Push da branch da tarefa')
+    expect(plan.map((p) => p.phase)).toEqual([{ id: 'spec' }, { id: 'plan' }, null, { id: 'pr' }])
+    expect(plan[3]!.action).toBe('push')
     expect(planProgress(plan)).toEqual({ done: 1, total: 4 })
   })
 
@@ -115,11 +112,16 @@ describe('flowPlan', () => {
         })
       )[1]!.state
     ).toBe('failed')
-    // Esperando vaga não é problema.
+    // Esperando vaga não é problema nem espera você: começa sozinho.
     expect(
       flowPlan(run({ status: 'paused', pauseReason: 'waiting_slot', currentStep: 'spec' }))[0]!
         .state
-    ).toBe('waiting')
+    ).toBe('current')
+    // Limite diário do agente é problema (cartão com "Retomar"), não "esperando você".
+    expect(
+      flowPlan(run({ status: 'paused', pauseReason: 'agent_daily_limit', currentStep: 'spec' }))[0]!
+        .state
+    ).toBe('failed')
   })
 
   it('fluxo encerrado: passos que não rodaram ficam como não alcançados, não "a seguir"', () => {
@@ -208,20 +210,19 @@ describe('resultado mostrado no gate', () => {
     expect(gateResultRunId(run({ history: [step(1, 'ok', 'waiting')] }))).toBeNull()
   })
 
-  it('texto final: o resultado; sem ele, a última mensagem do Claude', () => {
-    expect(
-      finalText([
-        { kind: 'text', text: 'pensando' },
-        { kind: 'result', ok: true, durationMs: 1, costUsd: null, turns: 1, text: '1. Plano' }
-      ])
-    ).toBe('1. Plano')
-    expect(
-      finalText([
-        { kind: 'text', text: '1. Plano' },
-        { kind: 'result', ok: true, durationMs: 1, costUsd: null, turns: 1, text: '' }
-      ])
-    ).toBe('1. Plano')
-    expect(finalText([])).toBeNull()
+  it('o /pr do alva-flow espera o CI (sem --comments); com --comments, não', () => {
+    const pr = (args: string): Step[] => [
+      {
+        id: 'pr',
+        name: 'PR',
+        type: 'claude_command',
+        command: 'alva-flow:pr',
+        args,
+        timeoutMin: 60
+      }
+    ]
+    expect(flowPlan(run({ steps: pr(''), currentStep: 'pr' }))[0]?.waitsForCi).toBe(true)
+    expect(flowPlan(run({ steps: pr('--comments'), currentStep: 'pr' }))[0]?.waitsForCi).toBe(false)
   })
 
   it('pedido em texto aparece no plano como pedido (sem barra de comando)', () => {

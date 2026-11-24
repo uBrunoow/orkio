@@ -33,8 +33,8 @@ describe('terminalCommand', () => {
     })
     expect(terminalCommand('linux', {}, DIR, () => false)).toBeNull()
   })
-  it('macOS: open -a Terminal <pasta>', () => {
-    expect(terminalCommand('darwin', {}, DIR)).toEqual({
+  it('macOS: open -a Terminal <pasta> (o open sempre existe, sem procurar no PATH)', () => {
+    expect(terminalCommand('darwin', {}, DIR, () => false)).toEqual({
       cmd: 'open',
       args: ['-a', 'Terminal', DIR]
     })

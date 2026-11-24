@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { NotionMapping } from '../../../shared/ipc-contract'
 import {
+  applyPropertyWrites,
   checkMapping,
+  decodePropertyWrites,
+  encodePropertyWrites,
   nameSimilarity,
+  propertyWritesKey,
+  propertyWritesMatch,
   parseDataSource,
   parseDataSourceSummary,
   parseProjectPage,
@@ -11,6 +15,7 @@ import {
   simplePropertyValues,
   suggestMapping
 } from './notion.schema'
+import type { NotionMapping } from '../../../shared/notion'
 
 const PROJECTS_DS = '11111111-1111-1111-1111-111111111111'
 const OTHER_DS = '99999999-9999-9999-9999-999999999999'
@@ -363,5 +368,51 @@ describe('nameSimilarity e sameId', () => {
   it('ids com e sem hífen', () => {
     expect(sameId(PROJECTS_DS, PROJECTS_DS.replace(/-/g, ''))).toBe(true)
     expect(sameId(PROJECTS_DS, OTHER_DS)).toBe(false)
+  })
+})
+
+describe('escrita de propriedades (formato da API só aqui)', () => {
+  it('codifica o payload do PATCH e lê de volta, inclusive pendência salva antes', () => {
+    const writes = {
+      st: { type: 'status' as const, name: 'Finalizadas' },
+      eo: { type: 'select' as const, name: 'Revisando' },
+      blk: { type: 'checkbox' as const, checked: true }
+    }
+    const payload = encodePropertyWrites(writes)
+    expect(payload).toEqual({
+      st: { status: { name: 'Finalizadas' } },
+      eo: { select: { name: 'Revisando' } },
+      blk: { checkbox: true }
+    })
+    expect(decodePropertyWrites(payload)).toEqual(writes)
+    expect(decodePropertyWrites({ x: { rich_text: [] }, y: 'z' })).toEqual({})
+  })
+
+  it('chave estável: a ordem das propriedades não muda a chave', () => {
+    const a = propertyWritesKey({
+      st: { type: 'status', name: 'A' },
+      blk: { type: 'checkbox', checked: false }
+    })
+    const b = propertyWritesKey({
+      blk: { type: 'checkbox', checked: false },
+      st: { type: 'status', name: 'A' }
+    })
+    expect(a).toBe(b)
+  })
+
+  it('match e apply sobre os valores conhecidos', () => {
+    const values = { st: { type: 'status' as const, id: 'o1', name: 'A' } }
+    const writes = {
+      st: { type: 'status' as const, name: 'B' },
+      blk: { type: 'checkbox' as const, checked: true }
+    }
+    expect(propertyWritesMatch(values, writes)).toBe(false)
+    applyPropertyWrites(values, writes)
+    expect(values).toEqual({
+      st: { type: 'status', id: null, name: 'B' },
+      blk: { type: 'checkbox', checked: true }
+    })
+    expect(propertyWritesMatch(values, writes)).toBe(true)
+    expect(propertyWritesMatch(undefined, writes)).toBe(false)
   })
 })

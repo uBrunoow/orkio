@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { ALVA_FAILURES } from './alva'
 import { DELIVERY_MESSAGES } from './delivery'
-import type { FlowRunView, FlowStepView, Step } from './task-flow'
-import { classifyMessage, describeFlowProblem } from './flow-problem'
+import { MAX_EXECUTED_STEPS, type FlowRunView, type FlowStepView, type Step } from './task-flow'
+import { describeFlowProblem } from './flow-problem'
 
 const STEPS: Step[] = [
   {
@@ -23,6 +24,8 @@ const entry = (over: Partial<FlowStepView>): FlowStepView => ({
   startedAt: '2026-11-21T10:00:00Z',
   endedAt: '2026-11-21T10:00:01Z',
   message: null,
+  code: null,
+  link: null,
   costUsd: null,
   ...over
 })
@@ -51,28 +54,11 @@ function run(over: Partial<FlowRunView>): FlowRunView {
   }
 }
 
-describe('classifyMessage', () => {
-  it('reconhece os textos reais do app', () => {
-    expect(classifyMessage(DELIVERY_MESSAGES.dirty)).toBe('uncommitted')
-    expect(classifyMessage('O git pediu credenciais. Configure o acesso…')).toBe('credentials')
-    expect(classifyMessage('O GitHub recusou o push: a branch remota tem commits…')).toBe(
-      'push_rejected'
-    )
-    expect(classifyMessage('Tempo limite esgotado: o Orkio cancelou a execução.')).toBe('timed_out')
-    expect(classifyMessage('O Claude Code terminou com erro: boom')).toBe('claude_error')
-    expect(
-      classifyMessage(
-        'O /alva-flow:spec terminou sem criar nem alterar nenhuma task em backlog/tasks/. Confira o log'
-      )
-    ).toBe('no_task')
-    expect(classifyMessage('Qualquer outra coisa')).toBe('generic')
-    expect(classifyMessage(null)).toBe('generic')
-  })
-})
-
 describe('describeFlowProblem', () => {
   it('push recusado por mudanças não commitadas: causa, motivo e "rodar o /commit de novo"', () => {
-    const p = describeFlowProblem(run({ history: [entry({ message: DELIVERY_MESSAGES.dirty })] }))
+    const p = describeFlowProblem(
+      run({ history: [entry({ code: 'dirty', message: DELIVERY_MESSAGES.dirty })] })
+    )
     expect(p).toMatchObject({
       kind: 'uncommitted',
       title: 'Um passo falhou — Push da branch (Orkio)',
@@ -91,6 +77,7 @@ describe('describeFlowProblem', () => {
           entry({
             stepId: 'commit',
             runId: 'run-9',
+            code: 'claude_error',
             message: 'O Claude Code terminou com erro.'
           })
         ]
@@ -103,8 +90,8 @@ describe('describeFlowProblem', () => {
     const p = describeFlowProblem(
       run({
         history: [
-          entry({ seq: 1, message: DELIVERY_MESSAGES.dirty }),
-          entry({ seq: 2, message: 'O git pediu credenciais.' })
+          entry({ seq: 1, code: 'dirty', message: DELIVERY_MESSAGES.dirty }),
+          entry({ seq: 2, code: 'credentials', message: 'O git pediu credenciais.' })
         ]
       })
     )
@@ -135,6 +122,7 @@ describe('describeFlowProblem', () => {
         history: [
           entry({
             stepId: 'plan',
+            code: ALVA_FAILURES.notLinked,
             message:
               'Este passo usa a task do Backlog, mas o fluxo ainda não sabe qual é a desta tarefa.'
           })
@@ -152,7 +140,31 @@ describe('describeFlowProblem', () => {
     expect(describeFlowProblem(run({ pauseReason: 'interrupted' }))?.kind).toBe('interrupted')
     expect(describeFlowProblem(run({ pauseReason: 'loop_guard' }))?.kind).toBe('loop_guard')
     expect(describeFlowProblem(run({ pauseReason: 'gate_timeout' }))?.kind).toBe('gate_timeout')
-    expect(describeFlowProblem(run({ pauseReason: 'agent_daily_limit' }))?.kind).toBe('daily_limit')
+    expect(describeFlowProblem(run({ pauseReason: 'agent_daily_limit' }))?.kind).toBe(
+      'agent_daily_limit'
+    )
+    // A dica do limite de passos vem do limite real (MAX_EXECUTED_STEPS).
+    expect(describeFlowProblem(run({ pauseReason: 'loop_guard' }))?.hint).toContain(
+      `${MAX_EXECUTED_STEPS} passos`
+    )
+  })
+
+  it('"Responder e continuar" segue a regra do main, mesmo sem o passo ter rodado', () => {
+    // Limite do dia antes de o /commit rodar: sem execução no histórico, mas o main aceita.
+    const limited = run({ currentStep: 'commit', pauseReason: 'agent_daily_limit' })
+    expect(describeFlowProblem(limited)?.runId).toBeNull()
+    expect(describeFlowProblem(limited)?.canReply).toBe(true)
+    // Passo do Orkio (push) não tem sessão do Claude Code.
+    expect(describeFlowProblem(run({}))?.canReply).toBe(false)
+  })
+
+  it('a causa vem do código, não do texto: mensagem antiga sem código = genérico', () => {
+    const old = describeFlowProblem(run({ history: [entry({ message: DELIVERY_MESSAGES.dirty })] }))
+    expect(old).toMatchObject({ kind: 'generic', reason: DELIVERY_MESSAGES.dirty, rerun: null })
+    const reworded = describeFlowProblem(
+      run({ history: [entry({ code: 'dirty', message: 'Texto reescrito qualquer.' })] })
+    )
+    expect(reworded?.kind).toBe('uncommitted')
   })
 
   it('espera por vaga ou por escolha, e fluxos que não estão pausados, não são problema', () => {
@@ -177,11 +189,17 @@ describe('publicar revisão como orkio[bot] (Task 18)', () => {
     },
     { id: 'pub', name: 'Publicar revisão', type: 'orkio_action', action: 'publish_review' }
   ]
-  const at = (message: string): FlowRunView =>
-    run({ steps: PUBLISH, currentStep: 'pub', history: [entry({ stepId: 'pub', message })] })
+  const at = (code: string, message: string, link: string | null = null): FlowRunView =>
+    run({
+      steps: PUBLISH,
+      currentStep: 'pub',
+      history: [entry({ stepId: 'pub', code, message, link })]
+    })
 
   it('JSON inválido: explica e oferece rodar a conversão de novo', () => {
-    const p = describeFlowProblem(at('A revisão em JSON é inválida: "event" precisa ser …'))
+    const p = describeFlowProblem(
+      at('review_invalid', 'A revisão em JSON é inválida: "event" precisa ser …')
+    )
     expect(p).toMatchObject({
       kind: 'review_invalid',
       rerun: { stepId: 'json', label: 'Rodar “Converter a revisão em JSON (só leitura)” de novo' },
@@ -189,32 +207,26 @@ describe('publicar revisão como orkio[bot] (Task 18)', () => {
     })
   })
 
-  it('App não instalado: link de instalação só no formato conhecido', () => {
+  it('App não instalado: o link vem da falha (campo), só no formato conhecido; nunca do texto', () => {
+    const url = 'https://github.com/apps/orkio/installations/new'
     const msg =
-      'O GitHub App do Orkio não está instalado neste repositório (ou não tem acesso às PRs). Instale o App neste link e retome: https://github.com/apps/orkio/installations/new'
-    expect(describeFlowProblem(at(msg))).toMatchObject({
+      'O GitHub App do Orkio não está instalado neste repositório. Instale o App pelo link.'
+    expect(describeFlowProblem(at('review_not_installed', msg, url))).toMatchObject({
       kind: 'review_not_installed',
-      link: {
-        label: 'Instalar o GitHub App do Orkio',
-        url: 'https://github.com/apps/orkio/installations/new'
-      }
+      link: { label: 'Instalar o GitHub App do Orkio', url }
     })
-    const evil = msg.replace(
-      'https://github.com/apps/orkio/installations/new',
-      'https://evil.example/apps/orkio/installations/new'
-    )
-    expect(describeFlowProblem(at(evil))?.link).toBeNull()
-    expect(
-      describeFlowProblem(
-        at(`${msg.split(' Instale')[0]} https://github.com/apps/orkio/installations/new/x`)
-      )?.link
-    ).toBeNull()
+    const evil = 'https://evil.example/apps/orkio/installations/new'
+    expect(describeFlowProblem(at('review_not_installed', msg, evil))?.link).toBeNull()
+    expect(describeFlowProblem(at('review_not_installed', `${msg} ${url}`))?.link).toBeNull()
+    // Outra causa com link: não vira botão de instalação.
+    expect(describeFlowProblem(at('review_invalid', msg, url))?.link).toBeNull()
   })
 
   it('timeout do site e site sem App: causas próprias, sem link', () => {
     expect(
       describeFlowProblem(
         at(
+          'review_maybe_posted',
           'O site do Orkio demorou para responder. Confira a PR antes de tentar de novo: a revisão pode ter sido publicada.'
         )
       )
@@ -222,12 +234,14 @@ describe('publicar revisão como orkio[bot] (Task 18)', () => {
     expect(
       describeFlowProblem(
         at(
+          'review_not_configured',
           'Não dá para publicar a revisão como orkio[bot]: o GitHub App do Orkio ainda não está configurado no site do Orkio.'
         )
       )
     ).toMatchObject({ kind: 'review_not_configured' })
     const noSite = describeFlowProblem(
       at(
+        'review_no_site',
         'Este app não sabe o endereço do site do Orkio (MAIN_VITE_SITE_URL não definido no build). Em dev, defina em .env.development e reinicie o pnpm dev.'
       )
     )

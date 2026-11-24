@@ -18,6 +18,9 @@ import {
   type Step
 } from './task-flow'
 
+/** Sem saídas declaradas: o validador não confere namespaces. */
+const NO_VARS: ReadonlySet<string> = new Set()
+
 const cmd = (id: string, command = 'revisar'): Step => ({
   id,
   name: id,
@@ -171,7 +174,12 @@ describe('motor de fluxos', () => {
   })
 
   it('validação: salto inexistente, loop sem limite, comando não instalado, extrator', () => {
-    const ctx = { commands: new Set(['revisar']), extractors: ['linhas_orkio'], actions: ['noop'] }
+    const ctx = {
+      commands: new Set(['revisar']),
+      extractors: ['linhas_orkio'],
+      actions: ['noop'],
+      declaredVars: NO_VARS
+    }
     const flow: Flow = {
       id: 'f',
       name: 'F',
@@ -220,6 +228,52 @@ describe('motor de fluxos', () => {
     expect(validateTaskFlow(ok, ctx)).toEqual([])
   })
 
+  it('validação: chave de um namespace do Orkio que ninguém grava é aviso (condição, args, gate)', () => {
+    const ctx = {
+      commands: null,
+      extractors: [],
+      actions: [],
+      declaredVars: new Set(['pr.pushed', 'review.pr'])
+    }
+    const flow: Flow = {
+      id: 'f',
+      name: 'F',
+      steps: [
+        { ...(cmd('a') as Extract<Step, { type: 'claude_command' }>), args: '{{flow.pr.numero}}' },
+        {
+          id: 'ja',
+          name: 'ja',
+          type: 'branch',
+          when: { type: 'var', key: 'pr.pushd', op: 'eq', value: 'sim' },
+          then: FLOW_END
+        },
+        {
+          id: 'g',
+          name: 'g',
+          type: 'gate',
+          message: 'PR #{{review.pr}} e {{review.total}}',
+          show: 'none',
+          onReject: 'stop',
+          timeoutMin: null
+        },
+        // Namespace que o Orkio não grava (do usuário): sem aviso.
+        {
+          id: 'meu',
+          name: 'meu',
+          type: 'branch',
+          when: { type: 'var', key: 'meu.valor', op: 'exists' },
+          then: FLOW_END
+        }
+      ]
+    }
+    const warnings = validateTaskFlow(flow, ctx).filter((i) => i.level === 'warning')
+    expect(warnings.map((i) => [i.stepId, i.message])).toEqual([
+      ['a', expect.stringContaining('pr.numero')],
+      ['ja', expect.stringContaining('pr.pushd')],
+      ['g', expect.stringContaining('review.total')]
+    ])
+  })
+
   it('newStepId: slug sem acento e único', () => {
     const flow: Flow = { id: 'f', name: 'F', steps: [cmd('revisao')] }
     expect(newStepId(flow, 'Revisão')).toBe('revisao-2')
@@ -238,12 +292,14 @@ describe('motor de fluxos', () => {
     }
     const d = afterStep(flow, startFlow(flow).state, 'a', { outcome: 'ok' })
     expect(d).toMatchObject({ kind: 'finished', result: 'done' })
-    expect(validateTaskFlow(flow, { commands: null, extractors: [], actions: [] })).toEqual([])
+    expect(
+      validateTaskFlow(flow, { commands: null, extractors: [], actions: [], declaredVars: NO_VARS })
+    ).toEqual([])
   })
 })
 
 describe('validateTaskFlow: modelo e raciocínio do passo', () => {
-  const ctx = { commands: null, extractors: [], actions: [] }
+  const ctx = { commands: null, extractors: [], actions: [], declaredVars: NO_VARS }
   const flowWith = (extra: Record<string, unknown>): Flow => ({
     id: 'f',
     name: 'f',
@@ -270,7 +326,7 @@ describe('validateTaskFlow: modelo e raciocínio do passo', () => {
 })
 
 describe('pedido em texto, só leitura e "Pedir ajustes"', () => {
-  const ctx = { commands: new Set(['revisar']), extractors: [], actions: [] }
+  const ctx = { commands: new Set(['revisar']), extractors: [], actions: [], declaredVars: NO_VARS }
   const prompt = (id: string, extra: Record<string, unknown> = {}): Step =>
     ({
       id,

@@ -1,7 +1,9 @@
 # Site do Orkio
 
-Landing page, páginas legais (/privacidade, /termos) e o **intermediário OAuth do Notion**
-(substitui o antigo `broker/` da Cloudflare, com o mesmo contrato).
+Landing page, páginas legais (/privacidade, /termos), o **intermediário OAuth do Notion**
+(`/notion/*`) e a revisão como `orkio[bot]` (`/github/*`). O que o app também tem escrito (versões
+das APIs, nomes do GitHub, limites e códigos de erro, redirect URI, repositório e nomes dos
+releases) fica em `lib/contract.ts`; `test/site-contract.test.ts`, na raiz, confere com o app.
 
 Next.js (App Router) + TypeScript, com package e lockfile próprios: o `pnpm install` do app
 (raiz) não instala nada daqui.
@@ -49,7 +51,7 @@ aceita apenas `http://127.0.0.1`.
 
 ### Teste com o app
 
-Com o site rodando local, o app em dev usa `MAIN_VITE_NOTION_OAUTH_BROKER_URL=http://127.0.0.1:3000`.
+Com o site rodando local, o app em dev usa `MAIN_VITE_SITE_URL=http://127.0.0.1:3000`.
 O E2E `@site` (`pnpm e2e --grep @site`, depois de `pnpm --dir site build`) sobe o `next start`, um
 Notion simulado em HTTP local e faz o login e a renovação pelo app.
 
@@ -104,7 +106,7 @@ stdin): `docs/github-app.md`.
    - `SITE_URL` = `https://<seu domínio>` (links absolutos do Open Graph)
    - **Nunca** defina `NOTION_TOKEN_URL` na Vercel (é só para o E2E local e é ignorada lá).
 4. **Domínio:** _Settings → Domains_ → adicione o domínio e siga os registros DNS indicados. Use o
-   domínio final em `MAIN_VITE_NOTION_OAUTH_BROKER_URL` no build de release do app.
+   domínio final em `MAIN_VITE_SITE_URL` no build de release do app.
 5. **Firewall** (_Firewall → Configure → New Rule_):
    - Nome: `Intermediário OAuth`; _If_ **Request Path** _starts with_ `/notion/`;
    - _Then_ **Rate Limit**: 20 requisições / 60 s por **IP**, ação **Deny (429)**.

@@ -7,9 +7,9 @@ import {
   shellSegments,
   suggestPattern
 } from './policy'
-import { isEnvFile, redactSecrets, sanitizeEnv } from './redact'
+import { decidePermission } from './policy'
+import { isEnvFile, redactSecrets, sanitizeEnv } from '../platform/redact'
 import { parseStreamLine } from './stream'
-import { isSendMessageRequest } from '../ipc/claude.ipc'
 
 const WT = '/home/u/.config/orkio/worktrees/p1/ORK-7'
 const rt = (
@@ -159,7 +159,9 @@ describe('stream-json → log', () => {
         WT,
         now
       )
-    ).toEqual([{ kind: 'tool', id: 'r1', tool: 'Read', summary: 'a.ts', parent: 't1' }])
+    ).toEqual([
+      { kind: 'tool', id: 'r1', tool: 'Read', summary: 'a.ts', file: 'a.ts', parent: 't1' }
+    ])
     expect(
       parseStreamLine(
         line(null, {
@@ -220,6 +222,87 @@ describe('stream-json → log', () => {
   })
 })
 
+describe('política: só leitura e contexto pedido pela política', () => {
+  const rules = [{ tool: 'Bash', pattern: 'npm test' }]
+  it('bug: só leitura — regra "sempre" não libera, ler a PR pergunta, editar é bloqueado', () => {
+    const repo = {
+      owner: 'acme',
+      repo: 'app',
+      remote: 'origin',
+      branch: 'feat/x',
+      defaultBranch: 'main',
+      displayId: 'ORK-7'
+    }
+    const ro = { worktree: WT, allowRules: rules, repo, readOnly: true }
+    const rw = { ...ro, readOnly: false }
+    const bash = (command: string, c: typeof ro) =>
+      evaluatePermission({ tool: 'Bash', input: { command } }, c).decision
+    expect(bash('npm test', rw)).toBe('allow')
+    expect(bash('npm test', ro)).toBe('ask')
+    expect(bash('gh pr view 1', rw)).toBe('allow')
+    expect(bash('gh pr view 1', ro)).toBe('ask')
+    expect(bash('git push', ro)).toBe('deny')
+    expect(
+      evaluatePermission({ tool: 'Edit', input: { file_path: `${WT}/a.ts` } }, ro)
+    ).toMatchObject({ decision: 'deny', code: 'read_only' })
+    expect(
+      evaluatePermission({ tool: 'Read', input: { file_path: `${WT}/a.ts` } }, ro).decision
+    ).toBe('allow')
+  })
+
+  it('bug: push por alias no modo entrega — a política pede a branch atual (só quando precisa)', async () => {
+    const target = {
+      owner: 'acme',
+      repo: 'app',
+      remote: 'origin',
+      branch: 'feat/ORK-7-x',
+      defaultBranch: 'main',
+      displayId: 'ORK-7'
+    }
+    const ctx = {
+      worktree: WT,
+      allowRules: [],
+      aliases: { git: { p: 'push' } },
+      delivery: {
+        target,
+        requirePushApproval: false,
+        granted: new Set<'push'>(['push']),
+        pushDefault: null
+      }
+    }
+    let reads = 0
+    const lazy = {
+      currentBranch: async () => {
+        reads++
+        return 'feat/ORK-7-x'
+      }
+    }
+    expect(
+      await decidePermission({ tool: 'Bash', input: { command: 'git p' } }, ctx, lazy)
+    ).toMatchObject({
+      decision: 'allow'
+    })
+    expect(reads).toBe(1)
+    // Push com a branch explícita, ou outro comando: nada a ler.
+    await decidePermission(
+      { tool: 'Bash', input: { command: 'git p origin feat/ORK-7-x' } },
+      ctx,
+      lazy
+    )
+    await decidePermission({ tool: 'Bash', input: { command: 'ls' } }, ctx, lazy)
+    expect(reads).toBe(1)
+    // Na branch errada, o motivo é a branch (não "não deu para saber a branch").
+    const wrong = await decidePermission({ tool: 'Bash', input: { command: 'git p' } }, ctx, {
+      currentBranch: async () => 'main'
+    })
+    expect(wrong).toMatchObject({
+      decision: 'deny',
+      code: 'delivery',
+      reason: expect.stringMatching(/protegida|padrão/)
+    })
+  })
+})
+
 describe('política de permissões', () => {
   const ctx = { worktree: WT, allowRules: [] as { tool: string; pattern: string }[] }
   const bash = (command: string, allowRules = ctx.allowRules) =>
@@ -236,7 +319,8 @@ describe('política de permissões', () => {
       evaluatePermission({ tool: 'Edit', input: { file_path: '/home/u/projeto/src/a.ts' } }, ctx)
     ).toEqual({
       decision: 'deny',
-      reason: POLICY_MESSAGES.outside
+      reason: POLICY_MESSAGES.outside,
+      code: 'outside'
     })
     expect(
       evaluatePermission({ tool: 'Read', input: { file_path: `${WT}/../ORK-8/x` } }, ctx).decision
@@ -261,10 +345,15 @@ describe('política de permissões', () => {
     ]) {
       expect(bash(cmd, [{ tool: 'Bash', pattern: 'git' }])).toEqual({
         decision: 'deny',
-        reason: POLICY_MESSAGES.push
+        reason: POLICY_MESSAGES.push,
+        code: 'push'
       })
     }
-    expect(bash('gh pr create --fill')).toEqual({ decision: 'deny', reason: POLICY_MESSAGES.gh })
+    expect(bash('gh pr create --fill')).toEqual({
+      decision: 'deny',
+      reason: POLICY_MESSAGES.gh,
+      code: 'gh'
+    })
     expect(bash('gh api repos/x/y')).toMatchObject({ decision: 'deny' })
     // "push" como texto não é push.
     expect(bash('git log --grep push').decision).toBe('ask')
@@ -400,9 +489,10 @@ describe('briefing', () => {
     expect(briefing.startsWith('# ORK-7 — Listar tarefas')).toBe(true)
     expect(briefing).toContain('- **Status:** Em andamento')
     expect(briefing).not.toContain('Prioridade')
-    expect(briefing).toContain(
-      'Branch de trabalho: ORK-7/listar-tarefas (worktree isolado). Não faça push nem abra PR: o Orkio faz isso pelo botão “Abrir PR” (ou pelo passo de entrega do fluxo). Se o usuário pedir, diga isso a ele.'
-    )
+    // A branch de trabalho e o caminho para publicar (o agente não faz push: é o “Abrir PR”).
+    const branchLine = briefing.split('\n').find((l) => l.includes('ORK-7/listar-tarefas'))
+    expect(branchLine).toMatch(/push/)
+    expect(branchLine).toContain('“Abrir PR”')
     expect(briefing).toContain('PR: #12 (aberta)')
     expect(briefing).toContain('## Critérios de aceite\n\n- [ ] lista aparece')
     expect(briefing).toContain('2 bloco(s) do Notion não foram convertidos (ai_block, breadcrumb)')
@@ -438,26 +528,8 @@ describe('briefing', () => {
   })
 })
 
-describe('IPC: runtime da mensagem', () => {
-  const base = { projectId: 'p1', taskId: 't1', text: 'oi' }
-  it('valida modelo e raciocínio', () => {
-    expect(isSendMessageRequest({ ...base, runtime: { effort: 'low' } })).toBe(true)
-    expect(isSendMessageRequest({ ...base, runtime: { model: 'opus', effort: null } })).toBe(true)
-    expect(isSendMessageRequest({ ...base, runtime: { model: 'a b' } })).toBe(false)
-    expect(isSendMessageRequest({ ...base, runtime: { model: '--dangerously-x' } })).toBe(false)
-    expect(isSendMessageRequest({ ...base, runtime: { effort: 'ultra' } })).toBe(false)
-    expect(isSendMessageRequest({ ...base, runtime: { cmd: 'x' } })).toBe(false)
-    expect(isSendMessageRequest({ ...base, runtime: 'opus' })).toBe(false)
-  })
-})
-
 describe('POLICY_MESSAGES: o caminho para publicar', () => {
-  it('push e gh dizem para usar “Abrir PR” e mantêm o começo reconhecido', () => {
-    expect(POLICY_MESSAGES.push).toMatch(
-      /^Bloqueado pelo Orkio: git push só é permitido em um passo/
-    )
-    expect(POLICY_MESSAGES.gh).toMatch(/^Bloqueado pelo Orkio: comandos do GitHub CLI que publicam/)
-    for (const m of [POLICY_MESSAGES.push, POLICY_MESSAGES.gh])
-      expect(m).toContain('Para publicar, use “Abrir PR” na aba PR & CI da tarefa.')
+  it('push e gh dizem para usar “Abrir PR” (a tela decide o botão pelo código)', () => {
+    for (const m of [POLICY_MESSAGES.push, POLICY_MESSAGES.gh]) expect(m).toContain('“Abrir PR”')
   })
 })

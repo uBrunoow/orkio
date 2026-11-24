@@ -8,15 +8,11 @@
  * Um resultado por repositório (projetos com o mesmo repo se juntam), só github.com (Enterprise
  * não tem o App). Cache em memória de 60 s; `force` ignora.
  */
-import type {
-  OrkioBotRepo,
-  OrkioBotRepoState,
-  OrkioBotStatus,
-  ProjectView
-} from '../../../shared/ipc-contract'
-import { GitHubApiError } from './github.client'
+import { isApiError, isTransientApiError } from '../../net/http'
 import type { OrkioSiteResponse } from './github.connector'
-import { INSTALL_URL } from './review-poster'
+import { parseOrkioSiteResponse } from './orkio-site'
+import type { OrkioBotRepo, OrkioBotRepoState, OrkioBotStatus } from '../../../shared/orkio-bot'
+import type { ProjectView } from '../../../shared/projects'
 
 export const ORKIO_BOT_CACHE_MS = 60_000
 
@@ -30,36 +26,34 @@ export const ORKIO_BOT_MESSAGES = {
 
 /** Resposta do `POST /github/installation` → estado do repositório (nada do corpo é repassado). */
 export function parseInstallationResponse(res: OrkioSiteResponse): OrkioBotRepoState {
-  const body = isRecord(res.body) ? res.body : {}
-  if (res.status === 200 && typeof body['installed'] === 'boolean') {
-    if (body['installed']) return { state: 'installed' }
-    const url = body['installUrl']
-    return {
-      state: 'not_installed',
-      installUrl: typeof url === 'string' && INSTALL_URL.test(url) ? url : null
-    }
-  }
-  if (res.status === 403) return { state: 'no_access' }
-  if (res.status === 503) return { state: 'unknown', message: ORKIO_BOT_MESSAGES.notConfigured }
-  if (res.status === 429) return { state: 'unknown', message: ORKIO_BOT_MESSAGES.rateLimited }
-  // 404/405: site publicado antes desta rota.
-  if (res.status === 404 || res.status === 405) {
-    return { state: 'unknown', message: ORKIO_BOT_MESSAGES.siteOutdated }
+  const result = parseOrkioSiteResponse(res)
+  switch (result.kind) {
+    case 'ok':
+      if (typeof result.body['installed'] !== 'boolean') break
+      return result.body['installed']
+        ? { state: 'installed' }
+        : { state: 'not_installed', installUrl: result.installUrl }
+    case 'forbidden':
+      return { state: 'no_access' }
+    case 'app_not_configured':
+      return { state: 'unknown', message: ORKIO_BOT_MESSAGES.notConfigured }
+    case 'rate_limited':
+      return { state: 'unknown', message: ORKIO_BOT_MESSAGES.rateLimited }
+    case 'site_outdated':
+      return { state: 'unknown', message: ORKIO_BOT_MESSAGES.siteOutdated }
   }
   return { state: 'unknown', message: ORKIO_BOT_MESSAGES.unexpected }
 }
 
 /** Erro do conector (sem site, rede, timeout) → estado; nunca a exceção crua. */
 export function stateFromError(e: unknown): OrkioBotRepoState {
-  if (e instanceof GitHubApiError) {
-    if (e.code === 'not_configured') return { state: 'unknown', message: ORKIO_BOT_MESSAGES.noSite }
-    if (e.code === 'network' || e.code === 'timeout')
-      return { state: 'unknown', message: e.message }
+  if (isApiError(e, 'site') && e.code === 'no_site') {
+    return { state: 'unknown', message: ORKIO_BOT_MESSAGES.noSite }
   }
+  if (isTransientApiError(e)) return { state: 'unknown', message: (e as Error).message }
   return { state: 'unknown', message: ORKIO_BOT_MESSAGES.unexpected }
 }
 
-/** Repositórios únicos do github.com dos projetos, com os nomes dos projetos. */
 export function reposOf(projects: readonly ProjectView[]): Omit<OrkioBotRepo, 'status'>[] {
   const byKey = new Map<string, Omit<OrkioBotRepo, 'status'>>()
   for (const p of projects) {
@@ -89,7 +83,6 @@ export class OrkioBotService {
   async status(force = false): Promise<OrkioBotStatus> {
     const now = this.deps.now ?? Date.now
     if (!force && this.cache && now() - this.cache.at < ORKIO_BOT_CACHE_MS) return this.cache.value
-    // Duas telas pedindo ao mesmo tempo dividem a mesma consulta.
     this.inflight ??= this.check().finally(() => {
       this.inflight = null
     })
@@ -121,8 +114,4 @@ export class OrkioBotService {
     this.cache = { at: now(), value }
     return value
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

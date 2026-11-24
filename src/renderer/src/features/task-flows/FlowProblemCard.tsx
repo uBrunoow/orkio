@@ -3,18 +3,10 @@ import { Button } from '@/components/ui/button'
 import { TextAreaField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { ExternalLinkIcon, ProblemIcon } from '@/components/icons'
-import type { ClaudeDiff } from '../../../../shared/agent-run'
 import type { FlowProblem } from '../../../../shared/flow-problem'
-import { Alert } from '../../components/Alert'
-import { DiffView } from '../../components/DiffView'
+import { TaskDiffView } from '../task/TaskDiffView'
 
-/**
- * Fluxo parado por um problema: o que o Orkio registrou, o que isso quer dizer e as saídas
- * (retomar, rodar de novo o passo anterior, ver a sessão ou o que falta commitar, pular, cancelar).
- */
 export function FlowProblemCard({
-  projectId,
-  taskId,
   problem,
   busy,
   onResume,
@@ -24,33 +16,18 @@ export function FlowProblemCard({
   onCancel,
   onOpenRun
 }: {
-  projectId: string
-  taskId: string
   problem: FlowProblem
   busy: boolean
   onResume(): void
   onRerun(stepId: string): void
-  /** Responde ao Claude e continua na mesma sessão do passo (só com a execução do passo). */
+  /** Responde ao Claude e continua no passo parado (quando `problem.canReply`). */
   onReply(text: string): void
   onSkip(): void
   onCancel(): void
-  /** Abre a sessão (log) da execução do passo parado. */
   onOpenRun?: (runId: string) => void
 }): React.JSX.Element {
   const [reply, setReply] = useState('')
   const [showChanges, setShowChanges] = useState(false)
-  const [changes, setChanges] = useState<ClaudeDiff | { error: string } | null>(null)
-
-  const toggleChanges = async (): Promise<void> => {
-    if (showChanges) {
-      setShowChanges(false)
-      return
-    }
-    setShowChanges(true)
-    if (changes) return
-    const r = await window.orkio.claude.diff(projectId, taskId)
-    setChanges(r.ok ? r.value : { error: r.error.message })
-  }
 
   return (
     <div
@@ -69,7 +46,7 @@ export function FlowProblemCard({
         </div>
       )}
       <p className="text-sm text-muted-foreground">{problem.hint}</p>
-      {problem.runId && (
+      {problem.canReply && (
         <div className="flex flex-col gap-2">
           <TextAreaField
             label="Responder ao Claude"
@@ -120,7 +97,7 @@ export function FlowProblemCard({
           </Button>
         )}
         {problem.kind === 'uncommitted' && (
-          <Button size="sm" variant="outline" onClick={() => void toggleChanges()}>
+          <Button size="sm" variant="outline" onClick={() => setShowChanges((v) => !v)}>
             {showChanges ? 'Esconder o que falta commitar' : 'Ver o que falta commitar'}
           </Button>
         )}
@@ -136,19 +113,7 @@ export function FlowProblemCard({
           Cancelar fluxo
         </Button>
       </div>
-      {showChanges &&
-        changes &&
-        ('error' in changes ? (
-          <Alert tone="danger">{changes.error}</Alert>
-        ) : (
-          <DiffView
-            label="O que falta commitar"
-            diff={changes.diff}
-            truncated={changes.truncated}
-            uncommitted={changes.uncommitted}
-            onlyUncommitted
-          />
-        ))}
+      {showChanges && <TaskDiffView label="O que falta commitar" onlyUncommitted />}
     </div>
   )
 }

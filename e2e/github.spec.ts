@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
+import { GITHUB_API_VERSION } from '../src/shared/github-names'
 import {
   createUserDataDir,
   cspViolations,
@@ -61,7 +62,7 @@ test.afterAll(async () => {
 test('Device Flow: mostra o código, copia, abre o GitHub e conecta ao autorizar', async () => {
   const { app, page } = await open({ githubDevice: 'pending' })
   const card = githubCard(page)
-  await expect(card.getByText('Desconectado')).toBeVisible()
+  await expect(card.getByText('Não conectado')).toBeVisible()
   // Lista de integrações: a linha do GitHub diz o estado; sem conexão, o card já vem aberto nela.
   const row = page.getByRole('article', { name: 'GitHub', exact: true })
   await expect(row).toContainText('Não conectado')
@@ -109,7 +110,7 @@ test('Device Flow: mostra o código, copia, abre o GitHub e conecta ao autorizar
   })
   expect(JSON.stringify(calls)).not.toMatch(/secret/i)
   const user = calls.find((c) => c.url === 'https://api.github.com/user')
-  expect(user).toMatchObject({ auth: 'Bearer gho_E2E_DEVICE_TOKEN', version: '2026-03-10' })
+  expect(user).toMatchObject({ auth: 'Bearer gho_E2E_DEVICE_TOKEN', version: GITHUB_API_VERSION })
 
   // Token cifrado no disco e fora do renderer.
   expect(secretFiles()).toContain('github.bin')

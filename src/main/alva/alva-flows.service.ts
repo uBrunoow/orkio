@@ -1,23 +1,25 @@
-/**
- * Tela "alva-flow" (Etapa 5B): pré-checagem (com cache), criação dos templates "Fluxo Alva" e
- * ligação nas colunas, coluna opcional "Planejando", limite de fluxos Alva em paralelo e o resumo
- * da task do Backlog.md para o painel.
- */
-import type { AlvaPrecheck, BacklogTaskDocument, BacklogTaskInfo } from '../../shared/alva'
-import type { ClaudeResult } from '../../shared/agent-run'
+import {
+  ALVA_MAX_PARALLEL,
+  clampAlvaParallel,
+  type AlvaPrecheck,
+  type BacklogTaskDocument,
+  type BacklogTaskInfo
+} from '../../shared/alva'
 import { ALVA_TEMPLATE_IDS, alvaTemplates } from '../../shared/alva-templates'
-import type { FlowStageDraft } from '../../shared/flow'
-import type { Flow, StageFlow } from '../../shared/task-flow'
+import { fromBoardStages, type FlowStageDraft } from '../../shared/flow'
+import { queueStageOf, stageWithRole } from '../../shared/board'
+import type { StageFlow } from '../../shared/task-flow'
 import type { BoardService } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
-import { errorName } from '../ipc/payload'
+import { DomainError, errorName } from '../errors'
 import type { ConfigStore } from '../storage/config-store'
 import type { AlvaService } from './alva.service'
+import type { Result } from '../../shared/result'
+import { projectById, projectFlows, withProjectFlows } from '../config/queries'
 
 export interface AlvaStatus {
   precheck: AlvaPrecheck | null
-  /** Templates já criados neste projeto (ids presentes na config). */
   templates: { id: string; name: string; stageId: string | null; mode: StageFlow['mode'] | null }[]
   /** Colunas com algum fluxo ligado (para a tela não sugerir trocar a ligação de alguém). */
   boundStages: string[]
@@ -43,14 +45,15 @@ export class AlvaFlowsService {
       board: Pick<BoardService, 'saveFlow'>
       alva: AlvaService
       precheck(projectDir: string): Promise<AlvaPrecheck>
+      usesDocker(projectDir: string): boolean
       actor(): string
       now?: () => Date
     }
   ) {}
 
   private project(projectId: string): { localPath: string } {
-    const p = this.deps.config.get().projects.find((x) => x.id === projectId)
-    if (!p) throw new Error('not_found')
+    const p = projectById(this.deps.config.get(), projectId)
+    if (!p) throw new DomainError('not_found', 'Projeto não encontrado. Atualize a lista.')
     return p
   }
 
@@ -62,9 +65,7 @@ export class AlvaFlowsService {
     return result
   }
 
-  /** Para o FlowRunner: mensagem que impede um fluxo Alva de começar (ou null). */
-  async blockReason(projectId: string, flow: Flow): Promise<string | null> {
-    if (!flow.tags?.includes('alva')) return null
+  async blockReason(projectId: string): Promise<string | null> {
     const r = await this.precheck(projectId, false).catch(() => null)
     if (!r) return 'Não deu para verificar se o projeto está pronto para o alva-flow.'
     if (r.ready) return null
@@ -72,15 +73,22 @@ export class AlvaFlowsService {
     return `O projeto não está pronto para o alva-flow: falta ${missing.join(', ')}. Veja a tela alva-flow do quadro.`
   }
 
-  /** Limite de fluxos Alva em paralelo: só quando o projeto usa Docker (portas). */
-  concurrencyLimit(projectId: string, flow: Flow): number | null {
-    if (!flow.tags?.includes('alva')) return null
-    if (!this.cache.get(projectId)?.hasDocker) return null
-    return this.deps.config.get().flows[projectId]?.alva?.maxParallel ?? 1
+  /**
+   * Limite de fluxos Alva em paralelo: só quando o projeto usa Docker (portas). Olha os arquivos
+   * de compose agora (não o cache da pré-checagem, vazio ao reabrir o app).
+   */
+  concurrencyLimit(projectId: string): number | null {
+    const project = projectById(this.deps.config.get(), projectId)
+    if (!project || !this.deps.usesDocker(project.localPath)) return null
+    return this.maxParallel(projectId)
+  }
+
+  private maxParallel(projectId: string): number {
+    return this.deps.config.get().flows[projectId]?.alva?.maxParallel ?? ALVA_MAX_PARALLEL.fallback
   }
 
   status(projectId: string): AlvaStatus {
-    const pf = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
+    const pf = projectFlows(this.deps.config.get(), projectId)
     const ids = Object.values(ALVA_TEMPLATE_IDS) as string[]
     return {
       precheck: this.cache.get(projectId) ?? null,
@@ -91,7 +99,7 @@ export class AlvaFlowsService {
           return { id: f.id, name: f.name, stageId: b?.stageId ?? null, mode: b?.mode ?? null }
         }),
       boundStages: [...new Set(pf.bindings.map((b) => b.stageId))],
-      maxParallel: pf.alva?.maxParallel ?? 1
+      maxParallel: this.maxParallel(projectId)
     }
   }
 
@@ -115,22 +123,16 @@ export class AlvaFlowsService {
       .filter(([stageId]) => stageId && stages.some((s) => s.id === stageId))
       .map(([stageId, flowId]) => ({ stageId: stageId!, flowId, enabled: true, mode: 'on_enter' }))
     await this.deps.config.update((c) => {
-      const pf = c.flows[projectId] ?? { flows: [], bindings: [] }
+      const pf = projectFlows(c, projectId)
       const takenStages = new Set(wanted.map((w) => w.stageId))
-      return {
-        ...c,
-        flows: {
-          ...c.flows,
-          [projectId]: {
-            ...pf,
-            flows: [...pf.flows.filter((f) => !ids.has(f.id)), ...templates],
-            bindings: [
-              ...pf.bindings.filter((b) => !ids.has(b.flowId) && !takenStages.has(b.stageId)),
-              ...wanted
-            ]
-          }
-        }
-      }
+      return withProjectFlows(c, projectId, {
+        ...pf,
+        flows: [...pf.flows.filter((f) => !ids.has(f.id)), ...templates],
+        bindings: [
+          ...pf.bindings.filter((b) => !ids.has(b.flowId) && !takenStages.has(b.stageId)),
+          ...wanted
+        ]
+      })
     })
     this.deps.store.addConfigEvent(
       projectId,
@@ -148,27 +150,25 @@ export class AlvaFlowsService {
   }
 
   /**
-   * Coluna "Planejando" entre Prioridades e Em andamento, com o status do Notion escolhido.
-   * Usa o mesmo caminho do "Salvar fluxo" (validação da 3C). Devolve o id da etapa nova.
+   * Coluna "Planejando" (papel `plan`) logo depois da coluna "A fazer" (`queueStageOf`), com o
+   * status do Notion escolhido. Usa o mesmo caminho do "Salvar fluxo" (validação da 3C). Devolve
+   * o id da etapa nova.
    */
-  async addPlanningStage(projectId: string, notionStatusId: string): Promise<ClaudeResult<string>> {
+  async addPlanningStage(projectId: string, notionStatusId: string): Promise<Result<string>> {
     const board = this.deps.config.get().boards[projectId]
     if (!board) return fail('no_board', 'Crie o quadro do projeto antes.')
-    if (board.stages.some((s) => s.name.trim().toLowerCase() === 'planejando')) {
-      return fail('exists', 'O quadro já tem a coluna “Planejando”.')
+    if (stageWithRole(board.stages, 'plan')) {
+      return fail('exists', 'O quadro já tem uma coluna de planejamento.')
     }
     const id = `planejando-${Date.now().toString(36)}`
-    const stages: FlowStageDraft[] = board.stages.map((s) => ({
-      id: s.id,
-      name: s.name,
-      ...(s.color ? { color: s.color } : {}),
-      notionStatusId: s.notionStatus.id
-    }))
-    const after = board.stages.findIndex((s) => /prioridade/i.test(s.name))
-    stages.splice(after >= 0 ? after + 1 : 0, 0, {
+    const stages: FlowStageDraft[] = fromBoardStages(board.stages)
+    const queue = queueStageOf(board)
+    const after = stages.findIndex((s) => s.id === queue)
+    stages.splice(after + 1, 0, {
       id,
       name: 'Planejando',
       color: 'purple',
+      role: 'plan',
       notionStatusId
     })
     try {
@@ -185,11 +185,10 @@ export class AlvaFlowsService {
   }
 
   async setMaxParallel(projectId: string, value: number): Promise<AlvaStatus> {
-    const n = Math.min(4, Math.max(1, Math.floor(value)))
-    await this.deps.config.update((c) => {
-      const pf = c.flows[projectId] ?? { flows: [], bindings: [] }
-      return { ...c, flows: { ...c.flows, [projectId]: { ...pf, alva: { maxParallel: n } } } }
-    })
+    const n = clampAlvaParallel(value)
+    await this.deps.config.update((c) =>
+      withProjectFlows(c, projectId, { ...projectFlows(c, projectId), alva: { maxParallel: n } })
+    )
     return this.status(projectId)
   }
 
@@ -217,6 +216,6 @@ export class AlvaFlowsService {
   }
 }
 
-function fail<T>(code: string, message: string): ClaudeResult<T> {
+function fail<T>(code: string, message: string): Result<T> {
   return { ok: false, error: { code, message } }
 }

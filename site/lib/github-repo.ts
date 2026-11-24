@@ -2,9 +2,10 @@
  * Dados públicos do repositório para o link "Ver no GitHub" (ISR, igual ao release). As estrelas
  * só aparecem a partir de `STARS_MIN`: um número pequeno diz menos que nenhum.
  */
-import { RELEASE_REVALIDATE_SECONDS } from './releases'
+import { githubHeaders } from './http'
 
 export const STARS_MIN = 25
+const REPO_REVALIDATE_SECONDS = 900
 
 export interface RepoInfo {
   url: string
@@ -29,12 +30,8 @@ export async function getRepoInfo(
   const url = repoUrl(repo)
   try {
     const res = await fetchImpl(`https://api.github.com/repos/${repo}`, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2026-03-10',
-        'User-Agent': 'orkio-site'
-      },
-      next: { revalidate: RELEASE_REVALIDATE_SECONDS }
+      headers: githubHeaders(),
+      next: { revalidate: REPO_REVALIDATE_SECONDS }
     } as RequestInit)
     if (!res.ok) return { url, stars: null }
     const data = (await res.json()) as { stargazers_count?: unknown; private?: unknown }

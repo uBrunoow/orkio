@@ -1,8 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
-import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
-import type { AlvaPrecheck } from '../../../../shared/alva'
-import type { ConnectionStatus, NotionWorkspaceStatus } from '../../../../shared/ipc-contract'
 import type { StatusTone } from '../../components/StatusToken'
 import {
   AgentsIcon,
@@ -15,15 +12,16 @@ import {
   type SvgIcon
 } from '../../components/icons'
 import { TextField } from '../../components/form'
-import { isTextField } from '../../app/shortcuts'
+import { useSlashFocus } from '../../lib/useSlashFocus'
 import { PageHeader } from '../../components/PageHeader'
 import { ClaudeCodeCard } from '../claude/ClaudeCodeCard'
 import { NotionWorkspaceCard } from '../notion-workspace/NotionWorkspaceCard'
 import { useNotionWorkspace } from '../notion-workspace/useNotionWorkspace'
 import { GitHubConnectionCard } from './GitHubConnectionCard'
 import { NotionConnectionCard } from './NotionConnectionCard'
-import { useGitHubConnection } from './useGitHubConnection'
-import { useNotionConnection } from './useNotionConnection'
+import { useConnection } from './useConnection'
+import { useClaudeStatus } from '../claude/useClaudeStatus'
+import { useAlvaPrecheck } from '../alva/useAlvaPrecheck'
 import { IntegrationCard } from './IntegrationCard'
 import {
   effectiveOpenId,
@@ -33,6 +31,13 @@ import {
 } from './integrations-logic'
 import { OrkioBotPanel, useOrkioBot } from './OrkioBotCard'
 import { PAGE_WIDTH } from '../../components/page-width'
+import {
+  claudeStatusText,
+  connectionStatusText,
+  isClaudeReady,
+  isWorkspaceReady,
+  workspaceStatusText
+} from '../../lib/status-text'
 
 export function IntegrationsPage({
   projectId = null
@@ -40,21 +45,18 @@ export function IntegrationsPage({
   /** Projeto atual (para a checagem do GitHub CLI e do alva-flow). */
   projectId?: string | null
 }): React.JSX.Element {
-  const notion = useNotionConnection()
-  const github = useGitHubConnection()
-  // Revalida os bancos quando a conexão do Notion muda (conectou, desconectou, reconectou).
-  const workspace = useNotionWorkspace(connectionKey(notion.status))
-  const claude = useClaudeStatus()
-  const precheck = usePrecheck(projectId)
+  const notion = useConnection('notion', { revalidate: true })
+  const github = useConnection('github', { revalidate: true })
+  const workspace = useNotionWorkspace(notion.key)
+  const claude = useClaudeStatus().status
+  const { precheck } = useAlvaPrecheck(projectId)
 
   const notionReady = notion.status?.state === 'connected'
-  const workspaceReady =
-    notionReady && workspace.status?.config != null && workspace.status.health === 'ok'
+  const workspaceReady = notionReady && isWorkspaceReady(workspace.status)
   const githubReady = github.status?.state === 'connected'
-  // Consulta o orkio[bot] quando o estado do GitHub já é conhecido (e de novo se ele mudar).
   const bot = useOrkioBot(github.status !== null && github.status.state !== 'connecting')
   const botStatus = orkioBotSummary(bot.status)
-  const claudeReady = claudeStatus(claude).tone === 'success'
+  const claudeReady = isClaudeReady(claude)
 
   const gh = precheck?.items.find((i) => i.id === 'gh') ?? null
   const ghStatus: { label: string; tone: StatusTone } = !gh
@@ -94,7 +96,7 @@ export function IntegrationsPage({
       logoClassName: 'bg-foreground text-background',
       name: 'Notion',
       category: 'tarefas',
-      status: connectionStatus(notion.status),
+      status: connectionStatusText(notion.status),
       action: notionReady ? 'Gerenciar' : 'Conectar',
       ready: notionReady,
       panel: <NotionConnectionCard notion={notion} />
@@ -106,14 +108,14 @@ export function IntegrationsPage({
       logoClassName: 'bg-muted text-muted-foreground',
       name: 'Bancos e campos',
       category: 'notion',
-      status: workspaceStatus(workspace.status, notion.status),
+      status: workspaceStatusText(workspace.status, notion.status),
       action: workspaceReady ? 'Revisar campos' : 'Configurar',
       ready: workspaceReady,
       panel: (
         <NotionWorkspaceCard
           workspace={workspace}
           notionStatus={notion.status}
-          {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
+          {...(notion.authOptions?.oauth ? { onReconnect: notion.authorize } : {})}
         />
       )
     },
@@ -124,7 +126,7 @@ export function IntegrationsPage({
       logoClassName: 'border border-border bg-surface text-foreground',
       name: 'GitHub',
       category: 'código',
-      status: connectionStatus(github.status),
+      status: connectionStatusText(github.status),
       action: githubReady ? 'Gerenciar' : 'Conectar',
       ready: githubReady,
       panel: <GitHubConnectionCard github={github} />
@@ -170,7 +172,7 @@ export function IntegrationsPage({
       logoClassName: 'bg-brand text-primary-foreground',
       name: 'Claude Code',
       category: 'agente',
-      status: claudeStatus(claude),
+      status: claudeStatusText(claude),
       action: claudeReady ? 'Gerenciar' : 'Configurar',
       ready: claudeReady,
       panel: <ClaudeCodeCard />
@@ -185,22 +187,13 @@ export function IntegrationsPage({
       status: pluginsStatus,
       action: 'Ver no Claude Code',
       ready: pluginsStatus.tone === 'success',
-      // Sem painel próprio: abre a configuração do Claude Code.
       opensId: 'claude'
     }
   ]
 
   const [query, setQuery] = useState('')
   const searchBox = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return
-      e.preventDefault()
-      searchBox.current?.querySelector('input')?.focus()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  useSlashFocus(searchBox)
   const visible = cards.filter((c) => matchesQuery(c, query))
   const readyCount = cards.filter((c) => c.ready).length
 
@@ -286,89 +279,4 @@ interface CardSpec {
   panel?: React.ReactNode
   /** Card sem painel próprio: a ação abre o painel deste outro card. */
   opensId?: string
-}
-
-/** Pré-checagem do alva-flow do projeto atual (gh, plugin); só leitura. */
-function usePrecheck(projectId: string | null): AlvaPrecheck | null {
-  const [state, setState] = useState<{ projectId: string; value: AlvaPrecheck } | null>(null)
-  useEffect(() => {
-    if (!projectId) return
-    let alive = true
-    void window.orkio.alva
-      .precheck(projectId)
-      .then((r) => {
-        if (alive && r.ok) setState({ projectId, value: r.value })
-      })
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [projectId])
-  return state && state.projectId === projectId ? state.value : null
-}
-
-function connectionStatus(s: ConnectionStatus | null): { label: string; tone: StatusTone } {
-  if (!s) return { label: 'Verificando', tone: 'neutral' }
-  switch (s.state) {
-    case 'connected':
-      return s.warning
-        ? { label: 'Conectado, sem verificação', tone: 'warning' }
-        : { label: `Conectado como ${s.account.handle ?? s.account.userName}`, tone: 'success' }
-    case 'connecting':
-      return { label: 'Conectando', tone: 'neutral' }
-    case 'error':
-      return { label: 'Precisa reconectar', tone: 'danger' }
-    default:
-      return { label: 'Não conectado', tone: 'warning' }
-  }
-}
-
-function workspaceStatus(
-  s: NotionWorkspaceStatus | null,
-  notion: ConnectionStatus | null
-): { label: string; tone: StatusTone } {
-  if (notion?.state !== 'connected') return { label: 'Conecte o Notion antes', tone: 'neutral' }
-  if (!s) return { label: 'Verificando', tone: 'neutral' }
-  if (!s.config) return { label: 'Falta escolher os bancos', tone: 'warning' }
-  switch (s.health) {
-    case 'ok':
-      return { label: 'Pronto', tone: 'success' }
-    case 'broken':
-      return { label: 'Tarefas bloqueadas', tone: 'danger' }
-    case 'warning':
-      return { label: 'Revisar mapeamento', tone: 'warning' }
-    case 'unverified':
-      return { label: 'Sem verificação', tone: 'warning' }
-    default:
-      return { label: 'Verificando', tone: 'neutral' }
-  }
-}
-
-function claudeStatus(s: ClaudeCodeStatus | null): { label: string; tone: StatusTone } {
-  if (!s) return { label: 'Verificando', tone: 'neutral' }
-  if (!s.installed) return { label: 'Não encontrado', tone: 'warning' }
-  if (!s.meetsMinimum) return { label: `Atualize para ${s.minimumVersion}`, tone: 'warning' }
-  if (s.loggedIn === false) return { label: 'Sem login', tone: 'warning' }
-  return { label: s.version ? `Pronto, ${s.version}` : 'Pronto', tone: 'success' }
-}
-
-/** Estado do Claude Code (o card de configuração lê o mesmo, com "Verificar de novo"). */
-function useClaudeStatus(): ClaudeCodeStatus | null {
-  const [status, setStatus] = useState<ClaudeCodeStatus | null>(null)
-  useEffect(() => {
-    let alive = true
-    void window.orkio.claude
-      .status()
-      .then((s) => alive && setStatus(s))
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [])
-  return status
-}
-
-function connectionKey(status: ConnectionStatus | null): string | null {
-  if (status === null || status.state === 'connecting') return null
-  return status.state === 'connected' ? `connected:${status.connectedAt}` : status.state
 }

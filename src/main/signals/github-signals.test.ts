@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  GitHubApiError,
   createGitHubClient,
   parseNextLink,
   parsePullItem,
@@ -13,6 +12,7 @@ import {
   SIGNALS_LIMITS,
   type GitHubSignalsApi
 } from './github-signals.source'
+import { ApiError } from '../net/http'
 
 const TOKEN = 'gho_SIGNALS_SECRET_TOKEN'
 const NOW = Date.parse('2026-11-19T12:00:00Z')
@@ -80,7 +80,7 @@ describe('client: GET condicional, Link e GraphQL', () => {
     expect(fetchMock.mock.calls[0]![0]).toBe('https://api.github.com/graphql')
     expect(fetchMock.mock.calls[0]![1]!.method).toBe('POST')
     const error = await client.graphql(TOKEN, 'query { x }', {}).catch((e: unknown) => e)
-    expect(error).toBeInstanceOf(GitHubApiError)
+    expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ code: 'forbidden' })
     expect(String(error) + JSON.stringify(error)).not.toContain(TOKEN)
   })
@@ -151,10 +151,18 @@ describe('GitHubRepoSignals', () => {
       [2, 'draft'],
       [3, 'merged']
     ])
-    expect(first.requests).toEqual({ notModified: 0, fetched: 3 })
+    const answers = async (): Promise<boolean[]> =>
+      Promise.all(
+        vi.mocked(api.getConditional).mock.results.map(async (r) => {
+          const page = (await r.value) as ConditionalPage
+          return page.notModified
+        })
+      )
+    expect(await answers()).toEqual([false, false, false])
 
     const second = await repo.snapshot()
-    expect(second.requests).toEqual({ notModified: 3, fetched: 0 })
+    // Segunda leitura: as três páginas voltam 304 (ETag), sem novo download.
+    expect((await answers()).slice(3)).toEqual([true, true, true])
     expect(second.pulls).toEqual(first.pulls)
     expect(api.getConditional).toHaveBeenLastCalledWith(
       `${BASE}/pulls?state=closed&sort=updated&direction=desc&per_page=100`,
@@ -218,7 +226,7 @@ describe('GitHubRepoSignals', () => {
     await repo.pullDetails([p1])
     expect(api.graphql).toHaveBeenCalledTimes(1)
     now += SIGNALS_LIMITS.openDetailsTtlMs + 1
-    api.graphql.mockRejectedValueOnce(new GitHubApiError('network', 'x'))
+    api.graphql.mockRejectedValueOnce(new ApiError('github', 'network', 'x'))
     expect((await repo.pullDetails([p1])).get(1)?.reviewDecision).toBe('approved')
     expect(repo.detailsWarning).toMatch(/Mostrando o que já se sabe/)
     expect(api.graphql).toHaveBeenCalledTimes(2)
@@ -253,7 +261,8 @@ describe('GitHubRepoSignals', () => {
   it('detalhes: sem dados por falta de escopo explica o escopo', async () => {
     const { api } = fakeApi()
     api.graphql.mockRejectedValue(
-      new GitHubApiError(
+      new ApiError(
+        'github',
         'forbidden',
         'A conexão do GitHub não tem permissão (revisões, comentários ou checks).'
       )

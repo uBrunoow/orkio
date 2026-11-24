@@ -8,18 +8,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Field } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
-import { StatusToken, toneOf } from '../../components/StatusToken'
-import type { ConnectedAccount, ConnectionStatus } from '../../../../shared/ipc-contract'
+import { StatusToken } from '../../components/StatusToken'
+import { connectionStatusText } from '../../lib/status-text'
+import { initials } from '../../lib/initials'
 import { Alert } from '../../components/Alert'
-
-export { Alert }
-
-/** O que está acontecendo agora, além do status persistido. */
-export type ConnectionActivity =
-  'loading' | 'idle' | 'connecting' | 'authorizing' | 'testing' | 'disconnecting'
-
-const dateFormatter = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' })
-const timeFormatter = new Intl.DateTimeFormat('pt-BR', { timeStyle: 'short' })
+import type { ConnectionActivity } from './useConnection'
+import type { ConnectedAccount, ConnectionStatus } from '../../../../shared/connection'
+import { formatDateTimeLong, formatTime } from '../../lib/format'
 
 export function StatusBadge({
   status,
@@ -32,24 +27,13 @@ export function StatusBadge({
   waitingLabel: string
 }): React.JSX.Element | null {
   if (status === null) return null
-  const token = (
-    label: string,
-    color: 'default' | 'green' | 'yellow' | 'red'
-  ): React.JSX.Element => <StatusToken label={label} tone={toneOf(color)} data-status={label} />
-  if (activity === 'testing') return token('Verificando…', 'default')
-  if (activity === 'authorizing') return token(waitingLabel, 'default')
-  switch (status.state) {
-    case 'connected':
-      return status.warning
-        ? token('Conectado (sem verificação)', 'yellow')
-        : token('Conectado', 'green')
-    case 'connecting':
-      return token('Conectando…', 'default')
-    case 'error':
-      return token('Erro', 'red')
-    case 'disconnected':
-      return token('Desconectado', 'default')
-  }
+  const { label, tone } =
+    activity === 'testing'
+      ? { label: 'Verificando…', tone: 'neutral' as const }
+      : activity === 'authorizing'
+        ? { label: waitingLabel, tone: 'neutral' as const }
+        : connectionStatusText(status)
+  return <StatusToken label={label} tone={tone} data-status={label} />
 }
 
 export interface TokenFormCopy {
@@ -104,7 +88,6 @@ export function TokenForm({
               disabled={connecting}
               aria-describedby={describedBy}
               aria-invalid={error ? true : undefined}
-              // Tokens em fonte mono (BRAND.md).
               className="font-mono"
             />
           )}
@@ -128,11 +111,6 @@ export function TokenForm({
   )
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/)
-  return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : '')).toUpperCase()
-}
-
 export function ConnectedView({
   account,
   connectedAt,
@@ -154,7 +132,7 @@ export function ConnectedView({
   const meta = [
     account.handle ? `@${account.handle}` : null,
     account.workspaceName ?? null,
-    `Conectado em ${formatDate(connectedAt)}`
+    `Conectado em ${formatDateTimeLong(connectedAt)}`
   ].filter(Boolean)
   return (
     <div className="flex flex-col gap-4">
@@ -183,7 +161,7 @@ export function ConnectedView({
         />
         {lastVerifiedAt && !warning && activity === 'idle' && (
           <span className="text-xs text-muted-foreground">
-            Verificado às {timeFormatter.format(lastVerifiedAt)}
+            Verificado às {formatTime(lastVerifiedAt)}
           </span>
         )}
       </div>
@@ -236,7 +214,6 @@ export function StoredCredentialErrorView({
   )
 }
 
-/** Confirmação inline (sem diálogo). */
 export function DisconnectButton({
   busy,
   disconnecting,
@@ -279,7 +256,6 @@ export function DisconnectButton({
   )
 }
 
-/** Volta para o fluxo principal a partir do formulário de token (ou avisa que não há OAuth). */
 export function TokenFallbackFooter({
   oauthAvailable,
   connecting,
@@ -304,42 +280,5 @@ export function TokenFallbackFooter({
   )
 }
 
-/** Cabeçalho comum dos cards: ícone, título/descrição e status. */
-export function CardHeader({
-  titleId,
-  title,
-  description,
-  icon,
-  badge
-}: {
-  titleId: string
-  title: string
-  description: string
-  icon: React.ReactNode
-  badge: React.ReactNode
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center gap-3">
-      <span className="grid size-8 shrink-0 place-items-center rounded-lg border border-border-soft bg-muted text-foreground">
-        {icon}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <h2 id={titleId} className="text-sm font-medium text-foreground">
-          {title}
-        </h2>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      {/* O status mantém o tamanho natural (não é truncado). */}
-      <div className="shrink-0">{badge}</div>
-    </div>
-  )
-}
-
-/** Caixa dos cards de conexão: borda fina, fundo de card (região nomeada pelo título). */
 export const CONNECTION_CARD_CLASS =
   'flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-4'
-
-function formatDate(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : dateFormatter.format(date)
-}

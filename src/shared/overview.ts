@@ -4,12 +4,22 @@
  * renderer); o `OverviewService` (main) lê os stores e chama estas funções. Nada de rede.
  */
 import type { BoardStage } from './board'
-import type { NotionColor, NotionWorkspaceStatus, ProjectView } from './ipc-contract'
 import type { TaskSignals } from './task-signals'
-import { FLOW_PAUSE_LABEL, type FlowRunView } from './task-flow'
+import { FLOW_PAUSES, waitingKind } from './flow-run-state'
+import type { FlowRunView } from './task-flow'
+import type { NotionColor, NotionWorkspaceStatus } from './notion'
+import { isFolderProblem, type ProjectView } from './projects'
+import { notionErrorLabel } from './notion-errors'
+import {
+  STAGE_EVENT_KINDS,
+  type ActivityGroup,
+  type TaskEvent,
+  type TaskEventKind
+} from './task-events'
 
 /** Seção do painel da tarefa que o clique abre. */
-export type TaskSection = 'flow' | 'claude' | 'history'
+export const TASK_SECTIONS = ['flow', 'claude', 'history'] as const
+export type TaskSection = (typeof TASK_SECTIONS)[number]
 
 export interface OverviewTask {
   projectId: string
@@ -116,18 +126,8 @@ export interface OverviewSnapshot {
   notices: string[]
 }
 
-export type ActivityGroup = 'board' | 'automation' | 'claude' | 'flow' | 'delivery' | 'notion'
-
-export const ACTIVITY_GROUP_LABEL: Record<ActivityGroup, string> = {
-  board: 'Quadro',
-  automation: 'Automações',
-  claude: 'Claude Code',
-  flow: 'Fluxos',
-  delivery: 'Entrega',
-  notion: 'Notion'
-}
-
-export interface ActivityItem {
+/** Evento da atividade: o evento tipado do histórico + tarefa, texto e link prontos. */
+export type ActivityItem = TaskEvent & {
   id: number
   at: string
   group: ActivityGroup
@@ -162,8 +162,6 @@ export const NOTION_PENDING_ATTEMPTS = 3
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-// ---------- Esperando você ----------
-
 function stepName(flow: FlowRunView): string | null {
   const step = flow.steps.find((s) => s.id === flow.currentStep)
   return step ? step.name || step.id : null
@@ -185,12 +183,15 @@ function flowSince(flow: FlowRunView): string {
   return flow.history[flow.history.length - 1]?.startedAt ?? flow.startedAt
 }
 
-/** Fluxo ativo que espera você (gate, ação, escolha, pausa, saída da etapa); `null` se não. */
+/**
+ * Fluxo ativo que espera você (gate, ação, escolha, problema, saída da etapa); `null` se não. A
+ * fila de vaga (`waitingKind` = `queue`) não espera você: aparece em "Rodando".
+ */
 export function flowWaitingItem(flow: FlowRunView, task: OverviewTask): WaitingItem | null {
   const base = { key: `flow:${flow.id}`, task, since: flowSince(flow), section: 'flow' as const }
   const step = stepName(flow)
-  switch (flow.status) {
-    case 'waiting_gate':
+  switch (waitingKind(flow)) {
+    case 'gate':
       return flow.confirm
         ? { ...base, kind: 'action', what: `Aprovar: ${flow.confirm.title}` }
         : {
@@ -198,25 +199,23 @@ export function flowWaitingItem(flow: FlowRunView, task: OverviewTask): WaitingI
             kind: 'gate',
             what: gateTitle(flow) ?? `Aprovação no fluxo${step ? `: ${step}` : ''}`
           }
-    case 'awaiting_decision':
+    case 'decision':
       return {
         ...base,
         kind: 'decision',
         what: 'A tarefa saiu da etapa: cancelar o fluxo ou deixar terminar?'
       }
-    case 'paused':
-      if (flow.pauseReason === 'waiting_slot') return null
-      if (flow.pauseReason === 'needs_choice') {
-        return {
-          ...base,
-          kind: 'choice',
-          what: flow.choice?.prompt ?? FLOW_PAUSE_LABEL.needs_choice
-        }
+    case 'choice':
+      return {
+        ...base,
+        kind: 'choice',
+        what: flow.choice?.prompt ?? FLOW_PAUSES.needs_choice.label
       }
+    case 'problem':
       return {
         ...base,
         kind: 'flow_paused',
-        what: `${flow.pauseReason ? FLOW_PAUSE_LABEL[flow.pauseReason] : 'Fluxo pausado'}${step ? ` (${step})` : ''}`
+        what: `${flow.pauseReason ? FLOW_PAUSES[flow.pauseReason].label : 'Fluxo pausado'}${step ? ` (${step})` : ''}`
       }
     default:
       return null
@@ -245,13 +244,6 @@ export function requestWaitingItem(req: PendingRequest, task: OverviewTask): Wai
   }
 }
 
-const NOTION_ERROR_LABEL: Record<string, string> = {
-  forbidden: 'a integração não pode editar esta página',
-  not_found: 'página não encontrada',
-  bad_request: 'o Notion recusou o valor',
-  unauthorized: 'reconecte o Notion'
-}
-
 /** Mudança recusada pelo Notion (voltou no quadro) ou presa tentando de novo. */
 export function notionWaitingItem(
   input:
@@ -260,7 +252,7 @@ export function notionWaitingItem(
   task: OverviewTask
 ): WaitingItem {
   if (input.type === 'rejected') {
-    const why = input.code ? NOTION_ERROR_LABEL[input.code] : undefined
+    const why = input.code ? notionErrorLabel(input.code) : undefined
     return {
       key: `notion:rejected:${input.eventId}`,
       kind: 'notion_write',
@@ -285,8 +277,6 @@ export function sortWaiting(items: WaitingItem[]): WaitingItem[] {
   return [...items].sort((a, b) => a.since.localeCompare(b.since) || a.key.localeCompare(b.key))
 }
 
-// ---------- Em execução ----------
-
 export interface ActiveRunInput {
   runId: string
   projectId: string
@@ -309,7 +299,8 @@ export function buildRunning(
   const flowRunIds = new Set<string>()
   for (const flow of flows) {
     const running = flow.status === 'running'
-    const waitingSlot = flow.status === 'paused' && flow.pauseReason === 'waiting_slot'
+    // Na fila (vaga do projeto ou do agente): começa sozinho, então conta como rodando.
+    const waitingSlot = waitingKind(flow) === 'queue'
     if (!running && !waitingSlot) continue
     const current = flow.history[flow.history.length - 1]
     if (current?.runId) flowRunIds.add(current.runId)
@@ -324,7 +315,7 @@ export function buildRunning(
       kind: 'flow',
       task: task(flow.projectId, flow.taskId),
       label: waitingSlot
-        ? `${flow.flowName} · aguardando vaga`
+        ? `${flow.flowName} · ${flow.pauseReason === 'waiting_agent' ? 'aguardando o agente' : 'aguardando vaga'}`
         : `${flow.flowName}${stepLabel ? ` · ${stepLabel}` : ''}`,
       state: waitingSlot ? 'queued' : 'running',
       startedAt: flow.startedAt,
@@ -349,8 +340,6 @@ export function buildRunning(
       a.startedAt.localeCompare(b.startedAt)
   )
 }
-
-// ---------- PRs ----------
 
 const PR_RANK: Record<PrReason, number> = {
   ci_failed: 0,
@@ -411,9 +400,6 @@ export const PR_REASON_LABEL: Record<PrReason, string> = {
   stale_review: 'Sem review'
 }
 
-// ---------- Por projeto ----------
-
-const FOLDER_PROBLEMS = new Set(['missing_folder', 'not_a_repo', 'repo_mismatch', 'git_error'])
 const GITHUB_WARNINGS = new Set(['github_disconnected', 'no_access', 'unverified'])
 
 export function projectHealth(
@@ -421,7 +407,7 @@ export function projectHealth(
   notion: NotionWorkspaceStatus['health'] | null
 ): ProjectHealthSummary {
   const state = project.health.state
-  const folder: HealthLevel = FOLDER_PROBLEMS.has(state) ? 'problem' : 'ok'
+  const folder: HealthLevel = isFolderProblem(state) ? 'problem' : 'ok'
   const github: HealthLevel = !project.repo
     ? 'off'
     : folder === 'problem'
@@ -480,22 +466,17 @@ export function projectCard(input: {
   }
 }
 
-// ---------- Semana ----------
-
 export interface StageEventInput {
   id: number
   taskPageId: string
   projectId: string
   at: string
-  kind: string
+  kind: TaskEventKind
   fromStage: string | null
   toStage: string | null
 }
 
-/** Eventos que mudam a etapa de uma tarefa. */
-export const STAGE_EVENT_KINDS = ['added', 'moved', 'reconciled', 'rolled_back'] as const
-
-/** Tarefas distintas que entraram na última etapa do quadro desde `since`. */
+/** Tarefas distintas que entraram na etapa final de cada projeto (`finalStage`) desde `since`. */
 export function finishedCount(
   events: readonly StageEventInput[],
   finalStage: ReadonlyMap<string, string>,
@@ -511,7 +492,7 @@ export function finishedCount(
 }
 
 /**
- * Tempo médio na etapa de revisão (ex.: "Revisado"): pares entrada → saída, contando só as saídas
+ * Tempo médio na etapa revisada (papel `reviewed`, ex.: "Revisado"): pares entrada → saída, contando só as saídas
  * desde `since`. Retrabalho aparece como várias passagens pela etapa.
  */
 export function stageDwell(
@@ -522,7 +503,7 @@ export function stageDwell(
   const entered = new Map<string, string>()
   const durations: number[] = []
   for (const e of [...events].sort((a, b) => a.id - b.id)) {
-    if (!(STAGE_EVENT_KINDS as readonly string[]).includes(e.kind)) continue
+    if (!STAGE_EVENT_KINDS.includes(e.kind)) continue
     const stage = stageByProject.get(e.projectId)
     if (!stage) continue
     if (e.toStage === stage && e.fromStage !== stage) {
@@ -537,17 +518,6 @@ export function stageDwell(
     avgMs: durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : null,
     samples: durations.length
   }
-}
-
-/** Etapa de revisão do projeto: a chamada "Revisado" (do template), sem acento/caixa. */
-export function reviewStageId(stages: readonly BoardStage[]): string | null {
-  const norm = (v: string): string => v.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-  return stages.find((s) => norm(s.name) === 'revisado')?.id ?? null
-}
-
-/** Última etapa do quadro (maior `order`). */
-export function finalStageId(stages: readonly BoardStage[]): string | null {
-  return [...stages].sort((a, b) => b.order - a.order)[0]?.id ?? null
 }
 
 export function pullsInWeek(
@@ -581,65 +551,6 @@ export function costSum(runs: readonly { cost: number | null }[]): WeekStats['co
   }
 }
 
-// ---------- Atividade ----------
-
-/** Tipos de evento de cada grupo da atividade (`sync_ok` fica de fora: é ruído). */
-export const ACTIVITY_KINDS: Record<ActivityGroup, readonly string[]> = {
-  board: [
-    'added',
-    'moved',
-    'reconciled',
-    'blocked',
-    'unblocked',
-    'automation_paused',
-    'automation_resumed',
-    'agent_assigned',
-    'agent_unassigned'
-  ],
-  automation: ['automation', 'moved'],
-  claude: [
-    'run_started',
-    'run_finished',
-    'run_cancelled',
-    'run_failed',
-    'run_blocked',
-    'artifact_attached',
-    'artifact_published'
-  ],
-  flow: [
-    'flow_started',
-    'step_started',
-    'step_finished',
-    'step_failed',
-    'step_skipped',
-    'gate_waiting',
-    'gate_approved',
-    'gate_rejected',
-    'gate_revised',
-    'flow_paused',
-    'flow_finished'
-  ],
-  delivery: ['delivery'],
-  notion: ['sync_failed', 'rolled_back']
-}
-
-/** Grupo de um evento (`null` = fica fora da atividade). */
-export function activityGroup(e: {
-  kind: string
-  source: string
-  detail: Record<string, unknown> | null
-}): ActivityGroup | null {
-  if (e.kind === 'moved') return e.source === 'automation' ? 'automation' : 'board'
-  if (e.kind === 'automation') return e.detail?.['outcome'] === 'noop' ? null : 'automation'
-  for (const [group, kinds] of Object.entries(ACTIVITY_KINDS) as [
-    ActivityGroup,
-    readonly string[]
-  ][]) {
-    if (kinds.includes(e.kind)) return group
-  }
-  return null
-}
-
 export function activitySection(group: ActivityGroup): TaskSection {
   return group === 'claude'
     ? 'claude'
@@ -648,31 +559,9 @@ export function activitySection(group: ActivityGroup): TaskSection {
       : 'history'
 }
 
-// ---------- Formatação ----------
-
-/** "agora", "há 5 min", "há 2 h", "há 3 d". */
-export function formatAgo(iso: string, now: Date): string {
-  const ms = Math.max(0, now.getTime() - Date.parse(iso))
-  const min = Math.floor(ms / 60_000)
-  if (min < 1) return 'agora'
-  if (min < 60) return `há ${min} min`
-  const h = Math.floor(min / 60)
-  if (h < 24) return `há ${h} h`
-  return `há ${Math.floor(h / 24)} d`
-}
-
-/** "45 s", "12 min", "1 h 05 min", "1,8 d". */
-export function formatDuration(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000))
-  if (s < 60) return `${s} s`
-  const min = Math.floor(s / 60)
-  if (min < 60) return `${min} min`
-  const h = Math.floor(min / 60)
-  if (h < 24) return `${h} h ${String(min % 60).padStart(2, '0')} min`
-  return `${(h / 24).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} d`
-}
-
-/** Rótulo curto da tarefa: "ORK-142 Exportar CSV" ou o que houver. */
-export function taskLabel(task: Pick<OverviewTask, 'displayId' | 'title'>): string {
-  return [task.displayId, task.title].filter(Boolean).join(' ') || 'Tarefa do Notion'
+export interface BoardTaskRef {
+  projectId: string
+  taskId: string
+  /** Seção do painel da tarefa a mostrar. */
+  section?: TaskSection
 }

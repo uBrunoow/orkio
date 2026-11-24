@@ -39,7 +39,6 @@ export function extractTaskNumbers(text: string, prefix: string): number[] {
   return found
 }
 
-/** O texto menciona exatamente esta tarefa? */
 export function mentionsTask(text: string, prefix: string, number: number): boolean {
   return extractTaskNumbers(text, prefix).includes(number)
 }
@@ -52,4 +51,16 @@ export function parseDisplayId(
   const match = /^(.+)-([1-9]\d{0,8})$/.exec(displayId.trim())
   if (!match || !match[1]) return null
   return { prefix: match[1], number: Number(match[2]) }
+}
+
+/**
+ * ID da tarefa no nome de uma branch do Orkio (`taskBranchName`: `feat/ORK-2-slug`; antigas:
+ * `ORK-2/slug`): o começo de um segmento, seguido de `-` ou do fim do segmento. Sem ID → `null`.
+ */
+export function displayIdInBranch(branch: string): string | null {
+  for (const segment of branch.split('/')) {
+    const match = /^([A-Za-z][A-Za-z0-9]*-[1-9]\d{0,8})(?=-|$)/.exec(segment)
+    if (match?.[1]) return match[1].toUpperCase()
+  }
+  return null
 }

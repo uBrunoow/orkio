@@ -1,12 +1,12 @@
 /**
- * Checagens de um projeto (Configurações › Projetos): pasta e git, GitHub, página do Notion,
- * quadro e, com a pré-checagem do alva-flow, plugin e gh. Puro.
+ * Checagens de um projeto (Configurações › Projetos): pasta e git, GitHub, página do Notion e
+ * quadro. Puro.
  */
-import type { AlvaPrecheck } from '../../../../shared/alva'
-import type { ProjectView } from '../../../../shared/ipc-contract'
 import { plural } from '../../lib/format'
+import { PROJECT_HEALTH } from '../../lib/status-text'
+import { isFolderProblem, type ProjectView } from '../../../../shared/projects'
 
-export type CheckId = 'folder' | 'github' | 'notion' | 'board' | 'alva' | 'gh'
+export type CheckId = 'folder' | 'github' | 'notion' | 'board'
 
 export interface ProjectCheck {
   id: CheckId
@@ -18,12 +18,12 @@ export function projectChecks(input: {
   project: ProjectView
   /** Colunas do quadro; `null` = quadro ainda não criado. */
   boardStages: number | null
-  precheck: AlvaPrecheck | null
 }): ProjectCheck[] {
-  const { project, boardStages, precheck } = input
-  const checks: ProjectCheck[] = [
-    project.local === null
-      ? { id: 'folder', label: 'Pasta não encontrada', state: 'problem' }
+  const { project, boardStages } = input
+  const folder = project.health.state
+  return [
+    isFolderProblem(folder)
+      ? { id: 'folder', label: PROJECT_HEALTH[folder].label, state: 'problem' }
       : { id: 'folder', label: 'Pasta e git', state: 'ok' },
     !project.repo
       ? { id: 'github', label: 'Sem repositório no GitHub', state: 'warning' }
@@ -37,18 +37,6 @@ export function projectChecks(input: {
       ? { id: 'board', label: 'Sem quadro', state: 'warning' }
       : { id: 'board', label: `Quadro: ${plural(boardStages, 'coluna', 'colunas')}`, state: 'ok' }
   ]
-  if (precheck) {
-    checks.push({ id: 'alva', label: 'alva-flow', state: precheck.ready ? 'ok' : 'warning' })
-    const gh = precheck.items.find((i) => i.id === 'gh')
-    if (gh) {
-      checks.push({
-        id: 'gh',
-        label: gh.state === 'ok' ? 'gh' : `gh: ${gh.detail}`,
-        state: gh.state === 'ok' ? 'ok' : 'warning'
-      })
-    }
-  }
-  return checks
 }
 
 /** Passos do setup que o projeto ainda deve (página do Notion e quadro). */

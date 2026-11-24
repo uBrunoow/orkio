@@ -1,8 +1,8 @@
+import type { NotionMappingField, NotionPropertySummary } from './notion'
 /**
  * Regras do mapeamento das Tarefas do Notion, compartilhadas entre main e renderer.
  * Funções puras, sem Node/DOM.
  */
-import type { NotionMappingField, NotionPropertySummary } from './ipc-contract'
 
 /** Tipos aceitos em cada campo do mapeamento das Tarefas. */
 export const FIELD_TYPES: Record<NotionMappingField, readonly string[]> = {

@@ -1,17 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import type { BoardStage } from '../../../../shared/board'
-import type { PlanState, PlanStep } from '../task-flows/flow-plan'
-import { phaseLabel, taskPhases } from './task-phases'
+import type { FlowRunView, Step } from '../../../../shared/task-flow'
+import { flowPlan, type PlanState, type PlanStep } from '../task-flows/flow-plan'
+import { defaultPanelTab } from './panel-tab'
+import { currentPhase, taskPhases } from './task-phases'
 
+/** Passo do fluxo com a fase que o plano daria a ele (o teste de ligação passa pelo `flowPlan`). */
 const step = (
-  detail: string,
+  phase: PlanStep['phase'],
   state: PlanState,
   kind: PlanStep['kind'] = 'claude_command'
 ): PlanStep => ({
-  id: `${detail}-${state}`,
-  name: detail,
-  detail,
+  id: `${JSON.stringify(phase)}-${state}-${Math.random()}`,
+  name: 'passo',
   kind,
+  command: null,
+  action: null,
+  readOnly: false,
+  phase,
+  waitsForCi: false,
+  detail: '',
   state,
   visits: 0
 })
@@ -23,55 +31,85 @@ const stage = (id: string, order: number): BoardStage => ({
   notionStatus: { id: null, name: id }
 })
 
-describe('phaseLabel', () => {
-  it('nomes do alva-flow e de outros comandos', () => {
-    expect(phaseLabel('/alva-flow:spec')).toBe('Spec')
-    expect(phaseLabel('/alva-flow:plan')).toBe('Plano')
-    expect(phaseLabel('/alva-flow:implement')).toBe('Implementar')
-    expect(phaseLabel('/alva-flow:review')).toBe('Revisão')
-    expect(phaseLabel('/alva-flow:fix')).toBe('Revisão')
-    expect(phaseLabel('/alva-flow:commit')).toBe('PR')
-    expect(phaseLabel('/alva-flow:pr')).toBe('PR')
-    expect(phaseLabel('Ação do Orkio: push')).toBe('PR')
-    expect(phaseLabel('/meu-plugin:deploy')).toBe('deploy')
-    expect(phaseLabel('/revisar')).toBe('revisar')
-    expect(phaseLabel('Sua aprovação')).toBeNull()
-    expect(phaseLabel('Ação do Orkio: noop')).toBeNull()
-    expect(phaseLabel('Ação do Orkio: review_snapshot')).toBe('Revisão')
-    expect(phaseLabel('Ação do Orkio: publish_review')).toBe('Revisão')
+const command = (id: string, cmd: string): Step => ({
+  id,
+  name: id,
+  type: 'claude_command',
+  command: cmd,
+  args: '',
+  timeoutMin: 30
+})
+
+const flowRun = (steps: Step[], currentStep: string): FlowRunView => ({
+  id: 'f1',
+  projectId: 'p',
+  taskId: 't',
+  flowId: 'f',
+  flowName: 'Fluxo',
+  steps,
+  status: 'running',
+  currentStep,
+  pauseReason: null,
+  result: null,
+  startedAt: '2026-11-23T10:00:00Z',
+  endedAt: null,
+  vars: {},
+  history: [],
+  choice: null,
+  confirm: null,
+  agent: null,
+  revise: null
+})
+
+describe('fases pelo plano do fluxo (comandos, ações e gates)', () => {
+  it('comandos do alva-flow, ações do Orkio e outros comandos viram fases; gate e noop não', () => {
+    const steps: Step[] = [
+      command('spec', 'alva-flow:spec'),
+      {
+        id: 'ok',
+        name: 'ok',
+        type: 'gate',
+        message: 'Pode?',
+        show: 'none',
+        onReject: 'stop',
+        timeoutMin: null
+      },
+      command('impl', 'alva-flow:implement'),
+      command('fix', 'alva-flow:fix'),
+      { id: 'noop', name: 'noop', type: 'orkio_action', action: 'noop' },
+      { id: 'push', name: 'push', type: 'orkio_action', action: 'push' },
+      command('deploy', 'meu-plugin:deploy')
+    ]
+    const phases = taskPhases({ plan: flowPlan(flowRun(steps, 'impl')), stages: [], stageId: null })
+    expect(phases.map((p) => [p.label, p.phase, p.state])).toEqual([
+      ['Spec', 'spec', 'done'],
+      ['Implementar', 'implement', 'current'],
+      ['Revisão', 'review', 'next'],
+      ['PR', 'pr', 'next'],
+      ['deploy', null, 'next']
+    ])
+    // A aba do painel sai da fase (enum), não do rótulo em português.
+    expect(
+      defaultPanelTab({
+        currentPhase: currentPhase(phases)?.phase ?? null,
+        hasBacklogDoc: true,
+        hasDiff: false,
+        hasPr: false
+      })
+    ).toBe('changes')
   })
 })
 
 describe('taskPhases', () => {
-  it('funde comandos e gates na fase', () => {
-    const plan = [
-      step('/alva-flow:spec', 'done'),
-      step('Sua aprovação', 'done', 'gate'),
-      step('/alva-flow:plan', 'waiting'),
-      step('/alva-flow:implement', 'next'),
-      step('/alva-flow:review', 'next'),
-      step('/alva-flow:fix', 'next'),
-      step('/alva-flow:commit', 'next'),
-      step('/alva-flow:pr', 'next')
-    ]
-    expect(taskPhases({ plan, stages: [], stageId: null })).toEqual([
-      { id: 'Spec', label: 'Spec', state: 'done' },
-      { id: 'Plano', label: 'Plano', state: 'waiting' },
-      { id: 'Implementar', label: 'Implementar', state: 'next' },
-      { id: 'Revisão', label: 'Revisão', state: 'next' },
-      { id: 'PR', label: 'PR', state: 'next' }
-    ])
-  })
-
   it('fase repetida depois do PR entra na primeira ocorrência (sem ids duplicados)', () => {
     const plan = [
-      step('/alva-flow:spec', 'done'),
-      step('/alva-flow:plan', 'done'),
-      step('/alva-flow:implement', 'done'),
-      step('/alva-flow:review', 'done'),
-      step('/alva-flow:pr', 'done'),
-      step('/alva-flow:fix', 'current'),
-      step('/alva-flow:review', 'next')
+      step({ id: 'spec' }, 'done'),
+      step({ id: 'plan' }, 'done'),
+      step({ id: 'implement' }, 'done'),
+      step({ id: 'review' }, 'done'),
+      step({ id: 'pr' }, 'done'),
+      step({ id: 'review' }, 'current'),
+      step({ id: 'review' }, 'next')
     ]
     const phases = taskPhases({ plan, stages: [], stageId: null })
     expect(phases.map((p) => p.label)).toEqual(['Spec', 'Plano', 'Implementar', 'Revisão', 'PR'])
@@ -80,27 +118,27 @@ describe('taskPhases', () => {
   })
 
   it('gate esperando entra na fase anterior', () => {
-    const plan = [step('/alva-flow:plan', 'done'), step('Sua aprovação', 'waiting', 'gate')]
+    const plan = [step({ id: 'plan' }, 'done'), step(null, 'waiting', 'gate')]
     expect(taskPhases({ plan, stages: [], stageId: null })[0]?.state).toBe('waiting')
   })
 
   it('falha vence', () => {
-    const plan = [step('/alva-flow:review', 'done'), step('/alva-flow:fix', 'failed')]
+    const plan = [step({ id: 'review' }, 'done'), step({ id: 'review' }, 'failed')]
     expect(taskPhases({ plan, stages: [], stageId: null })).toEqual([
-      { id: 'Revisão', label: 'Revisão', state: 'failed' }
+      { id: 'review', label: 'Revisão', phase: 'review', state: 'failed' }
     ])
   })
 
   it('pulados contam como feitos', () => {
-    const plan = [step('/alva-flow:implement', 'skipped'), step('/alva-flow:review', 'current')]
+    const plan = [step({ id: 'implement' }, 'skipped'), step({ id: 'review' }, 'current')]
     expect(taskPhases({ plan, stages: [], stageId: null }).map((p) => p.state)).toEqual([
       'done',
       'current'
     ])
   })
 
-  it('fluxo sem comandos cai nas colunas', () => {
-    const plan = [step('Sua aprovação', 'waiting', 'gate')]
+  it('fluxo sem fase cai nas colunas', () => {
+    const plan = [step(null, 'waiting', 'gate')]
     const stages = [stage('a', 0), stage('b', 1)]
     expect(taskPhases({ plan, stages, stageId: 'a' }).map((p) => p.id)).toEqual(['a', 'b'])
   })
@@ -108,9 +146,9 @@ describe('taskPhases', () => {
   it('sem fluxo usa as colunas', () => {
     const stages = [stage('c', 2), stage('a', 0), stage('b', 1)]
     expect(taskPhases({ plan: null, stages, stageId: 'b' })).toEqual([
-      { id: 'a', label: 'Etapa a', state: 'done' },
-      { id: 'b', label: 'Etapa b', state: 'current' },
-      { id: 'c', label: 'Etapa c', state: 'next' }
+      { id: 'a', label: 'Etapa a', phase: null, state: 'done' },
+      { id: 'b', label: 'Etapa b', phase: null, state: 'current' },
+      { id: 'c', label: 'Etapa c', phase: null, state: 'next' }
     ])
   })
 })

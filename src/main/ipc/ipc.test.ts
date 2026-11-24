@@ -1,27 +1,37 @@
 import type { IpcMainInvokeEvent } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { IPC_CHANNELS, type ConnectionStatus } from '../../shared/ipc-contract'
+import { ORKIO_API } from '../../shared/ipc/api'
 import type { DeviceFlowConnector, OAuthConnector } from '../connectors/types'
-import { registerGitHubIpc } from './github.ipc'
-import { registerProjectsIpc } from './projects.ipc'
-import { registerSignalsIpc } from './signals.ipc'
-import { registerBoardIpc } from './board.ipc'
-import { isFlowDraft, registerFlowIpc } from './flow.ipc'
-import { registerAutomationIpc } from './automation.ipc'
-import { registerNotionIpc } from './notion.ipc'
-import { registerNotionWorkspaceIpc } from './notion-workspace.ipc'
-import { isAllowedExternalUrl, registerShellIpc, siteUrlRules } from './shell.ipc'
-import { registerUpdatesIpc, type UpdatesIpcService } from './updates.ipc'
-import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
-import { registerAgentsIpc, toProfile } from './agents.ipc'
-import type { AgentsService } from '../agents/agents.service'
 import { AgentError } from '../agents/agents.service'
-import { defaultAgent, validateAgent } from '../../shared/agent'
+import type { AgentsService } from '../agents/agents.service'
+import { DeliveryError } from '../delivery/delivery.service'
+import { FlowError, type FlowRunner } from '../flows/flow-runner'
+import type { FlowsService } from '../flows/flows.service'
+import type { OpenPrDeps } from '../flows/open-pr'
+import type { OrchestratorService } from '../orchestrator/orchestrator.service'
+import { defaultAgent } from '../../shared/agent'
+import type { ConnectionStatus } from '../../shared/connection'
+import { agentsHandlers } from './agents.ipc'
+import { boardHandlers } from './board.ipc'
+import { claudeHandlers } from './claude.ipc'
+import { createEmitter } from './emit'
+import { flowHandlers } from './flow.ipc'
+import { githubHandlers } from './github.ipc'
+import { notionHandlers } from './notion.ipc'
+import { notionWorkspaceHandlers } from './notion-workspace.ipc'
+import { projectsHandlers } from './projects.ipc'
+import { registerGroup, registerHandlers, type Handlers, type RegisterOptions } from './register'
+import { isAllowedExternalUrl, openExternalHandler, siteUrlRules } from './shell.ipc'
+import { signalsHandlers } from './signals.ipc'
+import { taskFlowsHandlers } from './task-flows.ipc'
+import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
+import { updatesHandlers, type UpdatesIpcService } from './updates.ipc'
 
 type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknown>
 
 interface FakeIpc {
   trusted: boolean
+  channels: () => string[]
   handle: (channel: string, handler: Handler) => void
   invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
 }
@@ -30,6 +40,7 @@ function fakeIpc(): FakeIpc {
   const handlers = new Map<string, Handler>()
   const state: FakeIpc = {
     trusted: true,
+    channels: () => [...handlers.keys()],
     handle: (channel, handler) => {
       handlers.set(channel, handler)
     },
@@ -44,6 +55,12 @@ function fakeIpc(): FakeIpc {
 }
 
 const guard = createSenderGuard({ rendererFileUrl: 'file:///app/out/renderer/index.html' })
+const options = (ready: Promise<void> = Promise.resolve()): RegisterOptions => ({
+  isTrustedSender: guard,
+  ready
+})
+const TASK = '11111111-1111-4111-8111-000000000001'
+const invalid = { ok: false, error: { code: 'invalid' } }
 
 function fakeConnector(overrides: Partial<OAuthConnector> = {}): OAuthConnector {
   return {
@@ -57,6 +74,21 @@ function fakeConnector(overrides: Partial<OAuthConnector> = {}): OAuthConnector 
     testConnection: vi.fn(async (): Promise<ConnectionStatus> => ({ state: 'disconnected' })),
     ...overrides
   }
+}
+
+function notionIpc(
+  connector: OAuthConnector,
+  onOAuthFinished = vi.fn(),
+  onChanged = vi.fn()
+): FakeIpc {
+  const ipc = fakeIpc()
+  registerGroup(
+    ipc,
+    options(),
+    ORKIO_API.notion,
+    notionHandlers(connector, onOAuthFinished, onChanged)
+  )
+  return ipc
 }
 
 describe('isTrustedRendererUrl', () => {
@@ -79,23 +111,150 @@ describe('isTrustedRendererUrl', () => {
   })
 })
 
-describe('registerNotionIpc', () => {
-  it('encaminha connect com payload validado', async () => {
+describe('registro único (registerHandlers)', () => {
+  it('registra todos os canais declarados e recusa origem não confiável em qualquer um', async () => {
     const ipc = fakeIpc()
-    const connector = fakeConnector()
-    registerNotionIpc(ipc, connector, guard)
+    const fn = (): (() => Promise<never>) => async () => {
+      throw new Error('não deveria rodar')
+    }
+    // Um handler qualquer por método: o teste é do registro, não dos serviços.
+    const stub = (spec: object): Record<string, unknown> =>
+      Object.fromEntries(
+        Object.entries(spec)
+          .filter(([, v]) => (v as { kind?: string }).kind !== 'event')
+          .map(([k, v]) => [k, (v as { kind?: string }).kind === 'call' ? fn() : stub(v)])
+      )
+    registerHandlers(ipc, options(), stub(ORKIO_API) as unknown as Handlers)
+    const declared = Object.values(ORKIO_API).flatMap((g) =>
+      (g as { kind?: string }).kind === 'call'
+        ? [(g as { channel: string }).channel]
+        : Object.values(g)
+            .filter((m) => (m as { kind?: string }).kind === 'call')
+            .map((m) => (m as { channel: string }).channel)
+    )
+    expect(ipc.channels().sort()).toEqual(declared.sort())
 
-    await ipc.invoke(IPC_CHANNELS.notion.connect, { kind: 'token', token: 'ntn_x', extra: 1 })
+    ipc.trusted = false
+    for (const channel of ipc.channels()) {
+      await expect(ipc.invoke(channel)).rejects.toThrow('Origem de IPC não autorizada')
+    }
+  })
+
+  it('falta de handler fora do banco é erro na hora de registrar', () => {
+    const ipc = fakeIpc()
+    expect(() =>
+      registerGroup(ipc, options(), ORKIO_API.notion, {
+        ...notionHandlers(fakeConnector(), vi.fn(), vi.fn()),
+        getStatus: undefined as never
+      })
+    ).toThrow('IPC sem handler: notion:get-status')
+    expect(() => registerGroup(ipc, options(), ORKIO_API.projects, null)).toThrow('IPC sem handler')
+  })
+
+  it('banco indisponível: todo canal do banco responde o fallback dele (nada de erro cru)', async () => {
+    const ipc = fakeIpc()
+    for (const group of [
+      ORKIO_API.board,
+      ORKIO_API.flow,
+      ORKIO_API.automation,
+      ORKIO_API.alva,
+      ORKIO_API.agents,
+      ORKIO_API.taskFlows,
+      ORKIO_API.claude,
+      ORKIO_API.overview
+    ]) {
+      registerGroup(ipc, options(), group, null)
+    }
+    const unavailable = { ok: false, error: { code: 'db_unavailable' } }
+    expect(await ipc.invoke(ORKIO_API.board.get.channel, 'p1')).toMatchObject(unavailable)
+    expect(await ipc.invoke(ORKIO_API.taskFlows.start.channel, 'p1', TASK)).toMatchObject(
+      unavailable
+    )
+    expect(await ipc.invoke(ORKIO_API.claude.state.channel, 'p1', TASK)).toMatchObject(unavailable)
+    expect(await ipc.invoke(ORKIO_API.agents.list.channel, 'p1')).toMatchObject(unavailable)
+    expect(await ipc.invoke(ORKIO_API.agents.badges.channel, 'p1')).toEqual({})
+    expect(await ipc.invoke(ORKIO_API.taskFlows.runs.channel, TASK)).toEqual([])
+    expect(await ipc.invoke(ORKIO_API.claude.readLog.channel, 'r1')).toEqual([])
+    expect(await ipc.invoke(ORKIO_API.claude.status.channel)).toMatchObject({ installed: false })
+    expect(await ipc.invoke(ORKIO_API.automation.status.channel, 'p1')).toMatchObject({
+      error: 'Não foi possível consultar as automações.'
+    })
+    const r = (await ipc.invoke(ORKIO_API.overview.get.channel)) as {
+      error: { message: string }
+    }
+    expect(r.error.message).toMatch(/banco local/)
+  })
+
+  it('espera a config carregar antes de rodar canais que precisam dela', async () => {
+    const ipc = fakeIpc()
+    const service = fakeProjects()
+    let release!: () => void
+    const ready = new Promise<void>((r) => (release = r))
+    registerGroup(ipc, options(ready), ORKIO_API.projects, projectsHandlers(service))
+    const pending = ipc.invoke(ORKIO_API.projects.list.channel)
+    await Promise.resolve()
+    expect(service.list).not.toHaveBeenCalled()
+    release()
+    await pending
+    expect(service.list).toHaveBeenCalled()
+  })
+
+  it('evento: um envio a todas as janelas, com os efeitos declarados', () => {
+    const send = vi.fn()
+    const effects = { overview: vi.fn(), keepAwake: vi.fn() }
+    const emit = createEmitter({
+      windows: () => [
+        { isDestroyed: () => false, webContents: { send } },
+        { isDestroyed: () => true, webContents: { send } }
+      ],
+      effects
+    })
+    emit('agentsChanged', { projectId: 'p1' })
+    expect(send).toHaveBeenCalledWith('agents:changed', { projectId: 'p1' })
+    expect(effects.overview).not.toHaveBeenCalled()
+    emit('boardSync', {
+      projectId: 'p1',
+      taskId: TASK,
+      state: 'synced',
+      stageId: null,
+      blocked: false
+    })
+    expect(effects.overview).toHaveBeenCalledTimes(1)
+    expect(effects.keepAwake).not.toHaveBeenCalled()
+    const message = { runId: 'r', projectId: 'p1', taskId: TASK }
+    emit('runEvent', { ...message, event: { kind: 'text', text: 'oi' } } as never)
+    expect(effects.keepAwake).not.toHaveBeenCalled()
+    emit('runEvent', { ...message, event: { kind: 'status', status: 'running' } } as never)
+    expect(effects.keepAwake).toHaveBeenCalledTimes(1)
+    expect(effects.overview).toHaveBeenCalledTimes(2)
+    expect(send).toHaveBeenCalledTimes(4)
+  })
+})
+
+describe('notion', () => {
+  it('encaminha connect com payload validado', async () => {
+    const connector = fakeConnector()
+    const ipc = notionIpc(connector)
+    await ipc.invoke(ORKIO_API.notion.connect.channel, { kind: 'token', token: 'ntn_x', extra: 1 })
     expect(connector.connect).toHaveBeenCalledWith({ kind: 'token', token: 'ntn_x' })
   })
 
-  it('payload inválido não chega ao conector', async () => {
-    const ipc = fakeIpc()
-    const connector = fakeConnector()
-    registerNotionIpc(ipc, connector, guard)
+  it('conectar, desconectar e conferir avisam as janelas; ler o status não', async () => {
+    const onChanged = vi.fn()
+    const ipc = notionIpc(fakeConnector(), vi.fn(), onChanged)
+    await ipc.invoke(ORKIO_API.notion.getStatus.channel)
+    expect(onChanged).not.toHaveBeenCalled()
+    await ipc.invoke(ORKIO_API.notion.connect.channel, { kind: 'token', token: 'ntn_x' })
+    await ipc.invoke(ORKIO_API.notion.testConnection.channel)
+    await ipc.invoke(ORKIO_API.notion.disconnect.channel)
+    expect(onChanged).toHaveBeenCalledTimes(3)
+  })
 
+  it('payload inválido não chega ao conector', async () => {
+    const connector = fakeConnector()
+    const ipc = notionIpc(connector)
     for (const payload of [undefined, 'ntn_x', { token: 1 }, { kind: 'oauth', token: 'x' }]) {
-      expect(await ipc.invoke(IPC_CHANNELS.notion.connect, payload)).toMatchObject({
+      expect(await ipc.invoke(ORKIO_API.notion.connect.channel, payload)).toMatchObject({
         state: 'error'
       })
     }
@@ -103,46 +262,48 @@ describe('registerNotionIpc', () => {
   })
 
   it('recusa chamadas de origem não confiável', async () => {
-    const ipc = fakeIpc()
     const connector = fakeConnector()
-    registerNotionIpc(ipc, connector, guard)
+    const ipc = notionIpc(connector)
     ipc.trusted = false
-
-    await expect(ipc.invoke(IPC_CHANNELS.notion.getStatus)).rejects.toThrow('não autorizada')
+    for (const spec of [
+      ORKIO_API.notion.getStatus,
+      ORKIO_API.notion.getAuthOptions,
+      ORKIO_API.notion.startOAuth,
+      ORKIO_API.notion.cancelOAuth
+    ]) {
+      await expect(ipc.invoke(spec.channel)).rejects.toThrow('não autorizada')
+    }
     expect(connector.getStatus).not.toHaveBeenCalled()
+    expect(connector.startOAuth).not.toHaveBeenCalled()
+    expect(connector.cancelOAuth).not.toHaveBeenCalled()
   })
 
   it('disconnect devolve desconectado', async () => {
-    const ipc = fakeIpc()
     const connector = fakeConnector()
-    registerNotionIpc(ipc, connector, guard)
-    expect(await ipc.invoke(IPC_CHANNELS.notion.disconnect)).toEqual({ state: 'disconnected' })
+    const ipc = notionIpc(connector)
+    expect(await ipc.invoke(ORKIO_API.notion.disconnect.channel)).toEqual({
+      state: 'disconnected'
+    })
     expect(connector.disconnect).toHaveBeenCalled()
   })
 
   it('exceção inesperada vira erro genérico e o log não traz a mensagem original', async () => {
-    const ipc = fakeIpc()
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    registerNotionIpc(
-      ipc,
+    const ipc = notionIpc(
       fakeConnector({
         getStatus: async () => {
           throw new Error('segredo ntn_LEAK')
         }
-      }),
-      guard
+      })
     )
-
-    const result = await ipc.invoke(IPC_CHANNELS.notion.getStatus)
+    const result = await ipc.invoke(ORKIO_API.notion.getStatus.channel)
     expect(result).toMatchObject({ state: 'error' })
     expect(JSON.stringify(result)).not.toContain('ntn_LEAK')
     expect(JSON.stringify(spy.mock.calls)).not.toContain('ntn_LEAK')
+    spy.mockRestore()
   })
-})
 
-describe('registerNotionIpc — OAuth', () => {
-  it('expõe opções de autenticação, inicia e cancela o fluxo', async () => {
-    const ipc = fakeIpc()
+  it('OAuth: opções, início (foca a janela no fim) e cancelamento', async () => {
     const connector = fakeConnector({
       startOAuth: vi.fn(async (): Promise<ConnectionStatus> => ({
         state: 'connected',
@@ -151,30 +312,32 @@ describe('registerNotionIpc — OAuth', () => {
       }))
     })
     const onOAuthFinished = vi.fn()
-    registerNotionIpc(ipc, connector, guard, { onOAuthFinished })
-
-    expect(await ipc.invoke(IPC_CHANNELS.notion.getAuthOptions)).toEqual({ oauth: true })
-    expect(await ipc.invoke(IPC_CHANNELS.notion.startOAuth)).toMatchObject({ state: 'connected' })
+    const ipc = notionIpc(connector, onOAuthFinished)
+    expect(await ipc.invoke(ORKIO_API.notion.getAuthOptions.channel)).toEqual({ oauth: true })
+    expect(await ipc.invoke(ORKIO_API.notion.startOAuth.channel)).toMatchObject({
+      state: 'connected'
+    })
     expect(onOAuthFinished).toHaveBeenCalledTimes(1)
-    await ipc.invoke(IPC_CHANNELS.notion.cancelOAuth)
+    await ipc.invoke(ORKIO_API.notion.cancelOAuth.channel)
     expect(connector.cancelOAuth).toHaveBeenCalled()
   })
 
-  it('canais OAuth recusam origem não confiável', async () => {
-    const ipc = fakeIpc()
-    const connector = fakeConnector()
-    registerNotionIpc(ipc, connector, guard)
-    ipc.trusted = false
-
-    for (const channel of [
-      IPC_CHANNELS.notion.getAuthOptions,
-      IPC_CHANNELS.notion.startOAuth,
-      IPC_CHANNELS.notion.cancelOAuth
-    ]) {
-      await expect(ipc.invoke(channel)).rejects.toThrow('não autorizada')
-    }
-    expect(connector.startOAuth).not.toHaveBeenCalled()
-    expect(connector.cancelOAuth).not.toHaveBeenCalled()
+  it('getAuthOptions/cancelOAuth com exceção: resposta segura, não o erro cru (antes sem try/catch)', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const ipc = notionIpc(
+      fakeConnector({
+        getAuthOptions: () => {
+          throw new Error('ntn_LEAK')
+        },
+        cancelOAuth: () => {
+          throw new Error('ntn_LEAK')
+        }
+      })
+    )
+    expect(await ipc.invoke(ORKIO_API.notion.getAuthOptions.channel)).toEqual({ oauth: false })
+    expect(await ipc.invoke(ORKIO_API.notion.cancelOAuth.channel)).toBeUndefined()
+    expect(JSON.stringify(spy.mock.calls)).not.toContain('ntn_LEAK')
+    spy.mockRestore()
   })
 })
 
@@ -200,15 +363,29 @@ function fakeGitHub(overrides: Partial<DeviceFlowConnector> = {}): DeviceFlowCon
   }
 }
 
-describe('registerGitHubIpc', () => {
+function githubIpc(
+  connector: DeviceFlowConnector,
+  onDeviceFlowFinished = vi.fn(),
+  orkioBot = vi.fn(async () => ({ github: 'connected' as const, repos: [], checkedAt: null }))
+): FakeIpc {
+  const ipc = fakeIpc()
+  registerGroup(
+    ipc,
+    options(),
+    ORKIO_API.github,
+    githubHandlers(connector, { onDeviceFlowFinished, orkioBot, onChanged: vi.fn() })
+  )
+  return ipc
+}
+
+describe('github', () => {
+  const ch = ORKIO_API.github
   it('Device Flow: start devolve só código/URL/expiração; wait resolve e foca a janela', async () => {
-    const ipc = fakeIpc()
     const connector = fakeGitHub()
     const onDeviceFlowFinished = vi.fn()
-    registerGitHubIpc(ipc, connector, guard, { onDeviceFlowFinished })
-
-    expect(await ipc.invoke(IPC_CHANNELS.github.getAuthOptions)).toEqual({ oauth: true })
-    expect(await ipc.invoke(IPC_CHANNELS.github.startDeviceFlow)).toEqual({
+    const ipc = githubIpc(connector, onDeviceFlowFinished)
+    expect(await ipc.invoke(ch.getAuthOptions.channel)).toEqual({ oauth: true })
+    expect(await ipc.invoke(ch.startDeviceFlow.channel)).toEqual({
       ok: true,
       flow: {
         userCode: 'WDJB-MJHT',
@@ -216,69 +393,66 @@ describe('registerGitHubIpc', () => {
         expiresAt: '2026-11-19T12:15:00.000Z'
       }
     })
-    await ipc.invoke(IPC_CHANNELS.github.waitDeviceFlow)
+    await ipc.invoke(ch.waitDeviceFlow.channel)
     expect(onDeviceFlowFinished).toHaveBeenCalledTimes(1)
-    await ipc.invoke(IPC_CHANNELS.github.cancelDeviceFlow)
+    await ipc.invoke(ch.cancelDeviceFlow.channel)
     expect(connector.cancelDeviceFlow).toHaveBeenCalled()
   })
 
-  it('connect valida o payload', async () => {
-    const ipc = fakeIpc()
+  it('connect valida o payload; orkioBot normaliza force', async () => {
     const connector = fakeGitHub()
-    registerGitHubIpc(ipc, connector, guard)
-    expect(await ipc.invoke(IPC_CHANNELS.github.connect, { token: 1 })).toMatchObject({
-      state: 'error'
-    })
-    await ipc.invoke(IPC_CHANNELS.github.connect, { kind: 'token', token: 'ghp_x', extra: 1 })
+    const orkioBot = vi.fn(async () => ({
+      github: 'connected' as const,
+      repos: [],
+      checkedAt: null
+    }))
+    const ipc = githubIpc(connector, vi.fn(), orkioBot)
+    expect(await ipc.invoke(ch.connect.channel, { token: 1 })).toMatchObject({ state: 'error' })
+    await ipc.invoke(ch.connect.channel, { kind: 'token', token: 'ghp_x', extra: 1 })
     expect(connector.connect).toHaveBeenCalledWith({ kind: 'token', token: 'ghp_x' })
-  })
-
-  it('todos os canais recusam origem não confiável', async () => {
-    const ipc = fakeIpc()
-    const connector = fakeGitHub()
-    registerGitHubIpc(ipc, connector, guard)
-    ipc.trusted = false
-    for (const channel of Object.values(IPC_CHANNELS.github)) {
-      await expect(ipc.invoke(channel)).rejects.toThrow('não autorizada')
-    }
-    expect(connector.startDeviceFlow).not.toHaveBeenCalled()
+    await ipc.invoke(ch.orkioBot.channel, { force: 'sim' })
+    await ipc.invoke(ch.orkioBot.channel, { force: true })
+    expect(orkioBot.mock.calls).toEqual([[false], [true]])
   })
 
   it('exceção inesperada vira erro genérico, sem a mensagem original no log', async () => {
-    const ipc = fakeIpc()
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    registerGitHubIpc(
-      ipc,
+    const ipc = githubIpc(
       fakeGitHub({
         startDeviceFlow: async () => {
           throw new Error('gho_LEAK')
         }
-      }),
-      guard
+      })
     )
-    const result = await ipc.invoke(IPC_CHANNELS.github.startDeviceFlow)
+    const result = await ipc.invoke(ch.startDeviceFlow.channel)
     expect(result).toMatchObject({ ok: false, status: { state: 'error' } })
     expect(JSON.stringify([result, spy.mock.calls])).not.toContain('gho_LEAK')
+    spy.mockRestore()
   })
 })
 
-describe('registerProjectsIpc', () => {
-  function fakeProjects() {
-    return {
-      list: vi.fn(async () => ({ projects: [] })),
-      revalidate: vi.fn(async () => ({ projects: [] })),
-      pickFolder: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
-      create: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
-      relocate: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
-      remove: vi.fn(async () => ({ ok: true }))
-    }
+function fakeProjects() {
+  return {
+    list: vi.fn(async () => ({ projects: [] })),
+    revalidate: vi.fn(async () => ({ projects: [] })),
+    pickFolder: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+    create: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+    relocate: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
+    remove: vi.fn(async () => ({ ok: true }))
+  }
+}
+
+describe('projects', () => {
+  const ch = ORKIO_API.projects
+  function setup() {
+    const ipc = fakeIpc()
+    const service = fakeProjects()
+    registerGroup(ipc, options(), ch, projectsHandlers(service))
+    return { ipc, service }
   }
 
   it('create só aceita selectionId/remoteName/hostConfirmed/name — nunca caminhos', async () => {
-    const ipc = fakeIpc()
-    const service = fakeProjects()
-    registerProjectsIpc(ipc, service, guard)
-
+    const { ipc, service } = setup()
     for (const payload of [
       undefined,
       { localPath: '/etc' },
@@ -286,14 +460,14 @@ describe('registerProjectsIpc', () => {
       { selectionId: 'abc', remoteName: 'origin', hostConfirmed: 'sim' },
       { selectionId: 'abc', remoteName: '', hostConfirmed: false }
     ]) {
-      expect(await ipc.invoke(IPC_CHANNELS.projects.create, payload)).toMatchObject({ ok: false })
+      expect(await ipc.invoke(ch.create.channel, payload)).toMatchObject({ ok: false })
     }
     expect(service.create).not.toHaveBeenCalled()
-
-    await ipc.invoke(IPC_CHANNELS.projects.create, {
+    await ipc.invoke(ch.create.channel, {
       selectionId: 'id-1',
       remoteName: 'origin',
-      hostConfirmed: false
+      hostConfirmed: false,
+      localPath: '/etc'
     })
     expect(service.create).toHaveBeenCalledWith({
       selectionId: 'id-1',
@@ -303,41 +477,16 @@ describe('registerProjectsIpc', () => {
   })
 
   it('relocate/remove exigem id válido', async () => {
-    const ipc = fakeIpc()
-    const service = fakeProjects()
-    registerProjectsIpc(ipc, service, guard)
-    expect(await ipc.invoke(IPC_CHANNELS.projects.relocate, '/home/user')).toMatchObject({
-      ok: false
+    const { ipc, service } = setup()
+    expect(await ipc.invoke(ch.relocate.channel, '/home/user')).toMatchObject({
+      ok: false,
+      error: { message: 'Projeto inválido.' }
     })
-    expect(await ipc.invoke(IPC_CHANNELS.projects.remove, { id: 1 })).toEqual({ ok: false })
+    expect(await ipc.invoke(ch.remove.channel, { id: 1 })).toEqual({ ok: false })
     expect(service.relocate).not.toHaveBeenCalled()
     expect(service.remove).not.toHaveBeenCalled()
-    await ipc.invoke(IPC_CHANNELS.projects.remove, 'id-1')
+    await ipc.invoke(ch.remove.channel, 'id-1')
     expect(service.remove).toHaveBeenCalledWith('id-1')
-  })
-
-  it('espera o serviço inicializar e recusa origem não confiável', async () => {
-    const ipc = fakeIpc()
-    const service = fakeProjects()
-    let release!: () => void
-    const ready = new Promise<void>((r) => (release = r))
-    registerProjectsIpc(ipc, service, guard, ready)
-
-    const pending = ipc.invoke(IPC_CHANNELS.projects.list)
-    await new Promise((r) => setTimeout(r, 5))
-    expect(service.list).not.toHaveBeenCalled()
-    release()
-    await pending
-    expect(service.list).toHaveBeenCalled()
-
-    ipc.trusted = false
-    for (const channel of [
-      IPC_CHANNELS.projects.list,
-      IPC_CHANNELS.projects.pickFolder,
-      IPC_CHANNELS.projects.remove
-    ]) {
-      await expect(ipc.invoke(channel)).rejects.toThrow('não autorizada')
-    }
   })
 })
 
@@ -414,41 +563,39 @@ describe('shell.openExternal', () => {
   it('abre só URLs permitidas', async () => {
     const ipc = fakeIpc()
     const open = vi.fn(async () => {})
-    registerShellIpc(ipc, open, guard)
+    registerGroup(
+      ipc,
+      options(),
+      { openExternal: ORKIO_API.openExternal },
+      { openExternal: openExternalHandler(open, []) }
+    )
+    const ch = ORKIO_API.openExternal.channel
 
-    expect(await ipc.invoke(IPC_CHANNELS.shell.openExternal, 'https://evil.com')).toBe(false)
+    expect(await ipc.invoke(ch, 'https://evil.com')).toBe(false)
+    expect(await ipc.invoke(ch, { url: 'https://notion.so/x' })).toBe(false)
     expect(open).not.toHaveBeenCalled()
-    expect(await ipc.invoke(IPC_CHANNELS.shell.openExternal, 'https://notion.so/x')).toBe(true)
+    expect(await ipc.invoke(ch, 'https://notion.so/x')).toBe(true)
     expect(open).toHaveBeenCalledWith('https://notion.so/x')
   })
 })
 
-describe('registerNotionWorkspaceIpc', () => {
+describe('notionWorkspace', () => {
   const DS_A = '11111111-1111-1111-1111-111111111111'
   const DS_B = '2222222222222222222222222222222a'
   const ok = <T>(value: T) => ({ ok: true as const, value })
+  const ch = ORKIO_API.notionWorkspace
 
   function setup() {
     const ipc = fakeIpc()
+    const status = { config: null, health: 'ok' as const, messages: [], connection: null }
     const service = {
-      getStatus: vi.fn(async () => ({
-        config: null,
-        health: 'ok' as const,
-        messages: [],
-        connection: null
-      })),
-      revalidate: vi.fn(async () => ({
-        config: null,
-        health: 'ok' as const,
-        messages: [],
-        connection: null
-      })),
+      getStatus: vi.fn(async () => status),
+      revalidate: vi.fn(async () => status),
       listDataSources: vi.fn(async () =>
         ok({ dataSources: [], truncated: false, connection: null })
       ),
       getTasksSchema: vi.fn(async () => ok({} as never)),
       saveConfig: vi.fn(async () => ok({} as never)),
-      clearConfig: vi.fn(async () => ok({} as never)),
       listProjectChoices: vi.fn(async () => ok({ choices: [], truncated: false })),
       link: vi.fn(async () => ok({ id: DS_A, name: 'X' })),
       unlink: vi.fn(async () => ok(null)),
@@ -457,21 +604,21 @@ describe('registerNotionWorkspaceIpc', () => {
       }),
       searchTasks: vi.fn(async () => ok({ tasks: [] }))
     }
-    registerNotionWorkspaceIpc(ipc, service, guard)
+    registerGroup(ipc, options(), ch, notionWorkspaceHandlers(service))
     return { ipc, service }
   }
-  const ch = IPC_CHANNELS.notionWorkspace
 
   it('valida ids e o formato do mapeamento antes de chamar o serviço', async () => {
     const { ipc, service } = setup()
-    await ipc.invoke(ch.getTasksSchema, DS_B, DS_A)
+    await ipc.invoke(ch.getTasksSchema.channel, DS_B, DS_A)
     expect(service.getTasksSchema).toHaveBeenCalledWith(DS_B, DS_A)
 
-    const invalid = { ok: false, error: { code: 'invalid' } }
-    expect(await ipc.invoke(ch.getTasksSchema, '../etc', DS_A)).toMatchObject(invalid)
-    expect(await ipc.invoke(ch.link, 'proj-1', 'https://notion.so/x')).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.getTasksSchema.channel, '../etc', DS_A)).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.link.channel, 'proj-1', 'https://notion.so/x')).toMatchObject(
+      invalid
+    )
     expect(
-      await ipc.invoke(ch.save, {
+      await ipc.invoke(ch.save.channel, {
         projectsDataSourceId: DS_A,
         tasksDataSourceId: DS_B,
         mapping: { title: 'title', hacked: 'x' }
@@ -484,86 +631,68 @@ describe('registerNotionWorkspaceIpc', () => {
       tasksDataSourceId: DS_B,
       mapping: { title: 'title', status: 'st', uniqueId: 'uid', project: 'rel', priority: null }
     }
-    await ipc.invoke(ch.save, input)
+    await ipc.invoke(ch.save.channel, input)
     expect(service.saveConfig).toHaveBeenCalledWith(input)
 
-    await ipc.invoke(ch.link, 'proj-1', DS_A)
+    await ipc.invoke(ch.link.channel, 'proj-1', DS_A)
     expect(service.link).toHaveBeenCalledWith('proj-1', DS_A)
-    await ipc.invoke(ch.listTasks, 'proj-1', { force: 'yes' })
-    expect(service.listTasks).toHaveBeenCalledWith('proj-1', { force: false })
+    await ipc.invoke(ch.listDataSources.channel, '')
+    expect(service.listDataSources).toHaveBeenCalledWith(undefined)
 
-    // Busca: só texto curto.
-    await ipc.invoke(ch.searchTasks, 'ORK-142')
+    await ipc.invoke(ch.searchTasks.channel, 'ORK-142')
     expect(service.searchTasks).toHaveBeenCalledWith('ORK-142')
-    expect(await ipc.invoke(ch.searchTasks, { q: 1 })).toMatchObject(invalid)
-    expect(await ipc.invoke(ch.searchTasks, 'x'.repeat(201))).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.searchTasks.channel, { q: 1 })).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.searchTasks.channel, 'x'.repeat(201))).toMatchObject(invalid)
     expect(service.searchTasks).toHaveBeenCalledTimes(1)
   })
 
-  it('erro inesperado vira mensagem genérica; origem não confiável é recusada', async () => {
+  it('erro inesperado vira mensagem genérica; force é normalizado', async () => {
     const { ipc, service } = setup()
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const result = await ipc.invoke(ch.listTasks, 'proj-1')
+    const result = await ipc.invoke(ch.listTasks.channel, 'proj-1', { force: 'yes' })
+    expect(service.listTasks).toHaveBeenCalledWith('proj-1', { force: false })
     expect(JSON.stringify(result)).not.toContain('SECRET')
     expect(result).toMatchObject({ ok: false, error: { code: 'unexpected' } })
     expect(errors.mock.calls.flat().join(' ')).not.toContain('SECRET')
     errors.mockRestore()
-
-    ipc.trusted = false
-    await expect(ipc.invoke(ch.getStatus)).rejects.toThrow('não autorizada')
-    expect(service.getStatus).not.toHaveBeenCalled()
   })
 })
 
-describe('registerSignalsIpc', () => {
-  it('valida o id do projeto, normaliza force e não vaza erro', async () => {
+describe('signals', () => {
+  const ch = ORKIO_API.signals
+  it('valida ids, normaliza force e não vaza erro', async () => {
     const ipc = fakeIpc()
     const service = {
       get: vi.fn(async () => {
         throw new Error('gho_SECRET')
       })
     }
-    registerSignalsIpc(ipc, service as never, guard)
-    expect(await ipc.invoke(IPC_CHANNELS.signals.get, '../x')).toMatchObject({
-      ok: false,
-      error: { code: 'invalid' }
-    })
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const result = await ipc.invoke(IPC_CHANNELS.signals.get, 'proj-1', { force: 1 })
-    expect(service.get).toHaveBeenCalledWith('proj-1', { force: false })
-    expect(JSON.stringify(result)).not.toContain('SECRET')
-    expect(errors.mock.calls.flat().join(' ')).not.toContain('SECRET')
-    errors.mockRestore()
-  })
-})
-
-describe('registerSignalsIpc: reviewThreads', () => {
-  it('valida os ids, normaliza force e não vaza erro', async () => {
-    const ipc = fakeIpc()
     const reviews = {
       get: vi
         .fn()
         .mockResolvedValueOnce({ ok: false, code: 'no_pr', message: 'Sem PR.' })
         .mockRejectedValueOnce(new Error('gho_SECRET'))
     }
-    registerSignalsIpc(ipc, { get: vi.fn() } as never, guard, Promise.resolve(), reviews as never)
-    const ch = IPC_CHANNELS.signals.reviewThreads
-    expect(await ipc.invoke(ch, '../x', 'task')).toMatchObject({ ok: false })
-    expect(await ipc.invoke(ch, 'proj-1', { id: 1 })).toMatchObject({ ok: false })
+    registerGroup(ipc, options(), ch, signalsHandlers(service as never, reviews as never))
+    expect(await ipc.invoke(ch.get.channel, '../x')).toMatchObject(invalid)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const result = await ipc.invoke(ch.get.channel, 'proj-1', { force: 1 })
+    expect(service.get).toHaveBeenCalledWith('proj-1', { force: false })
+    expect(JSON.stringify(result)).not.toContain('SECRET')
+
+    expect(await ipc.invoke(ch.reviewThreads.channel, '../x', TASK)).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.reviewThreads.channel, 'proj-1', { id: 1 })).toMatchObject(invalid)
     expect(reviews.get).not.toHaveBeenCalled()
-    expect(await ipc.invoke(ch, 'proj-1', 'task-1', { force: 1 })).toEqual({
+    expect(await ipc.invoke(ch.reviewThreads.channel, 'proj-1', TASK, { force: 1 })).toEqual({
       ok: false,
       error: { code: 'no_pr', message: 'Sem PR.' }
     })
-    expect(reviews.get).toHaveBeenCalledWith('proj-1', 'task-1', false)
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const failed = await ipc.invoke(ch, 'proj-1', 'task-1', { force: true })
-    expect(reviews.get).toHaveBeenLastCalledWith('proj-1', 'task-1', true)
+    expect(reviews.get).toHaveBeenCalledWith('proj-1', TASK, false)
+    const failed = await ipc.invoke(ch.reviewThreads.channel, 'proj-1', TASK, { force: true })
+    expect(reviews.get).toHaveBeenLastCalledWith('proj-1', TASK, true)
     expect(JSON.stringify(failed)).not.toContain('SECRET')
     expect(errors.mock.calls.flat().join(' ')).not.toContain('SECRET')
     errors.mockRestore()
-    ipc.trusted = false
-    await expect(ipc.invoke(ch, 'proj-1', 'task-1')).rejects.toThrow('não autorizada')
   })
 })
 
@@ -600,10 +729,15 @@ describe('allowlist: PRs do GitHub', () => {
     expect(isAllowedExternalUrl('https://github.com/acme/app/tree/x/../../settings')).toBe(false)
     expect(isAllowedExternalUrl('https://github.com/acme/app/blob/main/x')).toBe(false)
   })
+
+  it('branch e "Criar a PR" aceitam o mesmo owner que a PR (conta gerenciada, com `_`)', () => {
+    expect(isAllowedExternalUrl('https://github.com/ana_acme/app/pull/12')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/ana_acme/app/tree/feat/x')).toBe(true)
+    expect(isAllowedExternalUrl('https://github.com/ana_acme/app/compare/main...feat/x')).toBe(true)
+  })
 })
 
-describe('registerBoardIpc', () => {
-  const TASK = '11111111-1111-4111-8111-000000000001'
+describe('board e flow', () => {
   it('valida ids, etapas e o formato do salvar', async () => {
     const ipc = fakeIpc()
     const ok = async () => ({ ok: true as const, value: null as never })
@@ -616,122 +750,54 @@ describe('registerBoardIpc', () => {
       retryNow: vi.fn(),
       setAutomationPaused: vi.fn(ok)
     }
-    registerBoardIpc(ipc, service, guard)
-    const ch = IPC_CHANNELS.board
-    const invalid = { ok: false, error: { code: 'invalid' } }
+    const ch = ORKIO_API.board
+    registerGroup(ipc, options(), ch, boardHandlers(service))
 
-    expect(await ipc.invoke(ch.move, 'p1', 'não-é-id', 'stage-1')).toMatchObject(invalid)
-    expect(await ipc.invoke(ch.move, 'p1', TASK, '../x')).toMatchObject(invalid)
-    await ipc.invoke(ch.move, 'p1', TASK, 'stage-1')
-    expect(service.move).toHaveBeenCalledWith('p1', TASK, 'stage-1')
+    expect(await ipc.invoke(ch.move.channel, 'p1', 'não-é-id', 'stage-1')).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.move.channel, 'p1', TASK, '../x')).toMatchObject(invalid)
+    await ipc.invoke(ch.move.channel, 'p1', TASK, 'stage_1')
+    expect(service.move).toHaveBeenCalledWith('p1', TASK, 'stage_1')
 
-    expect(await ipc.invoke(ch.setBlocked, 'p1', TASK, 'sim')).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.setBlocked.channel, 'p1', TASK, 'sim')).toMatchObject(invalid)
     const input = {
       stages: [{ id: null, name: 'Prioridades', notionStatusId: 'o1' }],
       orkioStage: { mode: 'existing', propertyId: 'sel' },
       addMissingOptions: false,
       blockedPropertyId: null
     }
-    await ipc.invoke(ch.save, 'p1', input)
+    await ipc.invoke(ch.save.channel, 'p1', input)
     expect(service.save).toHaveBeenCalledWith('p1', input)
-    expect(
-      await ipc.invoke(ch.save, 'p1', { ...input, orkioStage: { mode: 'hack' } })
-    ).toMatchObject(invalid)
-    expect(await ipc.invoke(ch.save, 'p1', { ...input, stages: [] })).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.save.channel, 'p1', { ...input, stages: [] })).toMatchObject(invalid)
     expect(service.save).toHaveBeenCalledTimes(1)
-
-    await ipc.invoke(ch.setAutomationPaused, 'p1', TASK, true)
+    await ipc.invoke(ch.setAutomationPaused.channel, 'p1', TASK, true)
     expect(service.setAutomationPaused).toHaveBeenCalledWith('p1', TASK, true)
-    expect(await ipc.invoke(ch.setAutomationPaused, 'p1', TASK, 'sim')).toMatchObject(invalid)
-
-    ipc.trusted = false
-    await expect(ipc.invoke(ch.get, 'p1')).rejects.toThrow('não autorizada')
   })
-})
 
-describe('registerAutomationIpc', () => {
-  it('valida id e booleano; erro vira estado genérico', async () => {
-    const ipc = fakeIpc()
-    const status = {
-      paused: false,
-      github: 'ok' as const,
-      lastRunAt: null,
-      nextRunAt: null,
-      error: null
-    }
-    const service = {
-      status: vi.fn(() => status),
-      runNow: vi.fn(async () => status),
-      setPaused: vi.fn(async () => {
-        throw new Error('gho_SECRET')
-      })
-    }
-    registerAutomationIpc(ipc, service, guard)
-    const ch = IPC_CHANNELS.automation
-    await ipc.invoke(ch.runNow, 'p1')
-    expect(service.runNow).toHaveBeenCalledWith('p1')
-    await ipc.invoke(ch.runNow, '../x')
-    expect(service.runNow).toHaveBeenCalledTimes(1)
-    await ipc.invoke(ch.setPaused, 'sim')
-    expect(service.setPaused).not.toHaveBeenCalled()
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const result = await ipc.invoke(ch.setPaused, true)
-    expect(JSON.stringify(result)).not.toContain('SECRET')
-    errors.mockRestore()
-  })
-})
-
-describe('registerFlowIpc / isFlowDraft', () => {
-  it('aceita só a forma do rascunho; descarta campos estranhos nas regras', async () => {
-    const draft = {
-      stages: [{ id: 'stage-1', name: 'A', notionStatusId: 'o1' }],
-      rules: [
-        {
-          id: 'r1',
-          name: 'r',
-          enabled: true,
-          trigger: 'pr.merged',
-          action: { type: 'move_to_stage', stageId: 'stage-1' },
-          exec: 'rm -rf /'
-        }
-      ],
-      removals: { 'stage-2': 'stage-1' }
-    }
-    expect(isFlowDraft(draft)).toBe(true)
-    expect(JSON.stringify(draft.rules)).not.toContain('exec')
-    expect(
-      isFlowDraft({ ...draft, stages: [{ id: '../x', name: 'A', notionStatusId: null }] })
-    ).toBe(false)
-    expect(isFlowDraft({ ...draft, rules: [{ id: 'x', trigger: 'pr.hack' }] })).toBe(false)
-    expect(isFlowDraft({ ...draft, removals: { 'stage-2': '../y' } })).toBe(false)
-
+  it('flow: forma do rascunho, exportar e importar', async () => {
     const ipc = fakeIpc()
     const service = {
       saveFlow: vi.fn(async () => ({ ok: true as const, value: null as never })),
       configEvents: vi.fn(async () => [])
     }
     const files = { save: vi.fn(async () => null), open: vi.fn(async () => '{oops') }
-    registerFlowIpc(ipc, service, files, guard)
-    expect(await ipc.invoke(IPC_CHANNELS.flow.save, 'p1', { stages: 'x' })).toMatchObject({
-      ok: false,
-      error: { code: 'invalid' }
-    })
-    expect(await ipc.invoke(IPC_CHANNELS.flow.exportFile, { a: 1 })).toEqual({
+    const ch = ORKIO_API.flow
+    registerGroup(ipc, options(), ch, flowHandlers(service, files))
+    expect(await ipc.invoke(ch.save.channel, 'p1', { stages: 'x' })).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.events.channel, '../x')).toEqual([])
+    expect(await ipc.invoke(ch.exportFile.channel, { a: 1 })).toEqual({
       ok: false,
       cancelled: true
     })
-    expect(await ipc.invoke(IPC_CHANNELS.flow.importFile)).toMatchObject({
-      ok: false,
-      cancelled: false
-    })
+    expect(await ipc.invoke(ch.importFile.channel)).toMatchObject({ ok: false, cancelled: false })
   })
 })
 
-describe('registerAgentsIpc', () => {
+describe('agentes e orquestrador', () => {
   const ANA = defaultAgent({ id: 'ana', name: 'Ana', instructions: 'Testes sempre.' })
   const state = { projectId: 'p1', agents: [], rules: [] }
+  const ch = ORKIO_API.agents
 
-  function setup(): { ipc: FakeIpc; service: Record<string, ReturnType<typeof vi.fn>> } {
+  function setup() {
     const ipc = fakeIpc()
     const service = {
       list: vi.fn(async () => state),
@@ -741,25 +807,29 @@ describe('registerAgentsIpc', () => {
       setRules: vi.fn(async () => state),
       badges: vi.fn(async () => ({}))
     }
-    registerAgentsIpc(ipc, service as unknown as AgentsService, guard)
-    return { ipc, service }
+    const orchestrator = {
+      state: vi.fn(async () => ({})),
+      save: vi.fn(async () => ({})),
+      tick: vi.fn(async () => undefined)
+    }
+    registerGroup(
+      ipc,
+      options(),
+      ch,
+      agentsHandlers(
+        service as unknown as AgentsService,
+        orchestrator as unknown as OrchestratorService
+      )
+    )
+    return { ipc, service, orchestrator }
   }
-
-  it('recusa origem não confiável', async () => {
-    const { ipc, service } = setup()
-    ipc.trusted = false
-    await expect(ipc.invoke(IPC_CHANNELS.agents.list, 'p1')).rejects.toThrow(/não autorizada/)
-    expect(service['list']).not.toHaveBeenCalled()
-  })
 
   it('valida o payload antes de chegar ao serviço', async () => {
     const { ipc, service } = setup()
-    const save = (input: unknown): Promise<unknown> => ipc.invoke(IPC_CHANNELS.agents.save, input)
+    const save = (input: unknown): Promise<unknown> => ipc.invoke(ch.save.channel, input)
     expect(
       await save({ projectId: 'p1', scope: 'nuvem', profile: ANA, isNew: true })
-    ).toMatchObject({
-      ok: false
-    })
+    ).toMatchObject({ ok: false })
     expect(
       await save({
         projectId: 'p1',
@@ -770,58 +840,192 @@ describe('registerAgentsIpc', () => {
     ).toMatchObject({ ok: false })
     expect(
       await save({ projectId: '../x', scope: 'repo', profile: ANA, isNew: true })
-    ).toMatchObject({
-      ok: false
-    })
-    expect(service['save']).not.toHaveBeenCalled()
+    ).toMatchObject({ ok: false })
+    expect(service.save).not.toHaveBeenCalled()
     expect(await save({ projectId: 'p1', scope: 'repo', profile: ANA, isNew: true })).toEqual({
       ok: true,
       value: state
     })
-    expect(await ipc.invoke(IPC_CHANNELS.agents.assign, 'p1', 't1', 'nuvem:ana')).toMatchObject({
-      ok: false,
-      error: { code: 'invalid' }
-    })
-    expect(await ipc.invoke(IPC_CHANNELS.agents.approve, 'p1', 'repo:ana', 'curto')).toMatchObject({
-      ok: false
-    })
+    expect(await ipc.invoke(ch.assign.channel, 'p1', TASK, 'nuvem:ana')).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.approve.channel, 'p1', 'repo:ana', 'curto')).toMatchObject(invalid)
     expect(
-      await ipc.invoke(IPC_CHANNELS.agents.setRules, 'p1', [{ stageId: 's1', agentKey: 'x' }])
-    ).toMatchObject({ ok: false })
+      await ipc.invoke(ch.setRules.channel, 'p1', [{ stageId: 's1', agentKey: 'x' }])
+    ).toMatchObject(invalid)
+  })
+
+  it('regras e orquestrador aceitam etapa com "_" como o quadro (antes: "Pedido inválido")', async () => {
+    const { ipc, service, orchestrator } = setup()
+    expect(
+      await ipc.invoke(ch.setRules.channel, 'p1', [
+        { stageId: 'em_andamento', agentKey: 'repo:ana' }
+      ])
+    ).toMatchObject({ ok: true })
+    expect(service.setRules).toHaveBeenCalledWith('p1', [
+      { stageId: 'em_andamento', agentKey: 'repo:ana' }
+    ])
+    const config = {
+      enabled: true,
+      queueStageId: null,
+      maxActive: 2,
+      lanes: [{ stageId: 'em_andamento', agents: ['repo:ana'], next: 'revisao_final' }]
+    }
+    expect(await ipc.invoke(ch.saveOrchestrator.channel, 'p1', config)).toMatchObject({
+      ok: true
+    })
+    expect(orchestrator.save).toHaveBeenCalled()
   })
 
   it('erros esperados do serviço viram mensagem; inesperados, mensagem genérica', async () => {
     const { ipc, service } = setup()
-    service['assign']!.mockRejectedValueOnce(new AgentError('busy', 'Tem fluxo.'))
-    expect(await ipc.invoke(IPC_CHANNELS.agents.assign, 'p1', 't1', 'repo:ana')).toEqual({
+    service.assign.mockRejectedValueOnce(new AgentError('busy', 'Tem fluxo.'))
+    expect(await ipc.invoke(ch.assign.channel, 'p1', TASK, 'repo:ana')).toEqual({
       ok: false,
       error: { code: 'busy', message: 'Tem fluxo.' }
     })
-    service['assign']!.mockRejectedValueOnce(new Error('segredo ghp_xxxxxxxxxxxxxxxxxxxxxxxx'))
-    const r = await ipc.invoke(IPC_CHANNELS.agents.assign, 'p1', 't1', null)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    service.assign.mockRejectedValueOnce(new Error('segredo ghp_xxxxxxxxxxxxxxxxxxxxxxxx'))
+    const r = await ipc.invoke(ch.assign.channel, 'p1', TASK, null)
     expect(JSON.stringify(r)).not.toContain('ghp_')
+    expect(r).toMatchObject({ ok: false, error: { code: 'unexpected' } })
+    errors.mockRestore()
   })
 
-  it('payload com modelo/raciocínio inválido não vira agente válido; nome longo vale', () => {
-    const bad = toProfile({ ...ANA, model: '--x' })
-    expect(bad && validateAgent(bad)).toContain('Modelo inválido')
-    const ultra = toProfile({ ...ANA, effort: 'ultra' })
-    expect(ultra && validateAgent(ultra)).toContain('Raciocínio inválido')
-    const long = toProfile({ ...ANA, model: 'claude-sonnet-4-5-20250929', effort: 'high' })
-    expect(long).not.toBeNull()
-    expect(long && validateAgent(long)).toEqual([])
-  })
-
-  it('toProfile só aceita a forma certa', () => {
-    expect(toProfile(ANA)).toEqual(ANA)
-    expect(toProfile({ ...ANA, commands: 'tudo' })).toBeNull()
-    expect(toProfile({ ...ANA, limits: null })).toBeNull()
-    expect(toProfile([])).toBeNull()
-    expect(toProfile({ ...ANA, effort: 7 })).toBeNull()
+  it('erro de domínio em método sem Result (badges) devolve o fallback, não um Result', async () => {
+    const { ipc, service } = setup()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    service.badges.mockRejectedValueOnce(new AgentError('busy', 'Tem fluxo.'))
+    expect(await ipc.invoke(ch.badges.channel, 'p1')).toEqual({})
+    errors.mockRestore()
   })
 })
 
-describe('updates IPC (6C)', () => {
+describe('taskFlows', () => {
+  const ch = ORKIO_API.taskFlows
+
+  function deps(over: Partial<OpenPrDeps> = {}): OpenPrDeps {
+    return {
+      linked: () => false,
+      alvaReady: async () => true,
+      compareUrl: () => 'https://github.com/o/r/compare/main...feat/x?expand=1',
+      alreadyPushed: async () => false,
+      startBuiltin: vi.fn(async () => ({}) as never),
+      ...over
+    }
+  }
+
+  function setup(openPr: OpenPrDeps = deps(), runner: Partial<FlowRunner> = {}) {
+    const ipc = fakeIpc()
+    registerGroup(
+      ipc,
+      options(),
+      ch,
+      taskFlowsHandlers({} as FlowsService, runner as FlowRunner, openPr)
+    )
+    return ipc
+  }
+
+  it('openPr: payload inválido → pedido inválido; resultado no Result', async () => {
+    const ipc = setup()
+    for (const args of [
+      ['../x', TASK],
+      ['p1', 5],
+      [undefined, undefined]
+    ]) {
+      expect(await ipc.invoke(ch.openPr.channel, ...args)).toMatchObject(invalid)
+    }
+    expect(await ipc.invoke(ch.openPr.channel, 'p1', TASK)).toEqual({
+      ok: true,
+      value: {
+        started: true,
+        mode: 'push',
+        compareUrl: 'https://github.com/o/r/compare/main...feat/x?expand=1'
+      }
+    })
+  })
+
+  it('FlowError e DeliveryError viram a mensagem pt-BR; desconhecido, genérica', async () => {
+    const busy = setup(
+      deps({
+        startBuiltin: async () => {
+          throw new FlowError('busy', 'Já há um fluxo nesta tarefa.')
+        }
+      })
+    )
+    expect(await busy.invoke(ch.openPr.channel, 'p1', TASK)).toEqual({
+      ok: false,
+      error: { code: 'busy', message: 'Já há um fluxo nesta tarefa.' }
+    })
+    const noTree = setup(
+      deps({
+        compareUrl: () => {
+          throw new DeliveryError('no_worktree', 'Esta tarefa ainda não tem ambiente.')
+        }
+      })
+    )
+    expect(await noTree.invoke(ch.openPr.channel, 'p1', TASK)).toEqual({
+      ok: false,
+      error: { code: 'no_worktree', message: 'Esta tarefa ainda não tem ambiente.' }
+    })
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const unknown = setup(
+      deps({
+        compareUrl: () => {
+          throw new Error('segredo-interno')
+        }
+      })
+    )
+    const r = await unknown.invoke(ch.openPr.channel, 'p1', TASK)
+    expect(JSON.stringify(r)).not.toContain('segredo-interno')
+    expect(r).toMatchObject({
+      ok: false,
+      error: { code: 'unexpected', message: 'Algo deu errado no fluxo. Tente novamente.' }
+    })
+    spy.mockRestore()
+  })
+
+  it('pedido de ajuste longo chega ao runner (mensagem do domínio, não "Pedido inválido")', async () => {
+    const reviseGate = vi.fn(async () => {
+      throw new FlowError('invalid_reply', 'O pedido de ajuste passa de 8000 caracteres.')
+    })
+    const ipc = setup(deps(), { reviseGate } as Partial<FlowRunner>)
+    const text = 'x'.repeat(9000)
+    expect(await ipc.invoke(ch.reviseGate.channel, 'p1', TASK, text)).toEqual({
+      ok: false,
+      error: { code: 'invalid_reply', message: 'O pedido de ajuste passa de 8000 caracteres.' }
+    })
+    expect(reviseGate).toHaveBeenCalledWith(TASK, text, 'p1')
+  })
+
+  it('aprovar gate: valores só de revisores válidos', async () => {
+    const approveGate = vi.fn(async () => ({}) as never)
+    const ipc = setup(deps(), { approveGate } as Partial<FlowRunner>)
+    expect(await ipc.invoke(ch.approve.channel, 'run-1', ['ok', '$(rm)'])).toMatchObject(invalid)
+    await ipc.invoke(ch.approve.channel, 'run-1', ['ana', 'team:core'])
+    await ipc.invoke(ch.approve.channel, 'run-1')
+    expect(approveGate.mock.calls).toEqual([
+      ['run-1', ['ana', 'team:core']],
+      ['run-1', undefined]
+    ])
+  })
+})
+
+describe('claude', () => {
+  it('catálogo da pasta do projeto (sem tarefa) usa null; texto qualquer não é tarefa', async () => {
+    const ipc = fakeIpc()
+    const catalog = vi.fn(async () => ({ ok: true as const, value: [] }))
+    const ch = ORKIO_API.claude
+    registerGroup(ipc, options(), ch, claudeHandlers({ catalog } as never, {} as never))
+    expect(await ipc.invoke(ch.catalog.channel, 'p1', null)).toEqual({ ok: true, value: [] })
+    await ipc.invoke(ch.catalog.channel, 'p1', TASK)
+    expect(await ipc.invoke(ch.catalog.channel, 'p1', 'projeto')).toMatchObject(invalid)
+    expect(catalog.mock.calls).toEqual([
+      ['p1', null],
+      ['p1', TASK]
+    ])
+  })
+})
+
+describe('updates', () => {
   function service(): UpdatesIpcService {
     const status = {
       mode: 'auto' as const,
@@ -838,7 +1042,9 @@ describe('updates IPC (6C)', () => {
     }
     return {
       getStatus: vi.fn(() => status),
-      check: vi.fn(async () => status),
+      check: vi.fn(async () => {
+        throw new Error('rede')
+      }),
       setChannel: vi.fn(async () => status),
       install: vi.fn(async () => ({ state: 'installing' as const })),
       openDownload: vi.fn(async () => true),
@@ -848,20 +1054,37 @@ describe('updates IPC (6C)', () => {
     }
   }
 
-  it('valida canal e modo de instalação; recusa origem não confiável', async () => {
+  it('valida canal e modo; erro e canal inválido devolvem o status atual', async () => {
     const ipc = fakeIpc()
     const s = service()
-    registerUpdatesIpc(ipc, s, () => ({ version: '1.0.0', links: null }), guard)
-    const ch = IPC_CHANNELS.updates
-    await ipc.invoke(ch.setChannel, 'nightly')
+    const ch = ORKIO_API.updates
+    registerGroup(
+      ipc,
+      options(),
+      ch,
+      updatesHandlers(
+        s,
+        () => ({ version: '1.0.0', links: null }),
+        async () => 'diag'
+      )
+    )
+    expect(await ipc.invoke(ch.setChannel.channel, 'nightly')).toMatchObject({ phase: 'idle' })
     expect(s.setChannel).not.toHaveBeenCalled()
-    await ipc.invoke(ch.setChannel, 'beta')
+    await ipc.invoke(ch.setChannel.channel, 'beta')
     expect(s.setChannel).toHaveBeenCalledWith('beta')
-    expect(await ipc.invoke(ch.install, 'rm -rf')).toMatchObject({ state: 'unavailable' })
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(await ipc.invoke(ch.check.channel)).toMatchObject({ phase: 'idle' })
+    errors.mockRestore()
+    expect(await ipc.invoke(ch.install.channel, 'rm -rf')).toEqual({
+      state: 'unavailable',
+      message: 'Pedido inválido.'
+    })
     expect(s.install).not.toHaveBeenCalled()
-    expect(await ipc.invoke(ch.install, 'when_idle')).toEqual({ state: 'installing' })
+    expect(await ipc.invoke(ch.install.channel, 'when_idle')).toEqual({ state: 'installing' })
     ipc.trusted = false
-    await expect(ipc.invoke(ch.install, 'now')).rejects.toThrow('Origem de IPC não autorizada')
+    await expect(ipc.invoke(ch.install.channel, 'now')).rejects.toThrow(
+      'Origem de IPC não autorizada'
+    )
     expect(s.install).toHaveBeenCalledTimes(1)
   })
 })

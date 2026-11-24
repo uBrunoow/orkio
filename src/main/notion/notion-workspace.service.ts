@@ -5,31 +5,9 @@
  * Roda no main. Fala com o Notion só via `NotionWorkspaceApi` (fornecida pelo NotionConnector,
  * que guarda o token). Salva no ConfigStore apenas ids e nomes, nunca conteúdo de páginas.
  */
-import type {
-  NotionDataSourceList,
-  NotionDataSourceSummary,
-  NotionMapping,
-  NotionMappingField,
-  NotionProjectChoice,
-  NotionProjectPage,
-  NotionPropertySummary,
-  NotionResult,
-  NotionTask,
-  NotionTaskHit,
-  NotionTaskSearchResult,
-  NotionTasksResult,
-  NotionTasksSchemaInfo,
-  NotionWorkspaceConfig,
-  NotionWorkspaceInput,
-  NotionWorkspaceStatus
-} from '../../shared/ipc-contract'
 import type { StatusOption } from '../../shared/board'
 import type { OrkioConfig } from '../config/orkio-config'
-import {
-  NotionApiError,
-  type NotionListPage,
-  type NotionQueryOptions
-} from '../connectors/notion/notion.client'
+import { type NotionListPage, type NotionQueryOptions } from '../connectors/notion/notion.client'
 import {
   REQUIRED_FIELDS,
   checkMapping,
@@ -48,6 +26,27 @@ import {
   type NotionDataSourceSchema
 } from '../connectors/notion/notion.schema'
 import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
+import type {
+  NotionDataSourceList,
+  NotionDataSourceSummary,
+  NotionMapping,
+  NotionMappingField,
+  NotionProjectChoice,
+  NotionProjectPage,
+  NotionPropertySummary,
+  NotionTask,
+  NotionTaskHit,
+  NotionTaskSearchResult,
+  NotionTasksResult,
+  NotionTasksSchemaInfo,
+  NotionWorkspaceConfig,
+  NotionWorkspaceInput,
+  NotionWorkspaceStatus
+} from '../../shared/notion'
+import type { Result } from '../../shared/result'
+import { projectById } from '../config/queries'
+import { isApiError } from '../net/http'
+import { canReconnect } from '../../shared/notion-errors'
 
 /** O que o serviço precisa do conector do Notion (o token fica lá dentro). */
 export interface NotionWorkspaceApi {
@@ -75,10 +74,9 @@ export const NOTION_READ_LIMIT = 500
 export const NOTION_CACHE_TTL_MS = 60_000
 
 export const WORKSPACE_MESSAGES = {
-  notConfigured: 'Configure os bancos do Notion em Integrações antes de continuar.',
+  notConfigured: 'Configure os bancos do Notion antes de continuar.',
   notLinked: 'Vincule este projeto a um projeto do Notion para ver as tarefas.',
-  broken:
-    'O mapeamento das Tarefas do Notion precisa ser revisto em Integrações antes de ler tarefas.',
+  broken: 'O mapeamento das Tarefas do Notion precisa ser revisto antes de ler tarefas.',
   sameDataSource: 'Escolha bancos diferentes para Projetos e Tarefas.',
   projectNotFound: 'Projeto não encontrado. Atualize a lista.',
   pageNotFound: 'Esse projeto do Notion não está mais no banco de Projetos. Atualize a lista.',
@@ -87,16 +85,16 @@ export const WORKSPACE_MESSAGES = {
   storage: 'Não foi possível salvar a configuração. Tente novamente.',
   unknown: 'Algo deu errado ao falar com o Notion. Tente novamente.',
   invalidSchema: 'O Notion devolveu um banco em formato inesperado. Tente novamente.',
-  notConnected: 'Conecte o Notion em Integrações para usar os bancos de Projetos e Tarefas.',
+  notConnected: 'Conecte o Notion para usar os bancos de Projetos e Tarefas.',
   noAssignee:
-    'Mapeie o campo Responsável (Pessoas) das Tarefas em Integrações: o Orkio mostra só as ' +
+    'Mapeie o campo Responsável (Pessoas) das Tarefas: o Orkio mostra só as ' +
     'tarefas em que você é responsável.',
   noPerson:
     'Não deu para saber quem é você no Notion: esta conexão é de uma integração do workspace. ' +
-    'Conecte com “Entrar com Notion” em Integrações para ver as suas tarefas.'
+    'Conecte com “Entrar com Notion” para ver as suas tarefas.'
 } as const
 
-type Err = Extract<NotionResult<never>, { ok: false }>['error']
+type Err = Extract<Result<never>, { ok: false }>['error']
 
 class WorkspaceError extends Error {
   constructor(readonly info: Err) {
@@ -132,8 +130,6 @@ export class NotionWorkspaceService {
     this.now = deps.now ?? (() => new Date())
     this.ttl = deps.cacheTtlMs ?? NOTION_CACHE_TTL_MS
   }
-
-  // ---------- Estado e revalidação ----------
 
   /**
    * Estado atual; na primeira chamada revalida o schema no Notion. Se a conexão do Notion mudou
@@ -223,10 +219,8 @@ export class NotionWorkspaceService {
     return status
   }
 
-  // ---------- Assistente ----------
-
   /** Data sources compartilhados com o Orkio (até NOTION_READ_LIMIT). */
-  async listDataSources(query?: string): Promise<NotionResult<NotionDataSourceList>> {
+  async listDataSources(query?: string): Promise<Result<NotionDataSourceList>> {
     return this.wrap(async () => {
       const connection = await this.deps.notion.connectionMethod()
       const { items, truncated } = await this.paginate((cursor) =>
@@ -245,7 +239,7 @@ export class NotionWorkspaceService {
   async getTasksSchema(
     tasksDataSourceId: string,
     projectsDataSourceId: string
-  ): Promise<NotionResult<NotionTasksSchemaInfo>> {
+  ): Promise<Result<NotionTasksSchemaInfo>> {
     return this.wrap(async () => {
       if (sameId(tasksDataSourceId, projectsDataSourceId)) {
         throw new WorkspaceError({ code: 'invalid', message: WORKSPACE_MESSAGES.sameDataSource })
@@ -257,7 +251,7 @@ export class NotionWorkspaceService {
   }
 
   /** Valida no Notion e salva a configuração. Trocar o banco de Projetos desfaz os vínculos. */
-  async saveConfig(input: NotionWorkspaceInput): Promise<NotionResult<NotionWorkspaceStatus>> {
+  async saveConfig(input: NotionWorkspaceInput): Promise<Result<NotionWorkspaceStatus>> {
     return this.wrap(async () => {
       if (sameId(input.tasksDataSourceId, input.projectsDataSourceId)) {
         throw new WorkspaceError({ code: 'invalid', message: WORKSPACE_MESSAGES.sameDataSource })
@@ -325,27 +319,11 @@ export class NotionWorkspaceService {
     })
   }
 
-  /** Remove a configuração dos bancos e os vínculos (nada é apagado no Notion). */
-  async clearConfig(): Promise<NotionResult<NotionWorkspaceStatus>> {
-    return this.wrap(async () => {
-      await this.save((c) => ({
-        ...c,
-        notion: null,
-        projects: c.projects.map((p) => ({ ...p, notionProject: null }))
-      }))
-      this.invalidate()
-      const connection = await this.deps.notion.connectionMethod().catch(() => null)
-      return this.setStatus({ config: null, health: 'ok', messages: [], connection })
-    })
-  }
-
-  // ---------- Vínculo projeto local ↔ Notion ----------
-
   /** Páginas do banco de Projetos, ordenadas pela semelhança com o projeto local. */
   async listProjectChoices(
     projectId: string,
     options: { force?: boolean } = {}
-  ): Promise<NotionResult<{ choices: NotionProjectChoice[]; truncated: boolean }>> {
+  ): Promise<Result<{ choices: NotionProjectChoice[]; truncated: boolean }>> {
     return this.wrap(async () => {
       const config = this.requireConfig()
       const project = this.findProject(projectId)
@@ -370,10 +348,7 @@ export class NotionWorkspaceService {
     })
   }
 
-  async link(
-    projectId: string,
-    pageId: string
-  ): Promise<NotionResult<{ id: string; name: string }>> {
+  async link(projectId: string, pageId: string): Promise<Result<{ id: string; name: string }>> {
     return this.wrap(async () => {
       const config = this.requireConfig()
       this.findProject(projectId)
@@ -402,7 +377,7 @@ export class NotionWorkspaceService {
     })
   }
 
-  async unlink(projectId: string): Promise<NotionResult<null>> {
+  async unlink(projectId: string): Promise<Result<null>> {
     return this.wrap(async () => {
       this.findProject(projectId)
       await this.save((c) => ({
@@ -414,13 +389,11 @@ export class NotionWorkspaceService {
     })
   }
 
-  // ---------- Tarefas ----------
-
   /** Tarefas do projeto vinculado (relação contém a página), até NOTION_READ_LIMIT. Cache de 60 s. */
   async listTasks(
     projectId: string,
     options: { force?: boolean } = {}
-  ): Promise<NotionResult<NotionTasksResult>> {
+  ): Promise<Result<NotionTasksResult>> {
     return this.wrap(async () => {
       const { value, fromCache } = await this.loadTasks(projectId, options.force === true)
       return {
@@ -437,7 +410,7 @@ export class NotionWorkspaceService {
    * número do ID (ORK-142 / 142). Texto vazio = as 20 editadas mais recentemente. Sem cache: é
    * uma consulta só (20 itens) a cada busca, que passa pela fila de rate limit do conector.
    */
-  async searchTasks(query: string): Promise<NotionResult<NotionTaskSearchResult>> {
+  async searchTasks(query: string): Promise<Result<NotionTaskSearchResult>> {
     return this.wrap(async () => {
       const config = this.requireConfig()
       const status = await this.getStatus()
@@ -483,7 +456,7 @@ export class NotionWorkspaceService {
     projectId: string,
     options: { force?: boolean } = {}
   ): Promise<
-    NotionResult<
+    Result<
       CachedTasks & {
         fromCache: boolean
         mapping: NotionMapping
@@ -501,7 +474,7 @@ export class NotionWorkspaceService {
 
   /** Opções atuais do status mapeado (relê o schema das Tarefas). */
   async statusOptions(): Promise<
-    NotionResult<{
+    Result<{
       options: StatusOption[]
       statusType: string
       properties: NotionPropertySummary[]
@@ -512,7 +485,11 @@ export class NotionWorkspaceService {
       const schema = await this.loadSchema(config.tasksDataSource.id)
       const property = schema.properties.find((p) => p.id === config.mapping.status.id)
       if (!property) {
-        throw new WorkspaceError({ code: 'broken', message: WORKSPACE_MESSAGES.broken })
+        throw new WorkspaceError({
+          code: 'broken',
+          message: WORKSPACE_MESSAGES.broken,
+          fixAt: 'integrations'
+        })
       }
       return {
         options: (property.options ?? []).map((o) => ({ id: o.id, name: o.name, color: o.color })),
@@ -557,13 +534,18 @@ export class NotionWorkspaceService {
     if (status.health === 'broken') {
       throw new WorkspaceError({
         code: 'broken',
-        message: [WORKSPACE_MESSAGES.broken, ...status.messages].join(' ')
+        message: [WORKSPACE_MESSAGES.broken, ...status.messages].join(' '),
+        fixAt: 'integrations'
       })
     }
     const mapping = status.config?.mapping ?? config.mapping
     const assignee = mapping.assignee
     if (!assignee) {
-      throw new WorkspaceError({ code: 'broken', message: WORKSPACE_MESSAGES.noAssignee })
+      throw new WorkspaceError({
+        code: 'broken',
+        message: WORKSPACE_MESSAGES.noAssignee,
+        fixAt: 'integrations'
+      })
     }
     // Sempre só as tarefas da pessoa logada no Notion (nunca as de todo o projeto).
     const personId = await this.deps.notion.currentPersonId()
@@ -571,7 +553,8 @@ export class NotionWorkspaceService {
       throw new WorkspaceError({
         code: 'no_person',
         message: WORKSPACE_MESSAGES.noPerson,
-        canReconnect: true
+        canReconnect: true,
+        fixAt: 'integrations'
       })
     }
 
@@ -607,8 +590,6 @@ export class NotionWorkspaceService {
     return { value, fromCache: false }
   }
 
-  // ---------- Auxiliares ----------
-
   private config(): OrkioConfig {
     return this.deps.store.get()
   }
@@ -618,14 +599,15 @@ export class NotionWorkspaceService {
     if (!config) {
       throw new WorkspaceError({
         code: 'not_configured',
-        message: WORKSPACE_MESSAGES.notConfigured
+        message: WORKSPACE_MESSAGES.notConfigured,
+        fixAt: 'integrations'
       })
     }
     return config
   }
 
   private findProject(projectId: string) {
-    const project = this.config().projects.find((p) => p.id === projectId)
+    const project = projectById(this.config(), projectId)
     if (!project) {
       throw new WorkspaceError({ code: 'not_found', message: WORKSPACE_MESSAGES.projectNotFound })
     }
@@ -657,7 +639,6 @@ export class NotionWorkspaceService {
     return value
   }
 
-  /** Lê páginas até o fim ou até NOTION_READ_LIMIT itens. */
   private async paginate(
     fetchPage: (cursor: string | null) => Promise<NotionListPage>
   ): Promise<{ items: unknown[]; truncated: boolean }> {
@@ -700,21 +681,16 @@ export class NotionWorkspaceService {
     }
   }
 
-  private async wrap<T>(run: () => Promise<T>): Promise<NotionResult<T>> {
+  private async wrap<T>(run: () => Promise<T>): Promise<Result<T>> {
     try {
       return { ok: true, value: await run() }
     } catch (e) {
       const error = toError(e)
-      // OAuth só enxerga o que foi escolhido na autorização: conteúdo "sumido" ou sem acesso
-      // costuma se resolver reconectando e marcando os bancos.
-      if (
-        (error.code === 'not_found' || error.code === 'forbidden') &&
-        e instanceof NotionApiError &&
-        (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth'
-      ) {
-        return { ok: false, error: { ...error, canReconnect: true } }
-      }
-      if (error.code === 'unauthorized' || error.code === 'invalid_grant') {
+      // O método só conta para erros da API (404/403 em OAuth).
+      const method = isApiError(e, 'notion')
+        ? await this.deps.notion.connectionMethod().catch(() => null)
+        : null
+      if (canReconnect(error.code, method, 'read')) {
         return { ok: false, error: { ...error, canReconnect: true } }
       }
       return { ok: false, error }
@@ -724,6 +700,6 @@ export class NotionWorkspaceService {
 
 function toError(e: unknown): Err {
   if (e instanceof WorkspaceError) return e.info
-  if (e instanceof NotionApiError) return { code: e.code, message: e.message }
+  if (isApiError(e, 'notion')) return { code: e.code, message: e.message }
   return { code: 'unexpected', message: WORKSPACE_MESSAGES.unknown }
 }

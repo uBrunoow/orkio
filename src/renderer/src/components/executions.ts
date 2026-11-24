@@ -11,64 +11,66 @@ export interface Execution {
   text: string
 }
 
-/**
- * Execuções de uma automação: os eventos de automação que citam a regra pelo nome
- * (`describeEvent` escreve `regra “Nome”`). Mais novas primeiro, como a atividade.
- */
-export function ruleExecutions(items: readonly ActivityItem[], ruleName: string): Execution[] {
-  const needle = `regra “${ruleName}”`
-  return items
-    .filter((i) => i.group === 'automation' && i.text.includes(needle))
-    .map((i) => {
-      const skipped = i.text.includes(' ignorada (')
-      const notified = i.text.includes(': notificação (')
-      return {
-        id: i.id,
-        at: i.at,
-        task: i.task,
-        text: i.text,
-        outcome: skipped ? 'Ignorada' : notified ? 'Notificou' : 'Moveu a tarefa',
-        tone: skipped ? 'neutral' : 'success'
-      }
-    })
+/** Resultado de um evento da regra na lista (`null` = o evento não conta como execução dela). */
+function ruleOutcome(i: ActivityItem, ruleId: string): Pick<Execution, 'outcome' | 'tone'> | null {
+  if (i.kind === 'moved') {
+    return i.source === 'automation' && i.detail.ruleId === ruleId
+      ? { outcome: 'Moveu a tarefa', tone: 'success' }
+      : null
+  }
+  if (i.kind !== 'automation' || i.detail.ruleId !== ruleId) return null
+  switch (i.detail.outcome) {
+    case 'skipped':
+      return { outcome: 'Ignorada', tone: 'neutral' }
+    case 'notify':
+      return { outcome: 'Notificou', tone: 'success' }
+    default:
+      return null
+  }
 }
 
-const FLOW_END: Record<string, { outcome: string; tone: StatusTone }> = {
-  'Fluxo concluído': { outcome: 'Concluído', tone: 'success' },
-  'Fluxo encerrado (recusado)': { outcome: 'Recusado', tone: 'danger' },
-  'Fluxo cancelado': { outcome: 'Cancelado', tone: 'neutral' }
+/** Execuções de uma automação (pelo id da regra no evento). Mais novas primeiro, como a atividade. */
+export function ruleExecutions(items: readonly ActivityItem[], ruleId: string): Execution[] {
+  return items.flatMap((i) => {
+    const result = ruleOutcome(i, ruleId)
+    return result ? [{ id: i.id, at: i.at, task: i.task, text: i.text, ...result }] : []
+  })
 }
 
+const FLOW_END = {
+  done: { outcome: 'Concluído', tone: 'success' },
+  rejected: { outcome: 'Recusado', tone: 'danger' },
+  cancelled: { outcome: 'Cancelado', tone: 'neutral' }
+} as const satisfies Record<string, Pick<Execution, 'outcome' | 'tone'>>
+
 /**
- * Execuções de um fluxo: cada "Fluxo iniciado: Nome" com o primeiro fim seguinte da mesma tarefa
- * (concluído, recusado ou cancelado). Sem fim ainda: "Em andamento". Mais novas primeiro.
+ * Execuções de um fluxo: cada início com o fim da mesma execução (`flowRunId`). Sem fim ainda:
+ * "Em andamento". Eventos gravados antes do `flowId` casam pelo nome do fluxo. Mais novas primeiro.
  */
-export function flowExecutions(items: readonly ActivityItem[], flowName: string): Execution[] {
-  const flowItems = items.filter((i) => i.group === 'flow')
-  const startText = `Fluxo iniciado: ${flowName}`
-  const isStart = (i: ActivityItem): boolean =>
-    i.text === startText || i.text.startsWith(`${startText} por `)
-  return flowItems.filter(isStart).map((start) => {
-    // Eventos da mesma tarefa depois do início, do mais antigo ao mais novo.
-    const after = flowItems
-      .filter((i) => i.task.taskId === start.task.taskId && i.id > start.id)
-      .sort((a, b) => a.id - b.id)
-    let end: ActivityItem | undefined
-    for (const i of after) {
-      if (i.text.startsWith('Fluxo iniciado: ')) break
-      if (FLOW_END[i.text]) {
-        end = i
-        break
+export function flowExecutions(
+  items: readonly ActivityItem[],
+  flow: { id: string; name: string }
+): Execution[] {
+  return items.flatMap((start) => {
+    if (start.kind !== 'flow_started') return []
+    const { flowId, flow: name, flowRunId } = start.detail
+    if (flowId !== undefined ? flowId !== flow.id : name !== flow.name) return []
+    const end = items.find(
+      (i) => i.kind === 'flow_finished' && flowRunId && i.detail.flowRunId === flowRunId
+    )
+    const result =
+      end?.kind === 'flow_finished'
+        ? FLOW_END[end.detail.result ?? 'done']
+        : { outcome: 'Em andamento', tone: 'running' as const }
+    return [
+      {
+        id: start.id,
+        at: start.at,
+        task: start.task,
+        text: start.text,
+        outcome: result.outcome,
+        tone: result.tone
       }
-    }
-    const result = end ? FLOW_END[end.text]! : { outcome: 'Em andamento', tone: 'running' as const }
-    return {
-      id: start.id,
-      at: start.at,
-      task: start.task,
-      text: start.text,
-      outcome: result.outcome,
-      tone: result.tone
-    }
+    ]
   })
 }

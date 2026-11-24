@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { OverviewResult } from '../../../../shared/ipc-contract'
+import { useCallback, useState } from 'react'
+import { useSources } from '../../app/sources'
+import { ipcResult, useSource } from '../../lib/ipc'
 import type { OverviewSnapshot } from '../../../../shared/overview'
-
-/** Relê a visão (só dados locais) a cada minuto com a janela visível: PRs e saúde mudam sozinhos. */
-const RELOAD_MS = 60_000
 
 export interface OverviewState {
   snapshot: OverviewSnapshot | null
@@ -14,59 +12,26 @@ export interface OverviewState {
   refresh(): Promise<void>
 }
 
+/** Visão geral (só dados locais), uma para o App: lista lateral, sino, Quadro e Agentes. */
 export function useOverview(): OverviewState {
-  const [snapshot, setSnapshot] = useState<OverviewSnapshot | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { overview } = useSources()
+  const state = useSource(overview, '')
   const [refreshing, setRefreshing] = useState(false)
-  const alive = useRef(true)
-
-  const apply = useCallback((result: OverviewResult<OverviewSnapshot> | null) => {
-    if (!alive.current) return
-    if (result?.ok) {
-      setSnapshot(result.value)
-      setError(null)
-    } else {
-      setError(result?.error.message ?? 'Não foi possível montar a Visão geral. Tente atualizar.')
-    }
-    setLoading(false)
-  }, [])
-
-  useEffect(() => {
-    alive.current = true
-    const load = (): void => {
-      void window.orkio.overview
-        .get()
-        .catch(() => null)
-        .then(apply)
-    }
-    load()
-    const off = window.orkio.overview.onChanged(load)
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') load()
-    }, RELOAD_MS)
-    return () => {
-      alive.current = false
-      off()
-      clearInterval(timer)
-    }
-  }, [apply])
+  const [refreshError, setRefreshError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setRefreshing(true)
-    try {
-      const result = await window.orkio.overview.refresh()
-      if (!alive.current) return
-      if (result.ok) {
-        setSnapshot(result.value)
-        setError(null)
-      } else setError(result.error.message)
-    } catch {
-      if (alive.current) setError('Não foi possível atualizar. Tente de novo.')
-    } finally {
-      if (alive.current) setRefreshing(false)
-    }
-  }, [])
+    const result = await ipcResult(() => window.orkio.overview.refresh())
+    if (result.ok) overview.set('', result.value)
+    setRefreshError(result.ok ? null : result.error.message)
+    setRefreshing(false)
+  }, [overview])
 
-  return { snapshot, error, loading, refreshing, refresh }
+  return {
+    snapshot: state.value,
+    error: refreshError ?? state.error?.message ?? null,
+    loading: state.loading && state.value === null,
+    refreshing,
+    refresh
+  }
 }

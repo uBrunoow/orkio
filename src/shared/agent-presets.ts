@@ -7,13 +7,25 @@
  * Mesmas regras de qualquer agente: só instruções, modelo e limites por cima do Claude Code do
  * usuário. Nenhuma permissão a mais; os que não entregam têm `delivery: false`.
  */
-import { defaultAgent, type AgentProfile } from './agent'
+import { agentKey, defaultAgent, parseAgentKey, type AgentKey, type AgentProfile } from './agent'
+import { BRIEFING_PATH } from './orkio-scratch'
 
-const COMMON = `Trabalhe só no worktree da tarefa. O briefing está em .orkio/briefing.md: leia antes de começar. Siga as convenções do repositório (CLAUDE.md, README, padrões do código vizinho). Quando faltar informação para decidir, pergunte em vez de supor. Termine com um resumo curto do que fez e do que ficou pendente.`
+/** Ids dos embutidos que outras partes do app escolhem por nome (ex.: sugestão do orquestrador). */
+export const BUILTIN_AGENT_IDS = {
+  implementer: 'implementador',
+  reviewer: 'revisor'
+} as const
+
+export const BUILTIN_AGENT_KEYS: Record<keyof typeof BUILTIN_AGENT_IDS, AgentKey> = {
+  implementer: agentKey('builtin', BUILTIN_AGENT_IDS.implementer),
+  reviewer: agentKey('builtin', BUILTIN_AGENT_IDS.reviewer)
+}
+
+const COMMON = `Trabalhe só no worktree da tarefa. O briefing está em ${BRIEFING_PATH}: leia antes de começar. Siga as convenções do repositório (CLAUDE.md, README, padrões do código vizinho). Quando faltar informação para decidir, pergunte em vez de supor. Termine com um resumo curto do que fez e do que ficou pendente.`
 
 export const BUILTIN_AGENTS: readonly AgentProfile[] = [
   defaultAgent({
-    id: 'implementador',
+    id: BUILTIN_AGENT_IDS.implementer,
     name: 'Implementador',
     role: 'implementer',
     color: 'orange',
@@ -29,7 +41,7 @@ export const BUILTIN_AGENTS: readonly AgentProfile[] = [
 ${COMMON}`
   }),
   defaultAgent({
-    id: 'revisor',
+    id: BUILTIN_AGENT_IDS.reviewer,
     name: 'Revisor',
     role: 'reviewer',
     color: 'blue',
@@ -111,4 +123,22 @@ ${COMMON}`
 
 export function builtinAgent(id: string): AgentProfile | null {
   return BUILTIN_AGENTS.find((a) => a.id === id) ?? null
+}
+
+/**
+ * Nome do agente para o histórico e a tela: o do catálogo (embutido), senão o último nome visto
+ * (`seen`: perfis lidos), senão o id. Nunca o id de um embutido ("implementador" em minúsculas).
+ */
+export function agentDisplayName(
+  key: AgentKey,
+  seen?: ReadonlyMap<AgentKey, string | { name: string }>
+): string {
+  const parsed = parseAgentKey(key)
+  if (parsed?.scope === 'builtin') {
+    const builtin = builtinAgent(parsed.id)
+    if (builtin) return builtin.name
+  }
+  const known = seen?.get(key)
+  if (known) return typeof known === 'string' ? known : known.name
+  return parsed?.id ?? key
 }

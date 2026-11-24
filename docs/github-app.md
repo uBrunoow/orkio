@@ -76,10 +76,9 @@ No projeto do site (_Settings → Environment Variables_, ambiente **Production*
 - Firewall: estenda a regra de _Rate Limit_ do intermediário (ver `site/README.md`) para o caminho
   `/github/` (20 requisições / 60 s por IP). O site também tem um limitador em memória por IP.
 
-O app usa a origem de `MAIN_VITE_SITE_URL` e, só sem ela, a do intermediário do Notion
-(`MAIN_VITE_NOTION_OAUTH_BROKER_URL`; o intermediário ainda pode ser o Worker da Cloudflare, que não
-tem a rota: nesse caso defina `MAIN_VITE_SITE_URL`). Sem nenhuma das duas, o app mostra "O GitHub
-App do Orkio ainda não está configurado no site."
+O app usa a origem de `MAIN_VITE_SITE_URL`, a mesma do intermediário do Notion (`/notion/*`) e dos
+links de Configurações > Sobre. Sem ela, o app mostra "Este app não sabe o endereço do site do
+Orkio"
 
 ## 3. Instalar o App no repositório
 

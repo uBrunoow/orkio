@@ -7,50 +7,48 @@
  * e não armazena tokens. Aqui ficam: config, URL de autorização, client do intermediário e
  * a leitura da resposta de token.
  */
+import {
+  ApiError,
+  genericStatusError,
+  requestJson,
+  unexpectedError,
+  type ApiTarget
+} from '../../net/http'
 import { httpsUrlOrNull, isRecord, stringOrNull } from '../../net/parse'
-import { NOTION_API_BASE_URL, NotionApiError } from './notion.client'
+import { NOTION_OAUTH_REDIRECT_URI } from '../../../shared/site-contract'
+import { NOTION_API_BASE_URL } from './notion.client'
+
+/** Cadastrada em "Redirect URIs" da conexão OAuth no Notion e no intermediário (site). */
+export { NOTION_OAUTH_REDIRECT_URI }
 
 export const NOTION_OAUTH_AUTHORIZE_URL = `${NOTION_API_BASE_URL}/oauth/authorize`
-/** Precisa estar cadastrada em "Redirect URIs" da conexão OAuth no Notion e no intermediário. */
-// `localhost` e não `127.0.0.1`: o Notion recusa IP em redirect URI. O servidor local escuta só em
-// 127.0.0.1 (loopback.ts) e confere o header Host.
-export const NOTION_OAUTH_REDIRECT_URI = 'http://localhost:47821/oauth/notion/callback'
 /** Tempo máximo para o usuário autorizar no navegador. */
 export const NOTION_OAUTH_TIMEOUT_MS = 5 * 60_000
 export const NOTION_BROKER_TIMEOUT_MS = 15_000
 
 export interface NotionOAuthConfig {
   clientId: string
-  /** URL base do intermediário, sem barra no final. */
-  brokerUrl: string
-}
-
-export interface NotionOAuthEnv {
-  MAIN_VITE_NOTION_OAUTH_CLIENT_ID?: string | undefined
-  MAIN_VITE_NOTION_OAUTH_BROKER_URL?: string | undefined
+  /** Origem do site do Orkio (`siteOrigin()`); o intermediário fica em `<site>/notion/*`. */
+  siteOrigin: string
 }
 
 /**
- * Lê a config de build (variáveis MAIN_VITE_*). Devolve null se faltar algo, se a URL do
- * intermediário não for https (http só é aceito em loopback, para desenvolvimento) ou se ela
- * apontar para o próprio servidor de retorno do app (a porta do redirect URI): esse servidor só
- * existe durante o login e não troca códigos, então a troca falharia sempre como "sem internet".
+ * Config do login com Notion: client ID (público) e a origem do site, já conferida por
+ * `siteOrigin()`. `null` se faltar algo ou se o site apontar para o próprio servidor de retorno
+ * do app (a porta do redirect URI): esse servidor só existe durante o login e não troca códigos,
+ * então a troca falharia sempre como "sem internet".
  */
-export function readNotionOAuthConfig(env: NotionOAuthEnv): NotionOAuthConfig | null {
-  const clientId = (env.MAIN_VITE_NOTION_OAUTH_CLIENT_ID ?? '').trim()
-  const brokerRaw = (env.MAIN_VITE_NOTION_OAUTH_BROKER_URL ?? '').trim()
-  if (!clientId || !brokerRaw || /\s/.test(clientId)) return null
-  let broker: URL
-  try {
-    broker = new URL(brokerRaw)
-  } catch {
+export function readNotionOAuthConfig(
+  clientIdRaw: string | undefined,
+  siteOrigin: string | null
+): NotionOAuthConfig | null {
+  const clientId = (clientIdRaw ?? '').trim()
+  if (!clientId || /\s/.test(clientId) || !siteOrigin) return null
+  const site = new URL(siteOrigin)
+  if (isLoopbackHost(site.hostname) && site.port === new URL(NOTION_OAUTH_REDIRECT_URI).port) {
     return null
   }
-  const loopback = isLoopbackHost(broker.hostname)
-  if (broker.protocol !== 'https:' && !(broker.protocol === 'http:' && loopback)) return null
-  if (broker.search || broker.hash || broker.username || broker.password) return null
-  if (loopback && broker.port === new URL(NOTION_OAUTH_REDIRECT_URI).port) return null
-  return { clientId, brokerUrl: broker.href.replace(/\/+$/, '') }
+  return { clientId, siteOrigin }
 }
 
 function isLoopbackHost(hostname: string): boolean {
@@ -122,56 +120,42 @@ export interface NotionOAuthBrokerDeps {
   timeoutMs?: number
 }
 
+/** Erros do intermediário são do login do Notion (o conector os trata como do Notion). */
+const BROKER: ApiTarget = { service: 'notion', label: 'o serviço de login do Orkio' }
+
 export function createNotionOAuthBroker(
   config: NotionOAuthConfig,
   deps: NotionOAuthBrokerDeps = {}
 ): NotionOAuthBroker {
-  const doFetch: typeof fetch = (...args) => (deps.fetch ?? globalThis.fetch)(...args)
   const timeoutMs = deps.timeoutMs ?? NOTION_BROKER_TIMEOUT_MS
-  const brokerOrigin = new URL(config.brokerUrl)
+  const brokerOrigin = new URL(config.siteOrigin)
   // Só a origem (sem caminho) entra nas mensagens: é config de build, não é segredo.
   const unreachable = isLoopbackHost(brokerOrigin.hostname)
     ? `Não foi possível falar com o intermediário de login local (${brokerOrigin.origin}). Em ` +
       'desenvolvimento, rode o site (pnpm --dir site dev) ou aponte ' +
-      'MAIN_VITE_NOTION_OAUTH_BROKER_URL para o site publicado.'
+      'MAIN_VITE_SITE_URL para o site publicado.'
     : `Não foi possível falar com o serviço de login do Orkio (${brokerOrigin.host}). Verifique ` +
       'sua internet e tente de novo.'
 
   async function post(path: string, payload: Record<string, string>): Promise<NotionTokenSet> {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-    let response: Response
-    try {
-      response = await doFetch(`${config.brokerUrl}${path}`, {
+    const response = await requestJson(
+      {
+        url: `${config.siteOrigin}${path}`,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      })
-    } catch {
-      throw controller.signal.aborted
-        ? new NotionApiError(
-            'timeout',
-            'O serviço de login do Orkio demorou demais para responder. Tente novamente.'
-          )
-        : new NotionApiError('network', unreachable)
-    } finally {
-      clearTimeout(timer)
-    }
-
-    let body: unknown = null
-    try {
-      body = await response.json()
-    } catch {
-      // corpo vazio ou não-JSON: tratado abaixo pelo status
-    }
-
+        body: JSON.stringify(payload)
+      },
+      { ...BROKER, fetch: deps.fetch, timeoutMs, messages: { network: unreachable } }
+    )
     if (response.ok) {
-      const tokens = parseNotionTokenResponse(body)
-      if (!tokens) throw brokerUnexpected(response.status)
+      const tokens = parseNotionTokenResponse(response.body)
+      if (!tokens) throw unexpectedError(BROKER, response.status)
       return tokens
     }
-    throw brokerError(response.status, isRecord(body) ? stringOrNull(body['error']) : null)
+    throw brokerError(
+      response.status,
+      isRecord(response.body) ? stringOrNull(response.body['error']) : null
+    )
   }
 
   return {
@@ -180,16 +164,18 @@ export function createNotionOAuthBroker(
   }
 }
 
-function brokerError(status: number, error: string | null): NotionApiError {
+function brokerError(status: number, error: string | null): ApiError {
   if (error === 'invalid_grant') {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'invalid_grant',
       'Sua autorização do Notion expirou ou foi revogada. Conecte o Notion de novo.',
       status
     )
   }
   if (error === 'redirect_uri_not_allowed') {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'oauth_config',
       'O serviço de login do Orkio recusou o endereço de retorno deste app (configuração do ' +
         'intermediário). Avise quem mantém o Orkio. Enquanto isso, use um token.',
@@ -197,33 +183,20 @@ function brokerError(status: number, error: string | null): NotionApiError {
     )
   }
   if (error === 'invalid_client' || error === 'unauthorized_client' || status === 401) {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'oauth_config',
       'O login com Notion está mal configurado nesta versão do Orkio. Avise quem mantém o app.',
       status
     )
   }
   if (status === 429) {
-    return new NotionApiError(
+    return new ApiError(
+      'notion',
       'rate_limited',
       'Muitas tentativas de login seguidas. Aguarde um pouco e tente de novo.',
       status
     )
   }
-  if (status >= 500) {
-    return new NotionApiError(
-      'server',
-      `O serviço de login está instável agora (erro ${status}). Tente novamente em instantes.`,
-      status
-    )
-  }
-  return brokerUnexpected(status)
-}
-
-function brokerUnexpected(status: number): NotionApiError {
-  return new NotionApiError(
-    'unexpected',
-    `Resposta inesperada do serviço de login (HTTP ${status}). Tente novamente.`,
-    status
-  )
+  return genericStatusError(BROKER, status)
 }

@@ -7,13 +7,21 @@
  * - Mover/bloquear: grava localmente na hora (otimista) e enfileira a escrita no Notion
  *   (NotionWriteQueue), que confirma, tenta de novo ou desfaz.
  */
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import { WEEK_MS } from '../../shared/overview'
 import type { StageFlow } from '../../shared/task-flow'
-import { defaultRules } from '../../shared/automation'
+import { defaultRules, type AutomationRule } from '../../shared/automation'
 import { upgradeAlvaFlows } from '../../shared/alva-templates'
-import { diffFlow, toBoardStages, validateFlow, type FlowDraft } from '../../shared/flow'
 import {
-  findOption,
+  diffFlow,
+  toBoardStages,
+  validateFlow,
+  type FlowDraft,
+  type ConfigEvent
+} from '../../shared/flow'
+import {
+  BOARD_SETUP_MESSAGES,
+  ORKIO_STAGE_PROPERTY_NAME,
   reconcile,
   stageMatchesStatus,
   suggestStages,
@@ -21,40 +29,42 @@ import {
   type BoardConfig,
   type BoardStage,
   type ReconcileTask,
-  type StatusOption
+  type StatusOption,
+  type BoardCard,
+  type BoardHistoryEntry,
+  type BoardSaveInput,
+  type BoardSyncEvent,
+  type BoardView
 } from '../../shared/board'
-import type {
-  BoardCard,
-  BoardHistoryEntry,
-  BoardSaveInput,
-  BoardSyncEvent,
-  BoardView,
-  ConfigEvent,
-  NotionMapping,
-  NotionPropertySummary,
-  NotionResult
-} from '../../shared/ipc-contract'
 import type { OrkioConfig } from '../config/orkio-config'
-import { NotionApiError } from '../connectors/notion/notion.client'
-import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
+import { projectFlows, withProjectFlows } from '../config/queries'
+import {
+  applyPropertyWrites,
+  propertyWritesMatch,
+  type PropertyWrite,
+  type PropertyWrites
+} from '../connectors/notion/notion.schema'
 import type { CachedTasks } from '../notion/notion-workspace.service'
 import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
 import type { BoardStore, PendingWrite } from './board.store'
-import type { NotionWriteQueue } from './write-queue'
+import { NotionWriteQueue, type WriteQueueDeps } from './write-queue'
+import type { Tx } from '../db/database'
+import type { NotionMapping, NotionPropertySummary } from '../../shared/notion'
+import type { Result } from '../../shared/result'
+import { isApiError } from '../net/http'
+import { canReconnect, type NotionConnectionMethod } from '../../shared/notion-errors'
 
-type Err = Extract<NotionResult<never>, { ok: false }>['error']
+type Err = Extract<Result<never>, { ok: false }>['error']
 
 export interface BoardNotion {
   boardTasks(
     projectId: string,
     options?: { force?: boolean }
   ): Promise<
-    NotionResult<
-      CachedTasks & { fromCache: boolean; mapping: NotionMapping; tasksDataSourceId: string }
-    >
+    Result<CachedTasks & { fromCache: boolean; mapping: NotionMapping; tasksDataSourceId: string }>
   >
   statusOptions(): Promise<
-    NotionResult<{
+    Result<{
       options: StatusOption[]
       statusType: string
       properties: NotionPropertySummary[]
@@ -69,7 +79,11 @@ export interface BoardServiceDeps {
   config: ConfigStore<OrkioConfig>
   store: BoardStore
   notion: BoardNotion
-  /** A fila é criada fora (precisa dos callbacks deste serviço): ligue com `attachQueue`. */
+  /**
+   * Fila de escrita no Notion, criada aqui (as respostas dela voltam para este serviço). O token
+   * fica no conector: `updatePage` só repassa.
+   */
+  writes: Omit<WriteQueueDeps, 'store' | 'onSynced' | 'onRejected' | 'onRetry'>
   onSync(event: BoardSyncEvent): void
   now?: () => Date
   newId?: () => string
@@ -78,10 +92,11 @@ export interface BoardServiceDeps {
   /** "Quem" nos eventos de configuração (usuário do sistema operacional). */
   actor?: () => string
   /**
-   * A etapa local de uma tarefa mudou (5A: fluxos). Chamado dentro da transação; quem ouve deve
+   * A etapa local de uma tarefa mudou (`enterStage`, `stage-entry.ts`). Sempre depois de gravar o
+   * evento no histórico e dentro da mesma transação, qualquer que seja a origem; quem ouve deve
    * adiar o trabalho. `source` diz se foi entrada real (manual/automação) ou não.
    */
-  onStageChanged?: (change: StageChange) => void
+  enterStage(change: StageChange): void
 }
 
 export interface StageChange {
@@ -101,17 +116,13 @@ export const BOARD_MESSAGES = {
   storage: 'Não foi possível salvar a configuração do quadro. Tente novamente.',
   readOnly: 'As configurações estão em modo só leitura. Atualize o Orkio para salvar mudanças.',
   unknown: 'Algo deu errado no quadro. Tente novamente.',
-  stageNeedsOption: 'Escolha uma opção de status do Notion que exista para cada etapa.',
-  orkioPropertyExists:
-    'Já existe uma propriedade “Etapa Orkio” no banco de Tarefas. Escolha “usar existente”.',
-  orkioPropertyInvalid: 'Escolha uma propriedade do tipo seleção (select) para a Etapa Orkio.',
-  blockedPropertyInvalid:
-    'Escolha uma propriedade do tipo caixa de seleção (checkbox) para Bloqueada.',
+  stageNeedsOption: BOARD_SETUP_MESSAGES.stageNeedsOption,
+  orkioPropertyExists: BOARD_SETUP_MESSAGES.orkioPropertyExists,
+  orkioPropertyInvalid: BOARD_SETUP_MESSAGES.orkioPropertyInvalid,
+  blockedPropertyInvalid: BOARD_SETUP_MESSAGES.blockedPropertyInvalid,
   pending: 'Aguardando o Notion…',
   retrying: 'Sem conexão com o Notion: a mudança será enviada assim que possível.'
 } as const
-
-export const ORKIO_STAGE_PROPERTY_NAME = 'Etapa Orkio'
 
 class BoardError extends Error {
   constructor(readonly info: Err) {
@@ -129,14 +140,12 @@ export class BoardService {
   private readonly now: () => Date
   private readonly newId: () => string
   private readonly graceMs: number
-  private queue: NotionWriteQueue | null = null
+  /** Escritas pendentes no Notion (persistidas no SQLite): `start`/`stop` ficam com a composição. */
+  readonly writes: NotionWriteQueue
   /** Últimas tarefas lidas por projeto (mover offline usa os valores conhecidos do Notion). */
   private readonly snapshots = new Map<string, Snapshot>()
   /** Escritas confirmadas há pouco: o Notion pode ainda devolver o valor antigo na consulta. */
-  private readonly recent = new Map<
-    string,
-    { properties: Record<string, unknown>; until: number }
-  >()
+  private readonly recent = new Map<string, { properties: PropertyWrites; until: number }>()
   /** Última mensagem de falha transitória por tarefa (exibida no card). */
   private readonly retryMessages = new Map<string, string>()
 
@@ -144,18 +153,16 @@ export class BoardService {
     this.now = deps.now ?? (() => new Date())
     this.newId = deps.newId ?? (() => `stage-${crypto.randomUUID()}`)
     this.graceMs = deps.graceMs ?? 30_000
+    this.writes = new NotionWriteQueue({
+      ...deps.writes,
+      store: deps.store,
+      onSynced: (w) => this.onSynced(w),
+      onRejected: (w, e) => void this.onRejected(w, e),
+      onRetry: (w, e) => this.onRetry(w, e)
+    })
   }
 
-  attachQueue(queue: NotionWriteQueue): void {
-    this.queue = queue
-  }
-
-  // ---------- Abrir / reconciliar ----------
-
-  async get(
-    projectId: string,
-    options: { force?: boolean } = {}
-  ): Promise<NotionResult<BoardView>> {
+  async get(projectId: string, options: { force?: boolean } = {}): Promise<Result<BoardView>> {
     return this.wrap(() => this.load(projectId, options.force === true))
   }
 
@@ -210,13 +217,12 @@ export class BoardService {
     const stages = validated.stages
     const config: BoardConfig = { ...board, stages }
 
-    // Reconciliação.
     const pending = new Set(this.deps.store.pendingForProject(projectId).map((w) => w.taskPageId))
     const nowMs = this.now().getTime()
     // "Atualizar" (force) é um pedido explícito pela verdade do Notion: sem janela de espera.
     if (force) this.recent.clear()
     for (const [taskId, recent] of this.recent) {
-      if (recent.until < nowMs || this.notionHas(data.values[taskId], recent.properties)) {
+      if (recent.until < nowMs || propertyWritesMatch(data.values[taskId], recent.properties)) {
         this.recent.delete(taskId)
       } else pending.add(taskId)
     }
@@ -251,28 +257,25 @@ export class BoardService {
             projectId,
             at,
             kind: 'added',
-            source: 'notion',
-            fromStage: null,
             toStage: d.stageId,
-            detail: null
+            detail: {}
           })
         } else if (d.from !== d.stageId) {
-          this.deps.onStageChanged?.({
-            projectId,
-            taskId: d.taskId,
-            from: d.from,
-            to: d.stageId,
-            source: 'notion'
-          })
           this.deps.store.addEvent({
             taskPageId: d.taskId,
             projectId,
             at,
             kind: 'reconciled',
-            source: 'notion',
             fromStage: d.from,
             toStage: d.stageId,
             detail: { status: reconcileTasks.find((t) => t.id === d.taskId)?.status?.name ?? null }
+          })
+          this.deps.enterStage({
+            projectId,
+            taskId: d.taskId,
+            from: d.from,
+            to: d.stageId,
+            source: 'notion'
           })
         }
         if (d.blockedChanged && d.from !== undefined) {
@@ -282,9 +285,7 @@ export class BoardService {
             at,
             kind: d.blocked ? 'blocked' : 'unblocked',
             source: 'notion',
-            fromStage: null,
-            toStage: null,
-            detail: null
+            detail: {}
           })
         }
       }
@@ -294,24 +295,13 @@ export class BoardService {
     const pendingNow = new Set(
       this.deps.store.pendingForProject(projectId).map((w) => w.taskPageId)
     )
-    const cards: BoardCard[] = data.tasks.map((t) => {
-      const d = byId.get(t.id)!
-      return {
-        taskId: t.id,
-        displayId: t.displayId,
-        title: t.title,
-        url: t.url,
-        status: t.status ? { name: t.status.name, color: t.status.color } : null,
-        priority: t.priority,
-        assignees: t.assignees,
-        stageId: d.stageId,
-        blocked: d.blocked,
+    const cards = data.tasks.map((t) =>
+      this.toCard(t, {
+        ...byId.get(t.id)!,
         automationPaused: states.get(t.id)?.automationPaused ?? false,
-        sync: pendingNow.has(t.id)
-          ? { state: 'pending', message: this.retryMessages.get(t.id) ?? BOARD_MESSAGES.pending }
-          : { state: 'synced' }
-      }
-    })
+        pending: pendingNow.has(t.id)
+      })
+    )
 
     return {
       ...base,
@@ -323,28 +313,28 @@ export class BoardService {
     }
   }
 
-  // ---------- Mover / bloquear ----------
-
-  async move(projectId: string, taskId: string, stageId: string): Promise<NotionResult<BoardCard>> {
+  async move(projectId: string, taskId: string, stageId: string): Promise<Result<BoardCard>> {
     return this.wrap(async () => {
       const moved = this.deps.store.transaction(() =>
         this.applyMove(projectId, taskId, stageId, { source: 'manual' })
       )
-      if (moved) this.queue?.kick()
+      if (moved) void this.writes.kick()
       return this.card(projectId, taskId)
     })
   }
 
   /**
-   * Mesmo caminho do movimento manual, para as automações (3B): estado local, evento com a chave
-   * de idempotência e a regra, e a escrita pendente no Notion. Chame dentro de uma transação
-   * (junto com o snapshot e a chave). Devolve se moveu.
+   * Mesmo caminho do movimento manual, para as automações (3B) e o orquestrador (8B): estado
+   * local, evento com a chave de idempotência e a regra, e a escrita pendente no Notion. Pede a
+   * transação de quem chama (`store.transaction((tx) => …)`): o movimento entra junto com o
+   * snapshot e a chave. Devolve se moveu.
    */
   applyAutomationMove(
+    _tx: Tx,
     projectId: string,
     taskId: string,
     stageId: string,
-    event: { key: string; detail: Record<string, unknown> }
+    event: { key: string; detail: TaskEventDetailInput<'moved'> }
   ): boolean {
     return this.applyMove(projectId, taskId, stageId, {
       source: 'automation',
@@ -353,9 +343,8 @@ export class BoardService {
     })
   }
 
-  /** Depois de um ciclo de automações: envia as escritas e avisa a tela. */
   flushWrites(): void {
-    this.queue?.kick()
+    void this.writes.kick()
   }
 
   /** As tarefas já foram carregadas nesta sessão (necessário para mover)? */
@@ -370,7 +359,7 @@ export class BoardService {
     options: {
       source: 'manual' | 'automation'
       eventKey?: string
-      detail?: Record<string, unknown>
+      detail?: TaskEventDetailInput<'moved'>
       /** Remoção de etapa na 3C: move sem contar como entrada (não dispara fluxos). */
       stageRemoved?: boolean
     }
@@ -395,20 +384,20 @@ export class BoardService {
       updatedAt: at,
       source: options.source
     })
-    const detail = { ...options.detail, ...statusChange }
     this.deps.store.addEvent({
       taskPageId: taskId,
       projectId,
       at,
       kind: 'moved',
-      source: options.source,
+      // Remoção de etapa é do Orkio: não conta como movimento manual (conflito das automações).
+      source: options.stageRemoved ? 'system' : options.source,
       fromStage: before.stageId,
       toStage: stageId,
-      detail: Object.keys(detail).length > 0 ? detail : null,
+      detail: { ...options.detail, ...statusChange },
       eventKey: options.eventKey ?? null
     })
     this.syncDesired(projectId, taskId, board, snapshot, before)
-    this.deps.onStageChanged?.({
+    this.deps.enterStage({
       projectId,
       taskId,
       from: before.stageId,
@@ -423,7 +412,7 @@ export class BoardService {
     projectId: string,
     taskId: string,
     paused: boolean
-  ): Promise<NotionResult<BoardCard>> {
+  ): Promise<Result<BoardCard>> {
     return this.wrap(async () => {
       this.context(projectId, taskId)
       const at = this.now().toISOString()
@@ -434,10 +423,7 @@ export class BoardService {
           projectId,
           at,
           kind: paused ? 'automation_paused' : 'automation_resumed',
-          source: 'manual',
-          fromStage: null,
-          toStage: null,
-          detail: null
+          detail: {}
         })
       })
       return this.card(projectId, taskId)
@@ -448,7 +434,7 @@ export class BoardService {
     projectId: string,
     taskId: string,
     blocked: boolean
-  ): Promise<NotionResult<BoardCard>> {
+  ): Promise<Result<BoardCard>> {
     return this.wrap(async () => {
       const { board, snapshot } = this.context(projectId, taskId)
       const before = this.localState(projectId, taskId)
@@ -469,34 +455,24 @@ export class BoardService {
           at,
           kind: blocked ? 'blocked' : 'unblocked',
           source: 'manual',
-          fromStage: null,
-          toStage: null,
-          detail: null
+          detail: {}
         })
         this.syncDesired(projectId, taskId, board, snapshot, before)
       })
-      this.queue?.kick()
+      void this.writes.kick()
       return this.card(projectId, taskId)
     })
   }
 
-  async history(projectId: string, taskId: string): Promise<NotionResult<BoardHistoryEntry[]>> {
+  async history(projectId: string, taskId: string): Promise<Result<BoardHistoryEntry[]>> {
     return this.wrap(async () => {
       this.project(projectId)
-      return this.deps.store.events(taskId).map((e) => ({
-        id: e.id,
-        at: e.at,
-        kind: e.kind,
-        source: e.source,
-        fromStage: e.fromStage,
-        toStage: e.toStage,
-        detail: e.detail
-      }))
+      return this.deps.store.events(taskId)
     })
   }
 
   retryNow(): void {
-    this.queue?.retryAllNow()
+    this.writes.retryAllNow()
   }
 
   /**
@@ -514,27 +490,26 @@ export class BoardService {
     const state = this.localState(projectId, taskId)
     const task = snapshot.data.tasks.find((t) => t.id === taskId)!
     const values = snapshot.data.values[taskId] ?? {}
-    const properties: Record<string, unknown> = {}
+    const properties: PropertyWrites = {}
     const stage = board.stages.find((s) => s.id === state.stageId)
     if (stage) {
       const status = task.status ? { id: task.status.id ?? null, name: task.status.name } : null
       if (!stageMatchesStatus(stage, status)) {
         const type = snapshot.statusType === 'select' ? 'select' : 'status'
-        properties[snapshot.data.mapping.status.id] = { [type]: { name: stage.notionStatus.name } }
+        properties[snapshot.data.mapping.status.id] = { type, name: stage.notionStatus.name }
       }
       const orkio = board.orkioStageProperty
-      if (orkio) {
-        const current = values[orkio.id]
-        if (!current || current.type === 'checkbox' || current.name !== stage.name) {
-          properties[orkio.id] = { select: { name: stage.name } }
-        }
+      if (orkio && !propertyWritesMatch(values, { [orkio.id]: orkioStage(stage.name) })) {
+        properties[orkio.id] = orkioStage(stage.name)
       }
     }
     const blockedProp = board.blockedProperty
     if (blockedProp) {
       const current = values[blockedProp.id]
       const notionBlocked = current?.type === 'checkbox' ? current.checked : false
-      if (notionBlocked !== state.blocked) properties[blockedProp.id] = { checkbox: state.blocked }
+      if (notionBlocked !== state.blocked) {
+        properties[blockedProp.id] = { type: 'checkbox', checked: state.blocked }
+      }
     }
 
     if (Object.keys(properties).length === 0) {
@@ -551,9 +526,7 @@ export class BoardService {
     })
   }
 
-  // ---------- Resultados da fila ----------
-
-  onSynced(write: PendingWrite): void {
+  private onSynced(write: PendingWrite): void {
     this.retryMessages.delete(write.taskPageId)
     this.recent.set(write.taskPageId, {
       properties: write.properties,
@@ -567,10 +540,8 @@ export class BoardService {
       projectId: write.projectId,
       at: this.now().toISOString(),
       kind: 'sync_ok',
-      source: 'manual',
-      fromStage: null,
       toStage: state.stageId,
-      detail: null
+      detail: {}
     })
     this.deps.onSync({
       projectId: write.projectId,
@@ -581,7 +552,10 @@ export class BoardService {
     })
   }
 
-  async onRejected(write: PendingWrite, error: { code: string; message: string }): Promise<void> {
+  private async onRejected(
+    write: PendingWrite,
+    error: { code: string; message: string }
+  ): Promise<void> {
     this.retryMessages.delete(write.taskPageId)
     const before = this.localState(write.projectId, write.taskPageId)
     const at = this.now().toISOString()
@@ -599,24 +573,21 @@ export class BoardService {
         projectId: write.projectId,
         at,
         kind: 'rolled_back',
-        source: 'manual',
         fromStage: before.stageId,
         toStage: write.rollback.stageId,
         detail: { code: error.code }
       })
+      if (before.stageId !== write.rollback.stageId) {
+        this.deps.enterStage({
+          projectId: write.projectId,
+          taskId: write.taskPageId,
+          from: before.stageId,
+          to: write.rollback.stageId,
+          source: 'rollback'
+        })
+      }
     })
-    if (before.stageId !== write.rollback.stageId) {
-      this.deps.onStageChanged?.({
-        projectId: write.projectId,
-        taskId: write.taskPageId,
-        from: before.stageId,
-        to: write.rollback.stageId,
-        source: 'rollback'
-      })
-    }
-    const canReconnect =
-      error.code === 'not_found' &&
-      (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth'
+    const reconnect = canReconnect(error.code, await this.connectionMethod(), 'write')
     this.deps.onSync({
       projectId: write.projectId,
       taskId: write.taskPageId,
@@ -624,15 +595,13 @@ export class BoardService {
       stageId: write.rollback.stageId,
       blocked: write.rollback.blocked,
       message: `O Notion recusou a mudança e o card voltou. ${error.message}`,
-      ...(canReconnect ? { canReconnect: true } : {})
+      ...(reconnect ? { canReconnect: true } : {})
     })
   }
 
-  onRetry(write: PendingWrite, error: { code: string; message: string }): void {
-    const auth =
-      error.code === 'unauthorized' ||
-      error.code === 'invalid_grant' ||
-      error.code === 'not_connected'
+  private onRetry(write: PendingWrite, error: { code: string; message: string }): void {
+    // Transitório: só a conexão perdida/expirada se resolve reconectando (não depende do método).
+    const auth = canReconnect(error.code, null, 'write')
     const message = auth
       ? `${error.message} A mudança será enviada depois de reconectar.`
       : BOARD_MESSAGES.retrying
@@ -649,146 +618,64 @@ export class BoardService {
     })
   }
 
-  // ---------- Fluxo (3C) ----------
-
   /**
-   * Salva etapas + automações do editor de fluxo. Valida de novo aqui (mesma função pura da tela),
-   * move as tarefas das etapas removidas para o destino escolhido (mesmo caminho do movimento
-   * manual, com escrita no Notion se o status mudar) e registra o evento de configuração.
+   * Salva etapas + automações do editor de fluxo (Colunas e Automações). Mesmo caminho do
+   * `save` (`commit`): mesma validação (`validateFlow`, a da tela), mesmas ligações e o mesmo
+   * destino das tarefas das etapas removidas.
    */
-  async saveFlow(projectId: string, draft: FlowDraft): Promise<NotionResult<BoardView>> {
+  async saveFlow(projectId: string, draft: FlowDraft): Promise<Result<BoardView>> {
     return this.wrap(async () => {
       this.project(projectId)
       const previous = this.deps.config.get().boards[projectId]
       if (!previous) {
         throw new BoardError({ code: 'not_configured', message: BOARD_MESSAGES.noBoard })
       }
-      const optionsResult = await this.deps.notion.statusOptions()
-      if (!optionsResult.ok) throw new BoardError(optionsResult.error)
-      const { options } = optionsResult.value
-
-      const issues = validateFlow(draft, {
-        statusOptions: options,
-        savedStageIds: previous.stages.map((s) => s.id),
-        taskCounts: this.deps.store.taskCounts(projectId)
-      }).filter((i) => i.level === 'error')
-      if (issues.length > 0) {
-        throw new BoardError({ code: 'invalid', message: issues.map((i) => i.message).join(' ') })
-      }
-
-      // Garante as tarefas em memória para mover as das etapas removidas.
-      if (!this.snapshots.has(projectId)) await this.load(projectId, false)
-
-      const stages = toBoardStages(draft.stages, options)
-      const board: BoardConfig = {
-        ...previous,
+      const options = await this.statusOptionsOrThrow()
+      const stages = this.checkedStages(projectId, draft, previous, options.options)
+      return this.commit(projectId, previous, {
         stages,
         rules: draft.rules,
-        updatedAt: this.now().toISOString()
-      }
-      // 5A: ligações etapa → fluxo de tarefa (só para etapas e fluxos que existem).
-      const current = this.deps.config.get().flows[projectId] ?? { flows: [], bindings: [] }
-      const flowIds = new Set(current.flows.map((f) => f.id))
-      const bindings = (draft.bindings ?? current.bindings).filter(
-        (b, i, all) =>
-          stages.some((st) => st.id === b.stageId) &&
-          flowIds.has(b.flowId) &&
-          all.findIndex((x) => x.stageId === b.stageId) === i
-      )
-      try {
-        await this.deps.config.update((c) => ({
-          ...c,
-          boards: { ...c.boards, [projectId]: board },
-          flows: { ...c.flows, [projectId]: { ...current, bindings } }
-        }))
-      } catch (e) {
-        throw new BoardError({
-          code: 'storage',
-          message:
-            e instanceof ConfigReadOnlyError ? BOARD_MESSAGES.readOnly : BOARD_MESSAGES.storage
-        })
-      }
-
-      const changes = diffFlow(previous, board)
-      changes.push(...diffBindings(current.bindings, bindings, stages, current.flows))
-      let moved = 0
-      this.deps.store.transaction(() => {
-        for (const removed of previous.stages) {
-          if (stages.some((s) => s.id === removed.id)) continue
-          const destination = draft.removals[removed.id]
-          const tasks = this.deps.store.tasksInStage(projectId, removed.id)
-          for (const taskId of tasks) {
-            if (
-              !destination ||
-              !this.snapshots.get(projectId)?.data.tasks.some((t) => t.id === taskId)
-            ) {
-              continue
-            }
-            if (
-              this.applyMove(projectId, taskId, destination, {
-                source: 'manual',
-                detail: { flow: 'stage_removed', removedStage: removed.name },
-                stageRemoved: true
-              })
-            ) {
-              moved++
-            }
-          }
-          if (tasks.length > 0 && destination) {
-            const name = stages.find((s) => s.id === destination)?.name ?? ''
-            changes.push(`Tarefas de “${removed.name}” movidas para “${name}”`)
-          }
-        }
-        if (changes.length > 0) {
-          this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
-        }
+        removals: draft.removals,
+        bindings: draft.bindings,
+        orkioStageProperty: previous.orkioStageProperty,
+        blockedProperty: previous.blockedProperty
       })
-      if (moved > 0) this.queue?.kick()
-      return this.load(projectId, false)
     })
   }
 
-  async configEvents(projectId: string): Promise<ConfigEvent[]> {
-    this.project(projectId)
-    return this.deps.store.configEvents(projectId)
-  }
-
-  private actor(): string {
-    try {
-      return this.deps.actor?.() || 'você'
-    } catch {
-      return 'você'
-    }
-  }
-
-  // ---------- Configuração ----------
-
-  async save(projectId: string, input: BoardSaveInput): Promise<NotionResult<BoardView>> {
+  /**
+   * Cria o quadro (ou ajusta etapas, "Etapa Orkio" e "Bloqueada" pela tela do Notion). Valida como
+   * o editor de fluxo; quadro novo ganha as regras padrão. As mudanças no Notion ("Etapa Orkio")
+   * só acontecem depois da validação.
+   */
+  async save(projectId: string, input: BoardSaveInput): Promise<Result<BoardView>> {
     return this.wrap(async () => {
       this.project(projectId)
-      const optionsResult = await this.deps.notion.statusOptions()
-      if (!optionsResult.ok) throw new BoardError(optionsResult.error)
-      const { options, properties } = optionsResult.value
+      const { options, properties } = await this.statusOptionsOrThrow()
       const previous = this.deps.config.get().boards[projectId]
 
-      const draft: BoardStage[] = input.stages.map((s, index) => {
+      // Etapas mantidas guardam cor e papel (a tela do Notion não edita os dois).
+      const draftStages = input.stages.map((s) => {
+        const kept = s.id ? previous?.stages.find((p) => p.id === s.id) : undefined
         const option = options.find((o) => o.id === s.notionStatusId)
-        const keep = s.id ? previous?.stages.find((p) => p.id === s.id) : undefined
+        const role = kept ? kept.role : s.role
         return {
-          id: keep?.id ?? this.newId(),
+          id: kept?.id ?? this.newId(),
           name: s.name,
-          order: index,
-          notionStatus: option
-            ? { id: option.id, name: option.name }
-            : { id: null, name: s.notionStatusId },
-          ...(option ? { color: option.color } : {})
+          ...(kept?.color ? { color: kept.color } : {}),
+          ...(role ? { role } : {}),
+          notionStatusId: option?.id ?? null,
+          ...(option ? {} : { missingStatusName: s.notionStatusId })
         }
       })
-      const { stages, issues } = validateStages(draft, options)
-      const errors = issues.filter((i) => i.level === 'error')
-      if (errors.length > 0) {
-        throw new BoardError({ code: 'invalid', message: errors.map((e) => e.message).join(' ') })
-      }
+      // Regras salvas são conferidas contra as etapas novas; as padrão (quadro novo) são geradas
+      // a partir delas (papel ausente = regra desligada).
+      const stages = this.checkedStages(
+        projectId,
+        { stages: draftStages, rules: previous?.rules ?? [], removals: {} },
+        previous,
+        options
+      )
 
       let orkioStageProperty: BoardConfig['orkioStageProperty'] = null
       const config = this.deps.config.get().notion
@@ -855,50 +742,158 @@ export class BoardService {
         blockedProperty = { id: prop.id, name: prop.name }
       }
 
-      const board: BoardConfig = {
+      return this.commit(projectId, previous, {
         stages,
-        orkioStageProperty,
-        blockedProperty,
-        // Quadro novo ganha as regras padrão; ajustar etapas mantém as regras (editor na 3C).
         rules: previous?.rules ?? defaultRules(stages).rules,
-        updatedAt: this.now().toISOString()
-      }
-      // Quadro novo num projeto que já usa os modelos Alva: Revisando/Revisado ganham os fluxos
-      // padrão (só colunas sem fluxo; fluxos do usuário não mudam). Calculado dentro da escrita,
-      // sobre a config do momento (nenhuma escrita de fluxos no meio se perde).
-      let alvaChanges: string[] = []
-      try {
-        await this.deps.config.update((c) => {
-          alvaChanges = []
-          const next = { ...c, boards: { ...c.boards, [projectId]: board } }
-          if (previous) return next
-          const alva = upgradeAlvaFlows(c.flows[projectId] ?? { flows: [], bindings: [] }, stages)
-          if (alva.changes.length === 0) return next
-          alvaChanges = alva.changes
-          return { ...next, flows: { ...c.flows, [projectId]: alva.flows } }
-        })
-      } catch (e) {
-        throw new BoardError({
-          code: 'storage',
-          message:
-            e instanceof ConfigReadOnlyError ? BOARD_MESSAGES.readOnly : BOARD_MESSAGES.storage
-        })
-      }
-      const changes = previous
-        ? diffFlow(previous, board)
-        : [
-            `Quadro criado com ${stages.length} etapas e ${board.rules.length} automações`,
-            ...alvaChanges
-          ]
-      if (changes.length > 0) {
-        this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
-      }
-      if (orkioStageProperty) this.deps.notion.invalidateTasks(projectId)
-      return this.load(projectId, orkioStageProperty !== null)
+        removals: {},
+        bindings: undefined,
+        orkioStageProperty,
+        blockedProperty
+      })
     })
   }
 
-  // ---------- Auxiliares ----------
+  private async statusOptionsOrThrow(): Promise<{
+    options: StatusOption[]
+    properties: NotionPropertySummary[]
+  }> {
+    const r = await this.deps.notion.statusOptions()
+    if (!r.ok) throw new BoardError(r.error)
+    return { options: r.value.options, properties: r.value.properties }
+  }
+
+  /** A validação única (`validateFlow`, a mesma da tela): erros bloqueiam. */
+  private checkedStages(
+    projectId: string,
+    draft: FlowDraft,
+    previous: BoardConfig | undefined,
+    options: readonly StatusOption[]
+  ): BoardStage[] {
+    const issues = validateFlow(draft, {
+      statusOptions: options,
+      savedStageIds: previous?.stages.map((s) => s.id) ?? [],
+      taskCounts: this.deps.store.taskCounts(projectId)
+    }).filter((i) => i.level === 'error')
+    if (issues.length > 0) {
+      throw new BoardError({ code: 'invalid', message: issues.map((i) => i.message).join(' ') })
+    }
+    return toBoardStages(draft.stages, options)
+  }
+
+  /**
+   * Grava o quadro (já validado) e os efeitos de mudar etapas, iguais para quem salva:
+   * - ligações etapa → fluxo (as do rascunho ou as salvas) pelo escritor único (`withProjectFlows`);
+   * - quadro novo num projeto que já usa os modelos Alva: as etapas de revisão ganham os fluxos
+   *   padrão (calculado dentro da escrita, sobre a config do momento);
+   * - tarefas das etapas removidas vão para o destino escolhido (caminho do movimento manual);
+   * - histórico de configuração.
+   */
+  private async commit(
+    projectId: string,
+    previous: BoardConfig | undefined,
+    next: {
+      stages: BoardStage[]
+      rules: AutomationRule[]
+      removals: FlowDraft['removals']
+      bindings: StageFlow[] | undefined
+      orkioStageProperty: BoardConfig['orkioStageProperty']
+      blockedProperty: BoardConfig['blockedProperty']
+    }
+  ): Promise<BoardView> {
+    const { stages } = next
+    const board: BoardConfig = {
+      stages,
+      orkioStageProperty: next.orkioStageProperty,
+      blockedProperty: next.blockedProperty,
+      rules: next.rules,
+      updatedAt: this.now().toISOString()
+    }
+    const removesStages = previous?.stages.some((p) => !stages.some((s) => s.id === p.id))
+    if (removesStages && !this.snapshots.has(projectId)) await this.load(projectId, false)
+
+    const before = projectFlows(this.deps.config.get(), projectId)
+    let flowChanges: string[] = []
+    try {
+      await this.deps.config.update((c) => {
+        const withBoard = { ...c, boards: { ...c.boards, [projectId]: board } }
+        const current = projectFlows(c, projectId)
+        let flows = { ...current, bindings: next.bindings ?? current.bindings }
+        flowChanges = []
+        if (!previous) {
+          const alva = upgradeAlvaFlows(flows, stages)
+          flows = alva.flows
+          flowChanges = alva.changes
+        }
+        if (!c.flows[projectId] && !next.bindings && flowChanges.length === 0) return withBoard
+        return withProjectFlows(withBoard, projectId, flows)
+      })
+    } catch (e) {
+      throw new BoardError({
+        code: 'storage',
+        message: e instanceof ConfigReadOnlyError ? BOARD_MESSAGES.readOnly : BOARD_MESSAGES.storage
+      })
+    }
+    const after = projectFlows(this.deps.config.get(), projectId)
+
+    const changes = previous
+      ? [
+          ...diffFlow(previous, board),
+          ...diffBindings(before.bindings, after.bindings, stages, after.flows)
+        ]
+      : [
+          `Quadro criado com ${stages.length} etapas e ${board.rules.length} automações`,
+          ...flowChanges
+        ]
+    let moved = 0
+    this.deps.store.transaction(() => {
+      for (const removed of previous?.stages ?? []) {
+        if (stages.some((s) => s.id === removed.id)) continue
+        const destination = next.removals[removed.id]
+        const tasks = this.deps.store.tasksInStage(projectId, removed.id)
+        for (const taskId of tasks) {
+          if (
+            !destination ||
+            !this.snapshots.get(projectId)?.data.tasks.some((t) => t.id === taskId)
+          ) {
+            continue
+          }
+          if (
+            this.applyMove(projectId, taskId, destination, {
+              source: 'manual',
+              detail: { flow: 'stage_removed', removedStage: removed.name },
+              stageRemoved: true
+            })
+          ) {
+            moved++
+          }
+        }
+        if (tasks.length > 0 && destination) {
+          const name = stages.find((s) => s.id === destination)?.name ?? ''
+          changes.push(`Tarefas de “${removed.name}” movidas para “${name}”`)
+        }
+      }
+      if (changes.length > 0) {
+        this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
+      }
+    })
+    if (moved > 0) void this.writes.kick()
+    const propertyChanged = board.orkioStageProperty?.id !== previous?.orkioStageProperty?.id
+    if (propertyChanged && board.orkioStageProperty) this.deps.notion.invalidateTasks(projectId)
+    return this.load(projectId, propertyChanged && board.orkioStageProperty !== null)
+  }
+
+  async configEvents(projectId: string): Promise<ConfigEvent[]> {
+    this.project(projectId)
+    return this.deps.store.configEvents(projectId)
+  }
+
+  private actor(): string {
+    try {
+      return this.deps.actor?.() || 'você'
+    } catch {
+      return 'você'
+    }
+  }
 
   private project(projectId: string) {
     const project = this.deps.config.get().projects.find((p) => p.id === projectId)
@@ -934,76 +929,60 @@ export class BoardService {
   private card(projectId: string, taskId: string): BoardCard {
     const snapshot = this.snapshots.get(projectId)!
     const task = snapshot.data.tasks.find((t) => t.id === taskId)!
-    const state = this.localState(projectId, taskId)
-    const pending = this.deps.store.pending(taskId)
+    return this.toCard(task, {
+      ...this.localState(projectId, taskId),
+      automationPaused: this.deps.store.state(taskId)?.automationPaused ?? false,
+      pending: this.deps.store.pending(taskId) !== null
+    })
+  }
+
+  /** Card do quadro: a tarefa do Notion + o estado local (etapa, bloqueio, pausa, escrita na fila). */
+  private toCard(
+    task: CachedTasks['tasks'][number],
+    local: { stageId: string | null; blocked: boolean; automationPaused: boolean; pending: boolean }
+  ): BoardCard {
     return {
-      taskId,
+      taskId: task.id,
       displayId: task.displayId,
       title: task.title,
       url: task.url,
       status: task.status ? { name: task.status.name, color: task.status.color } : null,
       priority: task.priority,
       assignees: task.assignees,
-      stageId: state.stageId,
-      blocked: state.blocked,
-      automationPaused: this.deps.store.state(taskId)?.automationPaused ?? false,
-      sync: pending
-        ? { state: 'pending', message: this.retryMessages.get(taskId) ?? BOARD_MESSAGES.pending }
+      stageId: local.stageId,
+      blocked: local.blocked,
+      automationPaused: local.automationPaused,
+      sync: local.pending
+        ? { state: 'pending', message: this.retryMessages.get(task.id) ?? BOARD_MESSAGES.pending }
         : { state: 'synced' }
     }
   }
 
-  /** Depois de confirmar, os valores conhecidos do Notion passam a ser os escritos. */
   private applyToSnapshot(write: PendingWrite): void {
     const snapshot = this.snapshots.get(write.projectId)
     if (!snapshot) return
-    const values = (snapshot.data.values[write.taskPageId] ??= {})
+    applyPropertyWrites((snapshot.data.values[write.taskPageId] ??= {}), write.properties)
     const task = snapshot.data.tasks.find((t) => t.id === write.taskPageId)
-    for (const [propId, raw] of Object.entries(write.properties)) {
-      const v = raw as Record<string, { name?: string } | boolean>
-      if (typeof v['checkbox'] === 'boolean') {
-        values[propId] = { type: 'checkbox', checked: v['checkbox'] }
-        continue
-      }
-      const type = 'status' in v ? 'status' : 'select'
-      const name = (v[type] as { name?: string } | undefined)?.name ?? null
-      values[propId] = { type, id: null, name }
-      if (task && propId === snapshot.data.mapping.status.id && name) {
-        task.status = { id: null, name, color: task.status?.color ?? 'default' }
-      }
+    const status = write.properties[snapshot.data.mapping.status.id]
+    if (task && status && status.type !== 'checkbox') {
+      task.status = { id: null, name: status.name, color: task.status?.color ?? 'default' }
     }
   }
 
-  private notionHas(
-    values: Record<string, SimplePropertyValue> | undefined,
-    properties: Record<string, unknown>
-  ): boolean {
-    if (!values) return false
-    return Object.entries(properties).every(([propId, raw]) => {
-      const current = values[propId]
-      const v = raw as Record<string, { name?: string } | boolean>
-      if (typeof v['checkbox'] === 'boolean') {
-        return current?.type === 'checkbox' && current.checked === v['checkbox']
-      }
-      const wanted = (v['status'] ?? v['select']) as { name?: string } | undefined
-      return current !== undefined && current.type !== 'checkbox' && current.name === wanted?.name
-    })
+  private connectionMethod(): Promise<NotionConnectionMethod> {
+    return this.deps.notion.connectionMethod().catch(() => null)
   }
 
-  private async wrap<T>(run: () => Promise<T>): Promise<NotionResult<T>> {
+  private async wrap<T>(run: () => Promise<T>): Promise<Result<T>> {
     try {
       return { ok: true, value: await run() }
     } catch (e) {
       if (e instanceof BoardError) return { ok: false, error: e.info }
-      if (e instanceof NotionApiError) {
-        const canReconnect =
-          e.code === 'unauthorized' ||
-          e.code === 'invalid_grant' ||
-          (e.code === 'not_found' &&
-            (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth')
+      if (isApiError(e, 'notion')) {
+        const reconnect = canReconnect(e.code, await this.connectionMethod(), 'read')
         return {
           ok: false,
-          error: { code: e.code, message: e.message, ...(canReconnect ? { canReconnect } : {}) }
+          error: { code: e.code, message: e.message, ...(reconnect ? { canReconnect: true } : {}) }
         }
       }
       return { ok: false, error: { code: 'unexpected', message: BOARD_MESSAGES.unknown } }
@@ -1029,15 +1008,6 @@ function propertyIdByName(body: unknown, name: string): string | null {
   return typeof id === 'string' && id ? id : null
 }
 
-/** Para testes e para o painel: nome da opção de status para uma etapa. */
-export function optionForStage(
-  options: readonly StatusOption[],
-  stage: BoardStage
-): StatusOption | null {
-  return findOption(options, stage.notionStatus)
-}
-
-/** Frases do histórico de configuração para as ligações etapa → fluxo (5A). */
 function diffBindings(
   before: readonly StageFlow[],
   after: readonly StageFlow[],
@@ -1062,4 +1032,8 @@ function diffBindings(
     }
   }
   return out
+}
+
+function orkioStage(name: string): PropertyWrite {
+  return { type: 'select', name }
 }

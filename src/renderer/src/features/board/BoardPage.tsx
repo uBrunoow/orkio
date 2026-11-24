@@ -12,7 +12,6 @@ import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CheckboxField, SegmentedControl } from '@/components/form'
 import { cn } from '@/lib/utils'
-import type { AutomationStatus, ProjectView } from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { ScreenTitle } from '../../components/ScreenTitle'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
@@ -25,23 +24,24 @@ import {
   RefreshIcon,
   SearchIcon
 } from '../../components/icons'
-import { ActiveFlowsProvider, useActiveFlows } from '../task-flows/active-flows'
 import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
-import type { ActiveFlows } from '../task-flows/active-flows'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
 import { TaskActivityProvider, type TaskActivityMap } from './task-activity'
-import { ActionLink } from '../projects/ActionLink'
+import { activityByTask } from '../overview/task-activity'
 import { useOverview } from '../overview/useOverview'
-import { useBoard, type BoardError } from './useBoard'
+import { useBoard } from './useBoard'
+import { useSources } from '../../app/sources'
+import { ipcCall, useSource } from '../../lib/ipc'
+import type { AutomationStatus } from '../../../../shared/automation'
+import type { ProjectView } from '../../../../shared/projects'
+import { formatTime } from '../../lib/format'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { SignalsMessages } from '../notion-workspace/SignalsMessages'
 
-/**
- * Tela "Quadro" do projeto atual (o projeto vem do menu). Etapas e automações, Fluxos e Contexto
- * do Claude são rotas próprias (6E); aqui fica só o quadro e, sem quadro ainda, a criação dele.
- */
 export function BoardPage({
   project,
   onOpenIntegrations,
@@ -52,7 +52,6 @@ export function BoardPage({
   project: ProjectView | null
   onOpenIntegrations(): void
   onOpenProjects(): void
-  /** Abre a tela da tarefa. */
   onOpenTask(taskId: string): void
 }): React.JSX.Element {
   if (!project) {
@@ -88,23 +87,9 @@ function Board({
   const automation = useAutomationStatus(projectId)
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
-  const activeFlows = useActiveFlows(projectId)
   const agentBadges = useAgentBadges(projectId)
   const { snapshot } = useOverview()
-  const taskActivity = useMemo(() => {
-    const map: TaskActivityMap = {}
-    for (const w of snapshot?.waiting ?? []) {
-      if (w.task.projectId !== projectId) continue
-      const cur = map[w.task.taskId] ?? { waiting: null, running: null }
-      map[w.task.taskId] = { ...cur, waiting: cur.waiting ?? w.what }
-    }
-    for (const r of snapshot?.running ?? []) {
-      if (r.task.projectId !== projectId) continue
-      const cur = map[r.task.taskId] ?? { waiting: null, running: null }
-      map[r.task.taskId] = { ...cur, running: cur.running ?? r.label }
-    }
-    return map
-  }, [snapshot, projectId])
+  const taskActivity = useMemo(() => activityByTask(snapshot, projectId), [snapshot, projectId])
   const [query, setQuery] = useState('')
   const [priority, setPriority] = useState<string | null>(null)
   const [onlyBlocked, setOnlyBlocked] = useState(false)
@@ -112,7 +97,6 @@ function Board({
   const [layout, setLayout] = useState<'kanban' | 'list'>('kanban')
   const { view } = board
 
-  // Branches/PRs depois de carregar o quadro.
   const fetchedAt = view?.fetchedAt
   useEffect(() => {
     if (fetchedAt) void refreshSignals(false)
@@ -146,7 +130,7 @@ function Board({
       <div className="flex flex-col gap-5 p-4">
         {header()}
         {board.error ? (
-          <BoardErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
+          <ErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
         ) : (
           <PageState kind="loading" label="Carregando quadro" />
         )}
@@ -170,13 +154,11 @@ function Board({
     onMove: (taskId: string, stageId: string) => void board.move(taskId, stageId),
     onToggleBlocked: (taskId: string, blocked: boolean) => void board.setBlocked(taskId, blocked),
     onToggleAutomation: (taskId: string, paused: boolean) =>
-      void board.setAutomationPaused(taskId, paused),
-    onExpand: onOpenTask
+      void board.setAutomationPaused(taskId, paused)
   }
   const refreshing = board.loading || automation.running
 
   return (
-    // Ocupa a altura útil da janela: as colunas e o painel rolam por dentro.
     <div className="flex h-full min-h-0 flex-col gap-3 p-3.5">
       <ScreenBarStart>
         <ScreenTitle look={5}>Quadro</ScreenTitle>
@@ -193,7 +175,7 @@ function Board({
         <AgentRow
           cards={view.cards}
           badges={agentBadges}
-          flows={activeFlows}
+          activity={taskActivity}
           selected={agentKey}
           onSelect={setAgentKey}
         />
@@ -215,7 +197,6 @@ function Board({
           variant="outline"
           disabled={refreshing}
           onClick={() => {
-            // Verifica git/GitHub agora (automações) e relê o Notion.
             void automation.runNow().then(() => board.load(true))
           }}
         >
@@ -237,7 +218,6 @@ function Board({
           </DropdownMenuContent>
         </DropdownMenu>
       </ScreenBarEnd>
-      {/* Filtros finos e o estado das automações, numa linha só acima das colunas. */}
       <div
         role="toolbar"
         aria-label="Filtros do quadro"
@@ -275,23 +255,8 @@ function Board({
           Elas são enviadas sozinhas quando a conexão voltar, mesmo depois de fechar o Orkio.
         </Alert>
       )}
-      {signals.result && signals.result.messages.length > 0 && (
-        <Alert
-          tone="warning"
-          {...(signals.result.action
-            ? { action: <ActionLink action={signals.result.action} /> }
-            : {})}
-        >
-          <div className="flex flex-col gap-1">
-            {signals.result.messages.map((m) => (
-              <p key={m}>{m}</p>
-            ))}
-          </div>
-        </Alert>
-      )}
-      {board.error && (
-        <BoardErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
-      )}
+      <SignalsMessages result={signals.result} />
+      {board.error && <ErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />}
       {board.notice && (
         <Alert
           tone="danger"
@@ -334,28 +299,23 @@ function Board({
           />
         ) : (
           <TaskActivityProvider value={taskActivity}>
-            <ActiveFlowsProvider value={activeFlows}>
-              <AgentBadgesProvider value={agentBadges}>
-                {layout === 'list' ? (
-                  <BoardList
-                    stages={view.config.stages}
-                    cards={cards}
-                    signals={signals.result?.signals ?? {}}
-                    selectedTaskId={null}
-                    actions={actions}
-                  />
-                ) : (
-                  <BoardColumns
-                    stages={view.config.stages}
-                    cards={cards}
-                    signals={signals.result?.signals ?? {}}
-                    selectedTaskId={null}
-                    actions={actions}
-                    endInset={null}
-                  />
-                )}
-              </AgentBadgesProvider>
-            </ActiveFlowsProvider>
+            <AgentBadgesProvider value={agentBadges}>
+              {layout === 'list' ? (
+                <BoardList
+                  stages={view.config.stages}
+                  cards={cards}
+                  signals={signals.result?.signals ?? {}}
+                  actions={actions}
+                />
+              ) : (
+                <BoardColumns
+                  stages={view.config.stages}
+                  cards={cards}
+                  signals={signals.result?.signals ?? {}}
+                  actions={actions}
+                />
+              )}
+            </AgentBadgesProvider>
           </TaskActivityProvider>
         )}
       </div>
@@ -363,82 +323,34 @@ function Board({
   )
 }
 
-function BoardErrorAlert({
-  error,
-  onOpenIntegrations
-}: {
-  error: BoardError
-  onOpenIntegrations(): void
-}): React.JSX.Element {
-  const toIntegrations =
-    error.canReconnect || ['not_configured', 'broken', 'not_connected'].includes(error.code)
-  return (
-    <Alert
-      tone="danger"
-      {...(toIntegrations
-        ? {
-            action: (
-              <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
-                Ir para Integrações
-              </Button>
-            )
-          }
-        : {})}
-    >
-      {error.message}
-    </Alert>
-  )
-}
-
-/** Estado das automações do projeto (atualiza a cada 15 s enquanto a tela está aberta). */
+/** Estado das automações do projeto (fonte compartilhada, relida a cada 15 s com a janela visível). */
 function useAutomationStatus(projectId: string): {
   status: AutomationStatus | null
   running: boolean
   runNow(): Promise<void>
   setPaused(paused: boolean): Promise<void>
 } {
-  const [status, setStatus] = useState<AutomationStatus | null>(null)
+  const { automation } = useSources()
+  const status = useSource(automation, projectId).value
   const [running, setRunning] = useState(false)
-  useEffect(() => {
-    let active = true
-    const load = (): void => {
-      void window.orkio.automation
-        .status(projectId)
-        .then((s) => {
-          if (active) setStatus(s)
-        })
-        .catch(() => {})
-    }
-    load()
-    const timer = window.setInterval(load, 15_000)
-    return () => {
-      active = false
-      window.clearInterval(timer)
-    }
-  }, [projectId])
+  const apply = (next: AutomationStatus | null): void => {
+    if (next) automation.set(projectId, next)
+  }
   return {
     status,
     running,
     runNow: async () => {
       setRunning(true)
-      const next = await window.orkio.automation.runNow(projectId).catch(() => null)
+      const next = await ipcCall(() => window.orkio.automation.runNow(projectId), null)
       setRunning(false)
-      if (next) setStatus(next)
+      apply(next)
     },
     setPaused: async (paused) => {
-      const next = await window.orkio.automation.setPaused(paused).catch(() => null)
-      if (next)
-        setStatus({
-          ...next,
-          ...(status
-            ? { github: status.github, lastRunAt: status.lastRunAt, nextRunAt: status.nextRunAt }
-            : {})
-        })
+      apply(await ipcCall(() => window.orkio.automation.setPaused(projectId, paused), null))
     }
   }
 }
 
-/** Estado das automações, curto, no cabeçalho do quadro. */
 function AutomationLine({
   status,
   onOpenIntegrations
@@ -447,8 +359,7 @@ function AutomationLine({
   onOpenIntegrations(): void
 }): React.JSX.Element | null {
   if (!status) return null
-  const time = (iso: string | null): string =>
-    iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
+  const time = (iso: string | null): string => (iso ? formatTime(iso) : '—')
   const text = status.paused
     ? 'Automações pausadas para todos os projetos'
     : status.github === 'disconnected'
@@ -486,20 +397,16 @@ function AutomationLine({
   )
 }
 
-/**
- * Agentes com tarefas neste quadro: avatar e quantas tarefas. Clicar filtra o quadro pelo agente;
- * o ponto laranja marca agente com fluxo rodando agora.
- */
 function AgentRow({
   cards,
   badges,
-  flows,
+  activity,
   selected,
   onSelect
 }: {
   cards: readonly { taskId: string }[]
   badges: AgentBadges
-  flows: ActiveFlows
+  activity: TaskActivityMap
   selected: string | null
   onSelect(key: string | null): void
 }): React.JSX.Element | null {
@@ -517,7 +424,7 @@ function AgentRow({
       running: false
     }
     cur.count += 1
-    if (flows[taskId] === 'running') cur.running = true
+    if (activity.get(taskId)?.running) cur.running = true
     agents.set(badge.key, cur)
   }
   if (agents.size === 0) return null

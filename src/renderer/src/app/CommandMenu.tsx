@@ -9,17 +9,19 @@ import {
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
 import { Spinner } from '@/components/Spinner'
-import type { BoardCard, ProjectView } from '../../../shared/ipc-contract'
 import { SETTINGS_TITLES, type Route, type SettingsSection } from './routes'
 import { SHORTCUTS } from './shortcuts'
+import type { BoardCard } from '../../../shared/board'
+import type { ProjectView } from '../../../shared/projects'
+import { normalizeLabel } from '../../../shared/text'
+import { isMac } from '../lib/platform'
+import { readBoard, useSources, type AppSources } from './sources'
+import { ipcResult } from '../lib/ipc'
 
 export interface CommandData {
   group: string
-  /** Rota de destino (Ir para, tarefas). */
   route?: Route
-  /** Trocar o projeto atual. */
   projectId?: string
-  /** ID da tarefa (mono) e onde ela está. */
   taskRef?: { displayId: string | null; where: string }
   keys?: string
   /** Tarefa fora do quadro: abre a página no Notion. */
@@ -37,7 +39,6 @@ interface SearchSource {
   search(query: string): Promise<CommandItem[]>
 }
 
-/** Comandos fixos de navegação, com o atalho de cada um, e as seções de Configurações. */
 function navigationItems(hasProject: boolean): CommandItem[] {
   const group = 'Ir para'
   const items: CommandItem[] = SHORTCUTS.filter((s) => hasProject || !s.isProjectScreen).map(
@@ -68,15 +69,11 @@ function navigationItems(hasProject: boolean): CommandItem[] {
 }
 
 /** Tarefas de todos os projetos vinculados (o main responde do cache de 60 s quando pode). */
-async function loadTasks(projects: readonly ProjectView[]): Promise<CommandItem[]> {
-  const views = await Promise.all(
-    projects.map((p) =>
-      window.orkio.board
-        .get(p.id)
-        .then((r) => (r.ok ? r.value : null))
-        .catch(() => null)
-    )
-  )
+async function loadTasks(
+  board: AppSources['board'],
+  projects: readonly ProjectView[]
+): Promise<CommandItem[]> {
+  const views = await Promise.all(projects.map((p) => readBoard(board, p.id)))
   return views.flatMap((view) => {
     if (!view?.config) return []
     const stageName = (card: BoardCard): string =>
@@ -105,8 +102,8 @@ async function searchNotionTasks(
   query: string,
   onBoard: ReadonlySet<string>
 ): Promise<CommandItem[]> {
-  const r = await window.orkio.notionWorkspace.searchTasks(query).catch(() => null)
-  if (!r?.ok) return []
+  const r = await ipcResult(() => window.orkio.notionWorkspace.searchTasks(query))
+  if (!r.ok) return []
   return r.value.tasks.map((t) => {
     const inOrkio = !!t.projectId && onBoard.has(`${t.projectId}:${t.id}`)
     const where = [
@@ -153,10 +150,11 @@ export function CommandMenu({
   currentProjectId: string | null
   onRun(item: CommandData): void
 }): React.JSX.Element {
+  const { board } = useSources()
   const source = useMemo((): SearchSource => {
     let tasks: Promise<CommandItem[]> | null = null
     const all = async (): Promise<CommandItem[]> => {
-      tasks ??= loadTasks(projects)
+      tasks ??= loadTasks(board, projects)
       const switchItems: CommandItem[] = projects
         .filter((p) => p.id !== currentProjectId)
         .map((p) => ({
@@ -166,10 +164,9 @@ export function CommandMenu({
         }))
       return [...(await tasks), ...navigationItems(projects.length > 0), ...switchItems]
     }
-    // Modo tarefas: tarefas do quadro (para saber o que abre no Orkio) + busca no Notion.
-    let board: Promise<Set<string>> | null = null
+    let onBoard: Promise<Set<string>> | null = null
     const notion = async (query: string): Promise<CommandItem[]> => {
-      board ??= loadTasks(projects).then(
+      onBoard ??= loadTasks(board, projects).then(
         (items) =>
           new Set(
             items.flatMap((i) =>
@@ -179,7 +176,7 @@ export function CommandMenu({
             )
           )
       )
-      return searchNotionTasks(query, await board)
+      return searchNotionTasks(query, await onBoard)
     }
     if (mode === 'tasks') {
       return { bootstrap: () => notion(''), search: (query) => notion(query) }
@@ -187,14 +184,13 @@ export function CommandMenu({
     return {
       bootstrap: async () => {
         const items = await all()
-        // Sem busca: as telas primeiro, e só algumas tarefas.
         const tasksOnly = items.filter((i) => i.auxiliaryData?.group === 'Tarefas').slice(0, 5)
         return [...items.filter((i) => i.auxiliaryData?.group !== 'Tarefas'), ...tasksOnly]
       },
       search: async (query) => {
-        const q = normalize(query)
+        const q = normalizeLabel(query)
         const items = await all()
-        return items.filter((i) => normalize(i.label).includes(q)).slice(0, 50)
+        return items.filter((i) => normalizeLabel(i.label).includes(q)).slice(0, 50)
       }
     }
     // Recria a fonte (e relê as tarefas) a cada abertura.
@@ -215,11 +211,10 @@ export function CommandMenu({
   useEffect(() => {
     if (!isOpen) return
     let alive = true
-    // Busca no Notion com um respiro entre teclas; a lista local responde na hora.
     const delay = mode === 'tasks' && query.trim() ? 250 : 0
     const timer = window.setTimeout(() => {
       const run = query.trim() ? source.search(query) : source.bootstrap()
-      void run.then((list) => alive && setItems(list)).catch(() => alive && setItems([]))
+      void run.then((list) => alive && setItems(list))
     }, delay)
     return () => {
       alive = false
@@ -325,14 +320,9 @@ function CommandRow({ item }: { item: CommandItem }): React.JSX.Element {
 
 /** "mod+1" → "Ctrl 1" / "⌘ 1". */
 export function formatKeys(keys: string): string {
-  const mac = navigator.userAgent.includes('Mac')
+  const mac = isMac()
   return keys
     .split('+')
     .map((k) => (k === 'mod' ? (mac ? '⌘' : 'Ctrl') : k.length === 1 ? k.toUpperCase() : k))
     .join(' ')
-}
-
-/** Busca sem diferenciar maiúsculas e acentos. */
-function normalize(s: string): string {
-  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 }

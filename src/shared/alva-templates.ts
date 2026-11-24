@@ -3,14 +3,34 @@
  * Gerados sob demanda e editáveis depois. Os comandos recebem só os argumentos (sem o briefing,
  * que fica em .orkio/briefing.md), e o extrator `alva` lê a task do Backlog.md depois de cada um.
  */
-import { FLOW_END, type Flow, type ProjectFlows, type StageFlow, type Step } from './task-flow'
+import {
+  ALVA_EXTRACTOR,
+  ALVA_REVIEWED,
+  ALVA_TAG,
+  ALVA_VARS,
+  alvaCommand,
+  type AlvaCommand
+} from './alva'
+import { ACTION_VARS, ORKIO_ACTIONS } from './orkio-actions'
+import { REVIEW_PATH } from './orkio-scratch'
+import { REVIEW_COMMENTS_MAX } from './review-publish'
+import {
+  FLOW_END,
+  FLOW_YES,
+  type Flow,
+  type ProjectFlows,
+  type StageFlow,
+  type Step
+} from './task-flow'
+import { stageWithRole, type StageRole } from './board'
 
-const P = 'alva-flow'
+const v = (key: string): string => `{{${key}}}`
+const TASK_ID = v(ALVA_VARS.taskId)
 
 function alva(
   id: string,
   name: string,
-  cmd: string,
+  cmd: AlvaCommand,
   args: string,
   timeoutMin: number,
   options: { delivery?: boolean } = {}
@@ -19,11 +39,11 @@ function alva(
     id,
     name,
     type: 'claude_command',
-    command: `${P}:${cmd}`,
+    command: alvaCommand(cmd),
     args,
     timeoutMin,
     includeBriefing: false,
-    extract: { extractor: 'alva' },
+    extract: { extractor: ALVA_EXTRACTOR },
     ...(options.delivery ? { delivery: true } : {})
   }
 }
@@ -33,11 +53,11 @@ const PUSH = (id = 'push'): Step => ({
   id,
   name: 'Push da branch (Orkio)',
   type: 'orkio_action',
-  action: 'push'
+  action: ORKIO_ACTIONS.push.id
 })
 
-const SPEC = (): Step => alva('spec', 'Especificar (/spec)', 'spec', '{{alva.spec_arg}}', 120)
-const PLAN = (): Step => alva('plan', 'Planejar (/plan)', 'plan', '{{alva.task_id}}', 60)
+const SPEC = (): Step => alva('spec', 'Especificar (/spec)', 'spec', v(ALVA_VARS.specArg), 120)
+const PLAN = (): Step => alva('plan', 'Planejar (/plan)', 'plan', TASK_ID, 60)
 const always = { type: 'all' as const, of: [] }
 
 /** Gate com a spec (descrição e critérios de aceite) da task do Backlog, antes de planejar. */
@@ -79,26 +99,25 @@ export const OPEN_PR_FLOW_IDS = {
   sendBranch: 'builtin:enviar-branch'
 } as const
 
-/** Coluna "Planejando": /spec → (Pequeno termina) → perguntas em aberto → /plan → aprovar plano. */
 export function alvaPlanFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.plan,
     name: 'Alva: planejar',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
       SPEC(),
       {
         id: 'pequeno',
         name: 'Caminho Pequeno? (spec já implementou)',
         type: 'branch',
-        when: { type: 'var', key: 'alva.status', op: 'eq', value: 'Reviewed' },
+        when: { type: 'var', key: ALVA_VARS.status, op: 'eq', value: ALVA_REVIEWED },
         then: FLOW_END
       },
       {
         id: 'sem-perguntas',
         name: 'Sem perguntas em aberto?',
         type: 'branch',
-        when: { type: 'var', key: 'alva.open_questions', op: 'eq', value: '0' },
+        when: { type: 'var', key: ALVA_VARS.openQuestions, op: 'eq', value: '0' },
         then: 'aprovar-spec'
       },
       {
@@ -126,22 +145,17 @@ export function alvaPlanFlow(): Flow {
   }
 }
 
-/**
- * Coluna "Em andamento": (sem vínculo: /spec e /plan) → /implement (pula se já Reviewed) →
- * /review → blocker volta para /fix --apply (máx. 2) → ver diff → /commit → push (Orkio, com
- * aprovação) → /pr em modo entrega (o próprio comando pode fazer push da branch e abrir a PR).
- */
 export function alvaDeliverFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.deliver,
     name: 'Alva: implementar e entregar',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
       {
         id: 'tem-vinculo',
         name: 'Já tem task no Backlog?',
         type: 'branch',
-        when: { type: 'var', key: 'alva.linked', op: 'eq', value: 'sim' },
+        when: { type: 'var', key: ALVA_VARS.linked, op: 'eq', value: FLOW_YES },
         then: 'ja-revisado'
       },
       SPEC(),
@@ -149,7 +163,7 @@ export function alvaDeliverFlow(): Flow {
         id: 'pequeno',
         name: 'Caminho Pequeno? (spec já implementou)',
         type: 'branch',
-        when: { type: 'var', key: 'alva.status', op: 'eq', value: 'Reviewed' },
+        when: { type: 'var', key: ALVA_VARS.status, op: 'eq', value: ALVA_REVIEWED },
         then: 'ver-diff'
       },
       APPROVE_SPEC(),
@@ -159,11 +173,11 @@ export function alvaDeliverFlow(): Flow {
         id: 'ja-revisado',
         name: 'Já revisado (caminho Pequeno)?',
         type: 'branch',
-        when: { type: 'var', key: 'alva.status', op: 'eq', value: 'Reviewed' },
+        when: { type: 'var', key: ALVA_VARS.status, op: 'eq', value: ALVA_REVIEWED },
         then: 'ver-diff'
       },
-      alva('implement', 'Implementar (/implement)', 'implement', '{{alva.task_id}}', 120),
-      alva('review', 'Revisar (/review)', 'review', '{{alva.task_id}}', 60),
+      alva('implement', 'Implementar (/implement)', 'implement', TASK_ID, 120),
+      alva('review', 'Revisar (/review)', 'review', TASK_ID, 60),
       {
         id: 'blocker',
         name: 'Blocker no review? (corrige até 2 vezes)',
@@ -171,7 +185,7 @@ export function alvaDeliverFlow(): Flow {
         when: {
           type: 'all',
           of: [
-            { type: 'var', key: 'alva.review_blocker', op: 'eq', value: 'sim' },
+            { type: 'var', key: ALVA_VARS.reviewBlocker, op: 'eq', value: FLOW_YES },
             { type: 'visits', step: 'fix', lt: 2 }
           ]
         },
@@ -187,13 +201,13 @@ export function alvaDeliverFlow(): Flow {
         onReject: 'stop',
         timeoutMin: null
       },
-      alva('commit', 'Commit (/commit)', 'commit', '{{alva.task_id}}', 15),
+      alva('commit', 'Commit (/commit)', 'commit', TASK_ID, 15),
       PUSH(),
-      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', '{{alva.task_id}}', 60, {
+      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', TASK_ID, 60, {
         delivery: true
       }),
       { id: 'fim', name: 'Fim', type: 'branch', when: always, then: FLOW_END },
-      alva('fix', 'Corrigir blocker (/fix --apply)', 'fix', '{{alva.task_id}} --apply', 60),
+      alva('fix', 'Corrigir blocker (/fix --apply)', 'fix', `${TASK_ID} --apply`, 60),
       {
         id: 'revisar-de-novo',
         name: 'Revisar de novo',
@@ -206,36 +220,29 @@ export function alvaDeliverFlow(): Flow {
 }
 
 /** Pedido do passo de plano (só leitura): o agente lê os comentários e diz o que vai fazer. */
-export const REVIEW_PLAN_PROMPT =
-  'Leia .orkio/revisao.md (comentários de revisão não resolvidos da PR #{{review.pr}}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.'
+export const REVIEW_PLAN_PROMPT = `Leia ${REVIEW_PATH} (comentários de revisão não resolvidos da PR #${v(ACTION_VARS.reviewPr)}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.`
 
 /** Pedido do passo de correção (modo entrega), depois que você aprova o plano. */
 export const REVIEW_APPLY_PROMPT =
   'Plano aprovado. Aplique as correções, rode os testes do projeto, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).'
 
-/**
- * Coluna "Revisado": o Orkio lê os comentários da PR (`.orkio/revisao.md`) → sem comentários,
- * termina → o agente propõe um plano (só leitura) → você aprova, pede ajustes (até 3) ou recusa →
- * o agente aplica, commita e responde as threads (modo entrega) → confere se a PR tem o commit
- * atual → se não, push pelo Orkio → pedir review de novo.
- */
 export function alvaReviewedFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.reviewed,
     name: 'Alva: comentários da PR',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
       {
         id: 'ler-comentarios',
         name: 'Ler os comentários da PR',
         type: 'orkio_action',
-        action: 'review_snapshot'
+        action: ORKIO_ACTIONS.review_snapshot.id
       },
       {
         id: 'sem-comentarios',
         name: 'Nenhum comentário pendente?',
         type: 'branch',
-        when: { type: 'var', key: 'review.count', op: 'eq', value: '0' },
+        when: { type: 'var', key: ACTION_VARS.reviewCount, op: 'eq', value: '0' },
         then: FLOW_END
       },
       {
@@ -252,7 +259,7 @@ export function alvaReviewedFlow(): Flow {
         id: 'aprovar-correcoes',
         name: 'Aprovar correções',
         type: 'gate',
-        message: 'Aprovar correções da PR #{{review.pr}}',
+        message: `Aprovar correções da PR #${v(ACTION_VARS.reviewPr)}`,
         show: 'result',
         onReject: 'stop',
         timeoutMin: null,
@@ -272,17 +279,22 @@ export function alvaReviewedFlow(): Flow {
         id: 'conferir-push',
         name: 'A PR já tem o commit atual?',
         type: 'orkio_action',
-        action: 'verify_pushed'
+        action: ORKIO_ACTIONS.verify_pushed.id
       },
       {
         id: 'ja-enviado',
         name: 'Já enviado?',
         type: 'branch',
-        when: { type: 'var', key: 'pr.pushed', op: 'eq', value: 'sim' },
+        when: { type: 'var', key: ACTION_VARS.prPushed, op: 'eq', value: FLOW_YES },
         then: 'pedir-review'
       },
       PUSH(),
-      { id: 'pedir-review', name: 'Pedir review', type: 'orkio_action', action: 'request_review' }
+      {
+        id: 'pedir-review',
+        name: 'Pedir review',
+        type: 'orkio_action',
+        action: ORKIO_ACTIONS.request_review.id
+      }
     ]
   }
 }
@@ -296,21 +308,16 @@ export const REVIEW_JSON_PROMPT = [
   'Converta a revisão acima no JSON abaixo e responda só com ele, num bloco ```json (sem texto antes ou depois):',
   '{"event": "REQUEST_CHANGES" ou "COMMENT", "summary": "resumo da revisão em markdown", "comments": [{"path": "caminho/do/arquivo", "line": 42, "body": "o problema e a correção sugerida"}]}',
   'Use "REQUEST_CHANGES" se houver qualquer coisa a corrigir (cada item de "comments" é uma correção pedida); "COMMENT" só quando não há nada a corrigir. Nunca aprove.',
-  'Em "comments", só achados com arquivo e linha do diff da PR (a linha no arquivo novo), no máximo 50; os demais vão no "summary". Escreva em pt-BR. Não altere arquivos.'
+  `Em "comments", só achados com arquivo e linha do diff da PR (a linha no arquivo novo), no máximo ${REVIEW_COMMENTS_MAX}; os demais vão no "summary". Escreva em pt-BR. Não altere arquivos.`
 ].join('\n')
 
-/**
- * Coluna "Revisando": /review → o agente converte a revisão em JSON (só leitura) → o Orkio mostra
- * o tipo, o resumo e os comentários e, aprovado, publica na PR como `orkio[bot]` (site do Orkio).
- * "Pedir alterações" dispara a regra "Alterações pedidas → Revisado".
- */
 export function alvaReviewPublishFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.review,
     name: 'Alva: revisão publicada',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
-      alva('review', 'Revisar (/review)', 'review', '{{alva.task_id}}', 60),
+      alva('review', 'Revisar (/review)', 'review', TASK_ID, 60),
       {
         id: 'revisao-json',
         name: 'Converter a revisão em JSON (só leitura)',
@@ -325,36 +332,34 @@ export function alvaReviewPublishFlow(): Flow {
         id: 'publicar-revisao',
         name: 'Publicar revisão na PR (orkio[bot])',
         type: 'orkio_action',
-        action: 'publish_review'
+        action: ORKIO_ACTIONS.publish_review.id
       }
     ]
   }
 }
 
-/** Avulso (manual, botão "Rodar fluxo CI vermelho"): /fix --ci --apply → /commit → push. */
 export function alvaCiFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.ci,
     name: 'Alva: CI vermelho',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
-      alva('fix-ci', 'Corrigir CI (/fix --ci --apply)', 'fix', '{{alva.task_id}} --ci --apply', 60),
-      alva('commit', 'Commit (/commit)', 'commit', '{{alva.task_id}}', 15),
+      alva('fix-ci', 'Corrigir CI (/fix --ci --apply)', 'fix', `${TASK_ID} --ci --apply`, 60),
+      alva('commit', 'Commit (/commit)', 'commit', TASK_ID, 15),
       PUSH()
     ]
   }
 }
 
-/** Botão "Abrir PR": push da branch da tarefa (com o gate) e `/alva-flow:pr` em modo entrega. */
 export function alvaOpenPrFlow(options: { push?: boolean } = {}): Flow {
   return {
     id: OPEN_PR_FLOW_IDS.openPr,
     name: 'Abrir PR',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
       // Branch já no GitHub (push anterior ou à mão): vai direto ao /pr.
       ...(options.push === false ? [] : [PUSH()]),
-      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', '{{alva.task_id}}', 60, {
+      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', TASK_ID, 60, {
         delivery: true
       })
     ]
@@ -376,31 +381,30 @@ export function alvaTemplates(): Flow[] {
   ]
 }
 
+export type AlvaStagedTemplate = 'plan' | 'deliver' | 'review' | 'reviewed'
+
 /**
- * Ligações padrão (ao entrar), sem configurar: "Alva: revisão publicada" em "Revisando" e "Alva:
- * comentários da PR" em "Revisado". Etapas pelo nome, sem acento/caixa (como `defaultRules`).
+ * Coluna de cada modelo Alva pelo papel da etapa (sugestão da tela alva-flow) e se ele já vem
+ * ligado sem configurar (`byDefault`): "Alva: revisão publicada" em `review` (Revisando) e
+ * "Alva: comentários da PR" em `reviewed` (Revisado), como `defaultRules`.
  */
-export const ALVA_DEFAULT_STAGES: readonly { flowId: string; stage: string }[] = [
-  { flowId: ALVA_TEMPLATE_IDS.review, stage: 'Revisando' },
-  { flowId: ALVA_TEMPLATE_IDS.reviewed, stage: 'Revisado' }
-]
-
-const normName = (s: string): string =>
-  s
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim()
-
-/** Etapa com o nome (sem acento/caixa) ou `null`. */
-export function stageByName(
-  stages: readonly { id: string; name: string }[],
-  name: string
-): string | null {
-  return stages.find((s) => normName(s.name) === normName(name))?.id ?? null
+export const ALVA_TEMPLATE_STAGES: Record<
+  AlvaStagedTemplate,
+  { role: StageRole; byDefault: boolean }
+> = {
+  plan: { role: 'plan', byDefault: false },
+  deliver: { role: 'work', byDefault: false },
+  review: { role: 'review', byDefault: true },
+  reviewed: { role: 'reviewed', byDefault: true }
 }
 
-/** JSON com as chaves em ordem (comparação que não depende da ordem das chaves). */
+/** Ligações padrão (ao entrar), sem configurar. */
+export const ALVA_DEFAULT_STAGES: readonly { flowId: string; role: StageRole }[] = (
+  Object.keys(ALVA_TEMPLATE_STAGES) as AlvaStagedTemplate[]
+)
+  .filter((key) => ALVA_TEMPLATE_STAGES[key].byDefault)
+  .map((key) => ({ flowId: ALVA_TEMPLATE_IDS[key], role: ALVA_TEMPLATE_STAGES[key].role }))
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
   if (value && typeof value === 'object') {
@@ -412,7 +416,6 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-/** `base`, senão `base-2`, `base-3`… (ids de fluxo livres no projeto). */
 function freeId(base: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base)) return base
   let n = 2
@@ -420,7 +423,6 @@ function freeId(base: string, taken: ReadonlySet<string>): string {
   return `${base}-${n}`
 }
 
-/** O projeto já usa os modelos do alva-flow (algum fluxo com id de modelo Alva)? */
 export function hasAlvaTemplates(pf: Pick<ProjectFlows, 'flows'> | undefined): boolean {
   const ids = new Set<string>(Object.values(ALVA_TEMPLATE_IDS))
   return !!pf?.flows.some((f) => ids.has(f.id))
@@ -431,14 +433,14 @@ export function hasAlvaTemplates(pf: Pick<ProjectFlows, 'flows'> | undefined): b
  * - acrescenta os modelos que faltam;
  * - troca as cópias antigas dos modelos (mesmo id) pela versão nova, se mudaram, guardando antes a
  *   cópia atual como `<id>-anterior` ("<nome> (cópia anterior)", sem coluna), para nada se perder;
- * - liga Revisando/Revisado (ao entrar) só se a etapa não tiver fluxo ligado e o modelo ainda não
+ * - liga as etapas de papel `review`/`reviewed` (ao entrar) só se a etapa não tiver fluxo ligado e o modelo ainda não
  *   estiver ligado em outra coluna.
  * Fluxos e ligações criados pelo usuário (outros ids) nunca mudam. Devolve as mudanças em texto
  * (histórico de configuração). Sem modelos Alva no projeto: nada muda.
  */
 export function upgradeAlvaFlows(
   pf: ProjectFlows,
-  stages: readonly { id: string; name: string }[]
+  stages: readonly { id: string; name: string; role?: StageRole | undefined }[]
 ): { flows: ProjectFlows; changes: string[] } {
   if (!hasAlvaTemplates(pf)) return { flows: pf, changes: [] }
   const changes: string[] = []
@@ -477,12 +479,12 @@ export function upgradeAlvaFlows(
   }
   const bindings: StageFlow[] = [...pf.bindings]
   for (const d of ALVA_DEFAULT_STAGES) {
-    const stageId = stageByName(stages, d.stage)
+    const stageId = stageWithRole(stages, d.role)
     if (!stageId) continue
     if (bindings.some((b) => b.stageId === stageId || b.flowId === d.flowId)) continue
     bindings.push({ stageId, flowId: d.flowId, enabled: true, mode: 'on_enter' })
     const name = byId.get(d.flowId)?.name ?? d.flowId
-    const stage = stages.find((s) => s.id === stageId)?.name ?? d.stage
+    const stage = stages.find((s) => s.id === stageId)?.name ?? stageId
     changes.push(`Coluna “${stage}” ganhou o fluxo “${name}” (ao entrar)`)
   }
   return changes.length > 0

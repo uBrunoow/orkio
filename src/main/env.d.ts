@@ -4,11 +4,12 @@
 interface ImportMetaEnv {
   /** OAuth client ID da conexão do Notion (público). */
   readonly MAIN_VITE_NOTION_OAUTH_CLIENT_ID?: string
-  /** URL https do intermediário OAuth (broker/), que guarda o client secret. */
-  readonly MAIN_VITE_NOTION_OAUTH_BROKER_URL?: string
   /** Client ID da OAuth App do GitHub com Device Flow habilitado (público). */
   readonly MAIN_VITE_GITHUB_CLIENT_ID?: string
-  /** Endereço https do site (Configurações > Sobre). Sem ele, usa a origem do intermediário. */
+  /**
+   * Endereço do site do Orkio (`platform/site.ts`): intermediário OAuth do Notion em `/notion/*`,
+   * revisão como orkio[bot] em `/github/*` e links de Configurações > Sobre.
+   */
   readonly MAIN_VITE_SITE_URL?: string
   /** '1' quando o build do macOS foi assinado com Developer ID (o CI da 6B define). */
   readonly MAIN_VITE_MAC_SIGNED?: string

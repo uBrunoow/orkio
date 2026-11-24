@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import { GitHubApiError, type ConditionalPage } from './github.client'
+import { type ConditionalPage } from './github.client'
 import type { OrkioSiteResponse, OrkioSiteReviewPayload } from './github.connector'
-import { isAllowedOrkioSiteOrigin, readOrkioSiteOrigin } from './orkio-site'
 import {
   GitHubReviewPoster,
   REVIEW_MESSAGES,
@@ -12,6 +11,7 @@ import {
   type ReviewGitHub,
   type ReviewInput
 } from './review-poster'
+import { ApiError } from '../../net/http'
 
 const REVIEW_URL = 'https://github.com/acme/orkio/pull/7#pullrequestreview-99'
 
@@ -285,8 +285,8 @@ describe('erros em pt-BR', () => {
   const site = (status: number, body: unknown) => () => ({ status, body })
 
   it.each([
-    [503, { error: 'not_configured' }, 'not_configured', REVIEW_MESSAGES.notConfigured],
-    [404, null, 'not_configured', REVIEW_MESSAGES.notConfigured],
+    [503, { error: 'not_configured' }, 'app_not_configured', REVIEW_MESSAGES.notConfigured],
+    [404, null, 'site_outdated', REVIEW_MESSAGES.siteOutdated],
     [403, { error: 'forbidden' }, 'forbidden', REVIEW_MESSAGES.forbidden],
     [429, { error: 'rate_limited' }, 'rate_limited', REVIEW_MESSAGES.rateLimited],
     [400, { error: 'bad_request', reason: 'rejected' }, 'rejected', REVIEW_MESSAGES.rejected],
@@ -335,13 +335,18 @@ describe('erros em pt-BR', () => {
 
   it.each([
     ['not_connected', 'not_connected'],
-    ['network', 'network'],
-    ['timeout', 'timeout'],
+    ['network', 'site_network'],
+    ['timeout', 'site_timeout'],
     ['server', 'upstream']
   ] as const)('erro %s do conector → %s, com a mensagem segura', async (from, to) => {
     const gh = fakeGitHub({
       site: () => {
-        throw new GitHubApiError(from, `mensagem ${from}`, from === 'server' ? 500 : undefined)
+        throw new ApiError(
+          from === 'not_connected' ? 'github' : 'site',
+          from,
+          `mensagem ${from}`,
+          from === 'server' ? 500 : undefined
+        )
       }
     })
     const error = await rejection(
@@ -353,7 +358,7 @@ describe('erros em pt-BR', () => {
   it('conector sem origem (ou origem recusada) → no_site, não "site sem App"', async () => {
     const gh = fakeGitHub({
       site: () => {
-        throw new GitHubApiError('not_configured', 'Este app não sabe o endereço do site…')
+        throw new ApiError('site', 'no_site', 'Este app não sabe o endereço do site…')
       }
     })
     const error = await rejection(
@@ -363,12 +368,12 @@ describe('erros em pt-BR', () => {
     expect(error.message).toBe(REVIEW_MESSAGES.noSite)
   })
 
-  it('o site respondeu not_configured (503) → not_configured com a mensagem do site', async () => {
+  it('o site respondeu not_configured (503) → app_not_configured com a mensagem do site', async () => {
     const gh = fakeGitHub({ site: () => ({ status: 503, body: { error: 'not_configured' } }) })
     const error = await rejection(
       poster(gh).postReview('acme', 'orkio', 7, { ...REVIEW, comments: [] })
     )
-    expect(error.code).toBe('not_configured')
+    expect(error.code).toBe('app_not_configured')
     expect(error.message).toBe(REVIEW_MESSAGES.notConfigured)
     expect(error.message).not.toBe(REVIEW_MESSAGES.noSite)
   })
@@ -379,38 +384,5 @@ describe('erros em pt-BR', () => {
     })
     const error = await rejection(poster(gh).postReview('acme', 'orkio', 7, REVIEW))
     expect(JSON.stringify({ m: error.message, d: error.details })).not.toContain('gho_')
-  })
-})
-
-describe('origem do site', () => {
-  it('MAIN_VITE_SITE_URL primeiro; a origem do intermediário do Notion só sem site', () => {
-    expect(
-      readOrkioSiteOrigin({
-        MAIN_VITE_NOTION_OAUTH_BROKER_URL: 'https://broker.workers.dev/x',
-        MAIN_VITE_SITE_URL: 'https://orkio.dev/'
-      })
-    ).toBe('https://orkio.dev')
-    expect(
-      readOrkioSiteOrigin({ MAIN_VITE_NOTION_OAUTH_BROKER_URL: 'https://orkio.dev/notion' })
-    ).toBe('https://orkio.dev')
-    expect(readOrkioSiteOrigin({})).toBeNull()
-  })
-
-  it('só https; http só em 127.0.0.1 e só em build de E2E; nunca localhost', () => {
-    const broker = (url: string, MODE = 'production') =>
-      readOrkioSiteOrigin({ MODE, MAIN_VITE_NOTION_OAUTH_BROKER_URL: url })
-    expect(broker('http://127.0.0.1:3000')).toBeNull()
-    expect(broker('http://127.0.0.1:3000', 'development')).toBeNull()
-    expect(broker('http://127.0.0.1:3000', 'e2e')).toBe('http://127.0.0.1:3000')
-    expect(broker('http://localhost:3000', 'e2e')).toBeNull()
-    expect(broker('http://orkio.dev')).toBeNull()
-    expect(broker('https://u:p@orkio.dev')).toBeNull()
-    expect(broker('lixo')).toBeNull()
-
-    expect(isAllowedOrkioSiteOrigin('https://orkio.dev', false)).toBe(true)
-    expect(isAllowedOrkioSiteOrigin('https://orkio.dev/x', false)).toBe(false) // só origem
-    expect(isAllowedOrkioSiteOrigin('http://127.0.0.1:3000', false)).toBe(false)
-    expect(isAllowedOrkioSiteOrigin('http://127.0.0.1:3000', true)).toBe(true)
-    expect(isAllowedOrkioSiteOrigin('http://localhost:3000', true)).toBe(false)
   })
 })

@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { NotionWorkspaceStatus } from '../../../../shared/ipc-contract'
-
-const IPC_FAILURE: NotionWorkspaceStatus = {
-  config: null,
-  health: 'unverified',
-  messages: ['Não foi possível falar com o processo principal do Orkio. Reinicie o app.'],
-  connection: null
-}
+import { useSources } from '../../app/sources'
+import { useSource } from '../../lib/ipc'
+import type { NotionWorkspaceStatus } from '../../../../shared/notion'
 
 export interface UseNotionWorkspace {
   /** `null` enquanto carrega. */
@@ -17,40 +12,40 @@ export interface UseNotionWorkspace {
 }
 
 /**
- * Estado dos bancos do Notion. `refreshKey` muda quando a conexão do Notion muda
+ * Estado dos bancos do Notion, um para o App (Integrações, Primeiros passos, Projetos e o
+ * "Falta N passos" da lista lateral). `refreshKey` muda quando a conexão do Notion muda
  * (conectou/desconectou): aí revalidamos o schema no main. `null` = ainda carregando; espera.
  */
 export function useNotionWorkspace(refreshKey: string | null = 'static'): UseNotionWorkspace {
-  const [status, setStatus] = useState<NotionWorkspaceStatus | null>(null)
+  const { notionWorkspace } = useSources()
+  const status = useSource(notionWorkspace, '').value
   const [revalidating, setRevalidating] = useState(false)
   const mounted = useRef(true)
   const first = useRef(true)
 
-  const run = useCallback(async (kind: 'getStatus' | 'revalidate') => {
+  const revalidate = useCallback(async () => {
     setRevalidating(true)
-    let next: NotionWorkspaceStatus
-    try {
-      next = await window.orkio.notionWorkspace[kind]()
-    } catch {
-      next = IPC_FAILURE
-    }
-    if (!mounted.current) return
-    setStatus(next)
-    setRevalidating(false)
-  }, [])
+    await notionWorkspace.reload('', 'revalidate')
+    if (mounted.current) setRevalidating(false)
+  }, [notionWorkspace])
 
   useEffect(() => {
     mounted.current = true
-    if (refreshKey === null) return
-    // Primeira carga: estado do main (que revalida uma vez por sessão); depois, revalida.
-    void run(first.current ? 'getStatus' : 'revalidate')
-    first.current = false
+    if (refreshKey !== null) {
+      // Ao abrir: o estado do main (que revalida uma vez por sessão); depois, cada mudança de
+      // conexão revalida o schema.
+      void (first.current ? notionWorkspace.reload('') : revalidate())
+      first.current = false
+    }
     return () => {
       mounted.current = false
     }
-  }, [run, refreshKey])
+  }, [refreshKey, revalidate, notionWorkspace])
 
-  const revalidate = useCallback(() => run('revalidate'), [run])
+  const setStatus = useCallback(
+    (next: NotionWorkspaceStatus) => notionWorkspace.set('', next),
+    [notionWorkspace]
+  )
 
   return { status, revalidating, revalidate, setStatus }
 }

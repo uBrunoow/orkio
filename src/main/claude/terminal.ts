@@ -3,18 +3,17 @@
  * `{ cmd, args }` (nunca shell); quem executa é o main com `spawn` sem shell e `cwd: dir`.
  */
 import { delimiter, join } from 'node:path'
+import { DomainError } from '../errors'
 
 export interface TerminalCommand {
   cmd: string
   args: string[]
 }
 
-/** Só caminhos absolutos simples (sem nova linha/NUL) vão para a linha de comando. */
 function safeDir(dir: string): boolean {
   return dir.length > 0 && !/[\0\r\n]/.test(dir)
 }
 
-/** Nome de executável sem caminho nem espaços (o `$TERMINAL` do usuário). */
 function safeCommandName(name: string): boolean {
   return /^[A-Za-z0-9._+][A-Za-z0-9._+-]*$/.test(name) && !name.startsWith('.')
 }
@@ -51,8 +50,9 @@ export function terminalCandidates(
 }
 
 /**
- * O primeiro candidato que existe (`exists` diz se o executável está no PATH). Quem executa deve
- * sempre passar `cwd: dir`: `$TERMINAL`, `x-terminal-emulator` e os do Windows só usam o cwd.
+ * O primeiro candidato que existe (`exists` diz se o executável está no PATH; no macOS o `open`
+ * sempre existe). Quem executa deve sempre passar `cwd: dir`: `$TERMINAL`, `x-terminal-emulator`
+ * e os do Windows só usam o cwd.
  */
 export function terminalCommand(
   platform: NodeJS.Platform,
@@ -60,10 +60,12 @@ export function terminalCommand(
   dir: string,
   exists: (cmd: string) => boolean = () => true
 ): TerminalCommand | null {
-  return terminalCandidates(platform, env, dir).find((c) => exists(c.cmd)) ?? null
+  return (
+    terminalCandidates(platform, env, dir).find((c) => platform === 'darwin' || exists(c.cmd)) ??
+    null
+  )
 }
 
-/** Procura um executável nas pastas do PATH (nomes simples; no Windows tenta as extensões). */
 export function onPath(
   cmd: string,
   env: NodeJS.ProcessEnv,
@@ -73,4 +75,11 @@ export function onPath(
   const dirs = (env['PATH'] ?? env['Path'] ?? '').split(delimiter).filter(Boolean)
   const exts = platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : ['']
   return dirs.some((d) => exts.some((e) => isFile(join(d, cmd + e))))
+}
+
+export class TerminalError extends DomainError {
+  constructor(code: 'no_workspace' | 'no_terminal') {
+    super(code, code === 'no_workspace' ? 'Pasta de trabalho não encontrada.' : 'Nenhum terminal.')
+    this.name = 'TerminalError'
+  }
 }

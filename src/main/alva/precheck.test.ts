@@ -2,12 +2,13 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { ALVA_COMMANDS, makeTargets, parseMcpList, runPrecheck, type Exec } from './precheck'
+import { ALVA_COMMANDS, alvaCommand } from '../../shared/alva'
+import { makeTargets, parseMcpList, runPrecheck, type Exec } from './precheck'
 
 let home: string
 let project: string
 let neutral: string
-const ALL = ALVA_COMMANDS.map((c) => `alva-flow:${c}`)
+const ALL = ALVA_COMMANDS.map(alvaCommand)
 
 interface Machine {
   mcpUser?: string

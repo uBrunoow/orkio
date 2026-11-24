@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import type { BusyItem, UpdateStatus } from '../../../../shared/updates'
+import { isUpdateReady } from '../../lib/status-text'
 
 /**
  * Botões de instalar uma atualização pronta. Nunca reinicia por cima de trabalho em andamento sem
@@ -26,14 +27,14 @@ export function InstallControls({ status }: { status: UpdateStatus }): React.JSX
     }
   }
 
-  if (status.mode === 'manual' && status.phase === 'available') {
+  if (!isUpdateReady(status)) return null
+  if (status.mode === 'manual') {
     return (
       <div className="flex">
         <Button onClick={() => void window.orkio.updates.openDownload()}>Baixar</Button>
       </div>
     )
   }
-  if (status.mode !== 'auto' || status.phase !== 'downloaded') return null
 
   if (status.installWhenIdle) {
     return (

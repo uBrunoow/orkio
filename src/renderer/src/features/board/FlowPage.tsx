@@ -19,13 +19,14 @@ import {
 } from '@/components/form'
 import { cn } from '@/lib/utils'
 import { StatusToken } from '../../components/StatusToken'
-import type { AutomationRule, EventKind } from '../../../../shared/automation'
+import {
+  EVENT_KINDS,
+  EVENT_META,
+  type AutomationRule,
+  type EventKind
+} from '../../../../shared/automation'
 import type { Flow, StageFlow } from '../../../../shared/task-flow'
 import {
-  EVENT_DESCRIPTIONS,
-  EVENT_KINDS,
-  EVENT_LABELS,
-  EVENT_PHRASES,
   FLOW_COLORS,
   describeRule,
   diffFlow,
@@ -37,17 +38,12 @@ import {
   validateFlow,
   type FlowDraft,
   type FlowStageDraft,
-  type SimulationResult
+  type SimulationResult,
+  type ConfigEvent
 } from '../../../../shared/flow'
-import type {
-  BoardView,
-  ConfigEvent,
-  NotionColor,
-  NotionResult
-} from '../../../../shared/ipc-contract'
 import { Alert } from '../../components/Alert'
 import { SaveBar } from '../../components/SaveBar'
-import { plural } from '../../lib/format'
+import { formatDateTime, plural } from '../../lib/format'
 import { DeliverySection } from '../task-flows/DeliverySection'
 import {
   ArrowDownIcon,
@@ -57,9 +53,21 @@ import {
   PlusIcon,
   TrashIcon
 } from '../../components/icons'
-import { useProjectActivity } from '../../components/SentenceDetail'
+import { useProjectActivity } from '../overview/useProjectActivity'
+import { useProjectFlows } from '../task-flows/useProjectFlows'
 import { RuleDetail } from './RuleDetail'
 import type { BoardSettingsTab } from '../../app/routes'
+import {
+  ORKIO_STAGE_PROPERTY_NAME,
+  STAGE_ROLES,
+  STAGE_ROLE_LABEL,
+  isStageRole,
+  type BoardView,
+  type StageRole
+} from '../../../../shared/board'
+import type { NotionColor } from '../../../../shared/notion'
+import { stageDotClass } from './stage-dot'
+import { IPC_FAILURE_MESSAGE, ipcCall, ipcResult } from '../../lib/ipc'
 
 const BOARD_TABS: { id: BoardSettingsTab; label: string }[] = [
   { id: 'columns', label: 'Colunas' },
@@ -85,30 +93,18 @@ const COLOR_LABELS: Record<NotionColor, string> = {
   red: 'Vermelho'
 }
 
-/** Ponto da etapa com a cor escolhida (só tokens do tema; sem cor, neutro). */
-const STAGE_DOT: Record<NotionColor, string> = {
-  default: 'bg-subtle-foreground',
-  gray: 'bg-muted-foreground',
-  brown: 'bg-brand',
-  orange: 'bg-brand',
-  yellow: 'bg-warn',
-  green: 'bg-ok',
-  blue: 'bg-info',
-  purple: 'bg-purple',
-  pink: 'bg-pink',
-  red: 'bg-danger'
-}
-
 function StageDot({ color }: { color: NotionColor | undefined }): React.JSX.Element {
   return (
     <span
       aria-hidden="true"
-      className={cn('inline-block size-[7px] shrink-0 rounded-full', STAGE_DOT[color ?? 'default'])}
+      className={cn(
+        'inline-block size-[7px] shrink-0 rounded-full',
+        stageDotClass(color ? { color } : {})
+      )}
     />
   )
 }
 
-/** Cabeçalho de bloco (mockup `.sh` menor): título, descrição e ação à direita. */
 function BlockHead({
   title,
   level = 2,
@@ -148,12 +144,12 @@ function RuleSentence({
   stages: readonly { id: string; name: string }[]
 }): React.JSX.Element {
   const full = describeRule(rule, stages)
-  const head = `Quando ${EVENT_PHRASES[rule.trigger]}`
+  const head = `Quando ${EVENT_META[rule.trigger].phrase}`
   if (!full.startsWith(head)) return <>{full}</>
   const rest = full.slice(head.length)
   const trigger = (
     <em className="rounded-[5px] bg-brand-tint px-1.5 py-px not-italic text-brand-tint-foreground">
-      {EVENT_PHRASES[rule.trigger]}
+      {EVENT_META[rule.trigger].phrase}
     </em>
   )
   if (rule.action.type === 'move_to_stage') {
@@ -194,6 +190,8 @@ function initialDraft(view: BoardView): FlowDraft {
   }
 }
 
+const NO_ROLE = 'nenhum'
+
 interface RuleEditing {
   rule: AutomationRule
   isNew: boolean
@@ -214,16 +212,12 @@ export function FlowPage({
   flowsSlot
 }: {
   view: BoardView
-  /** Cabeçalho da página com as ações do fluxo à direita. */
   header(action: React.ReactNode): React.ReactNode
   onSaved(view: BoardView): void
   onOpenNotionSettings(): void
-  /** "Criar fluxo" numa coluna: leva à aba Fluxos (5A). */
   onOpenTaskFlows(): void
-  /** Aba de Quadro e automações (Colunas · Automações · Fluxos · Entrega). */
   tab: BoardSettingsTab
   onTabChange(tab: BoardSettingsTab): void
-  /** Conteúdo da aba Fluxos (editor da 5A e modelos do alva-flow). */
   flowsSlot: React.ReactNode
 }): React.JSX.Element {
   const [draft, setDraft] = useState<FlowDraft>(() => initialDraft(view))
@@ -233,26 +227,23 @@ export function FlowPage({
   const [message, setMessage] = useState<{ tone: 'danger' | 'warning'; text: string } | null>(null)
   const [events, setEvents] = useState<ConfigEvent[]>([])
   const [eventsKey, setEventsKey] = useState(0)
-  /** 5A: fluxos de tarefa do projeto e as ligações salvas (para "Fluxo desta coluna"). */
-  const [taskFlows, setTaskFlows] = useState<{ flows: Flow[]; bindings: StageFlow[] } | null>(null)
+  const projectFlows = useProjectFlows(view.projectId)
+  const taskFlows = projectFlows.value
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
   const [showAllEvents, setShowAllEvents] = useState(false)
-  // Automação aberta em frase (fase 6); o formulário só abre em "Editar".
   const [viewingRule, setViewingRule] = useState<string | null>(null)
   const automationActivity = useProjectActivity(view.projectId, 'automation')
 
-  useEffect(() => {
-    let active = true
-    void window.orkio.taskFlows.getProject(view.projectId).then((r) => {
-      if (!active || !r.ok) return
-      setTaskFlows({ flows: r.value.flows, bindings: r.value.bindings })
-      // O rascunho ganha as ligações salvas (se ainda não tiver mexido nelas).
-      setDraft((d) => (d.bindings ? d : { ...d, bindings: r.value.bindings }))
-    })
-    return () => {
-      active = false
+  // O rascunho acompanha as ligações salvas enquanto você não mexer nelas (outra tela pode
+  // salvá-las: editor de fluxos, modelos Alva).
+  const [seeded, setSeeded] = useState<FlowDraft['bindings']>(undefined)
+  const sourceBindings = taskFlows?.bindings
+  if (sourceBindings && sourceBindings !== seeded) {
+    setSeeded(sourceBindings)
+    if (!draft.bindings || JSON.stringify(draft.bindings) === JSON.stringify(seeded)) {
+      setDraft({ ...draft, bindings: sourceBindings })
     }
-  }, [view.projectId])
+  }
 
   const saved = view.config!
   const options = view.statusOptions
@@ -264,12 +255,9 @@ export function FlowPage({
 
   useEffect(() => {
     let active = true
-    void window.orkio.flow
-      .events(view.projectId)
-      .then((list) => {
-        if (active) setEvents(list)
-      })
-      .catch(() => {})
+    void ipcCall(() => window.orkio.flow.events(view.projectId), null).then((list) => {
+      if (active && list) setEvents(list)
+    })
     return () => {
       active = false
     }
@@ -287,7 +275,6 @@ export function FlowPage({
   const errors = issues.filter((i) => i.level === 'error')
   const warnings = issues.filter((i) => i.level === 'warning')
 
-  // Rascunho salvo (o que "Descartar" restaura) e quantas mudanças o rascunho tem.
   const baseline = useMemo(
     (): FlowDraft => ({
       ...initialDraft(view),
@@ -301,7 +288,8 @@ export function FlowPage({
         id: st.id,
         name: st.name,
         notionStatus: { name: options.find((o) => o.id === st.notionStatusId)?.name ?? '' },
-        ...(st.color ? { color: st.color } : {})
+        ...(st.color ? { color: st.color } : {}),
+        ...(st.role ? { role: st.role } : {})
       })),
       rules: d.rules
     })
@@ -317,6 +305,18 @@ export function FlowPage({
   }
   const updateStage = (id: string, patch: Partial<FlowStageDraft>): void =>
     update((d) => ({ ...d, stages: d.stages.map((s) => (s.id === id ? { ...s, ...patch } : s)) }))
+  /** Um papel por etapa: dar o papel a esta tira das outras. */
+  const setStageRole = (id: string, role: StageRole | null): void =>
+    update((d) => ({
+      ...d,
+      stages: d.stages.map((s) => {
+        const mine = s.id === id
+        if (!mine && !(role && s.role === role)) return s
+        const next = { ...s }
+        delete next.role
+        return mine && role ? { ...next, role } : next
+      })
+    }))
   const setStageStatus = (id: string, optionId: string): void =>
     update((d) => ({
       ...d,
@@ -364,15 +364,7 @@ export function FlowPage({
   async function save(): Promise<void> {
     setSaving(true)
     setMessage(null)
-    let result: NotionResult<BoardView>
-    try {
-      result = await window.orkio.flow.save(view.projectId, draft)
-    } catch {
-      result = {
-        ok: false,
-        error: { code: 'ipc', message: 'Não foi possível falar com o processo principal do Orkio.' }
-      }
-    }
+    const result = await ipcResult(() => window.orkio.flow.save(view.projectId, draft))
     setSaving(false)
     if (!result.ok) {
       setMessage({ tone: 'danger', text: result.error.message })
@@ -382,7 +374,7 @@ export function FlowPage({
     // A tela continua aberta depois de salvar: o salvo vira o novo rascunho (e as ligações salvas
     // são as do rascunho), senão "Descartar" e o contador comparariam com o estado anterior.
     const bindings = draft.bindings
-    if (bindings) setTaskFlows((tf) => (tf ? { ...tf, bindings } : tf))
+    if (bindings && taskFlows) projectFlows.set({ ...taskFlows, bindings })
     setDraft({ ...initialDraft(result.value), ...(bindings ? { bindings } : {}) })
     setEditing(null)
     setAcceptWarnings(false)
@@ -391,17 +383,22 @@ export function FlowPage({
 
   async function doExport(): Promise<void> {
     const file = exportFlow(draft, options, new Date().toISOString())
-    const result = await window.orkio.flow.exportFile(file).catch(() => null)
-    if (result && !result.ok && !result.cancelled) {
+    const result = await ipcCall(() => window.orkio.flow.exportFile(file), null)
+    if (!result) setMessage({ tone: 'danger', text: IPC_FAILURE_MESSAGE })
+    else if (!result.ok && !result.cancelled) {
       setMessage({ tone: 'danger', text: result.message ?? 'Não foi possível exportar.' })
-    } else if (result?.ok) {
+    } else if (result.ok) {
       setMessage({ tone: 'warning', text: 'Fluxo exportado.' })
     }
   }
 
   async function doImport(): Promise<void> {
-    const result = await window.orkio.flow.importFile().catch(() => null)
-    if (!result || (!result.ok && result.cancelled)) return
+    const result = await ipcCall(() => window.orkio.flow.importFile(), null)
+    if (!result) {
+      setMessage({ tone: 'danger', text: IPC_FAILURE_MESSAGE })
+      return
+    }
+    if (!result.ok && result.cancelled) return
     if (!result.ok) {
       setMessage({ tone: 'danger', text: result.message ?? 'Não foi possível importar.' })
       return
@@ -489,7 +486,7 @@ export function FlowPage({
             <RuleSentence rule={rule} stages={draft.stages} />
           </span>
           <span className="font-mono text-2xs text-subtle-foreground">
-            {i + 1}ª na ordem · {EVENT_LABELS[rule.trigger]} ·{' '}
+            {i + 1}ª na ordem · {EVENT_META[rule.trigger].label} ·{' '}
             {firedLabel(view.ruleCountsWeek[rule.id] ?? 0)}
           </span>
         </button>
@@ -541,7 +538,7 @@ export function FlowPage({
       stages={draft.stages}
       onCancel={() => setEditing(null)}
       onApply={(rule) => {
-        const named = { ...rule, name: rule.name.trim() || EVENT_LABELS[rule.trigger] }
+        const named = { ...rule, name: rule.name.trim() || EVENT_META[rule.trigger].label }
         update((d) => ({
           ...d,
           rules: editing.isNew
@@ -567,7 +564,6 @@ export function FlowPage({
     ? draft.rules.filter((r) => r.action.type === 'move_to_stage' && r.action.stageId === stage.id)
     : []
   const shownRule = viewingRule ? (draft.rules.find((r) => r.id === viewingRule) ?? null) : null
-  /** Fluxo que a coluna dispara ao entrar (para a tabela das colunas). */
   const onEnterFlow = (stageId: string): string | null => {
     const b = (draft.bindings ?? []).find(
       (x) => x.stageId === stageId && x.enabled && x.mode === 'on_enter'
@@ -587,11 +583,7 @@ export function FlowPage({
             <li key={e.id} className={cn(ROW, 'flex flex-col gap-0.5 px-4 py-2.5')}>
               <span className="text-sm">{e.changes.join(' · ')}</span>
               <span className="text-2xs text-subtle-foreground">
-                {e.actor} ·{' '}
-                {new Date(e.at).toLocaleString('pt-BR', {
-                  dateStyle: 'short',
-                  timeStyle: 'short'
-                })}
+                {e.actor} · {formatDateTime(e.at)}
               </span>
             </li>
           ))}
@@ -618,7 +610,7 @@ export function FlowPage({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem onSelect={onOpenNotionSettings}>
-              Etapa Orkio e Bloqueada…
+              {ORKIO_STAGE_PROPERTY_NAME} e Bloqueada…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={restoreDefault}>Restaurar padrão</DropdownMenuItem>
@@ -659,7 +651,6 @@ export function FlowPage({
         </TabsList>
 
         <TabsContent value="columns" className="flex flex-col gap-5">
-          {/* Tabela das colunas (mockup): escolher uma linha abre o editor dela embaixo. */}
           <section aria-label="Etapas" className={ROWS}>
             <div
               aria-hidden="true"
@@ -832,6 +823,17 @@ export function FlowPage({
                       onChange={(value) => updateStage(stage.id, { color: value as NotionColor })}
                     />
                   </div>
+
+                  <SelectField
+                    label="Papel da coluna"
+                    description="O que esta coluna é no trabalho, qualquer que seja o nome: regras padrão, fluxos Alva, orquestrador e a lista “A fazer” (sem coluna com esse papel, vale a primeira) usam o papel. Uma coluna por papel."
+                    options={[
+                      { value: NO_ROLE, label: 'Sem papel' },
+                      ...STAGE_ROLES.map((r) => ({ value: r, label: STAGE_ROLE_LABEL[r] }))
+                    ]}
+                    value={stage.role ?? NO_ROLE}
+                    onChange={(value) => setStageRole(stage.id, isStageRole(value) ? value : null)}
+                  />
 
                   <StageFlowField
                     flows={taskFlows?.flows ?? null}
@@ -1102,8 +1104,8 @@ function RuleForm({
         label="Quando"
         options={EVENT_KINDS.map((k) => ({
           value: k,
-          label: EVENT_LABELS[k],
-          description: EVENT_DESCRIPTIONS[k]
+          label: EVENT_META[k].label,
+          description: EVENT_META[k].description
         }))}
         value={rule.trigger}
         onChange={(value) => setRule((r) => ({ ...r, trigger: value as EventKind }))}
@@ -1196,7 +1198,7 @@ function RuleForm({
       <TextField
         label="Nome (opcional)"
         value={rule.name}
-        placeholder={EVENT_LABELS[rule.trigger]}
+        placeholder={EVENT_META[rule.trigger].label}
         onChange={(value) => setRule((r) => ({ ...r, name: value }))}
         className="max-w-sm"
       />
@@ -1287,7 +1289,7 @@ function Simulator({ view, draft }: { view: BoardView; draft: FlowDraft }): Reac
         />
         <SelectField
           label="Evento"
-          options={EVENT_KINDS.map((k) => ({ value: k, label: EVENT_LABELS[k] }))}
+          options={EVENT_KINDS.map((k) => ({ value: k, label: EVENT_META[k].label }))}
           value={event}
           onChange={(value) => {
             setEvent(value as EventKind)
@@ -1312,7 +1314,6 @@ function Simulator({ view, draft }: { view: BoardView; draft: FlowDraft }): Reac
   )
 }
 
-/** "Fluxo desta coluna" (5A): fluxo de tarefa ligado à etapa, ligado/desligado e modo. */
 function StageFlowField({
   stageId,
   flows,

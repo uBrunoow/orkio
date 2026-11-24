@@ -5,43 +5,27 @@
 import type { DeliverySettings } from '../../shared/delivery'
 import { parseProjectAgents, type ProjectAgents } from '../../shared/agent'
 import { parseOrchestrator, type OrchestratorConfig } from '../../shared/orchestrator'
-import {
-  EVENT_KINDS,
-  defaultRules,
-  type AutomationRule,
-  type EventKind
-} from '../../shared/automation'
-import type { BoardConfig, BoardStage } from '../../shared/board'
+import { parseRule, type AutomationRule } from '../../shared/automation'
+import { isStageRole, type BoardConfig, type BoardStage } from '../../shared/board'
+import { ConfigStore, type ConfigMigrations } from '../storage/config-store'
+import { migrateV11, type AlvaMigrationNote } from './migrations/v11-alva'
+import { migrateV13 } from './migrations/v13-queue-stage'
+import { migrateV14 } from './migrations/v14-stage-roles'
+import { migrateV3 } from './migrations/v3-default-rules'
+
+export const ORKIO_CONFIG_FILE = 'orkio-config.json'
+import { clampAlvaParallel } from '../../shared/alva'
+import { parseFlowDef, type Flow, type ProjectFlows, type StageFlow } from '../../shared/task-flow'
+import type { UpdateChannel } from '../../shared/updates'
 import type {
   NotionColor,
   NotionMapping,
   NotionPropertyRef,
-  NotionWorkspaceConfig,
-  ProjectRepo
-} from '../../shared/ipc-contract'
-import { ConfigStore } from '../storage/config-store'
+  NotionWorkspaceConfig
+} from '../../shared/notion'
+import type { ProjectRepo } from '../../shared/projects'
 
-export const ORKIO_CONFIG_FILE = 'orkio-config.json'
-/**
- * v1: projects. v2: `notion` (bancos de Projetos/Tarefas + mapeamento) e `notionProject` em cada
- * projeto (vínculo com uma página do banco de Projetos). Só ids e nomes, nunca conteúdo.
- * v3: `boards` (quadro kanban por projeto: etapas ↔ opções do status do Notion).
- * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
- */
-import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
-import { upgradeAlvaFlows } from '../../shared/alva-templates'
-import { isEffort, isModelName } from '../../shared/agent-runtime'
-import {
-  GATE_SHOWS,
-  type Condition,
-  type Flow,
-  type ProjectFlows,
-  type StageFlow,
-  type Step
-} from '../../shared/task-flow'
-import type { UpdateChannel } from '../../shared/updates'
-
-export const ORKIO_CONFIG_VERSION = 12
+export const ORKIO_CONFIG_VERSION = 15
 
 export interface StoredProject {
   id: string
@@ -59,19 +43,13 @@ export interface OrkioConfig {
   notion: NotionWorkspaceConfig | null
   /** Quadro de cada projeto (chave: id do projeto). */
   boards: Record<string, BoardConfig>
-  /** Automações (3B): pausa global ("Pausar todas"). */
   automation: { paused: boolean }
-  /** Contexto do Claude Code por projeto (4B): instruções + páginas de referência (só ids/nomes). */
-  claudeContexts: Record<string, ProjectClaudeContext>
-  /** Fluxos de tarefa por projeto (5A) e a ligação de cada um com as etapas. */
   flows: Record<string, ProjectFlows>
   /** Ajustes de entrega por projeto (5C). Ausente = padrão (aprovação para push). */
   delivery: Record<string, DeliverySettings>
   /** Agentes (8A): regras de atribuição por coluna. Os perfis ficam em arquivos, não aqui. */
   agents: Record<string, ProjectAgents>
-  /** Orquestrador (8B): fila, etapas de trabalho e agentes de cada uma, por projeto. */
   orchestrator: Record<string, OrchestratorConfig>
-  /** Atualizações (6C): canal, última versão vista ("O que há de novo") e última verificação. */
   updates: UpdatesConfig
   /** Manter o computador acordado enquanto agentes trabalham. Ausente = desligado. */
   keepAwake?: boolean
@@ -90,7 +68,6 @@ export function emptyConfig(): OrkioConfig {
     notion: null,
     boards: {},
     automation: { paused: false },
-    claudeContexts: {},
     flows: {},
     delivery: {},
     agents: {},
@@ -103,9 +80,60 @@ export function emptyConfig(): OrkioConfig {
  * Mudanças feitas por uma migração num projeto, para o histórico de configuração (`config_events`).
  * A migração roda no `ConfigStore` (sem banco): o main recebe as notas e grava quando o banco abre.
  */
-export interface ConfigMigrationNote {
-  projectId: string
-  changes: string[]
+export type ConfigMigrationNote = AlvaMigrationNote
+
+/**
+ * Migrações publicadas (`v → v+1`), uma para cada versão de 0 até `ORKIO_CONFIG_VERSION - 1`
+ * (o `ConfigStore` recusa abrir se faltar uma; teste exige todas). Nunca edite uma publicada:
+ * as que precisam de dados (regras padrão, modelos Alva) levam uma cópia congelada da época em
+ * `migrations/`, nunca o código vivo.
+ */
+export function orkioConfigMigrations(
+  options: { onMigrationNote?: (note: ConfigMigrationNote) => void } = {}
+): ConfigMigrations {
+  return {
+    // v0: arquivo sem schemaVersion (rascunhos antigos) → v1.
+    0: (data) => ({ projects: Array.isArray(data['projects']) ? data['projects'] : [] }),
+    1: (data) => ({
+      ...data,
+      notion: null,
+      projects: Array.isArray(data['projects'])
+        ? data['projects'].map((p: unknown) => (isRecord(p) ? { ...p, notionProject: null } : p))
+        : []
+    }),
+    2: (data) => ({ ...data, boards: {} }),
+    // v3 → v4: quadros existentes ganham as regras padrão da época (etapas pelo nome).
+    3: migrateV3,
+    4: (data) => ({ ...data, claudeContexts: {} }),
+    5: (data) => ({ ...data, flows: {} }),
+    // v6 → v7 (5B): só campos opcionais novos nos fluxos (includeBriefing, tags, limite Alva).
+    6: (data) => ({ ...data }),
+    // v7 → v8 (5C): ajustes de entrega por projeto (padrão: exigir aprovação para push).
+    7: (data) => ({ ...data, delivery: {} }),
+    // v8 → v9 (6C): canal Estável. Sem versão vista: a primeira abertura só registra a versão
+    // (quem chega à 6C instalou na mão); o "O que há de novo" vale a partir da próxima.
+    8: (data) => ({
+      ...data,
+      updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
+    }),
+    9: (data) => ({ ...data, agents: {} }),
+    // v10 → v11 (8B): orquestrador desligado em todos os projetos.
+    10: (data) => ({ ...data, orchestrator: {} }),
+    // v11 → v12: modelos Alva da v12 (congelados) e as ligações padrão de Revisando/Revisado.
+    11: (data) => migrateV11(data, options.onMigrationNote),
+    // v12 → v13: sai o contexto do projeto do Claude Code (`claudeContexts`), sem leitor desde
+    // que o contexto passou a vir só da tarefa.
+    12: (data) => {
+      const rest = { ...data }
+      delete rest['claudeContexts']
+      return rest
+    },
+    // v13 → v14: coluna "A fazer" vai do orquestrador para o quadro; sai `maxActive`.
+    13: migrateV13,
+    // v14 → v15: papel das etapas (`role`, pelo nome uma única vez); `queueStageId` vira o papel
+    // `queue`.
+    14: migrateV14
+  }
 }
 
 export function createOrkioConfigStore(
@@ -115,57 +143,7 @@ export function createOrkioConfigStore(
   return new ConfigStore<OrkioConfig>({
     file,
     currentVersion: ORKIO_CONFIG_VERSION,
-    migrations: {
-      // v0: arquivo sem schemaVersion (rascunhos antigos) → v1.
-      0: (data) => ({ projects: Array.isArray(data['projects']) ? data['projects'] : [] }),
-      // v1 → v2: Notion ainda não configurado; nenhum projeto vinculado.
-      1: (data) => ({
-        ...data,
-        notion: null,
-        projects: Array.isArray(data['projects'])
-          ? data['projects'].map((p: unknown) => (isRecord(p) ? { ...p, notionProject: null } : p))
-          : []
-      }),
-      // v2 → v3: nenhum quadro ainda.
-      2: (data) => ({ ...data, boards: {} }),
-      // v3 → v4: quadros existentes ganham as regras padrão (etapas resolvidas pelo nome).
-      3: (data) => {
-        const boards: Record<string, unknown> = {}
-        const raw = isRecord(data['boards']) ? data['boards'] : {}
-        for (const [projectId, board] of Object.entries(raw)) {
-          const parsed = parseBoard({ ...(isRecord(board) ? board : {}), rules: [] })
-          boards[projectId] =
-            parsed && isRecord(board)
-              ? { ...board, rules: defaultRules(parsed.stages).rules }
-              : board
-        }
-        return { ...data, boards, automation: { paused: false } }
-      },
-      // v4 → v5: nenhum contexto do Claude Code ainda.
-      4: (data) => ({ ...data, claudeContexts: {} }),
-      // v5 → v6: nenhum fluxo de tarefa ainda.
-      5: (data) => ({ ...data, flows: {} }),
-      // v6 → v7 (5B): só campos opcionais novos nos fluxos (includeBriefing, tags, limite Alva);
-      // os fluxos existentes continuam iguais.
-      6: (data) => ({ ...data }),
-      // v7 → v8 (5C): ajustes de entrega por projeto (padrão: exigir aprovação para push).
-      7: (data) => ({ ...data, delivery: {} }),
-      // v8 → v9 (6C): canal Estável. Sem versão vista: a primeira abertura só registra a versão
-      // (quem chega à 6C instalou na mão); o "O que há de novo" vale a partir da próxima.
-      8: (data) => ({
-        ...data,
-        updates: { channel: 'stable', lastSeenVersion: null, lastCheckAt: null }
-      }),
-      // v9 → v10 (8A): nenhuma regra de atribuição de agentes ainda.
-      9: (data) => ({ ...data, agents: {} }),
-      // v10 → v11 (8B): orquestrador desligado em todos os projetos.
-      10: (data) => ({ ...data, orchestrator: {} }),
-      // v11 → v12 (Task 18): projetos com os modelos Alva ganham os modelos novos ("Alva: revisão
-      // publicada"), as cópias antigas dos modelos (mesmo id) viram a versão nova e Revisando/
-      // Revisado ganham os fluxos padrão só se a coluna não tiver fluxo ligado. Fluxos e ligações
-      // do usuário nunca mudam.
-      11: (data) => migrateAlvaDefaults(data, options.onMigrationNote)
-    },
+    migrations: orkioConfigMigrations(options),
     validate: validateConfig,
     empty: emptyConfig
   })
@@ -189,7 +167,6 @@ export function validateConfig(
     }
   }
 
-  // Quadros: um inválido é descartado sozinho, com aviso.
   const boards: Record<string, BoardConfig> = {}
   const rawBoards = data['boards']
   if (isRecord(rawBoards)) {
@@ -204,15 +181,6 @@ export function validateConfig(
   const automation = {
     paused: isRecord(automationRaw) && automationRaw['paused'] === true
   }
-  // Contextos do Claude Code: um inválido é descartado sozinho.
-  const claudeContexts: Record<string, ProjectClaudeContext> = {}
-  if (isRecord(data['claudeContexts'])) {
-    for (const [projectId, raw] of Object.entries(data['claudeContexts'])) {
-      const ctx = parseClaudeContext(raw)
-      if (ctx) claudeContexts[projectId] = ctx
-    }
-  }
-  // Fluxos de tarefa: fluxo ou ligação inválidos são descartados sozinhos, com aviso.
   const flows: Record<string, ProjectFlows> = {}
   if (isRecord(data['flows'])) {
     for (const [projectId, raw] of Object.entries(data['flows'])) {
@@ -250,7 +218,6 @@ export function validateConfig(
     notion,
     boards,
     automation,
-    claudeContexts,
     flows,
     delivery,
     agents,
@@ -388,6 +355,7 @@ function parseStage(value: unknown, index: number): BoardStage | null {
   if (typeof value['color'] === 'string' && COLORS.includes(value['color'])) {
     stage.color = value['color'] as NotionColor
   }
+  if (isStageRole(value['role'])) stage.role = value['role']
   return stage
 }
 
@@ -397,6 +365,13 @@ export function parseBoard(value: unknown): BoardConfig | null {
   if (stages.some((s) => s === null) || stages.length === 0) return null
   const ids = new Set(stages.map((s) => s!.id))
   if (ids.size !== stages.length) return null
+  // Papel repetido (arquivo editado à mão): fica o da primeira etapa.
+  const roles = new Set<string>()
+  for (const stage of stages as BoardStage[]) {
+    if (!stage.role) continue
+    if (roles.has(stage.role)) delete stage.role
+    else roles.add(stage.role)
+  }
   return {
     stages: stages as BoardStage[],
     orkioStageProperty: nameRef(value['orkioStageProperty']),
@@ -408,154 +383,7 @@ export function parseBoard(value: unknown): BoardConfig | null {
   }
 }
 
-function stringList(value: unknown): string[] | undefined {
-  return Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : undefined
-}
-
-/** Regra inválida é descartada (as outras continuam). */
-export function parseRule(value: unknown): AutomationRule | null {
-  if (!isRecord(value)) return null
-  const { id, name, trigger } = value
-  if (typeof id !== 'string' || !id || typeof name !== 'string') return null
-  if (typeof trigger !== 'string' || !(EVENT_KINDS as readonly string[]).includes(trigger))
-    return null
-  const action = value['action']
-  if (!isRecord(action)) return null
-  let parsedAction: AutomationRule['action']
-  if (action['type'] === 'move_to_stage' && typeof action['stageId'] === 'string') {
-    parsedAction = { type: 'move_to_stage', stageId: action['stageId'] }
-  } else if (action['type'] === 'notify' && typeof action['message'] === 'string') {
-    parsedAction = { type: 'notify', message: action['message'] }
-  } else return null
-  const c = isRecord(value['conditions']) ? value['conditions'] : {}
-  const fromStages = stringList(c['fromStages'])
-  const rule: AutomationRule = {
-    id,
-    name,
-    enabled: value['enabled'] === true,
-    trigger: trigger as EventKind,
-    conditions: {
-      ...(fromStages ? { fromStages } : {}),
-      ...(c['notBlocked'] === true ? { notBlocked: true } : {}),
-      ...(c['onlyForward'] === true ? { onlyForward: true } : {})
-    },
-    action: parsedAction
-  }
-  if (value['notify'] === true) rule.notify = true
-  return rule
-}
-
-export function parseClaudeContext(value: unknown): ProjectClaudeContext | null {
-  if (!isRecord(value) || typeof value['instructions'] !== 'string') return null
-  const pages = Array.isArray(value['notionPages'])
-    ? value['notionPages'].map(nameRef).filter((p): p is { id: string; name: string } => !!p)
-    : []
-  return {
-    instructions: value['instructions'].slice(0, CONTEXT_LIMITS.instructions),
-    notionPages: pages.slice(0, CONTEXT_LIMITS.pages)
-  }
-}
-
-// ---------- Fluxos de tarefa (5A) ----------
-
 const str = (v: unknown): v is string => typeof v === 'string'
-
-export function parseCondition(v: unknown, depth = 0): Condition | null {
-  if (!isRecord(v) || depth > 5) return null
-  switch (v['type']) {
-    case 'step':
-      return str(v['step']) && (v['is'] === 'ok' || v['is'] === 'failed' || v['is'] === 'cancelled')
-        ? { type: 'step', step: v['step'], is: v['is'] }
-        : null
-    case 'var': {
-      const op = v['op']
-      if (!str(v['key']) || (op !== 'eq' && op !== 'neq' && op !== 'exists')) return null
-      return { type: 'var', key: v['key'], op, ...(str(v['value']) ? { value: v['value'] } : {}) }
-    }
-    case 'visits':
-      return str(v['step']) && typeof v['lt'] === 'number' && v['lt'] >= 1
-        ? { type: 'visits', step: v['step'], lt: Math.floor(v['lt']) }
-        : null
-    case 'all':
-    case 'any': {
-      if (!Array.isArray(v['of'])) return null
-      const of = v['of'].map((c) => parseCondition(c, depth + 1))
-      return of.every((c): c is Condition => c !== null) ? { type: v['type'], of } : null
-    }
-    default:
-      return null
-  }
-}
-
-export function parseStep(v: unknown): Step | null {
-  if (!isRecord(v) || !str(v['id']) || !str(v['name'])) return null
-  const base = { id: v['id'], name: v['name'] }
-  switch (v['type']) {
-    case 'claude_command':
-      if (!str(v['command']) || !str(v['args']) || typeof v['timeoutMin'] !== 'number') return null
-      return {
-        ...base,
-        type: 'claude_command',
-        command: v['command'],
-        args: v['args'],
-        ...(str(v['prompt']) ? { prompt: v['prompt'] } : {}),
-        ...(v['readOnly'] === true ? { readOnly: true } : {}),
-        timeoutMin: v['timeoutMin'],
-        ...(isRecord(v['extract']) && str(v['extract']['extractor'])
-          ? { extract: { extractor: v['extract']['extractor'] } }
-          : {}),
-        ...(v['delivery'] === true ? { delivery: true } : {}),
-        ...(typeof v['includeBriefing'] === 'boolean'
-          ? { includeBriefing: v['includeBriefing'] }
-          : {}),
-        ...(isModelName(v['model']) ? { model: v['model'] } : {}),
-        ...(isEffort(v['effort']) ? { effort: v['effort'] } : {})
-      }
-    case 'gate': {
-      const show = GATE_SHOWS.find((x) => x === v['show'])
-      if (!str(v['message']) || !show) return null
-      const revise = v['revise']
-      return {
-        ...base,
-        type: 'gate',
-        message: v['message'],
-        show,
-        onReject: str(v['onReject']) ? v['onReject'] : 'stop',
-        timeoutMin: typeof v['timeoutMin'] === 'number' ? v['timeoutMin'] : null,
-        ...(isRecord(revise) && str(revise['step']) && typeof revise['max'] === 'number'
-          ? { revise: { step: revise['step'], max: revise['max'] } }
-          : {})
-      }
-    }
-    case 'orkio_action':
-      return str(v['action']) ? { ...base, type: 'orkio_action', action: v['action'] } : null
-    case 'branch': {
-      const when = parseCondition(v['when'])
-      if (!when || !str(v['then'])) return null
-      return {
-        ...base,
-        type: 'branch',
-        when,
-        then: v['then'],
-        ...(str(v['else']) ? { else: v['else'] } : {})
-      }
-    }
-    default:
-      return null
-  }
-}
-
-export function parseFlowDef(v: unknown): Flow | null {
-  if (!isRecord(v) || !str(v['id']) || !v['id'] || !str(v['name']) || !Array.isArray(v['steps'])) {
-    return null
-  }
-  const steps = v['steps'].map(parseStep)
-  if (!steps.every((s): s is Step => s !== null)) return null
-  const tags = Array.isArray(v['tags'])
-    ? v['tags'].filter((t): t is string => str(t) && /^[a-z0-9_-]{1,20}$/.test(t)).slice(0, 5)
-    : []
-  return { id: v['id'], name: v['name'], steps, ...(tags.length > 0 ? { tags } : {}) }
-}
 
 function parseBinding(v: unknown): StageFlow | null {
   if (!isRecord(v) || !str(v['stageId']) || !str(v['flowId'])) return null
@@ -569,7 +397,6 @@ export function parseProjectFlows(v: unknown): { value: ProjectFlows; dropped: n
   const flows = rawFlows.map(parseFlowDef).filter((f): f is Flow => f !== null)
   const ids = new Set(flows.map((f) => f.id))
   const rawBindings = isRecord(v) && Array.isArray(v['bindings']) ? v['bindings'] : []
-  // Uma ligação por etapa; ligação para fluxo que sumiu é descartada.
   const bindings: StageFlow[] = []
   for (const b of rawBindings.map(parseBinding)) {
     if (b && ids.has(b.flowId) && !bindings.some((x) => x.stageId === b.stageId)) bindings.push(b)
@@ -577,50 +404,10 @@ export function parseProjectFlows(v: unknown): { value: ProjectFlows; dropped: n
   const alvaRaw = isRecord(v) && isRecord(v['alva']) ? v['alva'] : null
   const maxParallel =
     alvaRaw && typeof alvaRaw['maxParallel'] === 'number'
-      ? Math.min(4, Math.max(1, Math.floor(alvaRaw['maxParallel'])))
+      ? clampAlvaParallel(alvaRaw['maxParallel'])
       : null
   return {
     value: { flows, bindings, ...(maxParallel !== null ? { alva: { maxParallel } } : {}) },
     dropped: rawFlows.length - flows.length
   }
-}
-
-/** v11 → v12: `upgradeAlvaFlows` sobre os dados crus (o `validateConfig` normaliza depois). */
-export function migrateAlvaDefaults(
-  data: Record<string, unknown>,
-  onNote?: (note: ConfigMigrationNote) => void
-): Record<string, unknown> {
-  const rawFlows = data['flows']
-  if (!isRecord(rawFlows)) return data
-  const boards = isRecord(data['boards']) ? data['boards'] : {}
-  const flows: Record<string, unknown> = {}
-  for (const [projectId, raw] of Object.entries(rawFlows)) {
-    flows[projectId] = raw
-    if (!isRecord(raw) || !Array.isArray(raw['flows']) || !Array.isArray(raw['bindings'])) continue
-    const pf = {
-      ...raw,
-      flows: raw['flows'].filter((f): f is Flow => isRecord(f) && typeof f['id'] === 'string'),
-      bindings: raw['bindings'].filter(
-        (b): b is StageFlow =>
-          isRecord(b) && typeof b['stageId'] === 'string' && typeof b['flowId'] === 'string'
-      )
-    } as ProjectFlows
-    // Itens sem id ficam como estavam (o validateConfig decide); só os reconhecíveis mudam.
-    if (pf.flows.length !== raw['flows'].length || pf.bindings.length !== raw['bindings'].length) {
-      continue
-    }
-    const board = boards[projectId]
-    const stages =
-      isRecord(board) && Array.isArray(board['stages'])
-        ? board['stages'].filter(
-            (st): st is { id: string; name: string } =>
-              isRecord(st) && typeof st['id'] === 'string' && typeof st['name'] === 'string'
-          )
-        : []
-    const r = upgradeAlvaFlows(pf, stages)
-    if (r.changes.length === 0) continue
-    flows[projectId] = r.flows
-    onNote?.({ projectId, changes: r.changes })
-  }
-  return { ...data, flows }
 }

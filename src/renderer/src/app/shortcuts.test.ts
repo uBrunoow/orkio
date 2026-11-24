@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { globalShortcut, SHORTCUTS, type KeyInput } from './shortcuts'
+import { globalShortcut, type KeyInput } from './shortcuts'
 
 const key = (k: string, extra: Partial<KeyInput> = {}): KeyInput => ({
   key: k,
@@ -22,7 +22,6 @@ describe('globalShortcut', () => {
 
   it('Ctrl+número segue a ordem do menu: Quadro, Agentes, Configurações', () => {
     const go = (n: string): unknown => globalShortcut(key(n, { ctrlKey: true }), false)
-    expect(SHORTCUTS.map((s) => s.route.name)).toEqual(['board', 'agents', 'settings'])
     expect(go('1')).toEqual({ type: 'navigate', route: { name: 'board' } })
     expect(go('2')).toEqual({ type: 'navigate', route: { name: 'agents' } })
     expect(go('3')).toEqual({ type: 'navigate', route: { name: 'settings' } })

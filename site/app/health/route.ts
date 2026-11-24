@@ -1,4 +1,4 @@
-import { json, methodNotAllowed } from '@/lib/notion-broker'
+import { json, methodNotAllowed } from '@/lib/http'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'

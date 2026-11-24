@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RunLogEvent } from '../../../../shared/agent-run'
+import type { PermissionBlockCode, RunLogEvent } from '../../../../shared/agent-run'
 import {
   buildTranscript,
   runningSubagents,
@@ -134,32 +134,32 @@ describe('buildTranscript', () => {
     })
   })
 
-  it('recibo de push/gh bloqueado carrega a ação "Abrir PR"; outros bloqueios não', () => {
-    const blocked = (summary: string, reason: string): RunLogEvent => ({
+  it('recibo de push/gh bloqueado carrega a ação "Abrir PR" (pelo código); outros bloqueios não', () => {
+    const blocked = (summary: string, code?: PermissionBlockCode): RunLogEvent => ({
       kind: 'permission',
       requestId: summary,
       tool: 'Bash',
       summary,
       state: 'blocked',
-      reason
+      // O texto não decide nada: o mesmo texto com outro código não oferece o botão.
+      reason: 'Bloqueado pelo Orkio: git push só é permitido em um passo de fluxo.',
+      ...(code ? { code } : {})
     })
     const items = buildTranscript(
       [
-        blocked(
-          'git push origin HEAD',
-          'Bloqueado pelo Orkio: git push só é permitido em um passo de fluxo com “modo entrega”. Para publicar, use “Abrir PR” na aba PR & CI da tarefa.'
-        ),
-        blocked(
-          'gh pr create',
-          'Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo.'
-        ),
-        blocked('cat /etc/x', 'Bloqueado pelo Orkio: fora do ambiente desta tarefa (worktree).')
+        blocked('git push origin HEAD', 'push'),
+        blocked('gh pr create', 'gh'),
+        blocked('cat /etc/x', 'outside'),
+        blocked('git push --force', 'delivery'),
+        blocked('git push antigo')
       ],
       false
     )
     expect(items.map((i) => (i.kind === 'receipt' ? (i.action ?? null) : 'x'))).toEqual([
       'open-pr',
       'open-pr',
+      null,
+      null,
       null
     ])
   })

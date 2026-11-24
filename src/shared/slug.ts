@@ -1,9 +1,8 @@
+import { normalizeLabel } from './text'
+
 /** "Sincronizar tarefas do Notion!" → "sincronizar-tarefas-do-notion" (máx. 40 caracteres). */
 export function slugify(title: string, max = 40): string {
-  const slug = title
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
+  const slug = normalizeLabel(title)
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
   const cut = slug.slice(0, max).replace(/-+$/g, '')
@@ -30,6 +29,12 @@ export function taskBranchName(
 ): string {
   const slug = slugify(title)
   return displayId ? `${kind}/${displayId}-${slug}` : `${kind}/${slug}`
+}
+
+/** Troca o tipo de uma branch montada por `taskBranchName` (`feat/x` → `fix/x`). */
+export function withBranchKind(name: string, kind: BranchKind): string {
+  const slash = name.indexOf('/')
+  return `${kind}/${slash < 0 ? name : name.slice(slash + 1)}`
 }
 
 /** Mesmo nome com sufixo numérico quando já existe (`feat/x` → `feat/x-2`). */

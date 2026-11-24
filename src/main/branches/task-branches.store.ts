@@ -15,18 +15,6 @@ export interface TaskBranchLink {
   createdAt: string
 }
 
-/** Nome de branch aceitável para vincular (mesmas regras do push, sem `..` nem espaços). */
-export function isValidBranchName(name: string): boolean {
-  return (
-    name.length > 0 &&
-    name.length <= 250 &&
-    /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(name) &&
-    !name.includes('..') &&
-    !name.endsWith('/') &&
-    !name.endsWith('.lock')
-  )
-}
-
 export class TaskBranchesStore {
   constructor(
     private readonly db: Db,
@@ -73,7 +61,6 @@ export class TaskBranchesStore {
       }))
   }
 
-  /** Branches de cada tarefa do projeto (para os sinais). */
   forProject(projectId: string): Map<string, string[]> {
     const out = new Map<string, string[]>()
     for (const r of this.db.all<{ branch: string; task_page_id: string }>(

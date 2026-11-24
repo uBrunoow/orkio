@@ -1,9 +1,11 @@
 /**
- * Download: último release do repositório público de binários (Etapa 6B), lido no servidor com
- * ISR. A sugestão do arquivo certo (SO/arquitetura) acontece no cliente (`suggestDownload`).
+ * Download: último release do repositório público do Orkio (Etapa 6B), lido no servidor com ISR.
+ * A sugestão do arquivo certo (SO/arquitetura) acontece no cliente (`suggestDownload`).
  */
+import { DOWNLOAD_FILES, RELEASES_REPO, isRepoPath, type DownloadKind } from './contract'
+import { githubHeaders } from './http'
 
-export type DownloadKind = 'mac-arm64' | 'mac-x64' | 'windows' | 'linux-appimage' | 'linux-deb'
+export type { DownloadKind }
 
 export interface DownloadFile {
   kind: DownloadKind
@@ -19,50 +21,28 @@ export interface LatestRelease {
   files: Partial<Record<DownloadKind, DownloadFile>>
 }
 
-/** Revalidação do release (segundos): 15 min. */
 export const RELEASE_REVALIDATE_SECONDS = 900
-const REPO = /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9._-]{1,100}$/
 
-/** Repositório público do Orkio (app + releases); vale quando `RELEASES_REPO` não está definido. */
-export const DEFAULT_RELEASES_REPO = 'uBrunoow/orkio'
-
-export function releasesRepo(
-  value = process.env['RELEASES_REPO'] ?? DEFAULT_RELEASES_REPO
-): string | null {
+export function releasesRepo(value = process.env['RELEASES_REPO'] ?? RELEASES_REPO): string | null {
   const repo = value?.trim()
-  return repo && REPO.test(repo) ? repo : null
+  return repo && isRepoPath(repo) ? repo : null
 }
 
 export function releasesPageUrl(repo: string): string {
   return `https://github.com/${repo}/releases/latest`
 }
 
-/** Classifica os arquivos do release pelo nome (convenção do electron-builder). */
 export function classifyAssets(
-  assets: readonly { name: string; browser_download_url: string; size?: number }[]
+  assets: readonly { name: string; browser_download_url: string; size?: number }[],
+  version: string
 ): Partial<Record<DownloadKind, DownloadFile>> {
   const out: Partial<Record<DownloadKind, DownloadFile>> = {}
-  const set = (kind: DownloadKind, a: (typeof assets)[number], priority: boolean): void => {
-    if (out[kind] && !priority) return
-    out[kind] = { kind, name: a.name, url: a.browser_download_url, size: a.size ?? 0 }
-  }
-  for (const a of assets) {
-    const name = a.name.toLowerCase()
-    if (!a.browser_download_url.startsWith('https://github.com/')) continue
-    if (/\.(blockmap|yml|yaml|sig|sha256|txt)$/.test(name)) continue
-    if (name.endsWith('.dmg') || (name.endsWith('.zip') && /mac|darwin/.test(name))) {
-      const dmg = name.endsWith('.dmg')
-      if (/universal/.test(name)) {
-        set('mac-arm64', a, false)
-        set('mac-x64', a, false)
-      } else if (/arm64|aarch64|apple-?silicon/.test(name)) set('mac-arm64', a, dmg)
-      else if (/x64|x86_64|intel|amd64/.test(name)) set('mac-x64', a, dmg)
-      else set('mac-x64', a, false) // sem arquitetura no nome: o padrão do electron-builder é x64
-    } else if (name.endsWith('.exe') && !/uninstall/.test(name)) set('windows', a, true)
-    else if (name.endsWith('.msi')) set('windows', a, false)
-    else if (name.endsWith('.appimage') && !/arm64|aarch64/.test(name))
-      set('linux-appimage', a, true)
-    else if (name.endsWith('.deb') && !/arm64|aarch64/.test(name)) set('linux-deb', a, true)
+  for (const kind of Object.keys(DOWNLOAD_FILES) as DownloadKind[]) {
+    const name = DOWNLOAD_FILES[kind](version)
+    const a = assets.find(
+      (x) => x.name === name && x.browser_download_url.startsWith('https://github.com/')
+    )
+    if (a) out[kind] = { kind, name: a.name, url: a.browser_download_url, size: a.size ?? 0 }
   }
   return out
 }
@@ -87,11 +67,12 @@ export function parseRelease(value: unknown, repo: string): LatestRelease | null
           : []
       })
     : []
+  const version = tag.replace(/^v/, '')
   return {
-    version: tag.replace(/^v/, ''),
+    version,
     url: releasesPageUrl(repo),
     publishedAt: typeof v['published_at'] === 'string' ? v['published_at'] : null,
-    files: classifyAssets(assets)
+    files: classifyAssets(assets, version)
   }
 }
 
@@ -103,11 +84,7 @@ export async function getLatestRelease(
   if (!repo) return null
   try {
     const res = await fetchImpl(`https://api.github.com/repos/${repo}/releases/latest`, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2026-03-10',
-        'User-Agent': 'orkio-site'
-      },
+      headers: githubHeaders(),
       next: { revalidate: RELEASE_REVALIDATE_SECONDS }
     } as RequestInit)
     if (!res.ok) return null
@@ -159,7 +136,8 @@ export function suggestDownload(
     return files['mac-arm64'] ?? files['mac-x64'] ?? null
   }
   if (platform.os === 'linux') {
-    if (platform.arch === 'arm') return null // só há build x64
+    // Os arquivos do Linux são x64: num ARM, nenhum serve.
+    if (platform.arch === 'arm') return null
     return files['linux-appimage'] ?? files['linux-deb'] ?? null
   }
   return null

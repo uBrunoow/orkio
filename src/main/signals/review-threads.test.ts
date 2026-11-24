@@ -3,15 +3,19 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { SCRATCH_GITIGNORE } from '../../shared/orkio-scratch'
+import { WorktreeError } from '../claude/worktree.service'
+import { DomainError } from '../errors'
 import { createReviewActions } from './review-action'
+import { pendingCount } from '../../shared/review'
 import {
   buildReviewMarkdown,
-  pendingCount,
   parseReviewData,
   REVIEW_LIMITS,
   REVIEW_QUERY,
   ReviewThreadsService
 } from './review-threads'
+import { detailsQuery } from './github-signals.source'
 
 const TOKEN = 'ghp_' + 'a'.repeat(30)
 
@@ -44,6 +48,11 @@ const thread = (over: Record<string, unknown> = {}): Record<string, unknown> => 
 describe('REVIEW_QUERY', () => {
   it('só usa campos do escopo repo (nada de Team/organização)', () => {
     expect(REVIEW_QUERY).not.toMatch(/on Team|organization|requestedReviewer/)
+  })
+
+  it('as queries têm nome (o GitHub simulado do E2E responde pelo nome da operação)', () => {
+    expect(REVIEW_QUERY).toMatch(/^query ReviewThreads\(/)
+    expect(detailsQuery([7])).toMatch(/^query PullRequestDetails\(/)
   })
 })
 
@@ -124,6 +133,17 @@ describe('limites sem perda silenciosa', () => {
     const next = parseReviewData(page([], { pageInfo: { hasNextPage: true } }))!
     expect(next.unreadThreads).toBe(1)
     expect(pendingCount(next)).toBe(1)
+  })
+
+  it('aba Revisão e sinais leem a mesma página de threads (antes 50 × 100: contagens divergiam)', () => {
+    const size = `reviewThreads(first: ${REVIEW_LIMITS.threads})`
+    expect(REVIEW_QUERY).toContain(size)
+    expect(detailsQuery([7])).toContain(size)
+    // 60 threads abertas: todas lidas pela aba (antes, 50 lidas e 10 "não lidas").
+    const sixty = Array.from({ length: 60 }, (_, i) => thread({ id: `T${i}` }))
+    const r = parseReviewData(page(sixty, { totalCount: 60 }))!
+    expect(r.threads).toHaveLength(60)
+    expect(r.unreadThreads).toBe(0)
   })
 
   it('o orçamento vai primeiro para as não resolvidas', () => {
@@ -267,7 +287,7 @@ describe('ação review_snapshot', () => {
       const md = await readFile(join(dir, '.orkio', 'revisao.md'), 'utf8')
       expect(md).toContain('## src/a.ts:10')
       expect(md).toContain('> Troque isto')
-      expect(await readFile(join(dir, '.orkio', '.gitignore'), 'utf8')).toBe('*\n')
+      expect(await readFile(join(dir, '.orkio', '.gitignore'), 'utf8')).toBe(SCRATCH_GITIGNORE)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
@@ -301,14 +321,26 @@ describe('ação review_snapshot', () => {
     const [action] = createReviewActions({
       reviews: service().svc,
       ensureWorktree: async () => {
-        const e = new Error('A pasta de trabalho desta tarefa já existe.')
-        e.name = 'WorktreeError'
-        throw e
+        throw new WorktreeError('path_in_use', 'A pasta de trabalho desta tarefa já existe.')
       }
     })
     expect(await action!.run({ projectId: 'p', taskId: 't', vars: {} })).toEqual({
       ok: false,
+      code: 'worktree_path_in_use',
       message: 'A pasta de trabalho desta tarefa já existe.'
+    })
+    // Um Error qualquer com o mesmo nome não é o erro do WorktreeService.
+    const fake = new Error('texto cru')
+    fake.name = 'WorktreeError'
+    const [named] = createReviewActions({
+      reviews: service().svc,
+      ensureWorktree: async () => {
+        throw fake
+      }
+    })
+    expect(await named!.run({ projectId: 'p', taskId: 't', vars: {} })).toMatchObject({
+      ok: false,
+      code: 'no_worktree'
     })
     const [other] = createReviewActions({
       reviews: service().svc,
@@ -320,23 +352,24 @@ describe('ação review_snapshot', () => {
     expect(JSON.stringify(r)).not.toContain('SECRET')
   })
 
-  it('ensure sem caminho: erro claro e nenhuma pasta criada', async () => {
-    const base = await mkdtemp(join(tmpdir(), 'orkio-review-'))
-    try {
-      const gone = join(base, 'apagada')
-      const [action] = createReviewActions({
-        reviews: service().svc,
-        ensureWorktree: async () => null
-      })
-      const r = await action!.run({ projectId: 'p', taskId: 't', vars: {} })
-      expect(r.ok).toBe(false)
-      expect(existsSync(gone)).toBe(false)
-    } finally {
-      await rm(base, { recursive: true, force: true })
-    }
+  it('ensure que falha com a causa (Notion fora, tarefa sumiu): a mensagem dela chega ao passo', async () => {
+    const [action] = createReviewActions({
+      reviews: service().svc,
+      ensureWorktree: async () => {
+        throw new DomainError(
+          'task_not_found',
+          'Tarefa não encontrada no Notion. Atualize o quadro.'
+        )
+      }
+    })
+    expect(await action!.run({ projectId: 'p', taskId: 't', vars: {} })).toEqual({
+      ok: false,
+      code: 'task_not_found',
+      message: 'Tarefa não encontrada no Notion. Atualize o quadro.'
+    })
   })
 
-  it('sem PR ou sem worktree: falha com mensagem em pt-BR', async () => {
+  it('sem PR: falha com mensagem em pt-BR', async () => {
     const [noPr] = createReviewActions({
       reviews: service({ pr: false }).svc,
       ensureWorktree: async () => '/tmp'
@@ -344,14 +377,6 @@ describe('ação review_snapshot', () => {
     expect(await noPr!.run({ projectId: 'p', taskId: 't', vars: {} })).toMatchObject({
       ok: false,
       message: expect.stringContaining('não tem PR')
-    })
-    const [noTree] = createReviewActions({
-      reviews: service().svc,
-      ensureWorktree: async () => null
-    })
-    expect(await noTree!.run({ projectId: 'p', taskId: 't', vars: {} })).toMatchObject({
-      ok: false,
-      message: expect.stringContaining('ambiente de trabalho')
     })
   })
 })

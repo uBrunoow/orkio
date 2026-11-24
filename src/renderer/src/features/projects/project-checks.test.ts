@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { AlvaPrecheck } from '../../../../shared/alva'
-import type { ProjectView } from '../../../../shared/ipc-contract'
 import { missingSteps, projectChecks } from './project-checks'
+import type { ProjectView } from '../../../../shared/projects'
 
 const project = (patch: Partial<ProjectView> = {}): ProjectView => ({
   id: 'p1',
@@ -27,28 +26,17 @@ const project = (patch: Partial<ProjectView> = {}): ProjectView => ({
   ...patch
 })
 
-const precheck = (ready: boolean, gh: 'ok' | 'missing'): AlvaPrecheck => ({
-  ready,
-  pluginVersion: '1.0.25',
-  hasDocker: false,
-  checkedAt: '',
-  items: [{ id: 'gh', label: 'GitHub CLI', state: gh, detail: 'x' }]
-})
-
 describe('projectChecks', () => {
   it('projeto pronto', () => {
     const checks = projectChecks({
       project: project(),
-      boardStages: 5,
-      precheck: precheck(true, 'ok')
+      boardStages: 5
     })
     expect(checks.map((c) => [c.id, c.state])).toEqual([
       ['folder', 'ok'],
       ['github', 'ok'],
       ['notion', 'ok'],
-      ['board', 'ok'],
-      ['alva', 'ok'],
-      ['gh', 'ok']
+      ['board', 'ok']
     ])
     expect(checks.find((c) => c.id === 'notion')?.label).toBe('Notion: página "Orkio"')
     expect(checks.find((c) => c.id === 'board')?.label).toBe('Quadro: 5 colunas')
@@ -58,8 +46,7 @@ describe('projectChecks', () => {
   it('sem Notion e sem quadro faltam 2', () => {
     const checks = projectChecks({
       project: project({ notionProject: null }),
-      boardStages: null,
-      precheck: null
+      boardStages: null
     })
     expect(checks.find((c) => c.id === 'notion')).toEqual({
       id: 'notion',
@@ -73,8 +60,7 @@ describe('projectChecks', () => {
   it('pasta sumida é problema', () => {
     const checks = projectChecks({
       project: project({ local: null, health: { state: 'missing_folder' } }),
-      boardStages: 5,
-      precheck: null
+      boardStages: 5
     })
     expect(checks[0]).toEqual({ id: 'folder', label: 'Pasta não encontrada', state: 'problem' })
   })
@@ -83,16 +69,16 @@ describe('projectChecks', () => {
     const p = project()
     const checks = projectChecks({
       project: { ...p, repo: { ...p.repo!, canPush: false } },
-      boardStages: 5,
-      precheck: null
+      boardStages: 5
     })
     expect(checks.find((c) => c.id === 'github')?.state).toBe('warning')
   })
 
-  it('sem precheck não mostra alva nem gh', () => {
-    const ids = projectChecks({ project: project(), boardStages: 5, precheck: null }).map(
-      (c) => c.id
-    )
-    expect(ids).toEqual(['folder', 'github', 'notion', 'board'])
+  it('pasta com problema pela saúde, com o rótulo da saúde (mesma regra da Visão geral)', () => {
+    const checks = projectChecks({
+      project: project({ health: { state: 'not_a_repo' } }),
+      boardStages: 5
+    })
+    expect(checks[0]).toEqual({ id: 'folder', label: 'Não é repositório', state: 'problem' })
   })
 })

@@ -1,13 +1,28 @@
 # Site (Next.js na Vercel). Separado do app: falhas aqui não afetam o workflow do app.
 # O deploy é feito pela integração Vercel ↔ GitHub (Root Directory = site).
+# Roda também quando muda o lado app do contrato (conectores, módulos compartilhados com o site, o
+# E2E @site e o fixture): o teste de contrato e o E2E app ↔ site são os únicos que ligam os dois.
 name: Site
 
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/site.yml']
+    paths: &contract
+      - 'site/**'
+      - '.github/workflows/site.yml'
+      - 'src/main/connectors/**'
+      - 'src/main/platform/site.ts'
+      - 'src/shared/site-contract.ts'
+      - 'src/shared/github-names.ts'
+      - 'src/shared/review-publish.ts'
+      - 'src/shared/release-artifacts.mts'
+      - 'src/shared/updates.ts'
+      - 'test/site-contract.test.ts'
+      - 'e2e/site-oauth.spec.ts'
+      - 'e2e/fixtures.ts'
+      - '.env.e2e'
   pull_request:
-    paths: ['site/**', '.github/workflows/site.yml']
+    paths: *contract
 
 permissions:
   contents: read
@@ -57,5 +72,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --dir site install --frozen-lockfile
       - run: pnpm --dir site build
+      # Valores e regras que app e site repetem (o ci.yml não roda em mudança só do site).
+      - run: pnpm exec vitest run test/site-contract.test.ts
       - run: pnpm exec playwright install-deps
+      # No CI (`CI=true`), sem o build do site o @site falha em vez de pular.
       - run: xvfb-run -a pnpm e2e --trace off --grep @site

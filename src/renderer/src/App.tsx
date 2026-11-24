@@ -1,5 +1,4 @@
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import type { BoardTaskRef, ProjectView } from '../../shared/ipc-contract'
 import {
   ROUTE_TITLES,
   SETTINGS_TITLES,
@@ -16,6 +15,8 @@ import { useSetupPending } from './app/useSetupPending'
 import { WaitingBell } from './app/WaitingBell'
 import { Sidebar } from './app/Sidebar'
 import { AccountMenu, useAccount } from './app/AccountMenu'
+import { useProjects } from './features/projects/useProjects'
+import { useConnection } from './features/integrations/useConnection'
 import { ScreenFrame } from './app/ScreenBar'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
@@ -30,29 +31,11 @@ import { SettingsLayout } from './features/settings/SettingsNav'
 import { PageHeader } from './components/PageHeader'
 import { PAGE_WIDTH } from './components/page-width'
 import { UpdateBanner } from './features/settings/UpdateBanner'
+import type { BoardTaskRef } from '../../shared/overview'
+import { isMac } from './lib/platform'
 
 /** Preferência de interface (não secreta): último projeto escolhido no menu. */
 const CURRENT_PROJECT_KEY = 'orkio.currentProject'
-
-/** Projetos (todos; o quadro só existe nos vinculados ao Notion). Relido a cada navegação. */
-function useProjects(trigger: number): ProjectView[] | null {
-  const [projects, setProjects] = useState<ProjectView[] | null>(null)
-  useEffect(() => {
-    let active = true
-    void window.orkio.projects
-      .list()
-      .then((result) => {
-        if (active) setProjects(result.projects)
-      })
-      .catch(() => {
-        if (active) setProjects([])
-      })
-    return () => {
-      active = false
-    }
-  }, [trigger])
-  return projects
-}
 
 function routeProjectId(route: Route): string | undefined {
   return 'projectId' in route ? route.projectId : undefined
@@ -62,12 +45,13 @@ export function App(): React.JSX.Element | null {
   const [router, dispatch] = useReducer(routerReducer, initialRouter({ name: 'board' }))
   const { route } = router
   const navigate = useCallback((next: Route) => dispatch({ type: 'navigate', route: next }), [])
-  const projects = useProjects(router.key)
+  const projects = useProjects().projects
+  /** Projetos com página no Notion (onde há tarefas para buscar). */
+  const linkedProjects = useMemo(() => (projects ?? []).filter((p) => p.notionProject), [projects])
   const [chosenProject, setChosenProject] = useState<string | null>(() =>
     window.localStorage.getItem(CURRENT_PROJECT_KEY)
   )
 
-  // Projeto atual: o da rota (ex.: notificação) → o escolhido no menu → o primeiro.
   const fromRoute = routeProjectId(route)
   const project = useMemo(() => {
     if (!projects) return null
@@ -85,20 +69,17 @@ export function App(): React.JSX.Element | null {
     window.localStorage.setItem(CURRENT_PROJECT_KEY, id)
   }, [])
 
-  // Relê o quadro a cada navegação (ex.: quadro criado nos Primeiros passos).
-  const sidebar = useSidebarData(linkedProject?.id ?? null, router.key)
+  const sidebar = useSidebarData(linkedProject?.id ?? null)
   const setupMissing = useSetupPending(project, sidebar.board)
-  const account = useAccount(router.key)
+  const account = useAccount()
+  const github = useConnection('github')
+  const notion = useConnection('notion')
   // "Sair": o Orkio não tem login próprio; sair = desconectar GitHub e Notion deste computador.
   const signOut = async (): Promise<void> => {
-    await Promise.all([
-      window.orkio.github.disconnect().catch(() => undefined),
-      window.orkio.notion.disconnect().catch(() => undefined)
-    ])
+    await Promise.all([github.disconnect(), notion.disconnect()])
     navigate({ name: 'setup', ...(project ? { projectId: project.id } : {}) })
   }
 
-  // Primeira tela: sem projeto, Primeiros passos; com algo esperando, essa tarefa; senão o Quadro.
   const decided = useRef(false)
   useEffect(() => {
     if (decided.current || projects === null) return
@@ -107,7 +88,6 @@ export function App(): React.JSX.Element | null {
       dispatch({ type: 'reset', route: { name: 'setup' } })
       return
     }
-    // Espera a Visão geral responder para saber se há algo esperando você (só dados locais).
     if (linkedProject && sidebar.snapshot === null) return
     decided.current = true
     dispatch({
@@ -128,16 +108,13 @@ export function App(): React.JSX.Element | null {
     [chooseProject, navigate]
   )
 
-  // Clique numa notificação: abre a tarefa (troca o projeto quando é de outro).
   useEffect(() => window.orkio.board.onOpenTask(openTask), [openTask])
 
-  // Atalhos globais e Command Palette (fora dos Primeiros passos).
   // Paleta: `all` (Ctrl/Cmd+K: telas e tarefas) ou `tasks` ("Buscar tarefa": só tarefas, no Notion).
   const [palette, setPalette] = useState<'all' | 'tasks' | null>(null)
   const inShell = route.name !== 'setup'
   useEffect(() => {
     if (!inShell) return
-    const isMac = navigator.userAgent.includes('Mac')
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.defaultPrevented || e.isComposing) return
       const action = globalShortcut(
@@ -149,7 +126,7 @@ export function App(): React.JSX.Element | null {
           shiftKey: e.shiftKey,
           inTextField: isTextField(e.target)
         },
-        isMac
+        isMac()
       )
       if (!action) return
       e.preventDefault()
@@ -163,7 +140,6 @@ export function App(): React.JSX.Element | null {
 
   const runCommand = (command: CommandData): void => {
     if (command.url) {
-      // Tarefa de fora do quadro (outra pessoa ou projeto sem vínculo): abre no Notion.
       void window.orkio.openExternal(command.url)
       return
     }
@@ -185,7 +161,6 @@ export function App(): React.JSX.Element | null {
     navigate({ name: 'settings', section })
   const toBoard = (): void => navigate({ name: 'board' })
 
-  // Primeiros passos em tela cheia, sem a navegação.
   if (route.name === 'setup') {
     return (
       <SetupPage
@@ -314,12 +289,10 @@ export function App(): React.JSX.Element | null {
           SETTINGS_TITLES[route.section ?? 'integrations']
         ]
       : null
-  // Quadro e tarefa ocupam a altura toda (rolagem própria); o resto rola com margem.
   const fullHeight = route.name === 'board' || route.name === 'task'
   const keyed = <Fragment key={router.key}>{page}</Fragment>
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
-      {/* Atualização pronta (6C) e "O que há de novo": acima de tudo. */}
       <UpdateBanner
         {...(route.name === 'settings'
           ? {}
@@ -380,7 +353,6 @@ export function App(): React.JSX.Element | null {
               </div>
             }
           >
-            {/* Chave nova a cada navegação: clicar no item atual sai de qualquer subtela. */}
             {fullHeight || route.name === 'settings' ? (
               <div className="h-full min-h-0">{keyed}</div>
             ) : (
@@ -393,7 +365,7 @@ export function App(): React.JSX.Element | null {
         isOpen={palette !== null}
         onOpenChange={(open) => setPalette(open ? (palette ?? 'all') : null)}
         mode={palette ?? 'all'}
-        projects={(projects ?? []).filter((p) => p.notionProject)}
+        projects={linkedProjects}
         currentProjectId={project?.id ?? null}
         onRun={runCommand}
       />

@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Field, SegmentedControl, SwitchField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
-import type { AboutInfo } from '../../../../shared/ipc-contract'
 import type { ReleaseNotes, UpdateStatus } from '../../../../shared/updates'
 import { InstallControls } from './InstallControls'
-import { formatDateTime, useUpdates } from './useUpdates'
-import { WhatsNewPanel } from './WhatsNewPanel'
+import { useUpdates } from './useUpdates'
+import { formatDateTime } from '../../lib/format'
+import { WhatsNewDialog } from './WhatsNewDialog'
 import { StatusToken } from '../../components/StatusToken'
+import { ipcCall, useIpcResource } from '../../lib/ipc'
+import { isUpdateDownloading, updatePhaseText } from '../../lib/status-text'
 
 export function UpdatesSection(): React.JSX.Element {
   const { status, checking, check, setChannel } = useUpdates()
@@ -36,7 +38,7 @@ export function UpdatesSection(): React.JSX.Element {
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">Última verificação</span>
               <span data-testid="last-check" className="text-sm text-foreground tabular">
-                {formatDateTime(status.lastCheckAt)}
+                {status.lastCheckAt ? formatDateTime(status.lastCheckAt) : 'Nunca'}
               </span>
             </div>
           </div>
@@ -99,17 +101,15 @@ export function UpdatesSection(): React.JSX.Element {
           </div>
         </div>
       )}
-      {notes && <WhatsNewPanel notes={notes} closeLabel="Fechar" onClose={() => setNotes(null)} />}
+      {notes && <WhatsNewDialog notes={notes} closeLabel="Fechar" onClose={() => setNotes(null)} />}
     </section>
   )
 }
 
 /** Energia: manter o computador acordado enquanto agentes trabalham (desligado por padrão). */
 export function PowerSection(): React.JSX.Element {
-  const [enabled, setEnabled] = useState<boolean | null>(null)
-  useEffect(() => {
-    void window.orkio.power.keepAwake().then(setEnabled)
-  }, [])
+  const keepAwake = useIpcResource('', () => window.orkio.power.keepAwake())
+  const enabled = keepAwake.value
   return (
     <section aria-labelledby="power-title" className={SECTION_CLASS}>
       <h2 id="power-title" className="text-sm font-medium text-foreground">
@@ -121,23 +121,19 @@ export function PowerSection(): React.JSX.Element {
         checked={enabled === true}
         disabled={enabled === null}
         onChange={(value) => {
-          setEnabled(value)
-          void window.orkio.power.setKeepAwake(value).then(setEnabled)
+          keepAwake.set(value)
+          void ipcCall(() => window.orkio.power.setKeepAwake(value), !value).then(keepAwake.set)
         }}
       />
     </section>
   )
 }
 
-/** Caixa das seções de Configurações (borda fina, fundo de card). */
 const SECTION_CLASS = 'flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5'
 
 function PhaseToken({ status }: { status: UpdateStatus }): React.JSX.Element | null {
-  if (status.mode === 'disabled') return <StatusToken label="Desligadas" />
-  if (status.phase === 'downloaded' || status.phase === 'available')
-    return <StatusToken tone="warning" label="Nova versão" />
-  if (status.phase === 'downloading') return <StatusToken tone="running" label="Baixando" />
-  return null
+  const text = updatePhaseText(status)
+  return text && <StatusToken {...text} />
 }
 
 function StatusLine({ status }: { status: UpdateStatus }): React.JSX.Element {
@@ -146,7 +142,7 @@ function StatusLine({ status }: { status: UpdateStatus }): React.JSX.Element {
     text = 'As atualizações automáticas funcionam só no app instalado (macOS e Windows).'
   } else if (status.phase === 'checking') {
     text = 'Procurando atualizações…'
-  } else if (status.phase === 'downloading') {
+  } else if (isUpdateDownloading(status)) {
     text = `Baixando a versão ${status.version ?? ''}${status.progress !== null ? ` (${status.progress}%)` : ''}…`
   } else if (status.phase === 'downloaded') {
     text = `A versão ${status.version ?? ''} está pronta. Ela é instalada quando você reiniciar ou fechar o Orkio.`
@@ -165,16 +161,7 @@ function StatusLine({ status }: { status: UpdateStatus }): React.JSX.Element {
 }
 
 export function AboutSection(): React.JSX.Element {
-  const [about, setAbout] = useState<AboutInfo | null>(null)
-  useEffect(() => {
-    let alive = true
-    void window.orkio.updates.about().then((a) => {
-      if (alive) setAbout(a)
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
+  const about = useIpcResource('', () => window.orkio.updates.about()).value
   return (
     <section aria-labelledby="about-title" className={SECTION_CLASS}>
       <h2 id="about-title" className="text-sm font-medium text-foreground">

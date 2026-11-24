@@ -3,22 +3,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { StatusOption } from '../../shared/board'
-import type {
-  NotionMapping,
-  NotionPropertySummary,
-  NotionTask,
-  TaskSignalsResult
-} from '../../shared/ipc-contract'
-import type { TaskPullRequest, TaskSignals } from '../../shared/task-signals'
+import type { TaskPullRequest, TaskSignals, TaskSignalsResult } from '../../shared/task-signals'
 import { BoardService, type BoardNotion } from '../board/board.service'
 import { BoardStore } from '../board/board.store'
-import { NotionWriteQueue } from '../board/write-queue'
+import type { NotionWriteQueue } from '../board/write-queue'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
-import { NotionApiError } from '../connectors/notion/notion.client'
-import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
+import {
+  encodePropertyWrites,
+  type PropertyWrites,
+  type SimplePropertyValue
+} from '../connectors/notion/notion.schema'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import { AutomationService, type AutomationNotification } from './automation.service'
+import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
+import { ApiError } from '../net/http'
 
 const OPTIONS: StatusOption[] = [
   { id: 'o-prio', name: 'Prioridades', color: 'gray' },
@@ -82,8 +81,9 @@ class FakeNotion implements BoardNotion {
   async connectionMethod() {
     return 'oauth' as const
   }
-  async updatePage(pageId: string, properties: Record<string, unknown>): Promise<void> {
-    if (this.offline) throw new NotionApiError('network', 'Sem conexão.')
+  async updatePage(pageId: string, writes: PropertyWrites): Promise<void> {
+    const properties = encodePropertyWrites(writes)
+    if (this.offline) throw new ApiError('notion', 'network', 'Sem conexão.')
     this.writes.push({ pageId, properties })
     const st = properties['st'] as { status?: { name: string } } | undefined
     if (st?.status) this.status[pageId] = st.status.name
@@ -138,24 +138,21 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
       config,
       store,
       notion,
+      writes: {
+        updatePage: (id, p) => notion.updatePage(id, p),
+        now: () => new Date(clock),
+        random: () => 0,
+        schedule: () => ({ cancel: () => {} })
+      },
       onSync: () => {},
+      enterStage: () => undefined,
       now: () => new Date(clock),
       newId: (() => {
         let n = 0
         return () => `stage-${++n}`
       })()
     })
-    queue = new NotionWriteQueue({
-      store,
-      updatePage: (id, p) => notion.updatePage(id, p),
-      onSynced: (w) => board.onSynced(w),
-      onRejected: (w, e) => void board.onRejected(w, e),
-      onRetry: (w, e) => board.onRetry(w, e),
-      now: () => new Date(clock),
-      random: () => 0,
-      schedule: () => ({ cancel: () => {} })
-    })
-    board.attachQueue(queue)
+    queue = board.writes
     automation = new AutomationService({
       config,
       store,
@@ -204,7 +201,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
   async function cycle() {
     clock += 60_000
     const r = await automation.run('p1')
-    await queue.idle()
+    await queue.kick()
     return r
   }
 
@@ -267,7 +264,8 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
       stages: first.value.suggestion!.map((s) => ({
         id: s.id,
         name: s.name,
-        notionStatusId: s.notionStatus.id!
+        notionStatusId: s.notionStatus.id!,
+        ...(s.role ? { role: s.role } : {})
       })),
       orkioStage: { mode: 'none' },
       addMissingOptions: false,
@@ -337,7 +335,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
 
     const h = await history(T1)
     const moves = h.filter((e) => e.kind === 'moved' && e.source === 'automation')
-    expect(moves.map((e) => e.detail?.['ruleId'])).toEqual([
+    expect(moves.map((e) => (e.kind === 'moved' ? e.detail.ruleId : null))).toEqual([
       'default-merged',
       'default-rerequest',
       'default-changes',
@@ -353,6 +351,8 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
 
   it('idempotência: repetir o ciclo e reiniciar o app não repetem automações', async () => {
     await cycle()
+    // A foto dos sinais antes da PR existir (para voltar a ela no fim).
+    const beforePr = new BoardStore(db).snapshots('p1')
     world.pr[T1] = {}
     await cycle()
     expect(await stageOf(T1)).toBe('Revisando')
@@ -371,10 +371,63 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
     expect((await history(T1)).length).toBe(before)
     expect(notion.writes.length).toBe(writes)
 
-    // Mesmo que o snapshot se perca, a chave do evento impede repetir.
-    db.run('DELETE FROM signal_snapshots')
-    await cycle() // linha de base de novo
+    // Mesmo que a foto volte a ser a de antes da PR (a abertura aparece de novo no diff), a chave
+    // do evento impede repetir.
+    const store = new BoardStore(db)
+    for (const [taskId, snapshot] of beforePr) store.saveSnapshot(taskId, 'p1', snapshot, 'x')
     expect(await cycle()).toMatchObject({ moves: 0 })
+    expect(await stageOf(T1)).toBe('Revisando')
+    expect((await history(T1)).length).toBe(before)
+  })
+
+  // Bug: a chave (`pr#5:opened`, `branch:local:<nome>`) era única no banco inteiro.
+  it('idempotência por projeto e tarefa: a PR #5 de outro projeto e a mesma PR em outra tarefa disparam', async () => {
+    await cycle() // linha de base
+    // A PR #5 de outro projeto já foi processada antes.
+    new BoardStore(db).addEvent({
+      taskPageId: 'tarefa-de-outro-projeto',
+      projectId: 'p-outro',
+      at: 'x',
+      kind: 'automation',
+      fromStage: null,
+      toStage: null,
+      detail: { event: 'pr.opened', ruleId: null, ruleName: null, outcome: 'no_rule' },
+      eventKey: 'pr#5:opened'
+    })
+    // As duas tarefas citam a mesma PR #5.
+    world.pr[T1] = {}
+    world.pr[T2] = {}
+    expect(await cycle()).toMatchObject({ events: 2, moves: 2 })
+    expect(await stageOf(T1)).toBe('Revisando')
+    expect(await stageOf(T2)).toBe('Revisando')
+    // E cada uma continua sem repetir.
+    expect(await cycle()).toMatchObject({ events: 0, moves: 0 })
+  })
+
+  // Decisão: branch apagada e recriada com o mesmo nome na MESMA tarefa não dispara de novo (o
+  // "começou o trabalho" já aconteceu; recriar costuma ser o push de novo depois de o GitHub apagar
+  // a branch no merge, ou a lista de branches oscilando, e puxaria a tarefa de volta). Outra tarefa
+  // com a mesma branch é outro evento.
+  it('branch recriada na mesma tarefa não dispara de novo; a mesma branch em outra tarefa dispara', async () => {
+    await cycle() // linha de base
+    world.local[T1] = ['feat/x']
+    await cycle()
+    expect(await stageOf(T1)).toBe('Em andamento')
+
+    const view = await board.get('p1')
+    if (!view.ok) throw new Error(view.error.message)
+    const prio = view.value.config!.stages.find((s) => s.name === 'Prioridades')!.id
+    await board.move('p1', T1, prio)
+    await board.move('p1', T2, prio)
+    world.local[T1] = []
+    await cycle()
+    world.local[T1] = ['feat/x']
+    expect(await cycle()).toMatchObject({ events: 0, moves: 0 })
+    expect(await stageOf(T1)).toBe('Prioridades')
+
+    world.local[T2] = ['feat/x']
+    expect(await cycle()).toMatchObject({ events: 1, moves: 1 })
+    expect(await stageOf(T2)).toBe('Em andamento')
   })
 
   it('pausada (tarefa e global) e bloqueada: não move e registra no histórico', async () => {
@@ -469,7 +522,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
     notion.offline = false
     clock += 10 * 60_000
     queue.kick()
-    await queue.idle()
+    await queue.kick()
     expect(notion.status[T2]).toBe('Finalizadas')
     expect(await cycle()).toMatchObject({ events: 0, moves: 0 })
   })

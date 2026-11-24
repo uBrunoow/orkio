@@ -7,8 +7,9 @@
  * 3. `evaluate(eventos, regras, estado)` decide, evento a evento, a primeira regra que casa e o
  *    resultado (mover, notificar, ignorar), aplicando em sequência.
  */
-import type { BoardStage } from './board'
-import type { TaskSignals } from './task-signals'
+import { STAGE_ROLE_LABEL, stageWithRole, type BoardStage, type StageRole } from './board'
+import type { SignalsGitHubState, TaskSignals } from './task-signals'
+import { isRecord } from './guards'
 
 export type EventKind =
   | 'branch.created'
@@ -21,31 +22,72 @@ export type EventKind =
   | 'pr.merged'
   | 'pr.closed_unmerged'
 
-export const EVENT_KINDS: readonly EventKind[] = [
-  'branch.created',
-  'pr.opened',
-  'pr.ready_for_review',
-  'pr.review_requested',
-  'pr.changes_requested',
-  'pr.review_comments_unresolved',
-  'pr.approved',
-  'pr.merged',
-  'pr.closed_unmerged'
-]
-
-export const EVENT_LABELS: Record<EventKind, string> = {
-  'branch.created': 'Branch criada',
-  'pr.opened': 'PR aberta',
-  'pr.ready_for_review': 'PR pronta para review',
-  'pr.review_requested': 'Review pedida',
-  'pr.changes_requested': 'Alterações pedidas na review',
-  'pr.review_comments_unresolved': 'Comentários de review não resolvidos',
-  'pr.approved': 'PR aprovada',
-  'pr.merged': 'PR mergeada',
-  'pr.closed_unmerged': 'PR fechada sem merge'
+/**
+ * Registro único dos gatilhos: rótulo (listas, histórico), frase ("Quando …"), descrição (editor)
+ * e `rank` na ordem do ciclo de vida (0 branch, 1 aberta, 2 pronta, 3 reviews, 4 merge/fechamento).
+ * Gatilho novo = entrada nova aqui (o tipo exige todas) + `deriveEvents`.
+ */
+export const EVENT_META: Record<
+  EventKind,
+  { label: string; phrase: string; description: string; rank: number }
+> = {
+  'branch.created': {
+    label: 'Branch criada',
+    phrase: 'uma branch da tarefa é criada',
+    description: 'Uma branch com o ID da tarefa foi criada (local ou no GitHub).',
+    rank: 0
+  },
+  'pr.opened': {
+    label: 'PR aberta',
+    phrase: 'a PR é aberta',
+    description: 'Uma PR com o ID da tarefa foi aberta (não rascunho).',
+    rank: 1
+  },
+  'pr.ready_for_review': {
+    label: 'PR pronta para review',
+    phrase: 'a PR fica pronta para review',
+    description: 'A PR saiu de rascunho e ficou pronta para review.',
+    rank: 2
+  },
+  'pr.review_requested': {
+    label: 'Review pedida',
+    phrase: 'pedem review',
+    description: 'Alguém pediu review, inclusive de novo depois de correções.',
+    rank: 3
+  },
+  'pr.changes_requested': {
+    label: 'Alterações pedidas na review',
+    phrase: 'a review pede alterações',
+    description: 'Uma review pediu alterações.',
+    rank: 3
+  },
+  'pr.review_comments_unresolved': {
+    label: 'Comentários de review não resolvidos',
+    phrase: 'há comentários de review não resolvidos',
+    description: 'Apareceram comentários de review não resolvidos.',
+    rank: 3
+  },
+  'pr.approved': {
+    label: 'PR aprovada',
+    phrase: 'a PR é aprovada',
+    description: 'Uma review aprovou a PR.',
+    rank: 3
+  },
+  'pr.merged': {
+    label: 'PR mergeada',
+    phrase: 'a PR é mergeada',
+    description: 'A PR foi mergeada.',
+    rank: 4
+  },
+  'pr.closed_unmerged': {
+    label: 'PR fechada sem merge',
+    phrase: 'a PR é fechada sem merge',
+    description: 'A PR foi fechada sem merge.',
+    rank: 4
+  }
 }
 
-// ---------- Snapshot ----------
+export const EVENT_KINDS = Object.keys(EVENT_META) as EventKind[]
 
 export interface PrSnapshot {
   number: number
@@ -119,10 +161,8 @@ export function mergeSnapshot(previous: TaskSnapshot | null, next: TaskSnapshot)
   return { localBranches: next.localBranches ?? previous.localBranches, github }
 }
 
-// ---------- Eventos ----------
-
 export interface AutomationEvent {
-  /** Chave de idempotência (única em task_events). */
+  /** Chave de idempotência (única por projeto e tarefa em task_events). */
   key: string
   kind: EventKind
   taskId: string
@@ -132,18 +172,6 @@ export interface AutomationEvent {
   branch?: { name: string; where: 'local' | 'remote' }
 }
 
-const RANK: Record<EventKind, number> = {
-  'branch.created': 0,
-  'pr.opened': 1,
-  'pr.ready_for_review': 2,
-  'pr.review_requested': 3,
-  'pr.changes_requested': 3,
-  'pr.review_comments_unresolved': 3,
-  'pr.approved': 3,
-  'pr.merged': 4,
-  'pr.closed_unmerged': 4
-}
-
 /**
  * Ordem de avaliação (estável e documentada): primeiro o ciclo de vida sem horário (branch,
  * abertura, pronta para review), depois o resto por horário do GitHub (pedidos e reviews na ordem
@@ -151,11 +179,12 @@ const RANK: Record<EventKind, number> = {
  * Empates: ordem do ciclo de vida, depois a chave.
  */
 export function compareEvents(a: AutomationEvent, b: AutomationEvent): number {
-  const phase = (e: AutomationEvent): number => (RANK[e.kind] <= 2 ? 0 : RANK[e.kind] === 4 ? 2 : 1)
+  const phase = (e: AutomationEvent): number =>
+    EVENT_META[e.kind].rank <= 2 ? 0 : EVENT_META[e.kind].rank === 4 ? 2 : 1
   return (
     phase(a) - phase(b) ||
     (a.at ?? '').localeCompare(b.at ?? '') ||
-    RANK[a.kind] - RANK[b.kind] ||
+    EVENT_META[a.kind].rank - EVENT_META[b.kind].rank ||
     a.key.localeCompare(b.key)
   )
 }
@@ -220,7 +249,6 @@ export function deriveEvents(
       const was = isNew ? null : p
       const num = n.number
 
-      // Abertura / pronta para review.
       if (isNew && n.state === 'open')
         events.push(prEvent('pr.opened', taskId, num, 'opened', null))
       if (was && was.state === 'draft' && n.state === 'open') {
@@ -255,7 +283,6 @@ export function deriveEvents(
       const oldThreads = isNew ? [] : was?.unresolvedThreadIds
       if (n.unresolvedThreadIds && oldThreads) {
         const added = n.unresolvedThreadIds.filter((id) => !oldThreads.includes(id))
-        // Passou de 0 ou aumentou: há thread não resolvida que antes não estava.
         if (added.length > 0) {
           events.push(
             prEvent(
@@ -269,7 +296,6 @@ export function deriveEvents(
         }
       }
 
-      // Merge / fechamento.
       const wasClosed = was && (was.state === 'merged' || was.state === 'closed')
       if (n.state === 'merged' && (!was || was.state !== 'merged')) {
         events.push(prEvent('pr.merged', taskId, num, 'merged', n.closedAt))
@@ -289,8 +315,6 @@ export function deriveEvents(
 
   return events.sort(compareEvents)
 }
-
-// ---------- Regras ----------
 
 export interface RuleConditions {
   /** Só se a tarefa estiver numa destas etapas. Ausente = qualquer etapa. */
@@ -316,89 +340,86 @@ export interface AutomationRule {
 }
 
 /**
- * Regras padrão do template (Etapa 3B), resolvidas pelos nomes das etapas do quadro. Etapa
- * ausente → a regra fica desligada (e o motivo vai em `warnings`).
+ * Regras padrão do template (Etapa 3B), resolvidas pelo papel das etapas do quadro (o nome não
+ * importa). Etapa ausente → a regra fica desligada (e o motivo vai em `warnings`).
  */
 export function defaultRules(stages: readonly BoardStage[]): {
   rules: AutomationRule[]
   warnings: string[]
 } {
   const warnings: string[] = []
-  const id = (name: string): string | null => {
-    const norm = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-    return stages.find((s) => norm(s.name) === norm(name))?.id ?? null
-  }
+  const id = (role: StageRole): string | null => stageWithRole(stages, role)
   const specs: {
     id: string
     name: string
     trigger: EventKind
-    to: string
-    from?: string[]
+    to: StageRole
+    from?: StageRole[]
     notify?: boolean
   }[] = [
     {
       id: 'default-branch',
       name: 'Branch criada inicia a tarefa',
       trigger: 'branch.created',
-      to: 'Em andamento',
-      from: ['Prioridades']
+      to: 'work',
+      from: ['queue']
     },
     {
       id: 'default-pr-opened',
       name: 'PR aberta vai para revisão',
       trigger: 'pr.opened',
-      to: 'Revisando',
-      from: ['Prioridades', 'Em andamento']
+      to: 'review',
+      from: ['queue', 'work']
     },
     {
       id: 'default-pr-ready',
       name: 'PR pronta para review vai para revisão',
       trigger: 'pr.ready_for_review',
-      to: 'Revisando',
-      from: ['Prioridades', 'Em andamento']
+      to: 'review',
+      from: ['queue', 'work']
     },
     {
       id: 'default-changes',
       name: 'Alterações pedidas: revisado',
       trigger: 'pr.changes_requested',
-      to: 'Revisado',
-      from: ['Revisando']
+      to: 'reviewed',
+      from: ['review']
     },
     {
       id: 'default-comments',
       name: 'Comentários pendentes: revisado',
       trigger: 'pr.review_comments_unresolved',
-      to: 'Revisado',
-      from: ['Revisando']
+      to: 'reviewed',
+      from: ['review']
     },
     {
       id: 'default-rerequest',
       name: 'Novo pedido de review volta para revisão',
       trigger: 'pr.review_requested',
-      to: 'Revisando',
-      from: ['Revisado']
+      to: 'review',
+      from: ['reviewed']
     },
     {
       id: 'default-merged',
       name: 'Merge finaliza a tarefa',
       trigger: 'pr.merged',
-      to: 'Finalizada'
+      to: 'done'
     },
     {
       id: 'default-closed',
       name: 'PR fechada sem merge volta para andamento',
       trigger: 'pr.closed_unmerged',
-      to: 'Em andamento',
+      to: 'work',
       notify: true
     }
   ]
   const rules = specs.map((spec): AutomationRule => {
     const target = id(spec.to)
     const from = spec.from?.map(id)
-    const missing = [spec.to, ...(spec.from ?? [])].filter((name) => !id(name))
+    const missing = [spec.to, ...(spec.from ?? [])].filter((role) => !id(role))
     if (missing.length > 0) {
       warnings.push(
-        `Regra “${spec.name}” desligada: o quadro não tem a etapa ${missing.map((m) => `“${m}”`).join(', ')}.`
+        `Regra “${spec.name}” desligada: o quadro não tem etapa com o papel ${missing.map((m) => `“${STAGE_ROLE_LABEL[m]}”`).join(', ')}.`
       )
     }
     return {
@@ -416,8 +437,6 @@ export function defaultRules(stages: readonly BoardStage[]): {
   })
   return { rules, warnings }
 }
-
-// ---------- Avaliação ----------
 
 export interface TaskAutomationState {
   stageId: string | null
@@ -511,4 +530,51 @@ export function evaluate(
     current = to
     return { ...base, outcome: 'move', to }
   })
+}
+
+export interface AutomationStatus {
+  /** "Pausar todas" ligado. */
+  paused: boolean
+  /** Situação do GitHub no último ciclo do projeto. */
+  github: SignalsGitHubState | 'unknown'
+  lastRunAt: string | null
+  nextRunAt: string | null
+  error: string | null
+}
+
+function stringList(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : undefined
+}
+
+/** Regra inválida é descartada (as outras continuam). */
+export function parseRule(value: unknown): AutomationRule | null {
+  if (!isRecord(value)) return null
+  const { id, name, trigger } = value
+  if (typeof id !== 'string' || !id || typeof name !== 'string') return null
+  if (typeof trigger !== 'string' || !(EVENT_KINDS as readonly string[]).includes(trigger))
+    return null
+  const action = value['action']
+  if (!isRecord(action)) return null
+  let parsedAction: AutomationRule['action']
+  if (action['type'] === 'move_to_stage' && typeof action['stageId'] === 'string') {
+    parsedAction = { type: 'move_to_stage', stageId: action['stageId'] }
+  } else if (action['type'] === 'notify' && typeof action['message'] === 'string') {
+    parsedAction = { type: 'notify', message: action['message'] }
+  } else return null
+  const c = isRecord(value['conditions']) ? value['conditions'] : {}
+  const fromStages = stringList(c['fromStages'])
+  const rule: AutomationRule = {
+    id,
+    name,
+    enabled: value['enabled'] === true,
+    trigger: trigger as EventKind,
+    conditions: {
+      ...(fromStages ? { fromStages } : {}),
+      ...(c['notBlocked'] === true ? { notBlocked: true } : {}),
+      ...(c['onlyForward'] === true ? { onlyForward: true } : {})
+    },
+    action: parsedAction
+  }
+  if (value['notify'] === true) rule.notify = true
+  return rule
 }

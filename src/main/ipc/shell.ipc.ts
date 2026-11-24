@@ -1,7 +1,5 @@
-import type { IpcMain } from 'electron'
-import { IPC_CHANNELS } from '../../shared/ipc-contract'
+import { GITHUB_NAME_SOURCES as GH } from '../../shared/github-names'
 import { RELEASES_PATH_PATTERN } from '../../shared/updates'
-import type { SenderGuard } from './trusted-sender'
 
 /**
  * O que o renderer pode abrir no navegador externo: só https, sem porta/credenciais, e só
@@ -12,6 +10,8 @@ export interface ExternalUrlRule {
   pathPrefix?: string
   pathPattern?: RegExp
 }
+
+const BRANCH_PATH = '[A-Za-z0-9._%-]+(/[A-Za-z0-9._%-]+)*'
 
 export const EXTERNAL_URL_RULES: readonly ExternalUrlRule[] = [
   { host: 'notion.so' },
@@ -28,29 +28,29 @@ export const EXTERNAL_URL_RULES: readonly ExternalUrlRule[] = [
   // Acesso de organizações (restrição de OAuth Apps / fine-grained PATs) e SSO (SAML).
   { host: 'github.com', pathPrefix: '/settings/connections/applications' },
   { host: 'github.com', pathPrefix: '/settings/personal-access-tokens' },
-  { host: 'github.com', pathPattern: /^\/orgs\/[A-Za-z0-9-]+\/sso$/ },
-  // PRs ligadas às tarefas (Etapa 2D) e revisões publicadas como orkio[bot]. Owner aceita `_`
-  // (contas gerenciadas), como o `OWNER_SLUG` da revisão.
-  { host: 'github.com', pathPattern: /^\/[A-Za-z0-9_-]+\/[A-Za-z0-9._-]+\/pull\/\d+$/ },
+  { host: 'github.com', pathPattern: new RegExp(`^/orgs/${GH.owner}/sso$`) },
+  // PRs ligadas às tarefas (Etapa 2D) e revisões publicadas como orkio[bot].
+  { host: 'github.com', pathPattern: new RegExp(`^/${GH.owner}/${GH.repo}/pull/\\d+$`) },
   // Instalar o GitHub App do Orkio (revisão como orkio[bot] sem o App no repositório): só a página
   // de instalação, no mesmo formato que o poster aceita do site.
-  { host: 'github.com', pathPattern: /^\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new$/ },
+  { host: 'github.com', pathPattern: new RegExp(`^/apps/${GH.appSlug}/installations/new$`) },
   // Branch da tarefa enviada por um fluxo (Etapa 5C).
   {
     host: 'github.com',
-    pathPattern: /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/tree\/[A-Za-z0-9._%-]+(\/[A-Za-z0-9._%-]+)*$/
+    pathPattern: new RegExp(`^/${GH.owner}/${GH.repo}/tree/${BRANCH_PATH}$`)
   },
   // "Criar a PR" da branch da tarefa (Abrir PR sem alva-flow): `compare/<base>...<branch>`.
   {
     host: 'github.com',
-    pathPattern:
-      /^\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\/compare\/[A-Za-z0-9._%-]+(\/[A-Za-z0-9._%-]+)*(\.\.\.[A-Za-z0-9._%-]+(\/[A-Za-z0-9._%-]+)*)?$/
+    pathPattern: new RegExp(
+      `^/${GH.owner}/${GH.repo}/compare/${BRANCH_PATH}(\\.\\.\\.${BRANCH_PATH})?$`
+    )
   },
   // DMG/página de versão do repo PÚBLICO de releases (6C, macOS sem assinatura).
   { host: 'github.com', pathPattern: RELEASES_PATH_PATTERN }
 ]
 
-/** Regras do site do Orkio (Configurações > Sobre), a partir do endereço do build. */
+/** Regras do site do Orkio (Configurações > Sobre), a partir de `siteOrigin()`. */
 export function siteUrlRules(siteUrl: string | null): ExternalUrlRule[] {
   if (!siteUrl) return []
   try {
@@ -59,6 +59,14 @@ export function siteUrlRules(siteUrl: string | null): ExternalUrlRule[] {
   } catch {
     return []
   }
+}
+
+/** Links de Configurações > Sobre: só quando o renderer pode abri-los (mesma regra acima). */
+export function siteLinks(
+  origin: string | null
+): { site: string; privacy: string; terms: string } | null {
+  if (!origin || siteUrlRules(origin).length === 0) return null
+  return { site: origin, privacy: `${origin}/privacidade`, terms: `${origin}/termos` }
 }
 
 export function isAllowedExternalUrl(
@@ -83,16 +91,14 @@ export function isAllowedExternalUrl(
   )
 }
 
-export function registerShellIpc(
-  ipc: Pick<IpcMain, 'handle'>,
+/** "Abrir no navegador": só URLs da allowlist; o resto responde `false` sem abrir. */
+export function openExternalHandler(
   openExternal: (url: string) => Promise<void>,
-  isTrustedSender: SenderGuard,
-  extraRules: readonly ExternalUrlRule[] = []
-): void {
-  ipc.handle(IPC_CHANNELS.shell.openExternal, async (event, url: unknown) => {
-    if (!isTrustedSender(event)) throw new Error('Origem de IPC não autorizada')
+  extraRules: readonly ExternalUrlRule[]
+): (url: string) => Promise<boolean> {
+  return async (url) => {
     if (!isAllowedExternalUrl(url, extraRules)) return false
     await openExternal(url)
     return true
-  })
+  }
 }

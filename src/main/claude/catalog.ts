@@ -8,7 +8,7 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
-import type { CatalogCommand, CatalogGroup } from '../../shared/agent-run'
+import { isCommandName, type CatalogCommand, type CatalogGroup } from '../../shared/agent-run'
 
 export type { CatalogCommand, CatalogGroup }
 
@@ -16,9 +16,7 @@ const MAX_FILES_PER_DIR = 300
 const MAX_HEAD_BYTES = 8 * 1024
 /** `installed_plugins.json` cresce com cada plugin (~170 bytes cada): lido inteiro, até 1 MB. */
 const MAX_INDEX_BYTES = 1024 * 1024
-const NAME = /^[A-Za-z0-9][\w:.-]{0,80}$/
 
-/** Frontmatter simples (`chave: valor`), só as duas chaves que interessam. */
 export function parseFrontmatter(text: string): { name?: string; description?: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
   if (!m) return {}
@@ -91,8 +89,8 @@ async function scanDir(fs: CatalogFs, dir: string, prefix: string): Promise<Cata
     if (head === null) continue
     const meta = parseFrontmatter(head)
     const base = asSkill ? entry : basename(entry, '.md')
-    const name = meta.name && NAME.test(meta.name) ? meta.name : base
-    if (!NAME.test(name)) continue
+    const name = isCommandName(meta.name) ? meta.name : base
+    if (!isCommandName(name)) continue
     out.push({
       name: prefix ? `${prefix}:${name}` : name,
       description: meta.description ?? '',
@@ -102,7 +100,6 @@ async function scanDir(fs: CatalogFs, dir: string, prefix: string): Promise<Cata
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** `installed_plugins.json`: só nome e pasta de instalação de cada plugin. */
 export function parseInstalledPlugins(json: string): { name: string; path: string }[] {
   try {
     const data = JSON.parse(json) as { plugins?: Record<string, unknown> }

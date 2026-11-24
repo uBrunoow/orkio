@@ -4,12 +4,9 @@
  */
 import { execFile as nodeExecFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { ClaudeCodeStatus } from '../../shared/agent-run'
+import { CLAUDE_MIN_VERSION, type ClaudeCodeStatus } from '../../shared/agent-run'
 import { CLAUDE_EFFORT_VERSION } from '../../shared/agent-runtime'
-import { sanitizeEnv } from './redact'
-
-/** Versão mínima testada com as flags usadas (stream-json in/out, --permission-prompt-tool, --settings). */
-export const CLAUDE_MIN_VERSION = '2.1.0'
+import { sanitizeEnv } from '../platform/redact'
 
 export type ExecFileFn = (
   file: string,
@@ -27,7 +24,6 @@ export function compareVersions(a: string, b: string): number {
   return 0
 }
 
-/** O CLI desta versão aceita `--effort`? Sem versão conhecida, não. */
 export function supportsEffortVersion(version: string | null): boolean {
   return version !== null && compareVersions(version, CLAUDE_EFFORT_VERSION) >= 0
 }

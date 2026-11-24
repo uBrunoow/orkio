@@ -15,24 +15,26 @@ import {
   alerts,
   type OrkioApp
 } from './fixtures'
+import { NOTION_OAUTH_REDIRECT_URI as REDIRECT_URI } from '../src/shared/site-contract'
 
 /**
  * Etapa 6A: o app (build E2E) faz o login OAuth do Notion passando pelo SITE de verdade
  * (`next start` do site/), que fala com um Notion simulado em HTTP local. Prova o contrato
  * app ↔ site ↔ Notion sem tocar no Notion real. Precisa do build do site:
  *   pnpm --dir site build
- * No CI, roda no workflow do site (tag @site).
+ * No CI, roda no workflow do site (tag @site) e falha se o build faltar; localmente, sem o build,
+ * pula com aviso.
  */
 const SITE = resolve(__dirname, '..', 'site')
 const CLIENT_ID = 'e2e-client-id'
 const CLIENT_SECRET = 'secret_E2E_SITE_NUNCA_NO_APP'
-const REDIRECT_URI = 'http://localhost:47821/oauth/notion/callback'
+const SITE_BUILT = existsSync(join(SITE, '.next', 'BUILD_ID'))
+const NO_BUILD = 'Build do site ausente: rode `pnpm --dir site build` antes.'
 
 test.describe.configure({ mode: 'serial' })
-test.skip(
-  !existsSync(join(SITE, '.next', 'BUILD_ID')),
-  'Build do site ausente: rode `pnpm --dir site build` antes (no CI: workflow do site).'
-)
+// Só local: no CI o teste do contrato app ↔ site nunca pula em silêncio (o beforeAll falha).
+test.skip(!SITE_BUILT && !process.env['CI'], NO_BUILD)
+if (!SITE_BUILT && !process.env['CI']) console.warn(`[@site] pulado: ${NO_BUILD}`)
 
 let userDataDir: string
 let orkio: OrkioApp | null = null
@@ -64,6 +66,7 @@ async function freePort(): Promise<number> {
 }
 
 test.beforeAll(async () => {
+  if (!SITE_BUILT) throw new Error(NO_BUILD)
   userDataDir = createUserDataDir()
   // Notion simulado: só o endpoint de token (o resto da API segue simulado dentro do app).
   let seq = 0
@@ -187,7 +190,7 @@ test.afterAll(async () => {
 })
 
 test('@site login OAuth do Notion pelo site local (troca do código e renovação)', async () => {
-  orkio = await launchOrkio(userDataDir, { brokerTarget: siteUrl })
+  orkio = await launchOrkio(userDataDir, { siteTarget: siteUrl })
   const { app, page } = orkio
 
   await notionCard(page).getByRole('button', { name: 'Conectar com Notion' }).click()

@@ -1,17 +1,13 @@
 import { useEffect } from 'react'
-import type { ProjectView } from '../../../../shared/ipc-contract'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
 import { useAgentBadges } from '../agents/agent-badges'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import type { TaskSection } from '../../../../shared/overview'
-import { TaskPanel } from '../board/TaskPanel'
+import { TaskPanel } from './TaskPanel'
 import { useBoard } from '../board/useBoard'
+import type { ProjectView } from '../../../../shared/projects'
 
-/**
- * Tela da tarefa: fases no topo, conversa no meio e o painel da fase à direita. Abre pela lista
- * lateral, pelo Quadro, pelo sino, pela Command Palette e pelas notificações.
- */
 export function TaskScreen({
   project,
   taskId,
@@ -23,7 +19,7 @@ export function TaskScreen({
   section: TaskSection | null
   onBackToBoard(): void
 }): React.JSX.Element {
-  const projectId = project?.id ?? ''
+  const projectId = project?.id ?? null
   const board = useBoard(projectId)
   const signals = useTaskSignals(projectId)
   const agentBadges = useAgentBadges(projectId)
@@ -74,17 +70,18 @@ export function TaskScreen({
   }
   return (
     <TaskPanel
+      key={`${project.id}:${card.taskId}`}
       projectId={project.id}
+      projectName={project.name}
       agent={agentBadges[card.taskId] ?? null}
       card={card}
       stages={board.view.config.stages}
       signals={signals.result?.signals[card.taskId]}
-      onMove={(stageId) => void board.move(card.taskId, stageId)}
-      onToggleBlocked={(blocked) => void board.setBlocked(card.taskId, blocked)}
-      onToggleAutomation={(paused) => void board.setAutomationPaused(card.taskId, paused)}
-      onBranchesChanged={() => void refreshSignals(true)}
+      move={(stageId) => void board.move(card.taskId, stageId)}
+      setBlocked={(blocked) => void board.setBlocked(card.taskId, blocked)}
+      setAutomationPaused={(paused) => void board.setAutomationPaused(card.taskId, paused)}
+      refreshSignals={() => void refreshSignals(true)}
       focusSection={section}
-      projectName={project.name}
       onOpenBoard={onBackToBoard}
     />
   )

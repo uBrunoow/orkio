@@ -2,12 +2,13 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { NotionTask } from '../../shared/ipc-contract'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
-import { GitHubApiError, type ConditionalPage } from '../connectors/github/github.client'
+import { type ConditionalPage } from '../connectors/github/github.client'
 import { GitError } from '../git/git'
 import type { ConfigStore } from '../storage/config-store'
 import { SIGNALS_MESSAGES, TaskSignalsService, type SignalsGitHub } from './task-signals.service'
+import type { NotionTask } from '../../shared/notion'
+import { ApiError } from '../net/http'
 
 const NOW = new Date('2026-11-19T12:00:00Z')
 
@@ -158,13 +159,15 @@ describe('TaskSignalsService', () => {
   })
 
   it('sem acesso (404) e SSO → aviso, link e nada quebra', async () => {
-    github.getConditional.mockRejectedValueOnce(new GitHubApiError('not_found', 'Sem acesso.', 404))
+    github.getConditional.mockRejectedValueOnce(
+      new ApiError('github', 'not_found', 'Sem acesso.', 404)
+    )
     expect(await (await service()).get('p1')).toMatchObject({
       ok: true,
       value: { github: 'no_access', messages: ['Sem acesso.'] }
     })
     github.getConditional.mockRejectedValueOnce(
-      new GitHubApiError('sso_required', 'SSO.', 403, {
+      new ApiError('github', 'sso_required', 'SSO.', 403, {
         ssoUrl: 'https://github.com/orgs/acme/sso'
       })
     )
@@ -172,7 +175,7 @@ describe('TaskSignalsService', () => {
       value: { github: 'sso', action: { url: 'https://github.com/orgs/acme/sso' } }
     })
     github.getConditional.mockRejectedValueOnce(
-      new GitHubApiError('oauth_restricted', 'Restrito.', 403)
+      new ApiError('github', 'oauth_restricted', 'Restrito.', 403)
     )
     expect(await (await service()).get('p1')).toMatchObject({
       value: {
@@ -185,7 +188,7 @@ describe('TaskSignalsService', () => {
   it('falha de rede depois de um sucesso → mantém o último resultado e avisa', async () => {
     const s = await service()
     await s.get('p1', { force: true })
-    github.getConditional.mockRejectedValue(new GitHubApiError('network', 'Sem conexão.'))
+    github.getConditional.mockRejectedValue(new ApiError('github', 'network', 'Sem conexão.'))
     const result = await s.get('p1', { force: true })
     expect(result).toMatchObject({
       ok: true,
@@ -200,7 +203,9 @@ describe('TaskSignalsService', () => {
     const calls = github.getConditional.mock.calls.length
     await s.get('p1')
     expect(github.getConditional.mock.calls.length).toBe(calls)
-    github.getConditional.mockRejectedValueOnce(new GitHubApiError('rate_limited', 'Limite.', 429))
+    github.getConditional.mockRejectedValueOnce(
+      new ApiError('github', 'rate_limited', 'Limite.', 429)
+    )
     expect(await s.get('p1', { force: true })).toMatchObject({ value: { github: 'rate_limited' } })
   })
 

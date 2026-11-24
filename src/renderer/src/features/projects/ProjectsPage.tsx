@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -11,14 +11,8 @@ import { EmptyState } from '@/components/PageState'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
 import { BoardIcon, FolderPlusIcon, FolderSearchIcon, MoreIcon } from '../../components/icons'
-import { StatusToken, toneOf } from '../../components/StatusToken'
-import type {
-  ProjectError,
-  ProjectHealthState,
-  ProjectMutationResult,
-  ProjectSelection,
-  ProjectView
-} from '../../../../shared/ipc-contract'
+import { StatusToken } from '../../components/StatusToken'
+import { PROJECT_HEALTH } from '../../lib/status-text'
 import { Alert } from '../../components/Alert'
 import { PageHeader } from '../../components/PageHeader'
 import { ProjectNotionSection } from '../notion-workspace/ProjectNotionSection'
@@ -28,36 +22,18 @@ import { missingSteps, projectChecks, type ProjectCheck } from './project-checks
 import { AddProjectPanel } from './AddProjectPanel'
 import { useProjects } from './useProjects'
 import { PAGE_WIDTH } from '../../components/page-width'
+import type {
+  ProjectError,
+  ProjectMutationResult,
+  ProjectSelection,
+  ProjectView
+} from '../../../../shared/projects'
+import { useIpcResource } from '../../lib/ipc'
+import { readBoard, useSources } from '../../app/sources'
+import { useConnectionStatus } from '../integrations/useConnection'
+import { isFolderProblem } from '../../../../shared/projects'
+import { ProjectAvatar } from '../../components/ProjectAvatar'
 
-type TokenColor = 'default' | 'green' | 'yellow' | 'red'
-
-const HEALTH: Record<ProjectHealthState, { label: string; color: TokenColor }> = {
-  checking: { label: 'Verificando…', color: 'default' },
-  ok: { label: 'OK', color: 'green' },
-  missing_folder: { label: 'Pasta não encontrada', color: 'red' },
-  not_a_repo: { label: 'Não é repositório', color: 'red' },
-  repo_mismatch: { label: 'Outro repositório', color: 'red' },
-  no_access: { label: 'Sem acesso', color: 'red' },
-  github_disconnected: { label: 'GitHub desconectado', color: 'yellow' },
-  unverified: { label: 'Não verificado', color: 'yellow' },
-  git_error: { label: 'Erro do git', color: 'red' }
-}
-
-/** Cor do quadradinho do projeto (inicial), estável pelo id (igual à lista lateral). */
-const PROJECT_TINTS = [
-  'bg-brand text-black',
-  'bg-info text-black',
-  'bg-ok text-black',
-  'bg-warn text-black',
-  'bg-danger text-black'
-]
-function projectTint(id: string): string {
-  let h = 0
-  for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return PROJECT_TINTS[h % PROJECT_TINTS.length]!
-}
-
-/** Colunas da lista (cabeçalho e linhas). */
 const STATE_COL = 'w-[220px] shrink-0'
 /**
  * Lista estreita (< 44rem: janela de ~1100 px com as duas colunas laterais): o estado e as ações
@@ -73,20 +49,18 @@ export function ProjectsPage({
   onOpenIntegrations(): void
   /** Abre o Quadro do projeto (e o torna o projeto atual). */
   onOpenBoard(projectId: string): void
-  /** Primeiros passos só com o que falta para este projeto. */
   onContinueSetup(projectId: string): void
 }): React.JSX.Element {
-  const projects = useProjects()
+  const projects = useProjects({ revalidate: true })
   const boardStages = useBoardStages(projects.projects)
   const [picking, setPicking] = useState(false)
   const [selection, setSelection] = useState<ProjectSelection | null>(null)
   const [pickError, setPickError] = useState<ProjectError | null>(null)
-  const [githubCheck, setGithubCheck] = useState(0)
-  const githubConnected = useGitHubConnected(githubCheck)
+  // Só para a dica "conecte o GitHub" (o status salvo, relido ao voltar para a janela).
+  const github = useConnectionStatus('github')
   const notionWorkspace = useNotionWorkspace().status
 
   async function addProject(): Promise<void> {
-    setGithubCheck((n) => n + 1)
     setPicking(true)
     setPickError(null)
     const result = await projects.pickFolder()
@@ -112,7 +86,7 @@ export function ProjectsPage({
 
       {projects.warning && <Alert tone="warning">{projects.warning}</Alert>}
 
-      {githubConnected === false && (
+      {github?.state === 'disconnected' && (
         <Alert
           tone="warning"
           action={
@@ -140,7 +114,6 @@ export function ProjectsPage({
           selection={selection}
           onCreate={async (input) => {
             const result = await projects.create(input)
-            setGithubCheck((n) => n + 1)
             if (result.ok) setSelection(null)
             return result
           }}
@@ -162,7 +135,6 @@ export function ProjectsPage({
         )
       ) : (
         <div className="@container overflow-hidden rounded-xl border border-border-soft bg-card">
-          {/* Cabeçalho das colunas (só visual: cada linha já diz o projeto e o estado). */}
           <div
             aria-hidden="true"
             className="flex gap-3.5 border-b border-border-soft px-4 py-2 text-2xs tracking-wider text-subtle-foreground uppercase"
@@ -183,8 +155,7 @@ export function ProjectsPage({
                 onContinueSetup={() => onContinueSetup(project.id)}
                 checks={projectChecks({
                   project,
-                  boardStages: boardStages[project.id] ?? null,
-                  precheck: null
+                  boardStages: boardStages[project.id] ?? null
                 })}
                 notion={
                   notionWorkspace?.config ? (
@@ -220,17 +191,13 @@ function ProjectRow({
   onOpenBoard(): void
   onContinueSetup(): void
   checks: ProjectCheck[]
-  /** Vínculo com o Notion e tarefas (quando os bancos estão configurados). */
   notion: React.ReactNode
 }): React.JSX.Element {
   const [busy, setBusy] = useState<'relocate' | 'remove' | null>(null)
   const [confirmingRemove, setConfirmingRemove] = useState(false)
   const [relocateError, setRelocateError] = useState<ProjectError | null>(null)
-  const health = HEALTH[project.health.state]
-  const folderProblem =
-    project.health.state === 'missing_folder' ||
-    project.health.state === 'not_a_repo' ||
-    project.health.state === 'repo_mismatch'
+  const health = PROJECT_HEALTH[project.health.state]
+  const folderProblem = isFolderProblem(project.health.state)
 
   async function relocate(): Promise<void> {
     setBusy('relocate')
@@ -246,15 +213,7 @@ function ProjectRow({
       className="flex flex-col gap-2.5 border-b border-border-soft px-4 py-3 last:border-b-0"
     >
       <div className="flex flex-wrap items-start gap-x-3.5 gap-y-2.5">
-        <span
-          aria-hidden="true"
-          className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-lg text-sm font-semibold',
-            projectTint(project.id)
-          )}
-        >
-          {project.name.slice(0, 1).toUpperCase()}
-        </span>
+        <ProjectAvatar size="md" project={project} />
 
         <div className="flex min-w-0 flex-1 flex-col gap-1.5 @max-[44rem]:basis-[calc(100%-46px)]">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -347,7 +306,7 @@ function ProjectRow({
             >
               <StatusToken
                 label={health.label}
-                tone={toneOf(health.color)}
+                tone={health.tone}
                 data-health={project.health.state}
               />
             </span>
@@ -392,7 +351,6 @@ function ProjectRow({
           </>
         )}
       </div>
-      {/* Detalhes (aviso, Notion e tarefas) em largura cheia, alinhados ao nome do projeto. */}
       <div className="flex min-w-0 flex-col gap-2 pl-[46px] empty:hidden">
         {project.health.message && project.health.state !== 'ok' && (
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -421,54 +379,22 @@ function ProjectRow({
   )
 }
 
-/**
- * `null` enquanto carrega. Só para a dica "conecte o GitHub": relê ao voltar para a janela e
- * quando `refreshKey` muda (ex.: depois de adicionar um projeto).
- */
-function useGitHubConnected(refreshKey: number): boolean | null {
-  const [connected, setConnected] = useState<boolean | null>(null)
-  useEffect(() => {
-    let active = true
-    const check = (): void => {
-      void window.orkio.github
-        .getStatus()
-        .then((status) => {
-          if (active) setConnected(status.state === 'connected' || status.state === 'error')
-        })
-        .catch(() => {})
-    }
-    check()
-    window.addEventListener('focus', check)
-    return () => {
-      active = false
-      window.removeEventListener('focus', check)
-    }
-  }, [refreshKey])
-  return connected
-}
-
 /** Colunas do quadro de cada projeto vinculado (`null` = sem quadro). Lê do main (cache). */
 function useBoardStages(projects: ProjectView[] | null): Record<string, number | null> {
-  const [stages, setStages] = useState<Record<string, number | null>>({})
+  const { board } = useSources()
   const ids = (projects ?? [])
     .filter((p) => p.notionProject)
     .map((p) => p.id)
     .join(',')
-  useEffect(() => {
-    let active = true
-    for (const id of ids ? ids.split(',') : []) {
-      void window.orkio.board
-        .get(id)
-        .then((r) => {
-          if (active && r.ok) {
-            setStages((s) => ({ ...s, [id]: r.value.config?.stages.length ?? null }))
-          }
+  return (
+    useIpcResource(ids || null, async (key) => {
+      const entries = await Promise.all(
+        key.split(',').map(async (id) => {
+          const view = await readBoard(board, id)
+          return view ? ([id, view.config?.stages.length ?? null] as const) : null
         })
-        .catch(() => undefined)
-    }
-    return () => {
-      active = false
-    }
-  }, [ids])
-  return stages
+      )
+      return Object.fromEntries(entries.filter((e) => e !== null))
+    }).value ?? {}
+  )
 }

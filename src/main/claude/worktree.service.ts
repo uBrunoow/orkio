@@ -12,6 +12,7 @@ import {
   uniqueBranchName,
   type BranchKind
 } from '../../shared/slug'
+import { parsePorcelainLine } from '../../shared/agent-run'
 import { TaskBranchesStore } from '../branches/task-branches.store'
 import type { Db } from '../db/database'
 import type { Git } from '../git/git'
@@ -98,7 +99,6 @@ export class WorktreeService {
     return this.branches.forTask(projectId, taskId)
   }
 
-  /** Registro do projeto inteiro (para os sinais). */
   linkedBranchesByTask(projectId: string): Map<string, string[]> {
     return this.branches.forProject(projectId)
   }
@@ -172,11 +172,8 @@ export class WorktreeService {
     await git.fetch(root, remote, project.defaultBranch).catch(() => undefined)
 
     const linked = this.branches.forTask(project.id, task.id).map((l) => l.branch)
-    const matches = (name: string): boolean =>
-      linked.includes(name) || (!!parsed && mentionsTask(name, parsed.prefix, parsed.number))
-    const localBranches = await git.localBranches(root)
-    // Registrada primeiro (a escolha explícita vence o casamento pelo ID).
-    const local = linked.find((b) => localBranches.includes(b)) ?? localBranches.find(matches)
+    const found = await this.findTaskBranch(project, task)
+    const local = found?.where === 'local' ? found.branch : undefined
     // Branch já aberta em outro worktree (inclusive a pasta principal do usuário): o git recusaria.
     const inUse = local
       ? (await git.worktreeList(root).catch(() => [])).find((w) => w.branch === local)
@@ -197,9 +194,7 @@ export class WorktreeService {
         reused = 'local_branch'
         await git.worktreeAdd(root, path, local, { newBranch: false })
       } else {
-        const remoteBranches = await git.remoteBranches(root, remote)
-        const remoteBranch =
-          linked.find((b) => remoteBranches.includes(b)) ?? remoteBranches.find(matches)
+        const remoteBranch = found?.where === 'remote' ? found.branch : undefined
         if (remoteBranch) {
           branch = remoteBranch
           reused = 'remote_branch'
@@ -214,6 +209,10 @@ export class WorktreeService {
               `Não encontrei ${base}. Verifique a conexão e o remote do projeto e tente de novo.`
             )
           }
+          const [localBranches, remoteBranches] = await Promise.all([
+            git.localBranches(root),
+            git.remoteBranches(root, remote)
+          ])
           branch = uniqueBranchName(
             taskBranchName(parsed ? task.displayId : null, task.title, options.kind),
             new Set([...localBranches, ...remoteBranches])
@@ -256,6 +255,30 @@ export class WorktreeService {
   }
 
   /**
+   * Branch que já existe para a tarefa, na ordem de escolha: a registrada para ela
+   * (`task_branches`) antes da que tem o ID do Notion no nome, local antes de remota. É a mesma
+   * ordem do `ensure` e da exibição antes de rodar. `null` = nenhuma (o `ensure` cria uma).
+   */
+  async findTaskBranch(
+    project: WorktreeProject,
+    task: WorktreeTask
+  ): Promise<{ branch: string; where: 'local' | 'remote' } | null> {
+    const parsed = parseDisplayId(task.displayId)
+    const linked = this.branches.forTask(project.id, task.id).map((l) => l.branch)
+    if (!parsed && linked.length === 0) return null
+    const matches = (name: string): boolean =>
+      linked.includes(name) || (!!parsed && mentionsTask(name, parsed.prefix, parsed.number))
+    const { git } = this.deps
+    const local = await git.localBranches(project.localPath)
+    const hit = linked.find((b) => local.includes(b)) ?? local.find(matches)
+    if (hit) return { branch: hit, where: 'local' }
+    // Os nomes já vêm sem o "<remote>/" (git.remoteBranches).
+    const remotes = await git.remoteBranches(project.localPath, project.remoteName)
+    const remote = linked.find((b) => remotes.includes(b)) ?? remotes.find(matches)
+    return remote ? { branch: remote, where: 'remote' } : null
+  }
+
+  /**
    * "Limpar ambiente": remove o worktree (a branch fica). Com mudanças não commitadas, recusa a
    * menos que `force` (confirmação explícita do usuário).
    */
@@ -268,7 +291,7 @@ export class WorktreeService {
         throw new WorktreeError(
           'dirty',
           `O ambiente tem ${changes.length} mudança(s) não commitada(s). Confirme para descartá-las.`,
-          changes.map((l) => l.slice(3))
+          changes.flatMap((l) => parsePorcelainLine(l)?.path ?? [])
         )
       }
       try {

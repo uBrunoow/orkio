@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
-  NOTION_FAKE,
   createUserDataDir,
   cspViolations,
   expectTaskHistory,
@@ -11,7 +10,9 @@ import {
   removeDir,
   openSettings,
   type OrkioApp,
-  taskScreen
+  taskScreen,
+  FAKE_REPO,
+  seedConfig
 } from './fixtures'
 
 /**
@@ -78,46 +79,12 @@ test.beforeAll(() => {
   git(repoDir(), 'commit', '-q', '-m', 'init')
   git(repoDir(), 'remote', 'add', 'origin', origin())
   git(repoDir(), 'push', '-q', 'origin', 'main')
-  writeFileSync(
-    configFile(),
-    JSON.stringify({
-      schemaVersion: 2,
-      notion: {
-        projectsDataSource: { id: NOTION_FAKE.projectsDs, name: 'Projetos' },
-        tasksDataSource: { id: NOTION_FAKE.tasksDs, name: 'Tarefas' },
-        mapping: {
-          title: { id: 'title', name: 'Nome', type: 'title' },
-          status: { id: 'st%3A', name: 'Status', type: 'status' },
-          uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
-          project: { id: 'rel', name: 'Projeto', type: 'relation' },
-          priority: { id: 'pri', name: 'Prioridade', type: 'select' },
-          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
-        },
-        updatedAt: '2026-11-19T00:00:00.000Z'
-      },
-      projects: [
-        {
-          id: PROJECT,
-          name: 'orkio-app',
-          localPath: repoDir(),
-          repo: {
-            host: 'github.com',
-            owner: 'acme',
-            name: 'orkio-app',
-            remoteName: 'origin',
-            defaultBranch: 'main',
-            visibility: 'private',
-            canPush: true,
-            archived: false,
-            verified: true
-          },
-          createdAt: '2026-11-01T00:00:00.000Z',
-          updatedAt: '2026-11-01T00:00:00.000Z',
-          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
-        }
-      ]
-    })
-  )
+  seedConfig(userDataDir, {
+    id: PROJECT,
+    name: 'orkio-app',
+    localPath: repoDir(),
+    repo: FAKE_REPO
+  })
 })
 
 test.afterAll(async () => {
@@ -146,7 +113,7 @@ test('prepara o quadro e um fluxo por coluna de trabalho', async () => {
     boards: Record<string, { stages: { id: string; name: string }[] }>
     flows: Record<string, unknown>
   }
-  expect(config.schemaVersion).toBe(12)
+  expect(config.schemaVersion).toBeGreaterThan(2)
   const stage = (name: string): string =>
     config.boards[PROJECT]!.stages.find((st) => st.name === name)!.id
   const oneStep = (id: string, name: string): unknown => ({
@@ -220,10 +187,13 @@ test('orquestrador não puxa da fila; movida à mão, a tarefa chega a Revisado 
   expect(saved.orchestrator[PROJECT]?.enabled).toBe(true)
   expect(saved.orchestrator[PROJECT]?.enabledSince).toMatch(/^\d{4}-/)
 
-  // Uma rodada não puxa a tarefa da fila: ela fica em Prioridades até você mover.
-  await orch.getByRole('button', { name: 'Rodar agora' }).click()
+  // Uma rodada não puxa a tarefa da fila: ela fica em Prioridades até você mover. "Rodar agora"
+  // só volta a ficar disponível quando a rodada termina (movimentos e atribuições já aplicados).
+  const runNow = orch.getByRole('button', { name: 'Rodar agora' })
+  await runNow.click()
+  await expect(orch).toContainText('Última rodada')
+  await expect(runNow).toBeEnabled()
   await goTo(page, 'Quadro')
-  await page.waitForTimeout(1500)
   await expect(
     page
       .getByRole('list', { name: 'Tarefas em Prioridades' })

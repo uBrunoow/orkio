@@ -1,11 +1,15 @@
 /**
  * Fluxo pausado por um problema (puro): o que aconteceu, o que isso quer dizer e o que fazer.
- * A causa vem da mensagem que o Orkio guardou no passo; as mensagens são textos fixos do próprio
- * app, então o reconhecimento é por trechos (e o teste confere os textos reais).
+ * A causa vem do motivo da pausa (`FLOW_PAUSES`) ou, quando um passo falhou, do código da falha
+ * que o Orkio guardou no passo (`StepFailure.code`), nunca do texto da mensagem.
  */
-import { FLOW_PAUSE_LABEL, type FlowRunView, type Step } from './task-flow'
+import { ALVA_FAILURES, alvaCommandOf } from './alva'
+import { acceptsReply, FLOW_PAUSES, isProblem, type PauseProblemKind } from './flow-run-state'
+import { isInstallUrl } from './github-names'
+import type { FlowRunView, Step } from './task-flow'
 
-export type ProblemKind =
+/** Causa que vem da falha do passo (pelo código). */
+export type FailureProblemKind =
   | 'uncommitted'
   | 'credentials'
   | 'push_rejected'
@@ -14,10 +18,6 @@ export type ProblemKind =
   | 'no_task'
   | 'no_description'
   | 'no_link'
-  | 'interrupted'
-  | 'loop_guard'
-  | 'gate_timeout'
-  | 'daily_limit'
   | 'review_invalid'
   | 'review_not_installed'
   | 'review_not_configured'
@@ -25,26 +25,39 @@ export type ProblemKind =
   | 'review_maybe_posted'
   | 'generic'
 
-/** Reconhece a causa pelo texto guardado no passo. */
-export function classifyMessage(message: string | null): ProblemKind {
-  if (!message) return 'generic'
-  if (/a revisão em json/i.test(message)) return 'review_invalid'
-  if (/app do orkio não está instalado/i.test(message)) return 'review_not_installed'
-  if (/app do orkio ainda não está configurado/i.test(message)) return 'review_not_configured'
-  if (/não sabe o endereço do site do orkio/i.test(message)) return 'review_no_site'
-  if (/a revisão pode ter sido publicada/i.test(message)) return 'review_maybe_posted'
-  if (/mudanças não commitadas/i.test(message)) return 'uncommitted'
-  if (/pediu credenciais/i.test(message)) return 'credentials'
-  if (/recusou o push/i.test(message)) return 'push_rejected'
-  if (/tempo limite esgotado/i.test(message)) return 'timed_out'
-  if (/sem descrição no notion/i.test(message)) return 'no_description'
-  if (/usa a task do backlog/i.test(message)) return 'no_link'
-  if (/terminou sem criar|arquivo da task vinculada/i.test(message)) return 'no_task'
-  if (/o claude code terminou com erro/i.test(message)) return 'claude_error'
-  return 'generic'
+export type ProblemKind = FailureProblemKind | PauseProblemKind
+
+/**
+ * Código da falha (`StepFailure.code`, gravado no passo) → causa. Códigos que não estão aqui (e
+ * linhas antigas, gravadas antes do código existir) viram `generic`: o cartão mostra a mensagem
+ * guardada e as saídas de sempre.
+ */
+const KIND_BY_CODE: Readonly<Record<string, FailureProblemKind>> = {
+  // DeliveryError (push).
+  dirty: 'uncommitted',
+  credentials: 'credentials',
+  rejected: 'push_rejected',
+  // Fim da execução do Claude Code (`RunFinished.code`).
+  timed_out: 'timed_out',
+  claude_error: 'claude_error',
+  // ClaudeService.flowContext.
+  no_description: 'no_description',
+  // alva-flow.
+  [ALVA_FAILURES.noTaskCreated]: 'no_task',
+  [ALVA_FAILURES.notLinked]: 'no_link',
+  // publish_review (`PUBLISH_FAILURES`, os códigos já são as causas).
+  review_invalid: 'review_invalid',
+  review_not_installed: 'review_not_installed',
+  review_not_configured: 'review_not_configured',
+  review_no_site: 'review_no_site',
+  review_maybe_posted: 'review_maybe_posted'
 }
 
-const HINT: Record<ProblemKind, string> = {
+export function classifyFailure(code: string | null): FailureProblemKind {
+  return (code !== null && KIND_BY_CODE[code]) || 'generic'
+}
+
+const HINT: Record<FailureProblemKind, string> = {
   uncommitted:
     'O ambiente tem arquivos que ainda não entraram em nenhum commit, e o push só envia commits. Veja o que falta, faça o commit (ou descarte) e retome.',
   credentials:
@@ -61,12 +74,6 @@ const HINT: Record<ProblemKind, string> = {
     'O /spec terminou sem criar nem alterar nenhuma task em backlog/tasks/ que o Orkio consiga ligar a esta tarefa. Veja a sessão e a pasta backlog/tasks/ do ambiente; retome para rodar de novo.',
   no_link:
     'Este passo usa a task do Backlog, e o fluxo ainda não sabe qual é a desta tarefa (o /spec não foi concluído ou foi pulado). Rode o /spec de novo para criar ou escolher a task e depois retome.',
-  interrupted:
-    'O Orkio foi fechado enquanto este passo rodava. Retome para rodar de novo; pule só se você sabe que ele já terminou.',
-  loop_guard:
-    'O fluxo passou de 50 passos, o que costuma indicar um loop. Retome para seguir por sua conta ou cancele.',
-  gate_timeout: 'A aprovação passou do prazo. Retome para pedir de novo.',
-  daily_limit: 'O agente chegou ao limite de hoje. Retomar libera este passo uma vez.',
   review_invalid:
     'O passo anterior precisa responder só com a revisão em JSON ({event, summary, comments}). Nada foi publicado. Rode a conversão de novo e retome.',
   review_not_installed:
@@ -92,18 +99,13 @@ export interface FlowProblem {
   stepName: string | null
   /** Execução do Claude Code do passo parado, para abrir a sessão. */
   runId: string | null
+  /** "Responder e continuar" (a regra do main, `acceptsReply`). */
+  canReply: boolean
   /** Comando anterior que dá para rodar de novo (ex.: /commit antes do push). */
   rerun: { stepId: string; label: string } | null
   /** Link útil (ex.: instalar o GitHub App do Orkio), só de formatos conhecidos. */
   link: { label: string; url: string } | null
 }
-
-/** Página de instalação do GitHub App (mesmo formato aceito pelo poster e pela allowlist). */
-const INSTALL_URL =
-  /https:\/\/github\.com\/apps\/[a-z0-9][a-z0-9-]{0,99}\/installations\/new(?![\w/-])/
-
-/** Passos que não são "problema" (esperam outro fluxo ou uma escolha, que têm tela própria). */
-const NOT_A_PROBLEM = new Set(['waiting_slot', 'waiting_agent', 'needs_choice'])
 
 /** Rótulo do botão "Rodar … de novo": `/commit` ou, num pedido em texto, o nome do passo. */
 function rerunLabel(step: Step): string | null {
@@ -127,7 +129,8 @@ function previousCommand(
 }
 
 export function describeFlowProblem(run: FlowRunView): FlowProblem | null {
-  if (run.status !== 'paused' || !run.pauseReason || NOT_A_PROBLEM.has(run.pauseReason)) return null
+  if (run.status !== 'paused' || !isProblem(run.pauseReason) || !run.pauseReason) return null
+  const pause = FLOW_PAUSES[run.pauseReason]
   const current = run.steps.find((s) => s.id === run.currentStep) ?? null
   const entry = current
     ? [...run.history]
@@ -140,18 +143,12 @@ export function describeFlowProblem(run: FlowRunView): FlowProblem | null {
     : undefined
   const reason = entry?.message ?? null
 
-  const kind: ProblemKind =
-    run.pauseReason === 'step_failed'
-      ? classifyMessage(reason)
-      : run.pauseReason === 'interrupted'
-        ? 'interrupted'
-        : run.pauseReason === 'loop_guard'
-          ? 'loop_guard'
-          : run.pauseReason === 'gate_timeout'
-            ? 'gate_timeout'
-            : run.pauseReason === 'agent_daily_limit'
-              ? 'daily_limit'
-              : 'generic'
+  const fromPause = typeof pause.problem === 'object' ? pause.problem : null
+  const kind: ProblemKind = fromPause
+    ? fromPause.kind
+    : pause.problem === 'from_failure'
+      ? classifyFailure(entry?.code ?? null)
+      : 'generic'
 
   // Rodar de novo o passo que resolve: o /commit antes de um push recusado, o /spec antes de um
   // passo que não achou a task do Backlog.
@@ -160,25 +157,26 @@ export function describeFlowProblem(run: FlowRunView): FlowProblem | null {
     : kind === 'uncommitted'
       ? previousCommand(run.steps, current.id)
       : kind === 'no_link'
-        ? previousCommand(run.steps, current.id, (c) => c.endsWith(':spec'))
+        ? previousCommand(run.steps, current.id, (c) => alvaCommandOf(c) === 'spec')
         : kind === 'review_invalid'
           ? previousCommand(run.steps, current.id)
           : null
   const label = previous ? rerunLabel(previous) : null
   return {
     kind,
-    title: `${FLOW_PAUSE_LABEL[run.pauseReason]}${current ? ` — ${current.name}` : ''}`,
+    title: `${pause.label}${current ? ` — ${current.name}` : ''}`,
     reason,
-    hint: HINT[kind],
+    hint: fromPause ? fromPause.hint : HINT[kind as FailureProblemKind],
     stepName: current?.name ?? null,
     runId: entry?.runId ?? null,
+    canReply: acceptsReply(run, current),
     rerun: previous && label ? { stepId: previous.id, label } : null,
-    link: installLink(kind, reason)
+    link: installLink(kind, entry?.link ?? null)
   }
 }
 
-function installLink(kind: ProblemKind, reason: string | null): FlowProblem['link'] {
-  if (kind !== 'review_not_installed' || !reason) return null
-  const url = INSTALL_URL.exec(reason)?.[0]
-  return url ? { label: 'Instalar o GitHub App do Orkio', url } : null
+/** O link que a falha trouxe, só se for o de instalação do App (defesa em profundidade). */
+function installLink(kind: ProblemKind, link: string | null): FlowProblem['link'] {
+  if (kind !== 'review_not_installed' || !isInstallUrl(link)) return null
+  return { label: 'Instalar o GitHub App do Orkio', url: link }
 }

@@ -3,12 +3,13 @@
  *   tarefas (quadro, 3A) + sinais (2D) → snapshot → eventos (diff com o salvo no SQLite) →
  *   regras → ações (mover pela fila da 3A, notificar) → histórico.
  *
- * Idempotência: cada evento tem uma chave única em task_events. Chave, estado local, escrita
- * pendente no Notion e o novo snapshot são gravados na MESMA transação: um evento nunca dispara
- * duas vezes, nem depois de reiniciar, e uma falha no Notion não perde a mudança (fica pendente).
+ * Idempotência: cada evento tem uma chave única por projeto e tarefa em task_events. Chave, estado
+ * local, escrita pendente no Notion e o novo snapshot são gravados na MESMA transação: um evento
+ * nunca dispara duas vezes, nem depois de reiniciar, e uma falha no Notion não perde a mudança.
  */
+import type { EventPr, TaskEventDetailInput } from '../../shared/task-events'
 import {
-  EVENT_LABELS,
+  EVENT_META,
   deriveEvents,
   evaluate,
   mergeSnapshot,
@@ -16,11 +17,15 @@ import {
   type AutomationDecision,
   type TaskSnapshot
 } from '../../shared/automation'
-import type { BoardView, NotionResult, TaskSignalsResult } from '../../shared/ipc-contract'
 import type { BoardService } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { ConfigStore } from '../storage/config-store'
+import type { BoardView } from '../../shared/board'
+import type { Result } from '../../shared/result'
+import type { TaskSignalsResult } from '../../shared/task-signals'
+import { projectById } from '../config/queries'
+import { githubRepoOf } from '../../shared/projects'
 
 export interface AutomationNotification {
   projectId: string
@@ -34,20 +39,17 @@ export interface AutomationServiceDeps {
   store: BoardStore
   board: Pick<BoardService, 'get' | 'applyAutomationMove' | 'flushWrites' | 'hasSnapshot'>
   signals: {
-    get(projectId: string, options?: { force?: boolean }): Promise<NotionResult<TaskSignalsResult>>
+    get(projectId: string, options?: { force?: boolean }): Promise<Result<TaskSignalsResult>>
   }
   notify(notification: AutomationNotification): void
-  /** Algo mudou no quadro do projeto (a tela recarrega). */
   onChanged(projectId: string): void
   now?: () => Date
 }
 
 export interface CycleResult {
-  /** Situação do GitHub neste ciclo (para o agendador decidir pausa/backoff). */
   github: TaskSignalsResult['github'] | 'unknown'
   events: number
   moves: number
-  /** Erro que impediu o ciclo (ex.: Notion fora do ar e tarefas nunca carregadas). */
   error?: { code: string; message: string }
 }
 
@@ -85,41 +87,35 @@ export class AutomationService {
     const board = config.boards[projectId]
     if (!board) return { github: 'unknown', events: 0, moves: 0 }
 
-    // 1. Tarefas e reconciliação com o Notion (mesmo caminho do quadro).
     const view = await this.deps.board.get(projectId, { force })
     if (!view.ok && !this.deps.board.hasSnapshot(projectId)) {
       return { github: 'unknown', events: 0, moves: 0, error: view.error }
     }
     const cards = view.ok ? view.value.cards : null
 
-    // 2. Sinais (git local + GitHub com ETag).
     const signals = await this.deps.signals.get(projectId, { force })
     if (!signals.ok) return { github: 'unknown', events: 0, moves: 0, error: signals.error }
     const result = signals.value
     const available = { local: result.local, github: result.github === 'ok' }
 
-    // 3. Diff + regras + ações, tarefa a tarefa, numa transação só.
     const previous = this.deps.store.snapshots(projectId)
     const states = this.deps.store.states(projectId)
     const stages = (view.ok ? view.value.config?.stages : null) ?? board.stages
     const taskIds = cards ? cards.map((c) => c.taskId) : [...states.keys()]
     const at = this.now().toISOString()
-    const repo = config.projects.find((p) => p.id === projectId)?.repo ?? null
-    // Só o necessário para montar o link da PR no histórico.
-    const pr = (n: number): Record<string, unknown> =>
-      repo && repo.host.toLowerCase() === 'github.com'
-        ? { number: n, owner: repo.owner, repo: repo.name }
-        : { number: n }
+    const repo = githubRepoOf(projectById(config, projectId))
+    const pr = (n: number): EventPr =>
+      repo ? { number: n, owner: repo.owner, repo: repo.name } : { number: n }
     const notifications: AutomationNotification[] = []
     let eventCount = 0
     let moves = 0
 
-    this.deps.store.transaction(() => {
+    this.deps.store.transaction((tx) => {
       for (const taskId of taskIds) {
         const prev = (previous.get(taskId) as TaskSnapshot | undefined) ?? null
         const fresh = toSnapshot(result.signals[taskId], available)
         const events = deriveEvents(taskId, prev, fresh).filter(
-          (e) => !this.deps.store.hasEventKey(e.key)
+          (e) => !this.deps.store.hasEventKey(projectId, taskId, e.key)
         )
         this.deps.store.saveSnapshot(taskId, projectId, mergeSnapshot(prev, fresh), at)
         if (events.length === 0) continue
@@ -139,7 +135,7 @@ export class AutomationService {
         )
         for (const d of decisions) {
           eventCount++
-          const detail: Record<string, unknown> = {
+          const detail: TaskEventDetailInput<'automation'> = {
             event: d.event.kind,
             ruleId: d.ruleId,
             ruleName: d.ruleName,
@@ -151,7 +147,7 @@ export class AutomationService {
           let moved = false
           if (d.outcome === 'move' && d.to) {
             try {
-              moved = this.deps.board.applyAutomationMove(projectId, taskId, d.to, {
+              moved = this.deps.board.applyAutomationMove(tx, projectId, taskId, d.to, {
                 key: d.event.key,
                 detail
               })
@@ -169,7 +165,6 @@ export class AutomationService {
               projectId,
               at,
               kind: 'automation',
-              source: 'automation',
               fromStage: d.from,
               toStage: detail.outcome === 'skipped' ? d.to : null,
               detail,
@@ -199,8 +194,8 @@ export class AutomationService {
     const card = cards?.find((c) => c.taskId === taskId)
     const id = card?.displayId ?? 'Tarefa'
     const what = d.event.pr
-      ? `${EVENT_LABELS[d.event.kind]} (PR #${d.event.pr.number})`
-      : EVENT_LABELS[d.event.kind]
+      ? `${EVENT_META[d.event.kind].label} (PR #${d.event.pr.number})`
+      : EVENT_META[d.event.kind].label
     const stage = stages.find((s) => s.id === d.to)?.name
     return {
       projectId,

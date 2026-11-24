@@ -4,7 +4,8 @@ import { CheckboxField, SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { Timestamp } from '@/components/Timestamp'
 import { MultiSelectField } from './MultiSelectField'
-import type { AgentsState } from '../../../../shared/agent'
+import { useOrchestrator } from './useAgents'
+import { isUsableAgent, type AgentsState } from '../../../../shared/agent'
 import {
   ORCHESTRATOR_LIMITS,
   suggestOrchestrator,
@@ -17,11 +18,8 @@ import { Alert } from '../../components/Alert'
 import { PlusIcon, TrashIcon } from '../../components/icons'
 import { StatusToken } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
+import { ipcResult } from '../../lib/ipc'
 
-/**
- * Orquestrador (8B) na tela Agentes: resumo em frase (fila → etapas → agentes), última rodada,
- * carga de cada agente e o que ficou esperando; o editor fica atrás de "Configurar".
- */
 export function OrchestratorSection({
   projectId,
   agents
@@ -29,29 +27,17 @@ export function OrchestratorSection({
   projectId: string
   agents: AgentsState
 }): React.JSX.Element {
-  const [state, setState] = useState<OrchestratorState | null>(null)
+  const orchestrator = useOrchestrator(projectId)
+  const state = orchestrator.value
   const [draft, setDraft] = useState<OrchestratorConfig | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [actionError, setError] = useState<string | null>(null)
+  const error = actionError ?? orchestrator.error?.message ?? null
   const [busy, setBusy] = useState(false)
-
+  // Regras ou perfis mudaram (salvos nesta tela): a carga dos agentes muda junto.
+  const reload = orchestrator.reload
   useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      void window.orkio.agents.orchestrator(projectId).then((r) => {
-        if (!alive) return
-        if (r.ok) setState(r.value)
-        else setError(r.error.message)
-      })
-    }
-    load()
-    const off = window.orkio.agents.onChanged((e) => {
-      if (e.projectId === projectId) load()
-    })
-    return () => {
-      alive = false
-      off()
-    }
-  }, [projectId, agents])
+    void reload()
+  }, [agents, reload])
 
   if (!state) return <p className="text-xs text-muted-foreground">Carregando o orquestrador…</p>
 
@@ -63,22 +49,22 @@ export function OrchestratorSection({
 
   const run = async (): Promise<void> => {
     setBusy(true)
-    const r = await window.orkio.agents.runOrchestrator(projectId)
+    const r = await ipcResult(() => window.orkio.agents.runOrchestrator(projectId))
     setBusy(false)
-    if (r.ok) setState(r.value)
+    if (r.ok) orchestrator.set(r.value)
     else setError(r.error.message)
   }
 
   const save = async (next: OrchestratorConfig): Promise<void> => {
     setBusy(true)
     setError(null)
-    const r = await window.orkio.agents.saveOrchestrator(projectId, next)
+    const r = await ipcResult(() => window.orkio.agents.saveOrchestrator(projectId, next))
     setBusy(false)
     if (!r.ok) {
       setError(r.error.message)
       return
     }
-    setState(r.value)
+    orchestrator.set(r.value)
     setDraft(null)
   }
 
@@ -254,12 +240,10 @@ function OrchestratorEditor({
   const set = (patch: Partial<OrchestratorConfig>): void => onChange({ ...draft, ...patch })
   const setLane = (i: number, patch: Partial<OrchestratorLane>): void =>
     set({ lanes: draft.lanes.map((l, j) => (j === i ? { ...l, ...patch } : l)) })
-  const usable = agents.agents.filter(
-    (a) => a.profile && a.status !== 'invalid' && a.status !== 'archived'
-  )
+  const usable = agents.agents.filter(isUsableAgent)
   const agentOptions = usable.map((a) => ({
     value: a.key,
-    label: a.scope === 'builtin' ? `${a.profile!.name} (embutido)` : a.profile!.name
+    label: a.scope === 'builtin' ? `${a.profile.name} (embutido)` : a.profile.name
   }))
   const stageOptions = state.stages.map((s) => ({ value: s.id, label: s.name }))
   // A mesma validação do main (a checagem de permissão do agente vem do main, depois de salvar).

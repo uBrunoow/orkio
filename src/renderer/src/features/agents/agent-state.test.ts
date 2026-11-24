@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentBadge, AgentView } from '../../../../shared/agent'
-import type { OverviewSnapshot } from '../../../../shared/overview'
+import type { OverviewSnapshot, WaitingKind, WeekStats } from '../../../../shared/overview'
 import { agentNow } from './agent-state'
 
 const agent = (patch: Partial<AgentView> = {}): AgentView =>
@@ -36,29 +36,44 @@ const task = (taskId: string) => ({
   title: 't'
 })
 
-const snapshot = (waiting: string[], running: string[], kind = 'gate'): OverviewSnapshot =>
-  ({
-    waiting: waiting.map((id) => ({
-      key: id,
-      kind,
-      task: task(id),
-      what: 'x',
-      since: '',
-      section: 'flow'
-    })),
-    running: running.map((id) => ({
-      key: id,
-      kind: 'flow',
-      task: task(id),
-      label: 'x',
-      state: 'running',
-      startedAt: '',
-      section: 'flow'
-    })),
-    prs: [],
-    projects: [],
-    notices: []
-  }) as unknown as OverviewSnapshot
+const WEEK: WeekStats = {
+  since: '',
+  finished: 0,
+  prsOpened: null,
+  prsMerged: null,
+  cost: { usd: 0, known: 0, total: 0 },
+  reviewAvgMs: null,
+  reviewSamples: 0
+}
+
+const snapshot = (
+  waiting: string[],
+  running: string[],
+  kind: WaitingKind = 'gate'
+): OverviewSnapshot => ({
+  generatedAt: '',
+  week: WEEK,
+  waiting: waiting.map((id) => ({
+    key: id,
+    kind,
+    task: task(id),
+    what: 'x',
+    since: '',
+    section: 'flow'
+  })),
+  running: running.map((id) => ({
+    key: id,
+    kind: 'flow',
+    task: task(id),
+    label: 'x',
+    state: 'running',
+    startedAt: '',
+    section: 'flow'
+  })),
+  prs: [],
+  projects: [],
+  notices: []
+})
 
 const badges = {
   'ork-1': badge('builtin:implementador'),
@@ -131,7 +146,7 @@ describe('agentNow', () => {
         snapshot: snapshot(['ork-1'], []),
         projectId: 'p1'
       })
-    ).toMatchObject({ filter: 'stopped', text: 'Precisa de revisão' })
+    ).toMatchObject({ filter: 'stopped', text: 'Revisar perfil' })
     expect(
       agentNow({ agent: agent({ status: 'invalid' }), badges, snapshot: null, projectId: 'p1' })
         .text

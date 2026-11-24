@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -9,16 +8,11 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table'
-import type { ActivityGroup, ActivityItem } from '../../../shared/overview'
 import type { Execution } from './executions'
 import { EditIcon } from './icons'
 import { StatusToken } from './StatusToken'
 import { Timestamp } from './Timestamp'
 
-/**
- * Detalhe "em frase" de uma regra ou fluxo (fase 6): a frase como título, "Começa" e "Faz",
- * execuções e uma coluna de detalhes. O editor fica atrás de "Editar".
- */
 export function SentenceDetail({
   label,
   sentence,
@@ -29,14 +23,12 @@ export function SentenceDetail({
   actions,
   onEdit
 }: {
-  /** Nome acessível da região (ex.: "Automação PR aprovada"). */
   label: string
   sentence: string
   starts: React.ReactNode
   does: React.ReactNode
   executions: React.ReactNode
   details: readonly { label: string; value: React.ReactNode }[]
-  /** Ações extras ao lado de "Editar" (ex.: Ativar/Desativar). */
   actions?: React.ReactNode
   onEdit(): void
 }): React.JSX.Element {
@@ -91,29 +83,6 @@ export function SentenceDetail({
   )
 }
 
-/** Atividade recente do projeto num grupo (a mesma da Visão geral), recarregada quando muda. */
-export function useProjectActivity(projectId: string, group: ActivityGroup): ActivityItem[] | null {
-  const [items, setItems] = useState<ActivityItem[] | null>(null)
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    let alive = true
-    void window.orkio.overview
-      .activity({ projectId, group, limit: 200 })
-      .then((r) => {
-        if (alive) setItems(r.ok ? r.value.items : [])
-      })
-      .catch(() => {
-        if (alive) setItems([])
-      })
-    return () => {
-      alive = false
-    }
-  }, [projectId, group, tick])
-  useEffect(() => window.orkio.overview.onChanged(() => setTick((n) => n + 1)), [])
-  return items
-}
-
-/** Tabela "Quando · Tarefa · Resultado"; vazio vira uma frase. */
 export function ExecutionsTable({
   executions,
   empty

@@ -3,47 +3,36 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import { Timestamp } from '@/components/Timestamp'
 import type { AgentBadge } from '../../../../shared/agent'
-import type { AgentRunView, RunLogEvent, RunSummary } from '../../../../shared/agent-run'
-import { StatusToken, toneOf } from '../../components/StatusToken'
-import { Alert } from '../../components/Alert'
-import { DiffView } from '../../components/DiffView'
+import {
+  isRunLive,
+  type AgentRunView,
+  type RunLogEvent,
+  type RunSummary
+} from '../../../../shared/agent-run'
+import { StatusToken } from '../../components/StatusToken'
 import { AutomationIcon, ClaudeLogo, DiffIcon, ReadIcon, UserIcon } from '../../components/icons'
 import type { FlowStepOrigin } from '../task-flows/flow-plan'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
-import { formatUsd, plural } from '../../lib/format'
+import { formatDuration, formatUsd, plural } from '../../lib/format'
 import { AgentAvatar } from '../agents/AgentAvatar'
-import { CollapsibleHeader } from '../board/TaskDetails'
+import { CollapsibleHeader } from '../../components/CollapsibleHeader'
 import { RunTranscript } from './RunTranscript'
 import { buildTranscript } from './run-transcript'
-import { STATUS_COLOR, STATUS_LABEL } from './run-status'
+import { RUN_STATUS } from '../../lib/status-text'
+import { backlogDocumentOf } from '../../../../shared/alva'
+import { TaskDiffView } from '../task/TaskDiffView'
+import { useTaskView } from '../task/task-view'
+import { ipcCall } from '../../lib/ipc'
 
-/** Duração curta: "40 s", "4 min", "1 h 12 min". */
-export function shortDuration(start: string, end: string | null): string | null {
-  if (!end) return null
-  const s = Math.max(0, Math.round((Date.parse(end) - Date.parse(start)) / 1000))
-  if (s < 60) return `${s} s`
-  const m = Math.round(s / 60)
-  if (m < 60) return `${m} min`
-  return `${Math.floor(m / 60)} h ${m % 60} min`
-}
-
-/**
- * Uma execução do Claude Code dentro da sessão da tarefa: quem falou (agente ou Claude Code), o
- * comando, o estado, a mensagem que você mandou (prompt) e a conversa inteira (respostas em
- * markdown, ferramentas agrupadas numa frase). Depois dela, o que ela produziu: a spec ou o plano
- * (alva-flow) e as mudanças no código (arquivos, commits, diff).
- */
 export function RunBlock({
   run,
   agent,
   liveLog,
   onRerun,
   focused = false,
-  projectId,
   showDocument = false,
   changesOpen = false,
-  origin = null,
-  canOpenPr = false
+  origin = null
 }: {
   run: AgentRunView
   /**
@@ -51,36 +40,30 @@ export function RunBlock({
    * (fluxo, passo N de M e o comando que ele mandou), como numa sessão dirigida pelo Orkio.
    */
   origin?: FlowStepOrigin | null
-  /** Agente da tarefa: se foi ele que rodou, mostra o avatar e o nome. */
   agent: AgentBadge | null
   /** Log ao vivo (só para a execução mais recente, vindo do `useTaskRuns`). */
   liveLog: readonly RunLogEvent[] | null
   /** "Rodar de novo": abre a nova sessão com o mesmo modo, comando e texto (só sem nada rodando). */
   onRerun?: () => void
-  /** Pedido para mostrar esta execução ("Ver a sessão do passo"): abre e rola até ela. */
   focused?: boolean
-  projectId: string
   /**
    * Execução que criou/atualizou a spec ou o plano (alva-flow): mostra a task do Backlog.md logo
    * abaixo da conversa (aberta na mais recente; as anteriores recolhidas, porque é o mesmo arquivo).
    */
   showDocument?: boolean | 'open'
-  /** Mudanças (arquivos, commits, diff) abertas por padrão (a execução mais recente que mudou código). */
   changesOpen?: boolean
-  /** A tarefa pode abrir PR agora (sem PR aberta): recibos de push/gh bloqueado ganham "Abrir PR". */
-  canOpenPr?: boolean
 }): React.JSX.Element {
+  const canOpenPr = useTaskView().openPr.available
   const [loaded, setLoaded] = useState<RunLogEvent[] | null>(null)
   const ref = useRef<HTMLElement>(null)
   useEffect(() => {
     if (focused) ref.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }, [focused])
-  const live = run.status === 'running' || run.status === 'queued'
-  // Execuções anteriores: lê o log uma vez para mostrar a última fala.
+  const live = isRunLive(run.status)
   useEffect(() => {
     if (liveLog) return
     let active = true
-    void window.orkio.claude.readLog(run.id).then((events) => {
+    void ipcCall(() => window.orkio.claude.readLog(run.id), []).then((events) => {
       if (active) setLoaded(events)
     })
     return () => {
@@ -94,13 +77,12 @@ export function RunBlock({
   const byAgent = !!agent && !!run.agentKey && run.agentKey === agent.key
   const who = byAgent ? agent.name : 'Claude Code'
   const meta = [
-    shortDuration(run.startedAt, run.endedAt),
+    run.endedAt ? formatDuration(Date.parse(run.endedAt) - Date.parse(run.startedAt)) : null,
     run.costUsd !== null ? formatUsd(run.costUsd) : null
   ]
     .filter(Boolean)
     .join(' · ')
   const youSaid = !origin && run.mode === 'prompt' && run.text ? run.text : null
-  // O que o piloto mandou: o comando e os argumentos (ou o texto, num passo em modo prompt).
   const autopilotSaid = origin
     ? [run.command ? `/${run.command}` : null, run.text].filter(Boolean).join(' ')
     : null
@@ -108,7 +90,7 @@ export function RunBlock({
   return (
     <article
       ref={ref}
-      aria-label={`${who}${run.command ? ` · /${run.command}` : ''} · ${STATUS_LABEL[run.status]}`}
+      aria-label={`${who}${run.command ? ` · /${run.command}` : ''} · ${RUN_STATUS[run.status].label}`}
       data-testid="session-run"
       data-run-id={run.id}
       className="flex scroll-mt-4 flex-col gap-4"
@@ -161,38 +143,18 @@ export function RunBlock({
               </span>
             )}
             <span className="ml-auto flex items-center gap-2 pl-2">
-              <StatusToken
-                tone={toneOf(STATUS_COLOR[run.status])}
-                label={STATUS_LABEL[run.status]}
-                data-testid="run-status"
-              />
+              <StatusToken {...RUN_STATUS[run.status]} data-testid="run-status" />
               {meta && <span className="tabular font-mono text-2xs">{meta}</span>}
             </span>
           </div>
 
-          <RunTranscript
-            items={items}
-            {...(canOpenPr ? { openPr: { projectId, taskId: run.taskId } } : {})}
-          />
+          <RunTranscript items={items} openPr={canOpenPr} />
 
           {showDocument && !live && (
-            <RunDocument
-              projectId={projectId}
-              taskId={run.taskId}
-              command={run.command ?? ''}
-              defaultOpen={showDocument === 'open'}
-              refreshKey={run.endedAt ?? ''}
-            />
+            <RunDocument command={run.command ?? ''} defaultOpen={showDocument === 'open'} />
           )}
 
-          {run.summary && !live && (
-            <RunChanges
-              projectId={projectId}
-              taskId={run.taskId}
-              summary={run.summary}
-              defaultOpen={changesOpen}
-            />
-          )}
+          {run.summary && !live && <RunChanges summary={run.summary} defaultOpen={changesOpen} />}
 
           {onRerun && !live && (
             <div>
@@ -207,22 +169,15 @@ export function RunBlock({
   )
 }
 
-/** Spec ou plano (task do Backlog.md) logo depois da execução que o criou ou atualizou. */
 function RunDocument({
-  projectId,
-  taskId,
   command,
-  defaultOpen,
-  refreshKey
+  defaultOpen
 }: {
-  projectId: string
-  taskId: string
   command: string
   defaultOpen: boolean
-  refreshKey: string
 }): React.JSX.Element {
   const [open, setOpen] = useState(defaultOpen)
-  const what = /plan$/.test(command) ? 'Plano' : 'Spec'
+  const what = backlogDocumentOf(command) === 'plan' ? 'Plano' : 'Spec'
   return (
     <section
       aria-label={`${what} criado(a) por /${command}`}
@@ -238,49 +193,22 @@ function RunDocument({
           <span className="text-subtle-foreground">versão atual do arquivo</span>
         </CollapsibleHeader>
         <CollapsibleContent className="border-t border-border-soft px-3 py-3">
-          {open && (
-            <BacklogDocumentView
-              projectId={projectId}
-              taskId={taskId}
-              refreshKey={refreshKey.length}
-            />
-          )}
+          {open && <BacklogDocumentView />}
         </CollapsibleContent>
       </Collapsible>
     </section>
   )
 }
 
-/** O que a execução mudou: arquivos, commits, testes e o diff da tarefa. */
 function RunChanges({
-  projectId,
-  taskId,
   summary,
   defaultOpen
 }: {
-  projectId: string
-  taskId: string
   summary: RunSummary
   defaultOpen: boolean
 }): React.JSX.Element {
   const [open, setOpen] = useState(defaultOpen && summary.files.length > 0)
-  const [diff, setDiff] = useState<{
-    diff: string
-    truncated: boolean
-    untracked: string[]
-  } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const loadDiff = async (): Promise<void> => {
-    if (diff) {
-      setDiff(null)
-      return
-    }
-    const r = await window.orkio.claude.diff(projectId, taskId)
-    if (r.ok) {
-      setDiff(r.value)
-      setError(null)
-    } else setError(r.error.message)
-  }
+  const [showDiff, setShowDiff] = useState(false)
   return (
     <Collapsible
       open={open}
@@ -318,20 +246,12 @@ function RunChanges({
           </ul>
         )}
         <div>
-          <Button size="sm" variant="ghost" onClick={() => void loadDiff()}>
+          <Button size="sm" variant="ghost" onClick={() => setShowDiff((v) => !v)}>
             <DiffIcon />
-            {diff ? 'Esconder o diff' : 'Ver o diff da tarefa'}
+            {showDiff ? 'Esconder o diff' : 'Ver o diff da tarefa'}
           </Button>
         </div>
-        {error && <Alert tone="danger">{error}</Alert>}
-        {diff && (
-          <DiffView
-            label="Diff da tarefa"
-            diff={diff.diff}
-            truncated={diff.truncated}
-            untracked={diff.untracked}
-          />
-        )}
+        {showDiff && <TaskDiffView label="Diff da tarefa" />}
       </CollapsibleContent>
     </Collapsible>
   )

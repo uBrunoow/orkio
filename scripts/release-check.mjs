@@ -6,7 +6,8 @@
  */
 import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { extractNotes, isPrerelease } from './release-lib.mjs'
+import { changelogNotes } from '../src/shared/changelog.mts'
+import { isPrerelease } from './release-lib.mts'
 
 const ROOT = join(import.meta.dirname, '..')
 const tag = (process.argv[2] ?? '').replace(/^refs\/tags\//, '')
@@ -25,7 +26,7 @@ try {
 } catch (e) {
   fail(e instanceof Error ? e.message : String(e))
 }
-const notes = extractNotes(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'), version)
+const notes = changelogNotes(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'), version)
 if (!notes) fail(`O CHANGELOG.md não tem a seção "## [${version}]" (ou ela está vazia).`)
 
 console.log(`Versão ${version} (${prerelease ? 'beta, pre-release' : 'estável'})`)

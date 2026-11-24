@@ -54,7 +54,6 @@ const COMPONENTS: Components = {
       {children}
     </a>
   ),
-  // Bloco de código: texto puro, mono, com quebra de linha (sem destaque de sintaxe).
   pre: ({ children }) => <pre className="orkio-codeblock my-2">{children}</pre>,
   code: ({ children, className }) =>
     className ? (

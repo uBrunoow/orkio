@@ -3,7 +3,6 @@ import { mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
-  NOTION_FAKE,
   createUserDataDir,
   enterApp,
   cspViolations,
@@ -12,7 +11,9 @@ import {
   openedUrls,
   removeDir,
   setFakes,
-  type OrkioApp
+  type OrkioApp,
+  FAKE_REPO,
+  seedConfig
 } from './fixtures'
 
 const NOTION_TOKEN = 'ntn_E2E_SIGNALS_TOKEN_abcdef123456'
@@ -57,46 +58,12 @@ test.beforeAll(() => {
   git('remote', 'add', 'origin', 'https://github.com/acme/orkio-app.git')
 
   // Projeto já vinculado ao Notion (config v2 da 2C): o foco aqui é a 2D.
-  writeFileSync(
-    join(userDataDir, 'orkio-config.json'),
-    JSON.stringify({
-      schemaVersion: 2,
-      notion: {
-        projectsDataSource: { id: NOTION_FAKE.projectsDs, name: 'Projetos' },
-        tasksDataSource: { id: NOTION_FAKE.tasksDs, name: 'Tarefas' },
-        mapping: {
-          title: { id: 'title', name: 'Nome', type: 'title' },
-          status: { id: 'st%3A', name: 'Status', type: 'status' },
-          uniqueId: { id: 'uid', name: 'ID', type: 'unique_id' },
-          project: { id: 'rel', name: 'Projeto', type: 'relation' },
-          priority: { id: 'pri', name: 'Prioridade', type: 'select' },
-          assignee: { id: 'ppl', name: 'Responsável', type: 'people' }
-        },
-        updatedAt: '2026-11-19T00:00:00.000Z'
-      },
-      projects: [
-        {
-          id: 'proj-signals',
-          name: 'orkio-app',
-          localPath: repoDir(),
-          repo: {
-            host: 'github.com',
-            owner: 'acme',
-            name: 'orkio-app',
-            remoteName: 'origin',
-            defaultBranch: 'main',
-            visibility: 'private',
-            canPush: true,
-            archived: false,
-            verified: true
-          },
-          createdAt: '2026-11-01T00:00:00.000Z',
-          updatedAt: '2026-11-01T00:00:00.000Z',
-          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
-        }
-      ]
-    })
-  )
+  seedConfig(userDataDir, {
+    id: 'proj-signals',
+    name: 'orkio-app',
+    localPath: repoDir(),
+    repo: FAKE_REPO
+  })
 })
 
 test.afterAll(async () => {
@@ -222,7 +189,7 @@ test('branch local e PR aparecem na tarefa certa', async () => {
   await row.getByRole('button', { name: 'Atualizar' }).click()
   await expect(ork2.getByTestId('pr-review')).toHaveText('Alterações pedidas')
   await ork2.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).hover()
-  await expect(page.getByTestId('pr-hover-badge')).toHaveText('Mudanças pedidas')
+  await expect(page.getByTestId('pr-hover-badge')).toHaveText('Alterações pedidas')
   await page.mouse.move(0, 0)
   await setFakes(orkio.app, {
     githubPulls: [

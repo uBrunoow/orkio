@@ -25,8 +25,7 @@ Orkio (main) ──abre navegador──▶ api.notion.com/v1/oauth/authorize?…
 O Notion exige o **client secret** para trocar o código e renovar tokens, e a API REST não
 aceita PKCE. Um app desktop não consegue esconder um segredo, então essa etapa passa pelo
 intermediário: as rotas `/notion/token` e `/notion/refresh` do site do Orkio
-([`site/`](../site/README.md), na Vercel). O antigo Worker em [`broker/`](../broker/README.md) fica
-até o login real ser confirmado pelo site. Os tokens ficam só no computador da pessoa,
+([`site/`](../site/README.md), na Vercel). Os tokens ficam só no computador da pessoa,
 criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo intermediário.
 
 ### Configuração (uma vez, por quem mantém o Orkio)
@@ -44,13 +43,13 @@ criptografados. Quando o token de acesso expira, o Orkio renova sozinho pelo int
    `.env.production` (build de release) e preencha:
    ```
    MAIN_VITE_NOTION_OAUTH_CLIENT_ID=<client ID>
-   MAIN_VITE_NOTION_OAUTH_BROKER_URL=https://<domínio do site>
+   MAIN_VITE_SITE_URL=https://<domínio do site>
    ```
    Em dev, com o site rodando local (`pnpm --dir site dev`), use `http://127.0.0.1:3000`.
    Nenhum desses valores é segredo. Sem eles, o app esconde o login com Notion e mostra só
-   a opção de token. `MAIN_VITE_NOTION_OAUTH_BROKER_URL` é a **origem do site**, sem caminho; não
-   é o Redirect URI (`http://localhost:47821/...`). Se apontar para a porta `47821`, o app trata
-   como config errada e esconde o login com Notion.
+   a opção de token. `MAIN_VITE_SITE_URL` é a **origem do site** (o intermediário fica em
+   `/notion/*`), sem caminho; não é o Redirect URI (`http://localhost:47821/...`). Se apontar para
+   a porta `47821`, o app trata como config errada e esconde o login com Notion.
 
 ### Problemas comuns no login com Notion
 
@@ -95,7 +94,7 @@ A pessoa clica em **Copiar** e **Abrir GitHub**, cola o código em github.com/lo
 clica em **Authorize**. O Orkio conecta sozinho, sem precisar voltar e clicar em nada.
 
 O Device Flow **não usa client secret** nem redirect, então o GitHub **não** passa pelo
-intermediário (`broker/`): o app fala direto com o GitHub e guarda o token cifrado.
+intermediário do site: o app fala direto com o GitHub e guarda o token cifrado.
 
 **Escopo pedido: `repo`.** Para OAuth Apps é o único escopo que dá acesso a repositórios
 privados, PRs e comentários e, depois, permite abrir PRs. O GitHub não oferece uma versão

@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { Timestamp } from '@/components/Timestamp'
-import { EVENT_LABELS, type AutomationRule } from '../../../../shared/automation'
-import { EVENT_PHRASES, describeRule } from '../../../../shared/flow'
+import { EVENT_META, type AutomationRule } from '../../../../shared/automation'
+import { describeRule } from '../../../../shared/flow'
 import type { ActivityItem } from '../../../../shared/overview'
 import { ExecutionsTable, SentenceDetail } from '../../components/SentenceDetail'
 import { StatusToken } from '../../components/StatusToken'
@@ -12,7 +12,6 @@ function list(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} ou ${names[names.length - 1]}`
 }
 
-/** Automação em frase: quando começa, o que faz, quando rodou. O formulário fica em "Editar". */
 export function RuleDetail({
   rule,
   index,
@@ -33,7 +32,7 @@ export function RuleDetail({
 }): React.JSX.Element {
   const name = (id: string): string => stages.find((s) => s.id === id)?.name ?? 'etapa removida'
   const from = rule.conditions?.fromStages ?? []
-  const executions = activity ? ruleExecutions(activity, rule.name) : null
+  const executions = activity ? ruleExecutions(activity, rule.id) : null
   const last = executions?.[0]
 
   const conditions = [
@@ -48,7 +47,7 @@ export function RuleDetail({
       sentence={describeRule(rule, stages)}
       starts={
         <div className="flex flex-col gap-1">
-          <p>Quando {EVENT_PHRASES[rule.trigger]}.</p>
+          <p>Quando {EVENT_META[rule.trigger].phrase}.</p>
           {conditions.map((c) => (
             <p key={c} className="text-xs text-muted-foreground">
               {c}
@@ -85,11 +84,11 @@ export function RuleDetail({
           )
         },
         { label: 'Nome', value: rule.name },
-        { label: 'Evento', value: EVENT_LABELS[rule.trigger] },
+        { label: 'Evento', value: EVENT_META[rule.trigger].label },
         { label: 'Ordem', value: `${index + 1}ª de ${total}` },
         {
           label: 'Última execução',
-          value: last ? <Timestamp value={last.at} format="auto" /> : 'Nunca'
+          value: last ? <Timestamp value={last.at} /> : 'Nunca'
         },
         {
           label: 'Execuções recentes',

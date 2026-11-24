@@ -6,10 +6,12 @@
  * - Publicar lê o arquivo NAQUELE commit (não o rascunho), redige segredos e envia ao Notion como
  *   seção no fim da página da tarefa ou como subpágina. Precisa da capacidade "Insert content".
  */
+import type { TaskEventDetailInput } from '../../shared/task-events'
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
 import {
   isDocFile,
+  parsePorcelainLine,
   type ArtifactCandidate,
   type ArtifactPublishMode,
   type ArtifactView
@@ -17,7 +19,7 @@ import {
 import type { BoardStore } from '../board/board.store'
 import type { Db } from '../db/database'
 import type { Git } from '../git/git'
-import { redactSecrets } from './redact'
+import { redactSecrets } from '../platform/redact'
 import type { WorktreeService } from './worktree.service'
 
 /** Acima disso o Notion tende a recusar (5.000 blocos / 500 KB por requisição). */
@@ -79,13 +81,14 @@ export class ArtifactsService {
     return (this.deps.now?.() ?? new Date()).toISOString()
   }
 
-  /** Documentos alterados desde a base no worktree da tarefa. */
   async candidates(taskId: string): Promise<ArtifactCandidate[]> {
     const wt = this.deps.worktrees.get(taskId)
     if (!wt) throw new ArtifactError('no_workspace', ARTIFACT_MESSAGES.noWorkspace)
     const { files } = await this.deps.git.diffStat(wt.path, wt.baseRef)
     // Pastas novas aparecem agrupadas (`?? docs/`): tudo dentro delas está pendente.
-    const pending = (await this.deps.git.statusPorcelain(wt.path)).map((l) => unquote(l.slice(3)))
+    const pending = (await this.deps.git.statusPorcelain(wt.path)).flatMap(
+      (l) => parsePorcelainLine(l)?.path ?? []
+    )
     const isPending = (path: string): boolean =>
       pending.some((p) => p === path || (p.endsWith('/') && path.startsWith(p)))
     return files.filter(isDocFile).map((path) => ({ path, committed: !isPending(path) }))
@@ -136,7 +139,10 @@ export class ArtifactsService {
         commit,
         at
       )
-      this.event(taskId, projectId, 'artifact_attached', { path, commit: commit.slice(0, 12) })
+      this.event(taskId, projectId, {
+        kind: 'artifact_attached',
+        detail: { path, commit: commit.slice(0, 12) }
+      })
     })
     return toView(this.row(id))
   }
@@ -173,7 +179,6 @@ export class ArtifactsService {
       pageId = created.id
       url = created.url
     } else {
-      // Títulos do documento descem um nível para ficarem dentro da seção.
       const nested = clean.replace(/^(#{1,5})\s/gm, '#$1 ')
       const section = `## ${file}\n\n_Do Orkio: \`${row.path}\` (commit ${short})._\n\n${nested}`
       await this.deps.notion.appendMarkdown(row.task_page_id, section)
@@ -188,9 +193,9 @@ export class ArtifactsService {
         at,
         artifactId
       )
-      this.event(row.task_page_id, row.project_id, 'artifact_published', {
-        path: row.path,
-        mode
+      this.event(row.task_page_id, row.project_id, {
+        kind: 'artifact_published',
+        detail: { path: row.path, mode }
       })
     })
     return { artifact: toView(this.row(artifactId)), url }
@@ -205,19 +210,11 @@ export class ArtifactsService {
   private event(
     taskId: string,
     projectId: string,
-    kind: 'artifact_attached' | 'artifact_published',
-    detail: Record<string, unknown>
+    event:
+      | { kind: 'artifact_attached'; detail: TaskEventDetailInput<'artifact_attached'> }
+      | { kind: 'artifact_published'; detail: TaskEventDetailInput<'artifact_published'> }
   ): void {
-    this.deps.store.addEvent({
-      taskPageId: taskId,
-      projectId,
-      at: this.now(),
-      kind,
-      source: 'manual',
-      fromStage: null,
-      toStage: null,
-      detail
-    })
+    this.deps.store.addEvent({ taskPageId: taskId, projectId, at: this.now(), ...event })
   }
 }
 
@@ -233,9 +230,4 @@ function toView(r: Row): ArtifactView {
         ? { mode: r.notion_mode, pageId: r.notion_page_id, publishedAt: r.published_at }
         : null
   }
-}
-
-/** `git status --porcelain` põe aspas em caminhos com espaços. */
-function unquote(path: string): string {
-  return path.startsWith('"') && path.endsWith('"') ? path.slice(1, -1) : path
 }

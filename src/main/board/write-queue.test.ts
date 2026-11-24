@@ -2,10 +2,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NotionApiError } from '../connectors/notion/notion.client'
 import { openDatabase, type Db } from '../db/database'
 import { BoardStore, type PendingWrite } from './board.store'
 import { NotionWriteQueue, WRITE_MAX_BACKOFF_MS, type WriteQueueDeps } from './write-queue'
+import { ApiError } from '../net/http'
 
 const T0 = Date.parse('2026-11-19T12:00:00Z')
 
@@ -35,7 +35,7 @@ describe('NotionWriteQueue', () => {
     store.upsertPending({
       taskPageId: task,
       projectId: 'p',
-      properties: { st: { status: { name: status } } },
+      properties: { st: { type: 'status', name: status } },
       rollback: { stageId: rollbackStage, blocked: false },
       now: new Date(clock).toISOString()
     })
@@ -58,25 +58,25 @@ describe('NotionWriteQueue', () => {
     enqueue('t1', 'Finalizadas')
     const q = queue()
     q.start()
-    await q.idle()
-    expect(updatePage).toHaveBeenCalledWith('t1', { st: { status: { name: 'Finalizadas' } } })
+    await q.kick()
+    expect(updatePage).toHaveBeenCalledWith('t1', { st: { type: 'status', name: 'Finalizadas' } })
     expect(store.allPending()).toEqual([])
     expect(events).toEqual([{ kind: 'synced', task: 't1' }])
   })
 
   it('sem rede: fica pendente com backoff exponencial (1 s, 2 s, 4 s… até 5 min)', async () => {
-    updatePage.mockRejectedValue(new NotionApiError('network', 'Sem conexão.'))
+    updatePage.mockRejectedValue(new ApiError('notion', 'network', 'Sem conexão.'))
     enqueue('t1', 'Finalizadas')
     const q = queue()
     q.start()
-    await q.idle()
+    await q.kick()
     const waits: number[] = []
     for (let i = 0; i < 12; i++) {
       const p = store.pending('t1')!
       waits.push(Date.parse(p.nextAttemptAt) - clock)
       clock = Date.parse(p.nextAttemptAt)
       q.kick()
-      await q.idle()
+      await q.kick()
     }
     expect(waits.slice(0, 4)).toEqual([1000, 2000, 4000, 8000])
     expect(Math.max(...waits)).toBe(WRITE_MAX_BACKOFF_MS)
@@ -85,27 +85,27 @@ describe('NotionWriteQueue', () => {
   })
 
   it('antes do horário da nova tentativa não reenvia', async () => {
-    updatePage.mockRejectedValueOnce(new NotionApiError('server', '503'))
+    updatePage.mockRejectedValueOnce(new ApiError('notion', 'server', '503'))
     enqueue('t1', 'Finalizadas')
     const q = queue()
     q.start()
-    await q.idle()
+    await q.kick()
     q.kick()
-    await q.idle()
+    await q.kick()
     expect(updatePage).toHaveBeenCalledTimes(1)
     clock += 1000
     q.kick()
-    await q.idle()
+    await q.kick()
     expect(updatePage).toHaveBeenCalledTimes(2)
     expect(store.allPending()).toEqual([])
   })
 
   it('persistência: pendência sobrevive a fechar e reabrir o app', async () => {
-    updatePage.mockRejectedValue(new NotionApiError('network', 'x'))
+    updatePage.mockRejectedValue(new ApiError('notion', 'network', 'x'))
     enqueue('t1', 'Finalizadas')
     const q1 = queue()
     q1.start()
-    await q1.idle()
+    await q1.kick()
     q1.stop()
     db.close()
 
@@ -113,21 +113,21 @@ describe('NotionWriteQueue', () => {
     store = new BoardStore(db)
     expect(store.pending('t1')).toMatchObject({
       attempts: 1,
-      properties: { st: { status: { name: 'Finalizadas' } } }
+      properties: { st: { type: 'status', name: 'Finalizadas' } }
     })
     updatePage.mockReset()
     updatePage.mockResolvedValue(undefined)
     clock += 60_000
     const q2 = queue()
     q2.start()
-    await q2.idle()
+    await q2.kick()
     expect(updatePage).toHaveBeenCalledTimes(1)
     expect(store.allPending()).toEqual([])
   })
 
   it('Notion recusa (400/403/404) → rollback, sem nova tentativa', async () => {
     for (const code of ['bad_request', 'forbidden', 'not_found'] as const) {
-      updatePage.mockRejectedValueOnce(new NotionApiError(code, 'Recusado.'))
+      updatePage.mockRejectedValueOnce(new ApiError('notion', code, 'Recusado.'))
       enqueue(`t-${code}`, 'X', 'stage-antes')
     }
     const rejected: PendingWrite[] = []
@@ -141,7 +141,7 @@ describe('NotionWriteQueue', () => {
       onRejected: (w) => rejected.push(w)
     })
     q.start()
-    await q.idle()
+    await q.kick()
     expect(rejected.map((w) => [w.taskPageId, w.rollback.stageId])).toEqual([
       ['t-bad_request', 'stage-antes'],
       ['t-forbidden', 'stage-antes'],
@@ -155,7 +155,7 @@ describe('NotionWriteQueue', () => {
     enqueue('t1', 'Finalizadas', 'and')
     expect(store.allPending()).toHaveLength(1)
     expect(store.pending('t1')).toMatchObject({
-      properties: { st: { status: { name: 'Finalizadas' } } },
+      properties: { st: { type: 'status', name: 'Finalizadas' } },
       rollback: { stageId: 'prio' }
     })
   })
@@ -174,9 +174,11 @@ describe('NotionWriteQueue', () => {
     await Promise.resolve()
     enqueue('t1', 'Finalizadas')
     release()
-    await q.idle()
+    await q.kick()
     expect(updatePage).toHaveBeenCalledTimes(2)
-    expect(updatePage).toHaveBeenLastCalledWith('t1', { st: { status: { name: 'Finalizadas' } } })
+    expect(updatePage).toHaveBeenLastCalledWith('t1', {
+      st: { type: 'status', name: 'Finalizadas' }
+    })
     expect(events.filter((e) => e.kind === 'synced')).toHaveLength(1)
     expect(store.allPending()).toEqual([])
   })
@@ -186,7 +188,7 @@ describe('NotionWriteQueue', () => {
     enqueue('t1', 'X')
     const q = queue()
     q.start()
-    await q.idle()
+    await q.kick()
     expect(store.pending('t1')).toMatchObject({ lastErrorCode: 'unexpected' })
   })
 })

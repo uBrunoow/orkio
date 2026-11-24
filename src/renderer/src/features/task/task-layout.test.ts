@@ -8,17 +8,15 @@ import {
 
 describe('taskLayout', () => {
   it('abaixo de 1200 px o painel vai para cima da conversa', () => {
-    expect(SIDE_PANEL_MIN_WIDTH).toBe(1200)
-    expect(taskLayout(1199)).toBe('stacked')
-    expect(taskLayout(1200)).toBe('columns')
+    expect(taskLayout(SIDE_PANEL_MIN_WIDTH - 1)).toBe('stacked')
+    expect(taskLayout(SIDE_PANEL_MIN_WIDTH)).toBe('columns')
   })
 })
 
 describe('compactPhaseBar', () => {
   it('abaixo de 1280 px só a fase de agora mostra o rótulo', () => {
-    expect(PHASE_LABELS_MIN_WIDTH).toBe(1280)
     expect(compactPhaseBar(1000)).toBe(true)
-    expect(compactPhaseBar(1279)).toBe(true)
-    expect(compactPhaseBar(1280)).toBe(false)
+    expect(compactPhaseBar(PHASE_LABELS_MIN_WIDTH - 1)).toBe(true)
+    expect(compactPhaseBar(PHASE_LABELS_MIN_WIDTH)).toBe(false)
   })
 })

@@ -8,15 +8,15 @@
  * - O orquestrador só ATRIBUI e MOVE (o mesmo caminho das automações da 3B). Quem trabalha é o
  *   fluxo ligado à coluna (5A), com o agente (8A): gates, push e falhas continuam parando em você.
  * - Passar adiante não espera vaga: o fluxo da etapa seguinte fica na fila do agente
- *   (`waiting_agent`) e começa sozinho. `queueStageId`/`maxActive` ficam na config por
- *   compatibilidade (versões antigas puxavam da fila) e não são mais usados.
+ *   (`waiting_agent`) e começa sozinho.
  * - Tarefa bloqueada, com automações pausadas ou com fluxo ativo nunca é tocada.
  */
 import { parseAgentKey, type AgentKey } from './agent'
+import { BUILTIN_AGENT_KEYS } from './agent-presets'
 import type { StageFlow } from './task-flow'
+import { stageWithRole, type StageRole } from './board'
 
 export const ORCHESTRATOR_LIMITS = {
-  maxActive: 10,
   lanes: 10,
   agentsPerLane: 10
 } as const
@@ -38,16 +38,12 @@ export interface OrchestratorConfig {
    * fazem a tarefa seguir: ligar o orquestrador não mexe no que já estava parado no quadro.
    */
   enabledSince: string | null
-  /** Coluna de onde o orquestrador puxa tarefas (ex.: "Prioridades"). */
-  queueStageId: string | null
-  /** Tarefas com agente trabalhando ao mesmo tempo neste projeto (só limita o puxar da fila). */
-  maxActive: number
-  /** Etapas de trabalho; a primeira recebe as tarefas puxadas da fila. */
+  /** Etapas de trabalho, na ordem do caminho. */
   lanes: OrchestratorLane[]
 }
 
 export function defaultOrchestrator(): OrchestratorConfig {
-  return { enabled: false, enabledSince: null, queueStageId: null, maxActive: 2, lanes: [] }
+  return { enabled: false, enabledSince: null, lanes: [] }
 }
 
 /** Leitura tolerante da config (nunca lança): inválido → `null` (a config cai no padrão). */
@@ -55,10 +51,6 @@ export function parseOrchestrator(value: unknown): OrchestratorConfig | null {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
   const v = value as Record<string, unknown>
   const id = (x: unknown): string | null => (typeof x === 'string' && x ? x.slice(0, 200) : null)
-  const maxActive =
-    typeof v['maxActive'] === 'number' && Number.isInteger(v['maxActive'])
-      ? Math.min(Math.max(v['maxActive'], 1), ORCHESTRATOR_LIMITS.maxActive)
-      : defaultOrchestrator().maxActive
   const lanes: OrchestratorLane[] = []
   const seen = new Set<string>()
   if (Array.isArray(v['lanes'])) {
@@ -81,46 +73,41 @@ export function parseOrchestrator(value: unknown): OrchestratorConfig | null {
   return {
     enabled: v['enabled'] === true,
     enabledSince: since && !Number.isNaN(Date.parse(since)) ? since : null,
-    queueStageId: id(v['queueStageId']),
-    maxActive,
     lanes
   }
 }
 
 /**
- * Ponto de partida pelo nome das etapas (template da 3A): fila "Prioridades" → "Em andamento"
- * (Implementador) → "Revisando" (Revisor) → "Revisado". Sem os nomes, usa a ordem do quadro.
- * Vem desligado: você confere e liga.
+ * Ponto de partida pelo papel das etapas: fila (`queue`, sem agente) → trabalho (`work`,
+ * Implementador) → revisão (`review`, Revisor) → revisada (`reviewed`; sem ela, a concluída). Sem
+ * os papéis, usa a ordem do quadro. Vem desligado: você confere e liga.
  */
 export function suggestOrchestrator(
-  stages: readonly { id: string; name: string }[]
+  stages: readonly { id: string; name: string; role?: StageRole | undefined }[]
 ): OrchestratorConfig {
-  const norm = (s: string): string => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-  const find = (re: RegExp, fallback: number): string | null =>
-    stages.find((s) => re.test(norm(s.name)))?.id ?? stages[fallback]?.id ?? null
-  const queue = find(/prioridade|backlog|a fazer|to ?do|fila/, 0)
-  const dev = find(/andamento|progress|fazendo|doing|implement/, 1)
-  const rev = find(/revisando|review|revisao/, 2)
-  const done = find(/revisado|reviewed|aprovad|pronto|finaliz|done/, 3)
+  const at = (role: StageRole, fallback: number): string | null =>
+    stageWithRole(stages, role) ?? stages[fallback]?.id ?? null
+  const queue = at('queue', 0)
+  const dev = at('work', 1)
+  const rev = at('review', 2)
+  const done = stageWithRole(stages, 'reviewed') ?? at('done', 3)
   const lanes: OrchestratorLane[] = []
   if (dev && dev !== queue) {
     lanes.push({
       stageId: dev,
-      agents: ['builtin:implementador'],
+      agents: [BUILTIN_AGENT_KEYS.implementer],
       next: rev && rev !== dev && rev !== queue ? rev : null
     })
   }
   if (rev && rev !== dev && rev !== queue) {
     lanes.push({
       stageId: rev,
-      agents: ['builtin:revisor'],
+      agents: [BUILTIN_AGENT_KEYS.reviewer],
       next: done && ![queue, dev, rev].includes(done) ? done : null
     })
   }
-  return { ...defaultOrchestrator(), queueStageId: queue, lanes }
+  return { ...defaultOrchestrator(), lanes }
 }
-
-// ---------- Validação (editor e main) ----------
 
 export interface OrchestratorAgentInfo {
   key: AgentKey
@@ -151,13 +138,6 @@ export function validateOrchestrator(
   const stageName = (id: string | null): string =>
     stages.find((s) => s.id === id)?.name ?? 'etapa removida'
   const has = (id: string | null): boolean => !!id && stages.some((s) => s.id === id)
-  if (
-    !Number.isInteger(config.maxActive) ||
-    config.maxActive < 1 ||
-    config.maxActive > ORCHESTRATOR_LIMITS.maxActive
-  ) {
-    errors.push(`Tarefas ao mesmo tempo: de 1 a ${ORCHESTRATOR_LIMITS.maxActive}.`)
-  }
   if (config.lanes.length > ORCHESTRATOR_LIMITS.lanes) {
     errors.push(`No máximo ${ORCHESTRATOR_LIMITS.lanes} etapas de trabalho.`)
   }
@@ -214,36 +194,12 @@ export function validateOrchestrator(
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] }
 }
 
-// ---------- Prioridade ----------
-
-/**
- * Ordem da prioridade do Notion (menor = antes). Reconhece nomes usuais pt/en e P0…P9; número puro
- * vale como está. Sem prioridade ou nome desconhecido vai depois de todas.
- */
-export function priorityRank(name: string | null | undefined): number {
-  if (!name) return 100
-  const n = name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-  const p = /^p\s*(\d)\b/.exec(n) ?? /^(\d+)$/.exec(n)
-  if (p) return Number(p[1])
-  if (/urgent|critic|blocker|imediat|highest/.test(n)) return 0
-  if (/alta|high|importante/.test(n)) return 1
-  if (/media|medium|normal|moderad/.test(n)) return 2
-  if (/baixa|low|minor/.test(n)) return 3
-  if (/lowest|minima|someday|talvez/.test(n)) return 4
-  return 50
-}
-
-// ---------- Decisão de uma rodada ----------
-
 export interface PlanCard {
   taskId: string
   displayId: string
   stageId: string | null
-  priority: string | null
   blocked: boolean
   automationPaused: boolean
-  /** Posição na lista do Notion (mais recentes primeiro): maior = mais antiga. */
-  index: number
 }
 
 export interface PlanAgent {
@@ -302,24 +258,8 @@ export function planTick(input: PlanInput): PlanDecision[] {
     const a = input.agents.get(key)
     return !!a && a.ready && a.limitProblem === null && (load.get(key) ?? 0) < a.capacity
   }
-  /** Menos ocupado entre os prontos; com `needFree`, só quem tem vaga agora. */
-  const pick = (keys: readonly AgentKey[], needFree: boolean): AgentKey | null => {
-    let best: AgentKey | null = null
-    let bestScore = Infinity
-    for (const key of keys) {
-      const a = input.agents.get(key)
-      if (!a || !a.ready) continue
-      if (needFree && !available(key)) continue
-      // Com limite do dia atingido, só como último recurso (o fluxo pausa e você decide).
-      const score = (load.get(key) ?? 0) / Math.max(a.capacity, 1) + (a.limitProblem ? 100 : 0)
-      if (score < bestScore) {
-        best = key
-        bestScore = score
-      }
-    }
-    return best
-  }
-  /** Agente para trabalhar em `lane`: mantém o atual se ele for da etapa. */
+  const pick = (keys: readonly AgentKey[], needFree: boolean): AgentKey | null =>
+    leastLoaded(keys, input.agents, load, { needFree })
   const agentFor = (taskId: string, lane: OrchestratorLane, needFree: boolean): AgentKey | null => {
     const current = input.assignments.get(taskId)
     if (current && lane.agents.includes(current.key)) {
@@ -332,7 +272,6 @@ export function planTick(input: PlanInput): PlanDecision[] {
     if (key) load.set(key, (load.get(key) ?? 0) + 1)
   }
 
-  // 1. Trabalho em andamento primeiro: seguir para a próxima etapa ou rodar a etapa atual.
   for (const c of input.cards) {
     if (!c.stageId || !usable(c)) continue
     const lane = lanes.get(c.stageId)
@@ -369,6 +308,35 @@ export function planTick(input: PlanInput): PlanDecision[] {
 }
 
 /**
+ * O agente menos ocupado (fluxos ativos ÷ capacidade) entre `keys`; empate pela ordem da lista.
+ * Perfil que não está pronto nunca entra; com limite do dia atingido, só como último recurso (o
+ * fluxo pausa e você decide). `needFree`: só quem tem vaga agora. `unknownCounts`: agente sem
+ * informação ainda (antes da primeira rodada) entra com carga 0 em vez de ficar de fora.
+ */
+export function leastLoaded(
+  keys: readonly AgentKey[],
+  agents: ReadonlyMap<AgentKey, PlanAgent>,
+  load: ReadonlyMap<AgentKey, number>,
+  options: { needFree?: boolean; unknownCounts?: boolean } = {}
+): AgentKey | null {
+  let best: AgentKey | null = null
+  let bestScore = Infinity
+  for (const key of keys) {
+    const a = agents.get(key)
+    if (!a && !options.unknownCounts) continue
+    if (a && !a.ready) continue
+    const active = load.get(key) ?? 0
+    if (options.needFree && (!a || a.limitProblem !== null || active >= a.capacity)) continue
+    const score = a ? active / Math.max(a.capacity, 1) + (a.limitProblem ? 100 : 0) : 0
+    if (score < bestScore) {
+      best = key
+      bestScore = score
+    }
+  }
+  return best
+}
+
+/**
  * Agente para uma tarefa que ENTROU numa etapa de trabalho por outro caminho (você, automação da
  * 3B): mantém o atual se ele for da etapa ou se foi escolhido à mão; senão, o menos ocupado.
  * `null` = não mexe.
@@ -384,30 +352,8 @@ export function laneAgentOnEnter(
   const lane = config.lanes.find((l) => l.stageId === stageId)
   if (!lane) return null
   if (current && (current.manual || lane.agents.includes(current.key))) return null
-  let best: AgentKey | null = null
-  let bestScore = Infinity
-  for (const key of lane.agents) {
-    const a = agents.get(key)
-    // Sem informação (primeira rodada ainda não aconteceu): vale a ordem da lista.
-    if (a && !a.ready) continue
-    const score = a ? (load.get(key) ?? 0) / Math.max(a.capacity, 1) : 0
-    if (score < bestScore) {
-      best = key
-      bestScore = score
-    }
-  }
-  return best
+  return leastLoaded(lane.agents, agents, load, { unknownCounts: true })
 }
-
-/** Rótulos curtos das decisões (histórico e tela). */
-export const ORCHESTRATOR_REASONS = {
-  /** Só em eventos antigos (o orquestrador puxava da fila). */
-  pull: 'puxada da fila',
-  handoff: 'fluxo da etapa concluído',
-  start: 'entrou na etapa durante a entrega'
-} as const
-
-// ---------- Visão para a tela ----------
 
 export interface OrchestratorAgentLoad {
   key: AgentKey
@@ -434,7 +380,8 @@ export interface OrchestratorState {
   projectId: string
   config: OrchestratorConfig
   validation: OrchestratorValidation
-  stages: { id: string; name: string }[]
+  /** Etapas do quadro com o papel (a sugestão monta o caminho por ele). */
+  stages: { id: string; name: string; role?: StageRole }[]
   /** Etapas com fluxo que roda ao entrar (para o editor avisar). */
   stagesWithFlow: string[]
   agents: OrchestratorAgentLoad[]

@@ -1,12 +1,13 @@
 import { cn } from '@/lib/utils'
-import type { BoardCard, BoardStage, TaskSignals } from '../../../../shared/ipc-contract'
 import { StatusToken } from '../../components/StatusToken'
-import { useTaskFlowState } from '../task-flows/active-flows'
+import { useTaskActivity } from './task-activity'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { CardActionsMenu, cardMenuItems, type CardActions } from './BoardCardView'
-import { stageDotClass } from './BoardColumns'
+import { stageDotClass } from './stage-dot'
 import { cardStatus } from './card-status'
+import type { BoardCard, BoardStage } from '../../../../shared/board'
+import type { TaskSignals } from '../../../../shared/task-signals'
 
 /**
  * Visão em lista do quadro: uma linha por tarefa, na ordem das etapas. Mesmos dados do Kanban
@@ -16,13 +17,11 @@ export function BoardList({
   stages,
   cards,
   signals,
-  selectedTaskId,
   actions
 }: {
   stages: readonly BoardStage[]
   cards: readonly BoardCard[]
   signals: Record<string, TaskSignals>
-  selectedTaskId: string | null
   actions: CardActions
 }): React.JSX.Element {
   const order = new Map(stages.map((s, i) => [s.id, i]))
@@ -51,7 +50,6 @@ export function BoardList({
               stages={stages}
               signals={signals[card.taskId]}
               actions={actions}
-              isSelected={selectedTaskId === card.taskId}
             />
           ))}
         </ul>
@@ -64,29 +62,24 @@ function BoardListRow({
   card,
   stages,
   signals,
-  actions,
-  isSelected
+  actions
 }: {
   card: BoardCard
   stages: readonly BoardStage[]
   signals: TaskSignals | undefined
   actions: CardActions
-  isSelected: boolean
 }): React.JSX.Element {
-  const flow = useTaskFlowState(card.taskId)
   const agent = useAgentBadge(card.taskId)
-  const status = cardStatus(card, flow, signals)
+  const status = cardStatus(card, useTaskActivity(card.taskId), signals)
   const stage = stages.find((s) => s.id === card.stageId)
   return (
     <li
       tabIndex={0}
       aria-label={`${card.displayId ?? ''} ${card.title}`.trim()}
-      aria-current={isSelected ? 'true' : undefined}
       data-task-id={card.taskId}
       data-sync={card.sync.state}
       className={cn(
-        'flex cursor-pointer items-center gap-3 border-b border-border-soft px-4 py-2.5 outline-none last:border-b-0 hover:bg-muted focus-visible:bg-muted',
-        isSelected && 'bg-muted'
+        'flex cursor-pointer items-center gap-3 border-b border-border-soft px-4 py-2.5 outline-none last:border-b-0 hover:bg-muted focus-visible:bg-muted'
       )}
       onClick={(e) => {
         if (!(e.target as HTMLElement).closest('button, a, [role="menu"]'))

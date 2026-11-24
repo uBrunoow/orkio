@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { basename } from 'node:path'
+import type { OrkioConfig, StoredProject } from '../config/orkio-config'
+import { type GitHubRepo } from '../connectors/github/github.client'
+import { GitError, type Git } from '../git/git'
+import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
+import { HeadWatcher } from './head-watcher'
+import { parseRemoteUrl, sameRepo } from './remote-url'
 import type {
   BranchChangedEvent,
   CreateProjectInput,
@@ -15,13 +21,8 @@ import type {
   ProjectView,
   ProjectsListResult,
   RemoteCandidate
-} from '../../shared/ipc-contract'
-import type { OrkioConfig, StoredProject } from '../config/orkio-config'
-import { GitHubApiError, type GitHubRepo } from '../connectors/github/github.client'
-import { GitError, type Git } from '../git/git'
-import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
-import { HeadWatcher } from './head-watcher'
-import { parseRemoteUrl, sameRepo } from './remote-url'
+} from '../../shared/projects'
+import { isApiError, isTransientApiError } from '../net/http'
 
 /** O que o serviço precisa do conector do GitHub (o token nunca sai de lá). */
 export interface ProjectsGitHub {
@@ -53,7 +54,6 @@ export interface ProjectsServiceDeps {
   folderExists(path: string): Promise<boolean>
   /** Resolve links simbólicos para comparar caminhos. */
   realpath(path: string): Promise<string>
-  onBranchChanged(event: BranchChangedEvent): void
   createHeadWatcher?: (
     gitDir: string,
     handlers: { onBranchChange(branch: string | null): void; onError(): void }
@@ -86,7 +86,9 @@ export class ProjectsService {
   private readonly watchers = new Map<string, { gitDir: string; watcher: HeadWatcherLike }>()
   /** Último resultado da checagem no GitHub, por projeto (só em memória). */
   private readonly remoteHealth = new Map<string, ProjectHealth>()
-  private loadWarning: string | undefined
+  private readonly branchListeners = new Set<(event: BranchChangedEvent) => void>()
+  /** Os HeadWatchers só existem entre `watch()` e `dispose()`. */
+  private watching = false
   private readonly now: () => Date
   private readonly newId: () => string
 
@@ -95,12 +97,22 @@ export class ProjectsService {
     this.newId = deps.newId ?? randomUUID
   }
 
-  async init(): Promise<void> {
-    const { warning } = await this.deps.store.load()
-    this.loadWarning = warning
+  /** Troca de branch (HeadWatcher) de qualquer projeto. Devolve a função que desliga. */
+  onBranchChanged(listener: (event: BranchChangedEvent) => void): () => void {
+    this.branchListeners.add(listener)
+    return () => this.branchListeners.delete(listener)
   }
 
-  // ---------- Listagem e saúde ----------
+  /**
+   * Liga os HeadWatchers de todos os projetos (eventos de branch na hora). A partir daqui, projeto
+   * adicionado, reapontado ou removido liga/troca/desliga o seu; `list()` nunca mexe neles.
+   */
+  async watch(): Promise<void> {
+    this.watching = true
+    await mapLimit(this.projects(), 4, async (project) =>
+      this.follow(project.id, await this.localState(project))
+    )
+  }
 
   /** Rápido: só checagens locais (pasta, repo, branch, sujeira). */
   async list(): Promise<ProjectsListResult> {
@@ -127,8 +139,6 @@ export class ProjectsService {
     })
     return this.result(views)
   }
-
-  // ---------- Adicionar ----------
 
   async pickFolder(): Promise<PickFolderResult> {
     const folder = await this.deps.pickFolder('add')
@@ -213,10 +223,9 @@ export class ProjectsService {
     this.remoteHealth.set(project.id, { state: 'ok' })
 
     const local = await this.localState(project)
+    this.follow(project.id, local)
     return { ok: true, project: this.view(project, local, this.remoteHealth.get(project.id)) }
   }
-
-  // ---------- Reapontar / remover ----------
 
   async relocate(projectId: string): Promise<ProjectMutationResult> {
     const project = this.findProject(projectId)
@@ -269,6 +278,7 @@ export class ProjectsService {
     this.stopWatcher(projectId)
 
     const local = await this.localState(updated)
+    this.follow(projectId, local)
     if (!local.health && updated.repo) {
       const connected = await this.deps.github.isConnected().catch(() => false)
       const checked = await this.checkRemote(updated, connected)
@@ -295,10 +305,9 @@ export class ProjectsService {
   }
 
   dispose(): void {
+    this.watching = false
     for (const id of [...this.watchers.keys()]) this.stopWatcher(id)
   }
-
-  // ---------- Internos ----------
 
   private projects(): StoredProject[] {
     return this.deps.store.get().projects
@@ -309,7 +318,8 @@ export class ProjectsService {
   }
 
   private result(projects: ProjectView[]): ProjectsListResult {
-    return this.loadWarning ? { projects, warning: this.loadWarning } : { projects }
+    const warning = this.deps.store.loadWarning
+    return warning ? { projects, warning } : { projects }
   }
 
   private async detect(folder: string): Promise<
@@ -443,10 +453,7 @@ export class ProjectsService {
       const fresh = await this.deps.github.getRepository(repo.owner, repo.name)
       return { health: { state: 'ok' }, repo: toProjectRepo(fresh, repo.remoteName) }
     } catch (error) {
-      if (
-        error instanceof GitHubApiError &&
-        ['network', 'timeout', 'server', 'rate_limited', 'unexpected'].includes(error.code)
-      ) {
+      if (isApiError(error) && isTransientApiError(error, 'github')) {
         return {
           health: {
             state: 'unverified',
@@ -482,7 +489,7 @@ export class ProjectsService {
   }
 
   private async githubFailure(error: unknown): Promise<ProjectError> {
-    if (!(error instanceof GitHubApiError)) {
+    if (!isApiError(error, 'github')) {
       return {
         code: 'github_error',
         message: 'Algo deu errado ao falar com o GitHub. Tente de novo.'
@@ -528,10 +535,7 @@ export class ProjectsService {
       local: null,
       gitDir: null
     }
-    if (!(await this.deps.folderExists(project.localPath).catch(() => false))) {
-      this.stopWatcher(project.id)
-      return missing
-    }
+    if (!(await this.deps.folderExists(project.localPath).catch(() => false))) return missing
 
     try {
       const root = await this.deps.git.showToplevel(project.localPath)
@@ -540,7 +544,6 @@ export class ProjectsService {
         this.deps.realpath(project.localPath).catch(() => project.localPath)
       ])
       if (!samePath(rootReal, pathReal)) {
-        this.stopWatcher(project.id)
         return {
           health: {
             state: 'not_a_repo',
@@ -570,10 +573,8 @@ export class ProjectsService {
           }
         }
       }
-      this.ensureWatcher(project.id, gitDir)
       return { health, local: { branch, dirty }, gitDir }
     } catch (error) {
-      this.stopWatcher(project.id)
       const failure = gitFailure(error)
       if (
         failure.code === 'git_error' &&
@@ -596,6 +597,13 @@ export class ProjectsService {
     }
   }
 
+  /** Com `watch()` ligado: o watcher acompanha o repositório da pasta (ou para, sem repositório). */
+  private follow(projectId: string, local: LocalState): void {
+    if (!this.watching) return
+    if (local.gitDir) this.ensureWatcher(projectId, local.gitDir)
+    else this.stopWatcher(projectId)
+  }
+
   private ensureWatcher(projectId: string, gitDir: string): void {
     const current = this.watchers.get(projectId)
     if (current?.gitDir === gitDir) return
@@ -609,7 +617,9 @@ export class ProjectsService {
           onError: handlers.onError
         }))
     const watcher = create(gitDir, {
-      onBranchChange: (branch) => this.deps.onBranchChanged({ projectId, branch }),
+      onBranchChange: (branch) => {
+        for (const listener of this.branchListeners) listener({ projectId, branch })
+      },
       onError: () => this.stopWatcher(projectId)
     })
     this.watchers.set(projectId, { gitDir, watcher })

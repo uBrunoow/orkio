@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  initialRouter,
-  ROUTE_TITLES,
-  routeForTaskRef,
-  routerReducer,
-  SETTINGS_TITLES
-} from './routes'
+import { initialRouter, routeForTaskRef, routerReducer } from './routes'
 
 describe('routerReducer', () => {
   it('toda navegação gera chave nova, inclusive para a mesma rota (sai de subtelas)', () => {
@@ -66,14 +60,5 @@ describe('routeForTaskRef', () => {
     const route = routeForTaskRef({ projectId: 'p2', taskId: 't9' })
     expect(route).toEqual({ name: 'task', projectId: 'p2', taskId: 't9' })
     expect('section' in route).toBe(false)
-  })
-})
-
-describe('títulos', () => {
-  it('menu e configurações', () => {
-    expect(ROUTE_TITLES.settings).toBe('Configurações')
-    expect(ROUTE_TITLES.setup).toBe('Primeiros passos')
-    expect(SETTINGS_TITLES.board).toBe('Quadro e automações')
-    expect(SETTINGS_TITLES.agents).toBe('Agentes do projeto')
   })
 })

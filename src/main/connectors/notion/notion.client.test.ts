@@ -2,12 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   NOTION_REQUEST_TIMEOUT_MS,
   NOTION_VERSION,
-  NotionApiError,
   createNotionClient,
-  parseRetryAfterMs,
   parseSelf
 } from './notion.client'
 import { RateQueue } from '../../net/rate-queue'
+import { ApiError } from '../../net/http'
 
 const TOKEN = 'ntn_test_token_SHOULD_NEVER_LEAK'
 
@@ -110,7 +109,7 @@ describe('createNotionClient().getSelf', () => {
         jsonResponse({ object: 'error', status: 401, code: 'unauthorized' }, { status: 401 })
     })
     const error = await client.getSelf(TOKEN).catch((e: unknown) => e)
-    expect(error).toBeInstanceOf(NotionApiError)
+    expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ code: 'unauthorized', status: 401 })
     expect((error as Error).message).toMatch(/Token inválido/)
     expectNoTokenLeak(error)
@@ -231,17 +230,6 @@ describe('createNotionClient().getSelf', () => {
   })
 })
 
-describe('parseRetryAfterMs', () => {
-  it('aceita segundos e datas HTTP', () => {
-    expect(parseRetryAfterMs('3')).toBe(3000)
-    expect(parseRetryAfterMs('0.5')).toBe(500)
-    const now = Date.parse('2026-11-19T12:00:00Z')
-    expect(parseRetryAfterMs('Thu, 19 Nov 2026 12:00:04 GMT', now)).toBe(4000)
-    expect(parseRetryAfterMs(null)).toBeNull()
-    expect(parseRetryAfterMs('amanhã')).toBeNull()
-  })
-})
-
 describe('parseSelf', () => {
   it('ignora avatar que não é https', () => {
     expect(
@@ -357,7 +345,7 @@ describe('leituras de dados (data sources)', () => {
     await vi.advanceTimersByTimeAsync(4000) // 4 s
     expect(fetchMock).toHaveBeenCalledTimes(4)
     const error = await result
-    expect(error).toBeInstanceOf(NotionApiError)
+    expect(error).toBeInstanceOf(ApiError)
     expect(error).toMatchObject({ code: 'rate_limited' })
     expectNoTokenLeak(error)
   })
