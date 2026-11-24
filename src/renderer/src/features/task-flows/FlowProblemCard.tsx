@@ -20,7 +20,7 @@ export function FlowProblemCard({
   busy: boolean
   onResume(): void
   onRerun(stepId: string): void
-  /** Responde ao Claude e continua na mesma sessão do passo (só com a execução do passo). */
+  /** Responde ao Claude e continua no passo parado (quando `problem.canReply`). */
   onReply(text: string): void
   onSkip(): void
   onCancel(): void
@@ -46,7 +46,7 @@ export function FlowProblemCard({
         </div>
       )}
       <p className="text-sm text-muted-foreground">{problem.hint}</p>
-      {problem.runId && (
+      {problem.canReply && (
         <div className="flex flex-col gap-2">
           <TextAreaField
             label="Responder ao Claude"

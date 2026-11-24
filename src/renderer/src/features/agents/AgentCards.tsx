@@ -17,6 +17,7 @@ import { Alert } from '../../components/Alert'
 import { Spinner } from '../../components/Spinner'
 import { StatusToken } from '../../components/StatusToken'
 import { CopyIcon, EditIcon, MoreIcon } from '../../components/icons'
+import { AGENTS_DIR } from '../../../../shared/orkio-scratch'
 import { formatUsd } from '../../lib/format'
 import { AGENT_STATUS } from '../../lib/status-text'
 import { AgentAvatar } from './AgentAvatar'
@@ -26,7 +27,7 @@ import { Sparkline } from './Sparkline'
 
 const SCOPE_TAG: Record<AgentView['scope'], string> = {
   builtin: 'Embutido',
-  repo: '.orkio/agents',
+  repo: AGENTS_DIR,
   local: 'Este computador'
 }
 

@@ -149,6 +149,15 @@ describe('describeFlowProblem', () => {
     )
   })
 
+  it('"Responder e continuar" segue a regra do main, mesmo sem o passo ter rodado', () => {
+    // Limite do dia antes de o /commit rodar: sem execução no histórico, mas o main aceita.
+    const limited = run({ currentStep: 'commit', pauseReason: 'agent_daily_limit' })
+    expect(describeFlowProblem(limited)?.runId).toBeNull()
+    expect(describeFlowProblem(limited)?.canReply).toBe(true)
+    // Passo do Orkio (push) não tem sessão do Claude Code.
+    expect(describeFlowProblem(run({}))?.canReply).toBe(false)
+  })
+
   it('a causa vem do código, não do texto: mensagem antiga sem código = genérico', () => {
     const old = describeFlowProblem(run({ history: [entry({ message: DELIVERY_MESSAGES.dirty })] }))
     expect(old).toMatchObject({ kind: 'generic', reason: DELIVERY_MESSAGES.dirty, rerun: null })

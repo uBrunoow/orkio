@@ -151,9 +151,6 @@ export function CommandMenu({
   onRun(item: CommandData): void
 }): React.JSX.Element {
   const { board } = useSources()
-  // A lista chega como array novo a cada render (e ler o quadro re-renderiza): a busca só é
-  // refeita quando os projetos mudam de fato, senão cancela a si mesma em laço.
-  const projectsKey = projects.map((p) => `${p.id}\t${p.name}`).join('\n')
   const source = useMemo((): SearchSource => {
     let tasks: Promise<CommandItem[]> | null = null
     const all = async (): Promise<CommandItem[]> => {
@@ -198,7 +195,7 @@ export function CommandMenu({
     }
     // Recria a fonte (e relê as tarefas) a cada abertura.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectsKey, currentProjectId, isOpen, mode])
+  }, [projects, currentProjectId, isOpen, mode])
 
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<CommandItem[] | null>(null)

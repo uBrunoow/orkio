@@ -4,7 +4,7 @@
  * que o Orkio guardou no passo (`StepFailure.code`), nunca do texto da mensagem.
  */
 import { ALVA_FAILURES, alvaCommandOf } from './alva'
-import { FLOW_PAUSES, isProblem, type PauseProblemKind } from './flow-run-state'
+import { acceptsReply, FLOW_PAUSES, isProblem, type PauseProblemKind } from './flow-run-state'
 import { isInstallUrl } from './github-names'
 import type { FlowRunView, Step } from './task-flow'
 
@@ -99,6 +99,8 @@ export interface FlowProblem {
   stepName: string | null
   /** Execução do Claude Code do passo parado, para abrir a sessão. */
   runId: string | null
+  /** "Responder e continuar" (a regra do main, `acceptsReply`). */
+  canReply: boolean
   /** Comando anterior que dá para rodar de novo (ex.: /commit antes do push). */
   rerun: { stepId: string; label: string } | null
   /** Link útil (ex.: instalar o GitHub App do Orkio), só de formatos conhecidos. */
@@ -167,6 +169,7 @@ export function describeFlowProblem(run: FlowRunView): FlowProblem | null {
     hint: fromPause ? fromPause.hint : HINT[kind as FailureProblemKind],
     stepName: current?.name ?? null,
     runId: entry?.runId ?? null,
+    canReply: acceptsReply(run, current),
     rerun: previous && label ? { stepId: previous.id, label } : null,
     link: installLink(kind, entry?.link ?? null)
   }

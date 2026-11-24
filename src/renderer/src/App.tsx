@@ -46,6 +46,8 @@ export function App(): React.JSX.Element | null {
   const { route } = router
   const navigate = useCallback((next: Route) => dispatch({ type: 'navigate', route: next }), [])
   const projects = useProjects().projects
+  /** Projetos com página no Notion (onde há tarefas para buscar). */
+  const linkedProjects = useMemo(() => (projects ?? []).filter((p) => p.notionProject), [projects])
   const [chosenProject, setChosenProject] = useState<string | null>(() =>
     window.localStorage.getItem(CURRENT_PROJECT_KEY)
   )
@@ -363,7 +365,7 @@ export function App(): React.JSX.Element | null {
         isOpen={palette !== null}
         onOpenChange={(open) => setPalette(open ? (palette ?? 'all') : null)}
         mode={palette ?? 'all'}
-        projects={(projects ?? []).filter((p) => p.notionProject)}
+        projects={linkedProjects}
         currentProjectId={project?.id ?? null}
         onRun={runCommand}
       />

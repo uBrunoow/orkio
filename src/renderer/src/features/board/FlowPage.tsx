@@ -234,8 +234,16 @@ export function FlowPage({
   const [viewingRule, setViewingRule] = useState<string | null>(null)
   const automationActivity = useProjectActivity(view.projectId, 'automation')
 
-  // O rascunho ganha as ligações salvas (se ainda não tiver mexido nelas).
-  if (taskFlows && !draft.bindings) setDraft({ ...draft, bindings: taskFlows.bindings })
+  // O rascunho acompanha as ligações salvas enquanto você não mexer nelas (outra tela pode
+  // salvá-las: editor de fluxos, modelos Alva).
+  const [seeded, setSeeded] = useState<FlowDraft['bindings']>(undefined)
+  const sourceBindings = taskFlows?.bindings
+  if (sourceBindings && sourceBindings !== seeded) {
+    setSeeded(sourceBindings)
+    if (!draft.bindings || JSON.stringify(draft.bindings) === JSON.stringify(seeded)) {
+      setDraft({ ...draft, bindings: sourceBindings })
+    }
+  }
 
   const saved = view.config!
   const options = view.statusOptions
