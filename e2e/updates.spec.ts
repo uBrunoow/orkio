@@ -257,7 +257,7 @@ test('"O que há de novo" aparece uma vez depois de atualizar', async () => {
   writeFileSync(configFile(), JSON.stringify(config))
 
   let { page } = await open()
-  const panel = page.getByRole('region', { name: `O que há de novo na versão ${APP_VERSION}` })
+  const panel = page.getByRole('dialog', { name: `O que há de novo na versão ${APP_VERSION}` })
   await expect(panel).toBeVisible()
   await panel.getByRole('button', { name: 'Entendi' }).click()
   await expect(panel).toHaveCount(0)
@@ -266,5 +266,5 @@ test('"O que há de novo" aparece uma vez depois de atualizar', async () => {
   await close()
   ;({ page } = await open())
   await expect(page.getByRole('navigation', { name: 'Navegação principal' })).toBeVisible()
-  await expect(page.getByRole('region', { name: /O que há de novo/ })).toHaveCount(0)
+  await expect(page.getByRole('dialog', { name: /O que há de novo/ })).toHaveCount(0)
 })

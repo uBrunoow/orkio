@@ -240,7 +240,7 @@ src/
       task-flows/          # fluxos de tarefa: editor, bloco do fluxo, plano (`flow-plan.ts`,
                            # PlanStep com tipo/comando/ação/fase) e textos dos passos (`step-text.ts`)
       setup/               # 9: Primeiros passos (SetupPage, setup-steps puro)
-      settings/            # Configurações (SettingsNav, seções), UpdateBanner, WhatsNewPanel
+      settings/            # Configurações (SettingsNav, seções), UpdateBanner, WhatsNewDialog (modal)
     components/ui/         # shadcn/ui (copiados pelo CLI e ajustados: Select próprio, Dialog/Menu não modais)
     components/form.tsx    # campos (TextField, SelectField, CheckboxField, RadioListField, SegmentedControl...)
     components/Alert.tsx   # mensagens (erro = role alert, aviso/info = role status)

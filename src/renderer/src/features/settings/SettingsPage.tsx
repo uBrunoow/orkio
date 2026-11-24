@@ -7,7 +7,7 @@ import type { ReleaseNotes, UpdateStatus } from '../../../../shared/updates'
 import { InstallControls } from './InstallControls'
 import { useUpdates } from './useUpdates'
 import { formatDateTime } from '../../lib/format'
-import { WhatsNewPanel } from './WhatsNewPanel'
+import { WhatsNewDialog } from './WhatsNewDialog'
 import { StatusToken } from '../../components/StatusToken'
 import { ipcCall, useIpcResource } from '../../lib/ipc'
 
@@ -100,7 +100,7 @@ export function UpdatesSection(): React.JSX.Element {
           </div>
         </div>
       )}
-      {notes && <WhatsNewPanel notes={notes} closeLabel="Fechar" onClose={() => setNotes(null)} />}
+      {notes && <WhatsNewDialog notes={notes} closeLabel="Fechar" onClose={() => setNotes(null)} />}
     </section>
   )
 }
