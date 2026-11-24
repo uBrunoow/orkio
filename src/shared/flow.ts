@@ -60,8 +60,6 @@ export interface FlowDraft {
   bindings?: StageFlow[]
 }
 
-// ---------- Frases ----------
-
 function list(names: string[]): string {
   if (names.length <= 1) return names.join('')
   return `${names.slice(0, -1).join(', ')} ou ${names[names.length - 1]}`
@@ -86,8 +84,6 @@ export function describeRule(
   ].filter(Boolean)
   return `Quando ${EVENT_META[rule.trigger].phrase}${where}, ${action}.${extras.length ? ` ${extras.join(' ')}` : ''}`
 }
-
-// ---------- Validação ----------
 
 export interface FlowIssue {
   level: 'error' | 'warning'
@@ -131,7 +127,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
   const stageIds = draft.stages.map((s) => s.id)
   const stageName = (id: string): string => draft.stages.find((s) => s.id === id)?.name ?? id
 
-  // Etapas.
   if (draft.stages.length === 0) {
     issues.push({
       level: 'error',
@@ -180,7 +175,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
     }
   }
 
-  // Remoções com tarefas precisam de destino.
   for (const id of ctx.savedStageIds) {
     if (stageIds.includes(id)) continue
     const count = ctx.taskCounts[id] ?? 0
@@ -195,7 +189,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
     }
   }
 
-  // Regras: referências e campos.
   draft.rules.forEach((rule, i) => {
     const label = `A regra ${ordinal(i)} (“${rule.name}”)`
     if (rule.action.type === 'move_to_stage' && !stageIds.includes(rule.action.stageId)) {
@@ -232,7 +225,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
     }
   })
 
-  // Conflitos, ciclos e regras inalcançáveis (só regras ativas de mover).
   const moves = draft.rules
     .map((rule, index) => ({ rule, index }))
     .filter(
@@ -304,8 +296,6 @@ export function validateFlow(draft: FlowDraft, ctx: FlowContext): FlowIssue[] {
 
   return issues
 }
-
-// ---------- Simulação ----------
 
 export interface SimulationInput {
   stageId: string | null
@@ -384,8 +374,6 @@ export function fromBoardStages(stages: readonly BoardStage[]): FlowStageDraft[]
     ...(s.notionStatus.id ? {} : { missingStatusName: s.notionStatus.name })
   }))
 }
-
-// ---------- Diferenças (histórico de configuração) ----------
 
 type DiffStage = {
   id: string
@@ -472,8 +460,6 @@ export function diffFlow(
   return changes
 }
 
-// ---------- Restaurar padrão ----------
-
 /**
  * As 5 etapas do template (reaproveitando as existentes com o mesmo papel, ou sem papel e com o
  * mesmo nome, para as tarefas continuarem nelas) e as regras padrão.
@@ -499,8 +485,6 @@ export function restoreDefaultFlow(
   })
   return { stages, rules: defaultRules(toBoardStages(stages, options)).rules }
 }
-
-// ---------- Exportar / importar ----------
 
 export const FLOW_FILE_FORMAT = 'orkio-flow'
 export const FLOW_FILE_VERSION = 1
@@ -690,8 +674,6 @@ export function importFlow(
   }
   return { ok: true, draft: { stages, rules }, warnings }
 }
-
-// ---------- Fluxo do projeto (Etapa 3C) ----------
 
 export interface ConfigEvent {
   id: number

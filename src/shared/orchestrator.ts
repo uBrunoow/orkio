@@ -109,8 +109,6 @@ export function suggestOrchestrator(
   return { ...defaultOrchestrator(), lanes }
 }
 
-// ---------- Validação (editor e main) ----------
-
 export interface OrchestratorAgentInfo {
   key: AgentKey
   name: string
@@ -196,8 +194,6 @@ export function validateOrchestrator(
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] }
 }
 
-// ---------- Decisão de uma rodada ----------
-
 export interface PlanCard {
   taskId: string
   displayId: string
@@ -264,7 +260,6 @@ export function planTick(input: PlanInput): PlanDecision[] {
   }
   const pick = (keys: readonly AgentKey[], needFree: boolean): AgentKey | null =>
     leastLoaded(keys, input.agents, load, { needFree })
-  /** Agente para trabalhar em `lane`: mantém o atual se ele for da etapa. */
   const agentFor = (taskId: string, lane: OrchestratorLane, needFree: boolean): AgentKey | null => {
     const current = input.assignments.get(taskId)
     if (current && lane.agents.includes(current.key)) {
@@ -277,7 +272,6 @@ export function planTick(input: PlanInput): PlanDecision[] {
     if (key) load.set(key, (load.get(key) ?? 0) + 1)
   }
 
-  // 1. Trabalho em andamento primeiro: seguir para a próxima etapa ou rodar a etapa atual.
   for (const c of input.cards) {
     if (!c.stageId || !usable(c)) continue
     const lane = lanes.get(c.stageId)
@@ -360,8 +354,6 @@ export function laneAgentOnEnter(
   if (current && (current.manual || lane.agents.includes(current.key))) return null
   return leastLoaded(lane.agents, agents, load, { unknownCounts: true })
 }
-
-// ---------- Visão para a tela ----------
 
 export interface OrchestratorAgentLoad {
   key: AgentKey

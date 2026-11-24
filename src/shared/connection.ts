@@ -1,6 +1,5 @@
 /** Conexão com os serviços externos (Notion, GitHub): estado, credenciais, Device Flow. */
 
-/** Conectores existentes. Depois: 'claude-code'. */
 export type ConnectorId = 'notion' | 'github'
 
 export interface ConnectedAccount {

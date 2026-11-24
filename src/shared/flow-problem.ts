@@ -53,7 +53,6 @@ const KIND_BY_CODE: Readonly<Record<string, FailureProblemKind>> = {
   review_maybe_posted: 'review_maybe_posted'
 }
 
-/** A causa de uma falha pelo código guardado no passo. */
 export function classifyFailure(code: string | null): FailureProblemKind {
   return (code !== null && KIND_BY_CODE[code]) || 'generic'
 }

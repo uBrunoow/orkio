@@ -43,8 +43,6 @@ export const DELIVERY_ACTIONS = [
 ] as const
 export type DeliveryAction = (typeof DELIVERY_ACTIONS)[number]
 
-// ---------- Campos do detail ----------
-
 interface Field<T, R extends boolean> {
   readonly check: (v: unknown) => v is T
   readonly required: R
@@ -111,8 +109,6 @@ const AUTOMATION_FIELDS = {
 }
 const RUN_END = { runId: req(str), files: req(num), costUsd: numOrNull }
 const STEP = { flowRunId: req(str), step: req(strOrNull), stepName: str }
-
-// ---------- Catálogo ----------
 
 /**
  * Quem aparece como autor da linha no histórico. `source` = decidido pelo `source` do evento.
@@ -380,8 +376,6 @@ export const TASK_EVENTS = {
 export type TaskEventKind = keyof typeof TASK_EVENTS
 export const TASK_EVENT_KINDS = Object.keys(TASK_EVENTS) as TaskEventKind[]
 
-// ---------- Tipos derivados ----------
-
 type FieldsOf<K extends TaskEventKind> = (typeof TASK_EVENTS)[K]['detail']
 type FieldValue<F> = F extends Field<infer T, boolean> ? T : never
 type RequiredKeys<D> = { [P in keyof D]: D[P] extends Field<unknown, true> ? P : never }[keyof D]
@@ -480,8 +474,6 @@ export function parseDetailJson(json: string | null): unknown {
   }
 }
 
-// ---------- Classificações (derivadas do catálogo) ----------
-
 const kindsWhere = (pred: (m: KindMeta) => boolean): TaskEventKind[] =>
   TASK_EVENT_KINDS.filter((k) => pred(TASK_EVENTS[k]))
 
@@ -495,11 +487,8 @@ export const ACTIVITY_KINDS: Record<ActivityGroup, readonly TaskEventKind[]> = {
   notion: kindsWhere((m) => m.groups.includes('notion'))
 }
 
-/** Eventos que mudam a etapa de uma tarefa (inclui a volta pela recusa do Notion). */
 export const STAGE_EVENT_KINDS = kindsWhere((m) => m.stage !== null)
-/** Entradas numa etapa (sem a volta pela recusa do Notion). */
 export const STAGE_ENTRY_KINDS = kindsWhere((m) => m.stage === 'enters')
-/** Eventos depois dos quais uma recusa do Notion já não espera você. */
 export const SETTLES_REJECTION_KINDS = kindsWhere((m) => m.settlesRejection)
 
 /** Grupo de um evento na atividade (`null` = fica fora). */
@@ -509,7 +498,6 @@ export function activityGroup(e: TaskEvent): ActivityGroup | null {
   return TASK_EVENTS[e.kind].groups[0] ?? null
 }
 
-/** O evento aparece na conversa da tarefa? */
 export function isSessionEvent(e: Pick<TaskEvent, 'kind'>): boolean {
   return TASK_EVENTS[e.kind].inSession
 }
@@ -518,7 +506,6 @@ export type EventActor =
   | { kind: 'agent'; name: string }
   | { kind: 'claude' | 'you' | 'github' | 'notion' | 'flow' | 'automation' | 'orkio' }
 
-/** Quem "fala" na linha do histórico. */
 export function eventActor(e: TaskEvent): EventActor {
   const agent = 'agent' in e.detail ? e.detail.agent : undefined
   if (agent) return { kind: 'agent', name: agent }

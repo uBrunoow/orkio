@@ -39,7 +39,6 @@ export function extractTaskNumbers(text: string, prefix: string): number[] {
   return found
 }
 
-/** O texto menciona exatamente esta tarefa? */
 export function mentionsTask(text: string, prefix: string, number: number): boolean {
   return extractTaskNumbers(text, prefix).includes(number)
 }

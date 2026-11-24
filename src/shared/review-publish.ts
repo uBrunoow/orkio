@@ -34,7 +34,6 @@ export const REVIEW_PATH_MAX = 1_000
 /** Texto final lido no máximo (o resto não é JSON de revisão razoável). */
 const ANSWER_MAX = 400_000
 
-/** Mensagens gravadas no passo (a tela de problema reconhece por trechos: ver `flow-problem.ts`). */
 export const PUBLISH_REVIEW_MESSAGES = {
   noAnswer:
     'A revisão em JSON não foi encontrada: nenhuma resposta do Claude Code neste fluxo para publicar.',

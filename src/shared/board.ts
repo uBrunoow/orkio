@@ -51,7 +51,6 @@ export interface BoardConfig {
   updatedAt: string
 }
 
-/** Etapa com o papel, ou `null`. */
 export function stageWithRole(
   stages: readonly { id: string; role?: StageRole | undefined }[],
   role: StageRole
@@ -212,8 +211,6 @@ export function validateStages(
   return { stages: updated, issues }
 }
 
-// ---------- Reconciliação ----------
-
 export interface ReconcileTask {
   id: string
   status: { id: string | null; name: string } | null
@@ -327,8 +324,6 @@ export function reconcile(
     }
   })
 }
-
-// ---------- Quadro (Etapa 3A) ----------
 
 export type CardSyncState = 'synced' | 'pending' | 'failed'
 

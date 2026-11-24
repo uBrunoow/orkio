@@ -23,7 +23,6 @@ import {
 } from './task-flow'
 import { stageWithRole, type StageRole } from './board'
 
-/** `{{chave}}` de uma variável do fluxo (para argumentos, pedidos e mensagens). */
 const v = (key: string): string => `{{${key}}}`
 const TASK_ID = v(ALVA_VARS.taskId)
 
@@ -409,7 +408,6 @@ export const ALVA_DEFAULT_STAGES: readonly { flowId: string; role: StageRole }[]
   { flowId: ALVA_TEMPLATE_IDS.reviewed, role: 'reviewed' }
 ]
 
-/** JSON com as chaves em ordem (comparação que não depende da ordem das chaves). */
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
   if (value && typeof value === 'object') {
@@ -421,7 +419,6 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value) ?? 'null'
 }
 
-/** `base`, senão `base-2`, `base-3`… (ids de fluxo livres no projeto). */
 function freeId(base: string, taken: ReadonlySet<string>): string {
   if (!taken.has(base)) return base
   let n = 2
@@ -429,7 +426,6 @@ function freeId(base: string, taken: ReadonlySet<string>): string {
   return `${base}-${n}`
 }
 
-/** O projeto já usa os modelos do alva-flow (algum fluxo com id de modelo Alva)? */
 export function hasAlvaTemplates(pf: Pick<ProjectFlows, 'flows'> | undefined): boolean {
   const ids = new Set<string>(Object.values(ALVA_TEMPLATE_IDS))
   return !!pf?.flows.some((f) => ids.has(f.id))

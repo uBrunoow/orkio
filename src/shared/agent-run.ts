@@ -230,7 +230,6 @@ export interface UncommittedFile {
 /** Resultado de "Ver diff": o diff contra a base e o que ainda está fora de commit. */
 export interface ClaudeDiff {
   diff: string
-  /** O texto passou do limite e foi cortado. */
   truncated: boolean
   /** Arquivos novos fora do git (não entram no `git diff`). */
   untracked: string[]

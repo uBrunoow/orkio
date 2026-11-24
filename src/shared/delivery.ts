@@ -2,7 +2,7 @@
  * Entrega (Etapa 5C): regras puras de push e do "modo entrega", usadas pela ação de push do
  * Orkio, pela política de permissões do Claude Code e pela tela.
  *
- * Regra de ouro: só a branch da tarefa (a do worktree, com o ID) vai para o GitHub. Branch
+ * Regra de ouro: só a branch da tarefa (a do worktree) vai para o GitHub. Branch
  * padrão, main/master/develop/production/release*, força e remoção nunca.
  */
 import { isBranchName } from './github-names'

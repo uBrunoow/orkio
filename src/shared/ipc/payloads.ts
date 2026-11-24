@@ -41,8 +41,6 @@ type Parsed<T> = T | Invalid
 const str = (value: unknown, max: number): value is string =>
   typeof value === 'string' && value.length <= max
 
-// ---------- Projetos ----------
-
 /** Criar projeto: só a seleção feita no main e o remote; nunca caminhos. */
 export function parseCreateProjectInput(value: unknown): Parsed<CreateProjectInput> {
   if (!isRecord(value)) return INVALID
@@ -59,8 +57,6 @@ export function parseCreateProjectInput(value: unknown): Parsed<CreateProjectInp
   }
   return { selectionId, remoteName, hostConfirmed, ...(name !== undefined ? { name } : {}) }
 }
-
-// ---------- Bancos do Notion ----------
 
 export function parseWorkspaceInput(value: unknown): Parsed<NotionWorkspaceInput> {
   if (!isRecord(value)) return INVALID
@@ -82,8 +78,6 @@ export function parseDataSourceQuery(value: unknown): Parsed<string | undefined>
   if (value === undefined || value === null || value === '') return undefined
   return str(value, 200) ? value : INVALID
 }
-
-// ---------- Quadro ----------
 
 function parseOrkioStageChoice(value: unknown): Parsed<OrkioStageChoice> {
   if (!isRecord(value)) return INVALID
@@ -123,8 +117,6 @@ export function parseBoardSaveInput(value: unknown): Parsed<BoardSaveInput> {
   }
   return { stages: parsedStages, orkioStage, addMissingOptions, blockedPropertyId }
 }
-
-// ---------- Fluxo do projeto (3C) ----------
 
 function parseStageDraft(value: unknown): Parsed<FlowStageDraft> {
   if (!isRecord(value)) return INVALID
@@ -193,8 +185,6 @@ export function parseFlowDraft(value: unknown): Parsed<FlowDraft> {
     ...(parsedBindings ? { bindings: parsedBindings } : {})
   }
 }
-
-// ---------- Claude Code ----------
 
 /** Id de pedido de permissão/pergunta do CLI. */
 export function isRequestId(value: unknown): value is string {
@@ -328,8 +318,6 @@ export function parseAnswers(value: unknown): Parsed<Record<string, string>> {
   return out
 }
 
-// ---------- Agentes e orquestrador ----------
-
 /** Perfil vindo do editor: só a forma (tipos); as regras são do `validateAgent` no serviço. */
 export function parseAgentProfile(value: unknown): Parsed<AgentProfile> {
   if (!isRecord(value)) return INVALID
@@ -450,8 +438,6 @@ export function parseOrchestratorConfig(value: unknown): Parsed<OrchestratorConf
   return parsed
 }
 
-// ---------- Fluxos de tarefa (5A) e alva-flow (5B) ----------
-
 /** Lista de fluxos vinda do editor: normalizada pelo mesmo parser da config. */
 export function parseFlows(value: unknown): Parsed<Flow[]> {
   if (!Array.isArray(value) || value.length > 50) return INVALID
@@ -490,8 +476,6 @@ export function parseAlvaBindings(value: unknown): Parsed<AlvaBindings> {
     ? { plan, deliver, review, reviewed }
     : INVALID
 }
-
-// ---------- Visão geral (6D) ----------
 
 /** Filtro da atividade: só campos conhecidos e válidos; ausente = sem filtro. */
 export function parseActivityQuery(value: unknown): Parsed<ActivityQuery> {

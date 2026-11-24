@@ -146,8 +146,6 @@ export const FLOW_END = '$fim'
 /** Trava de segurança: passos executados (inclui saltos avaliados) num mesmo fluxo. */
 export const MAX_EXECUTED_STEPS = 50
 
-// ---------- Estado e motor ----------
-
 export interface FlowState {
   vars: Record<string, string>
   /** Quantas vezes cada passo começou (inclui saltos avaliados). */
@@ -236,7 +234,6 @@ export type StepEnd =
   | { outcome: 'failed' | 'cancelled' }
   | { outcome: 'approved' | 'rejected' }
 
-/** Depois de um passo terminar: segue, salta (gate recusado), pausa (falha) ou conclui. */
 export function afterStep(
   flow: Flow,
   state: FlowState,
@@ -291,7 +288,6 @@ export function retryStep(flow: Flow, state: FlowState, stepId: StepId): FlowDec
   return { kind: 'run', stepId, state: visit(state, stepId) }
 }
 
-/** O passo roda um pedido em texto (`prompt`) em vez de um comando do catálogo? */
 export function isPromptStep(step: ClaudeCommandStep): boolean {
   return (step.prompt ?? '').trim() !== ''
 }
@@ -329,8 +325,6 @@ export function reviseGate(flow: Flow, state: FlowState, gateId: StepId): Revise
   return resolveFrom(flow, target, s)
 }
 
-// ---------- Template dos argumentos ----------
-
 export interface TemplateContext {
   briefingPath: string
   taskId: string
@@ -344,7 +338,6 @@ const KNOWN_VARS = new Set(['briefing_path', 'task_id', 'task_title', 'notion_ur
 /** Variáveis de integrações (ex.: `alva.task_id`), gravadas por extratores ou no início do fluxo. */
 const NAMESPACED_VAR = /^[a-z][a-z0-9_]*\.[a-z0-9_.]+$/
 
-/** Chave de variável do fluxo (aceita namespace com ponto, ex.: `alva.task_id`). */
 export const VAR_KEY = /^[a-z][a-z0-9_.]{0,39}$/
 
 export function renderArgs(
@@ -393,8 +386,6 @@ function templateVars(template: string): string[] {
   return [...template.matchAll(TEMPLATE_VAR)].map((m) => m[1]!)
 }
 
-// ---------- Validação ----------
-
 export interface FlowIssue {
   level: 'error' | 'warning'
   stepId: StepId | null
@@ -436,7 +427,6 @@ function undeclaredVar(key: string, declared: ReadonlySet<string>): boolean {
   return false
 }
 
-/** `{{flow.pr.number}}` e `{{pr.number}}` falam da mesma variável. */
 function templateKey(name: string): string {
   return name.startsWith('flow.') ? name.slice(5) : name
 }
@@ -594,8 +584,6 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
   return issues
 }
 
-// ---------- Helpers de UI ----------
-
 export const STEP_TYPE_LABEL: Record<StepType, string> = {
   claude_command: 'Comando do Claude Code',
   gate: 'Aprovação (gate)',
@@ -613,8 +601,6 @@ export function newStepId(flow: Flow, base: string): StepId {
   if (!used.has(clean)) return clean
   for (let n = 2; ; n++) if (!used.has(`${clean}-${n}`)) return `${clean}-${n}`
 }
-
-// ---------- Execução (visão para a UI) ----------
 
 export type FlowRunStatus =
   'running' | 'waiting_gate' | 'paused' | 'awaiting_decision' | 'finished' | 'cancelled'
@@ -752,8 +738,6 @@ export interface OpenPrResult {
   mode: 'pr' | 'push'
   compareUrl: string | null
 }
-
-// ---------- Leitura (config e IPC) ----------
 
 const str = (v: unknown): v is string => typeof v === 'string'
 

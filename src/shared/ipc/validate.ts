@@ -49,8 +49,6 @@ export function isTokenCredentials(value: unknown): value is ConnectorCredential
   return isRecord(value) && value['kind'] === 'token' && typeof value['token'] === 'string'
 }
 
-// ---------- Validadores de argumento ----------
-
 export function guard<T>(test: (value: unknown) => value is T): Parser<T> {
   return (value) => (test(value) ? value : INVALID)
 }

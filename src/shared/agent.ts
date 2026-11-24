@@ -37,7 +37,7 @@ export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
   custom: 'Outro papel'
 }
 
-/** Cores do avatar: nomes das cores de `Token` da Astryx (o tema decide o tom; nada de hex). */
+/** Cores do avatar: nomes, não hex (o tema decide o tom). */
 export const AGENT_COLORS = ['orange', 'blue', 'green', 'purple', 'pink', 'teal', 'yellow'] as const
 export type AgentColor = (typeof AGENT_COLORS)[number]
 
@@ -141,7 +141,6 @@ export function agentInitials(name: string): string {
   return `${words[0]![0]}${words[words.length - 1]![0]}`.toUpperCase()
 }
 
-/** Id a partir do nome: minúsculas, sem acento, hífens. */
 export function agentIdFromName(name: string): string {
   return normalizeLabel(name)
     .replace(/[^a-z0-9]+/g, '-')
@@ -149,8 +148,6 @@ export function agentIdFromName(name: string): string {
     .slice(0, 40)
     .replace(/-+$/g, '')
 }
-
-// ---------- Arquivo (.md com frontmatter) ----------
 
 export type AgentParse =
   { ok: true; profile: AgentProfile; warnings: string[] } | { ok: false; errors: string[] }
@@ -308,8 +305,6 @@ export function serializeAgent(p: AgentProfile): string {
   return `${lines.join('\n')}${p.instructions.trim()}\n`
 }
 
-// ---------- Execução ----------
-
 /**
  * Texto do `--append-system-prompt`: quem é o agente, as instruções e um lembrete fixo das regras.
  * O briefing da tarefa continua no prompt, igual a uma execução sem agente.
@@ -360,8 +355,6 @@ export function localDayStart(now: Date): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate())
 }
 
-// ---------- Interno: subconjunto de YAML ----------
-
 function parseHead(text: string): { values: Record<string, Value> } | { error: string } {
   const values: Record<string, Value> = {}
   const lines = text.split('\n')
@@ -376,7 +369,6 @@ function parseHead(text: string): { values: Record<string, Value> } | { error: s
     }
     const raw = stripComment(m[2] ?? '')
     if (raw === '') {
-      // Bloco: linhas indentadas `  chave: valor` (um nível só).
       const block: Record<string, Scalar> = {}
       while (i + 1 < lines.length && /^[ \t]+\S/.test(lines[i + 1]!)) {
         i++
@@ -455,9 +447,7 @@ function byteLength(text: string): number {
   return new TextEncoder().encode(text).length
 }
 
-// ---------- Config por projeto ----------
-
-/** `orkio-config.json` → `agents[projectId]` (v9): regras de atribuição por coluna. */
+/** `orkio-config.json` → `agents[projectId]` (v10): regras de atribuição por coluna. */
 export interface ProjectAgents {
   /** "Tarefas que entram em <etapa> vão para <agente>" (uma regra por etapa). */
   assignOnEnter: { stageId: string; agentKey: AgentKey }[]
@@ -479,8 +469,6 @@ export function parseProjectAgents(value: unknown): ProjectAgents | null {
   }
   return { assignOnEnter }
 }
-
-// ---------- Visões para a tela ----------
 
 /**
  * - `ready`: pode receber e rodar tarefas.

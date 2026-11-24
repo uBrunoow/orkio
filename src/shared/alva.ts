@@ -150,7 +150,6 @@ export interface BacklogTaskDocument {
   info: BacklogTaskInfo
   /** Markdown sem o frontmatter e sem os marcadores HTML; segredos ocultados no main. */
   body: string
-  /** O texto passou do limite e foi cortado. */
   truncated: boolean
   /** Ainda não vinculada: o rascunho que o `/spec` desta tarefa está escrevendo no worktree. */
   draft?: boolean

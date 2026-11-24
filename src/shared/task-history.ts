@@ -1,6 +1,6 @@
 /**
- * Texto e links de um evento do histórico da tarefa (`task_events`). Puro: usado no painel da
- * tarefa (quadro) e na atividade recente da Visão geral (6D).
+ * Texto e links de um evento do histórico da tarefa (`task_events`). Puro: usado no histórico da
+ * tarefa e na atividade recente.
  */
 import { EVENT_META } from './automation'
 import type { TaskEvent } from './task-events'

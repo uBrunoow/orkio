@@ -89,8 +89,6 @@ export const EVENT_META: Record<
 
 export const EVENT_KINDS = Object.keys(EVENT_META) as EventKind[]
 
-// ---------- Snapshot ----------
-
 export interface PrSnapshot {
   number: number
   state: 'draft' | 'open' | 'merged' | 'closed'
@@ -162,8 +160,6 @@ export function mergeSnapshot(previous: TaskSnapshot | null, next: TaskSnapshot)
         : next.github
   return { localBranches: next.localBranches ?? previous.localBranches, github }
 }
-
-// ---------- Eventos ----------
 
 export interface AutomationEvent {
   /** Chave de idempotência (única por projeto e tarefa em task_events). */
@@ -253,7 +249,6 @@ export function deriveEvents(
       const was = isNew ? null : p
       const num = n.number
 
-      // Abertura / pronta para review.
       if (isNew && n.state === 'open')
         events.push(prEvent('pr.opened', taskId, num, 'opened', null))
       if (was && was.state === 'draft' && n.state === 'open') {
@@ -288,7 +283,6 @@ export function deriveEvents(
       const oldThreads = isNew ? [] : was?.unresolvedThreadIds
       if (n.unresolvedThreadIds && oldThreads) {
         const added = n.unresolvedThreadIds.filter((id) => !oldThreads.includes(id))
-        // Passou de 0 ou aumentou: há thread não resolvida que antes não estava.
         if (added.length > 0) {
           events.push(
             prEvent(
@@ -302,7 +296,6 @@ export function deriveEvents(
         }
       }
 
-      // Merge / fechamento.
       const wasClosed = was && (was.state === 'merged' || was.state === 'closed')
       if (n.state === 'merged' && (!was || was.state !== 'merged')) {
         events.push(prEvent('pr.merged', taskId, num, 'merged', n.closedAt))
@@ -322,8 +315,6 @@ export function deriveEvents(
 
   return events.sort(compareEvents)
 }
-
-// ---------- Regras ----------
 
 export interface RuleConditions {
   /** Só se a tarefa estiver numa destas etapas. Ausente = qualquer etapa. */
@@ -447,8 +438,6 @@ export function defaultRules(stages: readonly BoardStage[]): {
   return { rules, warnings }
 }
 
-// ---------- Avaliação ----------
-
 export interface TaskAutomationState {
   stageId: string | null
   blocked: boolean
@@ -543,8 +532,6 @@ export function evaluate(
   })
 }
 
-// ---------- Automações (Etapa 3B) ----------
-
 export interface AutomationStatus {
   /** "Pausar todas" ligado. */
   paused: boolean
@@ -554,8 +541,6 @@ export interface AutomationStatus {
   nextRunAt: string | null
   error: string | null
 }
-
-// ---------- Leitura (config e IPC) ----------
 
 function stringList(value: unknown): string[] | undefined {
   return Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : undefined

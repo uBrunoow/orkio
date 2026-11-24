@@ -36,7 +36,6 @@ export function sameAsTarget(value: unknown): string | null {
 type AnyCall = (...args: never[]) => Promise<unknown>
 export type CallResult<F extends AnyCall> = Awaited<ReturnType<F>>
 
-/** Argumentos já validados, na ordem da assinatura. */
 export type ParsedArgs<P> = { -readonly [K in keyof P]: P[K] extends Parser<infer T> ? T : never }
 
 type IsResult<R> = [R] extends [Result<unknown>] ? true : false

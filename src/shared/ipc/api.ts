@@ -140,8 +140,6 @@ import {
   type ForceOption
 } from './validate'
 
-// ---------- Eventos main → renderer ----------
-
 const projectRef: Parser<{ projectId: string }> = (v) =>
   isRecord(v) && typeof v['projectId'] === 'string' ? { projectId: v['projectId'] } : INVALID
 
@@ -180,7 +178,6 @@ export const IPC_EVENTS = {
       return section ? { ...ref, section } : ref
     }
   }),
-  /** Resultado/estado de uma escrita no Notion. */
   boardSync: event<BoardSyncEvent>({
     channel: 'board:sync-changed',
     parse: (v) => {
@@ -209,7 +206,6 @@ export const IPC_EVENTS = {
   }),
   /** Agentes ou atribuições de um projeto mudaram. */
   agentsChanged: event({ channel: 'agents:changed', parse: projectRef }),
-  /** O fluxo de uma tarefa mudou. */
   taskFlowChanged: event({
     channel: 'task-flows:changed',
     parse: taskRef,
@@ -258,8 +254,6 @@ export type IpcEventPayload<K extends IpcEventName> = IpcEvents[K] extends {
 }
   ? T
   : never
-
-// ---------- Métodos ----------
 
 // Validadores com argumento ficam fora da declaração (a inferência da tupla `args` pede nomes).
 const anything: Parser<unknown> = (v) => v
@@ -1051,7 +1045,6 @@ export const ORKIO_API = {
         channel: 'claude:publish-artifact',
         args: [projectId, localId, publishMode]
       }),
-      /** Eventos das execuções. */
       onRunEvent: IPC_EVENTS.runEvent
     }
   ),

@@ -162,8 +162,6 @@ export const NOTION_PENDING_ATTEMPTS = 3
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-// ---------- Esperando você ----------
-
 function stepName(flow: FlowRunView): string | null {
   const step = flow.steps.find((s) => s.id === flow.currentStep)
   return step ? step.name || step.id : null
@@ -279,8 +277,6 @@ export function sortWaiting(items: WaitingItem[]): WaitingItem[] {
   return [...items].sort((a, b) => a.since.localeCompare(b.since) || a.key.localeCompare(b.key))
 }
 
-// ---------- Em execução ----------
-
 export interface ActiveRunInput {
   runId: string
   projectId: string
@@ -345,8 +341,6 @@ export function buildRunning(
   )
 }
 
-// ---------- PRs ----------
-
 const PR_RANK: Record<PrReason, number> = {
   ci_failed: 0,
   changes_requested: 1,
@@ -405,8 +399,6 @@ export const PR_REASON_LABEL: Record<PrReason, string> = {
   unresolved_comments: 'Comentários não resolvidos',
   stale_review: 'Sem review'
 }
-
-// ---------- Por projeto ----------
 
 const GITHUB_WARNINGS = new Set(['github_disconnected', 'no_access', 'unverified'])
 
@@ -474,8 +466,6 @@ export function projectCard(input: {
   }
 }
 
-// ---------- Semana ----------
-
 export interface StageEventInput {
   id: number
   taskPageId: string
@@ -486,7 +476,7 @@ export interface StageEventInput {
   toStage: string | null
 }
 
-/** Tarefas distintas que entraram na última etapa do quadro desde `since`. */
+/** Tarefas distintas que entraram na etapa final de cada projeto (`finalStage`) desde `since`. */
 export function finishedCount(
   events: readonly StageEventInput[],
   finalStage: ReadonlyMap<string, string>,
@@ -561,8 +551,6 @@ export function costSum(runs: readonly { cost: number | null }[]): WeekStats['co
   }
 }
 
-// ---------- Atividade ----------
-
 export function activitySection(group: ActivityGroup): TaskSection {
   return group === 'claude'
     ? 'claude'
@@ -570,8 +558,6 @@ export function activitySection(group: ActivityGroup): TaskSection {
       ? 'flow'
       : 'history'
 }
-
-// ---------- Formatação ----------
 
 /** "45 s", "12 min", "1 h 05 min", "1,8 d". */
 export function formatDuration(ms: number): string {
@@ -592,6 +578,6 @@ export function taskLabel(task: Pick<OverviewTask, 'displayId' | 'title'>): stri
 export interface BoardTaskRef {
   projectId: string
   taskId: string
-  /** Seção do painel da tarefa a mostrar (Visão geral, 6D). */
+  /** Seção do painel da tarefa a mostrar. */
   section?: TaskSection
 }

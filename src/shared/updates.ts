@@ -61,8 +61,6 @@ export interface ReleaseNotes {
   notes: string
 }
 
-// ---------- Versões ----------
-
 interface ParsedVersion {
   core: [number, number, number]
   pre: (string | number)[]
@@ -104,10 +102,8 @@ export function isPrerelease(version: string): boolean {
   return (parseVersion(version)?.pre.length ?? 0) > 0
 }
 
-// ---------- CHANGELOG ----------
-
 /**
- * Seção de uma versão no CHANGELOG (`## [X.Y.Z] - AAAA-MM-DD`; leitor único em `changelog.ts`, o
+ * Seção de uma versão no CHANGELOG (`## [X.Y.Z] - AAAA-MM-DD`; leitor único em `changelog.mts`, o
  * mesmo das notas do release). Seção vazia ou ausente → `null`.
  */
 export function changelogSection(markdown: string, version: string): string | null {
@@ -149,7 +145,6 @@ export function noteBlocks(markdown: string): NoteBlock[] {
   return blocks.filter((b) => b.text.length > 0)
 }
 
-/** Tira a marcação em linha (negrito, código, links → texto). */
 function plainInline(text: string): string {
   return text
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -158,8 +153,6 @@ function plainInline(text: string): string {
     .replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$|[.,;:!?])/g, '$1$2')
     .trim()
 }
-
-// ---------- Download manual (macOS sem assinatura) ----------
 
 /**
  * URL do DMG da arquitetura no repo de releases: o nome vem do manifesto (`release-artifacts.mts`)
@@ -182,8 +175,6 @@ export function macDownloadUrl(version: string, files: readonly string[], arch: 
 export const RELEASES_PATH_PATTERN = new RegExp(
   `^/${RELEASES_REPO.owner}/${RELEASES_REPO.repo}/releases/(download/v[0-9A-Za-z.-]+/[A-Za-z0-9._-]+\\.dmg|tag/v[0-9A-Za-z.-]+)$`
 )
-
-// ---------- Erros ----------
 
 /** Mensagem amigável para falhas do feed (nunca a exceção crua, que pode ter URLs). */
 export function friendlyUpdateError(error: unknown): string {

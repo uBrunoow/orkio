@@ -175,7 +175,7 @@ export function buildTaskSignals(
       ...(sources.pulls ?? []).filter((p) => linked.has(p.headRef)),
       ...(pullsByPage.get(normalizePageId(task.id)) ?? [])
     ])
-    // Sem nenhum caminho que ligue algo à tarefa: sem sinais (igual a antes para tarefa sem ID).
+    // Sem nenhum caminho que ligue algo à tarefa: sem sinais.
     if (!parsed && linked.size === 0 && pullSet.size === 0) continue
     const pulls = [...pullSet].sort(comparePulls)
     const main = pulls[0]
@@ -206,8 +206,6 @@ export function buildTaskSignals(
   }
   return result
 }
-
-// ---------- Sinais das tarefas (Etapa 2D) ----------
 
 /** Situação da parte do GitHub nos sinais. */
 export type SignalsGitHubState =
