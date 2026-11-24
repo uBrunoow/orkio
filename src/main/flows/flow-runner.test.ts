@@ -111,6 +111,7 @@ function makeRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
     actions: [NOOP_ACTION],
     notify: (title) => notifications.push(title),
     emit: () => undefined,
+    enterStage: () => undefined,
     newId: () => `fr-${++n}`,
     ...over
   })
@@ -883,7 +884,7 @@ describe('FlowRunner', () => {
       const entered: StageChange[] = []
       runner = makeRunner({
         actions: [PUBLISH],
-        stageEntered: (change) => {
+        enterStage: (change) => {
           entered.push(change)
           runner!.onStageChanged(change)
         }
@@ -907,7 +908,7 @@ describe('FlowRunner', () => {
         ]
       }
       const entered: StageChange[] = []
-      const runner = makeRunner({ stageEntered: (c) => void entered.push(c) })
+      const runner = makeRunner({ enterStage: (c) => void entered.push(c) })
       enter(runner, 'manual')
       await flush()
       await flush()

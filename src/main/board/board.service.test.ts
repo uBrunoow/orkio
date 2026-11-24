@@ -7,11 +7,11 @@ import type { StatusOption, BoardSaveInput, BoardSyncEvent } from '../../shared/
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
 import { NotionApiError } from '../connectors/notion/notion.client'
 import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
-import { openDatabase, type Db } from '../db/database'
+import { openDatabase, type Db, type Tx } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import { BoardService, type StageChange, type BoardNotion } from './board.service'
 import { BoardStore } from './board.store'
-import { NotionWriteQueue } from './write-queue'
+import type { NotionWriteQueue } from './write-queue'
 import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
 
 const OPTIONS: StatusOption[] = [
@@ -139,6 +139,26 @@ const DEFAULT_INPUT = (
   blockedPropertyId: null
 })
 
+/** Sabe se o código roda dentro de uma transação do quadro. */
+class TrackedStore extends BoardStore {
+  depth = 0
+  override transaction<T>(fn: (tx: Tx) => T): T {
+    this.depth++
+    try {
+      return super.transaction(fn)
+    } finally {
+      this.depth--
+    }
+  }
+}
+
+/** O que o ouvinte da entrada na etapa vê no momento em que é chamado. */
+interface EntrySeen {
+  change: StageChange
+  inTransaction: boolean
+  lastEvent: string | undefined
+}
+
 describe('BoardService', () => {
   let dir: string
   let db: Db
@@ -150,30 +170,35 @@ describe('BoardService', () => {
   let clock: number
   let seq: number
   let changes: StageChange[] = []
+  let seen: EntrySeen[] = []
+  let store: TrackedStore
 
   function build(): void {
-    const store = new BoardStore(db)
+    store = new TrackedStore(db)
     service = new BoardService({
       config,
       store,
       notion,
+      writes: {
+        updatePage: (id, props) => notion.updatePage(id, props),
+        now: () => new Date(clock),
+        random: () => 0,
+        schedule: () => ({ cancel: () => {} })
+      },
       onSync: (e) => events.push(e),
       now: () => new Date(clock),
       newId: () => `stage-${++seq}`,
       graceMs: 30_000,
-      onStageChanged: (c) => changes.push(c)
+      enterStage: (change) => {
+        changes.push(change)
+        seen.push({
+          change,
+          inTransaction: store.depth > 0,
+          lastEvent: store.events(change.taskId)[0]?.kind
+        })
+      }
     })
-    queue = new NotionWriteQueue({
-      store,
-      updatePage: (id, props) => notion.updatePage(id, props),
-      onSynced: (w) => service.onSynced(w),
-      onRejected: (w, e) => void service.onRejected(w, e),
-      onRetry: (w, e) => service.onRetry(w, e),
-      now: () => new Date(clock),
-      random: () => 0,
-      schedule: () => ({ cancel: () => {} })
-    })
-    service.attachQueue(queue)
+    queue = service.writes
   }
 
   async function createBoard(input?: Partial<BoardSaveInput>) {
@@ -425,6 +450,36 @@ describe('BoardService', () => {
       kind: 'rolled_back',
       detail: { code: 'bad_request' }
     })
+  })
+
+  // Bug: o momento da entrada na etapa mudava com a origem (reconciliação antes do evento, recusa
+  // do Notion fora da transação). Agora é um só: depois do evento, dentro da transação.
+  it('entrada na etapa: sempre depois do evento e dentro da transação, para toda origem', async () => {
+    const view = await createBoard()
+    seen = []
+    // Manual.
+    await service.move('p1', T1, stageId(view, 'Revisado'))
+    // Reconciliação (mudança direto no Notion).
+    notion.status[T1] = 'Finalizadas'
+    await service.get('p1', { force: true })
+    // Recusa do Notion (rollback).
+    notion.reject = 'bad_request'
+    await service.move('p1', T2, stageId(view, 'Finalizada'))
+    await queue.idle()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(seen.map((s) => [s.change.source, s.lastEvent, s.inTransaction])).toEqual([
+      ['manual', 'moved', true],
+      ['notion', 'reconciled', true],
+      ['manual', 'moved', true],
+      ['rollback', 'rolled_back', true]
+    ])
+  })
+
+  it('applyAutomationMove pede a transação de quem chama', () => {
+    const outsideTransaction = (): boolean =>
+      // @ts-expect-error sem o `Tx` de `store.transaction`, não compila.
+      service.applyAutomationMove('p1', T1, 'x', { key: 'k', detail: {} })
+    expect(outsideTransaction).toBeTypeOf('function')
   })
 
   it('mover e voltar antes de sincronizar cancela a escrita', async () => {

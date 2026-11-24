@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { GitHubApiError, type ConditionalPage } from './github.client'
 import type { OrkioSiteResponse, OrkioSiteReviewPayload } from './github.connector'
-import { isAllowedOrkioSiteOrigin, readOrkioSiteOrigin } from './orkio-site'
 import {
   GitHubReviewPoster,
   REVIEW_MESSAGES,
@@ -379,38 +378,5 @@ describe('erros em pt-BR', () => {
     })
     const error = await rejection(poster(gh).postReview('acme', 'orkio', 7, REVIEW))
     expect(JSON.stringify({ m: error.message, d: error.details })).not.toContain('gho_')
-  })
-})
-
-describe('origem do site', () => {
-  it('MAIN_VITE_SITE_URL primeiro; a origem do intermediário do Notion só sem site', () => {
-    expect(
-      readOrkioSiteOrigin({
-        MAIN_VITE_NOTION_OAUTH_BROKER_URL: 'https://broker.workers.dev/x',
-        MAIN_VITE_SITE_URL: 'https://orkio.dev/'
-      })
-    ).toBe('https://orkio.dev')
-    expect(
-      readOrkioSiteOrigin({ MAIN_VITE_NOTION_OAUTH_BROKER_URL: 'https://orkio.dev/notion' })
-    ).toBe('https://orkio.dev')
-    expect(readOrkioSiteOrigin({})).toBeNull()
-  })
-
-  it('só https; http só em 127.0.0.1 e só em build de E2E; nunca localhost', () => {
-    const broker = (url: string, MODE = 'production') =>
-      readOrkioSiteOrigin({ MODE, MAIN_VITE_NOTION_OAUTH_BROKER_URL: url })
-    expect(broker('http://127.0.0.1:3000')).toBeNull()
-    expect(broker('http://127.0.0.1:3000', 'development')).toBeNull()
-    expect(broker('http://127.0.0.1:3000', 'e2e')).toBe('http://127.0.0.1:3000')
-    expect(broker('http://localhost:3000', 'e2e')).toBeNull()
-    expect(broker('http://orkio.dev')).toBeNull()
-    expect(broker('https://u:p@orkio.dev')).toBeNull()
-    expect(broker('lixo')).toBeNull()
-
-    expect(isAllowedOrkioSiteOrigin('https://orkio.dev', false)).toBe(true)
-    expect(isAllowedOrkioSiteOrigin('https://orkio.dev/x', false)).toBe(false) // só origem
-    expect(isAllowedOrkioSiteOrigin('http://127.0.0.1:3000', false)).toBe(false)
-    expect(isAllowedOrkioSiteOrigin('http://127.0.0.1:3000', true)).toBe(true)
-    expect(isAllowedOrkioSiteOrigin('http://localhost:3000', true)).toBe(false)
   })
 })

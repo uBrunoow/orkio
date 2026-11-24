@@ -43,6 +43,7 @@ import type { OrkioConfig } from '../config/orkio-config'
 import type { Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
 import { redactSecrets } from '../claude/redact'
+import { projectById } from '../config/queries'
 
 export const AGENT_MESSAGES = {
   notFound: 'Agente não encontrado. Atualize a tela.',
@@ -507,7 +508,7 @@ export class AgentsService {
   }
 
   private project(projectId: string): { localPath: string } {
-    const p = this.deps.config.get().projects.find((x) => x.id === projectId)
+    const p = projectById(this.deps.config.get(), projectId)
     if (!p) throw new AgentError('not_found', AGENT_MESSAGES.projectNotFound)
     return p
   }

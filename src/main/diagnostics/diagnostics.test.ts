@@ -23,7 +23,14 @@ function deps(overrides: Partial<DiagnosticsDeps> = {}): DiagnosticsDeps {
       { name: 'Notion', status: { state: 'error', message: `falhou com ${SECRET}` } }
     ],
     toolVersion: async (cmd) => (cmd === 'gh' ? null : `${cmd} version 1.0`),
-    countEntries: async () => 2,
+    paths: { worktrees: '/ud/worktrees', runs: '/ud/runs' },
+    listDir: async (dir) =>
+      ({
+        '/ud/worktrees': ['p1', 'p2'],
+        '/ud/worktrees/p1': ['ORK-1', 'ORK-2'],
+        '/ud/worktrees/p2': ['ORK-3'],
+        '/ud/runs': ['a.jsonl', 'b.jsonl']
+      })[dir] ?? [],
     projects: () => ({ total: 3, withBoard: 1 }),
     automation: () => ({ polling: 1, failing: 0 }),
     now: () => new Date('2026-11-23T12:00:00Z'),
@@ -43,6 +50,9 @@ describe('collectDiagnostics', () => {
     expect(text).toContain('- Notion: erro')
     expect(text).toContain('- gh: não encontrado')
     expect(text).toContain('- Projetos com quadro: 1')
+    // Contagem pelas pastas de `userDataPaths()`: worktrees por projeto, logs das execuções.
+    expect(text).toContain('- Pastas de trabalho (worktrees): 3')
+    expect(text).toContain('- Logs de execução: 2')
   })
 
   it('nunca inclui conta, mensagem de erro nem token', async () => {
@@ -60,11 +70,13 @@ describe('collectDiagnostics', () => {
         toolVersion: async () => {
           throw new Error('boom')
         },
-        countEntries: async () => null
+        listDir: async () => {
+          throw new Error('ENOENT')
+        }
       })
     )
     expect(text).toContain('- Banco local: indisponível')
     expect(text).toContain('- git: não encontrado')
-    expect(text).toContain('- Pastas de trabalho (worktrees): —')
+    expect(text).toContain('- Pastas de trabalho (worktrees): 0')
   })
 })

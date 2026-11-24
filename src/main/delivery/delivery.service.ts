@@ -18,6 +18,7 @@ import type { Git } from '../git/git'
 import { GitError } from '../git/git'
 import { DomainError } from '../errors'
 import type { WorktreeRecord } from '../claude/worktree.service'
+import { githubRepoOf } from '../../shared/projects'
 
 export type DeliveryErrorCode =
   | 'no_project'
@@ -82,7 +83,7 @@ export class DeliveryService {
     const project = this.deps.project(projectId)
     if (!project) throw new DeliveryError('no_project', DELIVERY_SERVICE_MESSAGES.noProject)
     const repo = project.repo
-    if (!repo || repo.host !== 'github.com' || !repo.verified) {
+    if (!repo || !githubRepoOf(project)) {
       throw new DeliveryError('no_repo', DELIVERY_MESSAGES.noRepo)
     }
     const wt = this.deps.worktree(taskId)

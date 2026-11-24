@@ -2,7 +2,7 @@
  * Acesso ao SQLite do quadro: estado local das tarefas, histórico e escritas pendentes.
  * Só ids, etapas, flags e nomes de opção. Nunca título/conteúdo de páginas.
  */
-import type { Db } from '../db/database'
+import type { Db, Tx } from '../db/database'
 
 export type StateSource = 'manual' | 'notion' | 'automation'
 
@@ -122,7 +122,7 @@ function toPending(row: PendingDbRow): PendingWrite {
 export class BoardStore {
   constructor(readonly db: Db) {}
 
-  transaction<T>(fn: () => T): T {
+  transaction<T>(fn: (tx: Tx) => T): T {
     return this.db.transaction(fn)
   }
 

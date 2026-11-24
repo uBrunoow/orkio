@@ -27,13 +27,15 @@ repositório privado exigiria um token embutido no app, que daria acesso ao cód
 Em Settings → Secrets and variables → Actions → aba **Variables** (não são segredos: vão dentro do
 binário):
 
-| Variable                            | Valor                                    |
-| ----------------------------------- | ---------------------------------------- |
-| `MAIN_VITE_GITHUB_CLIENT_ID`        | Client ID do OAuth App do GitHub         |
-| `MAIN_VITE_NOTION_OAUTH_CLIENT_ID`  | OAuth client ID da conexão do Notion     |
-| `MAIN_VITE_NOTION_OAUTH_BROKER_URL` | URL do site (intermediário OAuth), https |
+| Variable                           | Valor                                                  |
+| ---------------------------------- | ------------------------------------------------------ |
+| `MAIN_VITE_GITHUB_CLIENT_ID`       | Client ID do OAuth App do GitHub                       |
+| `MAIN_VITE_NOTION_OAUTH_CLIENT_ID` | OAuth client ID da conexão do Notion                   |
+| `MAIN_VITE_SITE_URL`               | Endereço do site, https (intermediário OAuth, revisão) |
 
 Sem elas o release falha (o teste manual só avisa). Também são aceitas como _secrets_ com o mesmo nome.
+Enquanto o repositório tiver a variável antiga `MAIN_VITE_NOTION_OAUTH_BROKER_URL`, ela vale como
+reserva de `MAIN_VITE_SITE_URL` (só a origem é usada).
 
 ### 3. Site
 
@@ -173,7 +175,7 @@ ligar o Artifact Signing:
 | ------------------------------------------------------------- | --------- | ------------------------- |
 | `MAIN_VITE_GITHUB_CLIENT_ID`                                  | variable  | Sim, no release           |
 | `MAIN_VITE_NOTION_OAUTH_CLIENT_ID`                            | variable  | Sim, no release           |
-| `MAIN_VITE_NOTION_OAUTH_BROKER_URL`                           | variable  | Sim, no release           |
+| `MAIN_VITE_SITE_URL`                                          | variable  | Sim, no release           |
 | `CSC_LINK`, `CSC_KEY_PASSWORD`                                | secrets   | Opcional (assinatura mac) |
 | `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`       | secrets   | Opcional (notarização)    |
 | ou `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` | secrets   | Opcional (notarização)    |

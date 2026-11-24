@@ -23,6 +23,8 @@ import type { ConfigStore } from '../storage/config-store'
 import type { BoardView } from '../../shared/board'
 import type { Result } from '../../shared/result'
 import type { TaskSignalsResult } from '../../shared/task-signals'
+import { projectById } from '../config/queries'
+import { githubRepoOf } from '../../shared/projects'
 
 export interface AutomationNotification {
   projectId: string
@@ -106,17 +108,15 @@ export class AutomationService {
     const stages = (view.ok ? view.value.config?.stages : null) ?? board.stages
     const taskIds = cards ? cards.map((c) => c.taskId) : [...states.keys()]
     const at = this.now().toISOString()
-    const repo = config.projects.find((p) => p.id === projectId)?.repo ?? null
+    const repo = githubRepoOf(projectById(config, projectId))
     // Só o necessário para montar o link da PR no histórico.
     const pr = (n: number): Record<string, unknown> =>
-      repo && repo.host.toLowerCase() === 'github.com'
-        ? { number: n, owner: repo.owner, repo: repo.name }
-        : { number: n }
+      repo ? { number: n, owner: repo.owner, repo: repo.name } : { number: n }
     const notifications: AutomationNotification[] = []
     let eventCount = 0
     let moves = 0
 
-    this.deps.store.transaction(() => {
+    this.deps.store.transaction((tx) => {
       for (const taskId of taskIds) {
         const prev = (previous.get(taskId) as TaskSnapshot | undefined) ?? null
         const fresh = toSnapshot(result.signals[taskId], available)
@@ -153,7 +153,7 @@ export class AutomationService {
           let moved = false
           if (d.outcome === 'move' && d.to) {
             try {
-              moved = this.deps.board.applyAutomationMove(projectId, taskId, d.to, {
+              moved = this.deps.board.applyAutomationMove(tx, projectId, taskId, d.to, {
                 key: d.event.key,
                 detail
               })

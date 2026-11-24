@@ -4,10 +4,13 @@
  * só leitura), as conexões (só o estado), versões de git/gh/claude e quantas pastas de trabalho e
  * logs existem. O texto final passa por `redactSecrets` mesmo assim.
  */
+import { readdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import { formatDiagnostics, type DiagnosticSection } from '../../shared/diagnostics'
 import { redactSecrets } from '../claude/redact'
 import type { Db } from '../db/database'
 import type { ConnectionStatus } from '../../shared/connection'
+import type { UserDataPaths } from '../platform/paths'
 
 export interface DiagnosticsDeps {
   app: { version: string; packaged: boolean }
@@ -18,8 +21,10 @@ export interface DiagnosticsDeps {
   connections: () => Promise<{ name: string; status: ConnectionStatus }[]>
   /** `<cmd> --version` (primeira linha) ou `null` se não estiver instalado. */
   toolVersion: (cmd: 'git' | 'gh' | 'claude') => Promise<string | null>
-  /** Quantas entradas há numa pasta do userData (`worktrees/<projeto>/*`, `runs/*`). */
-  countEntries: (what: 'worktrees' | 'runs') => Promise<number | null>
+  /** Pastas do userData (`userDataPaths()`): worktrees por projeto e logs das execuções. */
+  paths: Pick<UserDataPaths, 'worktrees' | 'runs'>
+  /** Nomes numa pasta (padrão: `fs.readdir`). */
+  listDir?: (dir: string) => Promise<string[]>
   projects: () => { total: number; withBoard: number }
   automation: () => { polling: number; failing: number }
   now?: () => Date
@@ -33,6 +38,19 @@ function count(db: Db, sql: string): number | null {
   }
 }
 
+/** Worktrees (`worktrees/<projeto>/<ID>`) e logs (`runs/<id>.jsonl`); pasta ausente = 0. */
+async function countEntries(
+  paths: DiagnosticsDeps['paths'],
+  listDir: (dir: string) => Promise<string[]>
+): Promise<{ worktrees: number; runs: number }> {
+  const list = (dir: string): Promise<string[]> => listDir(dir).catch(() => [])
+  let worktrees = 0
+  for (const project of await list(paths.worktrees)) {
+    worktrees += (await list(join(paths.worktrees, project))).length
+  }
+  return { worktrees, runs: (await list(paths.runs)).length }
+}
+
 function connectionState(s: ConnectionStatus): string {
   if (s.state === 'connected')
     return s.warning ? 'conectado (última verificação falhou)' : 'conectado'
@@ -42,14 +60,15 @@ function connectionState(s: ConnectionStatus): string {
 
 export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string> {
   const now = (deps.now ?? (() => new Date()))()
-  const [connections, git, gh, claude, worktrees, runs] = await Promise.all([
+  const [connections, git, gh, claude, entries] = await Promise.all([
     deps.connections().catch(() => []),
     deps.toolVersion('git').catch(() => null),
     deps.toolVersion('gh').catch(() => null),
     deps.toolVersion('claude').catch(() => null),
-    deps.countEntries('worktrees').catch(() => null),
-    deps.countEntries('runs').catch(() => null)
+    countEntries(deps.paths, deps.listDir ?? ((dir) => readdir(dir))).catch(() => null)
   ])
+  const worktrees = entries?.worktrees ?? null
+  const runs = entries?.runs ?? null
 
   const db = deps.db
   let integrity: string | null = null

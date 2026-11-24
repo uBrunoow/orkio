@@ -14,6 +14,7 @@ import { errorName } from '../errors'
 import type { ConfigStore } from '../storage/config-store'
 import type { AlvaService } from './alva.service'
 import type { Result } from '../../shared/result'
+import { projectById } from '../config/queries'
 
 export interface AlvaStatus {
   precheck: AlvaPrecheck | null
@@ -49,7 +50,7 @@ export class AlvaFlowsService {
   ) {}
 
   private project(projectId: string): { localPath: string } {
-    const p = this.deps.config.get().projects.find((x) => x.id === projectId)
+    const p = projectById(this.deps.config.get(), projectId)
     if (!p) throw new Error('not_found')
     return p
   }

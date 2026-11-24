@@ -36,6 +36,7 @@ import type { ConfigStore } from '../storage/config-store'
 import type { AgentRuntime, AgentsService } from '../agents/agents.service'
 import type { BoardView } from '../../shared/board'
 import type { Result } from '../../shared/result'
+import { projectById } from '../config/queries'
 
 export const ORCHESTRATOR_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista.',
@@ -157,7 +158,7 @@ export class OrchestratorService {
 
   /** Salva (o main valida de novo com a mesma função do editor). */
   async save(projectId: string, config: OrchestratorConfig): Promise<OrchestratorState> {
-    const project = this.deps.config.get().projects.find((p) => p.id === projectId)
+    const project = projectById(this.deps.config.get(), projectId)
     if (!project) throw new OrchestratorError('not_found', ORCHESTRATOR_MESSAGES.projectNotFound)
     if (!this.deps.config.get().boards[projectId]) {
       throw new OrchestratorError('no_board', ORCHESTRATOR_MESSAGES.noBoard)
@@ -321,13 +322,13 @@ export class OrchestratorService {
     )
     if (moves.length > 0) {
       const iso = at.toISOString()
-      this.deps.store.transaction(() => {
+      this.deps.store.transaction((tx) => {
         for (const d of moves) {
           try {
             if (d.agent) {
               this.deps.agents.assignByOrchestrator(projectId, d.taskId, d.agent, name(d.agent))
             }
-            const moved = this.deps.board.applyAutomationMove(projectId, d.taskId, d.to, {
+            const moved = this.deps.board.applyAutomationMove(tx, projectId, d.taskId, d.to, {
               key: `orchestrator:${d.kind}:${d.taskId}:${d.to}:${iso}`,
               detail: {
                 orchestrator: d.kind,

@@ -46,6 +46,7 @@ import { WorktreeError, type WorktreeProject, type WorktreeService } from './wor
 import type { Result } from '../../shared/result'
 import type { NotionTask } from '../../shared/notion'
 import type { TaskSignalsResult } from '../../shared/task-signals'
+import { projectById } from '../config/queries'
 
 export const CLAUDE_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista de projetos.',
@@ -780,7 +781,7 @@ export class ClaudeService {
   // ---------- Interno ----------
 
   private project(projectId: string): StoredProject & { repo: NonNullable<StoredProject['repo']> } {
-    const project = this.deps.config.get().projects.find((p) => p.id === projectId)
+    const project = projectById(this.deps.config.get(), projectId)
     if (!project) throw new ClaudeFailure('not_found', CLAUDE_MESSAGES.projectNotFound)
     if (!project.repo) throw new ClaudeFailure('no_repo', CLAUDE_MESSAGES.noRepo)
     return project as StoredProject & { repo: NonNullable<StoredProject['repo']> }

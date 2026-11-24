@@ -28,12 +28,21 @@ export class ConfigStore<T extends object> {
   private writing: Promise<void> = Promise.resolve()
   /** true quando o arquivo é de uma versão mais nova do Orkio: não sobrescrevemos. */
   readOnly = false
+  /** Aviso da carga (ex.: arquivo corrompido recuperado, modo só leitura), mostrado em Projetos. */
+  loadWarning: string | undefined
 
   constructor(private readonly options: ConfigStoreOptions<T>) {
     this.data = options.empty()
   }
 
+  /** Carrega (uma vez, por quem cria o store). O aviso também fica em `loadWarning`. */
   async load(): Promise<{ data: T; warning?: string }> {
+    const result = await this.read()
+    this.loadWarning = result.warning
+    return result
+  }
+
+  private async read(): Promise<{ data: T; warning?: string }> {
     const { file, currentVersion } = this.options
     this.loaded = true
     let raw: string

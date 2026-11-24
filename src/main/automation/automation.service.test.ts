@@ -6,7 +6,7 @@ import type { StatusOption } from '../../shared/board'
 import type { TaskPullRequest, TaskSignals, TaskSignalsResult } from '../../shared/task-signals'
 import { BoardService, type BoardNotion } from '../board/board.service'
 import { BoardStore } from '../board/board.store'
-import { NotionWriteQueue } from '../board/write-queue'
+import type { NotionWriteQueue } from '../board/write-queue'
 import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config'
 import { NotionApiError } from '../connectors/notion/notion.client'
 import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
@@ -133,24 +133,21 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
       config,
       store,
       notion,
+      writes: {
+        updatePage: (id, p) => notion.updatePage(id, p),
+        now: () => new Date(clock),
+        random: () => 0,
+        schedule: () => ({ cancel: () => {} })
+      },
       onSync: () => {},
+      enterStage: () => undefined,
       now: () => new Date(clock),
       newId: (() => {
         let n = 0
         return () => `stage-${++n}`
       })()
     })
-    queue = new NotionWriteQueue({
-      store,
-      updatePage: (id, p) => notion.updatePage(id, p),
-      onSynced: (w) => board.onSynced(w),
-      onRejected: (w, e) => void board.onRejected(w, e),
-      onRetry: (w, e) => board.onRetry(w, e),
-      now: () => new Date(clock),
-      random: () => 0,
-      schedule: () => ({ cancel: () => {} })
-    })
-    board.attachQueue(queue)
+    queue = board.writes
     automation = new AutomationService({
       config,
       store,

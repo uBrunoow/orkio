@@ -48,6 +48,7 @@ import type {
   NotionWorkspaceStatus
 } from '../../shared/notion'
 import type { Result } from '../../shared/result'
+import { projectById } from '../config/queries'
 
 /** O que o serviço precisa do conector do Notion (o token fica lá dentro). */
 export interface NotionWorkspaceApi {
@@ -608,7 +609,7 @@ export class NotionWorkspaceService {
   }
 
   private findProject(projectId: string) {
-    const project = this.config().projects.find((p) => p.id === projectId)
+    const project = projectById(this.config(), projectId)
     if (!project) {
       throw new WorkspaceError({ code: 'not_found', message: WORKSPACE_MESSAGES.projectNotFound })
     }

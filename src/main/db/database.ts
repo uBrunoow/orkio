@@ -10,12 +10,20 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 
 export type SqlValue = SQLInputValue
 
+declare const TX: unique symbol
+/**
+ * Prova de que o código roda dentro de `transaction` (só ela cria um). Quem precisa gravar junto
+ * com outras escritas pede um `Tx` no tipo, em vez de pedir por comentário.
+ */
+export type Tx = { readonly [TX]: true }
+const TX_TOKEN = Object.freeze({}) as Tx
+
 export interface Db {
   exec(sql: string): void
   run(sql: string, ...params: SqlValue[]): { changes: number; lastInsertRowid: number }
   get<T>(sql: string, ...params: SqlValue[]): T | undefined
   all<T>(sql: string, ...params: SqlValue[]): T[]
-  transaction<T>(fn: () => T): T
+  transaction<T>(fn: (tx: Tx) => T): T
   readonly version: number
   close(): void
 }
@@ -244,13 +252,13 @@ export function openDatabase(file: string, migrations: readonly string[] = MIGRA
     },
     get: <T>(sql: string, ...params: SqlValue[]) => db.prepare(sql).get(...params) as T | undefined,
     all: <T>(sql: string, ...params: SqlValue[]) => db.prepare(sql).all(...params) as T[],
-    transaction<T>(fn: () => T): T {
+    transaction<T>(fn: (tx: Tx) => T): T {
       // Transações aninhadas viram parte da externa.
-      if (depth > 0) return fn()
+      if (depth > 0) return fn(TX_TOKEN)
       depth++
       db.exec('BEGIN IMMEDIATE')
       try {
-        const result = fn()
+        const result = fn(TX_TOKEN)
         db.exec('COMMIT')
         return result
       } catch (error) {

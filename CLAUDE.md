@@ -138,7 +138,14 @@ src/
   shared/orchestrator.ts   # 8B: config, validação, sugestão, prioridade e `planTick` (motor puro)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
-    index.ts               # janela, segurança, wiring de dependências e IPC
+    index.ts               # janela, segurança, registro do IPC e chamar a composição
+    composition/           # app.ts: cria os serviços → start() → stop({ waitMs }) (único desligamento);
+                           # late.ts (dependência de ciclo: lança se usada cedo), lifecycle.ts (ordem do
+                           # stop), claude.ts/flows.ts/updates.ts (fábricas por área)
+    platform/              # paths.ts (`userDataPaths()`: layout do userData), process.ts (`toolEnv`,
+                           # `execExitCode`, `spawnDetached`), dialog.ts (`withDialogWindow`),
+                           # site.ts (`siteOrigin()`: o endereço do site para tudo)
+    config/queries.ts      # `projectById`, `automationProjectIds` (perguntas à config com nome)
     connectors/types.ts    # interface Connector
     connectors/<id>/       # <id>.client.ts (HTTP) + <id>.oauth.ts + <id>.connector.ts
     oauth/                 # fluxos genéricos: loopback.ts (redirect, RFC 8252), device-flow.ts (RFC 8628)
@@ -155,7 +162,8 @@ src/
     signals/               # github-signals.source.ts (ETag, GraphQL) + task-signals.service.ts,
                            # review-threads.ts (aba Revisão) + review-action.ts (`review_snapshot`)
     db/database.ts         # SQLite (node:sqlite) + migrações por PRAGMA user_version
-    board/                 # board.store.ts (SQLite), write-queue.ts, board.service.ts
+    board/                 # board.store.ts (SQLite), write-queue.ts (criada pelo board.service.ts),
+                           # board.service.ts, stage-entry.ts (`enterStage`: ordem fixa da entrada)
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
     alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts
     overview/              # 6D: overview.service.ts (agrega stores/caches), badge.ts (ícone do app)
@@ -345,8 +353,8 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   propriedade vêm codificados; sem como validar sem a API real).
 - OAuth só enxerga o que foi escolhido na autorização: 404/403 em conexão OAuth vira
   `canReconnect` ("Reconectar com Notion").
-- Config de build: `MAIN_VITE_NOTION_OAUTH_CLIENT_ID` e `MAIN_VITE_NOTION_OAUTH_BROKER_URL`
-  (`.env.example`; `.env.e2e` só para o E2E). Sem elas, OAuth fica indisponível.
+- Config de build: `MAIN_VITE_NOTION_OAUTH_CLIENT_ID` e `MAIN_VITE_SITE_URL` (o intermediário é
+  `<site>/notion/*`; `.env.example`; `.env.e2e` só para o E2E). Sem elas, OAuth fica indisponível.
 
 ## GitHub
 
@@ -384,6 +392,11 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - **Branch ao vivo:** `HeadWatcher` observa o diretório de `git rev-parse --absolute-git-dir`
   (cobre worktrees) com `fs.watch` + debounce 300 ms; fallback para polling. O main emite
   `projects:branch-changed { projectId, branch }`; o preload expõe `onBranchChanged() → unsubscribe`.
+  Os watchers ligam no `start()` da composição (`ProjectsService.watch()`) e acompanham projeto
+  adicionado/reapontado/removido; `list()` nunca liga nem desliga watcher. No main, quem ouve assina
+  `projects.onBranchChanged(listener)`.
+- **Carga da config:** quem cria o `ConfigStore` carrega (`configReady` na composição; o IPC espera
+  `ready`); o aviso de carga fica em `ConfigStore.loadWarning`.
 - **Remover** só tira do `orkio-config.json`; nunca toca em arquivos do usuário.
 - **Config não secreta:** sempre via `ConfigStore` (nada de `fs.writeFile` direto). Mudou o
   formato? Suba `ORKIO_CONFIG_VERSION` e escreva a migração `v → v+1` com teste.
@@ -497,7 +510,12 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
 - `NotionWriteQueue`: uma pendência por tarefa (a última vence; o rollback é o da primeira),
   calculada contra os últimos valores conhecidos do Notion (mover e voltar cancela). Transitório
   (rede/5xx/429/sem conexão) → backoff 1 s…5 min sem limite; 400/403/404 → rollback + evento.
-  Retoma ao abrir o app. Resultado ao renderer por `board:sync-changed` (`onSyncChanged`).
+  Retoma ao abrir o app. Resultado ao renderer por `board:sync-changed` (`onSyncChanged`). A fila
+  nasce no construtor do `BoardService` (`board.writes`; `start`/`stop` ficam com a composição).
+- **Entrada na etapa:** toda mudança de etapa local (manual, automação, orquestrador, reconciliação,
+  recusa do Notion, remoção de etapa) chama `enterStage(change)` depois de gravar o evento e dentro
+  da mesma transação; a ordem (orquestrador → regra da coluna → fluxo da coluna) mora em
+  `createEnterStage` (`board/stage-entry.ts`), a mesma função que o `FlowRunner` usa.
 - "Etapa Orkio": select existente (opções faltando só com confirmação) ou criar via
   `PATCH /v1/data_sources/{id}` (só com confirmação explícita). "Bloqueada": local; opcionalmente
   sincronizada com um checkbox existente (aí o Notion manda na reconciliação).
@@ -522,9 +540,11 @@ blockedProperty, updatedAt }`. Template: Prioridades→"Prioridades", Em andamen
   motivo; o evento é consumido (não reaplica ao despausar).
 - Regras em `boards[projectId].rules` (`defaultRules` ao criar o quadro e na migração v3→v4,
   etapas pelo nome; etapa ausente → regra desligada). Pausa global em `automation.paused`.
-- Execução: `BoardService.applyAutomationMove` é o mesmo caminho do manual (`source:'automation'`,
-  detalhe com `ruleId`, evento e `pr {number, owner, repo}`). Chave + estado + escrita pendente +
-  snapshot numa transação: nunca repete, nunca perde (Notion fora → pendente).
+- Execução: `BoardService.applyAutomationMove(tx, …)` é o mesmo caminho do manual
+  (`source:'automation'`, detalhe com `ruleId`, evento e `pr {number, owner, repo}`). Pede o `Tx` de
+  `store.transaction((tx) => …)` no tipo: chave + estado + escrita pendente + snapshot numa
+  transação, nunca repete, nunca perde (Notion fora → pendente). Repositório do github.com sempre
+  por `githubRepoOf(project)` (`shared/projects.ts`: verificado E host github.com).
 - Agendador (`AutomationScheduler`): projetos com quadro e vínculo; ciclo ao abrir e a cada ~60 s
   (±10%); erro/rate limit → backoff 2^n × 60 s até 15 min; `for-each-ref` local a cada 5 s e
   `HeadWatcher` (via `onBranchChanged`) → ciclo imediato. "Atualizar" no quadro = `runNow` (force).
@@ -773,7 +793,8 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
     worktree/branch/limite de paralelismo); execução manual do Claude Code fica bloqueada com
     fluxo ativo. Briefing montado uma vez por fluxo, só em memória (`flow_json` guarda a cópia do
     fluxo; `state_json` só variáveis, visitas e resultados).
-  - `on_enter`: `BoardService.onStageChanged` com a origem; dispara só com `manual`/`automation`
+  - `on_enter`: entrada na etapa (`enterStage`, `board/stage-entry.ts`) com a origem; dispara só
+    com `manual`/`automation`
     (nunca `notion`, `rollback` ou `stage_removed`). "Rodar fluxo" no painel = fluxo ligado à
     etapa atual.
   - Reabrir o app: gate continua em gate; passo rodando (ou entre passos) vira `interrompido`
@@ -851,8 +872,8 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   que faltam e troca as cópias de mesmo id que diferem do modelo, comparadas sem depender da ordem
   das chaves, **guardando antes a cópia atual** como `<id>-anterior` (`-anterior-2`…), "<nome>
   (cópia anterior)", sem coluna; outros ids nunca mudam).
-  A migração roda no `ConfigStore` (sem banco): avisa por `onMigrationNote` e o `index.ts` grava em
-  `config_events` (autor "Orkio (atualização)") quando o banco abre.
+  A migração roda no `ConfigStore` (sem banco): avisa por `onMigrationNote` e o `start()` da
+  composição grava em `config_events` (autor "Orkio (atualização)").
 - **Execução:** cartão de perguntas com várias por vez, múltipla escolha e "Outro" (texto livre);
   com Docker no projeto, 1 fluxo Alva por vez (configurável até 4); hooks do projeto viram uma linha
   "Hook do projeto rodou" no log (formato do evento não confirmado, leitura tolerante); Detalhes →
@@ -915,8 +936,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - **Etapa:** automação que move a tarefa durante um passo de entrega (a PR aberta pelo `/pr`) não
   interrompe o fluxo: ele deixa de acompanhar a etapa e segue. Se quem moveu foi o
   `publish_review` (`Persisted.detachedFrom`), ao terminar `done` a entrada na etapa nova passa pelo
-  caminho de sempre (`FlowRunnerDeps.stageEntered`: orquestrador → regra da coluna → fluxo da
-  coluna), para o "comentários da PR" começar em Revisado; os outros passos de entrega (ex.: `/pr`
+  caminho de sempre (`FlowRunnerDeps.enterStage`, a mesma do quadro: orquestrador → regra da
+  coluna → fluxo da coluna), para o "comentários da PR" começar em Revisado; os outros passos de entrega (ex.: `/pr`
   → Revisando) continuam com o orquestrador (`carried_in`).
 - **Histórico:** evento `delivery` (`action`: push, pr_create, pr_edit, pr_comment, pr_ready,
   thread_reply, thread_resolve, review_request, review_post; `by`: orkio/claude) com owner/repo/branch
@@ -1043,7 +1064,7 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   `agent_daily_limit`; "Retomar" libera uma vez (`limitBypass`).
 - **Atribuição** (SQLite v8 `agent_assignments`, local, não vai ao Notion): no painel ("Agente") ou
   por regra da coluna (`orkio-config` v10 → `agents[projectId].assignOnEnter`, tela Agentes). A regra
-  roda dentro da transação do movimento (antes do `flowRunner.onStageChanged`), só com
+  roda dentro da transação do movimento (`enterStage`: depois do orquestrador, antes do fluxo), só com
   `manual`/`automation`, só se a tarefa não tiver agente nem fluxo ativo. Trocar com fluxo ativo é
   recusado. Histórico: `agent_assigned`/`agent_unassigned` (com o **nome** do agente; o orquestrador
   usa o catálogo dos embutidos mesmo antes da primeira rodada, `agentNameFallback`), "por X" em
@@ -1098,7 +1119,7 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   dele. CI: `.github/workflows/ci.yml` (ignora `site/**`) e `site.yml` (lint, typecheck, test,
   build e o E2E `@site`). Deploy pela Vercel (Root Directory `site`, Ignored Build Step).
 - **Intermediário OAuth** (`site/lib/notion-broker.ts`, rotas em `site/app/notion/*`, runtime Node):
-  mesmo contrato do `broker/` (o app só troca `MAIN_VITE_NOTION_OAUTH_BROKER_URL`). Nada de
+  mesmo contrato do `broker/` (o app usa `<MAIN_VITE_SITE_URL>/notion/*`). Nada de
   `console.*` (ESLint + teste). Limitador em memória por IP (20/min) só como defesa mínima; a regra
   real é o Rate Limiting do Firewall da Vercel. `NOTION_TOKEN_URL` só vale fora da Vercel e em
   `http://127.0.0.1` (E2E).
@@ -1116,8 +1137,9 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   `connectors/github/review-poster.ts` (`GitHubReviewPoster`: APPROVE nunca, redação, limites,
   comentários conferidos contra o diff da PR) e o POST ao site feito **dentro do conector**
   (`GitHubConnector.postReviewViaOrkioSite`; o token do usuário nunca vai a um callback). Origem
-  (`connectors/github/orkio-site.ts`, injetada no conector em `index.ts`): `MAIN_VITE_SITE_URL`,
-  senão a do intermediário do Notion; só https, `http://127.0.0.1` só em build de E2E. Passo a passo: `docs/github-app.md`.
+  (`platform/site.ts`, `siteOrigin()`, injetada no conector pela composição): `MAIN_VITE_SITE_URL`,
+  a mesma do intermediário do Notion e dos links do Sobre; só https, `http://127.0.0.1` só fora de
+  produção (dev e E2E; o conector confere de novo). Passo a passo: `docs/github-app.md`.
   `POST /github/installation` (`{ owner, repo, userToken }` → `{ installed, installUrl }`): só
   leitura; confere com o token do usuário que ele enxerga o repo (senão `forbidden`, para não
   revelar repositório privado) e consulta a instalação com o JWT, sem criar token; 30/min por IP.
@@ -1152,7 +1174,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   `status = 'running'` (passo rodando ou entre passos) e escritas pendentes no Notion. Gate/pausa não
   contam (sobrevivem a reabrir). `install('if_idle')` devolve a lista; "Atualizar quando terminar"
   consulta a cada 2 s e instala depois de 5 s seguidos ocioso; "agora mesmo assim" = `shutdownWork`
-  (mesmo caminho do `before-quit`: `dispose` do fluxo, `cancelAll`, espera até 12 s) e
+  (= `stop({ waitMs: 12_000 })` da composição, o mesmo do `before-quit` com `waitMs: 0`: `dispose`
+  do fluxo, `cancelAll`, espera, e o resto) e
   `quitAndInstall(false, true)`.
 - **Canal:** `orkio-config` v9 → `updates.channel` (`stable`/`beta` → `allowPrerelease`);
   `allowDowngrade` sempre falso (voltar a Estável numa beta mostra aviso e espera a próxima estável).
@@ -1166,8 +1189,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   sem tocar nos arquivos (`test/update-data-compat.test.ts`); o updater funciona mesmo assim.
 - **UI:** `UpdateBanner` no topo do conteúdo (Banner `info`, "Agora não" na sessão), `InstallControls`
   (lista do que está rodando + escolhas, inline), Configurações > Atualizações (versão, canal,
-  última verificação, status) e Sobre (links do site a partir de `MAIN_VITE_SITE_URL` ou da origem
-  https do intermediário; sem isso, sem links).
+  última verificação, status) e Sobre (links do site a partir de `siteOrigin()`, só https sem
+  porta; sem isso, sem links).
 
 ## Empacotamento e releases (Etapa 6B)
 

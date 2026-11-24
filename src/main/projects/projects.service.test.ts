@@ -74,15 +74,21 @@ describe('ProjectsService', () => {
   }[]
   let ids: number
 
+  /** A carga da config é de quem cria o store (no app, a composição). */
+  const loaded = new WeakMap<ProjectsService, ReturnType<typeof createOrkioConfigStore>>()
+  async function load(service: ProjectsService): Promise<void> {
+    await loaded.get(service)!.load()
+  }
+
   function makeService(overrides: { git?: ProjectsServiceDeps['git'] } = {}): ProjectsService {
-    return new ProjectsService({
-      store: createOrkioConfigStore(configFile),
+    const store = createOrkioConfigStore(configFile)
+    const service = new ProjectsService({
+      store,
       git: overrides.git ?? fakeGit(repos),
       github,
       pickFolder: vi.fn(async () => picks.shift() ?? null),
       folderExists: async (path) => existing.has(path),
       realpath: async (path) => path,
-      onBranchChanged: (e) => events.push(e),
       createHeadWatcher: (gitDir, handlers) => {
         const entry = { gitDir, onBranchChange: handlers.onBranchChange, stop: vi.fn() }
         watchers.push(entry)
@@ -91,6 +97,9 @@ describe('ProjectsService', () => {
       now: () => new Date('2026-11-19T12:00:00.000Z'),
       newId: () => `id-${++ids}`
     })
+    service.onBranchChanged((e) => events.push(e))
+    loaded.set(service, store)
+    return service
   }
 
   async function select(service: ProjectsService, folder: string): Promise<ProjectSelection> {
@@ -140,7 +149,7 @@ describe('ProjectsService', () => {
   describe('adicionar projeto', () => {
     it('subpasta → usa a raiz, avisa, e cria com owner/repo do GitHub', async () => {
       const service = makeService()
-      await service.init()
+      await load(service)
 
       const selection = await select(service, '/code/orkio/src/main')
       expect(selection).toMatchObject({
@@ -195,7 +204,7 @@ describe('ProjectsService', () => {
     it('fork: escolher o upstream cria o projeto apontando para ele', async () => {
       github.getRepository.mockResolvedValueOnce({ ...ORKIO_REPO, owner: 'acme', canPush: false })
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/orkio')
       const result = await service.create({
         selectionId: selection.selectionId,
@@ -215,14 +224,14 @@ describe('ProjectsService', () => {
 
     it('cancelar o seletor de pasta → cancelled', async () => {
       const service = makeService()
-      await service.init()
+      await load(service)
       expect(await service.pickFolder()).toEqual({ ok: false, cancelled: true })
     })
 
     it('pasta que não é repositório git', async () => {
       existing.add('/tmp/solta')
       const service = makeService()
-      await service.init()
+      await load(service)
       picks.push('/tmp/solta')
       expect(await errorOf(service.pickFolder())).toEqual({
         code: 'not_a_repo',
@@ -232,7 +241,7 @@ describe('ProjectsService', () => {
 
     it('git não encontrado no PATH', async () => {
       const service = makeService({ git: fakeGit(repos, { gitMissing: true }) })
-      await service.init()
+      await load(service)
       picks.push('/code/orkio')
       expect(await errorOf(service.pickFolder())).toMatchObject({
         code: 'git_not_found',
@@ -243,7 +252,7 @@ describe('ProjectsService', () => {
     it('repositório sem remote', async () => {
       repos['/code/local'] = { remotes: [], branch: 'main', dirty: false }
       const service = makeService()
-      await service.init()
+      await load(service)
       picks.push('/code/local')
       expect(await errorOf(service.pickFolder())).toMatchObject({
         code: 'no_remote',
@@ -258,7 +267,7 @@ describe('ProjectsService', () => {
         dirty: false
       }
       const service = makeService()
-      await service.init()
+      await load(service)
       picks.push('/code/gl')
       expect(await errorOf(service.pickFolder())).toMatchObject({
         code: 'not_github',
@@ -269,7 +278,7 @@ describe('ProjectsService', () => {
     it('GitHub não conectado', async () => {
       github.isConnected.mockResolvedValue(false)
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/orkio')
       expect(
         await errorOf(
@@ -293,7 +302,7 @@ describe('ProjectsService', () => {
         )
       )
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/orkio')
       expect(
         await errorOf(
@@ -315,7 +324,7 @@ describe('ProjectsService', () => {
         })
       )
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/orkio')
       expect(
         await errorOf(
@@ -344,7 +353,7 @@ describe('ProjectsService', () => {
         )
       )
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/orkio')
       expect(
         await errorOf(
@@ -367,7 +376,7 @@ describe('ProjectsService', () => {
     it('repo arquivado → salva, mas avisa', async () => {
       github.getRepository.mockResolvedValueOnce({ ...ORKIO_REPO, archived: true })
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/orkio')
       const result = await service.create({
         selectionId: selection.selectionId,
@@ -386,7 +395,7 @@ describe('ProjectsService', () => {
       existing.add('/code/work')
       github.getRepository.mockResolvedValueOnce({ ...ORKIO_REPO, owner: 'acme', name: 'api' })
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/work')
       expect(selection.candidates[0]).toMatchObject({
         host: 'github-trabalho',
@@ -425,7 +434,7 @@ describe('ProjectsService', () => {
       }
       existing.add('/code/ghe')
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/ghe')
       const result = await service.create({
         selectionId: selection.selectionId,
@@ -450,7 +459,7 @@ describe('ProjectsService', () => {
 
     it('mesma pasta duas vezes → already_added', async () => {
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/orkio')
       await service.create({
         selectionId: selection.selectionId,
@@ -463,7 +472,7 @@ describe('ProjectsService', () => {
 
     it('seleção expirada ou inventada pelo renderer → selection_expired', async () => {
       const service = makeService()
-      await service.init()
+      await load(service)
       expect(
         await errorOf(
           service.create({ selectionId: 'id-falso', remoteName: 'origin', hostConfirmed: false })
@@ -475,7 +484,7 @@ describe('ProjectsService', () => {
   describe('saúde, reapontar e remover', () => {
     async function withProject(): Promise<{ service: ProjectsService; id: string }> {
       const service = makeService()
-      await service.init()
+      await load(service)
       const selection = await select(service, '/code/orkio')
       const result = await service.create({
         selectionId: selection.selectionId,
@@ -489,7 +498,7 @@ describe('ProjectsService', () => {
     it('reabrir o app: lista do disco com branch/sujeira e revalida no GitHub', async () => {
       await withProject()
       const reopened = makeService()
-      await reopened.init()
+      await load(reopened)
 
       const quick = await reopened.list()
       expect(quick.projects[0]).toMatchObject({
@@ -509,10 +518,8 @@ describe('ProjectsService', () => {
       )
     })
 
-    it('pasta sumiu → missing_folder e watcher parado', async () => {
+    it('pasta sumiu → missing_folder', async () => {
       const { service } = await withProject()
-      await service.list()
-      expect(watchers).toHaveLength(1)
       existing.delete('/code/orkio')
 
       const result = await service.list()
@@ -523,7 +530,35 @@ describe('ProjectsService', () => {
           message: expect.stringContaining('Pasta não encontrada')
         }
       })
+    })
+
+    // Antes, quem ligava os HeadWatchers era `list()` (qualquer leitura, inclusive da visão geral).
+    it('HeadWatchers: só depois de watch(); listar não liga nem desliga', async () => {
+      const { service, id } = await withProject()
+      await service.list()
+      expect(watchers).toEqual([])
+      await service.watch()
+      expect(watchers.map((w) => w.gitDir)).toEqual(['/code/orkio/.git'])
+      // Projeto adicionado depois de watch() ganha o seu na hora.
+      repos['/code/outro'] = {
+        remotes: [{ name: 'origin', url: 'https://github.com/acme/outro.git' }],
+        branch: 'main',
+        dirty: false
+      }
+      existing.add('/code/outro')
+      const selection = await select(service, '/code/outro')
+      await service.create({
+        selectionId: selection.selectionId,
+        remoteName: 'origin',
+        hostConfirmed: false
+      })
+      expect(watchers.map((w) => w.gitDir)).toEqual(['/code/orkio/.git', '/code/outro/.git'])
+      await service.list()
+      expect(watchers).toHaveLength(2)
+      expect(await service.remove(id)).toEqual({ ok: true })
       expect(watchers[0]!.stop).toHaveBeenCalled()
+      service.dispose()
+      expect(watchers[1]!.stop).toHaveBeenCalled()
     })
 
     it('pasta agora é de outro repositório → repo_mismatch', async () => {
@@ -591,7 +626,7 @@ describe('ProjectsService', () => {
 
     it('remover só tira do Orkio', async () => {
       const { service, id } = await withProject()
-      await service.list()
+      await service.watch()
       expect(await service.remove(id)).toEqual({ ok: true })
       expect((await service.list()).projects).toEqual([])
       expect(existing.has('/code/orkio')).toBe(true)
@@ -601,7 +636,7 @@ describe('ProjectsService', () => {
 
     it('mudança de branch vira evento com o id do projeto', async () => {
       const { service, id } = await withProject()
-      await service.list()
+      await service.watch()
       expect(watchers[0]!.gitDir).toBe('/code/orkio/.git')
       watchers[0]!.onBranchChange('ORK-142/sync')
       expect(events).toEqual([{ projectId: id, branch: 'ORK-142/sync' }])
@@ -610,7 +645,7 @@ describe('ProjectsService', () => {
     it('config corrompida: aviso aparece na lista', async () => {
       await import('node:fs/promises').then((fs) => fs.writeFile(configFile, '{oops'))
       const service = makeService()
-      await service.init()
+      await load(service)
       const result = await service.list()
       expect(result.projects).toEqual([])
       expect(result.warning).toMatch(/corrompidas/)

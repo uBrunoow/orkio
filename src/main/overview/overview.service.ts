@@ -40,6 +40,7 @@ import type { OrkioConfig } from '../config/orkio-config'
 import type { Db, SqlValue } from '../db/database'
 import type { NotionTask, NotionWorkspaceStatus } from '../../shared/notion'
 import type { ProjectView } from '../../shared/projects'
+import { automationProjectIds } from '../config/queries'
 
 export interface OverviewDeps {
   db: Db
@@ -233,9 +234,7 @@ export class OverviewService {
   /** "Atualizar": ciclo das automações de cada projeto com quadro e vínculo (em paralelo). */
   async refresh(): Promise<OverviewSnapshot> {
     const config = this.deps.config()
-    const ids = config.projects
-      .filter((p) => p.notionProject && config.boards[p.id])
-      .map((p) => p.id)
+    const ids = automationProjectIds(config)
     await Promise.all(ids.map((id) => this.deps.refresh(id).catch(() => undefined)))
     return this.snapshot()
   }

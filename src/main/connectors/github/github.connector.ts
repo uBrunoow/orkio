@@ -16,7 +16,7 @@ import {
   type GitHubUser
 } from './github.client'
 import type { GitHubDeviceApi, GitHubOAuthToken } from './github.oauth'
-import { isAllowedOrkioSiteOrigin } from './orkio-site'
+import { isAllowedSiteOrigin } from '../../platform/site'
 import type { AuthOptions, ConnectedAccount, DeviceFlowInfo } from '../../../shared/connection'
 import { isLogin, isOwner, isRepo, isTeamSlug } from '../../../shared/github-names'
 import type { PublishReviewEvent } from '../../../shared/review-publish'
@@ -68,12 +68,12 @@ export interface GitHubConnectorDeps {
   fetch?: typeof fetch
   siteTimeoutMs?: number
   /**
-   * Origem do site do Orkio (`readOrkioSiteOrigin`), fixada na construção: é o ÚNICO destino
+   * Origem do site do Orkio (`siteOrigin()`, `platform/site.ts`), fixada na construção: é o ÚNICO destino
    * possível do token do usuário fora do GitHub. `null`/ausente → revisão como orkio[bot]
    * indisponível (`not_configured`).
    */
   siteOrigin?: string | null
-  /** `http://127.0.0.1` como site do Orkio: só em build de E2E. */
+  /** `http://127.0.0.1` como site do Orkio: nunca em build de produção (`allowsLoopbackSite`). */
   allowLoopbackSite?: boolean
 }
 
@@ -239,7 +239,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
   /** O build tem a origem do site do Orkio (revisão como orkio[bot])? Sem rede. */
   hasOrkioSite(): boolean {
     const origin = this.deps.siteOrigin
-    return Boolean(origin && isAllowedOrkioSiteOrigin(origin, this.deps.allowLoopbackSite === true))
+    return Boolean(origin && isAllowedSiteOrigin(origin, this.deps.allowLoopbackSite === true))
   }
 
   /** Há conta conectada (credencial salva e legível)? Sem rede. */
@@ -323,7 +323,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
    * (`POST <origem>/github/review`), que confere o push com o token do usuário e posta com o
    * GitHub App. Única saída do token do usuário para fora do GitHub: a requisição é montada AQUI
    * (nunca entregue a um callback), só para a origem fixada na construção (`deps.siteOrigin`,
-   * conferida por `isAllowedOrkioSiteOrigin`: https; http://127.0.0.1 só em build de E2E), sem
+   * conferida por `isAllowedSiteOrigin`: https; http://127.0.0.1 nunca em produção), sem
    * seguir redirecionamento, com timeout que cobre a leitura do corpo. Devolve só o status e o JSON
    * da resposta do site (que nunca ecoa o token).
    * Erros: `not_configured` (sem origem ou origem recusada), `not_connected`, `network`, `timeout`.
@@ -358,8 +358,8 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
   /**
    * POST ao site do PRÓPRIO Orkio com o token do usuário no corpo. Única saída do token para fora
    * do GitHub: a requisição é montada AQUI (nunca entregue a um callback), só para a origem fixada
-   * na construção (`deps.siteOrigin`, conferida por `isAllowedOrkioSiteOrigin`: https;
-   * http://127.0.0.1 só em build de E2E), sem seguir redirecionamento, com timeout que cobre a
+   * na construção (`deps.siteOrigin`, conferida por `isAllowedSiteOrigin`: https;
+   * http://127.0.0.1 nunca em produção), sem seguir redirecionamento, com timeout que cobre a
    * leitura do corpo. Devolve só o status e o JSON da resposta do site (que nunca ecoa o token).
    * Erros: `not_configured` (sem origem ou origem recusada), `not_connected`, `network`, `timeout`.
    */
@@ -369,10 +369,7 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     timeoutOverrideMs?: number
   ): Promise<OrkioSiteResponse> {
     const siteOrigin = this.deps.siteOrigin
-    if (
-      !siteOrigin ||
-      !isAllowedOrkioSiteOrigin(siteOrigin, this.deps.allowLoopbackSite === true)
-    ) {
+    if (!siteOrigin || !isAllowedSiteOrigin(siteOrigin, this.deps.allowLoopbackSite === true)) {
       throw new GitHubApiError(
         'not_configured',
         'Este app não sabe o endereço do site do Orkio (MAIN_VITE_SITE_URL não definido no build).'

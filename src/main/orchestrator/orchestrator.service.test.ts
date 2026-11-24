@@ -183,7 +183,7 @@ beforeEach(async () => {
           ok: true,
           value: { cards, config: {} } as unknown as BoardView
         }) as Result<BoardView>,
-      applyAutomationMove: (projectId, taskId, stageId, event) => {
+      applyAutomationMove: (_tx, projectId, taskId, stageId, event) => {
         const from = cards.find((c) => c.taskId === taskId)?.stageId ?? null
         if (from === stageId) return false
         place(taskId, stageId, new Date(clock).toISOString())

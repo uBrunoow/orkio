@@ -49,7 +49,7 @@ aceita apenas `http://127.0.0.1`.
 
 ### Teste com o app
 
-Com o site rodando local, o app em dev usa `MAIN_VITE_NOTION_OAUTH_BROKER_URL=http://127.0.0.1:3000`.
+Com o site rodando local, o app em dev usa `MAIN_VITE_SITE_URL=http://127.0.0.1:3000`.
 O E2E `@site` (`pnpm e2e --grep @site`, depois de `pnpm --dir site build`) sobe o `next start`, um
 Notion simulado em HTTP local e faz o login e a renovação pelo app.
 
@@ -104,7 +104,7 @@ stdin): `docs/github-app.md`.
    - `SITE_URL` = `https://<seu domínio>` (links absolutos do Open Graph)
    - **Nunca** defina `NOTION_TOKEN_URL` na Vercel (é só para o E2E local e é ignorada lá).
 4. **Domínio:** _Settings → Domains_ → adicione o domínio e siga os registros DNS indicados. Use o
-   domínio final em `MAIN_VITE_NOTION_OAUTH_BROKER_URL` no build de release do app.
+   domínio final em `MAIN_VITE_SITE_URL` no build de release do app.
 5. **Firewall** (_Firewall → Configure → New Rule_):
    - Nome: `Intermediário OAuth`; _If_ **Request Path** _starts with_ `/notion/`;
    - _Then_ **Rate Limit**: 20 requisições / 60 s por **IP**, ação **Deny (429)**.

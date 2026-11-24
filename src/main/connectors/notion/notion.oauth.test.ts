@@ -9,7 +9,7 @@ import {
 
 const ACCESS = 'ntn_ACCESS_TOKEN_SHOULD_NEVER_LEAK'
 const REFRESH = 'nrt_REFRESH_TOKEN_SHOULD_NEVER_LEAK'
-const CONFIG = { clientId: 'client-123', brokerUrl: 'https://broker.example' }
+const CONFIG = { clientId: 'client-123', siteOrigin: 'https://broker.example' }
 
 const TOKEN_RESPONSE = {
   access_token: ACCESS,
@@ -38,50 +38,26 @@ function expectNoLeak(value: unknown): void {
 }
 
 describe('readNotionOAuthConfig', () => {
-  it('lê client ID e URL https do intermediário', () => {
-    expect(
-      readNotionOAuthConfig({
-        MAIN_VITE_NOTION_OAUTH_CLIENT_ID: ' client-123 ',
-        MAIN_VITE_NOTION_OAUTH_BROKER_URL: 'https://orkio-oauth.example.workers.dev/'
-      })
-    ).toEqual({ clientId: 'client-123', brokerUrl: 'https://orkio-oauth.example.workers.dev' })
+  it('client ID + origem do site (o intermediário fica em <site>/notion/*)', () => {
+    expect(readNotionOAuthConfig(' client-123 ', 'https://orkio.dev')).toEqual({
+      clientId: 'client-123',
+      siteOrigin: 'https://orkio.dev'
+    })
+    expect(readNotionOAuthConfig('c', 'http://127.0.0.1:3000')).toEqual({
+      clientId: 'c',
+      siteOrigin: 'http://127.0.0.1:3000'
+    })
   })
 
-  it('aceita http só em loopback (dev)', () => {
-    expect(
-      readNotionOAuthConfig({
-        MAIN_VITE_NOTION_OAUTH_CLIENT_ID: 'c',
-        MAIN_VITE_NOTION_OAUTH_BROKER_URL: 'http://127.0.0.1:8787'
-      })
-    ).toEqual({ clientId: 'c', brokerUrl: 'http://127.0.0.1:8787' })
+  it('site igual ao servidor de retorno do app → null (config trocada)', () => {
+    expect(readNotionOAuthConfig('c', 'http://127.0.0.1:47821')).toBeNull()
+    expect(readNotionOAuthConfig('c', new URL(NOTION_OAUTH_REDIRECT_URI).origin)).toBeNull()
   })
 
-  it('URL do intermediário igual ao servidor de retorno do app → null (config trocada)', () => {
-    for (const url of [
-      NOTION_OAUTH_REDIRECT_URI,
-      'http://localhost:47821',
-      'http://127.0.0.1:47821/notion'
-    ]) {
-      expect(
-        readNotionOAuthConfig({
-          MAIN_VITE_NOTION_OAUTH_CLIENT_ID: 'c',
-          MAIN_VITE_NOTION_OAUTH_BROKER_URL: url
-        })
-      ).toBeNull()
-    }
-  })
-
-  it('sem config ou com URL insegura → null (OAuth indisponível)', () => {
-    expect(readNotionOAuthConfig({})).toBeNull()
-    expect(readNotionOAuthConfig({ MAIN_VITE_NOTION_OAUTH_CLIENT_ID: 'c' })).toBeNull()
-    for (const url of ['http://broker.example', 'ftp://x', 'lixo', 'https://u:p@x.com']) {
-      expect(
-        readNotionOAuthConfig({
-          MAIN_VITE_NOTION_OAUTH_CLIENT_ID: 'c',
-          MAIN_VITE_NOTION_OAUTH_BROKER_URL: url
-        })
-      ).toBeNull()
-    }
+  it('sem client ID ou sem site → null (OAuth indisponível)', () => {
+    expect(readNotionOAuthConfig(undefined, 'https://orkio.dev')).toBeNull()
+    expect(readNotionOAuthConfig('c', null)).toBeNull()
+    expect(readNotionOAuthConfig('c d', 'https://orkio.dev')).toBeNull()
   })
 })
 
@@ -189,7 +165,7 @@ describe('createNotionOAuthBroker', () => {
     expectNoLeak(networkError)
 
     const localSite = createNotionOAuthBroker(
-      { clientId: 'c', brokerUrl: 'http://127.0.0.1:3000' },
+      { clientId: 'c', siteOrigin: 'http://127.0.0.1:3000' },
       {
         fetch: async () => {
           throw new TypeError('fetch failed')

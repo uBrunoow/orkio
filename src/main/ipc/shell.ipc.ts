@@ -51,7 +51,7 @@ export const EXTERNAL_URL_RULES: readonly ExternalUrlRule[] = [
   { host: 'github.com', pathPattern: RELEASES_PATH_PATTERN }
 ]
 
-/** Regras do site do Orkio (Configurações > Sobre), a partir do endereço do build. */
+/** Regras do site do Orkio (Configurações > Sobre), a partir de `siteOrigin()`. */
 export function siteUrlRules(siteUrl: string | null): ExternalUrlRule[] {
   if (!siteUrl) return []
   try {
@@ -60,6 +60,14 @@ export function siteUrlRules(siteUrl: string | null): ExternalUrlRule[] {
   } catch {
     return []
   }
+}
+
+/** Links de Configurações > Sobre: só quando o renderer pode abri-los (mesma regra acima). */
+export function siteLinks(
+  origin: string | null
+): { site: string; privacy: string; terms: string } | null {
+  if (!origin || siteUrlRules(origin).length === 0) return null
+  return { site: origin, privacy: `${origin}/privacidade`, terms: `${origin}/termos` }
 }
 
 export function isAllowedExternalUrl(

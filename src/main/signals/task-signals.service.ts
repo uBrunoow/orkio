@@ -20,6 +20,8 @@ import { GitHubRepoSignals, type GitHubSignalsApi } from './github-signals.sourc
 import type { Result } from '../../shared/result'
 import type { NotionTasksResult } from '../../shared/notion'
 import type { ProjectAction } from '../../shared/projects'
+import { projectById } from '../config/queries'
+import { githubRepoOf } from '../../shared/projects'
 
 export interface SignalsGitHub extends GitHubSignalsApi {
   isConnected(): Promise<boolean>
@@ -71,7 +73,7 @@ export class TaskSignalsService {
     projectId: string,
     options: { force?: boolean } = {}
   ): Promise<Result<TaskSignalsResult>> {
-    const project = this.deps.store.get().projects.find((p) => p.id === projectId)
+    const project = projectById(this.deps.store.get(), projectId)
     if (!project) {
       return { ok: false, error: { code: 'not_found', message: SIGNALS_MESSAGES.projectNotFound } }
     }
@@ -101,11 +103,11 @@ export class TaskSignalsService {
     let remoteBranches: string[] | null = null
     let pulls: PullRequestSummary[] | null = null
     let details = new Map()
-    const repo = project.repo
-    if (!repo) {
+    const repo = githubRepoOf(project)
+    if (!project.repo) {
       github = 'no_repo'
       messages.push(SIGNALS_MESSAGES.noRepo)
-    } else if (repo.host.toLowerCase() !== 'github.com' && !repo.verified) {
+    } else if (!repo) {
       github = 'enterprise'
       messages.push(SIGNALS_MESSAGES.enterprise)
     } else if (!(await this.deps.github.isConnected().catch(() => false))) {
@@ -176,7 +178,7 @@ export class TaskSignalsService {
 
   /** PRs do repositório no último resultado do GitHub (abertas e fechadas há até 30 dias). */
   cachedPulls(projectId: string): PullRequestSummary[] | null {
-    const repo = this.deps.store.get().projects.find((p) => p.id === projectId)?.repo
+    const repo = githubRepoOf(projectById(this.deps.store.get(), projectId))
     if (!repo) return null
     return (
       this.remotes.get(`${projectId}:${repo.owner}/${repo.name}`.toLowerCase())?.last?.pulls ?? null
@@ -185,7 +187,7 @@ export class TaskSignalsService {
 
   /** PR aberta (ou rascunho) mais recente da branch, pelo último resultado conhecido (sem rede). */
   prForBranch(projectId: string, branch: string): PullRequestSummary | null {
-    const repo = this.deps.store.get().projects.find((p) => p.id === projectId)?.repo
+    const repo = githubRepoOf(projectById(this.deps.store.get(), projectId))
     if (!repo) return null
     const last = this.remotes.get(`${projectId}:${repo.owner}/${repo.name}`.toLowerCase())?.last
     return (

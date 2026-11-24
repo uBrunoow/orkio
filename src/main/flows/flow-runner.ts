@@ -203,11 +203,12 @@ export interface FlowRunnerDeps {
   /** 8B: um fluxo terminou (o orquestrador decide se a tarefa segue). */
   onFinished?: (ref: { projectId: string; taskId: string; result: RunRow['result'] }) => void
   /**
-   * Um fluxo que o `publish_review` tirou da etapa (a revisão publicada moveu a tarefa) terminou: a entrada na etapa onde a tarefa está agora passa pelo caminho de sempre
-   * (orquestrador, regra da coluna, fluxo da coluna). Sem isso, o fluxo da coluna nova nunca
-   * começaria, porque ela foi alcançada com outro fluxo ainda ativo.
+   * A entrada numa etapa (`createEnterStage`: orquestrador, regra da coluna, fluxo da coluna), a
+   * mesma que o quadro chama. Usada quando um fluxo que o `publish_review` tirou da etapa (a
+   * revisão publicada moveu a tarefa) termina: sem isso, o fluxo da coluna nova nunca começaria,
+   * porque ela foi alcançada com outro fluxo ainda ativo.
    */
-  stageEntered?: (change: StageChange) => void
+  enterStage(change: StageChange): void
   now?: () => Date
   newId?: () => string
 }
@@ -269,7 +270,7 @@ interface Persisted {
   pendingConfirm?: ActionConfirm | null
   /** 8A: você retomou depois do limite diário do agente; vale para o próximo comando. */
   limitBypass?: boolean
-  /** Etapa de onde o `publish_review` tirou o fluxo (ver `stageEntered`). */
+  /** Etapa de onde o `publish_review` tirou o fluxo (ver `enterStage`). */
   detachedFrom?: string | null
   /** Resposta ao Claude no passo parado; o próximo início desse passo a manda na mesma sessão. */
   pendingReply?: { stepId: string; text: string } | null
@@ -354,7 +355,7 @@ export class FlowRunner {
 
   // ---------- Gatilhos ----------
 
-  /** Do BoardService (dentro da transação): adia o trabalho. */
+  /** Da entrada na etapa (`enterStage`, dentro da transação do quadro): adia o trabalho. */
   onStageChanged(change: StageChange): void {
     setImmediate(() => void this.handleStageChange(change))
   }
@@ -1512,15 +1513,13 @@ export class FlowRunner {
     if (status === 'finished' && result === 'done' && from) {
       const to = this.deps.currentStage(row.project_id, row.task_page_id)
       if (to && to !== from) {
-        const change: StageChange = {
+        this.deps.enterStage({
           projectId: row.project_id,
           taskId: row.task_page_id,
           from,
           to,
           source: 'automation'
-        }
-        if (this.deps.stageEntered) this.deps.stageEntered(change)
-        else this.onStageChanged(change)
+        })
       }
     }
   }

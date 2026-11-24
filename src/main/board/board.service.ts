@@ -40,7 +40,8 @@ import type { SimplePropertyValue } from '../connectors/notion/notion.schema'
 import type { CachedTasks } from '../notion/notion-workspace.service'
 import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
 import type { BoardStore, PendingWrite } from './board.store'
-import type { NotionWriteQueue } from './write-queue'
+import { NotionWriteQueue, type WriteQueueDeps } from './write-queue'
+import type { Tx } from '../db/database'
 import type { NotionMapping, NotionPropertySummary } from '../../shared/notion'
 import type { Result } from '../../shared/result'
 
@@ -69,7 +70,11 @@ export interface BoardServiceDeps {
   config: ConfigStore<OrkioConfig>
   store: BoardStore
   notion: BoardNotion
-  /** A fila é criada fora (precisa dos callbacks deste serviço): ligue com `attachQueue`. */
+  /**
+   * Fila de escrita no Notion, criada aqui (as respostas dela voltam para este serviço). O token
+   * fica no conector: `updatePage` só repassa.
+   */
+  writes: Omit<WriteQueueDeps, 'store' | 'onSynced' | 'onRejected' | 'onRetry'>
   onSync(event: BoardSyncEvent): void
   now?: () => Date
   newId?: () => string
@@ -78,10 +83,11 @@ export interface BoardServiceDeps {
   /** "Quem" nos eventos de configuração (usuário do sistema operacional). */
   actor?: () => string
   /**
-   * A etapa local de uma tarefa mudou (5A: fluxos). Chamado dentro da transação; quem ouve deve
+   * A etapa local de uma tarefa mudou (`enterStage`, `stage-entry.ts`). Sempre depois de gravar o
+   * evento no histórico e dentro da mesma transação, qualquer que seja a origem; quem ouve deve
    * adiar o trabalho. `source` diz se foi entrada real (manual/automação) ou não.
    */
-  onStageChanged?: (change: StageChange) => void
+  enterStage(change: StageChange): void
 }
 
 export interface StageChange {
@@ -129,7 +135,8 @@ export class BoardService {
   private readonly now: () => Date
   private readonly newId: () => string
   private readonly graceMs: number
-  private queue: NotionWriteQueue | null = null
+  /** Escritas pendentes no Notion (persistidas no SQLite): `start`/`stop` ficam com a composição. */
+  readonly writes: NotionWriteQueue
   /** Últimas tarefas lidas por projeto (mover offline usa os valores conhecidos do Notion). */
   private readonly snapshots = new Map<string, Snapshot>()
   /** Escritas confirmadas há pouco: o Notion pode ainda devolver o valor antigo na consulta. */
@@ -144,10 +151,13 @@ export class BoardService {
     this.now = deps.now ?? (() => new Date())
     this.newId = deps.newId ?? (() => `stage-${crypto.randomUUID()}`)
     this.graceMs = deps.graceMs ?? 30_000
-  }
-
-  attachQueue(queue: NotionWriteQueue): void {
-    this.queue = queue
+    this.writes = new NotionWriteQueue({
+      ...deps.writes,
+      store: deps.store,
+      onSynced: (w) => this.onSynced(w),
+      onRejected: (w, e) => void this.onRejected(w, e),
+      onRetry: (w, e) => this.onRetry(w, e)
+    })
   }
 
   // ---------- Abrir / reconciliar ----------
@@ -254,13 +264,6 @@ export class BoardService {
             detail: null
           })
         } else if (d.from !== d.stageId) {
-          this.deps.onStageChanged?.({
-            projectId,
-            taskId: d.taskId,
-            from: d.from,
-            to: d.stageId,
-            source: 'notion'
-          })
           this.deps.store.addEvent({
             taskPageId: d.taskId,
             projectId,
@@ -270,6 +273,13 @@ export class BoardService {
             fromStage: d.from,
             toStage: d.stageId,
             detail: { status: reconcileTasks.find((t) => t.id === d.taskId)?.status?.name ?? null }
+          })
+          this.deps.enterStage({
+            projectId,
+            taskId: d.taskId,
+            from: d.from,
+            to: d.stageId,
+            source: 'notion'
           })
         }
         if (d.blockedChanged && d.from !== undefined) {
@@ -327,17 +337,19 @@ export class BoardService {
       const moved = this.deps.store.transaction(() =>
         this.applyMove(projectId, taskId, stageId, { source: 'manual' })
       )
-      if (moved) this.queue?.kick()
+      if (moved) this.writes.kick()
       return this.card(projectId, taskId)
     })
   }
 
   /**
-   * Mesmo caminho do movimento manual, para as automações (3B): estado local, evento com a chave
-   * de idempotência e a regra, e a escrita pendente no Notion. Chame dentro de uma transação
-   * (junto com o snapshot e a chave). Devolve se moveu.
+   * Mesmo caminho do movimento manual, para as automações (3B) e o orquestrador (8B): estado
+   * local, evento com a chave de idempotência e a regra, e a escrita pendente no Notion. Pede a
+   * transação de quem chama (`store.transaction((tx) => …)`): o movimento entra junto com o
+   * snapshot e a chave. Devolve se moveu.
    */
   applyAutomationMove(
+    _tx: Tx,
     projectId: string,
     taskId: string,
     stageId: string,
@@ -352,7 +364,7 @@ export class BoardService {
 
   /** Depois de um ciclo de automações: envia as escritas e avisa a tela. */
   flushWrites(): void {
-    this.queue?.kick()
+    this.writes.kick()
   }
 
   /** As tarefas já foram carregadas nesta sessão (necessário para mover)? */
@@ -405,7 +417,7 @@ export class BoardService {
       eventKey: options.eventKey ?? null
     })
     this.syncDesired(projectId, taskId, board, snapshot, before)
-    this.deps.onStageChanged?.({
+    this.deps.enterStage({
       projectId,
       taskId,
       from: before.stageId,
@@ -472,7 +484,7 @@ export class BoardService {
         })
         this.syncDesired(projectId, taskId, board, snapshot, before)
       })
-      this.queue?.kick()
+      this.writes.kick()
       return this.card(projectId, taskId)
     })
   }
@@ -493,7 +505,7 @@ export class BoardService {
   }
 
   retryNow(): void {
-    this.queue?.retryAllNow()
+    this.writes.retryAllNow()
   }
 
   /**
@@ -550,7 +562,7 @@ export class BoardService {
 
   // ---------- Resultados da fila ----------
 
-  onSynced(write: PendingWrite): void {
+  private onSynced(write: PendingWrite): void {
     this.retryMessages.delete(write.taskPageId)
     this.recent.set(write.taskPageId, {
       properties: write.properties,
@@ -578,7 +590,10 @@ export class BoardService {
     })
   }
 
-  async onRejected(write: PendingWrite, error: { code: string; message: string }): Promise<void> {
+  private async onRejected(
+    write: PendingWrite,
+    error: { code: string; message: string }
+  ): Promise<void> {
     this.retryMessages.delete(write.taskPageId)
     const before = this.localState(write.projectId, write.taskPageId)
     const at = this.now().toISOString()
@@ -601,16 +616,16 @@ export class BoardService {
         toStage: write.rollback.stageId,
         detail: { code: error.code }
       })
+      if (before.stageId !== write.rollback.stageId) {
+        this.deps.enterStage({
+          projectId: write.projectId,
+          taskId: write.taskPageId,
+          from: before.stageId,
+          to: write.rollback.stageId,
+          source: 'rollback'
+        })
+      }
     })
-    if (before.stageId !== write.rollback.stageId) {
-      this.deps.onStageChanged?.({
-        projectId: write.projectId,
-        taskId: write.taskPageId,
-        from: before.stageId,
-        to: write.rollback.stageId,
-        source: 'rollback'
-      })
-    }
     const canReconnect =
       error.code === 'not_found' &&
       (await this.deps.notion.connectionMethod().catch(() => null)) === 'oauth'
@@ -625,7 +640,7 @@ export class BoardService {
     })
   }
 
-  onRetry(write: PendingWrite, error: { code: string; message: string }): void {
+  private onRetry(write: PendingWrite, error: { code: string; message: string }): void {
     const auth =
       error.code === 'unauthorized' ||
       error.code === 'invalid_grant' ||
@@ -740,7 +755,7 @@ export class BoardService {
           this.deps.store.addConfigEvent(projectId, this.now().toISOString(), this.actor(), changes)
         }
       })
-      if (moved > 0) this.queue?.kick()
+      if (moved > 0) this.writes.kick()
       return this.load(projectId, false)
     })
   }

@@ -19,6 +19,27 @@ export interface ProjectRepo {
   verified: boolean
 }
 
+/** Repositório no github.com, nas coordenadas da API (`api.github.com`). */
+export interface GitHubRepoRef {
+  owner: string
+  name: string
+}
+
+/**
+ * O repositório do projeto no github.com, ou `null` (sem repositório, GitHub Enterprise ou não
+ * verificado). Regra única para sinais, histórico, aba Revisão, revisão publicada e entrega:
+ * `verified` é o que diz que a conta conectada alcançou o repositório na API do github.com
+ * (Projetos já trata o não verificado como Enterprise: sem revalidação e com aviso), e o host diz
+ * que `owner/name` são coordenadas do github.com (o conector só fala com `api.github.com`).
+ */
+export function githubRepoOf(
+  project: { repo: ProjectRepo | null } | null | undefined
+): GitHubRepoRef | null {
+  const repo = project?.repo
+  if (!repo || !repo.verified || repo.host.toLowerCase() !== 'github.com') return null
+  return { owner: repo.owner, name: repo.name }
+}
+
 /** Link externo oferecido junto de um erro/estado (sempre dentro da allowlist do main). */
 export interface ProjectAction {
   label: string
