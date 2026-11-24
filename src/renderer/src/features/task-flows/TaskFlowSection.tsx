@@ -30,6 +30,7 @@ import {
 } from '../../components/icons'
 import { DiffView } from '../../components/DiffView'
 import { describeFlowProblem } from '../../../../shared/flow-problem'
+import { isLive, waitingKind } from '../../../../shared/flow-run-state'
 import { FlowProblemCard } from './FlowProblemCard'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
 import { replyChips } from '../task/reply-chips'
@@ -97,7 +98,6 @@ export function TaskFlowSection({
   stageId,
   pr = null,
   onActivityChange,
-  onWaitingChange,
   onOpenRun,
   onLiveChange,
   onRunsChange,
@@ -110,8 +110,6 @@ export function TaskFlowSection({
   pr?: TaskPullRequest | null
   /** Passo rodando agora (ou null): o painel mostra "Trabalhando há…". */
   onActivityChange?: (activity: TaskActivity | null) => void
-  /** 1 quando o fluxo espera uma decisão sua (gate, escolha, saída da etapa). */
-  onWaitingChange?: (count: number) => void
   /** Abre a sessão (log) de uma execução do Claude Code desta tarefa. */
   onOpenRun?: (runId: string) => void
   /** O fluxo da tarefa está em andamento (o Claude Code manual fica bloqueado). */
@@ -126,7 +124,6 @@ export function TaskFlowSection({
   const [stepsOpen, setStepsOpen] = useState<boolean | null>(null)
   const [runs, setRuns] = useState<FlowRunView[] | null>(null)
   const [binding, setBinding] = useState<(StageFlow & { flowName: string }) | null>(null)
-  const [pending, setPending] = useState<Record<string, string>>({})
   const [ciFlow, setCiFlow] = useState<{ id: string; name: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -142,9 +139,6 @@ export function TaskFlowSection({
       const b = r.value.bindings.find((x) => x.stageId === stageId && x.enabled)
       const flow = b ? r.value.flows.find((f) => f.id === b.flowId) : null
       setBinding(b && flow ? { ...b, flowName: flow.name } : null)
-      setPending(
-        Object.fromEntries(r.value.actions.filter((a) => a.pending).map((a) => [a.id, a.pending!]))
-      )
       const ci = r.value.flows.find((f) => f.id === ALVA_TEMPLATE_IDS.ci)
       setCiFlow(ci ? { id: ci.id, name: ci.name } : null)
     })
@@ -179,24 +173,14 @@ export function TaskFlowSection({
   const activeWho = run?.status === 'running' ? (run.agent?.name ?? 'Fluxo') : null
   const activeWhat = run?.steps.find((s) => s.id === run.currentStep)?.name ?? null
   const activeSince = run ? (currentStepView?.startedAt ?? run.startedAt) : null
-  const waitingYou =
-    run &&
-    (run.status === 'waiting_gate' ||
-      run.status === 'awaiting_decision' ||
-      (run.status === 'paused' && run.pauseReason === 'needs_choice'))
-      ? 1
-      : 0
   useEffect(() => {
     onActivityChange?.(
       activeWho && activeSince ? { who: activeWho, what: activeWhat, since: activeSince } : null
     )
   }, [activeWho, activeWhat, activeSince, onActivityChange])
-  useEffect(() => {
-    onWaitingChange?.(waitingYou)
-  }, [waitingYou, onWaitingChange])
   useEffect(() => () => onActivityChange?.(null), [onActivityChange])
   // Fluxo em andamento (rodando, esperando ou pausado): o Claude Code roda pelos passos dele.
-  const liveNow = !!run && run.status !== 'finished' && run.status !== 'cancelled'
+  const liveNow = !!run && isLive(run.status)
   useEffect(() => {
     onLiveChange?.(liveNow)
   }, [liveNow, onLiveChange])
@@ -207,7 +191,7 @@ export function TaskFlowSection({
 
   const openPr = pr && (pr.state === 'open' || pr.state === 'draft') ? pr : null
   if (!run && !binding && !openPr?.checks) return null
-  const live = run && run.status !== 'finished' && run.status !== 'cancelled'
+  const live = run && isLive(run.status)
   const stepName = (id: string | null): string =>
     run?.steps.find((s) => s.id === id)?.name ?? id ?? ''
   const current = run?.steps.find((s) => s.id === run.currentStep) ?? null
@@ -376,31 +360,6 @@ export function TaskFlowSection({
         />
       )}
 
-      {run?.status === 'waiting_gate' && current?.type === 'orkio_action' && !run.confirm && (
-        <WaitCard label="Ação pendente do fluxo" title={current.name}>
-          <p className="text-sm text-muted-foreground">
-            {pending[current.action] ?? 'Esta ação ainda não existe no Orkio.'}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              disabled={busy}
-              onClick={() => void act(() => window.orkio.taskFlows.approve(run.id))}
-            >
-              {busy && <Spinner />}
-              Já fiz, seguir
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void act(() => window.orkio.taskFlows.reject(run.id))}
-            >
-              Encerrar o fluxo
-            </Button>
-          </div>
-        </WaitCard>
-      )}
-
       {run?.status === 'paused' && run.pauseReason === 'needs_choice' && run.choice && (
         <ChoiceCard
           prompt={run.choice.prompt}
@@ -430,23 +389,22 @@ export function TaskFlowSection({
         />
       )}
 
-      {run?.status === 'paused' &&
-        (run.pauseReason === 'waiting_slot' || run.pauseReason === 'waiting_agent') && (
-          <div className="flex flex-col items-start gap-2">
-            <Alert tone="warning" className="self-stretch">
-              {run.pauseReason === 'waiting_agent'
-                ? `Aguardando ${run.agent?.name ?? 'o agente'} terminar outra tarefa (limite de fluxos ao mesmo tempo). Começa sozinho.`
-                : 'Aguardando outro fluxo Alva deste projeto terminar (Docker e portas). Começa sozinho.'}
-            </Alert>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
-            >
-              Cancelar fluxo
-            </Button>
-          </div>
-        )}
+      {run && waitingKind(run) === 'queue' && (
+        <div className="flex flex-col items-start gap-2">
+          <Alert tone="warning" className="self-stretch">
+            {run.pauseReason === 'waiting_agent'
+              ? `Aguardando ${run.agent?.name ?? 'o agente'} terminar outra tarefa (limite de fluxos ao mesmo tempo). Começa sozinho.`
+              : 'Aguardando outro fluxo Alva deste projeto terminar (Docker e portas). Começa sozinho.'}
+          </Alert>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
+          >
+            Cancelar fluxo
+          </Button>
+        </div>
+      )}
 
       {run && problem && (
         <FlowProblemCard

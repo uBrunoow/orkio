@@ -7,7 +7,7 @@ function deps(over: Partial<OpenPrDeps> = {}): OpenPrDeps & { started: Flow[] } 
   return {
     started,
     linked: () => true,
-    blockReason: async () => null,
+    alvaReady: async () => true,
     compareUrl: () => 'https://github.com/o/r/compare/main...feat/x?expand=1',
     alreadyPushed: async () => false,
     startBuiltin: vi.fn(async (_p: string, _t: string, flow: Flow) => {
@@ -35,10 +35,10 @@ describe('openPr', () => {
   })
 
   it('alva-flow não pronto (ou pré-checagem falhou): só o push', async () => {
-    const a = deps({ blockReason: async () => 'falta o plugin' })
+    const a = deps({ alvaReady: async () => false })
     expect((await openPr(a, 'p', 't')).mode).toBe('push')
     const b = deps({
-      blockReason: async () => {
+      alvaReady: async () => {
         throw new Error('x')
       }
     })

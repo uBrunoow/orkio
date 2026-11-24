@@ -1,7 +1,73 @@
 /**
- * Integração com o plugin alva-flow (Etapa 5B): tipos compartilhados e as funções puras de
- * leitura das tasks do Backlog.md (frontmatter, status, critérios, perguntas em aberto).
+ * Integração com o plugin alva-flow (Etapa 5B): os nomes do plugin (comandos, status, variáveis,
+ * marcador dos fluxos), tipos compartilhados e as funções puras de leitura das tasks do Backlog.md
+ * (frontmatter, status, critérios, perguntas em aberto). Quem fala do plugin usa as constantes
+ * daqui (pré-checagem, extrator, modelos, fases da tela, problemas do fluxo).
  */
+import type { FlowOutput } from './orkio-actions'
+import { FLOW_NO, FLOW_YES } from './task-flow'
+
+export const ALVA_PLUGIN = 'alva-flow'
+export const ALVA_COMMANDS = ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr'] as const
+export type AlvaCommand = (typeof ALVA_COMMANDS)[number]
+
+/** Nome do comando no catálogo (`alva-flow:spec`). */
+export function alvaCommand(command: AlvaCommand): string {
+  return `${ALVA_PLUGIN}:${command}`
+}
+
+/** Qual comando do plugin é este (`alva-flow:review` → `review`); `null` se não é do plugin. */
+export function alvaCommandOf(command: string): AlvaCommand | null {
+  const prefix = `${ALVA_PLUGIN}:`
+  if (!command.startsWith(prefix)) return null
+  const name = command.slice(prefix.length)
+  return ALVA_COMMANDS.find((c) => c === name) ?? null
+}
+
+/** Fase da tarefa (barra do topo) de cada comando do plugin. */
+export const ALVA_COMMAND_PHASE: Record<AlvaCommand, string> = {
+  spec: 'Spec',
+  plan: 'Plano',
+  implement: 'Implementar',
+  review: 'Revisão',
+  fix: 'Revisão',
+  commit: 'PR',
+  pr: 'PR'
+}
+
+/** Marcador (`Flow.tags`) dos fluxos que usam o plugin: pré-checagem, variáveis e limite. */
+export const ALVA_TAG = 'alva'
+/** Prefixo das variáveis do alva-flow nos fluxos. */
+export const ALVA_VAR_PREFIX = 'alva.'
+
+/** Variáveis que a integração grava (no início do fluxo e pelo extrator `alva`). */
+export const ALVA_VARS = {
+  taskId: 'alva.task_id',
+  specArg: 'alva.spec_arg',
+  linked: 'alva.linked',
+  status: 'alva.status',
+  openQuestions: 'alva.open_questions',
+  reviewBlocker: 'alva.review_blocker',
+  size: 'alva.size'
+} as const
+
+/** Id do extrator do alva-flow (lê a task do Backlog.md depois de cada comando). */
+export const ALVA_EXTRACTOR = 'alva'
+
+/** Códigos de falha de passo do alva-flow (a tela de problema reconhece por eles). */
+export const ALVA_FAILURES = {
+  /** O /spec terminou sem criar nem alterar uma task em backlog/tasks/. */
+  noTaskCreated: 'alva_no_task',
+  /** O passo usa `alva.*`, mas a tarefa ainda não tem task do Backlog vinculada. */
+  notLinked: 'alva_not_linked'
+} as const
+
+/** Quantos fluxos Alva podem rodar ao mesmo tempo num projeto com Docker (portas). */
+export const ALVA_MAX_PARALLEL = { min: 1, max: 4, fallback: 1 } as const
+
+export function clampAlvaParallel(value: number): number {
+  return Math.min(ALVA_MAX_PARALLEL.max, Math.max(ALVA_MAX_PARALLEL.min, Math.floor(value)))
+}
 
 export type AlvaCheckState = 'ok' | 'missing' | 'warning'
 
@@ -32,6 +98,24 @@ export const ALVA_STATUSES = [
   'Reviewed',
   'Done'
 ] as const
+export type AlvaTaskStatus = (typeof ALVA_STATUSES)[number]
+/** Status depois de um `/review` limpo (ou de um `/spec` do caminho Pequeno, que já implementa). */
+export const ALVA_REVIEWED: AlvaTaskStatus = 'Reviewed'
+
+/** As variáveis do alva-flow como saídas declaradas (o validador confere os fluxos contra elas). */
+export const ALVA_OUTPUTS: readonly FlowOutput[] = [
+  { key: ALVA_VARS.taskId, about: 'ID da task do Backlog.md vinculada (ex.: TASK-12)' },
+  { key: ALVA_VARS.specArg, about: 'argumento do /spec (o ID, ou o resumo da tarefa sem vínculo)' },
+  { key: ALVA_VARS.linked, values: [FLOW_YES, FLOW_NO], about: 'a tarefa já tem task vinculada' },
+  { key: ALVA_VARS.status, about: 'status da task no Backlog.md' },
+  { key: ALVA_VARS.openQuestions, about: 'perguntas em aberto na spec' },
+  {
+    key: ALVA_VARS.reviewBlocker,
+    values: [FLOW_YES, FLOW_NO],
+    about: 'o /review deixou blocker'
+  },
+  { key: ALVA_VARS.size, values: ['Pequeno', 'Médio', 'Grande'], about: 'tamanho dado pelo /spec' }
+]
 
 /** O que o Orkio lê de uma task do Backlog.md (nada de descrição, plano ou notas). */
 export interface BacklogTaskInfo {

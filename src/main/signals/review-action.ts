@@ -1,10 +1,12 @@
 /**
  * Ação de fluxo `review_snapshot` (Task 15): o Orkio lê as threads não resolvidas da PR da tarefa
  * e grava `<worktree>/.orkio/revisao.md` para o agente (que não lê comentários da PR sozinho).
- * Variáveis: `review.count` (threads não resolvidas) e `review.pr` (número da PR).
+ * Variáveis: as saídas declaradas em `ORKIO_ACTIONS.review_snapshot` (pendentes e número da PR).
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { ACTION_VARS, ORKIO_ACTIONS } from '../../shared/orkio-actions'
+import { WorktreeError } from '../claude/worktree.service'
 import type { OrkioAction } from '../flows/flow-runner'
 import { errorName } from '../errors'
 import {
@@ -22,21 +24,23 @@ export interface ReviewActionDeps {
 }
 
 export function createReviewActions(deps: ReviewActionDeps): OrkioAction[] {
+  const noWorktree = { code: 'no_worktree', message: REVIEW_MESSAGES.noWorktree }
   const snapshot: OrkioAction = {
-    id: 'review_snapshot',
-    label: 'Ler os comentários da PR',
+    ...ORKIO_ACTIONS.review_snapshot,
     async run({ projectId, taskId }) {
       const result = await deps.reviews.get(projectId, taskId, true)
-      if (!result.ok) return { ok: false, message: result.message }
+      if (!result.ok) return { ok: false, code: result.code, message: result.message }
       let root: string | null
       try {
         root = await deps.ensureWorktree(projectId, taskId)
       } catch (error) {
         // Só a mensagem pt-BR do WorktreeService (pasta em uso, branch em checkout...).
-        const known = error instanceof Error && error.name === 'WorktreeError'
-        return { ok: false, message: known ? error.message : REVIEW_MESSAGES.noWorktree }
+        if (error instanceof WorktreeError) {
+          return { ok: false, code: `worktree_${error.code}`, message: error.message }
+        }
+        return { ok: false, ...noWorktree }
       }
-      if (!root) return { ok: false, message: REVIEW_MESSAGES.noWorktree }
+      if (!root) return { ok: false, ...noWorktree }
       const { pr, threads, reviews, truncated, unreadThreads } = result.value
       try {
         const dir = join(root, '.orkio')
@@ -50,13 +54,13 @@ export function createReviewActions(deps: ReviewActionDeps): OrkioAction[] {
         )
       } catch (error) {
         console.error(`[orkio] review_snapshot: ${errorName(error)}`)
-        return { ok: false, message: REVIEW_MESSAGES.failed }
+        return { ok: false, code: 'failed', message: REVIEW_MESSAGES.failed }
       }
       return {
         ok: true,
         vars: {
-          'review.count': String(pendingCount(result.value)),
-          'review.pr': String(pr.number)
+          [ACTION_VARS.reviewCount]: String(pendingCount(result.value)),
+          [ACTION_VARS.reviewPr]: String(pr.number)
         }
       }
     }

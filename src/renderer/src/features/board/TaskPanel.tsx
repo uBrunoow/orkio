@@ -22,6 +22,7 @@ import { EnvironmentPanel } from '../task/EnvironmentPanel'
 import { TaskSession } from './TaskSession'
 import type { BoardCard, BoardHistoryEntry, BoardStage } from '../../../../shared/board'
 import type { TaskSignals } from '../../../../shared/task-signals'
+import { isLive } from '../../../../shared/flow-run-state'
 
 /**
  * Tarefa como sessão: no topo, em que pé está (marcos) e o que espera você; no centro, a conversa
@@ -165,7 +166,6 @@ export function TaskPanel({
         stageId={card.stageId}
         pr={signals?.pr ?? null}
         onActivityChange={setFlowActivity}
-        onWaitingChange={() => undefined}
         onOpenRun={(runId) => setFocusRun({ runId, nonce: Date.now() })}
         onLiveChange={setFlowLive}
         onRunsChange={setFlowRuns}
@@ -233,10 +233,8 @@ export function TaskPanel({
     stages,
     stageId: card.stageId
   })
-  const liveRun =
-    flowRuns[0] && flowRuns[0].status !== 'finished' && flowRuns[0].status !== 'cancelled'
-      ? flowRuns[0]
-      : null
+  const liveRun = flowRuns[0] && isLive(flowRuns[0].status) ? flowRuns[0] : null
+  const flowActive = flowRuns.some((r) => isLive(r.status))
   const currentPhase =
     phases.find((p) => p.state === 'waiting' || p.state === 'current' || p.state === 'failed')
       ?.label ?? null
@@ -270,13 +268,7 @@ export function TaskPanel({
         {/* Sem PR aberta e com ambiente: "commits à frente" não é lido aqui (o push recusa se não
             houver nada novo). */}
         {canOpenPr(signals?.pr) && state?.workspace && (
-          <OpenPrButton
-            projectId={projectId}
-            taskId={card.taskId}
-            flowActive={flowRuns.some((r) =>
-              ['running', 'waiting_gate', 'paused', 'awaiting_decision'].includes(r.status)
-            )}
-          />
+          <OpenPrButton projectId={projectId} taskId={card.taskId} flowActive={flowActive} />
         )}
         {details(false, null, 'pr')}
       </div>
@@ -298,9 +290,7 @@ export function TaskPanel({
           workspace={state?.workspace ?? null}
           latestRun={state?.runs[0] ?? null}
           signals={signals}
-          flowActive={flowRuns.some((r) =>
-            ['running', 'waiting_gate', 'paused', 'awaiting_decision'].includes(r.status)
-          )}
+          flowActive={flowActive}
           refreshKey={tick}
         />
         {details(false, null, 'details')}

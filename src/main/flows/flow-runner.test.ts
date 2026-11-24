@@ -15,8 +15,11 @@ import {
   NOOP_ACTION,
   ORKIO_LINES_EXTRACTOR,
   type FlowExtractor,
-  type FlowRunnerDeps
+  type FlowRunnerDeps,
+  type OrkioAction
 } from './flow-runner'
+import { ORKIO_ACTIONS } from '../../shared/orkio-actions'
+import type { FlowIntegration } from './flow-integration'
 
 const FLOW: Flow = {
   id: 'f1',
@@ -50,6 +53,19 @@ const FLOW: Flow = {
     },
     { id: 'fim', name: 'Fim', type: 'orkio_action', action: 'noop' }
   ]
+}
+
+/** Integração de teste (marcador `x`, variáveis `x.*`). */
+function integration(over: Partial<FlowIntegration> = {}): FlowIntegration {
+  return {
+    tag: 'x',
+    varPrefix: 'x.',
+    missingVar: { code: 'x_missing', message: 'Falta a variável da integração x.' },
+    initialVars: async () => ({}),
+    canStart: async () => null,
+    concurrencyLimit: () => null,
+    ...over
+  }
 }
 
 const flush = (): Promise<void> => new Promise((r) => setImmediate(() => setImmediate(r)))
@@ -130,7 +146,8 @@ const finish = (
     resultText,
     summary: null,
     costUsd: 0.02,
-    message: status === 'failed' ? 'Deu ruim' : null
+    message: status === 'failed' ? 'Deu ruim' : null,
+    code: status === 'failed' ? 'claude_error' : status === 'cancelled' ? 'cancelled' : null
   })
 
 const enter = (runner: FlowRunner, source: StageChange['source'], to = 's-rev'): void =>
@@ -298,19 +315,19 @@ describe('FlowRunner', () => {
     expect(started).toHaveLength(1)
   })
 
-  it('comando com variável do alva-flow sem valor não roda: pausa explicando, sem gastar uma execução', async () => {
+  it('comando com variável de uma integração sem valor não roda: pausa com a falha dela, sem gastar uma execução', async () => {
     config = {
       flows: [
         {
-          id: 'f-alva',
-          name: 'Alva',
+          id: 'f-x',
+          name: 'X',
           steps: [
             {
               id: 'plan',
               name: 'Planejar',
               type: 'claude_command',
-              command: 'alva-flow:plan',
-              args: '{{alva.task_id}}',
+              command: 'x:plan',
+              args: '{{x.task_id}}',
               timeoutMin: 5
             }
           ]
@@ -318,28 +335,33 @@ describe('FlowRunner', () => {
       ],
       bindings: []
     }
-    const runner = makeRunner()
-    const { id } = await runner.startById('p1', 't1', 'f-alva')
+    const runner = makeRunner({ integrations: [integration()] })
+    const { id } = await runner.startById('p1', 't1', 'f-x')
     await flush()
     expect(started).toHaveLength(0) // o Claude Code nem começou
     const v = runner.view(id)
     expect(v).toMatchObject({ status: 'paused', pauseReason: 'step_failed', currentStep: 'plan' })
-    expect(v.history[0]).toMatchObject({ status: 'failed', message: FLOW_MESSAGES.noBacklogTask })
+    expect(v.history[0]).toMatchObject({
+      status: 'failed',
+      code: 'x_missing',
+      message: 'Falta a variável da integração x.'
+    })
   })
 
-  it('variável do alva-flow com valor roda normalmente', async () => {
+  it('variável da integração com valor (das variáveis iniciais dela) roda normalmente', async () => {
     config = {
       flows: [
         {
-          id: 'f-alva',
-          name: 'Alva',
+          id: 'f-x',
+          name: 'X',
+          tags: ['x'],
           steps: [
             {
               id: 'plan',
               name: 'Planejar',
               type: 'claude_command',
-              command: 'alva-flow:plan',
-              args: '{{alva.task_id}}',
+              command: 'x:plan',
+              args: '{{x.task_id}}',
               timeoutMin: 5
             }
           ]
@@ -347,8 +369,10 @@ describe('FlowRunner', () => {
       ],
       bindings: []
     }
-    const runner = makeRunner({ initialVars: async () => ({ 'alva.task_id': 'TASK-7' }) })
-    await runner.startById('p1', 't1', 'f-alva')
+    const runner = makeRunner({
+      integrations: [integration({ initialVars: async () => ({ 'x.task_id': 'TASK-7' }) })]
+    })
+    await runner.startById('p1', 't1', 'f-x')
     await flush()
     expect(started.map((s) => s.args)).toEqual(['TASK-7'])
   })
@@ -547,7 +571,7 @@ describe('FlowRunner', () => {
       snapshot: async () => ['antes'],
       extract: ({ resultText, snapshot }) =>
         resultText === 'nada'
-          ? { fail: 'Nada foi criado.' }
+          ? { fail: { code: 'nada', message: 'Nada foi criado.' } }
           : resultText === 'varias'
             ? {
                 vars: { 'x.antes': String((snapshot as string[])[0]) },
@@ -565,14 +589,14 @@ describe('FlowRunner', () => {
     const ALVA: Flow = {
       id: 'alva',
       name: 'Alva',
-      tags: ['alva'],
+      tags: ['x'],
       steps: [
         {
           id: 'spec',
           name: 'Spec',
           type: 'claude_command',
           command: 'alva-flow:spec',
-          args: '{{alva.spec_arg}}',
+          args: '{{x.spec_arg}}',
           timeoutMin: 60,
           includeBriefing: false,
           extract: { extractor: 'escolhe' }
@@ -588,7 +612,7 @@ describe('FlowRunner', () => {
         { id: 'push', name: 'Push', type: 'orkio_action', action: 'push' }
       ]
     }
-    const PUSH = { id: 'push', label: 'Push', pending: 'Push chega na 5C.', run: NOOP_ACTION.run }
+    const PUSH = { ...NOOP_ACTION, id: 'push' }
 
     function alvaRunner(over: Partial<FlowRunnerDeps> = {}): FlowRunner {
       config = {
@@ -604,12 +628,14 @@ describe('FlowRunner', () => {
       return makeRunner({
         extractors: [CHOOSER],
         actions: [PUSH],
-        initialVars: async () => ({ 'alva.spec_arg': 'ORK-1 — Exportar CSV' }),
+        integrations: [
+          integration({ initialVars: async () => ({ 'x.spec_arg': 'ORK-1 — Exportar CSV' }) })
+        ],
         ...over
       })
     }
 
-    it('variáveis iniciais, sem briefing nos argumentos, escolha pedida pelo extrator e ação pendente', async () => {
+    it('variáveis iniciais, sem briefing nos argumentos e escolha pedida pelo extrator', async () => {
       const runner = alvaRunner()
       const { id } = await runner.startManual('p1', 't1')
       expect(started[0]).toMatchObject({ args: 'ORK-1 — Exportar CSV', includeBriefing: false })
@@ -631,10 +657,7 @@ describe('FlowRunner', () => {
       finish(runner, 'run-2', 'succeeded')
       await flush()
       v = runner.view(id)
-      expect(v).toMatchObject({ status: 'waiting_gate', currentStep: 'push' })
-      expect(notifications).toContain('Um fluxo espera você')
-      await runner.approveGate(id) // fez o push à mão
-      expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'done' })
+      expect(v).toMatchObject({ status: 'finished', result: 'done' })
     })
 
     it('mensagem com anexo: a nota não entra no casamento da escolha', async () => {
@@ -658,23 +681,28 @@ describe('FlowRunner', () => {
       expect(runner.view(id)).toMatchObject({ status: 'paused', pauseReason: 'step_failed' })
       expect(runner.view(id).history[0]).toMatchObject({
         status: 'failed',
+        code: 'nada',
         message: 'Nada foi criado.'
       })
     })
 
-    it('recusar a ação pendente cancela o fluxo', async () => {
-      const runner = alvaRunner()
-      const { id } = await runner.startManual('p1', 't1')
-      finish(runner, 'run-1', 'succeeded', 'A')
-      await flush()
-      finish(runner, 'run-2', 'succeeded')
-      await flush()
-      await runner.rejectGate(id)
-      expect(runner.view(id)).toMatchObject({ status: 'cancelled' })
+    it('a integração impede o começo: nada é criado e a mensagem dela sobe', async () => {
+      const runner = alvaRunner({
+        integrations: [integration({ canStart: async () => 'Projeto não pronto.' })]
+      })
+      await expect(runner.startManual('p1', 't1')).rejects.toThrow('Projeto não pronto.')
+      expect(runner.list('t1')).toEqual([])
     })
 
-    it('limite por projeto: o segundo fluxo Alva espera vaga e começa sozinho', async () => {
-      const runner = alvaRunner({ concurrencyLimit: () => 1 })
+    it('limite por projeto: o segundo fluxo da integração espera vaga e começa sozinho', async () => {
+      const runner = alvaRunner({
+        integrations: [
+          integration({
+            initialVars: async () => ({ 'x.spec_arg': 'ORK-1' }),
+            concurrencyLimit: () => 1
+          })
+        ]
+      })
       const first = await runner.startManual('p1', 't1')
       const second = await runner.startManual('p1', 't2')
       expect(runner.view(second.id)).toMatchObject({
@@ -718,12 +746,12 @@ describe('FlowRunner', () => {
     let pushes: number
     let reviewInput: string[] | undefined
     let pushProblem: string | null
-    const PUSH = {
-      id: 'push',
+    const PUSH: OrkioAction = {
+      ...ORKIO_ACTIONS.push,
       label: 'Push',
       confirm: async () =>
         pushProblem
-          ? { problem: pushProblem }
+          ? { problem: { code: 'dirty', message: pushProblem } }
           : {
               title: 'Enviar?',
               message: 'm',
@@ -735,11 +763,11 @@ describe('FlowRunner', () => {
             },
       run: async () => {
         pushes++
-        return { ok: true as const, vars: { 'delivery.pushed': 'sim' } }
+        return { ok: true as const }
       }
     }
-    const REVIEW = {
-      id: 'request_review',
+    const REVIEW: OrkioAction = {
+      ...ORKIO_ACTIONS.request_review,
       label: 'Review',
       confirm: async () => ({
         title: 'Pedir review?',
@@ -749,7 +777,7 @@ describe('FlowRunner', () => {
         approveLabel: 'Pedir review',
         link: null
       }),
-      run: async ({ input }: { input?: string[] }) => {
+      run: async ({ input }) => {
         reviewInput = input
         return { ok: true as const }
       }
@@ -784,7 +812,6 @@ describe('FlowRunner', () => {
       expect(pushes).toBe(1)
       v = runner.view(id)
       expect(v).toMatchObject({ status: 'waiting_gate', currentStep: 'review' })
-      expect(v.vars).toMatchObject({ 'delivery.pushed': 'sim' })
       await runner.approveGate(id, ['bia', 'team:core'])
       expect(reviewInput).toEqual(['bia', 'team:core'])
       expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'done', confirm: null })
@@ -847,13 +874,17 @@ describe('FlowRunner', () => {
       expect(runner.view(id)).toMatchObject({ status: 'running', currentStep: 'depois' })
     })
 
-    it('a revisão publicada moveu a tarefa: ao terminar, o fluxo da coluna nova começa', async () => {
+    it('ação que muda a etapa de propósito (detach_and_reenter): ao terminar, o fluxo da coluna nova começa', async () => {
       // Caso real: revisão do orkio[bot] com "Pedir alterações" → regra move para Revisado durante
       // o passo → ao terminar, o "comentários da PR" (ligado a Revisado) tem que começar.
       let runner: FlowRunner | null = null
-      const PUBLISH = {
-        id: 'publish_review',
-        label: 'Publicar revisão',
+      const MOVES: OrkioAction = {
+        id: 'muda_etapa',
+        label: 'Muda a etapa',
+        delivers: false,
+        onStageMoved: 'detach_and_reenter',
+        phase: null,
+        outputs: [],
         run: async () => {
           stage = 's-revisado'
           runner!.onStageChanged({
@@ -872,7 +903,7 @@ describe('FlowRunner', () => {
           {
             id: 'd',
             name: 'Revisão publicada',
-            steps: [{ id: 'pub', name: 'Publicar', type: 'orkio_action', action: 'publish_review' }]
+            steps: [{ id: 'pub', name: 'Publicar', type: 'orkio_action', action: 'muda_etapa' }]
           },
           { id: 'c', name: 'Comentários', steps: [DELIVER.steps[1]!] }
         ],
@@ -883,7 +914,7 @@ describe('FlowRunner', () => {
       }
       const entered: StageChange[] = []
       runner = makeRunner({
-        actions: [PUBLISH],
+        actions: [MOVES],
         enterStage: (change) => {
           entered.push(change)
           runner!.onStageChanged(change)
@@ -1046,7 +1077,6 @@ describe('FlowRunner: publicar revisão como orkio[bot] (Task 18)', () => {
       }
     ])
     expect(runner.view(id)).toMatchObject({ status: 'finished', result: 'done' })
-    expect(runner.view(id).vars).toMatchObject({ 'review.posted': 'sim' })
     const delivery = store.events('t1').find((e) => e.kind === 'delivery')
     expect(delivery?.detail).toMatchObject({
       by: 'orkio',
@@ -1062,7 +1092,7 @@ describe('FlowRunner: publicar revisão como orkio[bot] (Task 18)', () => {
     const { id } = await runner.startManual('p1', 't1')
     finish(runner, 'run-1', 'succeeded', ANSWER)
     await flush()
-    postError = new ReviewPostError('timeout', ORKIO_SITE_TIMEOUT_MESSAGE)
+    postError = new ReviewPostError('site_timeout', ORKIO_SITE_TIMEOUT_MESSAGE)
     await runner.approveGate(id)
     const v = runner.view(id)
     expect(v).toMatchObject({ status: 'paused', pauseReason: 'step_failed' })
@@ -1327,7 +1357,8 @@ describe('FlowRunner: plano aprovado antes de corrigir (pedido em texto, só lei
       }
     ]
   }
-  const SNAP = {
+  const SNAP: OrkioAction = {
+    ...NOOP_ACTION,
     id: 'snap',
     label: 'Ler',
     run: async () => ({ ok: true as const, vars: { 'review.count': '2', 'review.pr': '13' } })

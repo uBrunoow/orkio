@@ -334,8 +334,8 @@ describe('erros em pt-BR', () => {
 
   it.each([
     ['not_connected', 'not_connected'],
-    ['network', 'network'],
-    ['timeout', 'timeout'],
+    ['network', 'site_network'],
+    ['timeout', 'site_timeout'],
     ['server', 'upstream']
   ] as const)('erro %s do conector → %s, com a mensagem segura', async (from, to) => {
     const gh = fakeGitHub({

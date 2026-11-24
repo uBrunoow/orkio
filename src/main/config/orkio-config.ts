@@ -17,6 +17,7 @@ export const ORKIO_CONFIG_FILE = 'orkio-config.json'
  * v4: `boards[].rules` (automações, 3B) e `automation.paused` (pausa global).
  */
 import { CONTEXT_LIMITS, type ProjectClaudeContext } from '../../shared/agent-run'
+import { clampAlvaParallel } from '../../shared/alva'
 import { upgradeAlvaFlows } from '../../shared/alva-templates'
 import { parseFlowDef, type Flow, type ProjectFlows, type StageFlow } from '../../shared/task-flow'
 import type { UpdateChannel } from '../../shared/updates'
@@ -430,7 +431,7 @@ export function parseProjectFlows(v: unknown): { value: ProjectFlows; dropped: n
   const alvaRaw = isRecord(v) && isRecord(v['alva']) ? v['alva'] : null
   const maxParallel =
     alvaRaw && typeof alvaRaw['maxParallel'] === 'number'
-      ? Math.min(4, Math.max(1, Math.floor(alvaRaw['maxParallel'])))
+      ? clampAlvaParallel(alvaRaw['maxParallel'])
       : null
   return {
     value: { flows, bindings, ...(maxParallel !== null ? { alva: { maxParallel } } : {}) },

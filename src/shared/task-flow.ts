@@ -136,6 +136,10 @@ export interface ProjectFlows {
   alva?: { maxParallel: number }
 }
 
+/** Valores de variável "sim/não" gravados pelas ações e extratores (ex.: `pr.pushed`). */
+export const FLOW_YES = 'sim'
+export const FLOW_NO = 'nao'
+
 /** Alvo especial de um salto: encerra o fluxo (concluído). */
 export const FLOW_END = '$fim'
 
@@ -402,6 +406,11 @@ export interface FlowValidationContext {
   commands: ReadonlySet<string> | null
   extractors: readonly string[]
   actions: readonly string[]
+  /**
+   * Variáveis com namespace que as ações e extratores do Orkio gravam (`shared/flow-outputs.ts`).
+   * Chave de um namespace desses que ninguém grava (ex.: `pr.pushd`) é aviso: ficaria vazia.
+   */
+  declaredVars: ReadonlySet<string>
 }
 
 const STEP_ID = /^[a-z0-9][a-z0-9_-]{0,39}$/
@@ -410,6 +419,26 @@ function hasVisitsLimit(c: Condition): boolean {
   if (c.type === 'visits') return true
   if (c.type === 'all') return c.of.some(hasVisitsLimit)
   return false
+}
+
+function conditionVars(c: Condition): string[] {
+  if (c.type === 'var') return [c.key]
+  if (c.type === 'all' || c.type === 'any') return c.of.flatMap(conditionVars)
+  return []
+}
+
+/** Chave com namespace do Orkio (`pr.`, `review.`, `alva.`…) que nenhuma ação ou extrator grava. */
+function undeclaredVar(key: string, declared: ReadonlySet<string>): boolean {
+  const dot = key.indexOf('.')
+  if (dot <= 0 || declared.has(key)) return false
+  const ns = key.slice(0, dot + 1)
+  for (const d of declared) if (d.startsWith(ns)) return true
+  return false
+}
+
+/** `{{flow.pr.number}}` e `{{pr.number}}` falam da mesma variável. */
+function templateKey(name: string): string {
+  return name.startsWith('flow.') ? name.slice(5) : name
 }
 
 function conditionSteps(c: Condition): StepId[] {
@@ -433,6 +462,11 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
   const index = new Map(flow.steps.map((s, i) => [s.id, i]))
   flow.steps.forEach((step, i) => {
     const label = `Passo “${step.name || step.id}”`
+    const checkVar = (key: string): void => {
+      if (undeclaredVar(key, ctx.declaredVars)) {
+        warn(step.id, `${label}: nenhuma ação do Orkio grava a variável ${key} (fica vazia).`)
+      }
+    }
     if (!STEP_ID.test(step.id)) {
       err(step.id, `${label}: a chave deve ter letras minúsculas, números, - ou _.`)
     }
@@ -478,7 +512,7 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
         for (const v of [...templateVars(step.args), ...templateVars(step.prompt ?? '')]) {
           if (!KNOWN_VARS.has(v) && !v.startsWith('flow.') && !NAMESPACED_VAR.test(v)) {
             warn(step.id, `${label}: variável desconhecida {{${v}}} (fica vazia).`)
-          }
+          } else if (!KNOWN_VARS.has(v)) checkVar(templateKey(v))
         }
         if (step.model !== undefined && !isModelName(step.model)) {
           err(step.id, `${label}: modelo inválido (use letras minúsculas, números, ponto e hífen).`)
@@ -496,7 +530,7 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
         for (const v of templateVars(step.message)) {
           if (!v.startsWith('flow.') && !NAMESPACED_VAR.test(v)) {
             warn(step.id, `${label}: a mensagem cita {{${v}}}, que o gate não conhece.`)
-          }
+          } else checkVar(templateKey(v))
         }
         if (step.onReject !== 'stop') target(step.onReject, 'recusar')
         if (step.timeoutMin !== null && !(step.timeoutMin >= 1 && step.timeoutMin <= 43_200)) {
@@ -534,6 +568,7 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
         }
         break
       case 'branch': {
+        for (const key of conditionVars(step.when)) checkVar(key)
         const thenAt = target(step.then, '“então”')
         const elseAt = step.else !== undefined ? target(step.else, '“senão”') : null
         for (const ref of conditionSteps(step.when)) {
@@ -616,6 +651,15 @@ export type FlowPauseReason =
   /** Limite diário do agente (8A): "Retomar" passa por cima uma vez. */
   | 'agent_daily_limit'
 
+/**
+ * Por que um passo falhou: código estável de quem lançou (`DeliveryError`, `FlowError`, fim da
+ * execução, ação, extrator...) e a mensagem pt-BR. A tela de problema decide pelo código.
+ */
+export interface StepFailure {
+  code: string
+  message: string
+}
+
 export interface FlowStepView {
   seq: number
   stepId: StepId
@@ -625,6 +669,8 @@ export interface FlowStepView {
   startedAt: string
   endedAt: string | null
   message: string | null
+  /** Código da falha (`StepFailure.code`); `null` em passos sem falha e em linhas antigas. */
+  code: string | null
   costUsd: number | null
 }
 
@@ -684,31 +730,13 @@ export interface ConfirmReview {
   pr: { owner: string; repo: string; number: number }
 }
 
-export const FLOW_PAUSE_LABEL: Record<FlowPauseReason, string> = {
-  step_failed: 'Um passo falhou',
-  interrupted: 'O Orkio foi fechado no meio do passo',
-  loop_guard: 'Limite de passos atingido (possível loop)',
-  gate_timeout: 'A aprovação expirou',
-  left_stage: 'A tarefa saiu da etapa do fluxo',
-  needs_choice: 'O fluxo precisa de uma escolha sua',
-  waiting_slot: 'Aguardando outro fluxo do projeto terminar',
-  waiting_agent: 'Aguardando o agente terminar outra tarefa',
-  agent_daily_limit: 'O agente atingiu o limite de hoje'
-}
-
-/** Fluxo ativo (não terminado) espera uma ação sua? */
-export function needsYou(status: FlowRunStatus): boolean {
-  return status === 'waiting_gate' || status === 'paused' || status === 'awaiting_decision'
-}
-
 /** Fluxo ativo numa tarefa, do jeito que o card e a lista mostram. */
 export type TaskFlowActivity = 'running' | 'needs_you'
 
 /** Fluxos do projeto + extratores e ações disponíveis (registrados em código). */
 export interface TaskFlowsProject extends ProjectFlows {
   extractors: { id: string; label: string }[]
-  /** `pending`: ação feita à mão (vira espera que você aprova). */
-  actions: { id: string; label: string; pending?: string }[]
+  actions: { id: string; label: string }[]
   /** Ajustes de entrega do projeto (5C). */
   delivery: DeliverySettings
 }

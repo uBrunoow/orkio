@@ -19,6 +19,7 @@ import {
 } from '@/components/form'
 import { cn } from '@/lib/utils'
 import type { CatalogGroup } from '../../../../shared/agent-run'
+import { DECLARED_FLOW_VARS } from '../../../../shared/flow-outputs'
 import {
   MAX_REVISE,
   STEP_TYPE_LABEL,
@@ -155,7 +156,8 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
     () => ({
       commands,
       extractors: project?.extractors.map((e) => e.id) ?? [],
-      actions: project?.actions.map((a) => a.id) ?? []
+      actions: project?.actions.map((a) => a.id) ?? [],
+      declaredVars: DECLARED_FLOW_VARS
     }),
     [commands, project]
   )

@@ -13,6 +13,7 @@
 import { CLAUDE_MODELS, isEffort, isModelName, type Effort } from './agent-runtime'
 import { isCommandName } from './agent-run'
 import type { Flow } from './task-flow'
+import { orkioAction } from './orkio-actions'
 import { normalizeLabel } from './text'
 
 export const AGENT_FORMAT = 'agent/v1'
@@ -335,7 +336,7 @@ export function checkAgentFlow(p: AgentProfile, flow: Flow): string | null {
     const step = flow.steps.find(
       (s) =>
         (s.type === 'claude_command' && s.delivery === true) ||
-        (s.type === 'orkio_action' && DELIVERY_ACTIONS.includes(s.action))
+        (s.type === 'orkio_action' && orkioAction(s.action)?.delivers === true)
     )
     if (step) {
       return `${p.name} não pode entregar (push, PR ou pedir review), e o fluxo “${flow.name}” tem o passo “${step.name}” que entrega.`
@@ -356,9 +357,6 @@ export function checkAgentFlow(p: AgentProfile, flow: Flow): string | null {
 export function commandAllowed(p: AgentProfile, command: string): boolean {
   return p.commands.length === 0 || p.commands.includes(command)
 }
-
-/** Ações do Orkio que entregam no GitHub (mesma lista do FlowRunner). */
-const DELIVERY_ACTIONS: readonly string[] = ['push', 'verify_pushed', 'request_review']
 
 /** Início do dia local (para os limites diários). */
 export function localDayStart(now: Date): Date {

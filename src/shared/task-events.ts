@@ -10,7 +10,7 @@
 import { EVENT_KINDS, type EventKind } from './automation'
 import { ARTIFACT_PUBLISH_MODES } from './agent-run'
 import { isRecord } from './guards'
-import { FLOW_PAUSE_LABEL, type FlowPauseReason } from './task-flow'
+import { FLOW_PAUSE_REASONS } from './flow-run-state'
 
 /**
  * Quem causou o evento: você (`manual`), o Notion, uma automação (regra, orquestrador, regra de
@@ -99,7 +99,6 @@ const numOrNull = field(orNull(isNumber))
 const pr = field(isEventPr)
 
 const AUTOMATION_OUTCOMES = ['no_rule', 'noop', 'move', 'notify', 'skipped'] as const
-const FLOW_PAUSE_REASONS = Object.keys(FLOW_PAUSE_LABEL) as FlowPauseReason[]
 
 const AUTOMATION_FIELDS = {
   event: field(oneOf<EventKind>(EVENT_KINDS)),

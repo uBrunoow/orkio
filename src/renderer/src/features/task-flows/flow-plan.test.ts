@@ -48,6 +48,7 @@ function step(
     stepId,
     runId,
     status,
+    code: null,
     startedAt: `2026-11-23T10:0${seq}:00Z`,
     endedAt: status === 'running' || status === 'waiting' ? null : `2026-11-23T10:0${seq}:30Z`,
     message: null,
@@ -115,11 +116,16 @@ describe('flowPlan', () => {
         })
       )[1]!.state
     ).toBe('failed')
-    // Esperando vaga não é problema.
+    // Esperando vaga não é problema nem espera você: começa sozinho.
     expect(
       flowPlan(run({ status: 'paused', pauseReason: 'waiting_slot', currentStep: 'spec' }))[0]!
         .state
-    ).toBe('waiting')
+    ).toBe('current')
+    // Limite diário do agente é problema (cartão com "Retomar"), não "esperando você".
+    expect(
+      flowPlan(run({ status: 'paused', pauseReason: 'agent_daily_limit', currentStep: 'spec' }))[0]!
+        .state
+    ).toBe('failed')
   })
 
   it('fluxo encerrado: passos que não rodaram ficam como não alcançados, não "a seguir"', () => {

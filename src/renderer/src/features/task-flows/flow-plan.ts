@@ -4,9 +4,9 @@
  * a seguir (como a lista de tarefas do Claude Code); `flowStepIndex` diz de que passo de que fluxo
  * veio cada execução, para a conversa mostrar quem "mandou" o comando.
  */
+import { isProblem, needsYou } from '../../../../shared/flow-run-state'
 import {
   isPromptStep,
-  type FlowPauseReason,
   type FlowRunView,
   type FlowStepStatus,
   type Step
@@ -50,14 +50,6 @@ const FAILED: ReadonlySet<FlowStepStatus> = new Set([
   'rejected'
 ])
 
-/** Pausas que são problema (o passo parou); as demais são espera (vaga, escolha, decisão). */
-const STOPPED: ReadonlySet<FlowPauseReason> = new Set([
-  'step_failed',
-  'interrupted',
-  'loop_guard',
-  'gate_timeout'
-])
-
 /**
  * O plano do fluxo. O passo atual (`currentStep`) é `current` (rodando) ou `waiting` (esperando
  * você); o estado dos demais vem da última vez que rodaram. Passos sem histórico depois do atual são
@@ -77,14 +69,16 @@ export function flowPlan(run: FlowRunView): PlanStep[] {
     const status = last.get(step.id)
     let state: PlanState
     if (i === currentIndex) {
+      // Problema = "parou aqui"; espera sua (gate, escolha, decisão) = "esperando você"; rodando ou
+      // na fila de vaga (começa sozinho) = "agora".
       state =
         status && FAILED.has(status)
           ? 'failed'
-          : run.status === 'running'
-            ? 'current'
-            : run.status === 'paused' && run.pauseReason && STOPPED.has(run.pauseReason)
-              ? 'failed'
-              : 'waiting'
+          : run.status === 'paused' && isProblem(run.pauseReason)
+            ? 'failed'
+            : needsYou(run)
+              ? 'waiting'
+              : 'current'
     } else if (status === undefined) {
       state = ended || (currentIndex >= 0 && i < currentIndex) ? 'unreached' : 'next'
     } else if (DONE.has(status)) {

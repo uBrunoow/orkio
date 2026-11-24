@@ -885,7 +885,7 @@ describe('taskFlows', () => {
   function deps(over: Partial<OpenPrDeps> = {}): OpenPrDeps {
     return {
       linked: () => false,
-      blockReason: async () => null,
+      alvaReady: async () => true,
       compareUrl: () => 'https://github.com/o/r/compare/main...feat/x?expand=1',
       alreadyPushed: async () => false,
       startBuiltin: vi.fn(async () => ({}) as never),

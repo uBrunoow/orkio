@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import { WorktreeError } from '../claude/worktree.service'
 import { createReviewActions } from './review-action'
 import {
   buildReviewMarkdown,
@@ -301,14 +302,26 @@ describe('ação review_snapshot', () => {
     const [action] = createReviewActions({
       reviews: service().svc,
       ensureWorktree: async () => {
-        const e = new Error('A pasta de trabalho desta tarefa já existe.')
-        e.name = 'WorktreeError'
-        throw e
+        throw new WorktreeError('path_in_use', 'A pasta de trabalho desta tarefa já existe.')
       }
     })
     expect(await action!.run({ projectId: 'p', taskId: 't', vars: {} })).toEqual({
       ok: false,
+      code: 'worktree_path_in_use',
       message: 'A pasta de trabalho desta tarefa já existe.'
+    })
+    // Um Error qualquer com o mesmo nome não é o erro do WorktreeService.
+    const fake = new Error('texto cru')
+    fake.name = 'WorktreeError'
+    const [named] = createReviewActions({
+      reviews: service().svc,
+      ensureWorktree: async () => {
+        throw fake
+      }
+    })
+    expect(await named!.run({ projectId: 'p', taskId: 't', vars: {} })).toMatchObject({
+      ok: false,
+      code: 'no_worktree'
     })
     const [other] = createReviewActions({
       reviews: service().svc,

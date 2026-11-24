@@ -169,7 +169,12 @@ export interface RunFinished {
   costUsd: number | null
   /** Motivo curto quando não foi sucesso (ex.: tempo esgotado). */
   message: string | null
+  /** Código do motivo (`null` = sucesso); o fluxo guarda no passo para a tela de problema. */
+  code: RunEndCode | null
 }
+
+/** Por que a execução não terminou bem. */
+export type RunEndCode = 'timed_out' | 'claude_error' | 'start_failed' | 'cancelled'
 
 interface Pending {
   resolve(decision: BridgeDecision): void
@@ -643,7 +648,7 @@ export class RunService {
       const run = this.queue.shift()!
       this.active.set(run.id, run)
       run.start().catch(() => {
-        void this.finish(run, 'failed', 'Não foi possível iniciar o Claude Code.')
+        void this.finish(run, 'failed', 'Não foi possível iniciar o Claude Code.', 'start_failed')
       })
     }
   }
@@ -835,10 +840,15 @@ export class RunService {
         : status === 'cancelled'
           ? RUN_MESSAGES.cancelled
           : undefined
-    await this.finish(run, status, message)
+    await this.finish(run, status, message, status === 'failed' ? 'claude_error' : undefined)
   }
 
-  private async finish(run: ActiveRun, status: RunStatus, message?: string): Promise<void> {
+  private async finish(
+    run: ActiveRun,
+    status: RunStatus,
+    message?: string,
+    failedCode: RunEndCode = 'claude_error'
+  ): Promise<void> {
     if (run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled') return
     if (run.timer) clearTimeout(run.timer)
     // Tempo esgotado: cancelado por nós, mas para quem pediu é falha.
@@ -846,6 +856,13 @@ export class RunService {
       status = 'failed'
       message = RUN_MESSAGES.timedOut
     }
+    const code: RunEndCode | null = run.timedOut
+      ? 'timed_out'
+      : status === 'failed'
+        ? failedCode
+        : status === 'cancelled'
+          ? 'cancelled'
+          : null
     run.status = status
     this.active.delete(run.id)
     let summary: RunSummary | null = null
@@ -888,7 +905,8 @@ export class RunService {
       resultText: scrubText(run.resultText, run.secrets),
       summary,
       costUsd: run.costUsd,
-      message: message ?? null
+      message: message ?? null,
+      code
     }
     for (const listener of this.finishListeners) {
       try {

@@ -10,8 +10,8 @@ import type { Flow, FlowRunView, OpenPrResult } from '../../shared/task-flow'
 export interface OpenPrDeps {
   /** A task do Backlog.md está vinculada à tarefa? */
   linked(taskId: string): boolean
-  /** O fluxo pode começar (plugin alva-flow, pré-checagem)? `null` = sim. */
-  blockReason(projectId: string, flow: Flow): Promise<string | null>
+  /** O projeto está pronto para o alva-flow (pré-checagem)? Falha ao checar = não. */
+  alvaReady(projectId: string): Promise<boolean>
   /** `https://github.com/<o>/<r>/compare/<base>...<branch>?expand=1` (lança sem repo/ambiente). */
   compareUrl(projectId: string, taskId: string): string
   /** A branch da tarefa já está no GitHub sem commits novos? */
@@ -24,9 +24,7 @@ export async function openPr(
   projectId: string,
   taskId: string
 ): Promise<OpenPrResult> {
-  const withAlva =
-    deps.linked(taskId) &&
-    (await deps.blockReason(projectId, alvaOpenPrFlow()).catch(() => 'x')) === null
+  const withAlva = deps.linked(taskId) && (await deps.alvaReady(projectId).catch(() => false))
   // O push só entra se há algo novo: com a branch já enviada, o passo falharia ("nada novo").
   const pushed = await deps.alreadyPushed(projectId, taskId).catch(() => false)
   if (withAlva) {

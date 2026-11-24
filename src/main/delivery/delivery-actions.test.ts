@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { TaskPullRequest } from '../../shared/task-signals'
+import { ORKIO_ACTIONS } from '../../shared/orkio-actions'
 import { GitHubApiError } from '../connectors/github/github.client'
+import { SIGNALS_FAILURE } from './action-helpers'
 import { createDeliveryActions, DELIVERY_ACTION_MESSAGES } from './delivery-actions'
 import { DeliveryError, type DeliveryService, type PushPreview } from './delivery.service'
 
@@ -107,7 +109,7 @@ describe('ações de entrega', () => {
       stat: ' a | 1 +'
     })
     expect(await setup({ requirePushApproval: false }).get('push').confirm!(s.ctx)).toBeNull()
-    expect(await s.get('push').run(s.ctx)).toEqual({ ok: true, vars: { 'delivery.pushed': 'sim' } })
+    expect(await s.get('push').run(s.ctx)).toEqual({ ok: true })
     expect(s.events[0]).toMatchObject({
       kind: 'delivery',
       detail: { action: 'push', by: 'orkio', branch: 'ORK-1/x', owner: 'acme', repo: 'app' }
@@ -115,18 +117,19 @@ describe('ações de entrega', () => {
   })
 
   it('push: problema na prévia vira falha; erro do git vira mensagem (sem detalhes crus)', async () => {
-    const s = setup({ preview: { problem: 'Não há commits novos para enviar.' } })
-    expect(await s.get('push').confirm!(s.ctx)).toEqual({
-      problem: 'Não há commits novos para enviar.'
-    })
+    const nothing = { code: 'nothing' as const, message: 'Não há commits novos para enviar.' }
+    const s = setup({ preview: { problem: nothing } })
+    expect(await s.get('push').confirm!(s.ctx)).toEqual({ problem: nothing })
     s.push.mockRejectedValueOnce(new DeliveryError('credentials', 'O git pediu credenciais.'))
     expect(await s.get('push').run(s.ctx)).toEqual({
       ok: false,
+      code: 'credentials',
       message: 'O git pediu credenciais.'
     })
     s.push.mockRejectedValueOnce(new Error('stderr cru com https://token@github.com'))
     expect(await s.get('push').run(s.ctx)).toEqual({
       ok: false,
+      code: 'push_failed',
       message: DELIVERY_ACTION_MESSAGES.generic
     })
     expect(s.events).toEqual([])
@@ -148,7 +151,7 @@ describe('ações de entrega', () => {
     const down = setup({ signalsOk: false })
     expect(await down.get('verify_pushed').run(down.ctx)).toEqual({
       ok: false,
-      message: DELIVERY_ACTION_MESSAGES.signals
+      ...SIGNALS_FAILURE
     })
   })
 
@@ -160,8 +163,7 @@ describe('ações de entrega', () => {
       link: { url: 'https://github.com/acme/app/pull/12' }
     })
     expect(await s.get('request_review').run({ ...s.ctx, input: ['ana', 'team:core'] })).toEqual({
-      ok: true,
-      vars: { 'review.requested': 'sim' }
+      ok: true
     })
     expect(s.requestReviewers).toHaveBeenCalledWith('acme', 'app', 12, {
       users: ['ana'],
@@ -179,11 +181,12 @@ describe('ações de entrega', () => {
     expect(info).toMatchObject({ input: { selected: [], options: ['bia', 'ana'] } })
     expect(await fresh.get('request_review').run(fresh.ctx)).toEqual({
       ok: false,
+      code: 'no_reviewers',
       message: DELIVERY_ACTION_MESSAGES.noReviewers
     })
     const none = setup({ pull: null })
     expect(await none.get('request_review').confirm!(none.ctx)).toEqual({
-      problem: DELIVERY_ACTION_MESSAGES.noPr
+      problem: { code: 'no_pr', message: DELIVERY_ACTION_MESSAGES.noPr }
     })
     const refused = setup({
       requestReviewers: async () => {
@@ -192,8 +195,18 @@ describe('ações de entrega', () => {
     })
     expect(await refused.get('request_review').run({ ...refused.ctx, input: ['x'] })).toEqual({
       ok: false,
+      code: 'github_invalid',
       message: 'O GitHub recusou o pedido de review.'
     })
     expect(refused.automation).not.toHaveBeenCalled()
+  })
+
+  it('as variáveis gravadas são só as saídas declaradas da ação (o validador e os modelos usam)', async () => {
+    const s = setup()
+    for (const action of ['push', 'verify_pushed'] as const) {
+      const r = await s.get(action).run(s.ctx)
+      const declared = new Set(ORKIO_ACTIONS[action].outputs.map((o) => o.key))
+      for (const key of Object.keys(r.ok ? (r.vars ?? {}) : {})) expect(declared).toContain(key)
+    }
   })
 })

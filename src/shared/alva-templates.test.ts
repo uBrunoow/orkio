@@ -20,13 +20,16 @@ import {
   type Flow,
   type FlowDecision
 } from './task-flow'
+import { ALVA_COMMANDS, ALVA_EXTRACTOR, alvaCommand } from './alva'
+import { DECLARED_FLOW_VARS } from './flow-outputs'
+import { ORKIO_ACTIONS } from './orkio-actions'
 
+/** O registro real: comandos do plugin, extrator e ações do Orkio, e as saídas declaradas. */
 const CTX = {
-  commands: new Set(
-    ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr'].map((c) => `alva-flow:${c}`)
-  ),
-  extractors: ['alva'],
-  actions: ['noop', 'push', 'verify_pushed', 'request_review', 'review_snapshot', 'publish_review']
+  commands: new Set(ALVA_COMMANDS.map(alvaCommand)),
+  extractors: [ALVA_EXTRACTOR],
+  actions: Object.keys(ORKIO_ACTIONS),
+  declaredVars: DECLARED_FLOW_VARS
 }
 
 /** Roda o motor: `outcomes[stepId]` dá as variáveis que o extrator gravaria a cada execução. */

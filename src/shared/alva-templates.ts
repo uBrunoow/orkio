@@ -3,16 +3,34 @@
  * Gerados sob demanda e editáveis depois. Os comandos recebem só os argumentos (sem o briefing,
  * que fica em .orkio/briefing.md), e o extrator `alva` lê a task do Backlog.md depois de cada um.
  */
+import {
+  ALVA_EXTRACTOR,
+  ALVA_REVIEWED,
+  ALVA_TAG,
+  ALVA_VARS,
+  alvaCommand,
+  type AlvaCommand
+} from './alva'
+import { ACTION_VARS, ORKIO_ACTIONS } from './orkio-actions'
 import { REVIEW_COMMENTS_MAX } from './review-publish'
-import { FLOW_END, type Flow, type ProjectFlows, type StageFlow, type Step } from './task-flow'
+import {
+  FLOW_END,
+  FLOW_YES,
+  type Flow,
+  type ProjectFlows,
+  type StageFlow,
+  type Step
+} from './task-flow'
 import { normalizeLabel } from './text'
 
-const P = 'alva-flow'
+/** `{{chave}}` de uma variável do fluxo (para argumentos, pedidos e mensagens). */
+const v = (key: string): string => `{{${key}}}`
+const TASK_ID = v(ALVA_VARS.taskId)
 
 function alva(
   id: string,
   name: string,
-  cmd: string,
+  cmd: AlvaCommand,
   args: string,
   timeoutMin: number,
   options: { delivery?: boolean } = {}
@@ -21,11 +39,11 @@ function alva(
     id,
     name,
     type: 'claude_command',
-    command: `${P}:${cmd}`,
+    command: alvaCommand(cmd),
     args,
     timeoutMin,
     includeBriefing: false,
-    extract: { extractor: 'alva' },
+    extract: { extractor: ALVA_EXTRACTOR },
     ...(options.delivery ? { delivery: true } : {})
   }
 }
@@ -35,11 +53,11 @@ const PUSH = (id = 'push'): Step => ({
   id,
   name: 'Push da branch (Orkio)',
   type: 'orkio_action',
-  action: 'push'
+  action: ORKIO_ACTIONS.push.id
 })
 
-const SPEC = (): Step => alva('spec', 'Especificar (/spec)', 'spec', '{{alva.spec_arg}}', 120)
-const PLAN = (): Step => alva('plan', 'Planejar (/plan)', 'plan', '{{alva.task_id}}', 60)
+const SPEC = (): Step => alva('spec', 'Especificar (/spec)', 'spec', v(ALVA_VARS.specArg), 120)
+const PLAN = (): Step => alva('plan', 'Planejar (/plan)', 'plan', TASK_ID, 60)
 const always = { type: 'all' as const, of: [] }
 
 /** Gate com a spec (descrição e critérios de aceite) da task do Backlog, antes de planejar. */
@@ -86,21 +104,21 @@ export function alvaPlanFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.plan,
     name: 'Alva: planejar',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
       SPEC(),
       {
         id: 'pequeno',
         name: 'Caminho Pequeno? (spec já implementou)',
         type: 'branch',
-        when: { type: 'var', key: 'alva.status', op: 'eq', value: 'Reviewed' },
+        when: { type: 'var', key: ALVA_VARS.status, op: 'eq', value: ALVA_REVIEWED },
         then: FLOW_END
       },
       {
         id: 'sem-perguntas',
         name: 'Sem perguntas em aberto?',
         type: 'branch',
-        when: { type: 'var', key: 'alva.open_questions', op: 'eq', value: '0' },
+        when: { type: 'var', key: ALVA_VARS.openQuestions, op: 'eq', value: '0' },
         then: 'aprovar-spec'
       },
       {
@@ -137,13 +155,13 @@ export function alvaDeliverFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.deliver,
     name: 'Alva: implementar e entregar',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
       {
         id: 'tem-vinculo',
         name: 'Já tem task no Backlog?',
         type: 'branch',
-        when: { type: 'var', key: 'alva.linked', op: 'eq', value: 'sim' },
+        when: { type: 'var', key: ALVA_VARS.linked, op: 'eq', value: FLOW_YES },
         then: 'ja-revisado'
       },
       SPEC(),
@@ -151,7 +169,7 @@ export function alvaDeliverFlow(): Flow {
         id: 'pequeno',
         name: 'Caminho Pequeno? (spec já implementou)',
         type: 'branch',
-        when: { type: 'var', key: 'alva.status', op: 'eq', value: 'Reviewed' },
+        when: { type: 'var', key: ALVA_VARS.status, op: 'eq', value: ALVA_REVIEWED },
         then: 'ver-diff'
       },
       APPROVE_SPEC(),
@@ -161,11 +179,11 @@ export function alvaDeliverFlow(): Flow {
         id: 'ja-revisado',
         name: 'Já revisado (caminho Pequeno)?',
         type: 'branch',
-        when: { type: 'var', key: 'alva.status', op: 'eq', value: 'Reviewed' },
+        when: { type: 'var', key: ALVA_VARS.status, op: 'eq', value: ALVA_REVIEWED },
         then: 'ver-diff'
       },
-      alva('implement', 'Implementar (/implement)', 'implement', '{{alva.task_id}}', 120),
-      alva('review', 'Revisar (/review)', 'review', '{{alva.task_id}}', 60),
+      alva('implement', 'Implementar (/implement)', 'implement', TASK_ID, 120),
+      alva('review', 'Revisar (/review)', 'review', TASK_ID, 60),
       {
         id: 'blocker',
         name: 'Blocker no review? (corrige até 2 vezes)',
@@ -173,7 +191,7 @@ export function alvaDeliverFlow(): Flow {
         when: {
           type: 'all',
           of: [
-            { type: 'var', key: 'alva.review_blocker', op: 'eq', value: 'sim' },
+            { type: 'var', key: ALVA_VARS.reviewBlocker, op: 'eq', value: FLOW_YES },
             { type: 'visits', step: 'fix', lt: 2 }
           ]
         },
@@ -189,13 +207,13 @@ export function alvaDeliverFlow(): Flow {
         onReject: 'stop',
         timeoutMin: null
       },
-      alva('commit', 'Commit (/commit)', 'commit', '{{alva.task_id}}', 15),
+      alva('commit', 'Commit (/commit)', 'commit', TASK_ID, 15),
       PUSH(),
-      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', '{{alva.task_id}}', 60, {
+      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', TASK_ID, 60, {
         delivery: true
       }),
       { id: 'fim', name: 'Fim', type: 'branch', when: always, then: FLOW_END },
-      alva('fix', 'Corrigir blocker (/fix --apply)', 'fix', '{{alva.task_id}} --apply', 60),
+      alva('fix', 'Corrigir blocker (/fix --apply)', 'fix', `${TASK_ID} --apply`, 60),
       {
         id: 'revisar-de-novo',
         name: 'Revisar de novo',
@@ -208,8 +226,7 @@ export function alvaDeliverFlow(): Flow {
 }
 
 /** Pedido do passo de plano (só leitura): o agente lê os comentários e diz o que vai fazer. */
-export const REVIEW_PLAN_PROMPT =
-  'Leia .orkio/revisao.md (comentários de revisão não resolvidos da PR #{{review.pr}}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.'
+export const REVIEW_PLAN_PROMPT = `Leia .orkio/revisao.md (comentários de revisão não resolvidos da PR #${v(ACTION_VARS.reviewPr)}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.`
 
 /** Pedido do passo de correção (modo entrega), depois que você aprova o plano. */
 export const REVIEW_APPLY_PROMPT =
@@ -225,19 +242,19 @@ export function alvaReviewedFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.reviewed,
     name: 'Alva: comentários da PR',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
       {
         id: 'ler-comentarios',
         name: 'Ler os comentários da PR',
         type: 'orkio_action',
-        action: 'review_snapshot'
+        action: ORKIO_ACTIONS.review_snapshot.id
       },
       {
         id: 'sem-comentarios',
         name: 'Nenhum comentário pendente?',
         type: 'branch',
-        when: { type: 'var', key: 'review.count', op: 'eq', value: '0' },
+        when: { type: 'var', key: ACTION_VARS.reviewCount, op: 'eq', value: '0' },
         then: FLOW_END
       },
       {
@@ -254,7 +271,7 @@ export function alvaReviewedFlow(): Flow {
         id: 'aprovar-correcoes',
         name: 'Aprovar correções',
         type: 'gate',
-        message: 'Aprovar correções da PR #{{review.pr}}',
+        message: `Aprovar correções da PR #${v(ACTION_VARS.reviewPr)}`,
         show: 'result',
         onReject: 'stop',
         timeoutMin: null,
@@ -274,17 +291,22 @@ export function alvaReviewedFlow(): Flow {
         id: 'conferir-push',
         name: 'A PR já tem o commit atual?',
         type: 'orkio_action',
-        action: 'verify_pushed'
+        action: ORKIO_ACTIONS.verify_pushed.id
       },
       {
         id: 'ja-enviado',
         name: 'Já enviado?',
         type: 'branch',
-        when: { type: 'var', key: 'pr.pushed', op: 'eq', value: 'sim' },
+        when: { type: 'var', key: ACTION_VARS.prPushed, op: 'eq', value: FLOW_YES },
         then: 'pedir-review'
       },
       PUSH(),
-      { id: 'pedir-review', name: 'Pedir review', type: 'orkio_action', action: 'request_review' }
+      {
+        id: 'pedir-review',
+        name: 'Pedir review',
+        type: 'orkio_action',
+        action: ORKIO_ACTIONS.request_review.id
+      }
     ]
   }
 }
@@ -310,9 +332,9 @@ export function alvaReviewPublishFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.review,
     name: 'Alva: revisão publicada',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
-      alva('review', 'Revisar (/review)', 'review', '{{alva.task_id}}', 60),
+      alva('review', 'Revisar (/review)', 'review', TASK_ID, 60),
       {
         id: 'revisao-json',
         name: 'Converter a revisão em JSON (só leitura)',
@@ -327,7 +349,7 @@ export function alvaReviewPublishFlow(): Flow {
         id: 'publicar-revisao',
         name: 'Publicar revisão na PR (orkio[bot])',
         type: 'orkio_action',
-        action: 'publish_review'
+        action: ORKIO_ACTIONS.publish_review.id
       }
     ]
   }
@@ -338,10 +360,10 @@ export function alvaCiFlow(): Flow {
   return {
     id: ALVA_TEMPLATE_IDS.ci,
     name: 'Alva: CI vermelho',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
-      alva('fix-ci', 'Corrigir CI (/fix --ci --apply)', 'fix', '{{alva.task_id}} --ci --apply', 60),
-      alva('commit', 'Commit (/commit)', 'commit', '{{alva.task_id}}', 15),
+      alva('fix-ci', 'Corrigir CI (/fix --ci --apply)', 'fix', `${TASK_ID} --ci --apply`, 60),
+      alva('commit', 'Commit (/commit)', 'commit', TASK_ID, 15),
       PUSH()
     ]
   }
@@ -352,11 +374,11 @@ export function alvaOpenPrFlow(options: { push?: boolean } = {}): Flow {
   return {
     id: OPEN_PR_FLOW_IDS.openPr,
     name: 'Abrir PR',
-    tags: ['alva'],
+    tags: [ALVA_TAG],
     steps: [
       // Branch já no GitHub (push anterior ou à mão): vai direto ao /pr.
       ...(options.push === false ? [] : [PUSH()]),
-      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', '{{alva.task_id}}', 60, {
+      alva('pr', 'Pull Request (/pr, modo entrega)', 'pr', TASK_ID, 60, {
         delivery: true
       })
     ]

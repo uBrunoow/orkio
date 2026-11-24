@@ -3,10 +3,16 @@
  * ligação nas colunas, coluna opcional "Planejando", limite de fluxos Alva em paralelo e o resumo
  * da task do Backlog.md para o painel.
  */
-import type { AlvaPrecheck, BacklogTaskDocument, BacklogTaskInfo } from '../../shared/alva'
+import {
+  ALVA_MAX_PARALLEL,
+  clampAlvaParallel,
+  type AlvaPrecheck,
+  type BacklogTaskDocument,
+  type BacklogTaskInfo
+} from '../../shared/alva'
 import { ALVA_TEMPLATE_IDS, alvaTemplates } from '../../shared/alva-templates'
 import type { FlowStageDraft } from '../../shared/flow'
-import type { Flow, StageFlow } from '../../shared/task-flow'
+import type { StageFlow } from '../../shared/task-flow'
 import type { BoardService } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
@@ -44,6 +50,8 @@ export class AlvaFlowsService {
       board: Pick<BoardService, 'saveFlow'>
       alva: AlvaService
       precheck(projectDir: string): Promise<AlvaPrecheck>
+      /** O projeto usa Docker Compose? (leitura local, sem a pré-checagem). */
+      usesDocker(projectDir: string): boolean
       actor(): string
       now?: () => Date
     }
@@ -63,9 +71,8 @@ export class AlvaFlowsService {
     return result
   }
 
-  /** Para o FlowRunner: mensagem que impede um fluxo Alva de começar (ou null). */
-  async blockReason(projectId: string, flow: Flow): Promise<string | null> {
-    if (!flow.tags?.includes('alva')) return null
+  /** Mensagem que impede um fluxo Alva de começar (ou null). */
+  async blockReason(projectId: string): Promise<string | null> {
     const r = await this.precheck(projectId, false).catch(() => null)
     if (!r) return 'Não deu para verificar se o projeto está pronto para o alva-flow.'
     if (r.ready) return null
@@ -73,11 +80,18 @@ export class AlvaFlowsService {
     return `O projeto não está pronto para o alva-flow: falta ${missing.join(', ')}. Veja a tela alva-flow do quadro.`
   }
 
-  /** Limite de fluxos Alva em paralelo: só quando o projeto usa Docker (portas). */
-  concurrencyLimit(projectId: string, flow: Flow): number | null {
-    if (!flow.tags?.includes('alva')) return null
-    if (!this.cache.get(projectId)?.hasDocker) return null
-    return this.deps.config.get().flows[projectId]?.alva?.maxParallel ?? 1
+  /**
+   * Limite de fluxos Alva em paralelo: só quando o projeto usa Docker (portas). Olha os arquivos
+   * de compose agora (não o cache da pré-checagem, vazio ao reabrir o app).
+   */
+  concurrencyLimit(projectId: string): number | null {
+    const project = projectById(this.deps.config.get(), projectId)
+    if (!project || !this.deps.usesDocker(project.localPath)) return null
+    return this.maxParallel(projectId)
+  }
+
+  private maxParallel(projectId: string): number {
+    return this.deps.config.get().flows[projectId]?.alva?.maxParallel ?? ALVA_MAX_PARALLEL.fallback
   }
 
   status(projectId: string): AlvaStatus {
@@ -92,7 +106,7 @@ export class AlvaFlowsService {
           return { id: f.id, name: f.name, stageId: b?.stageId ?? null, mode: b?.mode ?? null }
         }),
       boundStages: [...new Set(pf.bindings.map((b) => b.stageId))],
-      maxParallel: pf.alva?.maxParallel ?? 1
+      maxParallel: this.maxParallel(projectId)
     }
   }
 
@@ -186,7 +200,7 @@ export class AlvaFlowsService {
   }
 
   async setMaxParallel(projectId: string, value: number): Promise<AlvaStatus> {
-    const n = Math.min(4, Math.max(1, Math.floor(value)))
+    const n = clampAlvaParallel(value)
     await this.deps.config.update((c) => {
       const pf = c.flows[projectId] ?? { flows: [], bindings: [] }
       return { ...c, flows: { ...c.flows, [projectId]: { ...pf, alva: { maxParallel: n } } } }

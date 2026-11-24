@@ -3,8 +3,9 @@ import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { AgentError, type AgentsService } from '../agents/agents.service'
 import { AlvaFlowsService } from '../alva/alva-flows.service'
+import { createAlvaIntegration } from '../alva/alva-integration'
 import { AlvaService } from '../alva/alva.service'
-import { runPrecheck } from '../alva/precheck'
+import { hasComposeFile, runPrecheck } from '../alva/precheck'
 import type { BoardService, StageChange } from '../board/board.service'
 import type { BoardStore } from '../board/board.store'
 import { buildCatalog } from '../claude/catalog'
@@ -65,6 +66,7 @@ export function createFlows(deps: {
     board: deps.board,
     alva,
     actor: deps.actor,
+    usesDocker: hasComposeFile,
     precheck: async (dir) => {
       const catalog = await buildCatalog({ projectDir: dir, home: homedir() })
       return runPrecheck(
@@ -110,9 +112,7 @@ export function createFlows(deps: {
     extractors,
     actions,
     worktreePath: (taskId) => claude.worktrees.get(taskId)?.path ?? null,
-    initialVars: (projectId, taskId, flow) =>
-      flow.tags?.includes('alva') ? alva.initialVars(projectId, taskId) : Promise.resolve({}),
-    canStart: (projectId, flow) => alvaFlows.blockReason(projectId, flow),
+    integrations: [createAlvaIntegration({ alva, flows: alvaFlows })],
     agentFor: async (projectId, taskId) => {
       try {
         return await deps.agents.runtimeFor(projectId, taskId)
@@ -122,7 +122,6 @@ export function createFlows(deps: {
       }
     },
     agentLimit: (agent) => deps.agents.limitProblem(agent),
-    concurrencyLimit: (projectId, flow) => alvaFlows.concurrencyLimit(projectId, flow),
     notify: deps.notify,
     emit: (ref) => deps.emit('taskFlowChanged', ref),
     onFinished: (ref) => deps.onFlowFinished(ref.projectId),
@@ -139,7 +138,7 @@ export function createFlows(deps: {
   })
   const openPrDeps: OpenPrDeps = {
     linked: (taskId) => alva.getLink(taskId) !== null,
-    blockReason: (projectId, flow) => alvaFlows.blockReason(projectId, flow),
+    alvaReady: async (projectId) => (await alvaFlows.blockReason(projectId)) === null,
     compareUrl: (projectId, taskId) => claude.delivery.compareUrl(projectId, taskId),
     alreadyPushed: (projectId, taskId) => claude.delivery.alreadyPushed(projectId, taskId),
     startBuiltin: (projectId, taskId, flow) => runner.startBuiltin(projectId, taskId, flow)

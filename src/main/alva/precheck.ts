@@ -3,15 +3,20 @@
  * no repositório. Só lê metadados: versão do plugin, existência de arquivos, nome/status dos MCPs
  * (`claude mcp list`), código de saída do `gh auth status`. Nunca guarda nem loga a saída.
  */
+import { statSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { AlvaCheckItem, AlvaPrecheck } from '../../shared/alva'
+import {
+  ALVA_COMMANDS,
+  ALVA_PLUGIN,
+  alvaCommand,
+  type AlvaCheckItem,
+  type AlvaPrecheck
+} from '../../shared/alva'
 import { parseInstalledPlugins } from '../claude/catalog'
 import { compareVersions } from '../claude/detect'
 
-export const ALVA_PLUGIN = 'alva-flow'
-export const ALVA_COMMANDS = ['spec', 'plan', 'implement', 'review', 'fix', 'commit', 'pr'] as const
 const MIN_COMPOSE = '2.24.4'
 const COMPOSE_FILES = [
   'docker/docker-compose.dev.yml',
@@ -20,6 +25,16 @@ const COMPOSE_FILES = [
   'compose.yml',
   'docker-compose.yml'
 ]
+
+/**
+ * O projeto usa Docker Compose (algum arquivo de compose conhecido)? Leitura local e síncrona, sem
+ * depender da pré-checagem: o limite de fluxos Alva em paralelo pergunta isto ao reabrir o app.
+ */
+export function hasComposeFile(projectDir: string): boolean {
+  return COMPOSE_FILES.some(
+    (f) => statSync(join(projectDir, f), { throwIfNoEntry: false })?.isFile() === true
+  )
+}
 
 export type ExecResult = { code: number; stdout: string }
 export type Exec = (
@@ -115,9 +130,7 @@ export async function runPrecheck(
       pluginVersion = null
     }
   }
-  const missingCommands = ALVA_COMMANDS.filter(
-    (c) => !commandsInCatalog.includes(`${ALVA_PLUGIN}:${c}`)
-  )
+  const missingCommands = ALVA_COMMANDS.filter((c) => !commandsInCatalog.includes(alvaCommand(c)))
   if (!entry && missingCommands.length === ALVA_COMMANDS.length) {
     items.push({
       id: 'plugin',
@@ -131,7 +144,7 @@ export async function runPrecheck(
       id: 'plugin',
       label: 'Plugin alva-flow',
       state: 'missing',
-      detail: `Faltam comandos: ${missingCommands.map((c) => `/${ALVA_PLUGIN}:${c}`).join(', ')}.`,
+      detail: `Faltam comandos: ${missingCommands.map((c) => `/${alvaCommand(c)}`).join(', ')}.`,
       fix: '/plugin update alva-flow@alva-flow-marketplace'
     })
   } else {

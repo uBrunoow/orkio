@@ -351,6 +351,7 @@ export function createApp(): OrkioApp {
           os: { platform: process.platform, arch: process.arch, release: osRelease() },
           config: { schemaVersion: ORKIO_CONFIG_VERSION, readOnly: configStore.readOnly },
           db: boardStore?.db ?? null,
+          flows: work?.flows ?? null,
           connections: async () => [
             { name: 'Notion', status: await notion.getStatus() },
             { name: 'GitHub', status: await github.getStatus() }
@@ -625,10 +626,7 @@ function createWork(core: {
     store: boardStore,
     board,
     agents,
-    flows: {
-      hasActive: (taskId) => runner.hasActive(taskId),
-      startManual: (projectId, taskId) => runner.startManual(projectId, taskId)
-    },
+    flows: runner,
     actor: core.actor,
     emit: (projectId) => {
       emit('agentsChanged', { projectId })

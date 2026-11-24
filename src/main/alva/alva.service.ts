@@ -11,6 +11,11 @@ import { existsSync } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  ALVA_EXTRACTOR,
+  ALVA_FAILURES,
+  ALVA_REVIEWED,
+  ALVA_VARS,
+  alvaCommandOf,
   backlogTaskBody,
   parseBacklogTask,
   sizeFromSpecResult,
@@ -18,6 +23,7 @@ import {
   type BacklogTaskDocument,
   type BacklogTaskInfo
 } from '../../shared/alva'
+import { FLOW_NO, FLOW_YES } from '../../shared/task-flow'
 import { redactSecrets } from '../claude/redact'
 import type { Db } from '../db/database'
 import type { ExtractContext, ExtractResult, FlowExtractor } from '../flows/flow-runner'
@@ -25,7 +31,8 @@ import type { ExtractContext, ExtractResult, FlowExtractor } from '../flows/flow
 export const ALVA_MESSAGES = {
   noTaskCreated:
     'O /alva-flow:spec terminou sem criar nem alterar nenhuma task em backlog/tasks/. Confira o log; retome para tentar de novo.',
-  noTaskFile: 'Não achei o arquivo da task vinculada no ambiente da tarefa.',
+  notLinked:
+    'Este passo usa a task do Backlog, mas o fluxo ainda não sabe qual é a desta tarefa. Rode o /spec de novo (ou escolha a task) e depois retome.',
   choose: 'O /alva-flow:spec criou mais de uma task. Qual é a desta tarefa?',
   chooseChanged:
     'O /alva-flow:spec atualizou mais de uma task que já existia. Qual é a desta tarefa?'
@@ -221,7 +228,7 @@ export class AlvaService {
   /** Variáveis no início de um fluxo. */
   async initialVars(projectId: string, taskId: string): Promise<Record<string, string>> {
     const linked = this.getLink(taskId)
-    if (linked) return { 'alva.task_id': linked, 'alva.spec_arg': linked, 'alva.linked': 'sim' }
+    if (linked) return linkedVars(linked)
     const info = await this.deps.taskInfo(projectId, taskId)
     const parts = info
       ? [
@@ -230,11 +237,11 @@ export class AlvaService {
           'Briefing completo em .orkio/briefing.md.'
         ]
       : ['Briefing completo em .orkio/briefing.md.']
-    return { 'alva.spec_arg': parts.filter(Boolean).join(' '), 'alva.linked': 'nao' }
+    return { [ALVA_VARS.specArg]: parts.filter(Boolean).join(' '), [ALVA_VARS.linked]: FLOW_NO }
   }
 
   readonly extractor: FlowExtractor = {
-    id: 'alva',
+    id: ALVA_EXTRACTOR,
     label: 'alva-flow: task do Backlog.md (status, perguntas, blocker)',
     // Antes do passo. Na primeira rodada da tarefa o worktree ainda não existe (o passo o cria a
     // partir da branch padrão): a foto vem da pasta do projeto. Foto vazia faria todas as tasks
@@ -279,7 +286,9 @@ export class AlvaService {
       const created = await read(createdFiles)
       const candidates = created.length > 0 ? created : await read(changedFiles)
       if (candidates.length === 0) {
-        return ctx.command.endsWith(':spec') ? { fail: ALVA_MESSAGES.noTaskCreated } : {}
+        return alvaCommandOf(ctx.step.command) === 'spec'
+          ? { fail: { code: ALVA_FAILURES.noTaskCreated, message: ALVA_MESSAGES.noTaskCreated } }
+          : {}
       }
       if (candidates.length > 1) {
         return {
@@ -303,17 +312,13 @@ export class AlvaService {
   ): Promise<Record<string, string>> {
     const info = ctx.worktreePath ? await this.findTask(ctx.worktreePath, id) : null
     // Com vínculo, um novo /spec recebe o ID (retoma a task em vez de criar outra).
-    const vars: Record<string, string> = {
-      'alva.task_id': id,
-      'alva.spec_arg': id,
-      'alva.linked': 'sim'
-    }
+    const vars = linkedVars(id)
     if (!info) return vars
-    vars['alva.status'] = info.status
-    vars['alva.open_questions'] = String(info.openQuestions)
-    if (ctx.command.endsWith(':review')) {
+    vars[ALVA_VARS.status] = info.status
+    vars[ALVA_VARS.openQuestions] = String(info.openQuestions)
+    if (alvaCommandOf(ctx.step.command) === 'review') {
       // O /review deixa Reviewed quando limpo; com Blocker ou suíte vermelha continua Executed.
-      vars['alva.review_blocker'] = info.status === 'Reviewed' ? 'nao' : 'sim'
+      vars[ALVA_VARS.reviewBlocker] = info.status === ALVA_REVIEWED ? FLOW_NO : FLOW_YES
     }
     Object.assign(vars, this.sizeVars(ctx, resultText, info.status))
     return vars
@@ -324,9 +329,14 @@ export class AlvaService {
     resultText: string,
     status: string | null
   ): Record<string, string> {
-    if (!ctx.command.endsWith(':spec')) return {}
-    if (status === 'Reviewed') return { 'alva.size': 'Pequeno' }
+    if (alvaCommandOf(ctx.step.command) !== 'spec') return {}
+    if (status === ALVA_REVIEWED) return { [ALVA_VARS.size]: 'Pequeno' }
     const size = sizeFromSpecResult(resultText)
-    return size ? { 'alva.size': size } : {}
+    return size ? { [ALVA_VARS.size]: size } : {}
   }
+}
+
+/** Variáveis de uma tarefa já vinculada: um novo /spec recebe o ID (retoma a task). */
+function linkedVars(id: string): Record<string, string> {
+  return { [ALVA_VARS.taskId]: id, [ALVA_VARS.specArg]: id, [ALVA_VARS.linked]: FLOW_YES }
 }

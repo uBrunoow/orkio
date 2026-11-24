@@ -11,6 +11,7 @@ function deps(overrides: Partial<DiagnosticsDeps> = {}): DiagnosticsDeps {
     os: { platform: 'linux', arch: 'x64', release: '6.17.0' },
     config: { schemaVersion: 11, readOnly: false },
     db: openDatabase(':memory:'),
+    flows: { counts: () => ({ total: 4, active: 1 }) },
     connections: async () => [
       {
         name: 'GitHub',
@@ -53,6 +54,9 @@ describe('collectDiagnostics', () => {
     // Contagem pelas pastas de `userDataPaths()`: worktrees por projeto, logs das execuções.
     expect(text).toContain('- Pastas de trabalho (worktrees): 3')
     expect(text).toContain('- Logs de execução: 2')
+    // Fluxos contados pelo executor (dono da tabela).
+    expect(text).toContain('- Execuções de fluxo: 4')
+    expect(text).toContain('- Fluxos em andamento: 1')
   })
 
   it('nunca inclui conta, mensagem de erro nem token', async () => {
@@ -67,6 +71,7 @@ describe('collectDiagnostics', () => {
     const text = await collectDiagnostics(
       deps({
         db: null,
+        flows: null,
         toolVersion: async () => {
           throw new Error('boom')
         },

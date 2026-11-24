@@ -4,25 +4,24 @@
  * - `push`: gate com commits, `diff --stat` e destino (se "Exigir minha aprovação para push"
  *   estiver ligado) → `git push` só da branch da tarefa, sem força.
  * - `verify_pushed`: confere se a PR já tem o commit atual (`head.sha` == HEAD do worktree);
- *   grava `pr.exists`, `pr.pushed` e `pr.number`.
+ *   grava as saídas declaradas em `ORKIO_ACTIONS.verify_pushed`.
  * - `request_review`: gate com os revisores (quem já revisou ou foi pedido; senão, você escolhe)
  *   → POST requested_reviewers pelo conector → a 3B vê o pedido e move a tarefa para Revisando.
  *
  * Cada ação feita vira um evento `delivery` no histórico, com link (branch ou PR).
  */
-import type { TaskEventDetailInput } from '../../shared/task-events'
-import type { ActionConfirm } from '../../shared/task-flow'
+import { ACTION_VARS, ORKIO_ACTIONS } from '../../shared/orkio-actions'
+import { FLOW_NO, FLOW_YES, type ActionConfirm, type StepFailure } from '../../shared/task-flow'
 import type { BoardStore } from '../board/board.store'
 import { GitHubApiError } from '../connectors/github/github.client'
 import { errorName } from '../errors'
 import type { OrkioAction } from '../flows/flow-runner'
+import { deliveryEvent, openPullFor, type SignalsFetch } from './action-helpers'
 import { DeliveryError, type DeliveryService } from './delivery.service'
-import type { Result } from '../../shared/result'
-import type { TaskSignalsResult } from '../../shared/task-signals'
 
 export interface DeliveryActionsDeps {
   delivery: DeliveryService
-  signals(projectId: string, force: boolean): Promise<Result<TaskSignalsResult>>
+  signals: SignalsFetch
   github: {
     requestReviewers(
       owner: string,
@@ -41,39 +40,21 @@ export interface DeliveryActionsDeps {
 export const DELIVERY_ACTION_MESSAGES = {
   noPr: 'Esta tarefa não tem PR aberta no GitHub. Rode o /pr antes de pedir review.',
   noReviewers: 'Escolha pelo menos um revisor.',
-  signals: 'Não deu para conferir a PR no GitHub agora. Tente de novo em instantes.',
   generic: 'A ação de entrega falhou. Tente de novo.',
   github: 'O GitHub recusou o pedido de review. Tente de novo em instantes.'
 } as const
 
+const NO_PR: StepFailure = { code: 'no_pr', message: DELIVERY_ACTION_MESSAGES.noPr }
+const failure = (error: DeliveryError): StepFailure => ({
+  code: error.code,
+  message: error.message
+})
+
 const STAT_LIMIT = 4_000
 
 export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] {
-  const now = (): string => (deps.now?.() ?? new Date()).toISOString()
-  const event = (
-    projectId: string,
-    taskId: string,
-    detail: Omit<TaskEventDetailInput<'delivery'>, 'by'>
-  ): void =>
-    deps.store.addEvent({
-      taskPageId: taskId,
-      projectId,
-      at: now(),
-      kind: 'delivery',
-      detail: { by: 'orkio', ...detail }
-    })
-
-  /** PR aberta da tarefa, lida agora do GitHub (sinais da 2D com `force`). */
-  async function openPull(projectId: string, taskId: string) {
-    const r = await deps.signals(projectId, true)
-    if (!r.ok) return { error: DELIVERY_ACTION_MESSAGES.signals } as const
-    const pr = r.value.signals[taskId]?.pr ?? null
-    return { pr: pr && (pr.state === 'open' || pr.state === 'draft') ? pr : null } as const
-  }
-
   const push: OrkioAction = {
-    id: 'push',
-    label: 'Push da branch da tarefa',
+    ...ORKIO_ACTIONS.push,
     async confirm({ projectId, taskId }) {
       try {
         const p = await deps.delivery.preview(projectId, taskId)
@@ -99,54 +80,55 @@ export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] 
         }
         return info
       } catch (error) {
-        if (error instanceof DeliveryError) return { problem: error.message }
+        if (error instanceof DeliveryError) return { problem: failure(error) }
         throw error
       }
     },
     async run({ projectId, taskId }) {
       try {
         const r = await deps.delivery.push(projectId, taskId)
-        event(projectId, taskId, {
-          action: 'push',
-          owner: r.target.owner,
-          repo: r.target.repo,
-          branch: r.target.branch,
-          commits: r.commits
-        })
-        return { ok: true, vars: { 'delivery.pushed': 'sim' } }
+        deliveryEvent(
+          deps,
+          { projectId, taskId },
+          {
+            action: 'push',
+            owner: r.target.owner,
+            repo: r.target.repo,
+            branch: r.target.branch,
+            commits: r.commits
+          }
+        )
+        return { ok: true }
       } catch (error) {
-        if (error instanceof DeliveryError) return { ok: false, message: error.message }
+        if (error instanceof DeliveryError) return { ok: false, ...failure(error) }
         console.error(`[orkio] push: ${errorName(error)}`)
-        return { ok: false, message: DELIVERY_ACTION_MESSAGES.generic }
+        return { ok: false, code: 'push_failed', message: DELIVERY_ACTION_MESSAGES.generic }
       }
     }
   }
 
   const verify: OrkioAction = {
-    id: 'verify_pushed',
-    label: 'Conferir se a PR tem o commit atual',
+    ...ORKIO_ACTIONS.verify_pushed,
     async run({ projectId, taskId }) {
       const head = await deps.delivery.head(taskId)
-      const found = await openPull(projectId, taskId)
-      if ('error' in found)
-        return { ok: false, message: found.error ?? DELIVERY_ACTION_MESSAGES.signals }
+      const found = await openPullFor(deps.signals, projectId, taskId)
+      if ('failure' in found) return { ok: false, ...found.failure }
       const pr = found.pr
       return {
         ok: true,
         vars: {
-          'pr.exists': pr ? 'sim' : 'nao',
-          'pr.number': pr ? String(pr.number) : '',
-          'pr.pushed': pr && head && pr.headSha === head ? 'sim' : 'nao'
+          [ACTION_VARS.prExists]: pr ? FLOW_YES : FLOW_NO,
+          [ACTION_VARS.prNumber]: pr ? String(pr.number) : '',
+          [ACTION_VARS.prPushed]: pr && head && pr.headSha === head ? FLOW_YES : FLOW_NO
         }
       }
     }
   }
 
   async function reviewers(projectId: string, taskId: string) {
-    const found = await openPull(projectId, taskId)
-    if ('error' in found)
-      return { problem: found.error ?? DELIVERY_ACTION_MESSAGES.signals } as const
-    if (!found.pr) return { problem: DELIVERY_ACTION_MESSAGES.noPr } as const
+    const found = await openPullFor(deps.signals, projectId, taskId)
+    if ('failure' in found) return { problem: found.failure } as const
+    if (!found.pr) return { problem: NO_PR } as const
     const pr = found.pr
     const known = [
       ...(pr.reviews ?? []).map((r) => r.author ?? null),
@@ -156,16 +138,15 @@ export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] 
   }
 
   const requestReview: OrkioAction = {
-    id: 'request_review',
-    label: 'Pedir review',
+    ...ORKIO_ACTIONS.request_review,
     async confirm({ projectId, taskId }) {
       const r = await reviewers(projectId, taskId)
-      if ('problem' in r) return { problem: r.problem ?? DELIVERY_ACTION_MESSAGES.noPr }
+      if ('problem' in r) return { problem: r.problem }
       let target
       try {
         target = deps.delivery.target(projectId, taskId)
       } catch (error) {
-        if (error instanceof DeliveryError) return { problem: error.message }
+        if (error instanceof DeliveryError) return { problem: failure(error) }
         throw error
       }
       const collaborators = await deps.github
@@ -189,14 +170,16 @@ export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] 
     },
     async run({ projectId, taskId, input }) {
       const r = await reviewers(projectId, taskId)
-      if ('problem' in r) return { ok: false, message: r.problem ?? DELIVERY_ACTION_MESSAGES.noPr }
+      if ('problem' in r) return { ok: false, ...r.problem }
       const chosen = [...new Set(input ?? r.known)]
-      if (chosen.length === 0) return { ok: false, message: DELIVERY_ACTION_MESSAGES.noReviewers }
+      if (chosen.length === 0) {
+        return { ok: false, code: 'no_reviewers', message: DELIVERY_ACTION_MESSAGES.noReviewers }
+      }
       let target
       try {
         target = deps.delivery.target(projectId, taskId)
       } catch (error) {
-        if (error instanceof DeliveryError) return { ok: false, message: error.message }
+        if (error instanceof DeliveryError) return { ok: false, ...failure(error) }
         throw error
       }
       try {
@@ -205,20 +188,26 @@ export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] 
           teams: chosen.filter((c) => c.startsWith('team:')).map((c) => c.slice(5))
         })
       } catch (error) {
-        if (error instanceof GitHubApiError) return { ok: false, message: error.message }
+        if (error instanceof GitHubApiError) {
+          return { ok: false, code: `github_${error.code}`, message: error.message }
+        }
         console.error(`[orkio] pedir review: ${errorName(error)}`)
-        return { ok: false, message: DELIVERY_ACTION_MESSAGES.github }
+        return { ok: false, code: 'github', message: DELIVERY_ACTION_MESSAGES.github }
       }
-      event(projectId, taskId, {
-        action: 'review_request',
-        owner: target.owner,
-        repo: target.repo,
-        branch: target.branch,
-        reviewers: chosen.length,
-        pr: { number: r.pr.number, owner: target.owner, repo: target.repo }
-      })
+      deliveryEvent(
+        deps,
+        { projectId, taskId },
+        {
+          action: 'review_request',
+          owner: target.owner,
+          repo: target.repo,
+          branch: target.branch,
+          reviewers: chosen.length,
+          pr: { number: r.pr.number, owner: target.owner, repo: target.repo }
+        }
+      )
       deps.runAutomation?.(projectId)
-      return { ok: true, vars: { 'review.requested': 'sim' } }
+      return { ok: true }
     }
   }
 

@@ -12,6 +12,9 @@ import type { ConfigStore } from '../storage/config-store'
 import { OrchestratorService, agentNameFallback } from './orchestrator.service'
 import type { BoardCard, BoardView } from '../../shared/board'
 import type { Result } from '../../shared/result'
+import { isLive } from '../../shared/flow-run-state'
+import type { FlowRunStatus } from '../../shared/task-flow'
+import type { LastFlow } from '../flows/flow-runner'
 
 const P = 'p1'
 const STAGES = ['fila', 'dev', 'rev', 'ok']
@@ -82,26 +85,45 @@ function place(taskId: string, stageId: string, when: string): void {
   else cards.push(makeCard(taskId, stageId))
 }
 
+/** Execuções de fluxo que o executor (fake) responde ao orquestrador. */
+interface FakeRun extends LastFlow {
+  taskId: string
+  agentKey: string | null
+}
+let runs: FakeRun[]
+
 function flowRun(
   taskId: string,
   stageId: string | null,
   startedAt: string,
   endedAt: string | null,
-  over: { status?: string; result?: string | null; agent?: string | null } = {}
+  over: { status?: FlowRunStatus; result?: LastFlow['result']; agent?: string | null } = {}
 ): void {
-  db.run(
-    `INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, stage_id, status, state_json, started_at, ended_at, result, agent_key)
-     VALUES (?, ?, ?, 'f', '{}', ?, ?, '{}', ?, ?, ?, ?)`,
-    `${taskId}-${startedAt}`,
+  runs.push({
     taskId,
-    P,
     stageId,
-    over.status ?? 'finished',
+    status: over.status ?? 'finished',
+    result: over.result === undefined ? 'done' : over.result,
     startedAt,
     endedAt,
-    over.result === undefined ? 'done' : over.result,
-    over.agent ?? null
-  )
+    agentKey: over.agent ?? null
+  })
+}
+
+const fakeFlows = {
+  activeCountByAgent: (): Map<string, number> => {
+    const out = new Map<string, number>()
+    for (const r of runs) {
+      if (r.agentKey && isLive(r.status)) out.set(r.agentKey, (out.get(r.agentKey) ?? 0) + 1)
+    }
+    return out
+  },
+  activeTasks: () =>
+    runs.filter((r) => isLive(r.status)).map((r) => ({ taskId: r.taskId, agentKey: r.agentKey })),
+  lastFlow: (taskId: string): LastFlow | null =>
+    runs
+      .filter((r) => r.taskId === taskId)
+      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1))[0] ?? null
 }
 
 async function enable(over: Partial<OrchestratorConfig> = {}): Promise<void> {
@@ -160,6 +182,7 @@ beforeEach(async () => {
   cards = []
   started = []
   active = new Set()
+  runs = []
   pending = []
   clock = Date.parse(at(30))
   agents = new AgentsService({
@@ -206,6 +229,7 @@ beforeEach(async () => {
     },
     agents,
     flows: {
+      ...fakeFlows,
       hasActive: (t) => active.has(t),
       startManual: async (_p, t) => {
         started.push(`${t}:${agents.assignedKey(t)}`)

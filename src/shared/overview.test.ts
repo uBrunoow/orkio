@@ -72,6 +72,7 @@ function flow(over: Partial<FlowRunView> = {}): FlowRunView {
         stepId: 'rev',
         runId: 'run1',
         status: 'running',
+        code: null,
         startedAt: '2026-11-20T10:01:00.000Z',
         endedAt: null,
         message: null,

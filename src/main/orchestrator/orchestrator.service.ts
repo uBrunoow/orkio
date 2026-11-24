@@ -13,6 +13,7 @@
  */
 import { STAGE_ENTRY_KINDS } from '../../shared/task-events'
 import { DomainError } from '../errors'
+import { FlowError, type FlowRunner } from '../flows/flow-runner'
 import {
   ORCHESTRATOR_LIMITS,
   defaultOrchestrator,
@@ -52,7 +53,6 @@ export class OrchestratorError extends DomainError {
 }
 
 /** Status de fluxo que ocupam o agente (inclui esperas e pausas: o trabalho é dele). */
-const ACTIVE_SQL = `('running', 'waiting_gate', 'paused', 'awaiting_decision')`
 /** Quanto tempo uma tarefa recém-movida conta como "começando" até o fluxo aparecer. */
 const STARTING_MS = 2 * 60_000
 
@@ -70,8 +70,8 @@ export interface OrchestratorDeps {
     | 'releaseByOrchestrator'
     | 'limitProblem'
   >
-  flows: {
-    hasActive(taskId: string): boolean
+  /** O executor de fluxos (dono de `flow_runs`): consultas e o "Rodar fluxo". */
+  flows: Pick<FlowRunner, 'hasActive' | 'activeCountByAgent' | 'activeTasks' | 'lastFlow'> & {
     /** "Rodar fluxo": o fluxo ligado à etapa atual. Lança `FlowError` com mensagem pt-BR. */
     startManual(projectId: string, taskId: string): Promise<unknown>
   }
@@ -364,9 +364,7 @@ export class OrchestratorService {
         // Mensagens do FlowError são pt-BR e curtas; qualquer outra coisa vira texto genérico.
         wait(
           d.taskId,
-          error instanceof Error && error.name === 'FlowError'
-            ? error.message
-            : ORCHESTRATOR_MESSAGES.startFailed
+          error instanceof FlowError ? error.message : ORCHESTRATOR_MESSAGES.startFailed
         )
       }
     }
@@ -385,12 +383,7 @@ export class OrchestratorService {
 
   /** Fluxos ativos por agente (todos os projetos) + tarefas recém-movidas ainda sem fluxo. */
   private loadByAgent(): Map<AgentKey, number> {
-    const out = new Map<AgentKey, number>()
-    for (const r of this.deps.db.all<{ agent_key: string; n: number }>(
-      `SELECT agent_key, COUNT(*) AS n FROM flow_runs WHERE agent_key IS NOT NULL AND status IN ${ACTIVE_SQL} GROUP BY agent_key`
-    )) {
-      out.set(r.agent_key, r.n)
-    }
+    const out = new Map<AgentKey, number>(this.deps.flows.activeCountByAgent())
     for (const d of this.dispatched.values()) {
       out.set(d.agentKey, (out.get(d.agentKey) ?? 0) + 1)
     }
@@ -398,14 +391,7 @@ export class OrchestratorService {
   }
 
   private busyTasks(projectId: string): Set<string> {
-    const out = new Set(
-      this.deps.db
-        .all<{ task_page_id: string }>(
-          `SELECT DISTINCT task_page_id FROM flow_runs WHERE project_id = ? AND status IN ${ACTIVE_SQL}`,
-          projectId
-        )
-        .map((r) => r.task_page_id)
-    )
+    const out = new Set(this.deps.flows.activeTasks(projectId).map((t) => t.taskId))
     for (const [taskId, d] of this.dispatched) if (d.projectId === projectId) out.add(taskId)
     return out
   }
@@ -413,12 +399,10 @@ export class OrchestratorService {
   /** Tarefas do projeto com agente trabalhando (fluxo ativo) ou começando. */
   private activeTotal(projectId: string): number {
     const tasks = new Set(
-      this.deps.db
-        .all<{ task_page_id: string }>(
-          `SELECT DISTINCT task_page_id FROM flow_runs WHERE project_id = ? AND agent_key IS NOT NULL AND status IN ${ACTIVE_SQL}`,
-          projectId
-        )
-        .map((r) => r.task_page_id)
+      this.deps.flows
+        .activeTasks(projectId)
+        .filter((t) => t.agentKey !== null)
+        .map((t) => t.taskId)
     )
     for (const [taskId, d] of this.dispatched) if (d.projectId === projectId) tasks.add(taskId)
     return tasks.size
@@ -428,12 +412,9 @@ export class OrchestratorService {
   private purgeDispatched(): void {
     const nowMs = this.now().getTime()
     for (const [taskId, d] of this.dispatched) {
-      const started = this.deps.db.get<{ n: number }>(
-        'SELECT COUNT(*) AS n FROM flow_runs WHERE task_page_id = ? AND started_at >= ?',
-        taskId,
-        new Date(d.at).toISOString()
-      )
-      if ((started?.n ?? 0) > 0 || nowMs - d.at > STARTING_MS) this.dispatched.delete(taskId)
+      const last = this.deps.flows.lastFlow(taskId)
+      const started = last !== null && last.startedAt >= new Date(d.at).toISOString()
+      if (started || nowMs - d.at > STARTING_MS) this.dispatched.delete(taskId)
     }
   }
 
@@ -454,20 +435,11 @@ export class OrchestratorService {
       ...STAGE_ENTRY_KINDS
     )?.at
     if (!entry) return null
-    const last = this.deps.db.get<{
-      stage_id: string | null
-      status: string
-      result: string | null
-      started_at: string
-      ended_at: string | null
-    }>(
-      'SELECT stage_id, status, result, started_at, ended_at FROM flow_runs WHERE task_page_id = ? ORDER BY started_at DESC LIMIT 1',
-      taskId
-    )
-    if (!last || last.status !== 'finished' || last.result !== 'done' || !last.ended_at) return null
-    if (!since || last.ended_at < since) return null
-    if (last.started_at >= entry) return last.stage_id === stageId ? 'finished_here' : null
-    return last.ended_at >= entry ? 'carried_in' : null
+    const last = this.deps.flows.lastFlow(taskId)
+    if (!last || last.status !== 'finished' || last.result !== 'done' || !last.endedAt) return null
+    if (!since || last.endedAt < since) return null
+    if (last.startedAt >= entry) return last.stageId === stageId ? 'finished_here' : null
+    return last.endedAt >= entry ? 'carried_in' : null
   }
 
   /** Agentes do projeto, fluxos ligados às etapas e a checagem estática de cada agente. */

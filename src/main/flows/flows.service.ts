@@ -10,6 +10,7 @@ import {
   type TaskFlowsProject
 } from '../../shared/task-flow'
 import { DEFAULT_DELIVERY_SETTINGS, type DeliverySettings } from '../../shared/delivery'
+import { DECLARED_FLOW_VARS } from '../../shared/flow-outputs'
 import type { BoardStore } from '../board/board.store'
 import type { ConfigStore } from '../storage/config-store'
 import type { OrkioConfig } from '../config/orkio-config'
@@ -37,11 +38,7 @@ export class FlowsService {
       value: {
         ...pf,
         extractors: this.deps.extractors.map((e) => ({ id: e.id, label: e.label })),
-        actions: this.deps.actions.map((a) => ({
-          id: a.id,
-          label: a.label,
-          ...(a.pending ? { pending: a.pending } : {})
-        })),
+        actions: this.deps.actions.map((a) => ({ id: a.id, label: a.label })),
         delivery: this.deps.config.get().delivery[projectId] ?? DEFAULT_DELIVERY_SETTINGS
       }
     }
@@ -97,7 +94,8 @@ export class FlowsService {
       const errors = validateTaskFlow(flow, {
         commands: null,
         extractors: this.deps.extractors.map((e) => e.id),
-        actions: this.deps.actions.map((a) => a.id)
+        actions: this.deps.actions.map((a) => a.id),
+        declaredVars: DECLARED_FLOW_VARS
       }).filter((i) => i.level === 'error')
       if (errors.length > 0) {
         return fail(

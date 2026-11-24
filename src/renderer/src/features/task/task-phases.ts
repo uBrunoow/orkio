@@ -2,7 +2,9 @@
  * Fases da tarefa (barra do topo da tela da tarefa): os passos do fluxo agrupados em fases
  * (Spec → Plano → Implementar → Revisão → PR); sem fluxo, as colunas do quadro.
  */
+import { ALVA_COMMAND_PHASE, alvaCommandOf } from '../../../../shared/alva'
 import type { BoardStage } from '../../../../shared/board'
+import { orkioAction } from '../../../../shared/orkio-actions'
 import type { PlanStep } from '../task-flows/flow-plan'
 
 /** Marca outros gatilhos do popover do plano (ex.: "Ver plano"), que não contam como clique fora. */
@@ -16,29 +18,16 @@ export interface TaskPhase {
   state: PhaseState
 }
 
-const ALVA: Record<string, string> = {
-  spec: 'Spec',
-  plan: 'Plano',
-  implement: 'Implementar',
-  review: 'Revisão',
-  fix: 'Revisão',
-  commit: 'PR',
-  pr: 'PR'
-}
-
-const DELIVERY_ACTIONS = new Set(['push', 'verify_pushed', 'request_review'])
-
 /** Fase de um passo pelo que ele faz (`PlanStep.detail`); `null` = entra na fase anterior. */
 export function phaseLabel(detail: string): string | null {
   if (detail.startsWith('Ação do Orkio: ')) {
-    const action = detail.slice('Ação do Orkio: '.length)
-    if (action === 'review_snapshot' || action === 'publish_review') return 'Revisão'
-    return DELIVERY_ACTIONS.has(action) ? 'PR' : null
+    return orkioAction(detail.slice('Ação do Orkio: '.length))?.phase ?? null
   }
   if (!detail.startsWith('/')) return null
   const name = detail.slice(1).split(/\s/)[0] ?? ''
+  const alva = alvaCommandOf(name)
+  if (alva) return ALVA_COMMAND_PHASE[alva]
   const command = name.includes(':') ? name.slice(name.lastIndexOf(':') + 1) : name
-  if (name.startsWith('alva-flow:') && ALVA[command]) return ALVA[command]
   return command || null
 }
 

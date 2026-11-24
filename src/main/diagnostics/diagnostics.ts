@@ -18,6 +18,8 @@ export interface DiagnosticsDeps {
   os: { platform: string; arch: string; release: string }
   config: { schemaVersion: number; readOnly: boolean }
   db: Db | null
+  /** Contagens das execuções de fluxo, pelo dono da tabela (`null` = sem banco). */
+  flows: { counts(): { total: number; active: number } } | null
   connections: () => Promise<{ name: string; status: ConnectionStatus }[]>
   /** `<cmd> --version` (primeira linha) ou `null` se não estiver instalado. */
   toolVersion: (cmd: 'git' | 'gh' | 'claude') => Promise<string | null>
@@ -82,6 +84,12 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string>
   }
   const projects = deps.projects()
   const automation = deps.automation()
+  let flowCounts: { total: number; active: number } | null
+  try {
+    flowCounts = deps.flows?.counts() ?? null
+  } catch {
+    flowCounts = null
+  }
 
   const sections: DiagnosticSection[] = [
     {
@@ -104,7 +112,7 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string>
         ['Integridade do banco', integrity],
         ['Eventos de tarefas', db ? count(db, 'SELECT COUNT(*) AS n FROM task_events') : null],
         ['Execuções do Claude Code', db ? count(db, 'SELECT COUNT(*) AS n FROM agent_runs') : null],
-        ['Execuções de fluxo', db ? count(db, 'SELECT COUNT(*) AS n FROM flow_runs') : null],
+        ['Execuções de fluxo', flowCounts?.total ?? null],
         ['Pastas de trabalho (worktrees)', worktrees],
         ['Logs de execução', runs]
       ]
@@ -121,15 +129,7 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string>
               )
             : null
         ],
-        [
-          'Fluxos em andamento',
-          db
-            ? count(
-                db,
-                "SELECT COUNT(*) AS n FROM flow_runs WHERE status IN ('running', 'waiting_gate', 'paused', 'awaiting_decision')"
-              )
-            : null
-        ],
+        ['Fluxos em andamento', flowCounts?.active ?? null],
         [
           'Escritas pendentes no Notion',
           db ? count(db, 'SELECT COUNT(*) AS n FROM pending_writes') : null

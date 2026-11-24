@@ -58,8 +58,8 @@ export interface PushPreview {
   remoteExists: boolean
   /** Mudanças não commitadas (linhas do `status --porcelain`). */
   pending: string[]
-  /** Motivo para não fazer o push (`null` = pode). */
-  problem: string | null
+  /** Motivo para não fazer o push (`null` = pode), com o código do `DeliveryError` que o push lança. */
+  problem: { code: DeliveryErrorCode; message: string } | null
   /** Link da branch no GitHub. */
   branchUrl: string
 }
@@ -145,11 +145,14 @@ export class DeliveryService {
       git.diffStat(dir, `${base}...HEAD`).catch(() => ({ stat: '', files: [] }))
     ])
     const current = await git.currentBranch(dir).catch(() => null)
-    const problem =
-      checkPushBranch(t.branch, t) ??
-      checkPushBranch(current ?? '', t) ??
-      (pending.length > 0 ? DELIVERY_MESSAGES.dirty : null) ??
-      (commits.length === 0 ? DELIVERY_MESSAGES.nothing : null)
+    const branchProblem = checkPushBranch(t.branch, t) ?? checkPushBranch(current ?? '', t)
+    const problem: PushPreview['problem'] = branchProblem
+      ? { code: 'branch', message: branchProblem }
+      : pending.length > 0
+        ? { code: 'dirty', message: DELIVERY_MESSAGES.dirty }
+        : commits.length === 0
+          ? { code: 'nothing', message: DELIVERY_MESSAGES.nothing }
+          : null
     const target: DeliveryTarget = {
       owner: t.owner,
       repo: t.repo,
@@ -181,15 +184,7 @@ export class DeliveryService {
     taskId: string
   ): Promise<{ commits: number; branchUrl: string; target: DeliveryTarget }> {
     const p = await this.preview(projectId, taskId)
-    if (p.problem) {
-      const code =
-        p.problem === DELIVERY_MESSAGES.dirty
-          ? 'dirty'
-          : p.problem === DELIVERY_MESSAGES.nothing
-            ? 'nothing'
-            : 'branch'
-      throw new DeliveryError(code, p.problem)
-    }
+    if (p.problem) throw new DeliveryError(p.problem.code, p.problem.message)
     const wt = this.deps.worktree(taskId)!
     try {
       await this.deps.git.push(wt.path, p.target.remote, p.target.branch)

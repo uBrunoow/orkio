@@ -4,7 +4,7 @@
  */
 import { EVENT_LABELS } from './automation'
 import type { TaskEvent } from './task-events'
-import { FLOW_PAUSE_LABEL } from './task-flow'
+import { FLOW_PAUSES } from './flow-run-state'
 
 type HistoryEvent = TaskEvent
 
@@ -194,7 +194,7 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     case 'gate_revised':
       return `Ajustes pedidos: ${stepLabel(e.detail)}`
     case 'flow_paused':
-      return `Fluxo parado: ${e.detail.reason ? FLOW_PAUSE_LABEL[e.detail.reason] : 'motivo desconhecido'}`
+      return `Fluxo parado: ${e.detail.reason ? FLOW_PAUSES[e.detail.reason].label : 'motivo desconhecido'}`
     case 'flow_finished':
       return e.detail.result === 'cancelled'
         ? 'Fluxo cancelado'

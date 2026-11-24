@@ -123,7 +123,13 @@ src/
   shared/briefing.ts       # blocos do Notion → markdown e montagem do briefing (puro)
   shared/slug.ts           # slug, nome da branch (<tipo>/<ID>-<slug> ou <tipo>/<slug>), links do Notion
   shared/task-flow.ts      # 5A: fluxos de tarefa (tipos, motor puro, condições, template, validação)
-  shared/alva.ts           # 5B: tipos da pré-checagem, parse da task do Backlog.md (puro)
+  shared/orkio-actions.ts  # ações do Orkio nos fluxos: descritor (label, delivers, onStageMoved,
+                           # phase, outputs); o main só acrescenta confirm/run
+  shared/flow-outputs.ts   # variáveis com namespace que o Orkio grava (o validador confere)
+  shared/flow-run-state.ts # estado da execução: ACTIVE_FLOW_STATUSES, isLive, waitingKind,
+                           # needsYou, isProblem e a tabela única dos motivos de pausa (FLOW_PAUSES)
+  shared/alva.ts           # 5B: nomes do plugin (comandos, status, variáveis, marcador, códigos de
+                           # falha), tipos da pré-checagem, parse da task do Backlog.md (puro)
   shared/alva-templates.ts # 5B: templates "Fluxo Alva" (fluxos de tarefa com os comandos do plugin)
   shared/delivery.ts       # 5C: branches protegidas, checkPushBranch, DeliveryTarget/Settings (puro)
   shared/updates.ts        # 6C: status das atualizações, versões, recorte do CHANGELOG, URL do DMG
@@ -167,15 +173,18 @@ src/
     board/                 # board.store.ts (SQLite), write-queue.ts (criada pelo board.service.ts),
                            # board.service.ts, stage-entry.ts (`enterStage`: ordem fixa da entrada)
     automation/            # automation.service.ts (ciclo) + scheduler.ts (60 s / local 5 s)
-    alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts
+    alva/                  # 5B: precheck.ts, alva.service.ts (vínculo + extrator), alva-flows.service.ts,
+                           # alva-integration.ts (o alva-flow como `FlowIntegration`)
     overview/              # 6D: overview.service.ts (agrega stores/caches), badge.ts (ícone do app)
     delivery/              # 5C: delivery.service.ts (alvo, prévia, push), delivery-actions.ts (ações),
-                           # review-publish.ts (ação `publish_review`)
+                           # review-publish.ts (ação `publish_review`), action-helpers.ts
+                           # (`openPullFor`, `deliveryEvent`)
     updates/               # 6C: update.service.ts (electron-updater injetado), busy.ts, mac-signature.ts
     agents/                # 8A: agents.service.ts (perfis, confiança, atribuição, regras, uso do dia)
     orchestrator/          # 8B: orchestrator.service.ts (rodada: atribuir + mover, passar adiante)
-    flows/                 # 5A: flow-runner.ts (execução/persistência/retomada), flows.service.ts,
-                           # open-pr.ts ("Abrir PR")
+    flows/                 # 5A: flow-runner.ts (execução/persistência/retomada; dono de
+                           # `flow_runs`: as consultas dos outros passam por ele), flows.service.ts,
+                           # flow-integration.ts (integração por marcador), open-pr.ts ("Abrir PR")
     power/                 # keep-awake.ts (manter o computador acordado com trabalho rodando)
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker), stream,
                            # policy (+ delivery-policy, 5C), redact, run.service, claude.service,
@@ -815,12 +824,32 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
     mas o fluxo só avança com a escolha.
   - Notificação de desktop em gate, pausa e saída da etapa; evento `task-flows:changed` à tela;
     histórico com `flow_started`, `step_*`, `gate_*`, `flow_paused`, `flow_finished`.
-  - **Problema no fluxo:** `shared/flow-problem.ts` (puro) lê a pausa e a mensagem guardada no passo e
-    devolve causa (`uncommitted`, `credentials`, `push_rejected`, `timed_out`, `claude_error`,
-    `no_task`...), explicação e saídas; `FlowProblemCard` mostra o que o Orkio registrou, o que
-    fazer e os botões (Retomar, "Rodar /commit de novo", "Ver o que falta commitar", "Ver a sessão
-    do passo", Pular, Cancelar). O reconhecimento é por trechos das mensagens do main:
-    `main/flows/flow-problem.test.ts` usa os textos reais e falha se alguém mudar uma.
+  - **Problema no fluxo:** a falha de um passo é `{ code, message }` (`StepFailure`): o código vem
+    de quem falhou (`DeliveryError`, `FlowError`, `RunFinished.code`, a ação, o extrator) e fica no
+    `result_json` do passo (`FlowStepView.code`). `shared/flow-problem.ts` (puro) decide a causa
+    pelo motivo da pausa (`FLOW_PAUSES`) ou pelo código (`classifyFailure`; nunca pelo texto;
+    linha antiga sem código = `generic`) e devolve causa (`uncommitted`, `credentials`,
+    `push_rejected`, `timed_out`, `claude_error`, `no_task`...), explicação e saídas;
+    `FlowProblemCard` mostra o que o Orkio registrou, o que fazer e os botões (Retomar, "Rodar
+    /commit de novo", "Ver o que falta commitar", "Ver a sessão do passo", Pular, Cancelar).
+  - **Esperando você** tem uma regra só (`shared/flow-run-state.ts`, `waitingKind`): gate,
+    decisão (saiu da etapa), escolha e problema (inclui o limite diário do agente) esperam você;
+    a fila (`waiting_slot`/`waiting_agent`) não (começa sozinha; aparece em "Rodando"). Card, sino,
+    lista lateral, cartão de problema e plano usam as mesmas funções (teste de concordância em
+    `task-flows/flow-run-state.test.ts`).
+  - **Ações** (`shared/orkio-actions.ts`): `delivers` (agente sem entrega não roda),
+    `onStageMoved` (`ask` = a automação mover a tarefa vira decisão sua; `detach` = segue sem
+    acompanhar a etapa, ex.: push/pedir review; `detach_and_reenter` = idem e, ao terminar `done`,
+    a coluna nova começa o fluxo dela, ex.: `publish_review`), `phase` (barra de fases) e `outputs`
+    (variáveis gravadas: `pr.exists`/`pr.number`/`pr.pushed`, `review.count`/`review.pr`). Comando
+    em modo entrega = `detach`.
+  - **Integrações por marcador** (`flows/flow-integration.ts`, `FlowRunnerDeps.integrations`):
+    `tag`, `varPrefix`, `missingVar` (variável dela sem valor → o passo falha antes de rodar),
+    `initialVars`, `canStart`, `concurrencyLimit` (excedente espera `waiting_slot`; conta os
+    fluxos com o marcador, em qualquer posição de `tags`). O alva-flow é uma
+    (`alva/alva-integration.ts`); o limite olha os arquivos de compose na hora
+    (`hasComposeFile`), nunca o cache da pré-checagem (antes, ao reabrir o app, a fila inteira
+    começava junta).
     `FlowRunner.rerunFrom` (IPC `taskFlows.rerunFrom`) volta a um comando do Claude Code anterior ao
     passo parado (só em falha/interrupção) e segue dali; o histórico da falha fica. `claude.diff`
     devolve também `uncommitted` (de `git status --porcelain`, sem `.orkio/`). Com um passo rodando,
@@ -850,21 +879,23 @@ position: { type: 'end' } } }` (documentado como legado, ainda suportado).
   task que já estava no repositório) → vínculo nela (várias alteradas → escolha); nem criada nem
   alterada → passo falha com explicação. Com vínculo, `alva.task_id`/`alva.spec_arg` = ID. Comando
   com variável `alva.*` sem valor (task não vinculada) **não roda**: o passo falha antes de gastar
-  uma execução (`FLOW_MESSAGES.noBacklogTask`) e o cartão de problema oferece "Rodar /spec de novo".
-- **Variáveis:** `alva.task_id`, `alva.status`, `alva.open_questions`, `alva.linked`,
+  uma execução (`missingVar` da integração, código `alva_not_linked`) e o cartão de problema
+  oferece "Rodar /spec de novo".
+- **Variáveis** (`ALVA_VARS`/`ALVA_OUTPUTS` em `shared/alva.ts`): `alva.task_id`, `alva.spec_arg`,
+  `alva.status`, `alva.open_questions`, `alva.linked`,
   `alva.review_blocker` (`sim` se o `/review` deixou `Executed`), `alva.size` (Médio/Grande pela
   linha "**Tamanho:**" do resultado do `/spec`, heurística; Pequeno = status `Reviewed` depois do
   `/spec`, sinal confiável).
 - **Generalizações na 5A** usadas pela integração: extratores assíncronos com "antes do passo",
   falha e escolha; variáveis iniciais por fluxo; chaves com namespace (`{{alva.task_id}}`);
   `{{task_title}}`; `includeBriefing: false` (o comando recebe só os argumentos, porque o texto vira
-  `$ARGUMENTS`; o briefing fica em `.orkio/briefing.md`); salto para `$fim`; ação pendente
-  (`pending`: vira espera aprovada à mão, recusar cancela); limite por marcador e projeto (o
-  excedente espera `waiting_slot` e começa sozinho). `orkio-config` v7 só com campos opcionais.
+  `$ARGUMENTS`; o briefing fica em `.orkio/briefing.md`); salto para `$fim`; integração por
+  marcador (variáveis iniciais, pré-checagem, limite por projeto: o excedente espera
+  `waiting_slot` e começa sozinho). `orkio-config` v7 só com campos opcionais.
 - **Templates** (`shared/alva-templates.ts`, criados na tela alva-flow e editáveis): "Alva:
   planejar" (/spec → Pequeno termina → perguntas em aberto voltam ao /spec, até 3 → /plan → gate),
   "Alva: implementar e entregar" (sem vínculo: /spec e /plan → /implement (pula se Reviewed) →
-  /review → blocker → /fix --apply, no máximo 2 → gate do diff → /commit → push pendente da 5C →
+  /review → blocker → /fix --apply, no máximo 2 → gate do diff → /commit → push (Orkio) →
   /pr com 60 min), "Alva: comentários da PR" (`review_snapshot` → sem comentários termina →
   `plano-correcoes`, pedido só leitura → gate `aprovar-correcoes` com a mensagem
   "Aprovar correções da PR #{{review.pr}}", `show: 'result'`, ajustes até 3 → `aplicar-correcoes`,
@@ -920,7 +951,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   fluxo como recusado; `{ problem }` falha o passo (o fluxo pausa). Persistido em `pendingConfirm`
   (metadados do git/GitHub; no `publish_review`, também o texto da revisão), apagado ao aprovar,
   recusar e no fim do fluxo. Ações: `push` (gate só com "Exigir minha aprovação para push"),
-  `verify_pushed` (`head.sha` da PR == HEAD → `pr.pushed`/`pr.exists`/`pr.number`) e
+  `verify_pushed` (`head.sha` da PR == HEAD → `pr.pushed`/`pr.exists`/`pr.number`, saídas
+  declaradas) e
   `request_review` (quem revisou/foi pedido, ou você escolhe; POST pelo conector; `runNow` da 3B).
 - **Modo entrega** (`claude_command.delivery`, só no passo marcado; nunca no "Rodar" manual):
   `RunService` recebe o alvo; o CLI ganha `DELIVERY_RUN_SETTINGS` (deny de força/delete/mirror/
@@ -945,8 +977,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   `requestedReviewer` (GraphQL, só em memória; o snapshot da 3B continua só com ids).
   `TaskSignalsService.prForBranch` (sem rede) dá o número da PR para o histórico.
 - **Etapa:** automação que move a tarefa durante um passo de entrega (a PR aberta pelo `/pr`) não
-  interrompe o fluxo: ele deixa de acompanhar a etapa e segue. Se quem moveu foi o
-  `publish_review` (`Persisted.detachedFrom`), ao terminar `done` a entrada na etapa nova passa pelo
+  interrompe o fluxo: ele deixa de acompanhar a etapa e segue. Se o passo é `detach_and_reenter`
+  (o `publish_review`; `Persisted.detachedFrom`), ao terminar `done` a entrada na etapa nova passa pelo
   caminho de sempre (`FlowRunnerDeps.enterStage`, a mesma do quadro: orquestrador → regra da
   coluna → fluxo da coluna), para o "comentários da PR" começar em Revisado; os outros passos de entrega (ex.: `/pr`
   → Revisando) continuam com o orquestrador (`carried_in`).
@@ -987,7 +1019,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   "o GitHub App do Orkio ainda não está configurado no site" (`review_not_configured`);
   `not_installed` → mensagem com o link de instalação (problema
   `review_not_installed`, botão; allowlist `github.com/apps/<slug>/installations/new`); timeout ou
-  queda de rede no POST ao site (`ORKIO_SITE_NETWORK_PREFIX`) → "a revisão pode ter sido publicada"
+  queda de rede no POST ao site (`ReviewPostError` `site_timeout`/`site_network`) → "a revisão
+  pode ter sido publicada"
   e o próximo gate avisa (Retomar passa pelo gate, nunca
   reposta sozinho). Publicada → `runAutomation` (REQUEST_CHANGES → "Alterações pedidas → Revisado").
 - **"Abrir PR" avulso** (aba PR & CI, sem PR aberta e com ambiente): IPC `taskFlows.openPr` →
@@ -1027,7 +1060,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - **Títulos:** cache do Notion → último visto (memória) → ID pela branch do worktree
   (`ORK-2/<slug>` ou `feat/ORK-2-<slug>`) → "Tarefa do Notion". Nada de título no disco.
 - **Esperando você:** gate (ação com confirmação = "Aprovar: …", ex. push), escolha, saída da etapa,
-  fluxo pausado (menos `waiting_slot`), pergunta e permissão do Claude Code, recusa do Notion
+  fluxo parado por problema (`needsYou`; a fila de vaga/agente não), pergunta e permissão do
+  Claude Code, recusa do Notion
   (`rolled_back` nas últimas 24 h sem `moved`/`reconciled`/`sync_ok` depois) e escrita pendente com
   erro a partir da 3ª tentativa. Mais antigo primeiro.
 - **PRs:** abertas ligadas a tarefas com CI vermelho, mudanças pedidas, threads não resolvidas ou

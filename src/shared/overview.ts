@@ -5,7 +5,8 @@
  */
 import type { BoardStage } from './board'
 import type { TaskSignals } from './task-signals'
-import { FLOW_PAUSE_LABEL, type FlowRunView } from './task-flow'
+import { FLOW_PAUSES, waitingKind } from './flow-run-state'
+import type { FlowRunView } from './task-flow'
 import type { NotionColor, NotionWorkspaceStatus } from './notion'
 import type { ProjectView } from './projects'
 import { normalizeLabel } from './text'
@@ -193,12 +194,15 @@ function flowSince(flow: FlowRunView): string {
   return flow.history[flow.history.length - 1]?.startedAt ?? flow.startedAt
 }
 
-/** Fluxo ativo que espera você (gate, ação, escolha, pausa, saída da etapa); `null` se não. */
+/**
+ * Fluxo ativo que espera você (gate, ação, escolha, problema, saída da etapa); `null` se não. A
+ * fila de vaga (`waitingKind` = `queue`) não espera você: aparece em "Rodando".
+ */
 export function flowWaitingItem(flow: FlowRunView, task: OverviewTask): WaitingItem | null {
   const base = { key: `flow:${flow.id}`, task, since: flowSince(flow), section: 'flow' as const }
   const step = stepName(flow)
-  switch (flow.status) {
-    case 'waiting_gate':
+  switch (waitingKind(flow)) {
+    case 'gate':
       return flow.confirm
         ? { ...base, kind: 'action', what: `Aprovar: ${flow.confirm.title}` }
         : {
@@ -206,25 +210,23 @@ export function flowWaitingItem(flow: FlowRunView, task: OverviewTask): WaitingI
             kind: 'gate',
             what: gateTitle(flow) ?? `Aprovação no fluxo${step ? `: ${step}` : ''}`
           }
-    case 'awaiting_decision':
+    case 'decision':
       return {
         ...base,
         kind: 'decision',
         what: 'A tarefa saiu da etapa: cancelar o fluxo ou deixar terminar?'
       }
-    case 'paused':
-      if (flow.pauseReason === 'waiting_slot') return null
-      if (flow.pauseReason === 'needs_choice') {
-        return {
-          ...base,
-          kind: 'choice',
-          what: flow.choice?.prompt ?? FLOW_PAUSE_LABEL.needs_choice
-        }
+    case 'choice':
+      return {
+        ...base,
+        kind: 'choice',
+        what: flow.choice?.prompt ?? FLOW_PAUSES.needs_choice.label
       }
+    case 'problem':
       return {
         ...base,
         kind: 'flow_paused',
-        what: `${flow.pauseReason ? FLOW_PAUSE_LABEL[flow.pauseReason] : 'Fluxo pausado'}${step ? ` (${step})` : ''}`
+        what: `${flow.pauseReason ? FLOW_PAUSES[flow.pauseReason].label : 'Fluxo pausado'}${step ? ` (${step})` : ''}`
       }
     default:
       return null
@@ -317,7 +319,8 @@ export function buildRunning(
   const flowRunIds = new Set<string>()
   for (const flow of flows) {
     const running = flow.status === 'running'
-    const waitingSlot = flow.status === 'paused' && flow.pauseReason === 'waiting_slot'
+    // Na fila (vaga do projeto ou do agente): começa sozinho, então conta como rodando.
+    const waitingSlot = waitingKind(flow) === 'queue'
     if (!running && !waitingSlot) continue
     const current = flow.history[flow.history.length - 1]
     if (current?.runId) flowRunIds.add(current.runId)
@@ -332,7 +335,7 @@ export function buildRunning(
       kind: 'flow',
       task: task(flow.projectId, flow.taskId),
       label: waitingSlot
-        ? `${flow.flowName} · aguardando vaga`
+        ? `${flow.flowName} · ${flow.pauseReason === 'waiting_agent' ? 'aguardando o agente' : 'aguardando vaga'}`
         : `${flow.flowName}${stepLabel ? ` · ${stepLabel}` : ''}`,
       state: waitingSlot ? 'queued' : 'running',
       startedAt: flow.startedAt,

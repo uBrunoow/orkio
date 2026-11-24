@@ -73,6 +73,12 @@ export type ReviewPostErrorCode =
   | 'upstream'
   | 'network'
   | 'timeout'
+  /**
+   * Tempo esgotado ou queda de rede no POST da revisão ao site: o pedido pode ter chegado (e a
+   * revisão, saído). Diferente de `timeout`/`network` das leituras ao GitHub antes de postar.
+   */
+  | 'site_timeout'
+  | 'site_network'
   /** O GitHub recusou a revisão (422: linha fora do diff, PR fechada...). */
   | 'rejected'
   /** PR não existe. */
@@ -304,14 +310,18 @@ export class GitHubReviewPoster {
       checkCommentsAgainstDiff(prepared.comments, await this.diffLines(owner, repo, number))
     }
 
-    const response = await this.github(() =>
-      this.deps.github.postReviewViaOrkioSite({ owner, repo, number, review: prepared })
+    const response = await this.github(
+      () => this.deps.github.postReviewViaOrkioSite({ owner, repo, number, review: prepared }),
+      { posting: true }
     )
     return parseSiteResponse(response, owner, repo, number)
   }
 
-  /** Erros do conector → `ReviewPostError` (mensagens dele já são pt-BR e sem token). */
-  private async github<T>(call: () => Promise<T>): Promise<T> {
+  /**
+   * Erros do conector → `ReviewPostError` (mensagens dele já são pt-BR e sem token). `posting`: a
+   * chamada é o POST da revisão, e rede/tempo viram `site_network`/`site_timeout`.
+   */
+  private async github<T>(call: () => Promise<T>, options: { posting?: boolean } = {}): Promise<T> {
     try {
       return await call()
     } catch (error) {
@@ -319,8 +329,12 @@ export class GitHubReviewPoster {
       if (error instanceof GitHubApiError) {
         if (error.code === 'not_connected')
           throw new ReviewPostError('not_connected', error.message)
-        if (error.code === 'network') throw new ReviewPostError('network', error.message)
-        if (error.code === 'timeout') throw new ReviewPostError('timeout', error.message)
+        if (error.code === 'network') {
+          throw new ReviewPostError(options.posting ? 'site_network' : 'network', error.message)
+        }
+        if (error.code === 'timeout') {
+          throw new ReviewPostError(options.posting ? 'site_timeout' : 'timeout', error.message)
+        }
         if (error.code === 'rate_limited') throw new ReviewPostError('rate_limited', error.message)
         if (error.code === 'not_found') {
           throw new ReviewPostError('not_found', REVIEW_MESSAGES.notFound)
