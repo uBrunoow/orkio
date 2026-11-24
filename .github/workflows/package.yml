@@ -1,5 +1,5 @@
-# Empacota o app para macOS (dmg + zip, arm64 e x64) e Windows (nsis x64), roda o smoke test do
-# pacote e sobe os arquivos como artefatos do job.
+# Empacota o app para macOS (dmg + zip, arm64 e x64), Windows (nsis x64) e Linux (AppImage + deb,
+# x64), roda o smoke test do pacote e sobe os arquivos como artefatos do job.
 # - Manual (workflow_dispatch): só empacota, NÃO publica. Baixe os arquivos na página da execução.
 # - release.yml (workflow_call com publish: true): publica no rascunho do release deste repositório.
 # Segredos: só no `env` do passo que precisa; nunca `set -x` nem `echo` de valores.

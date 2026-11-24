@@ -105,7 +105,6 @@ export function HeroField() {
         sg.y += sg.dy * step
         sg.trail.push(before)
         if (sg.trail.length > 40) sg.trail.shift()
-        // Chegou a um cruzamento: conta a célula e decide se vira.
         const crossed =
           Math.floor(before.x / CELL) !== Math.floor(sg.x / CELL) ||
           Math.floor(before.y / CELL) !== Math.floor(sg.y / CELL)
@@ -116,7 +115,6 @@ export function HeroField() {
           sg.life--
           if (sg.left <= 0) {
             if (sg.dy) {
-              // Desvio vertical dura uma célula só e volta para a horizontal.
               sg.dx = 1
               sg.dy = 0
               sg.left = 2 + Math.floor(Math.random() * 4)
@@ -134,7 +132,6 @@ export function HeroField() {
             continue
           }
         }
-        // Rastro: do mais velho (apagado) à cabeça (laranja).
         const pts = [...sg.trail, { x: sg.x, y: sg.y }]
         const maxLen = TRAIL * CELL
         let len = 0
@@ -156,7 +153,6 @@ export function HeroField() {
         ctx.arc(sg.x + 0.5, sg.y + 0.5, 1.8, 0, Math.PI * 2)
         ctx.fill()
       }
-      // Cruzamento aceso onde o sinal parou.
       for (let i = sparks.length - 1; i >= 0; i--) {
         const sp = sparks[i]!
         sp.t -= dt * 0.9

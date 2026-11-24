@@ -26,10 +26,8 @@ export interface LatestRelease {
   files: Partial<Record<DownloadKind, DownloadFile>>
 }
 
-/** Revalidação do release (segundos): 15 min. */
 export const RELEASE_REVALIDATE_SECONDS = 900
 
-/** Repositório dos releases: a variável `RELEASES_REPO` da Vercel ou o do Orkio (`contract.ts`). */
 export function releasesRepo(value = process.env['RELEASES_REPO'] ?? RELEASES_REPO): string | null {
   const repo = value?.trim()
   return repo && isRepoPath(repo) ? repo : null
@@ -39,10 +37,6 @@ export function releasesPageUrl(repo: string): string {
   return `https://github.com/${repo}/releases/latest`
 }
 
-/**
- * Arquivos de download do release da versão: o nome exato que o empacotador gera
- * (`DOWNLOAD_FILES`); qualquer outro arquivo é ignorado.
- */
 export function classifyAssets(
   assets: readonly { name: string; browser_download_url: string; size?: number }[],
   version: string

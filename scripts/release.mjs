@@ -51,7 +51,6 @@ let changelog
 try {
   version = nextVersion(pkg.version, opts.kind, { beta: opts.beta })
   const today = releaseDate(new Date())
-  // RELEASE_NOTE (título da PR, no release ao mergear) preenche um "[Não lançado]" vazio.
   const current = fillUnreleased(readFileSync(changelogPath, 'utf8'), process.env['RELEASE_NOTE'])
   changelog = releaseChangelog(current, version, today)
 } catch (e) {

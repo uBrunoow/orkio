@@ -1,5 +1,5 @@
-# Release por tag. Dois caminhos: (1) rótulo `release:*` na PR + merge (release-on-merge.yml cria a
-# tag e dispara este workflow); (2) à mão: `pnpm release <patch|minor|major|beta>` + `git push --follow-tags`.
+# Release por tag. Dois caminhos: (1) merge na main (release-on-merge.yml cria a tag e dispara
+# este workflow); (2) à mão: `pnpm release <patch|minor|major|beta>` + `git push --follow-tags`.
 # vX.Y.Z → release estável; vX.Y.Z-beta.N → pre-release (canal beta).
 # Os binários vão para os releases deste mesmo repositório (público), com o GITHUB_TOKEN do
 # workflow (contents: write só nos jobs que publicam). Passo a passo em docs/releases.md.
@@ -40,8 +40,8 @@ jobs:
     needs: verify
     uses: ./.github/workflows/ci.yml
 
-  # Cria o rascunho antes da matriz: os jobs do mac e do Windows sobem para o mesmo release
-  # (sem isso, os dois poderiam criar rascunhos duplicados ao mesmo tempo).
+  # Cria o rascunho antes da matriz: os jobs do mac, do Windows e do Linux sobem para o mesmo
+  # release (sem isso, eles poderiam criar rascunhos duplicados ao mesmo tempo).
   draft:
     needs: [verify, ci]
     runs-on: ubuntu-latest

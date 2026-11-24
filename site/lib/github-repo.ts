@@ -5,7 +5,6 @@
 import { GITHUB_API_VERSION } from './contract'
 
 export const STARS_MIN = 25
-/** Revalidação (segundos): 15 min, como o release. */
 const REPO_REVALIDATE_SECONDS = 900
 
 export interface RepoInfo {

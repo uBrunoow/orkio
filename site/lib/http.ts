@@ -1,8 +1,3 @@
-/**
- * Peças HTTP comuns às rotas do site (`/notion/*`, `/github/*`, `/health`): resposta JSON sem cache,
- * 405, leitura do corpo com limite, corpo JSON, limitador por IP e o override de endpoint que só
- * vale no E2E local. Nenhuma depende do Notion nem do GitHub.
- */
 import { clientIp, type RateLimiter } from './rate-limit'
 
 export function json(
@@ -50,10 +45,6 @@ export async function readLimited(request: Request, max: number): Promise<string
   return new TextDecoder().decode(Buffer.concat(chunks))
 }
 
-/**
- * Corpo JSON do pedido: content-type JSON (senão 415), até `max` bytes (senão 413) e JSON válido
- * (senão 400). Quem chama escolhe o código de erro do próprio contrato.
- */
 export type JsonBody =
   | { ok: true; value: unknown }
   | { ok: false; status: 400 | 413 | 415; problem: 'json' | 'too_large' | 'content_type' }
@@ -71,7 +62,6 @@ export async function readJsonBody(request: Request, max: number): Promise<JsonB
   }
 }
 
-/** Limitador por IP antes do handler: estourou → 429 com `Retry-After`. */
 export function withRateLimit(
   limiter: RateLimiter,
   request: Request,

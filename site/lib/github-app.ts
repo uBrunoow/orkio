@@ -78,7 +78,6 @@ export const GITHUB_API_URL = 'https://api.github.com'
  * 3 bytes por caractere em UTF-8, mais o JSON em volta.
  */
 export const REVIEW_REQUEST_MAX_BYTES = 1024 * 1024
-/** Corpo de `/github/installation` (`{ owner, repo, userToken }`). */
 const INSTALLATION_REQUEST_MAX_BYTES = 4096
 /** Respostas do GitHub lidas até este tamanho (as que usamos são pequenas). */
 const RESPONSE_MAX_BYTES = 256 * 1024
@@ -105,7 +104,6 @@ export interface ValidReview {
   comments: { path: string; line: number; body: string }[]
 }
 
-/** Variáveis do processo (route handler). */
 export function githubAppEnv(): GitHubAppEnv {
   return {
     GITHUB_APP_ID: process.env['GITHUB_APP_ID'],
@@ -116,12 +114,10 @@ export function githubAppEnv(): GitHubAppEnv {
   }
 }
 
-/** Base da API: a do GitHub; fora da Vercel, um loopback explícito (E2E). */
 export function apiBaseFrom(env: GitHubAppEnv): string {
   return new URL(loopbackOverride(env, env.GITHUB_API_URL, GITHUB_API_URL)).origin
 }
 
-/** PEM da env (com `\n` literais ou quebras reais) → chave RSA. `null` se inválida. */
 export function parsePrivateKey(raw: string | undefined): KeyObject | null {
   const pem = (raw ?? '').replace(/\\n/g, '\n').trim()
   if (!pem.includes('PRIVATE KEY')) return null
@@ -155,7 +151,7 @@ function isRepoPath(path: unknown): path is string {
   if (typeof path !== 'string' || path.length === 0 || path.length > REVIEW_PATH_MAX) return false
   for (let i = 0; i < path.length; i++) {
     const code = path.charCodeAt(i)
-    if (code < 0x20 || code === 0x7f) return false // NUL e demais caracteres de controle
+    if (code < 0x20 || code === 0x7f) return false
   }
   return !path.split(/[\\/]/).includes('..')
 }
@@ -224,7 +220,6 @@ export function requireAppKey(env: GitHubAppEnv): { appId: string; key: KeyObjec
   return key ? { appId, key } : null
 }
 
-/** Corpo JSON do pedido; tipo, tamanho ou JSON errado = `bad_request` com o status do problema. */
 async function readRequest(request: Request, max: number): Promise<{ value: unknown } | Response> {
   const read = await readJsonBody(request, max)
   return read.ok ? { value: read.value } : json(read.status, { error: 'bad_request' })
@@ -232,10 +227,6 @@ async function readRequest(request: Request, max: number): Promise<{ value: unkn
 
 type Call = (path: string, token: string, body?: unknown) => Promise<GitHubResult | null>
 
-/**
- * `GET /repos/{owner}/{repo}` com o token do usuário: o repositório que ele enxerga, com o nome
- * canônico (owner/repo da resposta) e as permissões. 401/403/404 → `forbidden`.
- */
 async function canonicalRepo(
   call: Call,
   owner: string,
@@ -255,7 +246,6 @@ async function canonicalRepo(
   return { owner: login, repo: name, permissions }
 }
 
-/** Chamadas ao GitHub de um pedido: base da API e prazo total compartilhado entre elas. */
 function callerFor(env: GitHubAppEnv, deps: ReviewDeps): Call {
   const api = apiBaseFrom(env)
   const deadline = AbortSignal.timeout(deps.deadlineMs ?? REVIEW_DEADLINE_MS)
@@ -268,7 +258,6 @@ function notInstalled(env: GitHubAppEnv): Response {
   return fail('not_installed', installUrl ? { installUrl } : {})
 }
 
-/** POST da rota: limitador por IP e depois a lógica abaixo, com as variáveis do processo. */
 export function reviewPost(
   request: Request,
   limiter: RateLimiter = reviewLimiter
@@ -302,13 +291,11 @@ async function review(request: Request, env: GitHubAppEnv, deps: ReviewDeps): Pr
   const call = callerFor(env, deps)
   const now = deps.now ?? Date.now
 
-  // 1. O usuário pode dar push? (com o token dele; o nome canônico vem da resposta)
   const target = await canonicalRepo(call, input.owner, input.repo, input.userToken)
   if (target instanceof Response) return target
   if (target.permissions['push'] !== true) return fail('forbidden')
   const { owner, repo } = target
 
-  // Quem pediu: a revisão sai como orkio[bot], então o corpo diz a pedido de quem (responsável).
   const userRes = await call('/user', input.userToken)
   if (!userRes || isRateLimited(userRes)) return fail('upstream')
   if (userRes.status === 401 || userRes.status === 403) return fail('forbidden')
@@ -316,7 +303,6 @@ async function review(request: Request, env: GitHubAppEnv, deps: ReviewDeps): Pr
   const login = userRes.body['login']
   if (typeof login !== 'string' || !LOGIN.test(login)) return fail('forbidden')
 
-  // 2. Instalação do App neste repositório.
   const jwt = createAppJwt(appId, key, now())
   const inst = await call(`/repos/${owner}/${repo}/installation`, jwt)
   if (!inst) return fail('upstream')
@@ -342,7 +328,6 @@ async function review(request: Request, env: GitHubAppEnv, deps: ReviewDeps): Pr
   const appToken = tokenRes.body['token']
   if (typeof appToken !== 'string' || !TOKEN_CHARS.test(appToken)) return fail('upstream')
 
-  // 4. A revisão, montada aqui só com os campos permitidos.
   const posted = await call(`/repos/${owner}/${repo}/pulls/${input.number}/reviews`, appToken, {
     event: input.event,
     body: `${input.body}${attribution(login)}`,
@@ -371,8 +356,6 @@ async function review(request: Request, env: GitHubAppEnv, deps: ReviewDeps): Pr
   return json(200, { url: reviewUrlOrNull(htmlUrl, owner, repo, input.number) })
 }
 
-// ---------- POST /github/installation ----------
-//
 // Só leitura: o orkio[bot] está instalado neste repositório? Usado pelo app (Integrações) para
 // oferecer "Instalar no GitHub" ANTES da primeira revisão falhar.
 //
@@ -404,7 +387,6 @@ export function validateInstallationRequest(body: unknown): ValidInstallationQue
   return { owner, repo, userToken }
 }
 
-/** POST da rota: limitador por IP e depois a consulta, com as variáveis do processo. */
 export function installationPost(
   request: Request,
   limiter: RateLimiter = installationLimiter
@@ -440,12 +422,10 @@ async function installation(
   const call = callerFor(env, deps)
   const now = deps.now ?? Date.now
 
-  // 1. A pessoa enxerga o repositório? (o nome canônico vem da resposta)
   const target = await canonicalRepo(call, input.owner, input.repo, input.userToken)
   if (target instanceof Response) return target
   const { owner, repo } = target
 
-  // 2. Instalação do App neste repositório (só a consulta; nada de token de instalação).
   const jwt = createAppJwt(app.appId, app.key, now())
   const inst = await call(`/repos/${owner}/${repo}/installation`, jwt)
   if (!inst) return fail('upstream')
@@ -456,7 +436,6 @@ async function installation(
   return json(200, { installed: true, installUrl })
 }
 
-/** Linha acrescentada ao fim de toda revisão: quem pediu ao Orkio. */
 export function attribution(login: string): string {
   return `\n\n---\n_Publicado pelo Orkio a pedido de @${login}._`
 }
@@ -469,10 +448,6 @@ interface GitHubResult {
   body: unknown
 }
 
-/**
- * Chamada ao GitHub com timeout que cobre também a leitura do corpo (limitada). Falha de rede,
- * timeout ou corpo cortado → `null` (vira `upstream`).
- */
 async function githubCall(
   fetchImpl: typeof fetch,
   url: string,
@@ -519,7 +494,6 @@ async function githubCall(
   }
 }
 
-/** Lê o corpo até `RESPONSE_MAX_BYTES`; cancelado pelo timeout → `undefined`. Grande → ''. */
 async function readBody(response: Response, signal: AbortSignal): Promise<string | undefined> {
   if (!response.body) return ''
   const reader = response.body.getReader()

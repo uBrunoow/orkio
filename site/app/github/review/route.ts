@@ -1,7 +1,6 @@
 import { reviewPost } from '@/lib/github-app'
 import { methodNotAllowed } from '@/lib/http'
 
-// Revisão publicada como orkio[bot]: Node, sempre dinâmico, nunca em cache.
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 

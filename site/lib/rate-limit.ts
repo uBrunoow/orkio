@@ -14,7 +14,6 @@ export function createRateLimiter(options: {
   limit: number
   windowMs: number
   now?: () => number
-  /** Máximo de chaves guardadas (evita crescer sem fim com IPs variados). */
   maxKeys?: number
 }): RateLimiter {
   const hits = new Map<string, number[]>()

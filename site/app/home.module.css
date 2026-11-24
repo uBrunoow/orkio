@@ -17,8 +17,6 @@
   --reveal: 2;
 }
 
-/* ---------- hero: grade com sinais correndo, título centrado, luz e a janela em perspectiva ---------- */
-
 .hero {
   position: relative;
   padding-top: clamp(3.5rem, 8vw, 6rem);
@@ -144,7 +142,6 @@
   font-size: 0.9375rem;
 }
 
-/* Palco: uma luz difusa (sem arco) e a janela do app saindo dela. */
 .stage {
   position: relative;
   margin-top: clamp(3rem, 7vw, 5rem);
@@ -158,7 +155,6 @@
   height: 46rem;
   z-index: -1;
   pointer-events: none;
-  /* Só luz, sem arco: um brilho que nasce atrás do topo da janela e se espalha. */
   background:
     radial-gradient(
       ellipse 40% 14% at 50% 20%,
@@ -180,7 +176,6 @@
   perspective: 1800px;
 }
 
-/* Sombra laranja difusa por baixo da janela, como luz do horizonte refletida. */
 .previewContainer::before {
   content: '';
   position: absolute;
@@ -201,7 +196,6 @@
   transform-origin: 50% 0;
 }
 
-/* A janela fica inclinada no topo e assenta conforme a página rola. */
 @supports (animation-timeline: view()) {
   .previewContainer > * {
     animation: settle linear both;
@@ -210,7 +204,6 @@
   }
 }
 
-/* Entrada do hero, uma vez: sobe e perde o desfoque. */
 .heroTitle,
 .heroSide {
   animation: heroIn 800ms cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -266,14 +259,11 @@
   }
 }
 
-/* ---------- seções ---------- */
-
 .section {
   position: relative;
   padding-block: clamp(5rem, 10vw, 8rem);
 }
 
-/* Passagem entre seções: um fio de luz no topo e uma claridade que desce dele. */
 .section:not(.band)::before {
   content: '';
   position: absolute;
@@ -343,8 +333,6 @@
   line-height: 1.35;
 }
 
-/* ---------- caminho da tarefa: pipeline com nós ---------- */
-
 .railWrap {
   position: relative;
   /* O chip anda dentro do trilho; nada passa da largura da página. */
@@ -356,7 +344,6 @@
 .rail {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  /* Nome, dado, texto e "via" alinhados entre as colunas (subgrid). */
   grid-template-rows: repeat(4, auto);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -377,7 +364,6 @@
   border-left: 1px solid var(--border-soft);
 }
 
-/* A linha do pipeline atravessa os nós no alto de cada coluna. */
 .stop::before {
   content: '';
   position: absolute;
@@ -436,7 +422,6 @@
   }
 }
 
-/* Os nós acendem em sequência quando o trilho entra na tela. */
 @supports (animation-timeline: view()) {
   .railWrap {
     view-timeline: --rail block;
@@ -514,7 +499,6 @@
   font-size: 0.8125rem;
 }
 
-/* A tarefa viaja pelo trilho: para em cada nó e acende no Claude Code. */
 .packet {
   position: absolute;
   top: calc(1.05rem + 6px);
@@ -598,7 +582,6 @@
   }
 }
 
-/* Regras: tabela de verdade, com cabeçalho e o tom do status no destino. */
 .rules {
   display: grid;
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
@@ -684,8 +667,6 @@
   font-size: 0.8125rem;
 }
 
-/* ---------- recursos: texto e recorte alternados ---------- */
-
 .features {
   display: grid;
   gap: clamp(3.5rem, 7vw, 5.5rem);
@@ -708,7 +689,6 @@
   order: 2;
 }
 
-/* Luz baixa atrás do recorte, do lado em que ele está. */
 .feature::before {
   content: '';
   position: absolute;
@@ -768,8 +748,6 @@
   transform: translateY(2px);
 }
 
-/* ---------- segurança: faixa com terminal ---------- */
-
 .safety {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
@@ -818,7 +796,6 @@
   padding: 0.85rem 0.9rem 1rem;
 }
 
-/* Os comandos chegam um a um, como num log ao vivo; a última linha espera o próximo. */
 @supports (animation-timeline: view()) {
   .terminal li {
     animation: lineIn linear both;
@@ -932,8 +909,6 @@
   color: var(--muted);
 }
 
-/* ---------- perguntas ---------- */
-
 .faqWrap {
   display: grid;
   grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
@@ -984,8 +959,6 @@
   padding-bottom: 1.25rem;
 }
 
-/* ---------- fechamento: a mesma luz difusa, por baixo ---------- */
-
 .close {
   position: relative;
   padding-block: clamp(5rem, 10vw, 8rem);
@@ -1029,8 +1002,6 @@
   justify-items: center;
   margin-top: 0.75rem;
 }
-
-/* ---------- telas menores ---------- */
 
 @media (max-width: 1000px) {
   .packet {

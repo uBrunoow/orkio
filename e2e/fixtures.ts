@@ -309,7 +309,6 @@ export async function launchOrkio(
         const next = g.__savePaths.shift()
         return next ? { canceled: false, filePath: next } : { canceled: true, filePath: '' }
       }) as typeof dialog.showSaveDialog
-      // Seletor de pasta do sistema → fila controlada pelo teste.
       dialog.showOpenDialog = (async () => {
         const next = g.__picks.shift()
         return next ? { canceled: false, filePaths: [next] } : { canceled: true, filePaths: [] }
@@ -332,7 +331,6 @@ export async function launchOrkio(
       const json = (body: unknown, status = 200): Response =>
         new Response(JSON.stringify(body), { status })
 
-      // "Navegador": registra a URL e, para a página de autorização do Notion, simula o usuário.
       shell.openExternal = async (url: string) => {
         g.__opened.push(url)
         const parsed = new URL(url)
@@ -358,7 +356,6 @@ export async function launchOrkio(
         } as FakeGlobals['__calls'][number]
         g.__calls.push(call)
 
-        // Site de verdade (E2E @site): tudo o que vai para o site.
         if (url.startsWith(siteUrl) && g.__fakes.siteTarget) {
           const target = `${g.__fakes.siteTarget}${url.slice(siteUrl.length)}`
           const response = await realFetch(target, init)
@@ -418,7 +415,6 @@ export async function launchOrkio(
             url: `https://github.com/${body.owner}/${body.repo}/pull/${body.number}#pullrequestreview-${id}`
           })
         }
-        // Intermediário OAuth do Notion (`site/lib/notion-broker.ts`).
         if (url.startsWith(`${siteUrl}/notion/`)) {
           if (g.__fakes.notionOAuth === 'down') throw new TypeError('fetch failed')
           if (g.__fakes.notionOAuth === 'invalid_grant')
@@ -438,7 +434,6 @@ export async function launchOrkio(
           })
         }
 
-        // GitHub: Device Flow (github.com) e API REST (api.github.com).
         if (url === 'https://github.com/login/device/code') {
           return json({
             device_code: 'e2e-device-code',
@@ -455,7 +450,6 @@ export async function launchOrkio(
           if (mode === 'expire') return json({ error: 'expired_token' })
           return json({ access_token: 'gho_E2E_DEVICE_TOKEN', token_type: 'bearer', scope: 'repo' })
         }
-        // Sinais (2D): branches e PRs com ETag; detalhes via GraphQL.
         const listMatch =
           /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/(branches|pulls)\?(.*)$/.exec(url)
         if (listMatch) {
@@ -503,7 +497,6 @@ export async function launchOrkio(
             headers: { 'content-type': 'application/json', etag }
           })
         }
-        // 5C: pedir review (POST) e colaboradores do repositório.
         const reviewersMatch =
           /^https:\/\/api\.github\.com\/repos\/([^/]+)\/([^/]+)\/pulls\/(\d+)\/requested_reviewers$/.exec(
             url
@@ -538,7 +531,6 @@ export async function launchOrkio(
           )
           return json({ number: n }, 201)
         }
-        // Task 18: arquivos da PR (linhas comentáveis da revisão como orkio[bot]).
         const filesMatch =
           /^https:\/\/api\.github\.com\/repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/files\?/.exec(url)
         if (filesMatch) {
@@ -676,7 +668,6 @@ export async function launchOrkio(
           )
         }
 
-        // API do Notion.
         if (url === 'https://api.notion.com/v1/users/me') {
           const token = (headers['Authorization'] ?? '').replace(/^Bearer /, '')
           const { notion, validTokens } = g.__fakes
@@ -703,7 +694,6 @@ export async function launchOrkio(
           return json({ object: 'user', id: 'u1', type: 'person', name: 'Ada Lovelace' })
         }
 
-        // Bancos do Notion (data sources). Exige um token aceito em /users/me.
         if (url.startsWith('https://api.notion.com/v1/')) {
           const token = (headers['Authorization'] ?? '').replace(/^Bearer /, '')
           const { notion, validTokens, notionTasks } = g.__fakes
@@ -722,7 +712,6 @@ export async function launchOrkio(
             { id: 'o3', name: 'Concluída', color: 'green' }
           ]
 
-          // Publicação de artefatos (4B): subpágina com markdown e markdown no fim da página.
           if (path === '/pages' && init?.method === 'POST') {
             if (g.__fakes.notionWrites === 'reject') {
               return json({ object: 'error', code: 'restricted_resource' }, 403)
@@ -754,7 +743,6 @@ export async function launchOrkio(
             return json({ object: 'page_markdown', id: mdPatch[1] })
           }
 
-          // Escrita numa página (3A).
           const pagePatch = /^\/pages\/([0-9a-f-]+)$/.exec(path)
           if (pagePatch && init?.method === 'PATCH') {
             if (g.__fakes.notionWrites === 'reject') {
@@ -776,7 +764,6 @@ export async function launchOrkio(
             }
             return json({ object: 'page', id: pageId })
           }
-          // Nova propriedade no data source de Tarefas (3A: "Etapa Orkio").
           if (path === `/data_sources/${ids.tasksDs}` && init?.method === 'PATCH') {
             const props = (body['properties'] ?? {}) as Record<string, Record<string, unknown>>
             const result: Record<string, unknown> = {}
@@ -800,7 +787,6 @@ export async function launchOrkio(
             return json({ object: 'data_source', id: ids.tasksDs, properties: result })
           }
 
-          // Busca de páginas (4B: referências do contexto do projeto).
           const searchFilter = body['filter'] as { value?: string } | undefined
           if (path === '/search' && searchFilter?.value === 'page') {
             const pages = [
@@ -905,7 +891,6 @@ export async function launchOrkio(
               next_cursor: null
             })
           }
-          // Conteúdo da página da tarefa (4A: briefing).
           const children = /^\/blocks\/([0-9a-f-]+)\/children/.exec(path)
           if (children) {
             const para = (text: string): unknown => ({
@@ -1104,7 +1089,6 @@ export async function enterApp(page: Page): Promise<void> {
   const setup = page.getByRole('list', { name: 'Primeiros passos' })
   const nav = page.getByRole('navigation', { name: 'Navegação principal' })
   await expect(setup.or(nav)).toBeVisible()
-  // Sem projeto: o app abre nos Primeiros passos; "Fazer depois" leva ao app.
   if (await setup.isVisible()) {
     await page.getByRole('button', { name: 'Fazer depois' }).click()
   }
@@ -1187,7 +1171,6 @@ export async function simulateUpdate(
         emit(event: string, arg?: unknown): boolean
       }
       const g = globalThis as unknown as { __updateInstalls?: number; __restartPrompts?: string[] }
-      // Diálogo nativo "Reiniciar agora?": responde sem abrir janela e registra a pergunta.
       g.__restartPrompts ??= []
       dialog.showMessageBox = (async (...args: unknown[]) => {
         const opts = args.at(-1) as { message?: string }
@@ -1262,10 +1245,6 @@ export async function queueFolderPicks(app: ElectronApplication, paths: string[]
   }, paths)
 }
 
-/**
- * Alertas visíveis do app. Ignora a região `aria-live` global da Astryx (sempre presente,
- * vazia e escondida), que também tem role="alert".
- */
 export function alerts(scope: Page | Locator): Locator {
   return scope.locator('[role="alert"]:not([data-astryx-live-region])')
 }
@@ -1299,13 +1278,11 @@ function fakeClaudeBin(
     )
     writeFileSync(join(dir, 'mcp.json'), JSON.stringify({ backlog: alva?.mcpBacklog === true }))
   }
-  // Terminal simulado ("Abrir terminal aqui"): registra pasta e argumentos em terminal-calls.log.
   writeFileSync(
     join(dir, 'x-terminal-emulator'),
     ['#!/bin/sh', 'echo "$PWD $*" >> "$(dirname "$0")/terminal-calls.log"', 'exit 0', ''].join('\n')
   )
   chmodSync(join(dir, 'x-terminal-emulator'), 0o755)
-  // GitHub CLI simulado: pré-checagem (5B) e, na 5C, registra cada chamada em gh-calls.log.
   const gh = alva?.gh ?? 'missing'
   if (gh !== 'missing') {
     writeFileSync(

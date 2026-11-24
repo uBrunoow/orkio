@@ -17,11 +17,6 @@ const DURATION: Record<Scene, number> = { quadro: 5200, sessao: 7600, push: 7000
 /** Fase de agora na barra de fases (índice em `phases`). */
 const PHASE: Record<Scene, number> = { quadro: 2, sessao: 2, push: 4, revisao: 3 }
 
-/**
- * Prévia viva do Orkio: uma janela do app com dados de exemplo que passa sozinha pelos quatro
- * momentos de uma tarefa. Para com o mouse ou o foco em cima, fora da tela, com movimento
- * reduzido ou quando você pausa. "Fazer push" e "Aprovar correções" funcionam.
- */
 export function AppPreview({ p }: { p: Preview }) {
   const [scene, setScene] = useState<Scene>('quadro')
   const [paused, setPaused] = useState(false)
@@ -59,8 +54,6 @@ export function AppPreview({ p }: { p: Preview }) {
     }
   }, [])
 
-  // O card sai de Prioridades para Em andamento logo depois de o quadro aparecer (`go` o põe de
-  // volta em Prioridades). Com movimento reduzido, já aparece em Em andamento.
   useEffect(() => {
     if (scene !== 'quadro' || reduced) return
     const id = window.setTimeout(() => setMoved(true), 1300)
@@ -70,7 +63,6 @@ export function AppPreview({ p }: { p: Preview }) {
 
   const running = !paused && !held && visible && !reduced
 
-  // Avanço automático. Nos momentos com botão, o clique encurta a espera.
   useEffect(() => {
     if (!running) return
     const wait =

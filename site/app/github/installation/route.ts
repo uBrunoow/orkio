@@ -1,7 +1,6 @@
 import { installationPost } from '@/lib/github-app'
 import { methodNotAllowed } from '@/lib/http'
 
-// O orkio[bot] está instalado no repositório? Node, sempre dinâmico, nunca em cache.
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 

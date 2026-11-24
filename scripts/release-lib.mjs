@@ -5,8 +5,8 @@
  * CHANGELOG no formato Keep a Changelog, em pt-BR:
  *   ## [Não lançado]
  *   ## [X.Y.Z] - AAAA-MM-DD
- * O formato e o leitor das seções ficam em src/shared/changelog.ts (o mesmo do "O que há de novo"
- * do app); o Node roda o .ts direto (só tipos para tirar).
+ * O formato e o leitor das seções ficam em src/shared/changelog.mts (o mesmo do "O que há de novo"
+ * do app); o Node roda o .mts direto (só tipos para tirar).
  */
 import {
   CHANGELOG_UNRELEASED,
@@ -94,7 +94,6 @@ export function extractNotes(changelog, version) {
   return changelogNotes(changelog, version)
 }
 
-/** A seção tem pelo menos um item de lista? (subtítulos vazios não contam) */
 function hasEntries(body) {
   return body.split('\n').some((l) => /^\s*[-*]\s+\S/.test(l))
 }
@@ -134,7 +133,6 @@ export function releaseChangelog(changelog, version, date) {
 }
 
 /**
- * Argumentos do `pnpm release`: `<patch|minor|major|beta> [--beta]`.
  * @param {string[]} argv
  */
 export function parseReleaseArgs(argv) {

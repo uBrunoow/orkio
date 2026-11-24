@@ -73,7 +73,6 @@ const toolResult = (id, isError) =>
     }
   })
 
-/** Cliente MCP mínimo para a ponte do Orkio. */
 function bridge(config) {
   const server = config.mcpServers.orkio
   const child = spawn(server.command, server.args, {
@@ -172,7 +171,6 @@ async function main() {
   const mcp = bridge(config)
   await mcp.init()
 
-  // alva-flow simulado: imita o efeito dos comandos no Backlog.md (backlog/tasks/).
   const alvaMatch = /^\/alva-flow:(\w+)\s*([^\n]*)/.exec(prompt)
   if (alvaMatch) {
     await alvaCommand(alvaMatch[1], alvaMatch[2].trim(), mcp, prompt)
@@ -199,7 +197,6 @@ async function main() {
     return
   }
 
-  // Plano de correções (só leitura): responde com o plano, sem tocar em arquivos.
   const denied = args.includes('--disallowedTools')
     ? args[args.indexOf('--disallowedTools') + 1].split(',')
     : []

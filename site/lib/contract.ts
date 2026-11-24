@@ -7,9 +7,7 @@
  * `release-artifacts.mts`).
  */
 
-/** Versão da API REST do GitHub (header `X-GitHub-Api-Version`). */
 export const GITHUB_API_VERSION = '2026-03-10'
-/** Versão da API do Notion (header `Notion-Version`). */
 export const NOTION_VERSION = '2026-03-11'
 /** Redirect URI do OAuth do Notion que o app usa (vai em `ALLOWED_REDIRECT_URIS`). */
 export const NOTION_OAUTH_REDIRECT_URI = 'http://localhost:47821/oauth/notion/callback'
@@ -27,13 +25,11 @@ export function isRepoName(value: string): boolean {
   return REPO_SLUG.test(value) && value !== '.' && value !== '..'
 }
 
-/** `owner/repo` com as duas regras acima. */
 export function isRepoPath(value: string): boolean {
   const [owner, repo, ...rest] = value.split('/')
   return rest.length === 0 && OWNER_SLUG.test(owner ?? '') && isRepoName(repo ?? '')
 }
 
-/** Página de instalação do App; slug fora do formato → `null`. */
 export function installUrl(slug: string): string | null {
   return APP_SLUG.test(slug) ? `https://github.com/apps/${slug}/installations/new` : null
 }
@@ -44,10 +40,6 @@ export const REVIEW_COMMENTS_MAX = 50
 export const REVIEW_COMMENT_MAX = 4_000
 export const REVIEW_PATH_MAX = 1_000
 
-/**
- * Códigos de erro de `/github/review` e `/github/installation` e o status de cada um
- * (`rate_limited` vem do limitador da rota).
- */
 export const GITHUB_ERROR_STATUS = {
   not_configured: 503,
   bad_request: 400,
@@ -63,10 +55,6 @@ export type GitHubRouteError = keyof typeof GITHUB_ERROR_STATUS
 export const REVIEW_REJECT_REASONS = ['rejected', 'pr_not_found'] as const
 export type ReviewRejectReason = (typeof REVIEW_REJECT_REASONS)[number]
 
-/**
- * Só `https://github.com/<o>/<r>/pull/<n>` (com `#pullrequestreview-<id>` opcional), sem porta,
- * usuário/senha nem query.
- */
 export function reviewUrlOrNull(
   value: unknown,
   owner: string,
@@ -91,7 +79,6 @@ export function reviewUrlOrNull(
   }
 }
 
-/** Botões de download (um arquivo do release cada). */
 export type DownloadKind = 'mac-arm64' | 'mac-x64' | 'windows' | 'linux-appimage' | 'linux-deb'
 
 /** Nome exato de cada arquivo de download no release da versão (o que o empacotador gera). */

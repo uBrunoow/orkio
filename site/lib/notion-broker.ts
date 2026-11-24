@@ -10,10 +10,6 @@
  * - Sem estado: não guarda tokens, códigos nem logs de requisição. Nada de console.* (ESLint).
  * - Só aceita os redirect URIs configurados em ALLOWED_REDIRECT_URIS.
  * - Devolve ao app apenas os campos conhecidos da resposta do Notion.
- *
- * Rotas (`app/notion/*`):
- *   POST /notion/token    { code, redirect_uri }  → resposta de token do Notion
- *   POST /notion/refresh  { refresh_token }       → resposta de token do Notion
  */
 import { NOTION_VERSION } from './contract'
 import { isRecord, json, loopbackOverride, readJsonBody } from './http'
@@ -37,7 +33,6 @@ export const NOTION_TOKEN_URL = 'https://api.notion.com/v1/oauth/token'
 export const MAX_BODY_BYTES = 8 * 1024
 const UPSTREAM_TIMEOUT_MS = 10_000
 
-/** Campos da resposta de token repassados ao app. */
 const TOKEN_FIELDS = [
   'access_token',
   'token_type',
@@ -59,7 +54,6 @@ const BODY_PROBLEM = {
   json: 'JSON inválido.'
 } as const
 
-/** Variáveis do processo (route handlers). */
 export function brokerEnv(): BrokerEnv {
   return {
     NOTION_CLIENT_ID: process.env['NOTION_CLIENT_ID'],
@@ -70,7 +64,6 @@ export function brokerEnv(): BrokerEnv {
   }
 }
 
-/** Endpoint de token: o do Notion; fora da Vercel, um loopback explícito (E2E). */
 export function tokenUrlFrom(env: BrokerEnv): string {
   return loopbackOverride(env, env.NOTION_TOKEN_URL, NOTION_TOKEN_URL)
 }
