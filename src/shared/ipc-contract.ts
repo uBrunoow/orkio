@@ -89,7 +89,8 @@ export const IPC_CHANNELS = {
     getAuthOptions: 'github:get-auth-options',
     startDeviceFlow: 'github:device-flow-start',
     waitDeviceFlow: 'github:device-flow-wait',
-    cancelDeviceFlow: 'github:device-flow-cancel'
+    cancelDeviceFlow: 'github:device-flow-cancel',
+    orkioBot: 'github:orkio-bot'
   },
   signals: {
     get: 'signals:get',
@@ -579,6 +580,32 @@ export interface BoardTaskRef {
   section?: TaskSection
 }
 
+// ---------- orkio[bot] (GitHub App que publica as revisões) ----------
+
+export type OrkioBotRepoState =
+  | { state: 'installed' }
+  | { state: 'not_installed'; installUrl: string | null }
+  /** A conta conectada não enxerga o repositório. */
+  | { state: 'no_access' }
+  /** Não deu para saber (site sem endereço/configuração, rede, rate limit). */
+  | { state: 'unknown'; message: string }
+
+export interface OrkioBotRepo {
+  owner: string
+  repo: string
+  /** Nomes dos projetos do Orkio com este repositório. */
+  projects: string[]
+  status: OrkioBotRepoState
+}
+
+export interface OrkioBotStatus {
+  /** Sem GitHub conectado não há como consultar (a consulta usa a conta do usuário). */
+  github: 'connected' | 'disconnected'
+  repos: OrkioBotRepo[]
+  /** ISO; `null` sem consulta. */
+  checkedAt: string | null
+}
+
 // ---------- Projetos ----------
 
 export interface ProjectRepo {
@@ -759,6 +786,8 @@ export interface OrkioApi {
     /** Resolve quando o fluxo termina: conectado, erro ou cancelado (status salvo). */
     waitDeviceFlow(): Promise<ConnectionStatus>
     cancelDeviceFlow(): Promise<void>
+    /** O orkio[bot] (GitHub App) está instalado nos repositórios dos projetos? Só leitura. */
+    orkioBot(options?: { force?: boolean }): Promise<OrkioBotStatus>
   }
   /** Quadro kanban por projeto (Etapa 3A). */
   board: {

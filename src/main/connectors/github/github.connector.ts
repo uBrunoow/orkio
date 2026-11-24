@@ -83,6 +83,8 @@ export const ORKIO_SITE_TIMEOUT_MS = 25_000
 export const ORKIO_SITE_TIMEOUT_MESSAGE =
   'O site do Orkio demorou para responder. Confira a PR antes de tentar de novo: a revisão pode ' +
   'ter sido publicada.'
+/** Consulta da instalação do orkio[bot]: o site responde em até 15 s; aqui, 20. */
+export const ORKIO_SITE_QUERY_TIMEOUT_MS = 20_000
 const ORKIO_SITE_MAX_RESPONSE_BYTES = 64 * 1024
 /** Começo da mensagem de erro de rede do POST ao site (o passo do fluxo reconhece por ele). */
 export const ORKIO_SITE_NETWORK_PREFIX = 'Não foi possível falar com o site do Orkio'
@@ -327,6 +329,45 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
    * Erros: `not_configured` (sem origem ou origem recusada), `not_connected`, `network`, `timeout`.
    */
   async postReviewViaOrkioSite(payload: OrkioSiteReviewPayload): Promise<OrkioSiteResponse> {
+    return this.callOrkioSite('/github/review', (token) => ({
+      owner: payload.owner,
+      repo: payload.repo,
+      number: payload.number,
+      userToken: token,
+      review: payload.review
+    }))
+  }
+
+  /**
+   * O orkio[bot] está instalado neste repositório? Só leitura, pelo site do Orkio
+   * (`POST <origem>/github/installation`), que confere com o token do usuário que ele enxerga o
+   * repositório e consulta a instalação com o JWT do App. Mesmas regras de destino, timeout e
+   * erros do `postReviewViaOrkioSite`; prazo menor (é só uma consulta).
+   */
+  async orkioBotInstallation(owner: string, repo: string): Promise<OrkioSiteResponse> {
+    if (!SLUG.test(owner) || !SLUG.test(repo)) {
+      throw new GitHubApiError('unexpected', 'Repositório inválido.')
+    }
+    return this.callOrkioSite(
+      '/github/installation',
+      (token) => ({ owner, repo, userToken: token }),
+      ORKIO_SITE_QUERY_TIMEOUT_MS
+    )
+  }
+
+  /**
+   * POST ao site do PRÓPRIO Orkio com o token do usuário no corpo. Única saída do token para fora
+   * do GitHub: a requisição é montada AQUI (nunca entregue a um callback), só para a origem fixada
+   * na construção (`deps.siteOrigin`, conferida por `isAllowedOrkioSiteOrigin`: https;
+   * http://127.0.0.1 só em build de E2E), sem seguir redirecionamento, com timeout que cobre a
+   * leitura do corpo. Devolve só o status e o JSON da resposta do site (que nunca ecoa o token).
+   * Erros: `not_configured` (sem origem ou origem recusada), `not_connected`, `network`, `timeout`.
+   */
+  private async callOrkioSite(
+    path: '/github/review' | '/github/installation',
+    body: (token: string) => Record<string, unknown>,
+    timeoutOverrideMs?: number
+  ): Promise<OrkioSiteResponse> {
     const siteOrigin = this.deps.siteOrigin
     if (
       !siteOrigin ||
@@ -339,21 +380,15 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
     }
     const host = new URL(siteOrigin).host
     const doFetch: typeof fetch = (...args) => (this.deps.fetch ?? globalThis.fetch)(...args)
-    const timeoutMs = this.deps.siteTimeoutMs ?? ORKIO_SITE_TIMEOUT_MS
+    const timeoutMs = this.deps.siteTimeoutMs ?? timeoutOverrideMs ?? ORKIO_SITE_TIMEOUT_MS
     return this.withAccessToken(async (token) => {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
       try {
-        const response = await doFetch(`${siteOrigin}/github/review`, {
+        const response = await doFetch(`${siteOrigin}${path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({
-            owner: payload.owner,
-            repo: payload.repo,
-            number: payload.number,
-            userToken: token,
-            review: payload.review
-          }),
+          body: JSON.stringify(body(token)),
           // Nunca seguir redirecionamento: o corpo (com o token) iria para outro endereço.
           redirect: 'error',
           signal: controller.signal
@@ -363,17 +398,22 @@ export class GitHubConnector implements DeviceFlowConnector<GitHubCredentials> {
           ORKIO_SITE_MAX_RESPONSE_BYTES,
           controller.signal
         )
-        let body: unknown = null
+        let parsed: unknown = null
         try {
-          body = text ? JSON.parse(text) : null
+          parsed = text ? JSON.parse(text) : null
         } catch {
-          body = null
+          parsed = null
         }
-        return { status: response.status, body }
+        return { status: response.status, body: parsed }
       } catch {
         // Exceção original descartada (pode carregar detalhes da requisição).
         throw controller.signal.aborted
-          ? new GitHubApiError('timeout', ORKIO_SITE_TIMEOUT_MESSAGE)
+          ? new GitHubApiError(
+              'timeout',
+              path === '/github/review'
+                ? ORKIO_SITE_TIMEOUT_MESSAGE
+                : 'O site do Orkio demorou para responder. Tente de novo.'
+            )
           : new GitHubApiError(
               'network',
               `${ORKIO_SITE_NETWORK_PREFIX} (${host}). Verifique sua internet e tente de novo.`

@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Integrações › Orkio bot: mostra se o GitHub App que publica as revisões (orkio[bot]) está
+  instalado no repositório de cada projeto, com o botão "Instalar no GitHub", antes de a primeira
+  revisão falhar.
+
 ## [0.2.9] - 2026-11-24
 
 ### Adicionado

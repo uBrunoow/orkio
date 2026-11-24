@@ -437,6 +437,27 @@ describe('GitHubConnector', () => {
         expect(JSON.stringify(init?.headers)).not.toContain(PAT)
       })
 
+      it('orkioBotInstallation: consulta /github/installation com o token só no corpo', async () => {
+        const site = vi.fn<typeof fetch>(async () => json({ installed: false, installUrl: null }))
+        const connector = withSite(site)
+        await connector.connect({ kind: 'token', token: PAT })
+        const result = await connector.orkioBotInstallation('acme', 'orkio')
+        expect(result).toEqual({ status: 200, body: { installed: false, installUrl: null } })
+        const [url, init] = site.mock.calls[0]!
+        expect(url).toBe(`${SITE}/github/installation`)
+        expect(init?.redirect).toBe('error')
+        expect(JSON.parse(String(init?.body))).toEqual({
+          owner: 'acme',
+          repo: 'orkio',
+          userToken: PAT
+        })
+        expect(JSON.stringify(init?.headers)).not.toContain(PAT)
+        await expect(connector.orkioBotInstallation('a/b', 'orkio')).rejects.toMatchObject({
+          code: 'unexpected'
+        })
+        expect(site).toHaveBeenCalledTimes(1)
+      })
+
       it('sem origem ou origem fora das regras → not_configured, sem rede', async () => {
         const site = vi.fn<typeof fetch>(async () => json({}))
         await withSite(site).connect({ kind: 'token', token: PAT })

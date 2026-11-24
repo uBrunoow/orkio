@@ -333,7 +333,7 @@ export const ptBR = {
       },
       {
         q: 'Quem publica a revisão na PR?',
-        a: 'O orkio[bot], um GitHub App instalado no repositório, e só depois que você aprova o texto exato. Ele comenta ou pede alterações; aprovar a PR continua com o time.'
+        a: 'O orkio[bot], um GitHub App instalado no repositório, e só depois que você aprova o texto exato. Ele comenta ou pede alterações; aprovar a PR continua com o time. Em Integrações › Orkio bot, o app mostra em quais repositórios ele já está e o botão para instalar.'
       },
       {
         q: 'Funciona com GitHub Enterprise ou GitLab?',

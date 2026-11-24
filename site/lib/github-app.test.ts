@@ -6,6 +6,7 @@ import {
   REVIEW_REJECTED_MESSAGE,
   apiBaseFrom,
   createAppJwt,
+  handleInstallation,
   handleReview,
   parsePrivateKey,
   reviewPost,
@@ -560,5 +561,75 @@ describe('GITHUB_API_URL (só E2E local)', () => {
     expect(apiBaseFrom({ ...base, GITHUB_API_URL: 'http://localhost:1' })).toBe(GITHUB_API_URL)
     expect(apiBaseFrom({ ...base, GITHUB_API_URL: 'lixo' })).toBe(GITHUB_API_URL)
     expect(apiBaseFrom(base)).toBe(GITHUB_API_URL)
+  })
+})
+
+describe('POST /github/installation', () => {
+  const ask = (body: unknown, gh = fakeGitHub(), env: GitHubAppEnv = ENV): Promise<Response> =>
+    handleInstallation(post(body), env, { fetch: gh.fetch, now: () => NOW })
+  const QUERY = { owner: 'Acme', repo: 'orkio', userToken: USER_TOKEN }
+
+  it('instalado: confere o repo com o token do usuário e consulta a instalação com o JWT', async () => {
+    const gh = fakeGitHub()
+    const res = await ask(QUERY, gh)
+    expect(res.status).toBe(200)
+    const text = await res.text()
+    expect(JSON.parse(text)).toEqual({
+      installed: true,
+      installUrl: 'https://github.com/apps/orkio/installations/new'
+    })
+    expectNoSecrets(text)
+    expect(gh.calls.map((c) => new URL(c.url).pathname)).toEqual([
+      '/repos/Acme/orkio',
+      '/repos/acme/orkio/installation'
+    ])
+    expect(gh.calls[0]!.auth).toBe(`Bearer ${USER_TOKEN}`)
+    expect(gh.calls[1]!.auth.startsWith('Bearer eyJ')).toBe(true)
+    // Só leitura: nenhum token de instalação, nenhum POST.
+    expect(gh.calls.every((c) => c.method === 'GET')).toBe(true)
+  })
+
+  it('não instalado → 200 com installed false e o link', async () => {
+    const gh = fakeGitHub({ installation: () => Response.json({}, { status: 404 }) })
+    const res = await ask(QUERY, gh)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({
+      installed: false,
+      installUrl: 'https://github.com/apps/orkio/installations/new'
+    })
+  })
+
+  it('repositório invisível para o token → forbidden, sem perguntar ao App', async () => {
+    for (const status of [401, 403, 404]) {
+      const gh = fakeGitHub({ repo: () => Response.json({}, { status }) })
+      const res = await ask(QUERY, gh)
+      expect(res.status).toBe(403)
+      expect(gh.calls).toHaveLength(1)
+    }
+  })
+
+  it('pedido inválido → 400 sem rede; sem chave → 503', async () => {
+    const gh = fakeGitHub()
+    for (const bad of [
+      {},
+      { ...QUERY, owner: 'a/b' },
+      { ...QUERY, repo: '..' },
+      { ...QUERY, userToken: 'tem espaço' }
+    ]) {
+      expect((await ask(bad, gh)).status).toBe(400)
+    }
+    expect(gh.calls).toHaveLength(0)
+    const res = await ask(QUERY, gh, { ...ENV, GITHUB_APP_PRIVATE_KEY: undefined })
+    expect(res.status).toBe(503)
+  })
+
+  it('JWT recusado → not_configured; falha de rede → upstream', async () => {
+    const gh = fakeGitHub({ installation: () => Response.json({}, { status: 401 }) })
+    expect((await ask(QUERY, gh)).status).toBe(503)
+    const down = {
+      fetch: vi.fn(async () => Promise.reject(new Error('rede'))) as unknown as typeof fetch
+    }
+    const res = await handleInstallation(post(QUERY), ENV, { ...down, now: () => NOW })
+    expect(res.status).toBe(502)
   })
 })

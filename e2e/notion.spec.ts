@@ -111,7 +111,8 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       'getAuthOptions',
       'startDeviceFlow',
       'waitDeviceFlow',
-      'cancelDeviceFlow'
+      'cancelDeviceFlow',
+      'orkioBot'
     ],
     projects: [
       'list',

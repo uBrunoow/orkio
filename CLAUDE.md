@@ -257,6 +257,11 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   (Notion, Bancos e campos), Código (GitHub, GitHub CLI) e Agentes de código (Claude Code, Plugins e
   comandos); 1 coluna, 2 a partir de 900 px. "N de M prontas" e busca "Buscar integração" (`/` foca
   fora de campo de texto; filtra por nome, categoria e seção, sem acento/caixa).
+- **Orkio bot** (Código; `OrkioBotCard.tsx`, IPC `github.orkioBot`, `connectors/github/orkio-bot.ts`):
+  o orkio[bot] está instalado no repositório de cada projeto (github.com, um por repo)? Consulta
+  só leitura `POST <site>/github/installation` pelo conector (`orkioBotInstallation`, mesmo caminho
+  do token da revisão), cache de 60 s, de novo ao voltar o foco da janela; "Instalar no GitHub" abre
+  o link da allowlist. Não abre sozinho (opcional).
 - Um painel de configuração aberto por vez, numa linha inteira abaixo do cartão (os cards de conexão
   de sempre, sem moldura dupla). Sem escolha do usuário, abre o primeiro pendente na ordem da página
   e acompanha os estados (conectou o Notion → abre Bancos e campos); depois que o usuário abre/fecha,
@@ -1080,6 +1085,9 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   (`GitHubConnector.postReviewViaOrkioSite`; o token do usuário nunca vai a um callback). Origem
   (`connectors/github/orkio-site.ts`, injetada no conector em `index.ts`): `MAIN_VITE_SITE_URL`,
   senão a do intermediário do Notion; só https, `http://127.0.0.1` só em build de E2E. Passo a passo: `docs/github-app.md`.
+  `POST /github/installation` (`{ owner, repo, userToken }` → `{ installed, installUrl }`): só
+  leitura; confere com o token do usuário que ele enxerga o repo (senão `forbidden`, para não
+  revelar repositório privado) e consulta a instalação com o JWT, sem criar token; 30/min por IP.
   Usado pelo passo `publish_review` dos fluxos (ver "Entrega (5C)"); o E2E simula a rota
   `/github/review` no fetch do main (`notionState(app).siteReviews`, `githubPrFiles`).
 - **Landing:** textos em `site/i18n/pt-BR.ts` (só o que o app faz hoje; ver `site/PRODUCT.md`),

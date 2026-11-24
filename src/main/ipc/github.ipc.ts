@@ -2,7 +2,8 @@ import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 import {
   IPC_CHANNELS,
   type ConnectionStatus,
-  type DeviceFlowStartResult
+  type DeviceFlowStartResult,
+  type OrkioBotStatus
 } from '../../shared/ipc-contract'
 import type { DeviceFlowConnector } from '../connectors/types'
 import { errorName, isTokenCredentials } from './payload'
@@ -16,6 +17,8 @@ const GENERIC_ERROR: ConnectionStatus = {
 export interface GitHubIpcHooks {
   /** Chamado quando o Device Flow termina (ex.: trazer a janela do Orkio para a frente). */
   onDeviceFlowFinished?(event: IpcMainInvokeEvent): void
+  /** orkio[bot] instalado nos repositórios dos projetos (cartão de Integrações). */
+  orkioBot?: { status(force: boolean): Promise<OrkioBotStatus> }
 }
 
 export function registerGitHubIpc(
@@ -66,4 +69,17 @@ export function registerGitHubIpc(
     }
   })
   guarded(github.cancelDeviceFlow, undefined, () => connector.cancelDeviceFlow())
+  guarded<OrkioBotStatus>(
+    github.orkioBot,
+    { github: 'connected', repos: [], checkedAt: null },
+    (payload) => {
+      const force =
+        typeof payload === 'object' &&
+        payload !== null &&
+        (payload as { force?: unknown }).force === true
+      return hooks.orkioBot
+        ? hooks.orkioBot.status(force)
+        : { github: 'disconnected', repos: [], checkedAt: null }
+    }
+  )
 }

@@ -33,3 +33,34 @@ export function effectiveOpenId(
   if (chosen !== undefined) return chosen
   return firstPending ?? lastAuto
 }
+
+/** Rótulo do cartão "Orkio bot" a partir da consulta (null = ainda consultando). */
+export function orkioBotSummary(
+  s: {
+    github: 'connected' | 'disconnected'
+    repos: ReadonlyArray<{ status: { state: string } }>
+  } | null
+): { label: string; tone: 'success' | 'warning' | 'neutral' } {
+  if (!s) return { label: 'Verificando', tone: 'neutral' }
+  if (s.github === 'disconnected') return { label: 'Conecte o GitHub antes', tone: 'neutral' }
+  if (s.repos.length === 0) return { label: 'Nenhum projeto com GitHub', tone: 'neutral' }
+  const missing = s.repos.filter((r) => r.status.state === 'not_installed').length
+  const installed = s.repos.filter((r) => r.status.state === 'installed').length
+  if (missing > 0) {
+    return {
+      label:
+        missing === 1 && s.repos.length === 1
+          ? 'Não instalado no repositório'
+          : `Falta instalar em ${missing} de ${s.repos.length} repositórios`,
+      tone: 'warning'
+    }
+  }
+  if (installed === s.repos.length) {
+    return {
+      label:
+        installed === 1 ? 'Instalado no repositório' : `Instalado nos ${installed} repositórios`,
+      tone: 'success'
+    }
+  }
+  return { label: 'Não deu para conferir', tone: 'neutral' }
+}

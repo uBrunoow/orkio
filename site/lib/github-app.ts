@@ -32,7 +32,7 @@
  */
 import { createPrivateKey, sign, type KeyObject } from 'node:crypto'
 import { json, readLimited } from './notion-broker'
-import { clientIp, reviewLimiter, type RateLimiter } from './rate-limit'
+import { clientIp, installationLimiter, reviewLimiter, type RateLimiter } from './rate-limit'
 
 export interface GitHubAppEnv {
   /** App ID (numérico) do GitHub App: vai no `iss` do JWT. */
@@ -362,6 +362,115 @@ async function review(request: Request, env: GitHubAppEnv, deps: ReviewDeps): Pr
   // Já postada: devolve 200 mesmo sem link conferido (repetir duplicaria a revisão).
   const htmlUrl = isRecord(posted.body) ? posted.body['html_url'] : null
   return json(200, { url: reviewUrlOrNull(htmlUrl, owner, repo, input.number) })
+}
+
+// ---------- POST /github/installation ----------
+//
+// Só leitura: o orkio[bot] está instalado neste repositório? Usado pelo app (Integrações) para
+// oferecer "Instalar no GitHub" ANTES da primeira revisão falhar.
+//
+//   POST /github/installation  { owner, repo, userToken }  →  { installed, installUrl }
+//
+// O token do usuário vai no corpo (nunca na URL). Primeiro confirma, com ele, que a pessoa
+// enxerga o repositório: sem isso a rota diria a qualquer um se um repositório privado existe e
+// tem o App. Depois o JWT do App consulta a instalação; nenhum token de instalação é criado.
+
+export interface ValidInstallationQuery {
+  owner: string
+  repo: string
+  userToken: string
+}
+
+export function validateInstallationRequest(body: unknown): ValidInstallationQuery | null {
+  if (!isRecord(body)) return null
+  const { owner, repo, userToken } = body
+  if (
+    typeof owner !== 'string' ||
+    !OWNER_SLUG.test(owner) ||
+    typeof repo !== 'string' ||
+    !isRepoName(repo) ||
+    typeof userToken !== 'string' ||
+    !TOKEN_CHARS.test(userToken)
+  ) {
+    return null
+  }
+  return { owner, repo, userToken }
+}
+
+/** POST da rota: limitador por IP e depois a consulta, com as variáveis do processo. */
+export async function installationPost(
+  request: Request,
+  limiter: RateLimiter = installationLimiter
+): Promise<Response> {
+  const wait = limiter.check(clientIp(request))
+  if (wait !== null) {
+    return json(429, { error: 'rate_limited' }, { 'Retry-After': String(wait) })
+  }
+  return handleInstallation(request, githubAppEnv())
+}
+
+export async function handleInstallation(
+  request: Request,
+  env: GitHubAppEnv,
+  deps: ReviewDeps = {}
+): Promise<Response> {
+  try {
+    return await installation(request, env, deps)
+  } catch {
+    return fail('upstream')
+  }
+}
+
+async function installation(
+  request: Request,
+  env: GitHubAppEnv,
+  deps: ReviewDeps
+): Promise<Response> {
+  const appId = env.GITHUB_APP_ID?.trim() ?? ''
+  const key = /^\d{1,20}$/.test(appId) ? parsePrivateKey(env.GITHUB_APP_PRIVATE_KEY) : null
+  if (!key) return fail('not_configured')
+
+  if (!(request.headers.get('content-type') ?? '').toLowerCase().includes('application/json')) {
+    return json(415, { error: 'bad_request' })
+  }
+  const text = await readLimited(request, 4096)
+  if (text === null) return json(413, { error: 'bad_request' })
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return fail('bad_request')
+  }
+  const input = validateInstallationRequest(parsed)
+  if (!input) return fail('bad_request')
+
+  const api = apiBaseFrom(env)
+  const now = deps.now ?? Date.now
+  const deadline = AbortSignal.timeout(deps.deadlineMs ?? REVIEW_DEADLINE_MS)
+  const call = (path: string, token: string): Promise<GitHubResult | null> =>
+    githubCall(deps.fetch ?? fetch, `${api}${path}`, token, undefined, deadline, deps.timeoutMs)
+
+  // 1. A pessoa enxerga o repositório? (o nome canônico vem da resposta)
+  const repoRes = await call(`/repos/${input.owner}/${input.repo}`, input.userToken)
+  if (!repoRes || isRateLimited(repoRes)) return fail('upstream')
+  if (repoRes.status === 401 || repoRes.status === 403 || repoRes.status === 404) {
+    return fail('forbidden')
+  }
+  if (!repoRes.ok || !isRecord(repoRes.body)) return fail('upstream')
+  const repo = repoRes.body['name']
+  const ownerObj = repoRes.body['owner']
+  const owner = isRecord(ownerObj) ? ownerObj['login'] : null
+  if (typeof owner !== 'string' || !OWNER_SLUG.test(owner)) return fail('upstream')
+  if (typeof repo !== 'string' || !isRepoName(repo)) return fail('upstream')
+
+  // 2. Instalação do App neste repositório (só a consulta; nada de token de instalação).
+  const inst = await call(`/repos/${owner}/${repo}/installation`, createAppJwt(appId, key, now()))
+  if (!inst) return fail('upstream')
+  if (inst.status === 401) return fail('not_configured')
+  const installUrl = installUrlFrom(env)
+  if (inst.status === 404) return json(200, { installed: false, installUrl })
+  if (!inst.ok) return fail('upstream')
+  return json(200, { installed: true, installUrl })
 }
 
 /** Linha acrescentada ao fim de toda revisão: quem pediu ao Orkio. */

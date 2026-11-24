@@ -58,6 +58,7 @@ import { NotionWorkspaceService } from './notion/notion-workspace.service'
 import { authorizeViaLoopback } from './oauth/loopback'
 import { ProjectsService } from './projects/projects.service'
 import { registerGitHubIpc } from './ipc/github.ipc'
+import { OrkioBotService } from './connectors/github/orkio-bot'
 import { registerNotionIpc } from './ipc/notion.ipc'
 import { isAllowedExternalUrl, registerShellIpc, siteUrlRules } from './ipc/shell.ipc'
 import { createSenderGuard } from './ipc/trusted-sender'
@@ -254,7 +255,15 @@ function registerIpc(): void {
   }
 
   registerNotionIpc(ipcMain, notion, isTrustedSender, { onOAuthFinished: focusSender })
-  registerGitHubIpc(ipcMain, github, isTrustedSender, { onDeviceFlowFinished: focusSender })
+  const orkioBot = new OrkioBotService({
+    isConnected: () => github.isConnected(),
+    listProjects: async () => (await projects?.list())?.projects ?? [],
+    installation: (owner, repo) => github.orkioBotInstallation(owner, repo)
+  })
+  registerGitHubIpc(ipcMain, github, isTrustedSender, {
+    onDeviceFlowFinished: focusSender,
+    orkioBot: { status: (force) => orkioBot.status(force) }
+  })
   registerProjectsIpc(ipcMain, projects, isTrustedSender, projectsReady)
   registerNotionWorkspaceIpc(ipcMain, notionWorkspace, isTrustedSender, projectsReady)
 
