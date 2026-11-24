@@ -9,6 +9,7 @@ import { createSource, ipcCall, IPC_FAILURE_MESSAGE, unwrap, type Source } from 
 import type { ClaudeCodeStatus } from '../../../shared/agent-run'
 import type { BoardCard, BoardView } from '../../../shared/board'
 import type { AuthOptions, ConnectionStatus } from '../../../shared/connection'
+import type { NotionWorkspaceStatus } from '../../../shared/notion'
 import type { OverviewSnapshot } from '../../../shared/overview'
 import type { ProjectView } from '../../../shared/projects'
 import type { ResultError } from '../../../shared/result'
@@ -48,6 +49,7 @@ export interface AppSources {
   verifiedAt: Source<Date | null>
   authOptions: Source<AuthOptions>
   claude: Source<ClaudeCodeStatus, { force: boolean }>
+  notionWorkspace: Source<NotionWorkspaceStatus, 'revalidate'>
   updates: Source<UpdateStatus>
 }
 
@@ -162,6 +164,17 @@ export function createAppSources(): AppSources {
     verifiedAt: createSource<Date | null>({ load: () => Promise.resolve(null) }),
     authOptions: createSource({
       load: (kind) => ipcCall(() => connectorApi(kind).getAuthOptions(), { oauth: false })
+    }),
+    notionWorkspace: createSource<NotionWorkspaceStatus, 'revalidate'>({
+      // Estado dos bancos (o main revalida uma vez por sessão; 'revalidate' força).
+      load: (_key, arg) =>
+        ipcCall(() => window.orkio.notionWorkspace[arg ?? 'getStatus'](), {
+          config: null,
+          health: 'unverified',
+          messages: [IPC_FAILURE_MESSAGE],
+          connection: null
+        }),
+      refreshOnFocus: true
     }),
     claude: createSource({
       load: (_key, arg) => window.orkio.claude.status(arg ? { force: arg.force } : undefined)

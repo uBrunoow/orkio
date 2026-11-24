@@ -64,8 +64,8 @@ import {
   type StageRole
 } from '../../../../shared/board'
 import type { NotionColor } from '../../../../shared/notion'
-import type { Result } from '../../../../shared/result'
 import { stageDotClass } from './stage-dot'
+import { ipcResult } from '../../lib/ipc'
 
 const BOARD_TABS: { id: BoardSettingsTab; label: string }[] = [
   { id: 'columns', label: 'Colunas' },
@@ -374,15 +374,7 @@ export function FlowPage({
   async function save(): Promise<void> {
     setSaving(true)
     setMessage(null)
-    let result: Result<BoardView>
-    try {
-      result = await window.orkio.flow.save(view.projectId, draft)
-    } catch {
-      result = {
-        ok: false,
-        error: { code: 'ipc', message: 'Não foi possível falar com o processo principal do Orkio.' }
-      }
-    }
+    const result = await ipcResult(() => window.orkio.flow.save(view.projectId, draft))
     setSaving(false)
     if (!result.ok) {
       setMessage({ tone: 'danger', text: result.error.message })

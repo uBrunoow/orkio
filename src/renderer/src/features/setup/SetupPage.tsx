@@ -22,6 +22,7 @@ import './setup.css'
 import { setupPending, setupSteps, type SetupStep, type SetupStepId } from './setup-steps'
 import type { BoardTaskRef } from '../../../../shared/overview'
 import type { ProjectSelection, ProjectView } from '../../../../shared/projects'
+import { StepCircle } from '../../components/StepCircle'
 
 const WHY: Record<SetupStepId, string> = {
   github: 'O Orkio confere o repositório do projeto e acompanha branches, PRs e CI das tarefas.',
@@ -344,19 +345,7 @@ function StepItem({
           isSelected ? 'bg-muted' : 'hover:bg-muted/50'
         )}
       >
-        <span
-          aria-hidden="true"
-          className={cn(
-            'grid size-[22px] shrink-0 place-items-center rounded-full border font-mono text-2xs',
-            step.state === 'done'
-              ? 'border-ok-tint-border bg-ok-tint text-ok'
-              : step.state === 'current'
-                ? 'border-brand text-brand'
-                : 'border-border text-subtle-foreground'
-          )}
-        >
-          {step.state === 'done' ? '✓' : number}
-        </span>
+        <StepCircle number={number} state={step.state} />
         <span className="flex min-w-0 flex-col">
           <span
             className={cn(

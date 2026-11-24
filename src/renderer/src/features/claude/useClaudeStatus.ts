@@ -14,6 +14,10 @@ export function useClaudeStatus({ pollMs }: { pollMs?: number } = {}): {
 } {
   const { claude } = useSources()
   const { value } = useSource(claude, '')
+  // Relê ao abrir a tela (o main guarda o último resultado; junta-se a uma leitura em andamento).
+  useEffect(() => {
+    void claude.reload('')
+  }, [claude])
   useEffect(() => {
     if (!pollMs) return
     const timer = setInterval(() => void claude.reload(''), pollMs)

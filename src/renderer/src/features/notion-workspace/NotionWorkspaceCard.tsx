@@ -27,6 +27,7 @@ import type {
   NotionWorkspaceStatus
 } from '../../../../shared/notion'
 import type { ResultError } from '../../../../shared/result'
+import { StepCircle } from '../../components/StepCircle'
 
 const hint = 'text-xs text-muted-foreground'
 
@@ -498,17 +499,7 @@ function WizardSteps({ active }: { active: number }): React.JSX.Element {
             className="flex items-center gap-2"
           >
             {i > 0 && <span aria-hidden="true" className="h-px w-6 bg-border" />}
-            <span
-              aria-hidden="true"
-              className={cn(
-                'grid size-[22px] place-items-center rounded-full border font-mono text-2xs',
-                done && 'border-ok-tint-border bg-ok-tint text-ok',
-                current && 'border-brand text-brand',
-                !done && !current && 'border-border text-subtle-foreground'
-              )}
-            >
-              {done ? '✓' : i + 1}
-            </span>
+            <StepCircle number={i + 1} state={done ? 'done' : current ? 'current' : 'todo'} />
             <span className={cn('text-xs', current ? 'text-foreground' : 'text-muted-foreground')}>
               {label}
             </span>

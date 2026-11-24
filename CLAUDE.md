@@ -217,8 +217,8 @@ src/
     app/initial-route.ts   # 9: tela ao abrir (Primeiros passos, tarefa esperando ou Quadro), puro
     app/WaitingBell.tsx    # 9: sino (esperando você de todos os projetos + PRs com atenção)
     app/sources.tsx        # fontes compartilhadas (SourcesProvider no topo): visão geral, sinais
-                           # por projeto, quadro por projeto, projetos, conexões, Claude Code,
-                           # atualizações; um poll e uma assinatura de eventos por fonte
+                           # por projeto, quadro por projeto, projetos, conexões, bancos do Notion,
+                           # Claude Code, atualizações; um poll e uma assinatura de eventos por fonte
     lib/ipc.ts             # IPC_FAILURE_MESSAGE, ipcCall/ipcResult, createSource/useSource e
                            # useIpcResource (dado de um componente: chave, assinatura, poll, foco)
     lib/status-text.ts     # { label, tone } por dado (conexão, bancos, cores do Notion, Claude,
