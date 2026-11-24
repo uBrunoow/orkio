@@ -34,3 +34,27 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${one.format(bytes / 1024)} KB`
   return `${one.format(bytes / (1024 * 1024))} MB`
 }
+
+const DATE_TIME = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+const DATE_TIME_LONG = new Intl.DateTimeFormat('pt-BR', { dateStyle: 'medium', timeStyle: 'short' })
+const TIME = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' })
+
+function formatWith(format: Intl.DateTimeFormat, at: string | number | Date): string {
+  const date = at instanceof Date ? at : new Date(at)
+  return Number.isNaN(date.getTime()) ? '—' : format.format(date)
+}
+
+/** "24/11/2026, 14:05" (data inválida = "—"). */
+export function formatDateTime(at: string | number | Date): string {
+  return formatWith(DATE_TIME, at)
+}
+
+/** "24 de nov. de 2026, 14:05". */
+export function formatDateTimeLong(at: string | number | Date): string {
+  return formatWith(DATE_TIME_LONG, at)
+}
+
+/** "14:05". */
+export function formatTime(at: string | number | Date): string {
+  return formatWith(TIME, at)
+}

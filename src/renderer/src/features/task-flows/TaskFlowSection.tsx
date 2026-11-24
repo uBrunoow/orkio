@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { CheckboxField, Field, RadioListField, TextAreaField, TextField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
-import { StatusDot, StatusToken, toneOf } from '../../components/StatusToken'
+import { StatusDot, StatusToken } from '../../components/StatusToken'
 import type { RunSummary } from '../../../../shared/agent-run'
 import { ALVA_TEMPLATE_IDS } from '../../../../shared/alva-templates'
 import type { TaskPullRequest } from '../../../../shared/task-signals'
@@ -37,7 +37,7 @@ import { replyChips } from '../task/reply-chips'
 import { finalText, flowPlan, gateOutcomes, gateResultRunId, planProgress } from './flow-plan'
 import { MarkdownText } from '../../components/MarkdownText'
 import { formatUsd, plural } from '../../lib/format'
-import { RUN_STATUS } from './run-status'
+import { CI_STATUS, FLOW_RUN_STATUS } from '../../lib/status-text'
 import { PLAN_TRIGGER_ATTR } from '../task/task-phases'
 
 const STEP_STATUS: Record<FlowStepStatus, string> = {
@@ -86,11 +86,6 @@ function stepSummary(history: FlowRunView['history']): string {
  * diff ou resumo), pausas (retomar/pular/cancelar) e a decisão quando a tarefa sai da etapa. A
  * conversa do passo atual (Claude Code) aparece logo acima, na sessão.
  */
-const CI_LABEL = {
-  success: { label: 'CI passou', color: 'green' },
-  failure: { label: 'CI falhou', color: 'red' },
-  pending: { label: 'CI rodando', color: 'yellow' }
-} as const
 
 export function TaskFlowSection({
   projectId,
@@ -228,12 +223,12 @@ export function TaskFlowSection({
             tone={
               run.status === 'finished' && run.result === 'rejected'
                 ? 'danger'
-                : toneOf(RUN_STATUS[run.status].color)
+                : FLOW_RUN_STATUS[run.status].tone
             }
             label={
               run.status === 'finished' && run.result === 'rejected'
                 ? 'Recusado'
-                : RUN_STATUS[run.status].label
+                : FLOW_RUN_STATUS[run.status].label
             }
             data-testid="flow-status"
           />
@@ -277,8 +272,8 @@ export function TaskFlowSection({
       {openPr?.checks && (
         <div className="flex flex-wrap items-center gap-2">
           <StatusToken
-            tone={toneOf(CI_LABEL[openPr.checks].color)}
-            label={`${CI_LABEL[openPr.checks].label} (PR #${openPr.number})`}
+            tone={CI_STATUS[openPr.checks].tone}
+            label={`${CI_STATUS[openPr.checks].label} (PR #${openPr.number})`}
             data-testid="pr-ci"
           />
           {openPr.checks === 'failure' && ciFlow && !live && (

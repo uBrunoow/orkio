@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { ExternalLinkIcon, RefreshIcon } from '../../components/icons'
 import { StatusDot, type StatusTone } from '../../components/StatusToken'
 import type { OrkioBotRepoState, OrkioBotStatus } from '../../../../shared/orkio-bot'
+import { formatTime } from '../../lib/format'
 
 /**
  * orkio[bot]: o GitHub App que publica as revisões dos agentes nas PRs. Consulta (só leitura, pelo
@@ -104,11 +105,7 @@ export function OrkioBotPanel({ bot }: { bot: ReturnType<typeof useOrkioBot> }):
         </Button>
         {status?.checkedAt && !checking && (
           <span className="text-subtle-foreground">
-            Conferido às{' '}
-            {new Date(status.checkedAt).toLocaleTimeString('pt-BR', {
-              hour: '2-digit',
-              minute: '2-digit'
-            })}
+            Conferido às {formatTime(status.checkedAt)}
           </span>
         )}
       </div>

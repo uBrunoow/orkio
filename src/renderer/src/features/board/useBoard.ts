@@ -1,21 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback } from 'react'
+import { patchBoardCard, useSources, type BoardState } from '../../app/sources'
+import { ipcResult, useSource } from '../../lib/ipc'
 import type { BoardCard, BoardSaveInput, BoardView } from '../../../../shared/board'
-import type { Result } from '../../../../shared/result'
+import type { Result, ResultError } from '../../../../shared/result'
 
-export type BoardError = Extract<Result<never>, { ok: false }>['error']
-
-const IPC_FAILURE: BoardError = {
-  code: 'ipc',
-  message: 'Não foi possível falar com o processo principal do Orkio. Reinicie o app.'
-}
-
-async function call<T>(fn: () => Promise<Result<T>>): Promise<Result<T>> {
-  try {
-    return await fn()
-  } catch {
-    return { ok: false, error: IPC_FAILURE }
-  }
-}
+export type BoardError = ResultError
 
 export interface UseBoard {
   view: BoardView | null
@@ -23,7 +12,7 @@ export interface UseBoard {
   error: BoardError | null
   loading: boolean
   /** Última recusa do Notion / falha ao mover (some ao fechar). */
-  notice: (BoardError & { taskId?: string }) | null
+  notice: BoardState['notice']
   dismissNotice(): void
   load(force: boolean): Promise<void>
   /** Troca o quadro exibido (ex.: depois de salvar o fluxo). */
@@ -36,82 +25,25 @@ export interface UseBoard {
 }
 
 /**
- * Estado do quadro de um projeto. Mover/bloquear é otimista: o card muda na hora; o main grava
- * localmente e enfileira a escrita no Notion; o resultado chega por `board.onSyncChanged`
- * (sincronizado, pendente ou recusado → card volta).
+ * Quadro de um projeto (`null` = nenhum), compartilhado por todas as telas que o leem (Quadro,
+ * tarefa, lista lateral, Configurações, Primeiros passos). Mover/bloquear é otimista: o card muda
+ * na hora; o main grava localmente e enfileira a escrita no Notion; o resultado chega por
+ * `board.onSyncChanged` (sincronizado, pendente ou recusado → card volta).
  */
-export function useBoard(projectId: string): UseBoard {
-  const [view, setView] = useState<BoardView | null>(null)
-  const [error, setError] = useState<BoardError | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [notice, setNotice] = useState<UseBoard['notice']>(null)
-  const mounted = useRef(true)
+export function useBoard(projectId: string | null): UseBoard {
+  const { board } = useSources()
+  const state = useSource(board, projectId)
+  const key = projectId ?? ''
 
-  const patchCard = useCallback((taskId: string, patch: (card: BoardCard) => BoardCard) => {
-    setView((current) => {
-      if (!current) return current
-      const cards = current.cards.map((c) => (c.taskId === taskId ? patch(c) : c))
-      return {
-        ...current,
-        cards,
-        pendingCount: cards.filter((c) => c.sync.state === 'pending').length
-      }
-    })
-  }, [])
-
-  const apply = useCallback((result: Result<BoardView>) => {
-    if (!mounted.current) return
-    setLoading(false)
-    if (result.ok) {
-      setView(result.value)
-      setError(null)
-    } else {
-      setError(result.error)
-    }
-  }, [])
-
-  const load = useCallback(
-    async (force: boolean) => {
-      setLoading(true)
-      apply(await call(() => window.orkio.board.get(projectId, { force })))
-    },
-    [projectId, apply]
+  const replace = useCallback(
+    (view: BoardView) => board.set(key, (s) => ({ view, notice: s?.notice ?? null })),
+    [board, key]
   )
 
-  useEffect(() => {
-    mounted.current = true
-    void call(() => window.orkio.board.get(projectId, { force: false })).then(apply)
-    const unsubscribe = window.orkio.board.onSyncChanged((event) => {
-      if (event.projectId !== projectId) return
-      patchCard(event.taskId, (card) => ({
-        ...card,
-        stageId: event.stageId,
-        blocked: event.blocked,
-        sync:
-          event.state === 'pending'
-            ? { state: 'pending', ...(event.message ? { message: event.message } : {}) }
-            : { state: event.state === 'failed' ? 'failed' : 'synced' }
-      }))
-      if (event.state === 'failed') {
-        setNotice({
-          code: 'rejected',
-          message: event.message ?? 'O Notion recusou a mudança.',
-          taskId: event.taskId,
-          ...(event.canReconnect ? { canReconnect: true } : {})
-        })
-      }
-    })
-    // Movimento por automação (3B): recarrega o quadro (sem forçar o Notion).
-    const unsubscribeChanged = window.orkio.board.onChanged((event) => {
-      if (event.projectId !== projectId) return
-      void call(() => window.orkio.board.get(projectId, { force: false })).then(apply)
-    })
-    return () => {
-      mounted.current = false
-      unsubscribe()
-      unsubscribeChanged()
-    }
-  }, [projectId, apply, patchCard])
+  const setNotice = useCallback(
+    (notice: BoardState['notice']) => board.set(key, (s) => (s ? { ...s, notice } : s)),
+    [board, key]
+  )
 
   const mutate = useCallback(
     async (
@@ -119,87 +51,62 @@ export function useBoard(projectId: string): UseBoard {
       optimistic: (card: BoardCard) => BoardCard,
       run: () => Promise<Result<BoardCard>>
     ) => {
-      const before = view?.cards.find((c) => c.taskId === taskId)
-      if (!before) return
-      patchCard(taskId, (card) => ({ ...optimistic(card), sync: { state: 'pending' } }))
-      const result = await call(run)
-      if (!mounted.current) return
+      const before = board.get(key).value?.view.cards.find((c) => c.taskId === taskId)
+      if (!projectId || !before) return
+      board.set(key, (s) =>
+        patchBoardCard(s, taskId, (card) => ({ ...optimistic(card), sync: { state: 'pending' } }))
+      )
+      const result = await ipcResult(run)
       if (result.ok) {
         // O evento de sincronização pode já ter chegado: não regride um card já sincronizado.
-        patchCard(taskId, (card) =>
-          card.sync.state === 'synced' && result.value.sync.state === 'pending'
-            ? { ...result.value, sync: card.sync }
-            : result.value
+        board.set(key, (s) =>
+          patchBoardCard(s, taskId, (card) =>
+            card.sync.state === 'synced' && result.value.sync.state === 'pending'
+              ? { ...result.value, sync: card.sync }
+              : result.value
+          )
         )
       } else {
-        patchCard(taskId, () => before)
+        board.set(key, (s) => patchBoardCard(s, taskId, () => before))
         setNotice({ ...result.error, taskId })
       }
     },
-    [view, patchCard]
+    [board, key, projectId, setNotice]
   )
 
-  const move = useCallback(
-    (taskId: string, stageId: string) =>
+  return {
+    view: state.value?.view ?? null,
+    error: state.error,
+    loading: state.loading,
+    notice: state.value?.notice ?? null,
+    dismissNotice: () => setNotice(null),
+    load: (force) => (projectId ? board.reload(projectId, { force }) : Promise.resolve()),
+    replace,
+    move: (taskId, stageId) =>
       mutate(
         taskId,
         (card) => ({ ...card, stageId }),
-        () => window.orkio.board.move(projectId, taskId, stageId)
+        () => window.orkio.board.move(key, taskId, stageId)
       ),
-    [mutate, projectId]
-  )
-
-  const setBlocked = useCallback(
-    (taskId: string, blocked: boolean) =>
+    setBlocked: (taskId, blocked) =>
       mutate(
         taskId,
         (card) => ({ ...card, blocked }),
-        () => window.orkio.board.setBlocked(projectId, taskId, blocked)
+        () => window.orkio.board.setBlocked(key, taskId, blocked)
       ),
-    [mutate, projectId]
-  )
-
-  const setAutomationPaused = useCallback(
-    (taskId: string, paused: boolean) =>
+    setAutomationPaused: (taskId, paused) =>
       mutate(
         taskId,
         (card) => ({ ...card, automationPaused: paused }),
-        () => window.orkio.board.setAutomationPaused(projectId, taskId, paused)
+        () => window.orkio.board.setAutomationPaused(key, taskId, paused)
       ),
-    [mutate, projectId]
-  )
-
-  const save = useCallback(
-    async (input: BoardSaveInput) => {
-      const result = await call(() => window.orkio.board.save(projectId, input))
-      if (result.ok && mounted.current) {
-        setView(result.value)
-        setError(null)
-      }
+    save: async (input) => {
+      const result = await ipcResult(() => window.orkio.board.save(key, input))
+      if (result.ok) replace(result.value)
       return result
     },
-    [projectId]
-  )
-
-  const retryNow = useCallback(async () => {
-    await window.orkio.board.retryNow().catch(() => {})
-  }, [])
-
-  return {
-    view,
-    error,
-    loading,
-    notice,
-    dismissNotice: () => setNotice(null),
-    load,
-    replace: (next: BoardView) => {
-      setView(next)
-      setError(null)
-    },
-    move,
-    setBlocked,
-    setAutomationPaused,
-    save,
-    retryNow
+    retryNow: async () => {
+      await window.orkio.board.retryNow().catch(() => undefined)
+    }
   }
 }

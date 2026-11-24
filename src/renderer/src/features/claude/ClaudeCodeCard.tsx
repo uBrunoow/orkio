@@ -1,41 +1,28 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/Spinner'
 import { StatusToken } from '../../components/StatusToken'
-import { type ClaudeCodeStatus, CLAUDE_CODE_DOCS_URL } from '../../../../shared/agent-run'
+import { CLAUDE_CODE_DOCS_URL } from '../../../../shared/agent-run'
+import { useClaudeStatus } from './useClaudeStatus'
+import { claudeLoginText, claudeStatusText } from '../../lib/status-text'
 import { Alert } from '../../components/Alert'
 import { ClaudeLogo, ExternalLinkIcon, RefreshIcon } from '../../components/icons'
-import { CardHeader } from '../integrations/connection-ui'
+import { PanelHeader } from '../../components/PanelHeader'
 
 /**
  * Card "Claude Code" em Integrações: o Orkio usa o CLI do usuário (com a assinatura/login dele).
  * Mostra só instalado, versão e se está logado; nunca e-mail, token ou chave.
  */
 export function ClaudeCodeCard(): React.JSX.Element {
-  const [status, setStatus] = useState<ClaudeCodeStatus | null>(null)
+  const claude = useClaudeStatus()
+  const status = claude.status
   const [checking, setChecking] = useState(false)
-
-  const check = useCallback(async (force: boolean) => {
+  const check = async (): Promise<void> => {
     setChecking(true)
-    try {
-      setStatus(await window.orkio.claude.status({ force }))
-    } finally {
-      setChecking(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    let active = true
-    void window.orkio.claude.status().then((s) => {
-      if (active) setStatus(s)
-    })
-    return () => {
-      active = false
-    }
-  }, [])
-
-  const ready = status?.installed && status.loggedIn !== false && status.meetsMinimum
+    await claude.check(true)
+    setChecking(false)
+  }
 
   return (
     <section
@@ -43,7 +30,7 @@ export function ClaudeCodeCard(): React.JSX.Element {
       aria-busy={checking}
       className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
     >
-      <CardHeader
+      <PanelHeader
         titleId="claude-card-title"
         title="Claude Code"
         description="Executa as tarefas no seu computador, com a sua conta."
@@ -52,14 +39,7 @@ export function ClaudeCodeCard(): React.JSX.Element {
             <ClaudeLogo className="size-5" />
           </span>
         }
-        badge={
-          status === null ? null : (
-            <StatusToken
-              tone={ready ? 'success' : 'warning'}
-              label={ready ? 'Pronto' : status.installed ? 'Ação necessária' : 'Não encontrado'}
-            />
-          )
-        }
+        badge={status === null ? null : <StatusToken {...claudeStatusText(status)} />}
       />
       <div className="flex flex-col gap-3" aria-live="polite">
         {status === null ? (
@@ -76,24 +56,7 @@ export function ClaudeCodeCard(): React.JSX.Element {
               <code data-testid="claude-version" className="font-mono text-xs text-foreground">
                 {status.version ?? 'desconhecida'}
               </code>
-              <StatusToken
-                tone={
-                  status.loggedIn === true
-                    ? 'success'
-                    : status.loggedIn === false
-                      ? 'danger'
-                      : 'neutral'
-                }
-                label={
-                  status.loggedIn === true
-                    ? status.authMethod === 'claude.ai'
-                      ? 'Logado (assinatura)'
-                      : 'Logado'
-                    : status.loggedIn === false
-                      ? 'Não logado'
-                      : 'Login não verificado'
-                }
-              />
+              <StatusToken {...claudeLoginText(status)} />
             </div>
             {!status.meetsMinimum && (
               <Alert tone="warning">
@@ -113,7 +76,7 @@ export function ClaudeCodeCard(): React.JSX.Element {
           </div>
         )}
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled={checking} onClick={() => void check(true)}>
+          <Button size="sm" variant="outline" disabled={checking} onClick={() => void check()}>
             {checking ? <Spinner /> : <RefreshIcon />}
             Verificar de novo
           </Button>

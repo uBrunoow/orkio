@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext } from 'react'
+import { useIpcResource } from '../../lib/ipc'
 import type { AgentBadge } from '../../../../shared/agent'
 
 export type AgentBadges = Record<string, AgentBadge>
@@ -12,28 +13,16 @@ export function useAgentBadge(taskId: string): AgentBadge | null {
   return useContext(AgentBadgesContext)[taskId] ?? null
 }
 
-/** Agentes das tarefas do projeto; recarrega quando agentes, atribuições ou fluxos mudam. */
-export function useAgentBadges(projectId: string): AgentBadges {
-  const [badges, setBadges] = useState<AgentBadges>({})
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    let alive = true
-    void window.orkio.agents
-      .badges(projectId)
-      .then((b) => {
-        if (alive) setBadges(b)
-      })
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [projectId, tick])
-  useEffect(
-    () =>
-      window.orkio.agents.onChanged((e) => {
-        if (e.projectId === projectId) setTick((n) => n + 1)
-      }),
-    [projectId]
+const NONE: AgentBadges = {}
+
+/** Agentes das tarefas do projeto (`null` = nenhum); recarrega quando agentes ou atribuições mudam. */
+export function useAgentBadges(projectId: string | null): AgentBadges {
+  return (
+    useIpcResource(projectId, (id) => window.orkio.agents.badges(id), {
+      subscribe: (reload, id) =>
+        window.orkio.agents.onChanged((e) => {
+          if (e.projectId === id) reload()
+        })
+    }).value ?? NONE
   )
-  return badges
 }

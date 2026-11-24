@@ -3,6 +3,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { StatusDot, type StatusTone } from '@/components/StatusToken'
 import { Timestamp } from '@/components/Timestamp'
 import { plural } from '@/lib/format'
+import { CI_STATUS, isPrOpen, PR_STATE, REVIEW_DECISION, type StatusText } from '@/lib/status-text'
 import type { TaskSignals } from '../../../../shared/task-signals'
 
 type TaskPullRequest = NonNullable<TaskSignals['pr']>
@@ -17,20 +18,13 @@ export function repoOfPrUrl(url: string): string | null {
   }
 }
 
-export interface PrBadge {
-  label: string
-  tone: StatusTone
-}
-
 /** Pílula de estado da PR: o que mais importa primeiro (encerrada > revisão > rascunho). */
-export function prBadge(pr: TaskPullRequest): PrBadge {
-  if (pr.state === 'merged') return { label: 'Mergeada', tone: 'success' }
-  if (pr.state === 'closed') return { label: 'Fechada', tone: 'neutral' }
-  if (pr.reviewDecision === 'changes_requested')
-    return { label: 'Mudanças pedidas', tone: 'danger' }
-  if (pr.reviewDecision === 'approved') return { label: 'Aprovada', tone: 'success' }
-  if (pr.state === 'draft') return { label: 'Rascunho', tone: 'neutral' }
-  return { label: 'Revisão pendente', tone: 'neutral' }
+function prBadge(pr: TaskPullRequest): StatusText {
+  if (pr.state === 'merged' || pr.state === 'closed') return PR_STATE[pr.state]
+  if (pr.reviewDecision === 'changes_requested' || pr.reviewDecision === 'approved')
+    return REVIEW_DECISION[pr.reviewDecision]
+  if (pr.state === 'draft') return PR_STATE.draft
+  return REVIEW_DECISION.review_required
 }
 
 const PILL: Record<StatusTone, string> = {
@@ -39,12 +33,6 @@ const PILL: Record<StatusTone, string> = {
   danger: 'bg-danger-tint text-danger',
   running: 'bg-brand-tint text-brand',
   neutral: 'bg-muted text-muted-foreground'
-}
-
-const CI: Record<NonNullable<TaskPullRequest['checks']>, PrBadge> = {
-  success: { label: 'CI ok', tone: 'success' },
-  failure: { label: 'CI falhou', tone: 'danger' },
-  pending: { label: 'CI rodando', tone: 'running' }
 }
 
 /**
@@ -60,8 +48,8 @@ export function PrHoverCard({
 }): React.JSX.Element {
   const repo = repoOfPrUrl(pr.url)
   const badge = prBadge(pr)
-  const open = pr.state === 'open' || pr.state === 'draft'
-  const ci = open && pr.checks ? CI[pr.checks] : null
+  const open = isPrOpen(pr)
+  const ci = open && pr.checks ? CI_STATUS[pr.checks] : null
   const hasSize = pr.additions !== undefined && pr.deletions !== undefined
   const unresolved = open ? (pr.unresolvedComments ?? 0) : 0
   return (

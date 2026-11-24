@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { IconChevronRight } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,6 +19,7 @@ import { TaskBranchLinks } from './TaskBranchLinks'
 import { TaskTimeline } from './TaskTimeline'
 import type { BoardCard, BoardHistoryEntry, BoardStage } from '../../../../shared/board'
 import type { TaskSignals } from '../../../../shared/task-signals'
+import { ChevronRightIcon } from '../../components/icons'
 
 export type BacklogSummary = { linked: string | null; task: BacklogTaskInfo | null }
 
@@ -82,8 +82,7 @@ export function CollapsibleHeader({
         className
       )}
     >
-      <IconChevronRight
-        aria-hidden="true"
+      <ChevronRightIcon
         className={cn(
           'size-3.5 shrink-0 text-subtle-foreground transition-transform',
           open && 'rotate-90'

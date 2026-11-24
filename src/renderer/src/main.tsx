@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { App } from './App'
+import { SourcesProvider } from './app/sources'
 import './styles/fonts.css'
 import './styles/globals.css'
 import './styles/brand.css'
@@ -15,7 +16,9 @@ document.documentElement.classList.add('dark')
 createRoot(container).render(
   <StrictMode>
     <TooltipProvider delayDuration={300}>
-      <App />
+      <SourcesProvider>
+        <App />
+      </SourcesProvider>
     </TooltipProvider>
   </StrictMode>
 )

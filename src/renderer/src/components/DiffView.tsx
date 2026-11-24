@@ -1,5 +1,4 @@
 import { Fragment, useMemo, useState } from 'react'
-import { IconChevronRight } from '@tabler/icons-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
@@ -10,9 +9,11 @@ import {
   diffTotals,
   parseUnifiedDiff,
   type DiffFile,
-  type DiffFileStatus
+  type DiffFileStatus,
+  type DiffLineKind
 } from '../lib/diff'
 import { plural } from '../lib/format'
+import { ChevronRightIcon } from './icons'
 
 /** Quantos arquivos abrem sozinhos, e até quantas linhas cada um (o resto fica recolhido). */
 const AUTO_OPEN_FILES = 3
@@ -20,6 +21,13 @@ const AUTO_OPEN_LINES = 200
 /** Linhas mostradas por arquivo antes de "Mostrar mais"; cada clique revela outro bloco. */
 const ROWS_FIRST = 300
 const ROWS_MORE = 500
+
+/** Cor da linha pelo tipo (classes da camada da marca, `styles/brand.css`). */
+const LINE_CLASS: Record<DiffLineKind, string> = {
+  add: 'orkio-diff-add',
+  del: 'orkio-diff-del',
+  context: ''
+}
 
 const STATUS_LABEL: Record<DiffFileStatus, string | null> = {
   modified: null,
@@ -83,7 +91,7 @@ function FileBody({
         {lines.map((line, li) => {
           const no = line.kind === 'del' ? line.oldNo : line.newNo
           return (
-            <div key={li} className={`orkio-diff-line orkio-diff-${line.kind} text-xs`}>
+            <div key={li} className={cn('orkio-diff-line text-xs', LINE_CLASS[line.kind])}>
               <span className="orkio-diff-no">{no}</span>
               <span className="orkio-diff-sign">
                 {line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' '}
@@ -218,8 +226,7 @@ export function DiffView({
             className="rounded-lg border border-border-soft bg-surface"
           >
             <CollapsibleTrigger className="flex w-full flex-wrap items-center gap-2 px-3 py-2 text-left text-xs hover:bg-muted/40">
-              <IconChevronRight
-                aria-hidden="true"
+              <ChevronRightIcon
                 className={cn(
                   'size-3.5 text-subtle-foreground transition-transform',
                   opened && 'rotate-90'

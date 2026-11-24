@@ -65,7 +65,7 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
   const { page } = await open('401')
 
   await expect(page.getByRole('heading', { name: 'Integrações' })).toBeVisible()
-  await expect(notionCard(page).getByText('Desconectado')).toBeVisible()
+  await expect(notionCard(page).getByText('Não conectado')).toBeVisible()
 
   const isolation = await page.evaluate(() => {
     // Forma de `window.orkio`: só funções e grupos de funções (nada de ipcRenderer cru).
@@ -245,7 +245,7 @@ test('desconectar pede confirmação e apaga o token do disco', async () => {
     .click()
 
   await expect(notionCard(page).getByRole('button', { name: 'Conectar com Notion' })).toBeVisible()
-  await expect(notionCard(page).getByText('Desconectado')).toBeVisible()
+  await expect(notionCard(page).getByText('Não conectado')).toBeVisible()
   expect(secretFiles()).toEqual([])
   expect(await cspViolations(page)).toEqual([])
   await close()

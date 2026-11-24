@@ -1,74 +1,28 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Result } from '../../../../shared/result'
+import { useCallback } from 'react'
+import { useSources } from '../../app/sources'
+import { useSource } from '../../lib/ipc'
+import type { ResultError } from '../../../../shared/result'
 import type { TaskSignalsResult } from '../../../../shared/task-signals'
-
-type SignalsError = Extract<Result<never>, { ok: false }>['error']
-
-/** Atualização automática leve (o main usa ETag: quase sempre 304). */
-export const SIGNALS_POLL_MS = 60_000
 
 export interface UseTaskSignals {
   result: TaskSignalsResult | null
-  error: SignalsError | null
+  error: ResultError | null
   loading: boolean
   refresh(force: boolean): Promise<void>
 }
 
 /**
- * Sinais (branch/PR) das tarefas de um projeto. Atualiza a cada 60 s enquanto montado e com a
- * janela visível e em foco, e quando a branch atual do projeto muda.
+ * Sinais (branch/PR) das tarefas de um projeto, compartilhados pelas telas que os leem. Atualizam
+ * a cada 60 s com a janela visível e em foco e quando a branch atual do projeto muda (a fonte em
+ * `app/sources.tsx`). `refresh(false)` junta-se a uma leitura em andamento; `true` força.
  */
-export function useTaskSignals(projectId: string): UseTaskSignals {
-  const [result, setResult] = useState<TaskSignalsResult | null>(null)
-  const [error, setError] = useState<SignalsError | null>(null)
-  const [loading, setLoading] = useState(false)
-  const mounted = useRef(true)
-  const inFlight = useRef(false)
-
+export function useTaskSignals(projectId: string | null): UseTaskSignals {
+  const { signals } = useSources()
+  const state = useSource(signals, projectId)
   const refresh = useCallback(
-    async (force: boolean) => {
-      if (inFlight.current && !force) return
-      inFlight.current = true
-      setLoading(true)
-      let next: Result<TaskSignalsResult>
-      try {
-        next = await window.orkio.signals.get(projectId, { force })
-      } catch {
-        next = {
-          ok: false,
-          error: {
-            code: 'ipc',
-            message: 'Não foi possível falar com o processo principal do Orkio. Reinicie o app.'
-          }
-        }
-      }
-      inFlight.current = false
-      if (!mounted.current) return
-      setLoading(false)
-      if (next.ok) {
-        setResult(next.value)
-        setError(null)
-      } else {
-        setError(next.error)
-      }
-    },
-    [projectId]
+    (force: boolean) =>
+      projectId ? signals.reload(projectId, force ? { force } : undefined) : Promise.resolve(),
+    [signals, projectId]
   )
-
-  useEffect(() => {
-    mounted.current = true
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === 'visible' && document.hasFocus()) void refresh(false)
-    }, SIGNALS_POLL_MS)
-    const unsubscribe = window.orkio.projects.onBranchChanged((event) => {
-      if (event.projectId === projectId) void refresh(false)
-    })
-    return () => {
-      mounted.current = false
-      window.clearInterval(timer)
-      unsubscribe()
-    }
-  }, [projectId, refresh])
-
-  return { result, error, loading, refresh }
+  return { result: state.value, error: state.error, loading: state.loading, refresh }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { tokenColor } from '../notion-workspace/notion-colors'
+import { stageDotClass } from './stage-dot'
 import { ColumnCollapseIcon, ColumnExpandIcon } from '../../components/icons'
 import { BoardCardBody, BoardCardItem, CARD_CLASS, type CardActions } from './BoardCardView'
 import type { BoardCard, BoardStage } from '../../../../shared/board'
@@ -338,32 +338,4 @@ export function BoardColumns({
       )}
     </>
   )
-}
-
-/** Ponto da coluna com a cor escolhida para a etapa (Etapas e automações); sem cor, neutro. */
-export function stageDotColor(
-  stage: Pick<BoardStage, 'color'>
-): 'tertiary' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'gray' {
-  const c = stage.color ? tokenColor(stage.color) : 'default'
-  return c === 'default' ? 'tertiary' : c
-}
-
-/**
- * Classe de fundo do ponto da etapa. O tema não tem roxo nem rosa: roxo usa o azul de informação e
- * rosa o vermelho de perigo.
- */
-const DOT_BG: Record<ReturnType<typeof stageDotColor>, string> = {
-  tertiary: 'bg-subtle-foreground',
-  gray: 'bg-muted-foreground',
-  red: 'bg-danger',
-  orange: 'bg-brand',
-  yellow: 'bg-warn',
-  green: 'bg-ok',
-  blue: 'bg-info',
-  purple: 'bg-purple',
-  pink: 'bg-pink'
-}
-
-export function stageDotClass(stage: Pick<BoardStage, 'color'>): string {
-  return DOT_BG[stageDotColor(stage)]
 }

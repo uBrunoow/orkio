@@ -1,5 +1,7 @@
 /** Regras puras da tela de Integrações (busca e qual painel fica aberto). */
 import { normalizeLabel } from '../../../../shared/text'
+import type { OrkioBotRepoState } from '../../../../shared/orkio-bot'
+import type { StatusText } from '../../lib/status-text'
 
 /** A busca casa com nome, categoria ou seção (sem acento nem caixa). */
 export function matchesQuery(
@@ -35,9 +37,9 @@ export function effectiveOpenId(
 export function orkioBotSummary(
   s: {
     github: 'connected' | 'disconnected'
-    repos: ReadonlyArray<{ status: { state: string } }>
+    repos: ReadonlyArray<{ status: Pick<OrkioBotRepoState, 'state'> }>
   } | null
-): { label: string; tone: 'success' | 'warning' | 'neutral' } {
+): StatusText {
   if (!s) return { label: 'Verificando', tone: 'neutral' }
   if (s.github === 'disconnected') return { label: 'Conecte o GitHub antes', tone: 'neutral' }
   if (s.repos.length === 0) return { label: 'Nenhum projeto com GitHub', tone: 'neutral' }

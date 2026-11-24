@@ -1,5 +1,10 @@
 import type { CSSProperties } from 'react'
-import { resolveLogoVariant, wordmarkMetrics, type OrkioLogoVariant } from './logo-metrics'
+import {
+  resolveLogoVariant,
+  wordmarkMetrics,
+  type OrkioLogoVariant,
+  type WordmarkMetrics
+} from './logo-metrics'
 import './OrkioLogo.css'
 
 export interface OrkioLogoProps {
@@ -13,6 +18,12 @@ export interface OrkioLogoProps {
   className?: string
   /** Rótulo acessível. */
   label?: string
+}
+
+/** Peso do wordmark (classes de `OrkioLogo.css`). */
+const WEIGHT_CLASS: Record<WordmarkMetrics['fontWeight'], string> = {
+  300: 'orkio-logo__wordmark--w300',
+  400: 'orkio-logo__wordmark--w400'
 }
 
 /**
@@ -55,7 +66,7 @@ export function OrkioLogo({
       </svg>
       {withWordmark && (
         <span
-          className={`orkio-logo__wordmark orkio-logo__wordmark--w${wordmark.fontWeight}`}
+          className={`orkio-logo__wordmark ${WEIGHT_CLASS[wordmark.fontWeight]}`}
           aria-hidden="true"
         >
           ORKIO

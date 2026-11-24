@@ -4,6 +4,7 @@ import { CheckboxField, SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { Timestamp } from '@/components/Timestamp'
 import { MultiSelectField } from './MultiSelectField'
+import { useOrchestrator } from './useAgents'
 import type { AgentsState } from '../../../../shared/agent'
 import {
   ORCHESTRATOR_LIMITS,
@@ -29,29 +30,17 @@ export function OrchestratorSection({
   projectId: string
   agents: AgentsState
 }): React.JSX.Element {
-  const [state, setState] = useState<OrchestratorState | null>(null)
+  const orchestrator = useOrchestrator(projectId)
+  const state = orchestrator.value
   const [draft, setDraft] = useState<OrchestratorConfig | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [actionError, setError] = useState<string | null>(null)
+  const error = actionError ?? orchestrator.error?.message ?? null
   const [busy, setBusy] = useState(false)
-
+  // Regras ou perfis mudaram (salvos nesta tela): a carga dos agentes muda junto.
+  const reload = orchestrator.reload
   useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      void window.orkio.agents.orchestrator(projectId).then((r) => {
-        if (!alive) return
-        if (r.ok) setState(r.value)
-        else setError(r.error.message)
-      })
-    }
-    load()
-    const off = window.orkio.agents.onChanged((e) => {
-      if (e.projectId === projectId) load()
-    })
-    return () => {
-      alive = false
-      off()
-    }
-  }, [projectId, agents])
+    void reload()
+  }, [agents, reload])
 
   if (!state) return <p className="text-xs text-muted-foreground">Carregando o orquestrador…</p>
 
@@ -65,7 +54,7 @@ export function OrchestratorSection({
     setBusy(true)
     const r = await window.orkio.agents.runOrchestrator(projectId)
     setBusy(false)
-    if (r.ok) setState(r.value)
+    if (r.ok) orchestrator.set(r.value)
     else setError(r.error.message)
   }
 
@@ -78,7 +67,7 @@ export function OrchestratorSection({
       setError(r.error.message)
       return
     }
-    setState(r.value)
+    orchestrator.set(r.value)
     setDraft(null)
   }
 

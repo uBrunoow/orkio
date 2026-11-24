@@ -6,6 +6,7 @@ import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import type { ConnectionStatus } from '../../../../shared/connection'
 import type { NotionWorkspaceStatus } from '../../../../shared/notion'
 import type { ProjectView } from '../../../../shared/projects'
+import { accountName, isClaudeReady } from '../../lib/status-text'
 
 export type SetupStepId =
   'github' | 'notion' | 'claude' | 'folder' | 'notion-data' | 'board' | 'first-task'
@@ -28,7 +29,7 @@ export interface SetupInput {
   boardConfigured: boolean
 }
 
-export const SETUP_TITLES: Record<SetupStepId, string> = {
+const SETUP_TITLES: Record<SetupStepId, string> = {
   github: 'Entrar com GitHub',
   notion: 'Conectar o Notion',
   claude: 'Claude Code',
@@ -49,13 +50,7 @@ const REQUIRED: readonly SetupStepId[] = [
 ]
 
 function account(s: ConnectionStatus | null): string | null {
-  return s?.state === 'connected'
-    ? (s.account.handle ?? s.account.workspaceName ?? s.account.userName)
-    : null
-}
-
-function claudeReady(c: ClaudeCodeStatus | null): boolean {
-  return !!c && c.installed && c.meetsMinimum && c.loggedIn !== false
+  return s?.state === 'connected' ? accountName(s.account) : null
 }
 
 function shortPath(path: string): string {
@@ -68,7 +63,7 @@ export function setupSteps(input: SetupInput): SetupStep[] {
   const done: Record<SetupStepId, boolean> = {
     github: input.github?.state === 'connected',
     notion: input.notion?.state === 'connected',
-    claude: claudeReady(input.claude),
+    claude: isClaudeReady(input.claude),
     folder: project !== null,
     'notion-data': !!input.workspace?.config && !!project?.notionProject,
     board: input.boardConfigured,
@@ -77,7 +72,7 @@ export function setupSteps(input: SetupInput): SetupStep[] {
   const summary: Record<SetupStepId, string | null> = {
     github: account(input.github),
     notion: account(input.notion),
-    claude: claudeReady(input.claude)
+    claude: isClaudeReady(input.claude)
       ? `v${input.claude?.version ?? '?'} · logado`
       : input.claude && !input.claude.installed
         ? 'não encontrado'

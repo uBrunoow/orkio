@@ -167,7 +167,7 @@ export function FlowDetail({
         { label: 'Comandos', value: commands.length > 0 ? commands.join(', ') : 'Nenhum' },
         {
           label: 'Última execução',
-          value: last ? <Timestamp value={last.at} format="auto" /> : 'Nunca'
+          value: last ? <Timestamp value={last.at} /> : 'Nunca'
         },
         { label: 'Execuções recentes', value: executions ? String(executions.length) : '…' },
         {

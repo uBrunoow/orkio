@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { SelectField } from '@/components/form'
-import type { AgentBadge, AgentView } from '../../../../shared/agent'
+import type { AgentBadge } from '../../../../shared/agent'
 import { Alert } from '../../components/Alert'
 import { AgentAvatar } from './AgentAvatar'
+import { useAgentsState } from './useAgents'
 
 const NONE = '__nenhum__'
 
@@ -16,26 +17,9 @@ export function TaskAgentSection({
   taskId: string
   agent: AgentBadge | null
 }): React.JSX.Element {
-  const [agents, setAgents] = useState<AgentView[] | null>(null)
+  const agents = useAgentsState(projectId).value?.agents ?? null
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      void window.orkio.agents.list(projectId).then((r) => {
-        if (alive && r.ok) setAgents(r.value.agents)
-      })
-    }
-    load()
-    const off = window.orkio.agents.onChanged((e) => {
-      if (e.projectId === projectId) load()
-    })
-    return () => {
-      alive = false
-      off()
-    }
-  }, [projectId])
 
   const usable = (agents ?? []).filter(
     (a) => a.profile && a.status !== 'invalid' && a.status !== 'archived'

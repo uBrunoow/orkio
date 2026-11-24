@@ -8,7 +8,7 @@ import type { TaskSignals } from './task-signals'
 import { FLOW_PAUSES, waitingKind } from './flow-run-state'
 import type { FlowRunView } from './task-flow'
 import type { NotionColor, NotionWorkspaceStatus } from './notion'
-import type { ProjectView } from './projects'
+import { isFolderProblem, type ProjectView } from './projects'
 import { notionErrorLabel } from './notion-errors'
 import {
   STAGE_EVENT_KINDS,
@@ -408,7 +408,6 @@ export const PR_REASON_LABEL: Record<PrReason, string> = {
 
 // ---------- Por projeto ----------
 
-const FOLDER_PROBLEMS = new Set(['missing_folder', 'not_a_repo', 'repo_mismatch', 'git_error'])
 const GITHUB_WARNINGS = new Set(['github_disconnected', 'no_access', 'unverified'])
 
 export function projectHealth(
@@ -416,7 +415,7 @@ export function projectHealth(
   notion: NotionWorkspaceStatus['health'] | null
 ): ProjectHealthSummary {
   const state = project.health.state
-  const folder: HealthLevel = FOLDER_PROBLEMS.has(state) ? 'problem' : 'ok'
+  const folder: HealthLevel = isFolderProblem(state) ? 'problem' : 'ok'
   const github: HealthLevel = !project.repo
     ? 'off'
     : folder === 'problem'

@@ -89,7 +89,7 @@ export function RuleDetail({
         { label: 'Ordem', value: `${index + 1}ª de ${total}` },
         {
           label: 'Última execução',
-          value: last ? <Timestamp value={last.at} format="auto" /> : 'Nunca'
+          value: last ? <Timestamp value={last.at} /> : 'Nunca'
         },
         {
           label: 'Execuções recentes',

@@ -5,7 +5,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { Alert } from '../../components/Alert'
-import { StatusToken, toneOf } from '../../components/StatusToken'
+import { StatusToken } from '../../components/StatusToken'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { ipcResult } from '../../lib/ipc'
+import { NOTION_COLOR_TONE } from '../../lib/status-text'
 import {
   ExternalLinkIcon,
   LinkIcon,
@@ -14,20 +17,19 @@ import {
   TasksIcon,
   UnlinkIcon
 } from '../../components/icons'
-import { ActionLink } from '../projects/ActionLink'
-import { call } from './NotionWorkspaceCard'
+import { SignalsMessages } from './SignalsMessages'
 import { TaskSignalsLine } from './TaskSignalsLine'
 import { useTaskSignals } from './useTaskSignals'
-import { tokenColor } from './notion-colors'
 import type {
   NotionProjectChoice,
   NotionTasksResult,
   NotionWorkspaceStatus
 } from '../../../../shared/notion'
-import type { Result } from '../../../../shared/result'
+import type { ResultError } from '../../../../shared/result'
 import type { ProjectView } from '../../../../shared/projects'
+import { formatTime } from '../../lib/format'
 
-type NotionError = Extract<Result<never>, { ok: false }>['error']
+type NotionError = ResultError
 
 /** A sugestão automática só é pré-selecionada a partir desta semelhança de nome. */
 const SUGGESTION_THRESHOLD = 0.5
@@ -57,7 +59,7 @@ export function ProjectNotionSection({
   async function unlink(): Promise<void> {
     setBusy(true)
     setError(null)
-    const result = await call(() => window.orkio.notionWorkspace.unlink(project.id))
+    const result = await ipcResult(() => window.orkio.notionWorkspace.unlink(project.id))
     setBusy(false)
     if (!result.ok) setError(result.error)
     else {
@@ -141,7 +143,7 @@ function LinkPicker({
 
   useEffect(() => {
     let active = true
-    void call(() =>
+    void ipcResult(() =>
       window.orkio.notionWorkspace.listProjectChoices(project.id, { force: reloadKey > 0 })
     ).then((result) => {
       if (!active) return
@@ -166,7 +168,7 @@ function LinkPicker({
     if (!selected) return
     setLinking(true)
     setError(null)
-    const result = await call(() => window.orkio.notionWorkspace.link(project.id, selected))
+    const result = await ipcResult(() => window.orkio.notionWorkspace.link(project.id, selected))
     setLinking(false)
     if (result.ok) await onLinked()
     else setError(result.error)
@@ -216,22 +218,7 @@ function LinkPicker({
           )}
         </>
       )}
-      {error && (
-        <Alert
-          tone="danger"
-          {...(error.canReconnect || error.code === 'not_configured'
-            ? {
-                action: (
-                  <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
-                    Ir para Integrações
-                  </Button>
-                )
-              }
-            : {})}
-        >
-          {error.message}
-        </Alert>
-      )}
+      {error && <ErrorAlert error={error} onOpenIntegrations={onOpenIntegrations} />}
       <div className="flex gap-2">
         <Button size="sm" disabled={!selected || linking} onClick={() => void link()}>
           {linking ? <Spinner /> : <LinkIcon />}
@@ -275,7 +262,7 @@ function TasksPanel({
 
   useEffect(() => {
     let active = true
-    void call(() =>
+    void ipcResult(() =>
       window.orkio.notionWorkspace.listTasks(project.id, { force: refreshKey > 0 })
     ).then((r) => {
       if (!active) return
@@ -317,20 +304,7 @@ function TasksPanel({
         )}
       </div>
 
-      {signals.result && signals.result.messages.length > 0 && !error && (
-        <Alert
-          tone="warning"
-          {...(signals.result.action
-            ? { action: <ActionLink action={signals.result.action} /> }
-            : {})}
-        >
-          <div className="flex flex-col gap-1">
-            {signals.result.messages.map((m) => (
-              <p key={m}>{m}</p>
-            ))}
-          </div>
-        </Alert>
-      )}
+      {!error && <SignalsMessages result={signals.result} />}
       {signals.error && !error && <Alert tone="warning">{signals.error.message}</Alert>}
       {signals.result && signals.result.tasksWithoutPrefix > 0 && (
         <p className="text-xs text-muted-foreground">
@@ -340,22 +314,7 @@ function TasksPanel({
         </p>
       )}
 
-      {error && (
-        <Alert
-          tone="danger"
-          {...(error.canReconnect || error.code === 'broken' || error.code === 'not_configured'
-            ? {
-                action: (
-                  <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
-                    Ir para Integrações
-                  </Button>
-                )
-              }
-            : {})}
-        >
-          {error.message}
-        </Alert>
-      )}
+      {error && <ErrorAlert error={error} onOpenIntegrations={onOpenIntegrations} />}
 
       {result?.truncated && (
         <Alert tone="warning">Mostrando as 500 tarefas mais recentes deste projeto.</Alert>
@@ -397,7 +356,7 @@ function TasksPanel({
                 {task.status && (
                   <StatusToken
                     label={task.status.name}
-                    tone={toneOf(tokenColor(task.status.color))}
+                    tone={NOTION_COLOR_TONE[task.status.color]}
                     data-testid="task-status"
                     data-color={task.status.color}
                   />
@@ -419,8 +378,4 @@ function TasksPanel({
       ) : null}
     </section>
   )
-}
-
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }

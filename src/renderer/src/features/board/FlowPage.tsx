@@ -43,7 +43,7 @@ import {
 } from '../../../../shared/flow'
 import { Alert } from '../../components/Alert'
 import { SaveBar } from '../../components/SaveBar'
-import { plural } from '../../lib/format'
+import { formatDateTime, plural } from '../../lib/format'
 import { DeliverySection } from '../task-flows/DeliverySection'
 import {
   ArrowDownIcon,
@@ -65,6 +65,7 @@ import {
 } from '../../../../shared/board'
 import type { NotionColor } from '../../../../shared/notion'
 import type { Result } from '../../../../shared/result'
+import { stageDotClass } from './stage-dot'
 
 const BOARD_TABS: { id: BoardSettingsTab; label: string }[] = [
   { id: 'columns', label: 'Colunas' },
@@ -90,25 +91,14 @@ const COLOR_LABELS: Record<NotionColor, string> = {
   red: 'Vermelho'
 }
 
-/** Ponto da etapa com a cor escolhida (só tokens do tema; sem cor, neutro). */
-const STAGE_DOT: Record<NotionColor, string> = {
-  default: 'bg-subtle-foreground',
-  gray: 'bg-muted-foreground',
-  brown: 'bg-brand',
-  orange: 'bg-brand',
-  yellow: 'bg-warn',
-  green: 'bg-ok',
-  blue: 'bg-info',
-  purple: 'bg-purple',
-  pink: 'bg-pink',
-  red: 'bg-danger'
-}
-
 function StageDot({ color }: { color: NotionColor | undefined }): React.JSX.Element {
   return (
     <span
       aria-hidden="true"
-      className={cn('inline-block size-[7px] shrink-0 rounded-full', STAGE_DOT[color ?? 'default'])}
+      className={cn(
+        'inline-block size-[7px] shrink-0 rounded-full',
+        stageDotClass(color ? { color } : {})
+      )}
     />
   )
 }
@@ -607,11 +597,7 @@ export function FlowPage({
             <li key={e.id} className={cn(ROW, 'flex flex-col gap-0.5 px-4 py-2.5')}>
               <span className="text-sm">{e.changes.join(' · ')}</span>
               <span className="text-2xs text-subtle-foreground">
-                {e.actor} ·{' '}
-                {new Date(e.at).toLocaleString('pt-BR', {
-                  dateStyle: 'short',
-                  timeStyle: 'short'
-                })}
+                {e.actor} · {formatDateTime(e.at)}
               </span>
             </li>
           ))}

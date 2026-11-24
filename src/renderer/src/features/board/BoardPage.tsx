@@ -33,11 +33,13 @@ import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
 import { TaskActivityProvider, type TaskActivityMap } from './task-activity'
-import { ActionLink } from '../projects/ActionLink'
 import { useOverview } from '../overview/useOverview'
-import { useBoard, type BoardError } from './useBoard'
+import { useBoard } from './useBoard'
 import type { AutomationStatus } from '../../../../shared/automation'
 import type { ProjectView } from '../../../../shared/projects'
+import { formatTime } from '../../lib/format'
+import { ErrorAlert } from '../../components/ErrorAlert'
+import { SignalsMessages } from '../notion-workspace/SignalsMessages'
 
 /**
  * Tela "Quadro" do projeto atual (o projeto vem do menu). Etapas e automações, Fluxos e Contexto
@@ -147,7 +149,7 @@ function Board({
       <div className="flex flex-col gap-5 p-4">
         {header()}
         {board.error ? (
-          <BoardErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
+          <ErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
         ) : (
           <PageState kind="loading" label="Carregando quadro" />
         )}
@@ -276,23 +278,8 @@ function Board({
           Elas são enviadas sozinhas quando a conexão voltar, mesmo depois de fechar o Orkio.
         </Alert>
       )}
-      {signals.result && signals.result.messages.length > 0 && (
-        <Alert
-          tone="warning"
-          {...(signals.result.action
-            ? { action: <ActionLink action={signals.result.action} /> }
-            : {})}
-        >
-          <div className="flex flex-col gap-1">
-            {signals.result.messages.map((m) => (
-              <p key={m}>{m}</p>
-            ))}
-          </div>
-        </Alert>
-      )}
-      {board.error && (
-        <BoardErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />
-      )}
+      <SignalsMessages result={signals.result} />
+      {board.error && <ErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />}
       {board.notice && (
         <Alert
           tone="danger"
@@ -364,33 +351,6 @@ function Board({
   )
 }
 
-function BoardErrorAlert({
-  error,
-  onOpenIntegrations
-}: {
-  error: BoardError
-  onOpenIntegrations(): void
-}): React.JSX.Element {
-  const toIntegrations =
-    error.canReconnect || ['not_configured', 'broken', 'not_connected'].includes(error.code)
-  return (
-    <Alert
-      tone="danger"
-      {...(toIntegrations
-        ? {
-            action: (
-              <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
-                Ir para Integrações
-              </Button>
-            )
-          }
-        : {})}
-    >
-      {error.message}
-    </Alert>
-  )
-}
-
 /** Estado das automações do projeto (atualiza a cada 15 s enquanto a tela está aberta). */
 function useAutomationStatus(projectId: string): {
   status: AutomationStatus | null
@@ -448,8 +408,7 @@ function AutomationLine({
   onOpenIntegrations(): void
 }): React.JSX.Element | null {
   if (!status) return null
-  const time = (iso: string | null): string =>
-    iso ? new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '—'
+  const time = (iso: string | null): string => (iso ? formatTime(iso) : '—')
   const text = status.paused
     ? 'Automações pausadas para todos os projetos'
     : status.github === 'disconnected'

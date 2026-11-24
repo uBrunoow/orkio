@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Alert } from '../../components/Alert'
-import { StatusToken, toneOf } from '../../components/StatusToken'
+import { StatusToken } from '../../components/StatusToken'
 import { AutomationIcon } from '../../components/icons'
 import type { FlowRunView } from '../../../../shared/task-flow'
 import { AutopilotPlan } from './AutopilotPlan'
-import { RUN_STATUS } from './run-status'
+import { FLOW_RUN_STATUS } from '../../lib/status-text'
 
 /**
  * Conteúdo do popover da barra de fases: nome do fluxo (e agente), estado, a frase do piloto
@@ -43,8 +43,8 @@ export function FlowPlanPanel({
           {run.agent ? ` · ${run.agent.name}` : ''}
         </span>
         <StatusToken
-          tone={toneOf(RUN_STATUS[run.status].color)}
-          label={RUN_STATUS[run.status].label}
+          tone={FLOW_RUN_STATUS[run.status].tone}
+          label={FLOW_RUN_STATUS[run.status].label}
         />
       </div>
       <p className="text-xs text-muted-foreground">

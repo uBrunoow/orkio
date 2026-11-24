@@ -131,7 +131,7 @@ describe('agentNow', () => {
         snapshot: snapshot(['ork-1'], []),
         projectId: 'p1'
       })
-    ).toMatchObject({ filter: 'stopped', text: 'Precisa de revisão' })
+    ).toMatchObject({ filter: 'stopped', text: 'Revisar perfil' })
     expect(
       agentNow({ agent: agent({ status: 'invalid' }), badges, snapshot: null, projectId: 'p1' })
         .text

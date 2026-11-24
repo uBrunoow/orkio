@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Field, SegmentedControl, SwitchField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
-import type { ReleaseNotes, UpdateStatus, AboutInfo } from '../../../../shared/updates'
+import type { ReleaseNotes, UpdateStatus } from '../../../../shared/updates'
 import { InstallControls } from './InstallControls'
-import { formatDateTime, useUpdates } from './useUpdates'
+import { useUpdates } from './useUpdates'
+import { formatDateTime } from '../../lib/format'
 import { WhatsNewPanel } from './WhatsNewPanel'
 import { StatusToken } from '../../components/StatusToken'
+import { ipcCall, useIpcResource } from '../../lib/ipc'
 
 export function UpdatesSection(): React.JSX.Element {
   const { status, checking, check, setChannel } = useUpdates()
@@ -35,7 +37,7 @@ export function UpdatesSection(): React.JSX.Element {
             <div className="flex flex-col gap-1">
               <span className="text-xs text-muted-foreground">Última verificação</span>
               <span data-testid="last-check" className="text-sm text-foreground tabular">
-                {formatDateTime(status.lastCheckAt)}
+                {status.lastCheckAt ? formatDateTime(status.lastCheckAt) : 'Nunca'}
               </span>
             </div>
           </div>
@@ -105,10 +107,8 @@ export function UpdatesSection(): React.JSX.Element {
 
 /** Energia: manter o computador acordado enquanto agentes trabalham (desligado por padrão). */
 export function PowerSection(): React.JSX.Element {
-  const [enabled, setEnabled] = useState<boolean | null>(null)
-  useEffect(() => {
-    void window.orkio.power.keepAwake().then(setEnabled)
-  }, [])
+  const keepAwake = useIpcResource('', () => window.orkio.power.keepAwake())
+  const enabled = keepAwake.value
   return (
     <section aria-labelledby="power-title" className={SECTION_CLASS}>
       <h2 id="power-title" className="text-sm font-medium text-foreground">
@@ -120,8 +120,8 @@ export function PowerSection(): React.JSX.Element {
         checked={enabled === true}
         disabled={enabled === null}
         onChange={(value) => {
-          setEnabled(value)
-          void window.orkio.power.setKeepAwake(value).then(setEnabled)
+          keepAwake.set(value)
+          void ipcCall(() => window.orkio.power.setKeepAwake(value), !value).then(keepAwake.set)
         }}
       />
     </section>
@@ -164,16 +164,7 @@ function StatusLine({ status }: { status: UpdateStatus }): React.JSX.Element {
 }
 
 export function AboutSection(): React.JSX.Element {
-  const [about, setAbout] = useState<AboutInfo | null>(null)
-  useEffect(() => {
-    let alive = true
-    void window.orkio.updates.about().then((a) => {
-      if (alive) setAbout(a)
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
+  const about = useIpcResource('', () => window.orkio.updates.about()).value
   return (
     <section aria-labelledby="about-title" className={SECTION_CLASS}>
       <h2 id="about-title" className="text-sm font-medium text-foreground">

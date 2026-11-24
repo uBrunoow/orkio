@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { IconCheck, IconSelector } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import {
   Command,
@@ -17,7 +16,15 @@ import { StatusToken } from '../../components/StatusToken'
 import type { CatalogGroup, EditorId, RunMode, RunPreparation } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import { DiffView } from '../../components/DiffView'
-import { CleanIcon, DiffIcon, EditorIcon, PlayIcon, RefreshIcon } from '../../components/icons'
+import {
+  CheckIcon,
+  CleanIcon,
+  DiffIcon,
+  EditorIcon,
+  PlayIcon,
+  RefreshIcon,
+  SwitchIcon
+} from '../../components/icons'
 import { plural } from '../../lib/format'
 import {
   BRANCH_KINDS,
@@ -350,10 +357,6 @@ export function Workspace({
   )
 }
 
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
-}
-
 /** Catálogo agrupado por origem (usuário, projeto, plugin), com busca e recarregar. */
 function CommandPicker({
   projectId,
@@ -422,10 +425,7 @@ function CommandPicker({
                   <span className={cn('truncate', !value && 'font-sans text-muted-foreground')}>
                     {value ? `/${value}` : 'Escolha um comando…'}
                   </span>
-                  <IconSelector
-                    aria-hidden="true"
-                    className="size-3.5 shrink-0 text-subtle-foreground"
-                  />
+                  <SwitchIcon className="size-3.5 shrink-0 text-subtle-foreground" />
                 </button>
               </PopoverTrigger>
               <PopoverContent
@@ -462,8 +462,7 @@ function CommandPicker({
                                 </span>
                               )}
                             </span>
-                            <IconCheck
-                              aria-hidden="true"
+                            <CheckIcon
                               className={cn(
                                 'size-3.5',
                                 c.name === value ? 'opacity-100' : 'opacity-0'

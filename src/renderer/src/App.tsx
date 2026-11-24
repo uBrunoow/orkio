@@ -15,6 +15,8 @@ import { useSetupPending } from './app/useSetupPending'
 import { WaitingBell } from './app/WaitingBell'
 import { Sidebar } from './app/Sidebar'
 import { AccountMenu, useAccount } from './app/AccountMenu'
+import { useProjects } from './features/projects/useProjects'
+import { useConnection } from './features/integrations/useConnection'
 import { ScreenFrame } from './app/ScreenBar'
 import { BoardPage } from './features/board/BoardPage'
 import { AgentsPage } from './features/agents/AgentsPage'
@@ -30,30 +32,10 @@ import { PageHeader } from './components/PageHeader'
 import { PAGE_WIDTH } from './components/page-width'
 import { UpdateBanner } from './features/settings/UpdateBanner'
 import type { BoardTaskRef } from '../../shared/overview'
-import type { ProjectView } from '../../shared/projects'
+import { isMac } from './lib/platform'
 
 /** Preferência de interface (não secreta): último projeto escolhido no menu. */
 const CURRENT_PROJECT_KEY = 'orkio.currentProject'
-
-/** Projetos (todos; o quadro só existe nos vinculados ao Notion). Relido a cada navegação. */
-function useProjects(trigger: number): ProjectView[] | null {
-  const [projects, setProjects] = useState<ProjectView[] | null>(null)
-  useEffect(() => {
-    let active = true
-    void window.orkio.projects
-      .list()
-      .then((result) => {
-        if (active) setProjects(result.projects)
-      })
-      .catch(() => {
-        if (active) setProjects([])
-      })
-    return () => {
-      active = false
-    }
-  }, [trigger])
-  return projects
-}
 
 function routeProjectId(route: Route): string | undefined {
   return 'projectId' in route ? route.projectId : undefined
@@ -63,7 +45,7 @@ export function App(): React.JSX.Element | null {
   const [router, dispatch] = useReducer(routerReducer, initialRouter({ name: 'board' }))
   const { route } = router
   const navigate = useCallback((next: Route) => dispatch({ type: 'navigate', route: next }), [])
-  const projects = useProjects(router.key)
+  const projects = useProjects().projects
   const [chosenProject, setChosenProject] = useState<string | null>(() =>
     window.localStorage.getItem(CURRENT_PROJECT_KEY)
   )
@@ -86,16 +68,14 @@ export function App(): React.JSX.Element | null {
     window.localStorage.setItem(CURRENT_PROJECT_KEY, id)
   }, [])
 
-  // Relê o quadro a cada navegação (ex.: quadro criado nos Primeiros passos).
-  const sidebar = useSidebarData(linkedProject?.id ?? null, router.key)
+  const sidebar = useSidebarData(linkedProject?.id ?? null)
   const setupMissing = useSetupPending(project, sidebar.board)
-  const account = useAccount(router.key)
+  const account = useAccount()
+  const github = useConnection('github')
+  const notion = useConnection('notion')
   // "Sair": o Orkio não tem login próprio; sair = desconectar GitHub e Notion deste computador.
   const signOut = async (): Promise<void> => {
-    await Promise.all([
-      window.orkio.github.disconnect().catch(() => undefined),
-      window.orkio.notion.disconnect().catch(() => undefined)
-    ])
+    await Promise.all([github.disconnect(), notion.disconnect()])
     navigate({ name: 'setup', ...(project ? { projectId: project.id } : {}) })
   }
 
@@ -138,7 +118,6 @@ export function App(): React.JSX.Element | null {
   const inShell = route.name !== 'setup'
   useEffect(() => {
     if (!inShell) return
-    const isMac = navigator.userAgent.includes('Mac')
     const onKeyDown = (e: KeyboardEvent): void => {
       if (e.defaultPrevented || e.isComposing) return
       const action = globalShortcut(
@@ -150,7 +129,7 @@ export function App(): React.JSX.Element | null {
           shiftKey: e.shiftKey,
           inTextField: isTextField(e.target)
         },
-        isMac
+        isMac()
       )
       if (!action) return
       e.preventDefault()

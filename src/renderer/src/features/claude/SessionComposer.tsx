@@ -11,9 +11,9 @@ import { formatBytes } from '../../lib/format'
 import { ATTACHMENT_ACCEPT } from '../../../../shared/attachments'
 import { checkNewAttachments, type PendingAttachment } from './attachments-ui'
 import { RuntimePicker, useSupportsEffort } from './RuntimePicker'
+import { isMac } from '../../lib/platform'
 
-const IS_MAC = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
-const SEND_KEY = `${IS_MAC ? '⌘' : 'Ctrl'} ⏎ enviar`
+const SEND_KEY = `${isMac() ? '⌘' : 'Ctrl'} ⏎ enviar`
 
 /** Comandos do catálogo que começam com o que foi digitado depois da barra. */
 export function matchCommands(

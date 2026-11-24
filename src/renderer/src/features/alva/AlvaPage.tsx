@@ -4,22 +4,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { SelectField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
-import { StatusToken, toneOf } from '../../components/StatusToken'
-import type { AlvaCheckItem, AlvaPrecheck, AlvaStatusView } from '../../../../shared/alva'
+import { StatusToken } from '../../components/StatusToken'
+import { ALVA_CHECK } from '../../lib/status-text'
+import type { AlvaPrecheck, AlvaStatusView } from '../../../../shared/alva'
 import { Alert } from '../../components/Alert'
 import { CopyIcon, RefreshIcon } from '../../components/icons'
 import { PAGE_WIDTH } from '../../components/page-width'
 import { suggestAlvaTargets, type AlvaTargets } from './alva-targets'
 import { stageWithRole } from '../../../../shared/board'
 import type { BoardView } from '../../../../shared/board'
-
-const STATE: Record<AlvaCheckItem['state'], { label: string; color: 'green' | 'red' | 'yellow' }> =
-  {
-    ok: { label: 'OK', color: 'green' },
-    // Falta configurar é aviso (o resto do Orkio funciona), não erro.
-    missing: { label: 'Falta', color: 'yellow' },
-    warning: { label: 'Atenção', color: 'yellow' }
-  }
 
 /**
  * Tela "alva-flow" (5B): pré-checagem do projeto, criação dos fluxos Alva (templates editáveis no
@@ -164,8 +157,8 @@ export function AlvaPage({
                 className="flex items-start gap-4 border-b border-border-soft px-4 py-3 last:border-b-0"
               >
                 <StatusToken
-                  tone={toneOf(STATE[i.state].color)}
-                  label={STATE[i.state].label}
+                  tone={ALVA_CHECK[i.state].tone}
+                  label={ALVA_CHECK[i.state].label}
                   className="mt-0.5 w-20 shrink-0"
                 />
                 <div className="flex min-w-0 flex-1 flex-col gap-0.5">

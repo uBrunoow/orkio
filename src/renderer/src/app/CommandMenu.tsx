@@ -14,6 +14,7 @@ import { SHORTCUTS } from './shortcuts'
 import type { BoardCard } from '../../../shared/board'
 import type { ProjectView } from '../../../shared/projects'
 import { normalizeLabel } from '../../../shared/text'
+import { isMac } from '../lib/platform'
 
 export interface CommandData {
   group: string
@@ -327,7 +328,7 @@ function CommandRow({ item }: { item: CommandItem }): React.JSX.Element {
 
 /** "mod+1" → "Ctrl 1" / "⌘ 1". */
 export function formatKeys(keys: string): string {
-  const mac = navigator.userAgent.includes('Mac')
+  const mac = isMac()
   return keys
     .split('+')
     .map((k) => (k === 'mod' ? (mac ? '⌘' : 'Ctrl') : k.length === 1 ? k.toUpperCase() : k))

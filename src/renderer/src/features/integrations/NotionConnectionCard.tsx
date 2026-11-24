@@ -3,9 +3,9 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/Spinner'
 import { NotionLogo } from '../../components/icons'
+import { Alert } from '../../components/Alert'
+import { PanelHeader } from '../../components/PanelHeader'
 import {
-  Alert,
-  CardHeader,
   CONNECTION_CARD_CLASS,
   ConnectedView,
   StatusBadge,
@@ -14,7 +14,7 @@ import {
   TokenForm,
   type TokenFormCopy
 } from './connection-ui'
-import type { UseNotionConnection } from './useNotionConnection'
+import type { UseConnection } from './useConnection'
 import { NOTION_TOKEN_DOCS_URL, type ConnectionStatus } from '../../../../shared/connection'
 
 const TOKEN_COPY: TokenFormCopy = {
@@ -26,11 +26,7 @@ const TOKEN_COPY: TokenFormCopy = {
   docsUrl: NOTION_TOKEN_DOCS_URL
 }
 
-export function NotionConnectionCard({
-  notion
-}: {
-  notion: UseNotionConnection
-}): React.JSX.Element {
+export function NotionConnectionCard({ notion }: { notion: UseConnection }): React.JSX.Element {
   const { status, activity } = notion
 
   return (
@@ -39,7 +35,7 @@ export function NotionConnectionCard({
       aria-busy={activity !== 'idle'}
       className={CONNECTION_CARD_CLASS}
     >
-      <CardHeader
+      <PanelHeader
         titleId="notion-card-title"
         title="Notion"
         description="Planejamento: páginas, bancos e tarefas."
@@ -52,7 +48,7 @@ export function NotionConnectionCard({
         {status === null ? (
           <Skeleton className="h-10" aria-label="Carregando status da conexão" />
         ) : activity === 'authorizing' ? (
-          <AuthorizingView onCancel={notion.cancelOAuth} />
+          <AuthorizingView onCancel={notion.cancelAuthorize} />
         ) : status.state === 'connected' ? (
           <ConnectedView
             account={status.account}
@@ -69,7 +65,7 @@ export function NotionConnectionCard({
             activity={activity}
             onRetry={notion.testConnection}
             onDisconnect={notion.disconnect}
-            onReconnect={notion.authOptions?.oauth ? notion.startOAuth : undefined}
+            onReconnect={notion.authOptions?.oauth ? notion.authorize : undefined}
             reconnectLabel="Reconectar com Notion"
           />
         ) : (
@@ -78,7 +74,7 @@ export function NotionConnectionCard({
             connecting={activity === 'connecting'}
             oauthAvailable={notion.authOptions ? notion.authOptions.oauth : null}
             onConnectToken={notion.connect}
-            onStartOAuth={notion.startOAuth}
+            onStartOAuth={notion.authorize}
           />
         )}
       </div>

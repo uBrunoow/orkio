@@ -33,7 +33,7 @@ describe('cardStatus', () => {
     expect(cardStatus(synced, 'running', withPr({ reviewDecision: 'changes_requested' }))).toEqual({
       kind: 'pr',
       label: 'Alterações pedidas',
-      tone: 'warning'
+      tone: 'danger'
     })
   })
 

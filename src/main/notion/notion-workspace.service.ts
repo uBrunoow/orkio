@@ -74,10 +74,9 @@ export const NOTION_READ_LIMIT = 500
 export const NOTION_CACHE_TTL_MS = 60_000
 
 export const WORKSPACE_MESSAGES = {
-  notConfigured: 'Configure os bancos do Notion em Integrações antes de continuar.',
+  notConfigured: 'Configure os bancos do Notion antes de continuar.',
   notLinked: 'Vincule este projeto a um projeto do Notion para ver as tarefas.',
-  broken:
-    'O mapeamento das Tarefas do Notion precisa ser revisto em Integrações antes de ler tarefas.',
+  broken: 'O mapeamento das Tarefas do Notion precisa ser revisto antes de ler tarefas.',
   sameDataSource: 'Escolha bancos diferentes para Projetos e Tarefas.',
   projectNotFound: 'Projeto não encontrado. Atualize a lista.',
   pageNotFound: 'Esse projeto do Notion não está mais no banco de Projetos. Atualize a lista.',
@@ -86,13 +85,13 @@ export const WORKSPACE_MESSAGES = {
   storage: 'Não foi possível salvar a configuração. Tente novamente.',
   unknown: 'Algo deu errado ao falar com o Notion. Tente novamente.',
   invalidSchema: 'O Notion devolveu um banco em formato inesperado. Tente novamente.',
-  notConnected: 'Conecte o Notion em Integrações para usar os bancos de Projetos e Tarefas.',
+  notConnected: 'Conecte o Notion para usar os bancos de Projetos e Tarefas.',
   noAssignee:
-    'Mapeie o campo Responsável (Pessoas) das Tarefas em Integrações: o Orkio mostra só as ' +
+    'Mapeie o campo Responsável (Pessoas) das Tarefas: o Orkio mostra só as ' +
     'tarefas em que você é responsável.',
   noPerson:
     'Não deu para saber quem é você no Notion: esta conexão é de uma integração do workspace. ' +
-    'Conecte com “Entrar com Notion” em Integrações para ver as suas tarefas.'
+    'Conecte com “Entrar com Notion” para ver as suas tarefas.'
 } as const
 
 type Err = Extract<Result<never>, { ok: false }>['error']
@@ -494,7 +493,11 @@ export class NotionWorkspaceService {
       const schema = await this.loadSchema(config.tasksDataSource.id)
       const property = schema.properties.find((p) => p.id === config.mapping.status.id)
       if (!property) {
-        throw new WorkspaceError({ code: 'broken', message: WORKSPACE_MESSAGES.broken })
+        throw new WorkspaceError({
+          code: 'broken',
+          message: WORKSPACE_MESSAGES.broken,
+          fixAt: 'integrations'
+        })
       }
       return {
         options: (property.options ?? []).map((o) => ({ id: o.id, name: o.name, color: o.color })),
@@ -539,13 +542,18 @@ export class NotionWorkspaceService {
     if (status.health === 'broken') {
       throw new WorkspaceError({
         code: 'broken',
-        message: [WORKSPACE_MESSAGES.broken, ...status.messages].join(' ')
+        message: [WORKSPACE_MESSAGES.broken, ...status.messages].join(' '),
+        fixAt: 'integrations'
       })
     }
     const mapping = status.config?.mapping ?? config.mapping
     const assignee = mapping.assignee
     if (!assignee) {
-      throw new WorkspaceError({ code: 'broken', message: WORKSPACE_MESSAGES.noAssignee })
+      throw new WorkspaceError({
+        code: 'broken',
+        message: WORKSPACE_MESSAGES.noAssignee,
+        fixAt: 'integrations'
+      })
     }
     // Sempre só as tarefas da pessoa logada no Notion (nunca as de todo o projeto).
     const personId = await this.deps.notion.currentPersonId()
@@ -553,7 +561,8 @@ export class NotionWorkspaceService {
       throw new WorkspaceError({
         code: 'no_person',
         message: WORKSPACE_MESSAGES.noPerson,
-        canReconnect: true
+        canReconnect: true,
+        fixAt: 'integrations'
       })
     }
 
@@ -600,7 +609,8 @@ export class NotionWorkspaceService {
     if (!config) {
       throw new WorkspaceError({
         code: 'not_configured',
-        message: WORKSPACE_MESSAGES.notConfigured
+        message: WORKSPACE_MESSAGES.notConfigured,
+        fixAt: 'integrations'
       })
     }
     return config

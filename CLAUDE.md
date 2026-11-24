@@ -216,10 +216,18 @@ src/
     app/task-groups.ts     # 9: grupos da lista lateral (esperando, rodando, a fazer), puro
     app/initial-route.ts   # 9: tela ao abrir (Primeiros passos, tarefa esperando ou Quadro), puro
     app/WaitingBell.tsx    # 9: sino (esperando você de todos os projetos + PRs com atenção)
-    lib/format.ts          # plural, formatUsd (pt-BR)
+    app/sources.tsx        # fontes compartilhadas (SourcesProvider no topo): visão geral, sinais
+                           # por projeto, quadro por projeto, projetos, conexões, Claude Code,
+                           # atualizações; um poll e uma assinatura de eventos por fonte
+    lib/ipc.ts             # IPC_FAILURE_MESSAGE, ipcCall/ipcResult, createSource/useSource e
+                           # useIpcResource (dado de um componente: chave, assinatura, poll, foco)
+    lib/status-text.ts     # { label, tone } por dado (conexão, bancos, cores do Notion, Claude,
+                           # projeto, agente, execuções, PR/CI/revisão, atualização)
+    lib/format.ts          # plural, formatUsd, durações e datas (pt-BR)
     features/<feature>/    # componentes + hooks por funcionalidade
-      integrations/        # grade (IntegrationsPage, IntegrationCard, integrations-logic puro) e
-                           # connection-ui.tsx (peças comuns: conectado, erro, token, desconectar)
+      integrations/        # grade (IntegrationsPage, IntegrationCard, integrations-logic puro),
+                           # useConnection('notion'|'github') (também o login dos Primeiros
+                           # passos) e connection-ui.tsx (conectado, erro, token, desconectar)
       projects/            # tela Projetos (useProjects, AddProjectPanel, ActionLink)
       notion-workspace/    # card "Bancos do Notion" (assistente) e seção Notion de cada projeto
       board/               # Quadro, miolo da tarefa (TaskPanel, TaskSession, TaskDetails,
@@ -453,8 +461,7 @@ text-muted-foreground / text-subtle-foreground`, `border-border` (controles) e `
   (divisórias), `brand`/`brand-tint`, `ok`/`warn`/`danger` (+ `-tint`). Só escuro.
 - Cores: hex só no `globals.css`. Nos componentes, só as classes do tema (nada de `zinc-800`, hex
   ou `rgb()`). Única exceção: `backgroundColor` do `BrowserWindow` no main (espelha o fundo do tema).
-- Inter = UI; **Jost só para logo e títulos de destaque** (`brand.css`: `.orkio-display`,
-  `.orkio-slogan`); mono (`font-mono`) para IDs, branches, comandos e caminhos.
+- Inter = UI; **Jost só para logo e títulos de destaque** (`font-display`); mono (`font-mono`) para IDs, branches, comandos e caminhos.
 - Fontes vêm de `@fontsource` (`styles/fonts.css`). Nunca CDN. O
   build não transforma fontes em `data:` URI (`assetsInlineLimit`).
 - Logo: `<OrkioLogo>` (SVG da marca; abaixo de 48 px usa a versão simple). Wordmark em Jost 300,
@@ -484,7 +491,7 @@ text-muted-foreground / text-subtle-foreground`, `border-border` (controles) e `
   Projetos empilha estado e ações abaixo do nome) em vez de espremer o texto até quebrar letra a
   letra; confira por print a 1000×700 e 1100×800.
 - CSS próprio só na camada `orkio-brand` (`styles/brand.css`, `OrkioLogo.css`) e em
-  `features/welcome/welcome.css` (abertura + Primeiros passos em tela cheia; respeita
+  `features/setup/setup.css` (abertura + Primeiros passos em tela cheia; respeita
   `prefers-reduced-motion`). O resto é classe do Tailwind.
 - Ganchos de teste: papéis/nomes acessíveis primeiro; `data-testid` quando não houver (ex.:
   `device-code`, `project-branch`, `empty-hero`). Nunca classes do Tailwind.

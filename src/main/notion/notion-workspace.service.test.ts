@@ -456,10 +456,13 @@ describe('NotionWorkspaceService', () => {
     it('sem bancos configurados: erro claro, sem chamar o Notion', async () => {
       const service = await makeService()
       api.queryDataSource.mockClear()
-      expect(await service.searchTasks('x')).toMatchObject({
+      const result = await service.searchTasks('x')
+      expect(result).toMatchObject({
         ok: false,
-        error: { code: 'not_configured' }
+        // Onde resolver vai como dado (a tela decide texto e botão), não no meio do texto.
+        error: { code: 'not_configured', fixAt: 'integrations' }
       })
+      expect(result.ok ? '' : result.error.message).not.toContain('Integrações')
       expect(api.queryDataSource).not.toHaveBeenCalled()
     })
   })

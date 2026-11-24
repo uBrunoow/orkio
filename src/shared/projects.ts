@@ -57,6 +57,18 @@ export type ProjectHealthState =
   | 'unverified'
   | 'git_error'
 
+/** Pasta com problema (some, deixou de ser repositório, aponta para outro, git falhando). */
+export const FOLDER_PROBLEM_STATES: readonly ProjectHealthState[] = [
+  'missing_folder',
+  'not_a_repo',
+  'repo_mismatch',
+  'git_error'
+]
+
+export function isFolderProblem(state: ProjectHealthState): boolean {
+  return FOLDER_PROBLEM_STATES.includes(state)
+}
+
 export interface ProjectHealth {
   state: ProjectHealthState
   message?: string

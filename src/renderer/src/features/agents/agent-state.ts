@@ -6,6 +6,7 @@ import type { AgentBadge, AgentView } from '../../../../shared/agent'
 import type { OverviewSnapshot } from '../../../../shared/overview'
 import type { StatusTone } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
+import { AGENT_STATUS } from '../../lib/status-text'
 
 export type AgentFilter = 'all' | 'waiting' | 'working' | 'stopped'
 
@@ -40,12 +41,8 @@ export function agentNow(input: {
   const tasks = mine.map((taskId) => ({ taskId, displayId: idOf(taskId), hot: hot.has(taskId) }))
 
   if (agent.status === 'needs_review' || agent.status === 'invalid') {
-    return {
-      filter: 'stopped',
-      tone: 'warning',
-      text: agent.status === 'needs_review' ? 'Precisa de revisão' : 'Perfil inválido',
-      tasks
-    }
+    const { label, tone } = AGENT_STATUS[agent.status]
+    return { filter: 'stopped', tone, text: label, tasks }
   }
   const firstWaiting = waitingItems[0]
   if (firstWaiting) {

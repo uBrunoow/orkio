@@ -1,52 +1,32 @@
-import { useEffect, useState } from 'react'
-import type { ClaudeCodeStatus } from '../../../shared/agent-run'
 import { setupPending, setupSteps } from '../features/setup/setup-steps'
+import { useConnectionStatus } from '../features/integrations/useConnection'
+import { useClaudeStatus } from '../features/claude/useClaudeStatus'
+import { useIpcResource } from '../lib/ipc'
 import type { BoardView } from '../../../shared/board'
-import type { ConnectionStatus } from '../../../shared/connection'
-import type { NotionWorkspaceStatus } from '../../../shared/notion'
 import type { ProjectView } from '../../../shared/projects'
 
 /**
  * Quantos passos dos Primeiros passos faltam para o projeto atual (aviso no topo da lista lateral).
- * Lê o estado ao abrir, quando o projeto/vínculo muda e quando a janela volta ao foco.
+ * Conexões e Claude Code vêm das fontes do App; os bancos do Notion são relidos quando o projeto
+ * ou o vínculo mudam e quando a janela volta ao foco.
  */
 export function useSetupPending(project: ProjectView | null, board: BoardView | null): number {
-  const projectId = project?.id ?? null
-  const notionPageId = project?.notionProject?.id ?? null
-  const [state, setState] = useState<{
-    github: ConnectionStatus | null
-    notion: ConnectionStatus | null
-    claude: ClaudeCodeStatus | null
-    workspace: NotionWorkspaceStatus | null
-  } | null>(null)
-  useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      void Promise.all([
-        window.orkio.github.getStatus().catch(() => null),
-        window.orkio.notion.getStatus().catch(() => null),
-        window.orkio.claude.status().catch(() => null),
-        window.orkio.notionWorkspace.getStatus().catch(() => null)
-      ]).then(([github, notion, claude, workspace]) => {
-        if (alive) setState({ github, notion, claude, workspace })
-      })
-    }
-    load()
-    window.addEventListener('focus', load)
-    return () => {
-      alive = false
-      window.removeEventListener('focus', load)
-    }
-    // Relê quando o projeto ou o vínculo mudam (ex.: ao sair dos Primeiros passos no meio).
-  }, [projectId, notionPageId])
-  if (!state || !project) return 0
+  const github = useConnectionStatus('github')
+  const notion = useConnectionStatus('notion')
+  const claude = useClaudeStatus().status
+  const workspace = useIpcResource(
+    project ? `${project.id}:${project.notionProject?.id ?? ''}` : null,
+    () => window.orkio.notionWorkspace.getStatus(),
+    { refreshOnFocus: true }
+  ).value
+  if (!project || github === null || notion === null || claude === null) return 0
   return setupPending(
     setupSteps({
-      github: state.github,
-      notion: state.notion,
-      claude: state.claude,
+      github,
+      notion,
+      claude,
       project,
-      workspace: state.workspace,
+      workspace,
       boardConfigured: project.notionProject ? (board ? !!board.config : true) : false
     })
   )

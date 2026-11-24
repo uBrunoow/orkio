@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { InfoIcon } from '../../components/icons'
-import type { ReleaseNotes } from '../../../../shared/updates'
 import { InstallControls } from './InstallControls'
 import { useUpdates } from './useUpdates'
 import { WhatsNewPanel } from './WhatsNewPanel'
+import { useIpcResource } from '../../lib/ipc'
 
 /**
  * Topo do conteúdo: aviso discreto quando há atualização pronta (ou, no macOS sem assinatura,
@@ -17,17 +17,10 @@ export function UpdateBanner({
 }): React.JSX.Element | null {
   const { status } = useUpdates()
   const [dismissed, setDismissed] = useState<string | null>(null)
-  const [whatsNew, setWhatsNew] = useState<ReleaseNotes | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    void window.orkio.updates.whatsNew().then((n) => {
-      if (alive) setWhatsNew(n)
-    })
-    return () => {
-      alive = false
-    }
-  }, [])
+  // Lido uma vez ao abrir (o main marca a versão como vista ao responder).
+  const notes = useIpcResource('', () => window.orkio.updates.whatsNew())
+  const whatsNew = notes.value
+  const setWhatsNew = notes.set
 
   const ready =
     status &&

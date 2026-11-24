@@ -222,7 +222,7 @@ test('branch local e PR aparecem na tarefa certa', async () => {
   await row.getByRole('button', { name: 'Atualizar' }).click()
   await expect(ork2.getByTestId('pr-review')).toHaveText('Alterações pedidas')
   await ork2.getByRole('button', { name: 'Abrir a PR #7 no GitHub' }).hover()
-  await expect(page.getByTestId('pr-hover-badge')).toHaveText('Mudanças pedidas')
+  await expect(page.getByTestId('pr-hover-badge')).toHaveText('Alterações pedidas')
   await page.mouse.move(0, 0)
   await setFakes(orkio.app, {
     githubPulls: [

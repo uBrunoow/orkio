@@ -156,7 +156,7 @@ test('com a propriedade criada no Notion, sugere o mapeamento e salva só ids e 
     'Pronto'
   )
   await openIntegration(page, 'Bancos e campos')
-  await expect(card.getByTestId('workspace-health')).toHaveText('OK')
+  await expect(card.getByTestId('workspace-health')).toHaveText('Pronto')
   await expect(
     card.getByRole('group', { name: 'Configuração dos bancos do Notion' })
   ).toContainText('Tarefas')
@@ -249,7 +249,7 @@ test('propriedade renomeada no Notion → aviso claro ao reabrir', async () => {
   const { page } = await open({ notionTasks: 'renamed' })
   await openIntegration(page, 'Bancos e campos')
   const card = workspaceCard(page)
-  await expect(card.getByTestId('workspace-health')).toHaveText('Atenção')
+  await expect(card.getByTestId('workspace-health')).toHaveText('Revisar mapeamento')
   await expect(card.getByRole('status').filter({ hasText: 'renomeada' })).toContainText(
     'A propriedade Status (“Status”) foi renomeada para “Etapa”.'
   )
@@ -260,13 +260,13 @@ test('propriedade apagada no Notion → erro ao reabrir e tarefas bloqueadas', a
   const { page } = await open({ notionTasks: 'status_deleted' })
   await openIntegration(page, 'Bancos e campos')
   const card = workspaceCard(page)
-  await expect(card.getByTestId('workspace-health')).toHaveText('Revisar mapeamento')
+  await expect(card.getByTestId('workspace-health')).toHaveText('Tarefas bloqueadas')
   await expect(alerts(card)).toContainText('não existe mais nas Tarefas do Notion')
 
   await goTo(page, 'Projetos')
   const row = page.getByRole('listitem', { name: 'orkio-desktop' })
   await row.getByRole('button', { name: 'Ver tarefas' }).click()
-  await expect(alerts(row)).toContainText('precisa ser revisto em Integrações')
+  await expect(alerts(row)).toContainText('precisa ser revisto')
   await expect(row.getByRole('list', { name: 'Tarefas do Notion' })).toHaveCount(0)
   expect(await cspViolations(page)).toEqual([])
   await close()

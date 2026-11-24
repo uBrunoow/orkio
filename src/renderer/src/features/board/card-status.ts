@@ -1,4 +1,5 @@
 import type { StatusTone } from '../../components/StatusToken'
+import { CI_STATUS, isPrOpen, PR_STATE, REVIEW_DECISION } from '../../lib/status-text'
 import type { BoardCard } from '../../../../shared/board'
 import type { TaskSignals } from '../../../../shared/task-signals'
 import type { TaskFlowActivity } from '../../../../shared/task-flow'
@@ -21,19 +22,19 @@ export function cardStatus(
   signals: Pick<TaskSignals, 'pr'> | undefined
 ): CardStatus | null {
   const pr = signals?.pr ?? null
-  const prOpen = pr !== null && (pr.state === 'open' || pr.state === 'draft')
+  const prOpen = pr !== null && isPrOpen(pr)
   if (flow === 'needs_you') return { kind: 'flow', label: 'Esperando você', tone: 'warning' }
   if (card.sync.state === 'failed')
     return { kind: 'sync', label: 'Não sincronizou', tone: 'danger' }
-  if (prOpen && pr.checks === 'failure') return { kind: 'pr', label: 'CI falhou', tone: 'danger' }
+  if (prOpen && pr.checks === 'failure') return { kind: 'pr', ...CI_STATUS.failure }
   if (prOpen && pr.reviewDecision === 'changes_requested')
-    return { kind: 'pr', label: 'Alterações pedidas', tone: 'warning' }
+    return { kind: 'pr', ...REVIEW_DECISION.changes_requested }
   if (flow === 'running') return { kind: 'flow', label: 'Fluxo rodando', tone: 'running' }
   if (card.sync.state === 'pending')
     return { kind: 'sync', label: 'Sincronizando', tone: 'neutral' }
   if (pr?.state === 'open') return { kind: 'pr', label: 'Em revisão', tone: 'neutral' }
   if (pr?.state === 'draft') return { kind: 'pr', label: 'PR rascunho', tone: 'neutral' }
-  if (pr?.state === 'merged') return { kind: 'pr', label: 'Mergeada', tone: 'success' }
+  if (pr?.state === 'merged') return { kind: 'pr', ...PR_STATE.merged }
   return null
 }
 
@@ -53,7 +54,8 @@ export function cardDetail(input: {
   if (pr.unresolvedComments && pr.unresolvedComments > 0) {
     return `#${pr.number} · ${pr.unresolvedComments} ${pr.unresolvedComments === 1 ? 'comentário' : 'comentários'}`
   }
-  if (pr.checks === 'success') return `#${pr.number} · CI ok`
-  if (pr.checks === 'failure') return `#${pr.number} · CI falhou`
+  if (pr.checks === 'success' || pr.checks === 'failure') {
+    return `#${pr.number} · ${CI_STATUS[pr.checks].label}`
+  }
   return `#${pr.number}`
 }

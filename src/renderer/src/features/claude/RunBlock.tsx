@@ -4,7 +4,7 @@ import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import { Timestamp } from '@/components/Timestamp'
 import type { AgentBadge } from '../../../../shared/agent'
 import type { AgentRunView, RunLogEvent, RunSummary } from '../../../../shared/agent-run'
-import { StatusToken, toneOf } from '../../components/StatusToken'
+import { StatusToken } from '../../components/StatusToken'
 import { Alert } from '../../components/Alert'
 import { DiffView } from '../../components/DiffView'
 import { AutomationIcon, ClaudeLogo, DiffIcon, ReadIcon, UserIcon } from '../../components/icons'
@@ -15,7 +15,7 @@ import { AgentAvatar } from '../agents/AgentAvatar'
 import { CollapsibleHeader } from '../board/TaskDetails'
 import { RunTranscript } from './RunTranscript'
 import { buildTranscript } from './run-transcript'
-import { STATUS_COLOR, STATUS_LABEL } from './run-status'
+import { RUN_STATUS } from '../../lib/status-text'
 
 /** Duração curta: "40 s", "4 min", "1 h 12 min". */
 export function shortDuration(start: string, end: string | null): string | null {
@@ -108,7 +108,7 @@ export function RunBlock({
   return (
     <article
       ref={ref}
-      aria-label={`${who}${run.command ? ` · /${run.command}` : ''} · ${STATUS_LABEL[run.status]}`}
+      aria-label={`${who}${run.command ? ` · /${run.command}` : ''} · ${RUN_STATUS[run.status].label}`}
       data-testid="session-run"
       data-run-id={run.id}
       className="flex scroll-mt-4 flex-col gap-4"
@@ -161,11 +161,7 @@ export function RunBlock({
               </span>
             )}
             <span className="ml-auto flex items-center gap-2 pl-2">
-              <StatusToken
-                tone={toneOf(STATUS_COLOR[run.status])}
-                label={STATUS_LABEL[run.status]}
-                data-testid="run-status"
-              />
+              <StatusToken {...RUN_STATUS[run.status]} data-testid="run-status" />
               {meta && <span className="tabular font-mono text-2xs">{meta}</span>}
             </span>
           </div>

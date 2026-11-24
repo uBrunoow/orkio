@@ -1,3 +1,4 @@
+import type { OrkioBotRepoState } from '../../../../shared/orkio-bot'
 import { describe, expect, it } from 'vitest'
 import {
   effectiveOpenId,
@@ -40,7 +41,7 @@ describe('abertura automática', () => {
 })
 
 describe('orkioBotSummary', () => {
-  const repo = (state: string) => ({ status: { state } })
+  const repo = (state: OrkioBotRepoState['state']) => ({ status: { state } })
   it('estados do cartão do orkio[bot]', () => {
     expect(orkioBotSummary(null).tone).toBe('neutral')
     expect(orkioBotSummary({ github: 'disconnected', repos: [] }).label).toBe(

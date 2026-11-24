@@ -1,27 +1,26 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import type { ClaudeCodeStatus } from '../../../../shared/agent-run'
 import { Alert } from '../../components/Alert'
 import { FolderPlusIcon } from '../../components/icons'
 import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
 import { StatusToken } from '../../components/StatusToken'
+import { connectionStatusText } from '../../lib/status-text'
 import { BoardSettings } from '../board/BoardSettings'
 import { ClaudeCodeCard } from '../claude/ClaudeCodeCard'
 import { NotionConnectionCard } from '../integrations/NotionConnectionCard'
-import { useGitHubConnection } from '../integrations/useGitHubConnection'
-import { useNotionConnection } from '../integrations/useNotionConnection'
+import { useConnection } from '../integrations/useConnection'
+import { useClaudeStatus } from '../claude/useClaudeStatus'
+import { useBoard } from '../board/useBoard'
 import { NotionWorkspaceCard } from '../notion-workspace/NotionWorkspaceCard'
 import { ProjectNotionSection } from '../notion-workspace/ProjectNotionSection'
 import { useNotionWorkspace } from '../notion-workspace/useNotionWorkspace'
 import { AddProjectPanel } from '../projects/AddProjectPanel'
 import { useProjects } from '../projects/useProjects'
-import { LoginPanel } from '../welcome/LoginPanel'
-import '../welcome/welcome.css'
+import { LoginPanel } from './LoginPanel'
+import './setup.css'
 import { setupPending, setupSteps, type SetupStep, type SetupStepId } from './setup-steps'
 import type { BoardTaskRef } from '../../../../shared/overview'
-import type { BoardView } from '../../../../shared/board'
-import type { ConnectionStatus } from '../../../../shared/connection'
 import type { ProjectSelection, ProjectView } from '../../../../shared/projects'
 
 const WHY: Record<SetupStepId, string> = {
@@ -48,58 +47,6 @@ const LEAD: Record<SetupStepId, string> = {
   'first-task': 'Tudo pronto. Escolha uma tarefa para começar.'
 }
 
-function connectionKey(status: ConnectionStatus | null): string | null {
-  if (status === null || status.state === 'connecting') return null
-  return status.state === 'connected' ? `connected:${status.connectedAt}` : status.state
-}
-
-/** Estado do Claude Code (relê a cada 5 s enquanto a tela está aberta: a pessoa instala/loga fora). */
-function useClaude(): ClaudeCodeStatus | null {
-  const [status, setStatus] = useState<ClaudeCodeStatus | null>(null)
-  useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      void window.orkio.claude
-        .status()
-        .then((s) => alive && setStatus(s))
-        .catch(() => undefined)
-    }
-    load()
-    const timer = setInterval(load, 5000)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
-  }, [])
-  return status
-}
-
-/** Quadro do projeto (para saber se já existe e para criá-lo aqui). */
-function useProjectBoard(projectId: string | null): {
-  view: BoardView | null
-  reload(): void
-} {
-  const [state, setState] = useState<{ projectId: string; view: BoardView } | null>(null)
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    if (!projectId) return
-    let alive = true
-    void window.orkio.board
-      .get(projectId)
-      .then((r) => {
-        if (alive && r.ok) setState({ projectId, view: r.value })
-      })
-      .catch(() => undefined)
-    return () => {
-      alive = false
-    }
-  }, [projectId, tick])
-  return {
-    view: state && state.projectId === projectId ? state.view : null,
-    reload: () => setTick((n) => n + 1)
-  }
-}
-
 /**
  * Primeiros passos (reestruturação): um caminho só, do zero até a primeira tarefa. Os passos vêm
  * do estado real; o conteúdo de cada passo reaproveita os fluxos que já existem (login do GitHub,
@@ -119,13 +66,13 @@ export function SetupPage({
   /** "Usar um token": a conexão por token fica em Configurações › Integrações. */
   onOpenIntegrations(): void
 }): React.JSX.Element {
-  const notion = useNotionConnection()
-  const github = useGitHubConnection()
-  const [githubOverride, setGithubOverride] = useState<ConnectionStatus | null>(null)
-  const githubStatus = githubOverride ?? github.status
-  const workspace = useNotionWorkspace(connectionKey(notion.status))
-  const claude = useClaude()
-  const projects = useProjects()
+  const notion = useConnection('notion', { revalidate: true })
+  const github = useConnection('github', { revalidate: true })
+  const githubStatus = github.status
+  const workspace = useNotionWorkspace(notion.key)
+  // A pessoa instala/loga o Claude Code fora: relê a cada 5 s enquanto a tela está aberta.
+  const claude = useClaudeStatus({ pollMs: 5000 }).status
+  const projects = useProjects({ revalidate: true })
   const [createdId, setCreatedId] = useState<string | null>(null)
   const [selected, setSelected] = useState<SetupStepId | null>(null)
   const [selection, setSelection] = useState<ProjectSelection | null>(null)
@@ -139,7 +86,7 @@ export function SetupPage({
       list.find((p) => p.id === (createdId ?? projectId)) ?? (projectId ? null : (list[0] ?? null))
     )
   }, [projects.projects, createdId, projectId])
-  const board = useProjectBoard(project?.notionProject ? project.id : null)
+  const board = useBoard(project?.notionProject ? project.id : null)
 
   const steps = setupSteps({
     github: githubStatus,
@@ -166,13 +113,9 @@ export function SetupPage({
     case 'github':
       content =
         githubStatus?.state === 'connected' ? (
-          <StatusToken tone="success" label={`Conectado como ${step.summary ?? 'você'}`} />
+          <StatusToken {...connectionStatusText(githubStatus)} />
         ) : (
-          <LoginPanel
-            oauth={github.authOptions?.oauth ?? false}
-            onConnected={(s) => setGithubOverride(s)}
-            onUseToken={onOpenIntegrations}
-          />
+          <LoginPanel github={github} onUseToken={onOpenIntegrations} />
         )
       break
     case 'notion':
@@ -223,7 +166,7 @@ export function SetupPage({
           <NotionWorkspaceCard
             workspace={workspace}
             notionStatus={notion.status}
-            {...(notion.authOptions?.oauth ? { onReconnect: notion.startOAuth } : {})}
+            {...(notion.authOptions?.oauth ? { onReconnect: notion.authorize } : {})}
           />
           {project && workspace.status?.config && (
             <ProjectNotionSection
@@ -254,11 +197,8 @@ export function SetupPage({
           <BoardSettings
             view={board.view}
             onSave={async (input) => {
-              const r = await window.orkio.board.save(project.id, input)
-              if (r.ok) {
-                board.reload()
-                setSelected(null)
-              }
+              const r = await board.save(input)
+              if (r.ok) setSelected(null)
               return r
             }}
             onCancel={undefined}

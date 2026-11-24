@@ -8,4 +8,9 @@ export interface ResultError {
   canReconnect?: boolean
   /** Arquivos envolvidos no erro (ex.: mudanças que impedem a operação). */
   files?: string[]
+  /**
+   * Onde o usuário resolve (o texto não cita o lugar): a tela decide o que dizer e o botão (ex.:
+   * "Ir para Integrações" fora de Integrações; nada dentro dela).
+   */
+  fixAt?: 'integrations'
 }
