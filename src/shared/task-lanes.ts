@@ -145,18 +145,28 @@ export function deriveLane(input: LaneInput): PersonalTask | null {
   return null
 }
 
-export const TASK_FILTERS = ['all', 'active', 'attention'] as const
+export const TASK_FILTERS = ['all', 'attention', 'active', 'review'] as const
 export type TaskFilter = (typeof TASK_FILTERS)[number]
 
 export const TASK_FILTER_TEXT: Record<TaskFilter, string> = {
   all: 'Todas',
+  attention: 'Precisa de você',
   active: 'Em andamento',
-  attention: 'Precisa de atenção'
+  review: 'Em revisão'
 }
 
 /** Precisa de atenção: espera você ou PR com CI falhando, mudanças pedidas ou conflito. */
 export function needsAttention(t: PersonalTask): boolean {
   return t.lane === 'needs_you' || t.chips.some((c) => PR_CHIP_TEXT[c].attention)
+}
+
+/** `null` (card sem tarefa pessoal) só passa em "Todas". */
+export function matchesTaskFilter(t: PersonalTask | null, filter: TaskFilter): boolean {
+  if (filter === 'all') return true
+  if (!t) return false
+  if (filter === 'attention') return needsAttention(t)
+  if (filter === 'active') return t.lane === 'working' || t.lane === 'waiting'
+  return t.lane === 'in_review'
 }
 
 export function filterTasks(
@@ -166,8 +176,7 @@ export function filterTasks(
 ): PersonalTask[] {
   const q = query.trim().toLowerCase()
   return tasks.filter((t) => {
-    if (filter === 'active' && t.lane === 'done') return false
-    if (filter === 'attention' && !needsAttention(t)) return false
+    if (!matchesTaskFilter(t, filter)) return false
     if (!q) return true
     return [t.task.displayId, t.task.title, t.task.projectName, t.what].some((x) =>
       x?.toLowerCase().includes(q)

@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { OverviewTask, RunningItem, WaitingItem } from './overview'
 import type { TaskPullRequest } from './task-signals'
-import { deriveLane, filterTasks, groupByLane, prChips, type LaneInput } from './task-lanes'
+import {
+  deriveLane,
+  filterTasks,
+  groupByLane,
+  matchesTaskFilter,
+  prChips,
+  type LaneInput
+} from './task-lanes'
 
 const NOW = '2026-11-24T12:00:00.000Z'
 const TASK: OverviewTask = {
@@ -102,20 +109,28 @@ describe('kanban derivado', () => {
     expect(deriveLane(input())).toBeNull()
   })
 
-  it('filtros: em andamento tira o concluído; atenção = espera você ou PR com problema', () => {
+  it('filtros: atenção = espera você ou PR com problema; em andamento = trabalhando + aguardando', () => {
     const tasks = [
       deriveLane(input({ waiting: WAITING }))!,
       deriveLane(input({ task: { ...TASK, taskId: 't2' }, pr: pr({ checks: 'failure' }) }))!,
       deriveLane(input({ task: { ...TASK, taskId: 't3' }, pr: pr() }))!,
       deriveLane(
         input({ task: { ...TASK, taskId: 't4' }, lastFlow: { result: 'done', endedAt: NOW } })
+      )!,
+      deriveLane(input({ task: { ...TASK, taskId: 't5' }, running: RUNNING }))!,
+      deriveLane(
+        input({ task: { ...TASK, taskId: 't6' }, running: { ...RUNNING, state: 'queued' } })
       )!
     ]
-    expect(filterTasks(tasks, 'all')).toHaveLength(4)
-    expect(filterTasks(tasks, 'active').map((t) => t.task.taskId)).toEqual(['t1', 't2', 't3'])
+    expect(filterTasks(tasks, 'all')).toHaveLength(6)
     expect(filterTasks(tasks, 'attention').map((t) => t.task.taskId)).toEqual(['t1', 't2'])
-    expect(filterTasks(tasks, 'all', 'csv')).toHaveLength(4)
+    expect(filterTasks(tasks, 'active').map((t) => t.task.taskId)).toEqual(['t5', 't6'])
+    expect(filterTasks(tasks, 'review').map((t) => t.task.taskId)).toEqual(['t2', 't3'])
     expect(filterTasks(tasks, 'all', 'nada')).toHaveLength(0)
+    expect(matchesTaskFilter(null, 'all')).toBe(true)
+    for (const f of ['attention', 'active', 'review'] as const) {
+      expect(matchesTaskFilter(null, f)).toBe(false)
+    }
     const lanes = groupByLane(tasks)
     expect(lanes.needs_you).toHaveLength(1)
     expect(lanes.in_review).toHaveLength(2)

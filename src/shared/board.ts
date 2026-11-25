@@ -24,6 +24,16 @@ export const STAGE_ROLE_LABEL: Record<StageRole, string> = {
   done: 'Concluída'
 }
 
+/** Rótulo da coluna do Quadro unificado para cada papel. */
+export const STAGE_ROLE_COLUMN: Record<StageRole, string> = {
+  queue: 'A fazer',
+  plan: 'Planejando',
+  work: 'Trabalhando',
+  review: 'Em revisão',
+  reviewed: 'Revisada',
+  done: 'Concluída'
+}
+
 export function isStageRole(value: unknown): value is StageRole {
   return typeof value === 'string' && (STAGE_ROLES as readonly string[]).includes(value)
 }

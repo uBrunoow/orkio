@@ -17,6 +17,7 @@ import type {
   ReviewDecision,
   TaskPullRequest
 } from '../../../shared/task-signals'
+import { TASK_LANE_TEXT, type TaskLane } from '../../../shared/task-lanes'
 import type { UpdateStatus } from '../../../shared/updates'
 import type { AlvaCheckItem } from '../../../shared/alva'
 
@@ -192,6 +193,15 @@ export const CI_STATUS: Record<ChecksState, StatusText> = {
   success: { label: 'CI ok', tone: 'success' },
   failure: { label: 'CI falhou', tone: 'danger' },
   pending: { label: 'CI rodando', tone: 'neutral' }
+}
+
+/** Badge da situação da tarefa no Quadro. Concluído não tem badge. */
+export const TASK_LANE_STATUS: Record<TaskLane, StatusText | null> = {
+  needs_you: { label: TASK_LANE_TEXT.needs_you.label, tone: 'warning' },
+  working: { label: TASK_LANE_TEXT.working.label, tone: 'running' },
+  waiting: { label: TASK_LANE_TEXT.waiting.label, tone: 'neutral' },
+  in_review: { label: TASK_LANE_TEXT.in_review.label, tone: 'neutral' },
+  done: null
 }
 
 export function isPrOpen(pr: Pick<TaskPullRequest, 'state'> | null | undefined): boolean {
