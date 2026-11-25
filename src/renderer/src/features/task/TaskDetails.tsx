@@ -7,6 +7,7 @@ import { StatusToken } from '../../components/StatusToken'
 import { ExternalLinkIcon } from '../../components/icons'
 import { plural } from '../../lib/format'
 import { TaskAgentSection } from '../agents/TaskAgentSection'
+import { TaskRunSetup } from '../tasks/TaskRunSetup'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
 import { CollapsibleHeader } from '../../components/CollapsibleHeader'
 import { useTaskView } from './task-view'
@@ -144,6 +145,8 @@ export function TaskDetails(): React.JSX.Element {
           )}
         </Section>
       )}
+
+      <TaskRunSetup projectId={projectId} taskId={card.taskId} />
 
       <TaskAgentSection projectId={projectId} taskId={card.taskId} agent={agent} />
 

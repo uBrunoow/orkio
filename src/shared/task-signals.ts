@@ -49,6 +49,8 @@ export interface PullRequestDetails {
   }[]
   /** Ids das threads de review não resolvidas. */
   unresolvedThreadIds?: string[]
+  /** Conflito com a base (GraphQL `mergeable: CONFLICTING`); ausente = desconhecido. */
+  conflict?: boolean
   /** Tamanho da PR (GraphQL); só para o cartão. Ausente = desconhecido. */
   additions?: number
   deletions?: number

@@ -120,6 +120,12 @@ describe('abas salvas e rotas', () => {
     expect(
       parseRoute({ name: 'settings', section: 'board', tab: 'nada', projectId: 'p', x: 1 })
     ).toEqual({ name: 'settings', section: 'board', projectId: 'p' })
+    expect(parseRoute({ name: 'tasks', view: 'list', filter: 'attention', x: 1 })).toEqual({
+      name: 'tasks',
+      view: 'list',
+      filter: 'attention'
+    })
+    expect(parseRoute({ name: 'tasks', view: 'grade', filter: 1 })).toEqual({ name: 'tasks' })
     expect(parseRoute({ name: 'task', projectId: 'p', taskId: 't', section: 'flow' })).toEqual({
       name: 'task',
       projectId: 'p',

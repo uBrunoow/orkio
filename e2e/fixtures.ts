@@ -85,6 +85,8 @@ export interface FakeServices {
     string,
     {
       reviewDecision: string | null
+      /** GraphQL `mergeable` (CONFLICTING/MERGEABLE/UNKNOWN); ausente = UNKNOWN. */
+      mergeable?: string
       unresolved: number
       checks: string | null
       /** Cartão da PR: tamanho (GraphQL). */
@@ -668,6 +670,7 @@ export async function launchOrkio(
                   deletions: d.deletions,
                   changedFiles: d.changedFiles,
                   reviewDecision: d.reviewDecision,
+                  mergeable: d.mergeable ?? 'UNKNOWN',
                   reviewThreads: {
                     nodes: [
                       ...Array.from({ length: d.unresolved }, (_, i) => ({
@@ -1431,7 +1434,7 @@ export function ghCalls(userDataDir: string): string[] {
 
 /** Telas do menu (Quadro, Agentes, Configurações) e seções de Configurações pelo nome antigo. */
 export async function navTo(page: Page, name: string): Promise<void> {
-  if (name === 'Quadro' || name === 'Agentes' || name === 'Configurações') {
+  if (name === 'Quadro' || name === 'Tarefas' || name === 'Agentes' || name === 'Configurações') {
     await page
       .getByRole('navigation', { name: 'Navegação principal' })
       .getByRole('group', { name: 'Telas' })

@@ -69,7 +69,19 @@ export type ClaudeCommandStep = StepBase & {
   model?: string
   /** Raciocínio só deste passo (vence o do agente). */
   effort?: Effort
+  /**
+   * Quem roda o passo (Fase 1): `reviewer` = o revisor da tarefa (outro agente, nunca o autor),
+   * numa sessão nova com o briefing. Ausente = quem implementa (o agente do fluxo).
+   */
+  agent?: StepAgent
+  /**
+   * Junta ao pedido o texto final do passo anterior do Claude Code neste fluxo (ex.: a revisão,
+   * para quem implementa corrigir). Só em pedido em texto.
+   */
+  withLastResult?: boolean
 }
+
+export type StepAgent = 'reviewer'
 
 export type GateStep = StepBase & {
   type: 'gate'
@@ -496,6 +508,12 @@ export function validateTaskFlow(flow: Flow, ctx: FlowValidationContext): FlowIs
         if (step.readOnly === true && step.delivery === true) {
           err(step.id, `${label}: um passo só de leitura não pode estar em modo entrega.`)
         }
+        if (step.agent === 'reviewer' && step.delivery === true) {
+          err(step.id, `${label}: o revisor não entrega (tire o modo entrega).`)
+        }
+        if (step.withLastResult === true && !hasPrompt) {
+          err(step.id, `${label}: juntar o resultado anterior só vale num pedido em texto.`)
+        }
         if (!(step.timeoutMin >= 1 && step.timeoutMin <= 720)) {
           err(step.id, `${label}: o tempo limite deve ficar entre 1 e 720 minutos.`)
         }
@@ -686,6 +704,8 @@ export interface FlowRunView {
   confirm: ActionConfirm | null
   /** Agente que roda o fluxo (8A; cópia do perfil feita no início). */
   agent: { key: string; name: string; color: string } | null
+  /** Fase 1: quem revisa (outro agente; cópia do perfil feita no início). Ausente = sem revisor. */
+  reviewer?: { key: string; name: string; color: string } | null
   /** Gate atual com "Pedir ajustes": voltas usadas e o limite (`null` = sem ajustes). */
   revise: { used: number; max: number } | null
 }
@@ -791,7 +811,9 @@ export function parseStep(v: unknown): Step | null {
           ? { includeBriefing: v['includeBriefing'] }
           : {}),
         ...(isModelName(v['model']) ? { model: v['model'] } : {}),
-        ...(isEffort(v['effort']) ? { effort: v['effort'] } : {})
+        ...(isEffort(v['effort']) ? { effort: v['effort'] } : {}),
+        ...(v['agent'] === 'reviewer' ? { agent: 'reviewer' as const } : {}),
+        ...(v['withLastResult'] === true ? { withLastResult: true } : {})
       }
     case 'gate': {
       const show = GATE_SHOWS.find((x) => x === v['show'])

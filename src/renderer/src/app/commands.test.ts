@@ -100,12 +100,13 @@ describe('registro de comandos', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('Ctrl+número segue o dock: Quadro, Agentes, Configurações; Ctrl+4 não faz nada', () => {
+  it('Ctrl+número segue o dock: Quadro, Tarefas, Agentes, Configurações; Ctrl+5 não faz nada', () => {
     const go = (n: string) => fire(key(n, { ctrlKey: true })).ctx.navigate.mock.calls[0]?.[0]
     expect(go('1')).toEqual({ name: 'board' })
-    expect(go('2')).toEqual({ name: 'agents' })
-    expect(go('3')).toEqual({ name: 'settings' })
-    expect(fire(key('4', { ctrlKey: true })).command).toBeNull()
+    expect(go('2')).toEqual({ name: 'tasks' })
+    expect(go('3')).toEqual({ name: 'agents' })
+    expect(go('4')).toEqual({ name: 'settings' })
+    expect(fire(key('5', { ctrlKey: true })).command).toBeNull()
   })
 
   it('Ctrl+K abre a paleta mesmo num campo; "?" só fora dele', () => {

@@ -489,11 +489,18 @@ export class RunService {
     )
   }
 
-  lastSession(taskId: string): string | null {
+  /**
+   * Sessão mais recente da tarefa. `excludeAgent`: ignora as execuções desse agente (o revisor da
+   * Fase 1 roda em sessão própria; quem implementa continua a dele).
+   */
+  lastSession(taskId: string, excludeAgent?: string): string | null {
+    const sql = excludeAgent
+      ? 'SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL AND (agent_key IS NULL OR agent_key != ?) ORDER BY started_at DESC LIMIT 1'
+      : 'SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1'
     return (
       this.deps.db.get<{ session_id: string }>(
-        'SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1',
-        taskId
+        sql,
+        ...(excludeAgent ? [taskId, excludeAgent] : [taskId])
       )?.session_id ?? null
     )
   }

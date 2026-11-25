@@ -15,6 +15,7 @@ import {
   FlowError,
   FlowRunner,
   NOOP_ACTION,
+  type FlowRunnerDeps,
   ORKIO_LINES_EXTRACTOR,
   type OrkioAction
 } from '../flows/flow-runner'
@@ -44,6 +45,10 @@ export function createFlows(deps: {
   notify: (title: string, body: string, ref: { projectId: string; taskId: string }) => void
   onFlowFinished: (projectId: string) => void
   enterStage: (change: StageChange) => void
+  /** Fase 1: "Como deve rodar?" (fluxo nativo da tarefa e o revisor). */
+  nativePlan: NonNullable<FlowRunnerDeps['nativePlan']>
+  /** Texto final de uma execução (o fix recebe a revisão). */
+  lastResult: NonNullable<FlowRunnerDeps['lastResult']>
 }): { runner: FlowRunner; handlers: Pick<Handlers, 'alva' | 'taskFlows'> } {
   const { claude } = deps
   const neutralDir = deps.paths.alvaCheck
@@ -119,7 +124,9 @@ export function createFlows(deps: {
     notify: deps.notify,
     emit: (ref) => deps.emit('taskFlowChanged', ref),
     onFinished: (ref) => deps.onFlowFinished(ref.projectId),
-    enterStage: deps.enterStage
+    enterStage: deps.enterStage,
+    nativePlan: deps.nativePlan,
+    lastResult: deps.lastResult
   })
   claude.runs.onFinished((info) => runner.onRunFinished(info))
   const service = new FlowsService({

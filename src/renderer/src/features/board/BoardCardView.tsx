@@ -6,8 +6,12 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import { RUN_MODES, RUN_MODE_TEXT, type RunMode } from '../../../../shared/task-setup'
 import { cn } from '@/lib/utils'
 import {
   GitBranchIcon,
@@ -29,9 +33,18 @@ export interface CardActions {
   onMove(taskId: string, stageId: string): void
   onToggleBlocked(taskId: string, blocked: boolean): void
   onToggleAutomation(taskId: string, paused: boolean): void
+  /**
+   * Fase 1: colunas com "Como deve rodar?" padrão (etapa → modo). Mover para uma delas pergunta
+   * como esta tarefa roda (o padrão da coluna ou outro modo só para ela).
+   */
+  runModes?: Readonly<Record<string, RunMode>>
+  onMoveWithMode?(taskId: string, stageId: string, mode: RunMode | null): void
 }
 
-export type CardMenuItem = { label: string; onClick(): void } | { type: 'divider' }
+export type CardMenuItem =
+  | { label: string; onClick(): void }
+  | { type: 'divider' }
+  | { label: string; sub: { label: string; onClick(): void }[] }
 
 export function cardMenuItems(
   card: BoardCard,
@@ -51,10 +64,26 @@ export function cardMenuItems(
     { type: 'divider' },
     ...stages
       .filter((s) => s.id !== card.stageId)
-      .map((s) => ({
-        label: `Mover para ${s.name}`,
-        onClick: () => actions.onMove(card.taskId, s.id)
-      }))
+      .map((s): CardMenuItem => {
+        const mode = actions.runModes?.[s.id]
+        const withMode = actions.onMoveWithMode
+        if (!mode || !withMode) {
+          return { label: `Mover para ${s.name}`, onClick: () => actions.onMove(card.taskId, s.id) }
+        }
+        return {
+          label: `Mover para ${s.name}`,
+          sub: [
+            {
+              label: `Como a coluna manda (${RUN_MODE_TEXT[mode].label})`,
+              onClick: () => withMode(card.taskId, s.id, null)
+            },
+            ...RUN_MODES.filter((m) => m !== mode).map((m) => ({
+              label: RUN_MODE_TEXT[m].label,
+              onClick: () => withMode(card.taskId, s.id, m)
+            }))
+          ]
+        }
+      })
   ]
 }
 
@@ -83,6 +112,17 @@ export function CardActionsMenu({
         {items.map((item, i) =>
           'type' in item ? (
             <DropdownMenuSeparator key={`divider-${i}`} />
+          ) : 'sub' in item ? (
+            <DropdownMenuSub key={item.label}>
+              <DropdownMenuSubTrigger>{item.label}</DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="min-w-56">
+                {item.sub.map((sub) => (
+                  <DropdownMenuItem key={sub.label} onSelect={sub.onClick}>
+                    {sub.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
           ) : (
             <DropdownMenuItem key={item.label} onSelect={item.onClick}>
               {item.label}

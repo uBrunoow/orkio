@@ -204,7 +204,7 @@ export function detailsQuery(numbers: readonly number[]): string {
     .filter((n) => Number.isSafeInteger(n) && n > 0)
     .map(
       (n) =>
-        `pr${n}: pullRequest(number: ${n}) { number additions deletions changedFiles reviewDecision ` +
+        `pr${n}: pullRequest(number: ${n}) { number additions deletions changedFiles reviewDecision mergeable ` +
         `reviewThreads(first: ${REVIEW_LIMITS.threads}) { nodes { id isResolved } } ` +
         `commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } ` +
         // 3B: ids estáveis para eventos idempotentes (pedidos de review e reviews com decisão).
@@ -266,7 +266,15 @@ export function parseDetails(
       const v = pr[key]
       return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 ? { [key]: v } : {}
     }
+    // UNKNOWN (o GitHub ainda calcula) fica de fora: só o que ele já sabe.
+    const mergeable =
+      pr['mergeable'] === 'CONFLICTING'
+        ? { conflict: true }
+        : pr['mergeable'] === 'MERGEABLE'
+          ? { conflict: false }
+          : {}
     result.set(n, {
+      ...mergeable,
       ...size('additions'),
       ...size('deletions'),
       ...size('changedFiles'),

@@ -177,6 +177,16 @@ export class AgentsService {
    * Agente da tarefa, pronto para rodar. `null` = sem agente. Lança `AgentError` (mensagem pt-BR)
    * quando há agente, mas ele não pode rodar (apagado, inválido, arquivado, sem aprovação).
    */
+  /**
+   * Um agente pela chave, pronto para rodar (Fase 1: o revisor da tarefa). Lança `AgentError`
+   * quando ele não existe ou não pode rodar.
+   */
+  async runtimeByKey(projectId: string, key: AgentKey): Promise<AgentRuntime> {
+    const view = await this.get(projectId, key)
+    if (!view) throw new AgentError('not_found', AGENT_MESSAGES.gone)
+    return this.usable(view)
+  }
+
   async runtimeFor(projectId: string, taskId: string): Promise<AgentRuntime | null> {
     const key = this.assignedKey(taskId)
     if (!key) return null
