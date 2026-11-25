@@ -212,6 +212,8 @@ export function buildTaskSignals(
 /** Situação da parte do GitHub nos sinais. */
 export type SignalsGitHubState =
   | 'ok'
+  /** Projeto só com git local: o Orkio não lê o GitHub pela API dele. */
+  | 'git_only'
   | 'disconnected'
   | 'no_repo'
   | 'enterprise'

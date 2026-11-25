@@ -18,6 +18,7 @@ import type { OrkioAction } from '../flows/flow-runner'
 import { deliveryEvent, openPullFor, type SignalsFetch } from './action-helpers'
 import { DeliveryError, type DeliveryService } from './delivery.service'
 import { isApiError } from '../net/http'
+import { GIT_ONLY_REVIEW_MESSAGE } from '../../shared/delivery'
 
 export interface DeliveryActionsDeps {
   delivery: DeliveryService
@@ -34,6 +35,8 @@ export interface DeliveryActionsDeps {
   store: Pick<BoardStore, 'addEvent'>
   /** Depois de pedir review: roda as automações já (a 3B move para Revisando). */
   runAutomation?(projectId: string): void
+  /** Projeto só com git local: nada de pedir review pela API do Orkio. */
+  gitOnly?(projectId: string): boolean
   now?: () => Date
 }
 
@@ -140,6 +143,9 @@ export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] 
   const requestReview: OrkioAction = {
     ...ORKIO_ACTIONS.request_review,
     async confirm({ projectId, taskId }) {
+      if (deps.gitOnly?.(projectId)) {
+        return { problem: { code: 'git_only', message: GIT_ONLY_REVIEW_MESSAGE } }
+      }
       const r = await reviewers(projectId, taskId)
       if ('problem' in r) return { problem: r.problem }
       let target

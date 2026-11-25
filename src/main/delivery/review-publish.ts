@@ -28,6 +28,8 @@ import type { ActionResult, OrkioAction } from '../flows/flow-runner'
 import { errorName } from '../errors'
 import { deliveryEvent, openPullFor, type SignalsFetch } from './action-helpers'
 
+import { GIT_ONLY_REVIEW_MESSAGE } from '../../shared/delivery'
+
 export interface PublishReviewDeps {
   poster: Pick<GitHubReviewPoster, 'isConfigured' | 'diffLines' | 'postReview'>
   /** Texto final de uma execução do Claude Code (log normalizado e redigido). */
@@ -38,6 +40,8 @@ export interface PublishReviewDeps {
   store: Pick<BoardStore, 'addEvent'>
   /** Depois de publicar: roda as automações já (REQUEST_CHANGES → "Alterações pedidas"). */
   runAutomation?(projectId: string): void
+  /** Projeto só com git local: não publica pela API do Orkio. */
+  gitOnly?(projectId: string): boolean
   now?: () => Date
 }
 
@@ -70,6 +74,7 @@ export const PUBLISH_FAILURES = {
   noSite: 'review_no_site',
   maybePosted: 'review_maybe_posted',
   noRepo: 'review_no_repo',
+  gitOnly: 'review_git_only',
   noPr: 'review_no_pr',
   noConfirm: 'review_no_confirm',
   failed: 'review_failed'
@@ -135,6 +140,9 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
           }
         }
         throw error
+      }
+      if (deps.gitOnly?.(projectId)) {
+        return { problem: fail(PUBLISH_FAILURES.gitOnly, GIT_ONLY_REVIEW_MESSAGE) }
       }
       const target = deps.repo(projectId)
       if (!target) return { problem: fail(PUBLISH_FAILURES.noRepo, PUBLISH_ACTION_MESSAGES.noRepo) }

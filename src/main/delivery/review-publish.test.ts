@@ -1,3 +1,4 @@
+import { GIT_ONLY_REVIEW_MESSAGE } from '../../shared/delivery'
 import { describe, expect, it, vi } from 'vitest'
 import { PUBLISH_REVIEW_MESSAGES } from '../../shared/review-publish'
 import type { ActionConfirm } from '../../shared/task-flow'
@@ -103,6 +104,7 @@ describe('publish_review: antes do gate', () => {
         PUBLISH_REVIEW_MESSAGES.badEvent
       ],
       [{ repo: () => null }, PUBLISH_FAILURES.noRepo, PUBLISH_ACTION_MESSAGES.noRepo],
+      [{ gitOnly: () => true }, PUBLISH_FAILURES.gitOnly, GIT_ONLY_REVIEW_MESSAGE],
       [
         { signals: async () => ({ ok: false, error: { code: 'x', message: 'x' } }) as never },
         SIGNALS_FAILURE.code,

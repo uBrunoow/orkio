@@ -222,6 +222,16 @@ describe('DeliveryService com git real', () => {
     expect(() => service.target('p1', 'x')).toThrow(/ainda não tem ambiente/)
   })
 
+  it('projeto só com git local: o alvo da entrega existe (push pelo git do usuário)', () => {
+    project = { ...project, repo: { ...project.repo!, verified: false, access: 'git' } }
+    expect(service.target('p1', 't1')).toMatchObject({
+      owner: project.repo!.owner,
+      repo: project.repo!.name,
+      remote: project.repo!.remoteName,
+      branch: BRANCH
+    })
+  })
+
   describe('credenciais pedidas', () => {
     let server: Server
     let url: string

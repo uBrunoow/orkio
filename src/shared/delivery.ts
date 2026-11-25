@@ -87,3 +87,10 @@ export function sameRepo(owner: string, repo: string, target: DeliveryTarget): b
     repo.replace(/\.git$/i, '').toLowerCase() === target.repo.toLowerCase()
   )
 }
+
+/**
+ * Projeto só com git local (sem a API do GitHub do Orkio): pedir revisão e publicar a revisão do
+ * agente ainda não têm caminho (chegam com a leitura pelo `gh`).
+ */
+export const GIT_ONLY_REVIEW_MESSAGE =
+  'Este projeto usa só o git desta máquina: pedir revisão e publicar a revisão chegam com a leitura pelo `gh`.'
