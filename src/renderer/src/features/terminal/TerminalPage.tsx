@@ -24,10 +24,13 @@ export function TerminalPage({
   taskId,
   startClaude = false,
   onStarted,
-  onOpenTask
+  onOpenTask,
+  embedded = false
 }: {
   projectId: string
   taskId: string
+  /** Dentro do painel da tarefa: sem a barra da tela (caminho e "Ver tarefa"). */
+  embedded?: boolean
   /** Abriu pela paleta/menu "Continuar no Claude": começa sozinho, uma vez. */
   startClaude?: boolean
   onStarted?(): void
@@ -78,14 +81,18 @@ export function TerminalPage({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ScreenBarStart>
-        <Crumbs parts={[{ label: taskLabel, onClick: onOpenTask }, 'Terminal']} />
-      </ScreenBarStart>
-      <ScreenBarEnd>
-        <Button size="sm" variant="ghost" onClick={onOpenTask}>
-          Ver tarefa
-        </Button>
-      </ScreenBarEnd>
+      {!embedded && (
+        <>
+          <ScreenBarStart>
+            <Crumbs parts={[{ label: taskLabel, onClick: onOpenTask }, 'Terminal']} />
+          </ScreenBarStart>
+          <ScreenBarEnd>
+            <Button size="sm" variant="ghost" onClick={onOpenTask}>
+              Ver tarefa
+            </Button>
+          </ScreenBarEnd>
+        </>
+      )}
 
       <div className="flex shrink-0 items-center gap-1 border-b border-border-soft px-3 py-1.5">
         <div

@@ -267,6 +267,56 @@ describe('RunService', () => {
     expect(service.lastSession('task-1')).toBe(runs[2]!.opts.sessionId)
   })
 
+  it('sidechat: roda junto da sessão principal, é só dele e nunca vira a sessão da tarefa', async () => {
+    const first = await start(1)
+    await spawned(1)
+    const main = runs[0]!.opts.sessionId
+    runs[0]!.emit({ kind: 'text', text: 'Resposta', uuid: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc' })
+    expect(await service.lastPoint(main)).toEqual({
+      session: main,
+      at: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc'
+    })
+    // A principal ainda roda: o sidechat começa mesmo assim (não conta no "um por tarefa").
+    const side = await start(1, {
+      input: { kind: 'prompt', text: 'Pergunta ao lado' },
+      session: {
+        kind: 'fork',
+        from: main,
+        at: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc',
+        reason: 'branch'
+      },
+      side: true
+    })
+    await spawned(2)
+    const sideSession = runs[1]!.opts.sessionId
+    expect(service.isRunning('task-1')).toBe(true)
+    expect(service.isSideRunning('task-1')).toBe(true)
+    // Um sidechat por vez.
+    await expect(
+      start(1, {
+        input: { kind: 'prompt', text: 'outro' },
+        session: { kind: 'resume', id: sideSession },
+        side: true
+      })
+    ).rejects.toThrow()
+    runs[1]!.exit(0)
+    await finished(side.id)
+    runs[0]!.exit(0)
+    await finished(first.id)
+    expect(service.view(side.id)).toMatchObject({
+      side: true,
+      sessionId: sideSession,
+      forkedFrom: main
+    })
+    expect(service.view(first.id)?.side).toBe(false)
+    expect(service.isSideSession(sideSession)).toBe(true)
+    // A sessão da tarefa continua a principal, mesmo com o sidechat mais recente.
+    expect(service.lastSession('task-1')).toBe(main)
+    expect(
+      (await service.readLog(side.id)).some((e) => e.kind === 'info' && /Sidechat/.test(e.text))
+    ).toBe(true)
+  })
+
   it('custo: sessão nova guarda o total; --resume guarda só a diferença; total menor = reinício', async () => {
     const costOf = (id: string) =>
       db.get<{ cost: number; session_cost_total: number }>(

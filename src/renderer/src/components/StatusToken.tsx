@@ -52,3 +52,36 @@ export function StatusToken({
     </span>
   )
 }
+
+const BADGE_CLASS: Record<StatusTone, string> = {
+  success: 'border-ok/30 bg-ok-tint text-ok',
+  warning: 'border-warn/30 bg-warn-tint text-warn',
+  danger: 'border-danger/30 bg-danger-tint text-danger',
+  running: 'border-brand/30 bg-brand-tint text-brand',
+  neutral: 'border-border-soft bg-muted text-muted-foreground'
+}
+
+/** O mesmo estado em pílula (cabeçalho de cartão/linha, quando o ponto solto se perde). */
+export function StatusBadge({
+  label,
+  tone = 'neutral',
+  className,
+  ...rest
+}: {
+  label: string
+  tone?: StatusTone
+  className?: string
+} & { [K in `data-${string}`]?: string }): React.JSX.Element {
+  return (
+    <span
+      className={cn(
+        'inline-flex h-5 max-w-full shrink-0 items-center rounded-full border px-2 text-2xs font-medium whitespace-nowrap',
+        BADGE_CLASS[tone],
+        className
+      )}
+      {...rest}
+    >
+      <span className="truncate">{label}</span>
+    </span>
+  )
+}

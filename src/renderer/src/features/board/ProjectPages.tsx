@@ -121,11 +121,10 @@ export function BoardSettingsPage({
             onSaved={(next) => board.replace(next)}
             onOpenNotionSettings={() => setNotionSettings(true)}
             onOpenTaskFlows={() => onTabChange('flows')}
-            flowsSlot={
+            flowsSlot={<TaskFlowsPage key={project.id} projectId={project.id} />}
+            alvaSlot={
               <div className="flex flex-col gap-6">
-                <TaskFlowsPage key={project.id} projectId={project.id} />
                 <section aria-label="Modelos do alva-flow" className="flex flex-col gap-3">
-                  <h2 className="text-base font-medium">Modelos do alva-flow</h2>
                   <AlvaPage
                     projectId={project.id}
                     view={view}

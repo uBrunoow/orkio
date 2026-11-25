@@ -9,7 +9,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { CheckboxField } from '@/components/form'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { ScreenTitle } from '../../components/ScreenTitle'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
@@ -23,6 +22,7 @@ import {
   BoardNoticeAlert,
   BoardViewControl,
   PendingWritesAlert,
+  BlockedFilter,
   PriorityFilter,
   StageIssuesAlert,
   TruncatedNote
@@ -260,7 +260,7 @@ export function MultiBoard({
         onQuery={setQuery}
       >
         <PriorityFilter priorities={priorities} value={priority} onChange={setPriority} />
-        <CheckboxField label="Só bloqueadas" checked={onlyBlocked} onChange={setOnlyBlocked} />
+        <BlockedFilter checked={onlyBlocked} onChange={setOnlyBlocked} />
       </BoardFilters>
       {/* A fila de escritas do Notion é uma só para todos os projetos: o IPC não leva projeto. */}
       <PendingWritesAlert

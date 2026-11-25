@@ -14,6 +14,8 @@ const buttonVariants = cva(
         outline: 'border border-border bg-card text-foreground hover:bg-muted',
         secondary: 'border border-border bg-muted text-foreground hover:bg-muted/70',
         ghost: 'text-muted-foreground hover:bg-muted hover:text-foreground',
+        /** Ação destrutiva sem peso de botão cheio (remover, apagar, desvincular): sempre vermelha. */
+        danger: 'text-danger hover:bg-danger-tint hover:text-danger focus-visible:ring-danger/30',
         link: 'h-auto px-0 text-brand-tint-foreground underline-offset-4 hover:underline'
       },
       size: {

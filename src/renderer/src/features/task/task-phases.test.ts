@@ -89,14 +89,10 @@ describe('fases pelo plano do fluxo (comandos, ações e gates)', () => {
       ['deploy', null, 'next']
     ])
     // A aba do painel sai da fase (enum), não do rótulo em português.
+    expect(currentPhase(phases)?.phase).toBe('implement')
     expect(
-      defaultPanelTab({
-        currentPhase: currentPhase(phases)?.phase ?? null,
-        hasBacklogDoc: true,
-        hasDiff: false,
-        hasPr: false
-      })
-    ).toBe('changes')
+      defaultPanelTab({ currentPhase: currentPhase(phases)?.phase ?? null, hasBacklogDoc: true })
+    ).toBe('details')
   })
 })
 

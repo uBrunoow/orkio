@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { PAGE_WIDTH } from '../../components/page-width'
 import { TextField } from '@/components/form'
 import { SETTINGS_TITLES, type SettingsSection } from '../../app/routes'
 import { isTextField } from '../../app/keys'
@@ -8,7 +9,8 @@ import {
   BellIcon,
   BoardIcon,
   GaugeIcon,
-  GridIcon,
+  AppearanceIcon,
+  LayoutIcon,
   InfoIcon,
   IntegrationsIcon,
   KeyboardIcon,
@@ -27,7 +29,8 @@ import { ScopeNote } from './SettingsHeader'
 
 const ICONS: Record<SettingsSection, SvgIcon> = {
   general: SettingsIcon,
-  appearance: GridIcon,
+  appearance: AppearanceIcon,
+  layout: LayoutIcon,
   notifications: BellIcon,
   shortcuts: KeyboardIcon,
   terminal: TerminalIcon,
@@ -68,10 +71,12 @@ function useNavSlashFocus(target: React.RefObject<HTMLDivElement | null>): void 
  * busca, e a seção escolhida ao lado com a linha "Vale para". As seções do projeto só aparecem com
  * um projeto vinculado ao Notion.
  */
+
 export function SettingsLayout({
   section,
   projectName,
   scope,
+  scopePicker,
   onSection,
   children
 }: {
@@ -80,6 +85,8 @@ export function SettingsLayout({
   projectName: string | null
   /** A quem a seção vale; `null` = a própria tela diz. */
   scope: string | null
+  /** Seletor do projeto das telas por projeto (Quadro e automações, Agentes do projeto). */
+  scopePicker?: React.ReactNode
   onSection(section: SettingsSection): void
   children: React.ReactNode
 }): React.JSX.Element {
@@ -118,10 +125,7 @@ export function SettingsLayout({
         )}
         {groups.map((g, i) => (
           <div key={g.id} className={cn('flex flex-col gap-0.5', i > 0 && 'pt-3.5')}>
-            <span
-              id={`settings-nav-${g.id}`}
-              className="truncate px-2 pt-1 pb-1 text-[10.5px] tracking-[0.08em] text-subtle-foreground uppercase"
-            >
+            <span id={`settings-nav-${g.id}`} className="truncate px-2 pt-1 pb-1 label-caps">
               {g.title}
             </span>
             <ul aria-labelledby={`settings-nav-${g.id}`} className="flex flex-col gap-0.5">
@@ -156,9 +160,11 @@ export function SettingsLayout({
           </div>
         ))}
       </nav>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[18px] overflow-y-auto px-8 py-6">
-        {scope && <ScopeNote scope={scope} className="-mb-2.5" />}
-        {children}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto px-8 py-6 [scrollbar-gutter:stable_both-edges]">
+        <div className={cn('flex w-full flex-col gap-[18px]', PAGE_WIDTH.form)}>
+          {scope && <ScopeNote scope={scope} picker={scopePicker} className="-mb-2.5" />}
+          {children}
+        </div>
       </div>
     </div>
   )

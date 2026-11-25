@@ -170,6 +170,7 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   const rev = page.getByRole('region', { name: 'Etapa Revisando', exact: true })
   await choose(page, rev, 'Fluxo desta coluna', 'Revisar e entregar')
   await expect(rev.getByRole('radio', { name: 'Ao entrar' })).toBeChecked()
+  await page.keyboard.press('Escape')
   await page
     .getByRole('region', { name: 'Validação do fluxo' })
     .getByRole('button', { name: 'Salvar fluxo' })

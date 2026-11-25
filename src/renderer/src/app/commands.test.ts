@@ -104,13 +104,14 @@ describe('registro de comandos', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('Ctrl+número: Quadro, Quadro de todos os projetos, Agentes, Configurações; Ctrl+5 nada', () => {
+  it('Ctrl+número: Quadro, Quadro de todos os projetos, Agentes, Configurações, Terminais; Ctrl+6 nada', () => {
     const go = (n: string) => fire(key(n, { ctrlKey: true })).ctx.navigate.mock.calls[0]?.[0]
     expect(go('1')).toEqual({ name: 'board' })
     expect(go('2')).toEqual({ name: 'board', projectIds: 'all' })
     expect(go('3')).toEqual({ name: 'agents' })
     expect(go('4')).toEqual({ name: 'settings' })
-    expect(fire(key('5', { ctrlKey: true })).command).toBeNull()
+    expect(go('5')).toEqual({ name: 'terminals' })
+    expect(fire(key('6', { ctrlKey: true })).command).toBeNull()
   })
 
   it('Ctrl+K abre a paleta mesmo num campo; "?" só fora dele', () => {

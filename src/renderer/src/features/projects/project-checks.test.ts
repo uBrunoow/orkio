@@ -3,6 +3,7 @@ import { missingSteps, projectChecks } from './project-checks'
 import type { ProjectView } from '../../../../shared/projects'
 
 const project = (patch: Partial<ProjectView> = {}): ProjectView => ({
+  archived: false,
   id: 'p1',
   name: 'orkio',
   localPath: '/repo',

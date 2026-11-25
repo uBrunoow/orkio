@@ -31,12 +31,15 @@ export function AgentCardHead({
   profile,
   scope,
   seed,
+  onOpen,
   children
 }: {
   name: string
   profile: AgentProfile | null
   scope: AgentScope
   seed: string
+  /** Abre a página do agente: o nome vira o link do card inteiro (o card precisa de `relative`). */
+  onOpen?: () => void
   /** Fallback da segunda linha sem perfil (o arquivo). */
   children?: React.ReactNode
 }): React.JSX.Element {
@@ -44,7 +47,18 @@ export function AgentCardHead({
     <div className="flex min-w-0 flex-1 items-start gap-3">
       <AgentAvatar name={name} color={profile?.color ?? 'yellow'} seed={seed} size="lg" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5">
-        <p className="truncate font-medium">{name}</p>
+        {onOpen ? (
+          <button
+            type="button"
+            onClick={onOpen}
+            aria-label={`Abrir ${name}`}
+            className="truncate rounded-sm text-left font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-ring/40"
+          >
+            {name}
+          </button>
+        ) : (
+          <p className="truncate font-medium">{name}</p>
+        )}
         <p
           className="line-clamp-2 text-xs text-muted-foreground"
           data-testid="agent-description"

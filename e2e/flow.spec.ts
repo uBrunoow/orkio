@@ -33,8 +33,16 @@ function flowStage(page: Page, name: string): Locator {
     .getByRole('list', { name: 'Etapas do fluxo' })
     .getByRole('listitem', { name: `Etapa ${name}`, exact: true })
 }
-/** Escolhe a etapa na lista e devolve o editor dela. */
+/** Fecha o modal da coluna, se estiver aberto. */
+async function closeStage(page: Page): Promise<void> {
+  if ((await page.getByRole('dialog').count()) > 0) {
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  }
+}
+/** Escolhe a etapa na lista e devolve o editor dela (no modal da coluna). */
 async function openStage(page: Page, name: string): Promise<Locator> {
+  await closeStage(page)
   await flowStage(page, name).click()
   const editor = page.getByRole('region', { name: `Etapa ${name}`, exact: true })
   await expect(editor).toBeVisible()
@@ -148,6 +156,7 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
   await expect(validation).not.toContainText('Conflito')
 
   // Simular (sem executar): fica na aba Automações.
+  await closeStage(page)
   await boardSettingsTab(page, 'Automações')
   const sim = page.getByRole('region', { name: 'Testar automação' })
   await choose(page, sim, 'Tarefa', 'ORK-2 Listar tarefas do Notion')
@@ -182,11 +191,14 @@ test('cria a etapa QA com uma regra, simula, salva e o quadro mostra a coluna no
 test('histórico de alterações e exportar/importar JSON', async () => {
   const { app, page } = orkio!
   await navTo(page, 'Etapas e automações')
+  await closeStage(page)
+  await flowMenu(page, 'Histórico de alterações')
   const history = page.getByRole('region', { name: 'Alterações do fluxo' })
   await expect(history).toContainText(
     'Etapa “QA” criada entre Revisado e Finalizada (Notion: Em andamento)'
   )
   await expect(history).toContainText('Quadro criado com 5 etapas')
+  await closeStage(page)
 
   const file = join(userDataDir, 'fluxo.json')
   await queueSavePaths(app, [file])

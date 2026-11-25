@@ -78,10 +78,11 @@ async function goToBoard(page: Page): Promise<void> {
     .click()
 }
 const card = (page: Page): Locator => page.getByRole('listitem', { name: ORK2, exact: true })
-/** Etapa da tarefa na tela dela (seletor "Mover para" na barra do topo, fora da região da tela). */
+/** Etapa da tarefa na tela dela (seletor "Mover para" na coluna Detalhes do painel). */
 async function expectStage(screen: Locator, stage: string): Promise<void> {
-  const bar = screen.page().getByTestId('top-bar')
-  await expect(bar.getByRole('combobox', { name: /^Mover para/ })).toContainText(stage, {
+  const panel = screen.page().getByRole('complementary', { name: /^Detalhes de / })
+  await panel.getByRole('tab', { name: 'Detalhes', exact: true }).click()
+  await expect(panel.getByRole('combobox', { name: /^Mover para/ })).toContainText(stage, {
     timeout: 30_000
   })
 }
@@ -160,7 +161,7 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
     .click()
   await expect(card(page)).toBeVisible()
 
-  await navTo(page, 'Fluxos')
+  await navTo(page, 'alva-flow')
   const check = page.getByRole('region', { name: 'Pronto para o alva-flow?' })
   await expect(check.getByTestId('alva-ready')).toHaveText('Falta configurar', { timeout: 30_000 })
   const items = check.getByRole('list', { name: 'Itens da pré-checagem' })
@@ -175,7 +176,7 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
   await close()
   const { page: p2 } = await open({ plugin: true, mcpBacklog: true, gh: 'ok' })
   await goToBoard(p2)
-  await navTo(p2, 'Fluxos')
+  await navTo(p2, 'alva-flow')
   const check2 = p2.getByRole('region', { name: 'Pronto para o alva-flow?' })
   await expect(check2.getByTestId('alva-ready')).toHaveText('Pronto', { timeout: 30_000 })
   await expect(p2.getByRole('region', { name: 'alva-flow', exact: true })).toContainText('v1.0.25')
@@ -638,7 +639,7 @@ test('Abrir PR: botão na aba PR & CI → gate do push → aprovar → /pr em mo
   await taskTab(panel, 'PR & CI')
   await expect(panel.getByRole('button', { name: 'Abrir PR' })).toBeDisabled()
   await expect(
-    panel.getByRole('tabpanel', { name: 'PR & CI' }).getByText('Espere o fluxo atual terminar')
+    panel.getByRole('region', { name: 'PR & CI' }).getByText('Espere o fluxo atual terminar')
   ).toBeVisible()
   await push.getByRole('button', { name: 'Fazer push' }).click()
 

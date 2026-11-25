@@ -1,7 +1,8 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
-import { SidebarIcon } from '../components/icons'
+import { MoonIcon, SidebarIcon, SunIcon } from '../components/icons'
+import { appearancePref, resolvedTheme } from '../features/settings/appearance'
 import { ariaKeys, formatKeys } from './keys'
 import type { Route } from './routes'
 import { dockScreens, type ScreenDef } from './screens'
@@ -59,8 +60,34 @@ function DockButton({
 }
 
 /**
+ * Troca rápida entre claro e escuro (acima das Configurações). Com o tema "Sistema", troca para o
+ * oposto do que está na tela e passa a valer só o escolhido; Aparência volta ao "Sistema".
+ */
+function ThemeToggle(): React.JSX.Element {
+  const appearance = appearancePref.use()
+  const dark = resolvedTheme(appearance.theme) === 'dark'
+  const label = dark ? 'Mudar para o tema claro' : 'Mudar para o tema escuro'
+  const Icon = dark ? SunIcon : MoonIcon
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onClick={() => appearancePref.save({ ...appearance, theme: dark ? 'light' : 'dark' })}
+          className="flex size-9 items-center justify-center rounded-lg text-subtle-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+        >
+          <Icon className="size-[18px]" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/**
  * Dock: as telas do app num trilho fino à esquerda (do registro `screens.ts`), com o atalho no
- * tooltip; no pé, Configurações e mostrar/esconder a lista de tarefas.
+ * tooltip; no pé, trocar o tema, Configurações e mostrar/esconder a lista de tarefas.
  */
 export function Dock({
   route,
@@ -83,9 +110,10 @@ export function Dock({
     <div className="flex h-full w-12 shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-background py-2">
       <div role="group" aria-label="Telas" className="flex min-h-0 flex-1 flex-col">
         <ul className="flex flex-col items-center gap-1">{dockScreens('main').map(button)}</ul>
-        <ul className="mt-auto flex flex-col items-center gap-1">
-          {dockScreens('bottom').map(button)}
-        </ul>
+        <div className="mt-auto flex flex-col items-center gap-1">
+          <ThemeToggle />
+          <ul className="flex flex-col items-center gap-1">{dockScreens('bottom').map(button)}</ul>
+        </div>
       </div>
       <Tooltip>
         <TooltipTrigger asChild>

@@ -39,6 +39,9 @@ function run(id: string, startedAt: string, over: Partial<AgentRunView> = {}): A
     summary: null,
     hasSession: true,
     agentKey: null,
+    sessionId: null,
+    forkedFrom: null,
+    side: false,
     ...over
   }
 }

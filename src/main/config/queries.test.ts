@@ -23,4 +23,13 @@ describe('consultas da config', () => {
     expect(projectById(config, 'c')?.name).toBe('c')
     expect(projectById(config, 'zz')).toBeNull()
   })
+
+  it('automações: projeto arquivado fica de fora', () => {
+    const config: OrkioConfig = {
+      ...emptyConfig(),
+      projects: [project('a', true), { ...project('d', true), archived: true }],
+      boards: { a: {} as never, d: {} as never }
+    }
+    expect(automationProjectIds(config)).toEqual(['a'])
+  })
 })

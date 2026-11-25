@@ -6,6 +6,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { TaskSection } from '../../../../shared/overview'
+import type { PanelTab } from './panel-tab'
 import type { AgentBadge } from '../../../../shared/agent'
 import type { ClaudeDiff, RunEventMessage } from '../../../../shared/agent-run'
 import type { BacklogTaskDocument, BacklogTaskInfo } from '../../../../shared/alva'
@@ -73,6 +74,9 @@ export interface TaskViewInput {
   focusSection: TaskSection | null
   /** Fase 2: abre a aba Terminal da tarefa. */
   openTerminal?: () => void
+  /** Sessão do Claude Code escolhida na lista "Sessões" (`null` = a mais recente). */
+  session: string | null
+  selectSession(session: string | null): void
 }
 
 export interface TaskView extends TaskViewInput {
@@ -113,6 +117,8 @@ export interface TaskView extends TaskViewInput {
   setDraft: ((draft: ComposerDraft | null) => void) | null
   /** O campo usou (mandou ou cancelou) o rascunho. */
   clearDraft(): void
+  /** Abre uma aba do painel ao lado (o medidor de contexto do campo abre "Contexto"). */
+  showPanel: ((tab: PanelTab) => void) | null
 }
 
 /** Evento de execução que muda o que a tarefa mostra além da conversa (histórico, spec, diff). */
@@ -305,7 +311,9 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
     focusComposer,
     draft,
     setDraft: canFork ? setDraft : null,
-    clearDraft
+    clearDraft,
+    // O painel ao lado é da tela (TaskPanel), que preenche ao montar o contexto.
+    showPanel: null
   }
 }
 

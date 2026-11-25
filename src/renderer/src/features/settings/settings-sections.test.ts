@@ -16,7 +16,7 @@ describe('settings-sections', () => {
       'app'
     ])
     const withProject = visibleSettingsGroups('Acme', '')
-    expect(withProject.find((g) => g.id === 'project')?.title).toBe('Projeto · Acme')
+    expect(withProject.find((g) => g.id === 'project')?.title).toBe('Por projeto')
   })
 
   it('busca por título e palavra-chave, sem acento nem caixa', () => {

@@ -1,6 +1,7 @@
 import { FLOW_END_OPTIONS } from '../../../../shared/flow-final'
 import { useId, useMemo, useState } from 'react'
 import { useProjectActivity } from '../overview/useProjectActivity'
+import { flowPurpose } from './flow-purpose'
 import { useProjectFlows } from './useProjectFlows'
 import { useCatalog } from '../claude/useCatalog'
 import { FlowDetail } from './FlowDetail'
@@ -44,6 +45,7 @@ import { ArrowDownIcon, ArrowUpIcon, PlusIcon, TrashIcon } from '../../component
 import { GATE_SHOW_TEXT, stepSummary } from './step-text'
 import { ipcResult } from '../../lib/ipc'
 import { useBoard } from '../board/useBoard'
+import { SURFACE } from '../../components/surface'
 
 function Chip({
   tone = 'neutral',
@@ -203,30 +205,35 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
   return (
     <section role="region" aria-label="Fluxos do projeto" className="flex flex-col gap-[18px]">
       <p className="text-xs text-muted-foreground">
-        Ligue um fluxo a uma coluna em Etapas e automações (“Fluxo desta coluna”). O ajuste de push
-        fica lá também, em Entrega.
+        Um fluxo roda sozinho numa tarefa. Ligue cada um a uma coluna em Colunas (“Fluxo desta
+        coluna”); o ajuste de push fica em Entrega.
       </p>
 
       {flows.length === 0 ? (
         <PageState
           kind="empty"
           title="Nenhum fluxo ainda"
-          description="Um fluxo roda sozinho numa tarefa: comandos do Claude Code, suas aprovações e ações do Orkio, em ordem. Comece do zero ou use um dos Modelos do alva-flow, mais abaixo."
+          description="Um fluxo roda sozinho numa tarefa: comandos do Claude Code, suas aprovações e ações do Orkio, em ordem. Comece do zero ou crie os modelos na aba alva-flow."
           action={{ label: 'Novo fluxo', onClick: createFlow }}
         />
       ) : (
-        <div className="flex items-start gap-5">
-          <div className="flex w-60 shrink-0 flex-col gap-2">
+        <div className="flex flex-col gap-4">
+          {/* Os fluxos em abas (rolam de lado quando são muitos) e o "Novo fluxo" no fim. */}
+          <div className="flex items-center gap-2 border-b border-border-soft">
             <ul
               aria-label="Fluxos do projeto"
-              className="overflow-hidden rounded-xl border border-border-soft bg-card"
+              onWheel={(e) => {
+                // A roda do mouse anda de lado (a barra fica escondida).
+                if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) e.currentTarget.scrollLeft += e.deltaY
+              }}
+              className="scroll-x-clean -mb-px flex min-w-0 flex-1 items-end gap-1 pr-8"
             >
               {flows.map((f) => {
                 const errors =
                   issuesByFlow.get(f.id)?.filter((i) => i.level === 'error').length ?? 0
                 const isSelected = f.id === selected
                 return (
-                  <li key={f.id} className="border-b border-border-soft last:border-b-0">
+                  <li key={f.id} className="shrink-0">
                     <button
                       type="button"
                       aria-current={isSelected ? 'true' : undefined}
@@ -235,17 +242,15 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
                         setEditingId(null)
                       }}
                       className={cn(
-                        'flex w-full items-center gap-2 px-3 py-2.5 text-left outline-none hover:bg-muted focus-visible:bg-muted',
-                        isSelected && 'bg-muted'
+                        'flex items-center gap-2 border-b-2 px-3 py-2 text-left text-sm outline-none transition-colors focus-visible:bg-muted/60',
+                        isSelected
+                          ? 'border-brand text-foreground'
+                          : 'border-transparent text-muted-foreground hover:text-foreground'
                       )}
                     >
-                      <span className="flex min-w-0 flex-1 flex-col">
-                        <span className={cn('truncate text-sm', isSelected && 'font-medium')}>
-                          {f.name || 'Sem nome'}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {plural(f.steps.length, 'passo', 'passos')}
-                        </span>
+                      <span className="whitespace-nowrap">{f.name || 'Sem nome'}</span>
+                      <span className="rounded-full bg-muted px-1.5 text-2xs text-subtle-foreground tabular-nums">
+                        {f.steps.length}
                       </span>
                       {errors > 0 && <Chip tone="danger">{plural(errors, 'erro', 'erros')}</Chip>}
                     </button>
@@ -253,13 +258,43 @@ export function TaskFlowsPage({ projectId }: { projectId: string }): React.JSX.E
                 )
               })}
             </ul>
-            <Button variant="outline" onClick={createFlow}>
+            <Button size="sm" variant="ghost" className="mb-1 shrink-0" onClick={createFlow}>
               <PlusIcon />
               Novo fluxo
             </Button>
           </div>
 
-          <div className="min-w-0 flex-1">
+          {flow && editingId !== flow.id && (
+            <div className="flex flex-col gap-2 rounded-xl border border-border-soft bg-card p-4">
+              <span className="label-caps">O que faz</span>
+              <p className="text-sm text-foreground" data-testid="flow-purpose">
+                {flowPurpose(flow)}
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5 pt-1 text-2xs">
+                <span className="rounded-full border border-border-soft px-2 py-0.5 text-muted-foreground">
+                  {plural(flow.steps.length, 'passo', 'passos')}
+                </span>
+                {project.bindings
+                  .filter((b) => b.flowId === flow.id && b.enabled)
+                  .map((b) => (
+                    <span
+                      key={b.stageId}
+                      className="rounded-full border border-brand/30 bg-brand-tint/50 px-2 py-0.5 text-foreground"
+                    >
+                      {b.mode === 'on_enter' ? 'Ao entrar em' : 'Botão em'}{' '}
+                      {stageNames[b.stageId] ?? 'coluna removida'}
+                    </span>
+                  ))}
+                {(flow.tags ?? []).includes('alva') && (
+                  <span className="rounded-full border border-border-soft px-2 py-0.5 font-mono text-muted-foreground">
+                    alva-flow
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="min-w-0">
             {flow && editingId !== flow.id ? (
               <FlowDetail
                 flow={flow}
@@ -375,7 +410,7 @@ function FlowEditor({
         <Button variant="outline" onClick={onDone}>
           Ver em frase
         </Button>
-        <Button variant="ghost" onClick={onRemove}>
+        <Button variant="danger" onClick={onRemove}>
           <TrashIcon />
           Remover fluxo
         </Button>
@@ -415,10 +450,7 @@ function FlowEditor({
             Nenhum passo ainda. Use “Adicionar passo”.
           </p>
         ) : (
-          <ul
-            aria-label="Passos do fluxo"
-            className="overflow-hidden rounded-xl border border-border-soft bg-card"
-          >
+          <ul aria-label="Passos do fluxo" className={SURFACE.list}>
             {flow.steps.map((s, i) => {
               const problems = problemsOf(s.id)
               const isSelected = i === index
@@ -488,7 +520,7 @@ function FlowEditor({
             </Button>
             <Button
               size="icon-sm"
-              variant="ghost"
+              variant="danger"
               aria-label="Remover passo"
               onClick={() => {
                 onChange({ ...flow, steps: flow.steps.filter((_, i) => i !== index) })
@@ -936,7 +968,7 @@ function BranchForm({
           {rows.length > 1 && (
             <Button
               size="icon-sm"
-              variant="ghost"
+              variant="danger"
               aria-label={`Remover condição ${i + 1}`}
               onClick={() => setRows(rows.filter((_, k) => k !== i))}
             >

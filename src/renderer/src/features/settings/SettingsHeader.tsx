@@ -7,14 +7,20 @@ import { cn } from '@/lib/utils'
  */
 export function ScopeNote({
   scope,
+  picker,
   className
 }: {
   scope: string
+  /** Telas por projeto: o seletor do projeto no lugar do nome (não muda o projeto atual). */
+  picker?: React.ReactNode
   className?: string
 }): React.JSX.Element {
   return (
-    <p data-testid="settings-scope" className={cn('text-xs text-subtle-foreground', className)}>
-      Vale para: <span className="text-muted-foreground">{scope}</span>
-    </p>
+    <div
+      data-testid="settings-scope"
+      className={cn('flex items-center gap-2 text-xs text-subtle-foreground', className)}
+    >
+      Vale para: {picker ?? <span className="text-muted-foreground">{scope}</span>}
+    </div>
   )
 }

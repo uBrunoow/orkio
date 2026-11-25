@@ -102,6 +102,11 @@ export interface RunRequest {
   timeoutMin: number | null
   /** Tipo da branch nova, se ela ainda não existe. */
   branchKind?: BranchKind
+  /**
+   * Sidechat: conversa ao lado, só de leitura. Roda junto da sessão principal (não conta na
+   * "uma execução por tarefa") e nunca vira a sessão que a tarefa e os fluxos continuam.
+   */
+  side?: boolean
 }
 
 export type GithubRead = { mode: 'read'; target: DeliveryTarget } | null
@@ -127,6 +132,8 @@ export interface RunSpec {
    * autonomia dele.
    */
   askEdits?: boolean
+  /** Sidechat (ver `RunRequest.side`). */
+  side?: boolean
 }
 
 /** Modo e comando como o histórico guarda (`agent_runs.mode/command/input_text`). */

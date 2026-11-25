@@ -154,6 +154,13 @@ export class TerminalService {
     return this.deps.spawnPty !== null
   }
 
+  /** Todos os terminais (tela Terminais), do mais antigo ao mais novo. */
+  all(): TerminalView[] {
+    return [...this.live.values()]
+      .map((t) => ({ ...t.view }))
+      .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+  }
+
   list(taskId: string): TerminalView[] {
     return [...this.live.values()]
       .filter((t) => t.view.taskId === taskId)

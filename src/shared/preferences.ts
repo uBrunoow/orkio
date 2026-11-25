@@ -6,7 +6,7 @@ import { isEffort, isModelName, type Effort } from './agent-runtime'
 import { isRecord } from './guards'
 
 /** Como o Claude Code trabalha nas execuções sem agente (os agentes têm a própria autonomia). */
-export const DEFAULT_AUTONOMIES = ['edits', 'ask'] as const
+export const DEFAULT_AUTONOMIES = ['edits', 'ask', 'read_only'] as const
 export type DefaultAutonomy = (typeof DEFAULT_AUTONOMIES)[number]
 
 /** Atalho global para trazer o Orkio para a frente (lista fechada: nada de acelerador livre). */
@@ -58,7 +58,9 @@ export function parsePreferences(value: unknown): AppPreferences {
       ].slice(0, 200)
     : []
   return {
-    autonomy: v['autonomy'] === 'ask' ? 'ask' : 'edits',
+    autonomy: (DEFAULT_AUTONOMIES as readonly unknown[]).includes(v['autonomy'])
+      ? (v['autonomy'] as DefaultAutonomy)
+      : 'edits',
     model: isModelName(v['model']) && v['model'] !== 'default' ? v['model'] : null,
     effort: isEffort(v['effort']) ? v['effort'] : null,
     notifications: {

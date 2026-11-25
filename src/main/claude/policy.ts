@@ -87,11 +87,14 @@ export function isShellWait(cmd: { name: string; args: readonly string[] }): boo
   const { name, args } = cmd
   if (name === 'gh') {
     if (args[0] === 'run' && args[1] === 'watch') return true
-    if (args[0] === 'pr' && args[1] === 'checks') return args.some((a) => a === '--watch' || a.startsWith('--watch='))
+    if (args[0] === 'pr' && args[1] === 'checks')
+      return args.some((a) => a === '--watch' || a.startsWith('--watch='))
     return false
   }
   if (name === 'tail') {
-    return args.some((a) => a === '--follow' || a.startsWith('--follow=') || /^-[a-zA-Z]*[fF]/.test(a))
+    return args.some(
+      (a) => a === '--follow' || a.startsWith('--follow=') || /^-[a-zA-Z]*[fF]/.test(a)
+    )
   }
   if (name === 'watch') return true
   if (name === 'sleep') {

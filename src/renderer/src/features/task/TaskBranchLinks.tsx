@@ -77,7 +77,7 @@ export function TaskBranchLinks({
               </div>
               <Button
                 size="xs"
-                variant="ghost"
+                variant="danger"
                 aria-label={`Desvincular ${l.branch}`}
                 disabled={busy}
                 onClick={() =>

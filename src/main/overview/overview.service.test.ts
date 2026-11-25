@@ -43,7 +43,8 @@ function project(id: string, name: string): ProjectView {
     local: null,
     health: { state: 'ok' },
     notices: [],
-    notionProject: { id: `n-${id}`, name }
+    notionProject: { id: `n-${id}`, name },
+    archived: false
   }
 }
 

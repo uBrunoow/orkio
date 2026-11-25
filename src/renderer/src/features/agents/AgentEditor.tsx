@@ -20,6 +20,9 @@ import {
 } from '../../../../shared/agent'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
+import { DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { Alert } from '../../components/Alert'
+import { AgentsIcon } from '../../components/icons'
 import {
   CheckboxField,
   Field,
@@ -37,6 +40,7 @@ import { agentFill } from './AgentAvatar'
 import { AgentCardPreview } from './AgentCardFace'
 import { MultiSelectField } from './MultiSelectField'
 import { RuntimePicker, useSupportsEffort } from '../claude/RuntimePicker'
+import { SURFACE } from '../../components/surface'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',
@@ -117,8 +121,17 @@ export function AgentEditor({
   busy,
   onChange,
   onCancel,
-  onSave
+  onSave,
+  initialAdvanced = false,
+  bare = false,
+  error = null
 }: {
+  /** Dentro de um modal: sem moldura, título do diálogo e botões à direita. */
+  bare?: boolean
+  /** Erro ao salvar, mostrado junto dos botões (no modal, a página fica atrás). */
+  error?: string | null
+  /** Abre já no modo Avançado (a página do agente pediu ferramentas, permissões ou limites). */
+  initialAdvanced?: boolean
   editing: Editing
   state: AgentsState | null
   commands: string[]
@@ -133,7 +146,7 @@ export function AgentEditor({
   const set = (patch: Partial<AgentProfile>): void =>
     onChange({ ...editing, draft: { ...d, ...patch } })
   const isNew = editing.mode === 'new'
-  const [advanced, setAdvanced] = useState(false)
+  const [advanced, setAdvanced] = useState(initialAdvanced)
   const [idTouched, setIdTouched] = useState(false)
   // "Começar de" trocou instruções que você já tinha escrito: dá para desfazer.
   const [undo, setUndo] = useState<AgentProfile | null>(null)
@@ -168,13 +181,26 @@ export function AgentEditor({
   }
 
   return (
-    <div
-      role="form"
-      aria-label={title}
-      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-medium">{title}</h2>
+    <div role="form" aria-label={title} className={bare ? 'flex flex-col gap-5' : SURFACE.section}>
+      <div className={cn('flex flex-wrap items-center justify-between gap-2', bare && 'pr-8')}>
+        {bare ? (
+          <div className="flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="grid size-9 shrink-0 place-items-center rounded-lg border border-border-soft bg-muted text-muted-foreground"
+            >
+              <AgentsIcon className="size-[18px]" />
+            </span>
+            <div className="flex flex-col">
+              <DialogTitle className="text-base font-medium">{title}</DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                Um colega de IA que pega tarefas do quadro.
+              </DialogDescription>
+            </div>
+          </div>
+        ) : (
+          <h2 className="text-base font-medium">{title}</h2>
+        )}
         <SegmentedControl
           label="Modo do formulário"
           size="sm"
@@ -446,7 +472,8 @@ export function AgentEditor({
           ))}
         </ul>
       )}
-      <div className="flex gap-2">
+      {error && <Alert tone="danger">{error}</Alert>}
+      <div className={cn('flex gap-2', bare && 'flex-row-reverse justify-start')}>
         <Button disabled={busy || errors.length > 0} onClick={() => onSave(editing)}>
           {busy && <Spinner />}
           Salvar agente

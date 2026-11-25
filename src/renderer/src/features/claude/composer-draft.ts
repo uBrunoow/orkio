@@ -13,6 +13,8 @@ export interface ComposerDraft {
   fork: SessionFork
   /** Começo do ponto escolhido, para a faixa acima do campo. */
   excerpt: string
+  /** "Tentar de novo": manda o texto assim que o campo o pega (sem esperar o Enter). */
+  send?: boolean
 }
 
 export function draftExcerpt(text: string, max = 80): string {

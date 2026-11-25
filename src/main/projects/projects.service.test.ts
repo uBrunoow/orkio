@@ -637,6 +637,15 @@ describe('ProjectsService', () => {
       expect(await service.remove(id)).toEqual({ ok: false })
     })
 
+    it('arquivar guarda o projeto e desarquivar volta ao formato de antes', async () => {
+      const { service, id } = await withProject()
+      expect(await service.setArchived(id, true)).toEqual({ ok: true })
+      expect((await service.list()).projects[0]!.archived).toBe(true)
+      expect(await service.setArchived(id, false)).toEqual({ ok: true })
+      expect((await service.list()).projects[0]!.archived).toBe(false)
+      expect(await service.setArchived('nao-existe', true)).toEqual({ ok: false })
+    })
+
     it('mudança de branch vira evento com o id do projeto', async () => {
       const { service, id } = await withProject()
       await service.watch()

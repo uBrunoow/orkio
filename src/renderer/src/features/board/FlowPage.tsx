@@ -7,6 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -18,7 +19,7 @@ import {
   TextField
 } from '@/components/form'
 import { cn } from '@/lib/utils'
-import { StatusToken } from '../../components/StatusToken'
+import { StatusBadge, StatusToken } from '../../components/StatusToken'
 import {
   EVENT_KINDS,
   EVENT_META,
@@ -46,12 +47,21 @@ import { SaveBar } from '../../components/SaveBar'
 import { formatDateTime, plural } from '../../lib/format'
 import { DeliverySection } from '../task-flows/DeliverySection'
 import {
+  ApprovedIcon,
   ArrowDownIcon,
   ArrowUpIcon,
   BackIcon,
+  BellIcon,
+  CommentIcon,
+  GitBranchIcon,
+  GitMergeIcon,
   MoreIcon,
   PlusIcon,
-  TrashIcon
+  PullRequestClosedIcon,
+  PullRequestIcon,
+  ReviewRequestIcon,
+  TrashIcon,
+  type SvgIcon
 } from '../../components/icons'
 import { useProjectActivity } from '../overview/useProjectActivity'
 import { useProjectFlows } from '../task-flows/useProjectFlows'
@@ -68,16 +78,32 @@ import {
 import type { NotionColor } from '../../../../shared/notion'
 import { stageDotClass } from './stage-dot'
 import { IPC_FAILURE_MESSAGE, ipcCall, ipcResult } from '../../lib/ipc'
+import { SURFACE } from '../../components/surface'
 
 const BOARD_TABS: { id: BoardSettingsTab; label: string }[] = [
   { id: 'columns', label: 'Colunas' },
   { id: 'rules', label: 'Automações' },
+  { id: 'notifications', label: 'Notificações' },
   { id: 'flows', label: 'Fluxos' },
+  { id: 'alva', label: 'alva-flow' },
   { id: 'delivery', label: 'Entrega' }
 ]
 
 function firedLabel(n: number): string {
   return n === 0 ? 'não disparou esta semana' : `disparou ${n}× esta semana`
+}
+
+/** Ícone do gatilho da automação (branch, PR, revisão...), no quadradinho da linha. */
+const TRIGGER_ICON: Record<EventKind, SvgIcon> = {
+  'branch.created': GitBranchIcon,
+  'pr.opened': PullRequestIcon,
+  'pr.ready_for_review': PullRequestIcon,
+  'pr.review_requested': ReviewRequestIcon,
+  'pr.changes_requested': CommentIcon,
+  'pr.review_comments_unresolved': CommentIcon,
+  'pr.approved': ApprovedIcon,
+  'pr.merged': GitMergeIcon,
+  'pr.closed_unmerged': PullRequestClosedIcon
 }
 
 const COLOR_LABELS: Record<NotionColor, string> = {
@@ -105,6 +131,31 @@ function StageDot({ color }: { color: NotionColor | undefined }): React.JSX.Elem
   )
 }
 
+function TriggerTile({
+  trigger,
+  enabled,
+  notify
+}: {
+  trigger: EventKind
+  enabled: boolean
+  notify: boolean
+}): React.JSX.Element {
+  const Icon = notify ? BellIcon : TRIGGER_ICON[trigger]
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        'grid size-9 shrink-0 place-items-center rounded-lg border',
+        enabled
+          ? 'border-brand/30 bg-brand-tint/50 text-brand'
+          : 'border-border-soft bg-muted text-subtle-foreground'
+      )}
+    >
+      <Icon className="size-[18px]" />
+    </span>
+  )
+}
+
 function BlockHead({
   title,
   level = 2,
@@ -129,7 +180,7 @@ function BlockHead({
 }
 
 const CARD = 'rounded-xl border border-border-soft bg-card'
-const ROWS = 'overflow-hidden rounded-xl border border-border-soft bg-card'
+const ROWS = SURFACE.list
 const ROW = 'border-b border-border-soft last:border-b-0'
 
 /**
@@ -209,7 +260,8 @@ export function FlowPage({
   onOpenTaskFlows,
   tab,
   onTabChange,
-  flowsSlot
+  flowsSlot,
+  alvaSlot
 }: {
   view: BoardView
   header(action: React.ReactNode): React.ReactNode
@@ -219,6 +271,8 @@ export function FlowPage({
   tab: BoardSettingsTab
   onTabChange(tab: BoardSettingsTab): void
   flowsSlot: React.ReactNode
+  /** Aba alva-flow: pré-checagem e modelos do plugin. */
+  alvaSlot: React.ReactNode
 }): React.JSX.Element {
   const [draft, setDraft] = useState<FlowDraft>(() => initialDraft(view))
   const [editing, setEditing] = useState<RuleEditing | null>(null)
@@ -230,7 +284,10 @@ export function FlowPage({
   const projectFlows = useProjectFlows(view.projectId)
   const taskFlows = projectFlows.value
   const [selectedStage, setSelectedStage] = useState<string | null>(null)
+  /** A coluna abre num modal (clique na linha); fechado, só a tabela. */
+  const [stageOpen, setStageOpen] = useState(false)
   const [showAllEvents, setShowAllEvents] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const [viewingRule, setViewingRule] = useState<string | null>(null)
   const automationActivity = useProjectActivity(view.projectId, 'automation')
 
@@ -342,6 +399,7 @@ export function FlowPage({
       return { ...d, stages }
     })
     setSelectedStage(id)
+    setStageOpen(true)
     setEditing(null)
   }
   const removeStage = (id: string): void =>
@@ -460,13 +518,18 @@ export function FlowPage({
         data-selected={selected || undefined}
         className={cn(
           ROW,
-          'flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-muted/40 data-[selected]:bg-muted/60'
+          'flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40 data-[selected]:bg-muted/60'
         )}
       >
+        <TriggerTile
+          trigger={rule.trigger}
+          enabled={rule.enabled}
+          notify={rule.action.type === 'notify'}
+        />
         <button
           type="button"
           aria-current={selected || undefined}
-          className="flex min-w-0 flex-1 flex-col gap-0.5 self-stretch rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+          className="flex min-w-0 flex-1 flex-col gap-1 self-stretch rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
           onClick={() => {
             setEditing(null)
             setViewingRule(rule.id)
@@ -485,9 +548,17 @@ export function FlowPage({
           >
             <RuleSentence rule={rule} stages={draft.stages} />
           </span>
-          <span className="font-mono text-2xs text-subtle-foreground">
-            {i + 1}ª na ordem · {EVENT_META[rule.trigger].label} ·{' '}
-            {firedLabel(view.ruleCountsWeek[rule.id] ?? 0)}
+          <span className="flex flex-wrap items-center gap-1.5 text-2xs text-subtle-foreground">
+            <span className="rounded-md border border-border-soft px-1.5 font-mono tabular-nums">
+              {i + 1}ª na ordem
+            </span>
+            <span>{EVENT_META[rule.trigger].label}</span>
+            <span aria-hidden="true">·</span>
+            {(view.ruleCountsWeek[rule.id] ?? 0) > 0 ? (
+              <StatusBadge label={firedLabel(view.ruleCountsWeek[rule.id] ?? 0)} tone="success" />
+            ) : (
+              <span>{firedLabel(0)}</span>
+            )}
           </span>
         </button>
         <Switch
@@ -532,21 +603,23 @@ export function FlowPage({
     )
   }
 
+  const applyRule = (rule: AutomationRule): void => {
+    if (!editing) return
+    const named = { ...rule, name: rule.name.trim() || EVENT_META[rule.trigger].label }
+    update((d) => ({
+      ...d,
+      rules: editing.isNew
+        ? [...d.rules, named]
+        : d.rules.map((r) => (r.id === named.id ? named : r))
+    }))
+    setEditing(null)
+  }
   const ruleForm = editing && (
     <RuleForm
       editing={editing}
       stages={draft.stages}
       onCancel={() => setEditing(null)}
-      onApply={(rule) => {
-        const named = { ...rule, name: rule.name.trim() || EVENT_META[rule.trigger].label }
-        update((d) => ({
-          ...d,
-          rules: editing.isNew
-            ? [...d.rules, named]
-            : d.rules.map((r) => (r.id === named.id ? named : r))
-        }))
-        setEditing(null)
-      }}
+      onApply={applyRule}
     />
   )
 
@@ -574,7 +647,6 @@ export function FlowPage({
 
   const history = (
     <section aria-label="Alterações do fluxo" className="flex flex-col gap-3">
-      <BlockHead title="Alterações salvas" />
       {events.length === 0 ? (
         <p className="text-xs text-muted-foreground">Nenhuma alteração registrada.</p>
       ) : (
@@ -613,12 +685,32 @@ export function FlowPage({
               {ORKIO_STAGE_PROPERTY_NAME} e Bloqueada…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+              Histórico de alterações
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={restoreDefault}>Restaurar padrão</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void doExport()}>Exportar JSON</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void doImport()}>Importar JSON</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+
+      <p className="-mt-2 text-xs text-muted-foreground tabular-nums" data-testid="flow-summary">
+        {plural(draft.stages.length, 'coluna', 'colunas')}
+        <span aria-hidden="true" className="px-1.5 text-subtle-foreground">
+          ·
+        </span>
+        {plural(moveRules.length, 'automação', 'automações')} (
+        {moveRules.filter((r) => r.enabled).length} ligadas)
+        <span aria-hidden="true" className="px-1.5 text-subtle-foreground">
+          ·
+        </span>
+        {(() => {
+          const fired = Object.values(view.ruleCountsWeek).reduce((a, b) => a + b, 0)
+          return fired === 0 ? 'nenhuma disparou esta semana' : `${fired}× esta semana`
+        })()}
+      </p>
 
       {message && <Alert tone={message.tone}>{message.text}</Alert>}
 
@@ -629,7 +721,7 @@ export function FlowPage({
       >
         <TabsList
           variant="line"
-          className="w-full justify-start gap-5 rounded-none border-b border-border-soft p-0 group-data-[orientation=horizontal]/tabs:h-auto"
+          className="scroll-x-clean w-full justify-start gap-5 rounded-none border-b border-border-soft p-0 pr-8 group-data-[orientation=horizontal]/tabs:h-auto"
         >
           {BOARD_TABS.map((t) => (
             <TabsTrigger
@@ -638,11 +730,11 @@ export function FlowPage({
               className="h-auto flex-none rounded-none border-0 px-0.5 pt-0 pb-2 text-sm font-normal text-muted-foreground after:bg-brand hover:text-foreground data-[state=active]:text-foreground group-data-[orientation=horizontal]/tabs:after:bottom-[-1px]"
             >
               {t.label}
-              {t.id === 'rules' && (
+              {(t.id === 'rules' || t.id === 'notifications') && (
                 <>
                   {' '}
                   <span className="font-mono text-2xs text-subtle-foreground tabular">
-                    {moveRules.length}
+                    {t.id === 'rules' ? moveRules.length : notifyRules.length}
                   </span>
                 </>
               )}
@@ -654,7 +746,7 @@ export function FlowPage({
           <section aria-label="Etapas" className={ROWS}>
             <div
               aria-hidden="true"
-              className="grid grid-cols-[14px_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_56px] gap-3 border-b border-border-soft px-4 py-2 text-2xs tracking-[0.06em] text-subtle-foreground uppercase"
+              className="grid grid-cols-[14px_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_56px] gap-3 border-b border-border-soft px-4 py-2 label-caps"
             >
               <span />
               <span>Coluna</span>
@@ -677,6 +769,7 @@ export function FlowPage({
                       aria-current={selected || undefined}
                       onClick={() => {
                         setSelectedStage(st.id)
+                        setStageOpen(true)
                         setEditing(null)
                         setViewingRule(null)
                       }}
@@ -728,176 +821,203 @@ export function FlowPage({
             </div>
           </section>
 
-          <div className="flex flex-col">
-            <div data-testid="rule-detail-anchor" />
-            {shownRule ? (
-              <div className="flex flex-col gap-2">
-                <div>
-                  <Button variant="ghost" size="sm" onClick={() => setViewingRule(null)}>
-                    <BackIcon />
-                    {stage ? `Voltar para a etapa ${stageLabel}` : 'Voltar para as etapas'}
-                  </Button>
+          <Dialog
+            open={stageOpen && stage !== null}
+            onOpenChange={(o) => {
+              setStageOpen(o)
+              if (!o) {
+                setViewingRule(null)
+                setEditing(null)
+              }
+            }}
+          >
+            <DialogContent className="max-h-[88vh] gap-4 overflow-y-auto sm:max-w-2xl">
+              <DialogTitle className="sr-only">
+                {shownRule ? `Automação ${shownRule.name}` : `Etapa ${stageLabel}`}
+              </DialogTitle>
+              <DialogDescription className="sr-only">
+                Mudanças ficam no rascunho até Salvar fluxo.
+              </DialogDescription>
+              <div data-testid="rule-detail-anchor" />
+              {shownRule ? (
+                <div className="flex flex-col gap-2">
+                  <div>
+                    <Button variant="ghost" size="sm" onClick={() => setViewingRule(null)}>
+                      <BackIcon />
+                      {stage ? `Voltar para a etapa ${stageLabel}` : 'Voltar para as etapas'}
+                    </Button>
+                  </div>
+                  <RuleDetail
+                    rule={shownRule}
+                    index={ruleIndex(shownRule.id)}
+                    total={draft.rules.length}
+                    stages={draft.stages}
+                    activity={automationActivity}
+                    onEdit={() => editRule(shownRule)}
+                    onToggle={() => toggleRule(shownRule.id)}
+                  />
                 </div>
-                <RuleDetail
-                  rule={shownRule}
-                  index={ruleIndex(shownRule.id)}
-                  total={draft.rules.length}
-                  stages={draft.stages}
-                  activity={automationActivity}
-                  onEdit={() => editRule(shownRule)}
-                  onToggle={() => toggleRule(shownRule.id)}
-                />
-              </div>
-            ) : (
-              stage && (
-                <section
-                  aria-label={`Etapa ${stageLabel}`}
-                  className={cn(CARD, 'flex flex-col gap-5 p-4')}
-                >
-                  <div className="flex flex-wrap items-center gap-1">
-                    <StageDot color={stage.color} />
-                    <p className="ml-1.5 min-w-0 flex-1 truncate text-sm font-medium">
-                      {stageLabel}
-                    </p>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Mover ${stageLabel} para a esquerda`}
-                      disabled={stageIndex === 0}
-                      onClick={() => stageIndex > 0 && moveStage(stageIndex, -1)}
-                    >
-                      <ArrowUpIcon />
-                    </Button>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Mover ${stageLabel} para a direita`}
-                      disabled={stageIndex === draft.stages.length - 1}
-                      onClick={() =>
-                        stageIndex < draft.stages.length - 1 && moveStage(stageIndex, 1)
-                      }
-                    >
-                      <ArrowDownIcon />
-                    </Button>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Adicionar etapa depois de ${stageLabel}`}
-                      onClick={() => addStageAfter(stageIndex)}
-                    >
-                      <PlusIcon />
-                    </Button>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Remover ${stageLabel}`}
-                      onClick={() => removeStage(stage.id)}
-                    >
-                      <TrashIcon />
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-3">
-                    <TextField
-                      label="Nome"
-                      value={stage.name}
-                      onChange={(value) => updateStage(stage.id, { name: value })}
-                    />
-                    <SelectField
-                      label="Status no Notion"
-                      options={options.map((o) => ({ value: o.id, label: o.name }))}
-                      placeholder="Escolha a opção"
-                      {...(stage.notionStatusId &&
-                      options.some((o) => o.id === stage.notionStatusId)
-                        ? { value: stage.notionStatusId }
-                        : {
-                            error: stage.missingStatusName
-                              ? `“${stage.missingStatusName}” não existe no Notion.`
-                              : 'Escolha uma opção.'
-                          })}
-                      onChange={(value) => setStageStatus(stage.id, value)}
-                    />
-                    <SelectField
-                      label="Cor"
-                      options={FLOW_COLORS.map((c) => ({ value: c, label: COLOR_LABELS[c] }))}
-                      value={stage.color ?? 'default'}
-                      onChange={(value) => updateStage(stage.id, { color: value as NotionColor })}
-                    />
-                  </div>
-
-                  <SelectField
-                    label="Papel da coluna"
-                    description="O que esta coluna é no trabalho, qualquer que seja o nome: regras padrão, fluxos Alva, orquestrador e a lista “A fazer” (sem coluna com esse papel, vale a primeira) usam o papel. Uma coluna por papel."
-                    options={[
-                      { value: NO_ROLE, label: 'Sem papel' },
-                      ...STAGE_ROLES.map((r) => ({ value: r, label: STAGE_ROLE_LABEL[r] }))
-                    ]}
-                    value={stage.role ?? NO_ROLE}
-                    onChange={(value) => setStageRole(stage.id, isStageRole(value) ? value : null)}
-                  />
-
-                  <StageFlowField
-                    flows={taskFlows?.flows ?? null}
-                    binding={draft.bindings?.find((b) => b.stageId === stage.id) ?? null}
-                    onChange={(binding) =>
-                      update((d) => ({
-                        ...d,
-                        bindings: [
-                          ...(d.bindings ?? []).filter((b) => b.stageId !== stage.id),
-                          ...(binding ? [binding] : [])
-                        ]
-                      }))
-                    }
-                    stageId={stage.id}
-                    onOpenTaskFlows={onOpenTaskFlows}
-                  />
-
-                  <div className="flex flex-col gap-2.5">
-                    <BlockHead
-                      level={3}
-                      title="Automações que trazem para cá"
-                      action={
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          aria-label={`Nova automação para ${stageLabel}`}
-                          onClick={() =>
-                            setEditing({
-                              isNew: true,
-                              rule: {
-                                id: newId('rule'),
-                                name: '',
-                                enabled: true,
-                                trigger: 'pr.opened',
-                                conditions: { notBlocked: true },
-                                action: { type: 'move_to_stage', stageId: stage.id }
-                              }
-                            })
-                          }
-                        >
-                          <PlusIcon />
-                          Nova automação
-                        </Button>
-                      }
-                    />
-                    {stageRules.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        Nenhuma automação leva para cá.
+              ) : (
+                stage && (
+                  <section aria-label={`Etapa ${stageLabel}`} className="flex flex-col gap-5">
+                    <div className="flex flex-wrap items-center gap-1 pr-8">
+                      <StageDot color={stage.color} />
+                      <p className="ml-1.5 min-w-0 flex-1 truncate text-base font-medium">
+                        {stageLabel}
                       </p>
-                    ) : (
-                      <ul
-                        aria-label={`Automações para ${stageLabel}`}
-                        className="overflow-hidden rounded-lg border border-border-soft"
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Mover ${stageLabel} para a esquerda`}
+                        disabled={stageIndex === 0}
+                        onClick={() => stageIndex > 0 && moveStage(stageIndex, -1)}
                       >
-                        {stageRules.map(ruleItem)}
-                      </ul>
-                    )}
-                  </div>
+                        <ArrowUpIcon />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Mover ${stageLabel} para a direita`}
+                        disabled={stageIndex === draft.stages.length - 1}
+                        onClick={() =>
+                          stageIndex < draft.stages.length - 1 && moveStage(stageIndex, 1)
+                        }
+                      >
+                        <ArrowDownIcon />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Adicionar etapa depois de ${stageLabel}`}
+                        onClick={() => addStageAfter(stageIndex)}
+                      >
+                        <PlusIcon />
+                      </Button>
+                      <Button
+                        size="icon-sm"
+                        variant="danger"
+                        aria-label={`Remover ${stageLabel}`}
+                        onClick={() => {
+                          removeStage(stage.id)
+                          setStageOpen(false)
+                        }}
+                      >
+                        <TrashIcon />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-1 items-start gap-3 sm:grid-cols-3">
+                      <TextField
+                        label="Nome"
+                        value={stage.name}
+                        onChange={(value) => updateStage(stage.id, { name: value })}
+                      />
+                      <SelectField
+                        label="Status no Notion"
+                        options={options.map((o) => ({ value: o.id, label: o.name }))}
+                        placeholder="Escolha a opção"
+                        {...(stage.notionStatusId &&
+                        options.some((o) => o.id === stage.notionStatusId)
+                          ? { value: stage.notionStatusId }
+                          : {
+                              error: stage.missingStatusName
+                                ? `“${stage.missingStatusName}” não existe no Notion.`
+                                : 'Escolha uma opção.'
+                            })}
+                        onChange={(value) => setStageStatus(stage.id, value)}
+                      />
+                      <SelectField
+                        label="Cor"
+                        options={FLOW_COLORS.map((c) => ({ value: c, label: COLOR_LABELS[c] }))}
+                        value={stage.color ?? 'default'}
+                        onChange={(value) => updateStage(stage.id, { color: value as NotionColor })}
+                      />
+                    </div>
 
-                  {editing && editing.rule.action.type === 'move_to_stage' && ruleForm}
-                </section>
-              )
-            )}
-          </div>
+                    <SelectField
+                      label="Papel da coluna"
+                      description="O que esta coluna é no trabalho, qualquer que seja o nome: regras padrão, fluxos Alva, orquestrador e a lista “A fazer” (sem coluna com esse papel, vale a primeira) usam o papel. Uma coluna por papel."
+                      options={[
+                        { value: NO_ROLE, label: 'Sem papel' },
+                        ...STAGE_ROLES.map((r) => ({ value: r, label: STAGE_ROLE_LABEL[r] }))
+                      ]}
+                      value={stage.role ?? NO_ROLE}
+                      onChange={(value) =>
+                        setStageRole(stage.id, isStageRole(value) ? value : null)
+                      }
+                    />
+
+                    <StageFlowField
+                      flows={taskFlows?.flows ?? null}
+                      binding={draft.bindings?.find((b) => b.stageId === stage.id) ?? null}
+                      onChange={(binding) =>
+                        update((d) => ({
+                          ...d,
+                          bindings: [
+                            ...(d.bindings ?? []).filter((b) => b.stageId !== stage.id),
+                            ...(binding ? [binding] : [])
+                          ]
+                        }))
+                      }
+                      stageId={stage.id}
+                      onOpenTaskFlows={onOpenTaskFlows}
+                    />
+
+                    <div className="flex flex-col gap-2.5">
+                      <BlockHead
+                        level={3}
+                        title="Automações que trazem para cá"
+                        action={
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            aria-label={`Nova automação para ${stageLabel}`}
+                            onClick={() =>
+                              setEditing({
+                                isNew: true,
+                                rule: {
+                                  id: newId('rule'),
+                                  name: '',
+                                  enabled: true,
+                                  trigger: 'pr.opened',
+                                  conditions: { notBlocked: true },
+                                  action: { type: 'move_to_stage', stageId: stage.id }
+                                }
+                              })
+                            }
+                          >
+                            <PlusIcon />
+                            Nova automação
+                          </Button>
+                        }
+                      />
+                      {stageRules.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">
+                          Nenhuma automação leva para cá.
+                        </p>
+                      ) : (
+                        <ul
+                          aria-label={`Automações para ${stageLabel}`}
+                          className="overflow-hidden rounded-lg border border-border-soft"
+                        >
+                          {stageRules.map(ruleItem)}
+                        </ul>
+                      )}
+                    </div>
+
+                    {editing && editing.rule.action.type === 'move_to_stage' && ruleForm}
+                  </section>
+                )
+              )}
+              <div className="flex items-center justify-between gap-3 border-t border-border-soft pt-3">
+                <span className="text-xs text-muted-foreground">
+                  Fica no rascunho até “Salvar fluxo”.
+                </span>
+                <Button size="sm" variant="outline" onClick={() => setStageOpen(false)}>
+                  Pronto
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
           {removedWithTasks.length > 0 && (
             <section
@@ -923,8 +1043,6 @@ export function FlowPage({
               ))}
             </section>
           )}
-
-          {history}
         </TabsContent>
 
         <TabsContent value="rules" className="flex flex-col gap-6">
@@ -964,9 +1082,8 @@ export function FlowPage({
                 {moveRules.map(ruleItem)}
               </ul>
             )}
-            {editing && editing.rule.action.type === 'move_to_stage' && ruleForm}
             <div data-testid="rule-detail-anchor" />
-            {shownRule && (
+            {shownRule && shownRule.action.type === 'move_to_stage' && (
               <RuleDetail
                 rule={shownRule}
                 index={ruleIndex(shownRule.id)}
@@ -979,10 +1096,14 @@ export function FlowPage({
             )}
           </section>
 
+          <Simulator view={view} draft={draft} />
+        </TabsContent>
+
+        <TabsContent value="notifications" className="flex flex-col gap-6">
           <section aria-label="Notificações" className="flex flex-col gap-3">
             <BlockHead
               title="Notificações"
-              description="Avisam no desktop sem mover a tarefa."
+              description="Avisam no desktop quando algo acontece no GitHub, sem mover a tarefa. O sino do app continua com tudo."
               action={
                 <Button
                   size="sm"
@@ -1007,28 +1128,83 @@ export function FlowPage({
               }
             />
             {notifyRules.length === 0 ? (
-              <p className="text-xs text-muted-foreground">Nenhuma.</p>
+              <p className="rounded-xl border border-dashed border-border-soft px-4 py-6 text-center text-xs text-muted-foreground">
+                Nenhuma notificação. Crie uma para ser avisado, por exemplo, quando a PR for
+                aprovada.
+              </p>
             ) : (
               <ul aria-label="Automações de notificação" className={ROWS}>
                 {notifyRules.map(ruleItem)}
               </ul>
             )}
-            {editing && editing.rule.action.type === 'notify' && ruleForm}
+            {shownRule && shownRule.action.type === 'notify' && (
+              <RuleDetail
+                rule={shownRule}
+                index={ruleIndex(shownRule.id)}
+                total={draft.rules.length}
+                stages={draft.stages}
+                activity={automationActivity}
+                onEdit={() => editRule(shownRule)}
+                onToggle={() => toggleRule(shownRule.id)}
+              />
+            )}
           </section>
-
-          <Simulator view={view} draft={draft} />
-
-          {history}
         </TabsContent>
 
         <TabsContent value="flows" className="flex flex-col gap-5">
           {flowsSlot}
         </TabsContent>
 
+        <TabsContent value="alva" className="flex flex-col gap-5">
+          {alvaSlot}
+        </TabsContent>
+
         <TabsContent value="delivery" className="flex flex-col gap-5">
           <DeliverySection projectId={view.projectId} />
         </TabsContent>
       </Tabs>
+
+      {/* Nova automação/notificação (e editar) pelas abas: modal. Na coluna, fica no modal dela. */}
+      <Dialog
+        open={editing !== null && !stageOpen}
+        onOpenChange={(o) => {
+          if (!o) setEditing(null)
+        }}
+      >
+        <DialogContent className="max-h-[88vh] gap-4 overflow-y-auto sm:max-w-2xl">
+          <DialogTitle className="sr-only">
+            {editing?.isNew
+              ? editing.rule.action.type === 'notify'
+                ? 'Nova notificação'
+                : 'Nova automação'
+              : 'Editar automação'}
+          </DialogTitle>
+          <DialogDescription className="sr-only">
+            Fica no rascunho até Salvar fluxo.
+          </DialogDescription>
+          {editing && !stageOpen && (
+            <RuleForm
+              bare
+              editing={editing}
+              stages={draft.stages}
+              onCancel={() => setEditing(null)}
+              onApply={applyRule}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-h-[85vh] gap-4 overflow-y-auto sm:max-w-2xl">
+          <DialogTitle className="text-base font-medium text-foreground">
+            Histórico de alterações
+          </DialogTitle>
+          <DialogDescription className="-mt-2 text-xs text-muted-foreground">
+            Quem mudou colunas, automações e fluxos deste quadro, e quando.
+          </DialogDescription>
+          {history}
+        </DialogContent>
+      </Dialog>
 
       <SaveBar
         label="Validação do fluxo"
@@ -1077,8 +1253,11 @@ function RuleForm({
   editing,
   stages,
   onApply,
-  onCancel
+  onCancel,
+  bare = false
 }: {
+  /** Dentro de um modal: sem a moldura. */
+  bare?: boolean
   editing: RuleEditing
   stages: readonly FlowStageDraft[]
   onApply(rule: AutomationRule): void
@@ -1092,14 +1271,24 @@ function RuleForm({
     (rule.action.type === 'move_to_stage' &&
       !stages.some((s) => s.id === (rule.action as { stageId: string }).stageId)) ||
     (rule.action.type === 'notify' && !rule.action.message.trim())
-  const title = editing.isNew ? 'Nova automação' : 'Editar automação'
+  const notify = editing.rule.action.type === 'notify'
+  const title = editing.isNew
+    ? notify
+      ? 'Nova notificação'
+      : 'Nova automação'
+    : notify
+      ? 'Editar notificação'
+      : 'Editar automação'
 
   return (
     <section
       aria-label={title}
-      className="flex flex-col gap-4 rounded-xl border border-border bg-surface p-4"
+      className={cn(
+        'flex flex-col gap-4',
+        !bare && 'rounded-xl border border-border bg-surface p-4'
+      )}
     >
-      <h3 className="text-sm font-medium">{title}</h3>
+      <h3 className={bare ? 'pr-8 text-base font-medium' : 'text-sm font-medium'}>{title}</h3>
       <SelectField
         label="Quando"
         options={EVENT_KINDS.map((k) => ({

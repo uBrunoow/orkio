@@ -41,6 +41,11 @@ export interface StoredProject {
   updatedAt: string
   /** Página do banco de Projetos do Notion vinculada (1 ↔ 1). */
   notionProject: { id: string; name: string } | null
+  /**
+   * Arquivado (Configurações › Projetos): fica guardado, sem automações, orquestrador nem lugar no
+   * quadro e na lista lateral. Opcional, sem migração: ausente = ativo.
+   */
+  archived?: boolean
 }
 
 export interface OrkioConfig {

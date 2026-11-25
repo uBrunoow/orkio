@@ -304,22 +304,35 @@ export class RunService {
     ]
   }
 
+  /** A tarefa tem execução da sessão principal rodando ou na fila (sidechats não contam). */
   isRunning(taskId: string): boolean {
-    return [...this.active.values(), ...this.queue].some((r) => r.taskId === taskId)
+    return [...this.active.values(), ...this.queue].some((r) => r.taskId === taskId && !r.spec.side)
+  }
+
+  /** Um sidechat da tarefa está rodando ou na fila (um por vez). */
+  isSideRunning(taskId: string): boolean {
+    return [...this.active.values(), ...this.queue].some(
+      (r) => r.taskId === taskId && !!r.spec.side
+    )
   }
 
   /** Inicia (ou enfileira) uma execução. O worktree precisa ter sido preparado antes. */
   async start(spec: RunSpec): Promise<AgentRunView> {
-    if (this.isRunning(spec.task.id)) throw new RunBusyError()
+    if (spec.side ? this.isSideRunning(spec.task.id) : this.isRunning(spec.task.id)) {
+      throw new RunBusyError()
+    }
     const worktree = this.deps.worktrees.get(spec.task.id)
     if (!worktree) throw new Error('Prepare o ambiente da tarefa antes de rodar.')
     const id = this.deps.newId?.() ?? randomUUID()
     const startedAt = this.now().toISOString()
     const resume = spec.session.kind === 'resume'
     const sessionId = spec.session.kind === 'resume' ? spec.session.id : randomUUID()
+    // `fork_json`: de onde a sessão saiu e se é um sidechat (marcado só na primeira execução dela).
+    const forkPoint =
+      spec.session.kind === 'fork' ? { session: spec.session.from, at: spec.session.at } : null
     const fork =
-      spec.session.kind === 'fork'
-        ? JSON.stringify({ session: spec.session.from, at: spec.session.at })
+      forkPoint || spec.side
+        ? JSON.stringify({ ...(forkPoint ?? {}), ...(spec.side ? { side: true } : {}) })
         : null
     const { runtime, agent } = spec
     const record = runInputRecord(spec.input)
@@ -391,8 +404,9 @@ export class RunService {
         if (spec.session.kind === 'fork') {
           this.log(run, {
             kind: 'info',
-            text:
-              spec.session.reason === 'edit'
+            text: spec.side
+              ? 'Sidechat: conversa ao lado da sessão principal, só de leitura. A sessão principal não muda.'
+              : spec.session.reason === 'edit'
                 ? 'Mensagem editada: a conversa voltou até antes dela (os arquivos da pasta de trabalho continuam como estão).'
                 : 'Ramificada de uma resposta anterior: conversa nova a partir dali (os arquivos da pasta de trabalho continuam como estão).'
           })
@@ -572,14 +586,48 @@ export class RunService {
    * Fase 1 roda em sessão própria; quem implementa continua a dele).
    */
   lastSession(taskId: string, excludeAgent?: string): string | null {
+    // Sidechats nunca são a sessão da tarefa: ficam fora (a marca está na 1ª execução deles).
+    const notSide = `AND session_id NOT IN (SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL AND ${SIDE_SQL})`
     const sql = excludeAgent
-      ? 'SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL AND (agent_key IS NULL OR agent_key != ?) ORDER BY started_at DESC LIMIT 1'
-      : 'SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL ORDER BY started_at DESC LIMIT 1'
+      ? `SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL AND (agent_key IS NULL OR agent_key != ?) ${notSide} ORDER BY started_at DESC LIMIT 1`
+      : `SELECT session_id FROM agent_runs WHERE task_page_id = ? AND session_id IS NOT NULL ${notSide} ORDER BY started_at DESC LIMIT 1`
     return (
       this.deps.db.get<{ session_id: string }>(
         sql,
-        ...(excludeAgent ? [taskId, excludeAgent] : [taskId])
+        ...(excludeAgent ? [taskId, excludeAgent, taskId] : [taskId, taskId])
       )?.session_id ?? null
+    )
+  }
+
+  /** A sessão é um sidechat (a primeira execução dela foi marcada)? */
+  isSideSession(sessionId: string): boolean {
+    return !!this.deps.db.get<{ id: string }>(
+      `SELECT id FROM agent_runs WHERE session_id = ? AND ${SIDE_SQL} LIMIT 1`,
+      sessionId
+    )
+  }
+
+  /** O último ponto da conversa de uma sessão (a resposta mais recente com id), para ramificar. */
+  async lastPoint(sessionId: string): Promise<{ session: string; at: string } | null> {
+    const rows = this.deps.db.all<{ id: string }>(
+      'SELECT id FROM agent_runs WHERE session_id = ? ORDER BY started_at DESC',
+      sessionId
+    )
+    for (const r of rows) {
+      const last = (await this.readLog(r.id))
+        .filter((e): e is Extract<RunLogEvent, { kind: 'text' }> => e.kind === 'text')
+        .findLast((e) => e.uuid)
+      if (last?.uuid) return { session: sessionId, at: last.uuid }
+    }
+    return null
+  }
+
+  /** A sessão é desta tarefa (o campo pode continuar uma sessão escolhida na lista "Sessões")? */
+  hasSession(taskId: string, sessionId: string): boolean {
+    return !!this.deps.db.get<{ id: string }>(
+      'SELECT id FROM agent_runs WHERE task_page_id = ? AND session_id = ? LIMIT 1',
+      taskId,
+      sessionId
     )
   }
 
@@ -711,6 +759,7 @@ export class RunService {
       summary: string | null
       input_text: string | null
       session_id: string | null
+      fork_json: string | null
       agent_key: string | null
     }>('SELECT * FROM agent_runs WHERE id = ?', runId)
     if (!r) return null
@@ -730,7 +779,10 @@ export class RunService {
       worktreePath: wt?.path ?? null,
       summary: r.summary ? (JSON.parse(r.summary) as RunSummary) : null,
       hasSession: r.session_id !== null,
-      agentKey: r.agent_key
+      agentKey: r.agent_key,
+      sessionId: r.session_id,
+      forkedFrom: r.fork_json ? (parseForkPoint(r.fork_json)?.session ?? null) : null,
+      side: r.session_id !== null && this.isSideSession(r.session_id)
     }
   }
 
@@ -1071,7 +1123,13 @@ export class RunService {
     void next.then(() => {
       if (this.logWrites.get(run.id) === next) this.logWrites.delete(run.id)
     })
-    this.deps.emit({ runId: run.id, projectId: run.projectId, taskId: run.taskId, event })
+    this.deps.emit({
+      runId: run.id,
+      projectId: run.projectId,
+      taskId: run.taskId,
+      event,
+      ...(run.spec.side ? { side: true } : {})
+    })
   }
 
   private logPath(runId: string): string {
@@ -1146,6 +1204,9 @@ function scrubEvent(event: RunLogEvent, secrets: ReadonlySet<string>): RunLogEve
 function scrubText(text: string, secrets: ReadonlySet<string>): string {
   return redactValues(redactSecrets(text), secrets)
 }
+
+/** A execução abriu um sidechat (`fork_json` com `"side":true`, gravado só por nós). */
+const SIDE_SQL = `fork_json LIKE '%"side":true%'`
 
 function parseForkPoint(json: string): { session: string; at: string } | null {
   try {

@@ -58,3 +58,188 @@
     font-size: inherit;
   }
 }
+
+/*
+ * Fundo das telas (Configurações › Aparência, `data-wallpaper`): luz difusa feita dos tokens do
+ * tema (vale no claro e no escuro), atrás do conteúdo de cada painel. Liso = só o fundo.
+ */
+@layer orkio-brand {
+  :root {
+    --wp-ember:
+      radial-gradient(
+        70% 60% at 0% 100%,
+        color-mix(in oklab, var(--brand) 13%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        55% 45% at 100% 0%,
+        color-mix(in oklab, var(--danger) 7%, transparent),
+        transparent 70%
+      );
+    --wp-mesh:
+      radial-gradient(
+        50% 50% at 85% 10%,
+        color-mix(in oklab, var(--info) 11%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        45% 45% at 10% 90%,
+        color-mix(in oklab, var(--ok) 9%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        40% 40% at 55% 55%,
+        color-mix(in oklab, var(--purple) 6%, transparent),
+        transparent 70%
+      );
+    --wp-carbon:
+      radial-gradient(
+        90% 70% at 50% 0%,
+        color-mix(in oklab, var(--foreground) 5%, transparent),
+        transparent 70%
+      ),
+      repeating-linear-gradient(
+        135deg,
+        color-mix(in oklab, var(--foreground) 3.5%, transparent) 0 1px,
+        transparent 1px 7px
+      );
+    --wp-esmeralda:
+      radial-gradient(
+        60% 55% at 100% 0%,
+        color-mix(in oklab, var(--wp-esmeralda-1) 16%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        55% 50% at 0% 100%,
+        color-mix(in oklab, var(--wp-esmeralda-2) 9%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(var(--wp-esmeralda-base), var(--wp-esmeralda-base));
+    --wp-oceano:
+      radial-gradient(
+        60% 55% at 100% 0%,
+        color-mix(in oklab, var(--wp-oceano-1) 16%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        55% 50% at 0% 100%,
+        color-mix(in oklab, var(--wp-oceano-2) 9%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(var(--wp-oceano-base), var(--wp-oceano-base));
+    --wp-orquidea:
+      radial-gradient(
+        60% 55% at 100% 0%,
+        color-mix(in oklab, var(--wp-orquidea-1) 16%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        55% 50% at 0% 100%,
+        color-mix(in oklab, var(--wp-orquidea-2) 9%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(var(--wp-orquidea-base), var(--wp-orquidea-base));
+    --wp-dracula:
+      radial-gradient(
+        60% 55% at 100% 0%,
+        color-mix(in oklab, var(--wp-dracula-1) 16%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        55% 50% at 0% 100%,
+        color-mix(in oklab, var(--wp-dracula-2) 9%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(var(--wp-dracula-base), var(--wp-dracula-base));
+    --wp-nord:
+      radial-gradient(
+        60% 55% at 100% 0%,
+        color-mix(in oklab, var(--wp-nord-1) 16%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        55% 50% at 0% 100%,
+        color-mix(in oklab, var(--wp-nord-2) 9%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(var(--wp-nord-base), var(--wp-nord-base));
+    --wp-catppuccin:
+      radial-gradient(
+        60% 55% at 100% 0%,
+        color-mix(in oklab, var(--wp-catppuccin-1) 16%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        55% 50% at 0% 100%,
+        color-mix(in oklab, var(--wp-catppuccin-2) 9%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(var(--wp-catppuccin-base), var(--wp-catppuccin-base));
+    --wallpaper: none;
+  }
+  html[data-wallpaper='ember'] {
+    --wallpaper: var(--wp-ember);
+  }
+  html[data-wallpaper='mesh'] {
+    --wallpaper: var(--wp-mesh);
+  }
+  html[data-wallpaper='carbon'] {
+    --wallpaper: var(--wp-carbon);
+  }
+  html[data-wallpaper='esmeralda'] {
+    --wallpaper: var(--wp-esmeralda);
+  }
+  html[data-wallpaper='oceano'] {
+    --wallpaper: var(--wp-oceano);
+  }
+  html[data-wallpaper='orquidea'] {
+    --wallpaper: var(--wp-orquidea);
+  }
+  html[data-wallpaper='dracula'] {
+    --wallpaper: var(--wp-dracula);
+  }
+  html[data-wallpaper='nord'] {
+    --wallpaper: var(--wp-nord);
+  }
+  html[data-wallpaper='catppuccin'] {
+    --wallpaper: var(--wp-catppuccin);
+  }
+
+  .orkio-wallpaper {
+    background-color: var(--background);
+    background-image: var(--wallpaper);
+    background-attachment: local;
+  }
+
+  /* Prévia de cada fundo nos cartões de Aparência (independe do fundo escolhido agora). */
+  .orkio-wallpaper-preview {
+    background-color: var(--background);
+  }
+  .orkio-wallpaper-preview[data-preview='ember'] {
+    background-image: var(--wp-ember);
+  }
+  .orkio-wallpaper-preview[data-preview='mesh'] {
+    background-image: var(--wp-mesh);
+  }
+  .orkio-wallpaper-preview[data-preview='carbon'] {
+    background-image: var(--wp-carbon);
+  }
+  .orkio-wallpaper-preview[data-preview='esmeralda'] {
+    background-image: var(--wp-esmeralda);
+  }
+  .orkio-wallpaper-preview[data-preview='oceano'] {
+    background-image: var(--wp-oceano);
+  }
+  .orkio-wallpaper-preview[data-preview='orquidea'] {
+    background-image: var(--wp-orquidea);
+  }
+  .orkio-wallpaper-preview[data-preview='dracula'] {
+    background-image: var(--wp-dracula);
+  }
+  .orkio-wallpaper-preview[data-preview='nord'] {
+    background-image: var(--wp-nord);
+  }
+  .orkio-wallpaper-preview[data-preview='catppuccin'] {
+    background-image: var(--wp-catppuccin);
+  }
+}

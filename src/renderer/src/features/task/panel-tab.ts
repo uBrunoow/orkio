@@ -1,49 +1,56 @@
 import type { TaskPhaseId } from '../../../../shared/task-phase'
 
-export type PanelTab = 'spec' | 'plan' | 'changes' | 'pr' | 'review' | 'details'
+/**
+ * Painel ao lado da conversa (como no Claude Desktop): poucos ícones no topo (Detalhes, Mudanças,
+ * Sidechat e, com a task do Backlog.md, Spec e Plano) e subtelas abertas pelas linhas de Detalhes
+ * (PR & CI, Revisão, Contexto), com "voltar".
+ */
+export type PanelTab =
+  'details' | 'changes' | 'sidechat' | 'terminal' | 'spec' | 'plan' | 'pr' | 'review' | 'context'
 
 export const PANEL_TAB_LABEL: Record<PanelTab, string> = {
+  details: 'Detalhes',
+  changes: 'Mudanças',
+  sidechat: 'Sidechat',
+  terminal: 'Terminal',
   spec: 'Spec',
   plan: 'Plano',
-  changes: 'Mudanças',
   pr: 'PR & CI',
   review: 'Revisão',
-  details: 'Detalhes'
+  context: 'Contexto'
 }
 
-/**
- * Spec e Plano só existem com a task do Backlog.md vinculada (D14); Revisão só com PR (os
- * comentários da PR).
- */
-export function availableTabs(hasBacklogDoc: boolean, hasPr = false): PanelTab[] {
+/** Subtela aberta por uma linha de Detalhes (não tem ícone no topo). */
+export const SUBVIEWS = ['pr', 'review', 'context'] as const satisfies readonly PanelTab[]
+
+export function isSubview(tab: PanelTab): boolean {
+  return (SUBVIEWS as readonly PanelTab[]).includes(tab)
+}
+
+/** Ícones do topo: Spec e Plano só com a task do Backlog.md vinculada (D14). */
+export function availableTabs(hasBacklogDoc: boolean): PanelTab[] {
   return [
-    ...(hasBacklogDoc ? (['spec', 'plan'] as const) : []),
+    'details',
     'changes',
-    'pr',
-    ...(hasPr ? (['review'] as const) : []),
-    'details'
+    'sidechat',
+    'terminal',
+    ...(hasBacklogDoc ? (['spec', 'plan'] as const) : [])
   ]
 }
 
+/** Revisão só existe com PR (os comentários dela). */
+export function canOpen(tab: PanelTab, input: { hasBacklogDoc: boolean; hasPr: boolean }): boolean {
+  if (tab === 'spec' || tab === 'plan') return input.hasBacklogDoc
+  if (tab === 'review') return input.hasPr
+  return true
+}
+
+/** Ao abrir: na fase de spec/plano, o documento; senão Detalhes (que já resume o resto). */
 export function defaultPanelTab(input: {
   currentPhase: TaskPhaseId | null
   hasBacklogDoc: boolean
-  hasDiff: boolean
-  hasPr: boolean
 }): PanelTab {
-  const fallback: PanelTab = input.hasDiff ? 'changes' : 'details'
-  switch (input.currentPhase) {
-    case 'spec':
-      return input.hasBacklogDoc ? 'spec' : fallback
-    case 'plan':
-      return input.hasBacklogDoc ? 'plan' : fallback
-    case 'implement':
-      return 'changes'
-    case 'review':
-      return input.hasPr ? 'review' : 'changes'
-    case 'pr':
-      return 'pr'
-    case null:
-      return fallback
-  }
+  if (input.hasBacklogDoc && input.currentPhase === 'spec') return 'spec'
+  if (input.hasBacklogDoc && input.currentPhase === 'plan') return 'plan'
+  return 'details'
 }

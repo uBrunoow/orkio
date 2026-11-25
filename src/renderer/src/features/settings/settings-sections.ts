@@ -17,11 +17,11 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   {
     id: 'basic',
     title: 'Básico',
-    items: ['general', 'appearance', 'notifications', 'shortcuts', 'terminal']
+    items: ['general', 'appearance', 'layout', 'notifications', 'shortcuts', 'terminal']
   },
   { id: 'connections', title: 'Conexões', items: ['integrations', 'projects', 'providers'] },
   { id: 'tools', title: 'Agentes e ferramentas', items: ['skills', 'mcp', 'secrets'] },
-  { id: 'project', title: 'Projeto', project: true, items: ['board', 'agents'] },
+  { id: 'project', title: 'Por projeto', project: true, items: ['board', 'agents'] },
   { id: 'app', title: 'App', items: ['diagnostics', 'updates', 'about'] }
 ]
 
@@ -38,7 +38,22 @@ export const SETTINGS_KEYWORDS: Record<SettingsSection, readonly string[]> = {
     'revogar',
     'privacidade'
   ],
-  appearance: ['tema', 'escuro', 'movimento', 'animação', 'texto', 'fonte', 'tamanho', 'zoom'],
+  appearance: [
+    'tema',
+    'escuro',
+    'claro',
+    'movimento',
+    'animação',
+    'texto',
+    'fonte',
+    'tamanho',
+    'zoom',
+    'letras',
+    'espaçamento',
+    'fundo',
+    'wallpaper'
+  ],
+  layout: ['desktop', 'painéis', 'divisão', 'arranjo', 'foco', 'largura', 'centralizar', 'janela'],
   notifications: ['aviso', 'som', 'silenciar', 'sino', 'alerta'],
   shortcuts: ['teclado', 'tecla', 'atalho global', 'trazer para a frente'],
   terminal: ['shell', 'console', 'pty'],
@@ -68,7 +83,7 @@ export function visibleSettingsGroups(projectName: string | null, query: string)
   return SETTINGS_GROUPS.filter((g) => !g.project || projectName)
     .map((g) => ({
       id: g.id,
-      title: g.project && projectName ? `Projeto · ${projectName}` : g.title,
+      title: g.title,
       items: g.items.filter((s) => matchesSettingsQuery(s, q, g.title))
     }))
     .filter((g) => g.items.length > 0)
@@ -90,6 +105,7 @@ export function settingsScope(section: SettingsSection, projectName: string | nu
     case 'general':
       return 'todas as execuções sem agente, em todos os projetos'
     case 'appearance':
+    case 'layout':
     case 'notifications':
     case 'shortcuts':
     case 'diagnostics':

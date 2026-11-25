@@ -94,6 +94,8 @@ export interface ProjectView {
   notices: ProjectNotice[]
   /** Projeto do Notion vinculado (página do banco de Projetos). */
   notionProject: { id: string; name: string } | null
+  /** Arquivado: guardado, fora do quadro, da lista lateral e das automações. */
+  archived: boolean
 }
 
 export interface ProjectsListResult {

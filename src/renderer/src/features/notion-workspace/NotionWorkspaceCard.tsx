@@ -28,6 +28,7 @@ import type {
 } from '../../../../shared/notion'
 import type { ResultError } from '../../../../shared/result'
 import { StepCircle } from '../../components/StepCircle'
+import { SURFACE } from '../../components/surface'
 
 const hint = 'text-xs text-muted-foreground'
 
@@ -73,7 +74,7 @@ export function NotionWorkspaceCard({
     <section
       aria-labelledby="notion-workspace-title"
       aria-busy={workspace.revalidating}
-      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
+      className={SURFACE.section}
     >
       <PanelHeader
         titleId="notion-workspace-title"
@@ -399,10 +400,10 @@ function Wizard({
             </div>
           )}
 
-          <div className="overflow-hidden rounded-xl border border-border-soft bg-card">
+          <div className={SURFACE.list}>
             <div
               aria-hidden="true"
-              className="flex gap-3 border-b border-border-soft px-3.5 py-2 text-2xs tracking-wider text-subtle-foreground uppercase"
+              className="flex gap-3 border-b border-border-soft px-3.5 py-2 label-caps"
             >
               <span className="w-40 shrink-0">Campo do Orkio</span>
               <span>Propriedade no Notion</span>

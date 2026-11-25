@@ -9,6 +9,7 @@ import { claudeLoginText, claudeStatusText } from '../../lib/status-text'
 import { Alert } from '../../components/Alert'
 import { ClaudeLogo, ExternalLinkIcon, RefreshIcon } from '../../components/icons'
 import { PanelHeader } from '../../components/PanelHeader'
+import { SURFACE } from '../../components/surface'
 
 /**
  * Card "Claude Code" em Integrações: o Orkio usa o CLI do usuário (com a assinatura/login dele).
@@ -25,11 +26,7 @@ export function ClaudeCodeCard(): React.JSX.Element {
   }
 
   return (
-    <section
-      aria-labelledby="claude-card-title"
-      aria-busy={checking}
-      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
-    >
+    <section aria-labelledby="claude-card-title" aria-busy={checking} className={SURFACE.section}>
       <PanelHeader
         titleId="claude-card-title"
         title="Claude Code"

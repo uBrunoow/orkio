@@ -6,6 +6,7 @@ import { Alert } from '../../components/Alert'
 import { MarkdownText } from '../../components/MarkdownText'
 import {
   AgentsIcon,
+  CheckIcon,
   CopyIcon,
   EditIcon,
   ForkIcon,
@@ -13,6 +14,7 @@ import {
   PermissionIcon,
   PlayIcon,
   ReadIcon,
+  RetryIcon,
   SearchIcon,
   TerminalIcon,
   ToolIcon,
@@ -214,52 +216,121 @@ function AgentMessage({
   )
 }
 
-/** Ações de uma mensagem: discretas, aparecem no hover/foco (Compozy: Copiar · Ramificar). */
+/**
+ * Rodapé de uma mensagem (como no Compozy): copiar sempre à vista, discreto; ramificar e editar
+ * aparecem no hover/foco. Só ícones, com o nome no tooltip e no leitor de tela.
+ */
 export function MessageActions({
   text,
   onBranch,
+  onRetry,
   onEdit,
+  meta,
   className
 }: {
   text: string
   onBranch?: () => void
+  /** Sua mensagem: mandar de novo do mesmo ponto. */
+  onRetry?: () => void
   onEdit?: () => void
+  /** Sua mensagem (como no Compozy): a hora vem antes dos ícones e a ordem é ramificar · tentar
+   * de novo · editar · copiar, tudo à vista. */
+  meta?: React.ReactNode
   className?: string
 }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
-  return (
-    <div
-      className={cn(
-        'flex items-center gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100 motion-reduce:transition-none',
-        className
-      )}
+  const icon = 'size-6 text-subtle-foreground hover:text-foreground'
+  const copyButton = (
+    <Button
+      key="copy"
+      size="icon-xs"
+      variant="ghost"
+      aria-label="Copiar mensagem"
+      title={copied ? 'Copiado' : 'Copiar'}
+      className={icon}
+      onClick={() =>
+        void navigator.clipboard?.writeText(text).then(
+          () => {
+            setCopied(true)
+            window.setTimeout(() => setCopied(false), 1500)
+          },
+          () => setCopied(false)
+        )
+      }
     >
-      <Button
-        size="xs"
-        variant="ghost"
-        aria-label="Copiar mensagem"
-        onClick={() =>
-          void navigator.clipboard?.writeText(text).then(
-            () => setCopied(true),
-            () => setCopied(false)
-          )
-        }
-      >
+      {copied ? (
+        <CheckIcon aria-hidden="true" className="text-ok" />
+      ) : (
         <CopyIcon aria-hidden="true" />
-        {copied ? 'Copiado' : 'Copiar'}
-      </Button>
-      {onBranch && (
-        <Button size="xs" variant="ghost" onClick={onBranch}>
-          <ForkIcon aria-hidden="true" />
-          Ramificar daqui
-        </Button>
       )}
-      {onEdit && (
-        <Button size="xs" variant="ghost" onClick={onEdit}>
-          <EditIcon aria-hidden="true" />
-          Editar mensagem
-        </Button>
-      )}
+    </Button>
+  )
+  const branchButton = onBranch && (
+    <Button
+      key="branch"
+      size="icon-xs"
+      variant="ghost"
+      aria-label="Ramificar daqui"
+      title="Ramificar daqui: uma conversa nova a partir deste ponto"
+      className={icon}
+      onClick={onBranch}
+    >
+      <ForkIcon aria-hidden="true" />
+    </Button>
+  )
+  const retryButton = onRetry && (
+    <Button
+      key="retry"
+      size="icon-xs"
+      variant="ghost"
+      aria-label="Tentar de novo"
+      title="Tentar de novo: manda a mesma mensagem outra vez, do mesmo ponto"
+      className={icon}
+      onClick={onRetry}
+    >
+      <RetryIcon aria-hidden="true" />
+    </Button>
+  )
+  const editButton = onEdit && (
+    <Button
+      key="edit"
+      size="icon-xs"
+      variant="ghost"
+      aria-label="Editar mensagem"
+      title="Editar mensagem e mandar de novo"
+      className={icon}
+      onClick={onEdit}
+    >
+      <EditIcon aria-hidden="true" />
+    </Button>
+  )
+  const status = copied && (
+    <span role="status" className="text-2xs text-subtle-foreground">
+      Copiado
+    </span>
+  )
+
+  if (meta !== undefined) {
+    return (
+      <div className={cn('flex items-center gap-0.5', className)}>
+        {status}
+        <span className="mr-1 text-[11.5px] text-subtle-foreground">{meta}</span>
+        {branchButton}
+        {retryButton}
+        {editButton}
+        {copyButton}
+      </div>
+    )
+  }
+
+  return (
+    <div className={cn('flex items-center gap-0.5', className)}>
+      {copyButton}
+      {status}
+      <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100 motion-reduce:transition-none">
+        {branchButton}
+        {editButton}
+      </div>
     </div>
   )
 }

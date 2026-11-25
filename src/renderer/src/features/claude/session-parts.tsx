@@ -298,7 +298,7 @@ export function Workspace({
         {!isBusy && (
           <Button
             size="sm"
-            variant={suggestCleanup ? 'default' : 'ghost'}
+            variant={suggestCleanup ? 'destructive' : 'danger'}
             onClick={() => void cleanup(false)}
           >
             <CleanIcon />

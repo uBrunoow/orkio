@@ -19,6 +19,7 @@ import { actorOf } from './TaskTimeline'
 import { useTaskView } from './task-view'
 import { backlogDocumentOf } from '../../../../shared/alva'
 import { buildSession, tailSession, type SessionItem } from './task-session'
+import { runsOfSession, visibleSessionId } from './task-sessions'
 import { ipcResult } from '../../lib/ipc'
 import { Alert } from '../../components/Alert'
 import type { HandoffView } from '../../../../shared/handoff'
@@ -55,13 +56,19 @@ export function TaskSession({
   const [preparing, setPreparing] = useState(false)
   const state = runs.state
   const handoff = useHandoffActions(projectId, taskId, runs.reload)
+  // Lista "Sessões": a conversa mostra só as execuções da sessão escolhida (ou da mais recente).
+  const shownSession = state ? visibleSessionId(state.runs, view.session) : null
+  const sessionRuns = useMemo(
+    () => (state ? runsOfSession(state.runs, shownSession) : null),
+    [state, shownSession]
+  )
   const items = useMemo(
-    () => (history && state ? buildSession(history, state.runs, new Date()) : null),
-    [history, state]
+    () => (history && sessionRuns ? buildSession(history, sessionRuns, new Date()) : null),
+    [history, sessionRuns]
   )
   const visible = items ? (showAll ? { items, hidden: 0 } : tailSession(items, TAIL)) : null
   const ready = visible !== null
-  const latestId = state?.runs[0]?.id ?? null
+  const latestId = state?.runs.find((r) => !r.side)?.id ?? null
   // O documento (spec/plano) abre só na execução mais recente que o mexeu; as mudanças, na mais
   // recente que mudou arquivos. As anteriores ficam recolhidas (é o mesmo arquivo, o mesmo diff).
   const docRuns = new Set(
@@ -124,7 +131,7 @@ export function TaskSession({
   return (
     <section aria-label="Sessão da tarefa" className="flex h-full min-h-0 flex-col">
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <div ref={content} className="flex flex-col gap-4 px-7 py-5">
+        <div ref={content} className="mx-auto flex w-full max-w-[50rem] flex-col gap-4 px-7 py-5">
           {!visible ? (
             <Skeleton className="h-[60px]" aria-label="Carregando a sessão" />
           ) : (
@@ -210,74 +217,78 @@ export function TaskSession({
       </div>
       {/* O campo fica preso embaixo, fora da rolagem: é onde o olho está. */}
       <div className="shrink-0 border-t border-border-soft px-7 pt-3 pb-4">
-        {waitingSubagents && (
-          <p
-            role="status"
-            aria-label="Esperando subagentes"
-            data-testid="waiting-subagents"
-            className="mb-2 min-w-0 truncate text-xs text-muted-foreground"
-          >
-            {waitingSubagents}
-          </p>
-        )}
-        {state?.handoff ? (
-          <SessionHandoff
-            projectId={projectId}
-            taskId={taskId}
-            handoff={state.handoff}
-            actions={handoff}
-            onOpenTerminal={view.openTerminal}
-          />
-        ) : newSession ? (
-          newSession.ok ? (
-            <Composer
-              prep={newSession.value}
-              initial={initial}
+        <div className="mx-auto w-full max-w-[50rem]">
+          {waitingSubagents && (
+            <p
+              role="status"
+              aria-label="Esperando subagentes"
+              data-testid="waiting-subagents"
+              className="mb-2 min-w-0 truncate text-xs text-muted-foreground"
+            >
+              {waitingSubagents}
+            </p>
+          )}
+          {state?.handoff ? (
+            <SessionHandoff
               projectId={projectId}
-              onCancel={() => setNewSession(null)}
-              onStarted={(s) => {
-                setNewSession(null)
+              taskId={taskId}
+              handoff={state.handoff}
+              actions={handoff}
+              onOpenTerminal={view.openTerminal}
+            />
+          ) : newSession ? (
+            newSession.ok ? (
+              <Composer
+                prep={newSession.value}
+                initial={initial}
+                projectId={projectId}
+                onCancel={() => setNewSession(null)}
+                onStarted={(s) => {
+                  setNewSession(null)
+                  // Sessão nova: a conversa passa a mostrar só ela.
+                  view.selectSession(s.runs.find((x) => !x.side)?.sessionId ?? null)
+                  runs.setState(s)
+                  void runs.select(s.activeRunId)
+                }}
+              />
+            ) : (
+              <div className="flex flex-col items-start gap-2">
+                <p className="text-xs">{newSession.error.message}</p>
+                <Button size="sm" variant="ghost" onClick={() => setNewSession(null)}>
+                  Fechar
+                </Button>
+              </div>
+            )
+          ) : (
+            <SessionComposer
+              projectId={projectId}
+              taskId={taskId}
+              agent={agent}
+              state={state}
+              flowRunning={flowRunning}
+              autopilotStep={flowRunning ? (activity?.what ?? null) : null}
+              onSent={(s) => {
                 runs.setState(s)
                 void runs.select(s.activeRunId)
               }}
+              onNewSession={() => void openNewSession()}
+              {...(view.openTerminal
+                ? {
+                    onContinueInClaude: () =>
+                      void handoff.start().then((v) => {
+                        if (v) view.openTerminal?.()
+                      }),
+                    continuing: handoff.busy === 'start'
+                  }
+                : {})}
             />
-          ) : (
-            <div className="flex flex-col items-start gap-2">
-              <p className="text-xs">{newSession.error.message}</p>
-              <Button size="sm" variant="ghost" onClick={() => setNewSession(null)}>
-                Fechar
-              </Button>
-            </div>
-          )
-        ) : (
-          <SessionComposer
-            projectId={projectId}
-            taskId={taskId}
-            agent={agent}
-            state={state}
-            flowRunning={flowRunning}
-            autopilotStep={flowRunning ? (activity?.what ?? null) : null}
-            onSent={(s) => {
-              runs.setState(s)
-              void runs.select(s.activeRunId)
-            }}
-            onNewSession={() => void openNewSession()}
-            {...(view.openTerminal
-              ? {
-                  onContinueInClaude: () =>
-                    void handoff.start().then((v) => {
-                      if (v) view.openTerminal?.()
-                    }),
-                  continuing: handoff.busy === 'start'
-                }
-              : {})}
-          />
-        )}
-        {!state?.handoff && handoff.error && (
-          <Alert tone="danger" className="mt-2">
-            {handoff.error}
-          </Alert>
-        )}
+          )}
+          {!state?.handoff && handoff.error && (
+            <Alert tone="danger" className="mt-2">
+              {handoff.error}
+            </Alert>
+          )}
+        </div>
       </div>
     </section>
   )

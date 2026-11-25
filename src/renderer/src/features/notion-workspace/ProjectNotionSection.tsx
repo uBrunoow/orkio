@@ -87,24 +87,33 @@ export function ProjectNotionSection({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <NotionLogo className="size-3.5 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground" data-testid="notion-link">
-          {linked.name}
+      <div className="flex min-h-7 flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="inline-flex h-6 max-w-full min-w-0 items-center gap-1.5 rounded-full border border-border-soft bg-muted px-2.5 text-xs text-foreground">
+          <NotionLogo aria-hidden="true" className="size-3.5 shrink-0" />
+          <span className="truncate" data-testid="notion-link">
+            {linked.name}
+          </span>
         </span>
-        <Button
-          size="sm"
-          variant="outline"
-          aria-expanded={showTasks}
-          onClick={() => setShowTasks((v) => !v)}
-        >
-          <TasksIcon />
-          {showTasks ? 'Ocultar tarefas' : 'Ver tarefas'}
-        </Button>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void unlink()}>
-          {busy ? <Spinner /> : <UnlinkIcon />}
-          Desvincular
-        </Button>
+        <div className="ml-auto flex items-center gap-0.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={showTasks}
+            onClick={() => setShowTasks((v) => !v)}
+          >
+            <TasksIcon />
+            {showTasks ? 'Ocultar tarefas' : 'Ver tarefas'}
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={busy}
+            onClick={() => void unlink()}
+          >
+            {busy ? <Spinner /> : <UnlinkIcon />}
+            Desvincular
+          </Button>
+        </div>
       </div>
       {error && <Alert tone="danger">{error.message}</Alert>}
       {showTasks && (

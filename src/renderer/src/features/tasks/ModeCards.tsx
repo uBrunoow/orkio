@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { ChoiceMark, choiceCardClass, useRovingRadio } from '../../components/ChoiceCards'
 import { CheckIcon, ListIcon, PermissionIcon, PlayIcon } from '../../components/icons'
 import { RUN_MODES, RUN_MODE_TEXT, type RunMode } from '../../../../shared/task-setup'
 
@@ -45,13 +46,7 @@ export function ModeCards({
       steps: RUN_MODE_TEXT[m].steps
     }))
   ]
-  const move = (from: number, delta: number): void => {
-    const next = options[(from + delta + options.length) % options.length]!
-    onChange(next.value)
-    requestAnimationFrame(() => {
-      document.querySelector<HTMLButtonElement>(`[data-mode-card="${next.value}"]`)?.focus()
-    })
-  }
+  const { group, keyDown } = useRovingRadio(options, onChange)
   return (
     <div
       role="radiogroup"
@@ -68,32 +63,28 @@ export function ModeCards({
             role="radio"
             aria-checked={checked}
             data-mode-card={o.value}
+            data-choice-group={group}
+            data-choice={o.value}
             tabIndex={checked ? 0 : -1}
             disabled={disabled}
             title={o.steps ?? undefined}
             onClick={() => onChange(o.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-                e.preventDefault()
-                move(i, 1)
-              } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-                e.preventDefault()
-                move(i, -1)
-              }
-            }}
+            onKeyDown={(e) => keyDown(e, i)}
             className={cn(
-              'flex flex-col items-start gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors',
-              'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none motion-reduce:transition-none',
-              'disabled:cursor-not-allowed disabled:opacity-60',
-              checked
-                ? 'border-foreground/40 bg-muted text-foreground'
-                : 'border-border-soft bg-card text-muted-foreground hover:bg-muted/60',
+              'flex flex-col items-start gap-1 px-3 py-2.5',
+              choiceCardClass(checked),
               o.value === INHERIT && !compact && 'sm:col-span-3'
             )}
           >
-            <span className="flex items-center gap-2 text-sm font-medium text-foreground">
-              <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex w-full items-center gap-2 text-sm font-medium text-foreground">
+              <Icon
+                className={cn(
+                  'size-3.5 shrink-0',
+                  checked ? 'text-brand' : 'text-muted-foreground'
+                )}
+              />
               {o.title}
+              <ChoiceMark checked={checked} />
             </span>
             <span className="text-xs text-muted-foreground">{o.phrase}</span>
           </button>

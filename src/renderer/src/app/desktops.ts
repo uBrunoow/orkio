@@ -69,7 +69,7 @@ export type DesktopsAction =
   /** Ação de abas no desktop atual. */
   | { type: 'tabs'; action: TabsAction }
   /** Desktop novo (com uma aba Início), que vira o atual. */
-  | { type: 'create'; name?: string }
+  | { type: 'create'; name?: string; arrangement?: Arrangement }
   | { type: 'switch'; id: string }
   /** Próximo (+1) ou anterior (-1), dando a volta. */
   | { type: 'cycle'; offset: 1 | -1 }
@@ -162,7 +162,11 @@ export function desktopsReducer(state: DesktopsState, action: DesktopsAction): D
       const created = create(state, action.name)
       if (!created) return state
       const at = created.desktops.findIndex((d) => d.id === state.activeId)
-      return { ...created, activeId: created.desktops[at + 1]!.id }
+      const id = created.desktops[at + 1]!.id
+      const next = { ...created, activeId: id }
+      return action.arrangement
+        ? withDesktop(next, id, (d) => ({ ...d, arrangement: action.arrangement! }))
+        : next
     }
     case 'switch':
       return state.desktops.some((d) => d.id === action.id)

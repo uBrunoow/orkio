@@ -103,10 +103,7 @@ export function DesktopSwitcher({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-80" aria-labelledby={labelId}>
-        <DropdownMenuLabel
-          id={labelId}
-          className="text-2xs font-normal tracking-wider text-subtle-foreground uppercase"
-        >
+        <DropdownMenuLabel id={labelId} className="font-normal label-caps">
           Todos os desktops
         </DropdownMenuLabel>
         <DropdownMenuRadioGroup
@@ -235,10 +232,7 @@ export function ArrangementMenu({
         <TooltipContent>Dividir a tela: {current.label}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-72" aria-labelledby={labelId}>
-        <DropdownMenuLabel
-          id={labelId}
-          className="text-2xs font-normal tracking-wider text-subtle-foreground uppercase"
-        >
+        <DropdownMenuLabel id={labelId} className="font-normal label-caps">
           Arranjo das abas
         </DropdownMenuLabel>
         <DropdownMenuRadioGroup

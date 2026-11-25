@@ -18,29 +18,53 @@ function token(name: string, fallback: string): string {
   return v || fallback
 }
 
-function theme(): ITheme {
-  return {
-    background: token('--background', '#0a0a0b'),
-    foreground: token('--foreground', '#f2f2f0'),
-    cursor: token('--brand', '#ff5b1f'),
-    cursorAccent: token('--background', '#0a0a0b'),
-    selectionBackground: '#ff5b1f55',
+/**
+ * Cores ANSI do terminal: as de tom saem do tema; as que o tema não tem (ciano, as "bright" e o
+ * par preto/branco) têm uma versão para cada tema, para o texto colorido do shell ler bem nos dois.
+ */
+const ANSI_EXTRA = {
+  dark: {
     black: '#1e1e21',
     brightBlack: '#5e5e63',
-    red: token('--danger', '#f2555a'),
     brightRed: '#ff7b80',
-    green: token('--ok', '#3dd68c'),
     brightGreen: '#6ee7a8',
-    yellow: token('--warn', '#f5c451'),
     brightYellow: '#ffd97a',
-    blue: token('--info', '#6ca8ff'),
     brightBlue: '#94c0ff',
-    magenta: token('--purple', '#c9a2ff'),
     brightMagenta: '#dcc2ff',
     cyan: '#5fd4d4',
     brightCyan: '#8ce6e6',
     white: '#d6d6d3',
     brightWhite: '#f2f2f0'
+  },
+  light: {
+    black: '#18181b',
+    brightBlack: '#5b5b63',
+    brightRed: '#a3161d',
+    brightGreen: '#0a6b3f',
+    brightYellow: '#7a4d00',
+    brightBlue: '#1748a3',
+    brightMagenta: '#5a2fb0',
+    cyan: '#0b7a85',
+    brightCyan: '#075a62',
+    white: '#a1a1aa',
+    brightWhite: '#71717a'
+  }
+} satisfies Record<'dark' | 'light', ITheme>
+
+function theme(): ITheme {
+  const light = document.documentElement.dataset['theme'] === 'light'
+  return {
+    background: token('--background', '#0a0a0b'),
+    foreground: token('--foreground', '#f2f2f0'),
+    cursor: token('--brand', '#ff5b1f'),
+    cursorAccent: token('--background', '#0a0a0b'),
+    selectionBackground: light ? '#ff5b1f33' : '#ff5b1f55',
+    red: token('--danger', '#f2555a'),
+    green: token('--ok', '#3dd68c'),
+    yellow: token('--warn', '#f5c451'),
+    blue: token('--info', '#6ca8ff'),
+    magenta: token('--purple', '#c9a2ff'),
+    ...ANSI_EXTRA[light ? 'light' : 'dark']
   }
 }
 
@@ -64,7 +88,7 @@ export function TerminalView({
     const release = acquireXtermCsp()
     const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
     const term = new Terminal({
-      fontFamily: token('--font-mono', 'monospace'),
+      fontFamily: token('--app-font-mono', 'monospace'),
       fontSize: 13,
       lineHeight: 1.2,
       cursorBlink: !reduced,
@@ -83,6 +107,15 @@ export function TerminalView({
       // Sem WebGL neste computador.
     }
     term.open(el)
+    // Trocou o tema ou a fonte em Configurações › Aparência: o terminal acompanha na hora.
+    const restyle = new MutationObserver(() => {
+      term.options.theme = theme()
+      term.options.fontFamily = token('--app-font-mono', 'monospace')
+    })
+    restyle.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'data-code-font']
+    })
 
     let disposed = false
     let end: number | null = null
@@ -140,6 +173,7 @@ export function TerminalView({
       disposed = true
       cancelAnimationFrame(frame)
       observer.disconnect()
+      restyle.disconnect()
       off()
       input.dispose()
       binary.dispose()

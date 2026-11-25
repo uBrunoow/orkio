@@ -13,6 +13,7 @@ export type BoardLayout = (typeof BOARD_LAYOUTS)[number]
 export const SETTINGS_SECTIONS = [
   'general',
   'appearance',
+  'layout',
   'notifications',
   'shortcuts',
   'terminal',
@@ -30,7 +31,14 @@ export const SETTINGS_SECTIONS = [
 ] as const
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
-export const BOARD_SETTINGS_TABS = ['columns', 'rules', 'flows', 'delivery'] as const
+export const BOARD_SETTINGS_TABS = [
+  'columns',
+  'rules',
+  'notifications',
+  'flows',
+  'alva',
+  'delivery'
+] as const
 export type BoardSettingsTab = (typeof BOARD_SETTINGS_TABS)[number]
 
 export type Route =
@@ -44,7 +52,8 @@ export type Route =
       view?: BoardLayout
       filter?: TaskFilter
     }
-  | { name: 'task'; projectId: string; taskId: string; section?: TaskSection }
+  /** `session`: a sessão do Claude Code que a conversa mostra (lista "Sessões"); sem = a mais recente. */
+  | { name: 'task'; projectId: string; taskId: string; section?: TaskSection; session?: string }
   /** Fase 2: terminais da tarefa (pasta de trabalho) e "Continuar no Claude". */
   | {
       name: 'terminal'
@@ -54,6 +63,7 @@ export type Route =
       start?: 'claude'
     }
   | { name: 'agents' }
+  | { name: 'terminals' }
   | { name: 'settings'; section?: SettingsSection; tab?: BoardSettingsTab; projectId?: string }
   /** Aba nova (Fase 0): ponto de partida com as telas e o que espera você. */
   | { name: 'home' }
@@ -66,6 +76,7 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
   task: 'Tarefa',
   terminal: 'Terminal',
   agents: 'Agentes',
+  terminals: 'Terminais',
   settings: 'Configurações',
   home: 'Nova aba'
 }
@@ -73,6 +84,7 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
 export const SETTINGS_TITLES: Record<SettingsSection, string> = {
   general: 'Geral',
   appearance: 'Aparência',
+  layout: 'Layout',
   notifications: 'Notificações',
   shortcuts: 'Atalhos',
   terminal: 'Terminal',
@@ -234,6 +246,8 @@ export function parseRoute(v: unknown): Route | null {
     }
     case 'agents':
       return { name: 'agents' }
+    case 'terminals':
+      return { name: 'terminals' }
     case 'tasks': {
       // A tela Tarefas saiu: a aba antiga vira o Quadro com todos os projetos e o mesmo filtro.
       const view = pick(BOARD_LAYOUTS, v['view'])
@@ -253,7 +267,8 @@ export function parseRoute(v: unknown): Route | null {
         name: 'task',
         projectId: v['projectId'],
         taskId: v['taskId'],
-        ...(section ? { section } : {})
+        ...(section ? { section } : {}),
+        ...(str(v['session']) ? { session: v['session'] } : {})
       }
     }
     case 'terminal':

@@ -255,6 +255,8 @@ test('automação em frase: começa, faz e as execuções vindas da atividade', 
   // "Editar" abre o formulário de sempre.
   await detail.getByRole('button', { name: 'Editar' }).click()
   await expect(page.getByRole('region', { name: 'Editar automação' })).toBeVisible()
+  // A coluna abre num modal: fecha antes de sair.
+  await page.keyboard.press('Escape')
   await goToBoard(page)
 })
 

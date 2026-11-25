@@ -1,4 +1,5 @@
 import type { ORKIO_API } from '../../shared/ipc/api'
+import { PROJECT_TERMINAL_TASK } from '../../shared/terminal'
 import type { TerminalService } from '../terminal/terminal.service'
 import type { Impl } from './register'
 
@@ -10,6 +11,8 @@ export function terminalHandlers(deps: {
   terminals: TerminalService
   hasProject(projectId: string): boolean
   worktreePath(taskId: string): string | null
+  /** Pasta local do projeto (`null` = projeto não existe). */
+  projectPath(projectId: string): string | null
 }): Impl<typeof ORKIO_API.terminal> {
   const { terminals } = deps
   return {
@@ -20,6 +23,26 @@ export function terminalHandlers(deps: {
           available: terminals.available,
           terminals: terminals.list(taskId).filter((t) => t.projectId === projectId)
         }
+      }
+    },
+    all: async () => ({
+      ok: true,
+      value: {
+        available: terminals.available,
+        terminals: terminals.all().filter((t) => deps.hasProject(t.projectId))
+      }
+    }),
+    openInProject: async (projectId) => {
+      const cwd = deps.projectPath(projectId)
+      if (!cwd) {
+        return {
+          ok: false,
+          error: { code: 'no_project', message: 'Projeto não encontrado. Escolha outro projeto.' }
+        }
+      }
+      return {
+        ok: true,
+        value: terminals.open({ projectId, taskId: PROJECT_TERMINAL_TASK, cwd, kind: 'shell' })
       }
     },
     open: async (projectId, taskId) => {

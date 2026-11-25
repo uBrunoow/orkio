@@ -372,7 +372,6 @@ export function createApp(): OrkioApp {
   })
   keepAwakeRef.set(keepAwake)
 
-
   // Atualizações automáticas (6C). Funcionam mesmo com a config em modo só leitura ou sem o banco
   // local: é assim que se sai de um downgrade.
   const updates = createUpdates({
@@ -875,7 +874,8 @@ function createWork(core: {
       terminal: terminalHandlers({
         terminals: claude.terminals,
         hasProject: (projectId) => projectById(configStore.get(), projectId) !== undefined,
-        worktreePath: (taskId) => core.worktrees.get(taskId)?.path ?? null
+        worktreePath: (taskId) => core.worktrees.get(taskId)?.path ?? null,
+        projectPath: (projectId) => projectById(configStore.get(), projectId)?.localPath ?? null
       }),
       overview: overviewHandlers(overview)
     }

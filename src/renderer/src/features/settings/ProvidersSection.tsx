@@ -1,28 +1,33 @@
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { SegmentedControl, SwitchField } from '@/components/form'
+import { SegmentedControl } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { PageHeader } from '../../components/PageHeader'
 import { PAGE_WIDTH } from '../../components/page-width'
-import { StatusToken } from '../../components/StatusToken'
-import { ClaudeLogo } from '../../components/icons'
+import { StatusBadge } from '../../components/StatusToken'
+import { ClaudeLogo, RefreshIcon } from '../../components/icons'
+import { SettingRow, SettingsGroup, SwitchRow } from '../../components/SettingRows'
+import { formatDateTime } from '../../lib/format'
 import { useSources } from '../../app/sources'
 import type { SettingsSection } from '../../app/routes'
 import { ipcCall, useSource } from '../../lib/ipc'
-import { USAGE_HOLD_DEFAULT, type UsageHold } from '../../../../shared/claude-usage'
+import {
+  USAGE_HOLD_DEFAULT,
+  type UsageHold,
+  type UsageWindow
+} from '../../../../shared/claude-usage'
 import { claudeLoginText, claudeStatusText } from '../../lib/status-text'
 import { useClaudeStatus } from '../claude/useClaudeStatus'
-import { SettingsCard } from './SettingsCard'
 
-/** Configurações › Provedores e uso: o Claude Code deste computador e o medidor de uso. */
+/** Configurações › Provedores e uso: o Claude Code deste computador, o uso e o que fazer perto do limite. */
 export function ProvidersSection({
   onOpenSection
 }: {
   onOpenSection(section: SettingsSection): void
 }): React.JSX.Element {
   return (
-    <div className={cn('flex flex-col gap-6', PAGE_WIDTH.form)}>
+    <div className={cn('flex flex-col gap-7', PAGE_WIDTH.form)}>
       <PageHeader
         title="Provedores e uso"
         subtitle="Quem roda as tarefas e quanto da sua assinatura já foi usado."
@@ -44,47 +49,143 @@ function ClaudeProvider({ onOpenIntegrations }: { onOpenIntegrations(): void }):
     setChecking(false)
   }
   return (
-    <SettingsCard
-      title="Claude Code"
+    <SettingsGroup
+      bare
+      title="Provedor"
       description="Executa as tarefas no seu computador, com a sua conta. É o único provedor por enquanto."
-      action={<StatusToken {...claudeStatusText(status)} />}
     >
-      <div className="flex items-start gap-3">
-        <ClaudeLogo className="mt-0.5 size-5 shrink-0" />
-        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-sm">
-          <dt className="text-xs text-muted-foreground">Versão</dt>
-          <dd className="font-mono text-xs text-foreground">
-            {status === null ? '…' : status.installed ? (status.version ?? '—') : 'Não instalado'}
-          </dd>
-          <dt className="text-xs text-muted-foreground">Login</dt>
-          <dd>{status === null ? '…' : <StatusToken {...claudeLoginText(status)} />}</dd>
-        </dl>
+      <section
+        aria-label="Claude Code"
+        className="overflow-hidden rounded-xl border border-border-soft bg-card"
+      >
+        <div className="flex flex-wrap items-center gap-3 border-b border-border-soft px-4 py-3.5">
+          <span
+            aria-hidden="true"
+            className="grid size-10 shrink-0 place-items-center rounded-xl bg-claude text-white"
+          >
+            <ClaudeLogo className="size-5" />
+          </span>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="text-sm font-medium text-foreground">Claude Code</span>
+            <span className="text-xs text-muted-foreground">CLI da Anthropic · sua assinatura</span>
+          </div>
+          <StatusBadge {...claudeStatusText(status)} />
+        </div>
+        <div className="flex flex-col divide-y divide-border-soft">
+          <SettingRow label="Versão">
+            <code className="font-mono text-xs text-foreground">
+              {status === null ? '…' : status.installed ? (status.version ?? '—') : 'Não instalado'}
+            </code>
+          </SettingRow>
+          <SettingRow label="Login">
+            {status === null ? (
+              <span className="text-xs text-muted-foreground">…</span>
+            ) : (
+              <StatusBadge {...claudeLoginText(status)} />
+            )}
+          </SettingRow>
+        </div>
+        <div className="flex flex-wrap gap-2 border-t border-border-soft bg-surface/50 px-4 py-2.5">
+          <Button variant="outline" size="sm" disabled={checking} onClick={() => void check()}>
+            {checking ? <Spinner /> : <RefreshIcon />}
+            Verificar de novo
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onOpenIntegrations}>
+            Instalar, entrar e plugins em Integrações
+          </Button>
+        </div>
+      </section>
+    </SettingsGroup>
+  )
+}
+
+/** Uma janela de uso em barra: %, quando renova e (opcional) a marca do limite da automação. */
+function UsageBar({
+  label,
+  window: w,
+  mark
+}: {
+  label: string
+  window: UsageWindow | null
+  mark?: number | undefined
+}): React.JSX.Element {
+  const pct = w?.percent ?? 0
+  const tone = pct >= 90 ? 'bg-danger' : pct >= 70 ? 'bg-warn' : 'bg-ok'
+  return (
+    <div className="flex flex-col gap-1.5 px-4 py-3">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-sm text-foreground">{label}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {w ? (
+            <>
+              <span className="text-sm text-foreground">{w.percent}%</span>
+              {w.resetsAt && ` · renova ${formatDateTime(w.resetsAt)}`}
+            </>
+          ) : (
+            '—'
+          )}
+        </span>
       </div>
-      <div className="flex flex-wrap gap-2">
-        <Button variant="outline" size="sm" disabled={checking} onClick={() => void check()}>
-          {checking && <Spinner />}
-          Verificar de novo
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onOpenIntegrations}>
-          Instalar, entrar e plugins em Integrações
-        </Button>
+      <div
+        role="meter"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        className="relative h-2 rounded-full bg-muted"
+      >
+        <span
+          className={cn('absolute inset-y-0 left-0 rounded-full', tone)}
+          style={{ width: `${pct}%` }}
+        />
+        {mark !== undefined && (
+          <span
+            aria-hidden="true"
+            title={`A automação espera a partir de ${mark}%`}
+            className="absolute -inset-y-1 w-0.5 -translate-x-1/2 rounded-full bg-foreground"
+            style={{ left: `${mark}%` }}
+          />
+        )}
       </div>
-    </SettingsCard>
+    </div>
   )
 }
 
 /**
- * Medidor de uso do Claude na barra (experimental, ligado por padrão). Lê a mesma fonte da barra:
- * mudar aqui some/aparece lá na hora.
+ * Uso do Claude: as janelas em barra (quando o medidor tem dados) e o medidor na barra do app
+ * (experimental, ligado por padrão). Lê a mesma fonte da barra: mudar aqui some/aparece lá na hora.
  */
 export function UsageMeterSection(): React.JSX.Element {
   const { claudeUsage } = useSources()
   const view = useSource(claudeUsage, '').value
+  const usage = view?.usage ?? null
+  const hold = view?.hold ?? USAGE_HOLD_DEFAULT
   return (
-    <SettingsCard title="Uso do Claude">
-      <SwitchField
+    <SettingsGroup
+      title="Uso do Claude"
+      description="Lido do login do Claude Code neste computador, só na hora, sem guardar nada."
+    >
+      {view?.enabled !== false &&
+        (usage ? (
+          <>
+            <UsageBar
+              label="Janela de 5 horas"
+              window={usage.session}
+              mark={hold.enabled ? hold.percent : undefined}
+            />
+            <UsageBar label="Semana" window={usage.weekly} />
+          </>
+        ) : (
+          view !== null && (
+            <p className="px-4 py-3 text-xs text-muted-foreground">
+              Sem leitura do uso agora (Claude Code sem login ou a Anthropic não respondeu).
+            </p>
+          )
+        ))}
+      <SwitchRow
         label="Mostrar o uso do Claude na barra (experimental)"
-        description="Quanto da janela de 5 horas e da semanal a sua assinatura já usou, e quando renovam. O Orkio lê do login do Claude Code neste computador, só na hora, sem guardar nada. Se a Anthropic mudar algo, o medidor some sozinho."
+        description="As duas janelas, ao lado da busca."
+        help="Se a Anthropic mudar algo, o medidor some sozinho."
         checked={view?.enabled !== false}
         disabled={view === null}
         onChange={(value) => {
@@ -94,7 +195,7 @@ export function UsageMeterSection(): React.JSX.Element {
           )
         }}
       />
-    </SettingsCard>
+    </SettingsGroup>
   )
 }
 
@@ -114,24 +215,25 @@ export function UsageHoldSection(): React.JSX.Element {
     void ipcCall(() => window.orkio.usage.setHold(next), hold).then(() => claudeUsage.reload(''))
   }
   return (
-    <SettingsCard
-      title="Segurar a automação perto do limite"
+    <SettingsGroup
+      title="Perto do limite"
       description={
         meterOff
           ? 'Precisa do medidor de uso ligado (acima). Com ele desligado, nada é segurado.'
-          : 'Quando a janela de 5 horas do Claude chega ao limite, os fluxos que a automação começou (regras das colunas, orquestrador, a PR que acorda o fluxo) esperam a janela renovar. O que você pede roda sempre. Se o medidor falhar, nada é segurado.'
+          : 'Os fluxos que a automação começou (regras das colunas, orquestrador, a PR que acorda o fluxo) esperam a janela renovar. O que você pede roda sempre.'
       }
     >
-      <SwitchField
+      <SwitchRow
         label="Esperar a janela renovar antes de rodar pela automação"
+        help="Se o medidor falhar, nada é segurado."
         checked={hold.enabled}
         disabled={view === null}
         onChange={(enabled) => save({ ...hold, enabled })}
       />
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-muted-foreground" aria-hidden="true">
-          Segurar a partir de
-        </span>
+      <SettingRow
+        label="Segurar a partir de"
+        description="Da janela de 5 horas (a marca na barra acima)."
+      >
         <SegmentedControl
           label="Segurar a partir de"
           size="sm"
@@ -143,7 +245,7 @@ export function UsageHoldSection(): React.JSX.Element {
           value={String(hold.percent)}
           onChange={(v) => save({ ...hold, percent: Number(v) })}
         />
-      </div>
-    </SettingsCard>
+      </SettingRow>
+    </SettingsGroup>
   )
 }

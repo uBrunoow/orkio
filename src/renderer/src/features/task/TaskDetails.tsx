@@ -32,9 +32,7 @@ function Section({
       className="flex flex-col gap-2.5"
       {...(testId ? { 'data-testid': testId } : {})}
     >
-      <h3 className="text-2xs font-medium tracking-wider text-subtle-foreground uppercase">
-        {title}
-      </h3>
+      <h3 className="font-medium label-caps">{title}</h3>
       {children}
     </section>
   )
@@ -93,7 +91,7 @@ export function TaskChanges(): React.JSX.Element {
         <TaskArtifacts
           projectId={projectId}
           taskId={taskId}
-          runId={state.runs[0]?.id ?? null}
+          runId={state.runs.find((r) => !r.side)?.id ?? null}
           refreshKey={`${state.runs.length}:${state.activeRunId ?? ''}:${state.workspace?.changes ?? ''}`}
         />
       )}

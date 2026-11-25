@@ -8,10 +8,13 @@ import { IntegrationsPage } from '../features/integrations/IntegrationsPage'
 import { SetupPage } from '../features/setup/SetupPage'
 import { ProjectsPage } from '../features/projects/ProjectsPage'
 import { AboutSection, PowerSection, UpdatesSection } from '../features/settings/SettingsPage'
+import { Select } from '@/components/ui/select'
 import { SettingsLayout } from '../features/settings/SettingsNav'
 import { settingsScope } from '../features/settings/settings-sections'
 import { GeneralSection } from '../features/settings/GeneralSection'
+import { TerminalsPage } from '../features/terminal/TerminalsPage'
 import { AppearanceSection } from '../features/settings/AppearanceSection'
+import { LayoutSection } from '../features/settings/LayoutSection'
 import { NotificationsSection } from '../features/settings/NotificationsSection'
 import { ShortcutsSection } from '../features/settings/ShortcutsSection'
 import { TerminalSection } from '../features/settings/TerminalSection'
@@ -57,6 +60,11 @@ export interface PageView {
   crumbs: readonly Crumb[] | null
   /** Ocupa a altura toda (rolagem própria); senão, a casca rola com respiro. */
   fullHeight: boolean
+  /**
+   * Largura do container centralizado (`PAGE_WIDTH`). Sem valor: `list`. `full` = a janela toda
+   * (Quadro e terminal); Configurações têm o próprio container por seção.
+   */
+  width?: 'list' | 'wide' | 'full'
 }
 
 type Renderer<K extends RouteName> = (
@@ -64,11 +72,47 @@ type Renderer<K extends RouteName> = (
   ctx: PageContext
 ) => PageView
 
+/**
+ * Projeto das telas por projeto (Quadro e automações, Agentes do projeto): o da rota (escolhido no
+ * "Vale para") ou o atual. Escolher aqui não troca o projeto atual do app.
+ */
+function settingsProject(
+  route: Extract<Route, { name: 'settings' }>,
+  ctx: PageContext
+): ProjectView | null {
+  const linked = (ctx.projects ?? []).filter((p) => p.notionProject && !p.archived)
+  return linked.find((p) => p.id === route.projectId) ?? ctx.linkedProject
+}
+
+/** "Vale para: [projeto ▾]": troca o projeto só desta tela. */
+function SettingsProjectPicker({
+  route,
+  ctx
+}: {
+  route: Extract<Route, { name: 'settings' }>
+  ctx: PageContext
+}): React.JSX.Element | null {
+  const linked = (ctx.projects ?? []).filter((p) => p.notionProject && !p.archived)
+  const current = settingsProject(route, ctx)
+  if (linked.length === 0 || !current) return null
+  return (
+    <Select
+      aria-label="Projeto desta tela"
+      size="sm"
+      value={current.id}
+      options={linked.map((p) => ({ value: p.id, label: p.name }))}
+      onChange={(projectId) => ctx.replace({ ...route, projectId })}
+      className="h-7 w-auto min-w-36 text-xs"
+    />
+  )
+}
+
 function settingsPage(
   route: Extract<Route, { name: 'settings' }>,
   ctx: PageContext
 ): React.ReactNode {
-  const { linkedProject, project, navigate } = ctx
+  const { project, navigate } = ctx
+  const linkedProject = settingsProject(route, ctx)
   const toSettings = (section: SettingsSection): void => navigate({ name: 'settings', section })
   const projectId = project?.id ?? null
   switch (route.section ?? 'integrations') {
@@ -76,6 +120,8 @@ function settingsPage(
       return <GeneralSection onOpenSection={toSettings} />
     case 'appearance':
       return <AppearanceSection />
+    case 'layout':
+      return <LayoutSection />
     case 'notifications':
       return <NotificationsSection projects={ctx.projects} />
     case 'shortcuts':
@@ -111,27 +157,39 @@ function settingsPage(
     case 'board':
       return (
         <BoardSettingsPage
+          key={linkedProject?.id ?? 'none'}
           project={linkedProject}
           tab={route.tab ?? 'columns'}
           onTabChange={(tab) => ctx.replace({ ...route, tab })}
-          onOpenBoard={() => navigate({ name: 'board' })}
+          onOpenBoard={() =>
+            navigate(
+              linkedProject ? { name: 'board', projectId: linkedProject.id } : { name: 'board' }
+            )
+          }
           onOpenProjects={() => toSettings('projects')}
         />
       )
     case 'agents':
-      return linkedProject ? <ProjectAgentsSettings projectId={linkedProject.id} /> : <AgentsPage />
+      return linkedProject ? (
+        <ProjectAgentsSettings key={linkedProject.id} projectId={linkedProject.id} />
+      ) : (
+        <AgentsPage />
+      )
     case 'updates':
       return (
-        <div className={`flex flex-col gap-6 ${PAGE_WIDTH.form}`}>
-          <PageHeader title={SETTINGS_TITLES.updates} />
+        <div className={`flex flex-col gap-7 ${PAGE_WIDTH.form}`}>
+          <PageHeader
+            title={SETTINGS_TITLES.updates}
+            subtitle="Versão, canal e o que acontece quando sai uma nova."
+          />
           <UpdatesSection />
           <PowerSection />
         </div>
       )
     case 'about':
       return (
-        <div className={`flex flex-col gap-6 ${PAGE_WIDTH.form}`}>
-          <PageHeader title={SETTINGS_TITLES.about} />
+        <div className={`flex flex-col gap-7 ${PAGE_WIDTH.form}`}>
+          <PageHeader title={SETTINGS_TITLES.about} subtitle="O app, a versão e os links." />
           <AboutSection />
         </div>
       )
@@ -160,7 +218,8 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
       />
     ),
     crumbs: null,
-    fullHeight: true
+    fullHeight: true,
+    width: 'full'
   }),
   task: (route, ctx) => ({
     node: (
@@ -168,6 +227,16 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
         project={ctx.projects === null ? null : ctx.linkedProject}
         taskId={route.taskId}
         section={route.section ?? null}
+        session={route.session ?? null}
+        onSelectSession={(session) =>
+          ctx.replace({
+            name: 'task',
+            projectId: route.projectId,
+            taskId: route.taskId,
+            ...(route.section ? { section: route.section } : {}),
+            ...(session ? { session } : {})
+          })
+        }
         onBackToBoard={() => ctx.navigate({ name: 'board', projectId: route.projectId })}
         onOpenTerminal={() =>
           ctx.navigate({ name: 'terminal', projectId: route.projectId, taskId: route.taskId })
@@ -175,7 +244,8 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
       />
     ),
     crumbs: null,
-    fullHeight: true
+    fullHeight: true,
+    width: 'wide'
   }),
   terminal: (route, ctx) => ({
     node: (
@@ -192,27 +262,39 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
       />
     ),
     crumbs: null,
-    fullHeight: true
+    fullHeight: true,
+    width: 'full'
   }),
-  agents: (_route, ctx) => ({
+  terminals: (_route, ctx) => ({
     node: (
-      <AgentsPage
-        projectId={ctx.linkedProject?.id ?? null}
-        onOpenOrchestrator={() => ctx.navigate({ name: 'settings', section: 'agents' })}
+      <TerminalsPage
+        project={ctx.project ? { id: ctx.project.id, name: ctx.project.name } : null}
+        onOpenTask={(projectId, taskId) => ctx.navigate({ name: 'terminal', projectId, taskId })}
       />
     ),
+    crumbs: null,
+    fullHeight: true,
+    width: 'full'
+  }),
+  agents: (_route, ctx) => ({
+    node: <AgentsPage projectId={ctx.linkedProject?.id ?? null} />,
     crumbs: null,
     fullHeight: false
   }),
   settings: (route, ctx) => {
     const section = route.section ?? 'integrations'
-    const { linkedProject, navigate } = ctx
+    const { navigate } = ctx
+    const linkedProject = settingsProject(route, ctx)
+    const perProject = section === 'board' || section === 'agents'
     return {
       node: (
         <SettingsLayout
           section={section}
           projectName={linkedProject?.name ?? null}
           scope={settingsScope(section, linkedProject?.name ?? null)}
+          {...(perProject
+            ? { scopePicker: <SettingsProjectPicker route={route} ctx={ctx} /> }
+            : {})}
           onSection={(next) => navigate({ name: 'settings', section: next })}
         >
           {settingsPage(route, ctx)}
@@ -224,13 +306,16 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
           ? [
               {
                 label: linkedProject?.name ?? 'Projeto',
-                onClick: linkedProject ? () => navigate({ name: 'board' }) : undefined
+                onClick: linkedProject
+                  ? () => navigate({ name: 'board', projectId: linkedProject.id })
+                  : undefined
               }
             ]
           : []),
         SETTINGS_TITLES[section]
       ],
-      fullHeight: true
+      fullHeight: true,
+      width: 'full'
     }
   },
   home: (_route, ctx) => ({

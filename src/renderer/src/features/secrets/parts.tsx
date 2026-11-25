@@ -3,7 +3,10 @@
  * segredo (senha, sem autocompletar nem corretor) e a lista "Quem pode usar".
  */
 import { Input } from '@/components/ui/input'
-import { CheckboxField, Field } from '../../components/form'
+import { Field } from '../../components/form'
+import { McpPlugIcon } from '../../components/icons'
+import type { AgentColor } from '../../../../shared/agent'
+import { CheckCardGrid } from '../agents/AgentCheckGrid'
 import type { SecretUse } from '../../../../shared/vault'
 import { hasUse, toggleUse } from './secrets-logic'
 
@@ -54,7 +57,7 @@ export function SecretValueField({
   )
 }
 
-/** "Quem pode usar": agentes e servidores MCP do Orkio, com checkbox. */
+/** "Quem pode usar": agentes (com o rosto) e servidores MCP do Orkio, em cartões 2×2. */
 export function UsesPicker({
   uses,
   onChange,
@@ -64,51 +67,48 @@ export function UsesPicker({
 }: {
   uses: SecretUse[]
   onChange(uses: SecretUse[]): void
-  agents: readonly { key: string; name: string }[]
-  servers: readonly { id: string; name: string }[]
+  agents: readonly { key: string; name: string; color?: AgentColor; description?: string }[]
+  servers: readonly { id: string; name: string; description?: string }[]
   disabled?: boolean
 }): React.JSX.Element {
+  const agentUse = (key: string): SecretUse => ({ kind: 'agent', key })
+  const serverUse = (id: string): SecretUse => ({ kind: 'mcp', id })
   return (
     <fieldset className="flex flex-col gap-3" disabled={disabled}>
       <legend className="mb-1 text-sm font-medium">Quem pode usar</legend>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-2">
-          <span className="text-2xs tracking-[0.06em] text-subtle-foreground uppercase">
-            Agentes
-          </span>
-          {agents.map((a) => {
-            const use: SecretUse = { kind: 'agent', key: a.key }
-            return (
-              <CheckboxField
-                key={a.key}
-                label={a.name}
-                checked={hasUse(uses, use)}
-                disabled={disabled}
-                onChange={(on) => onChange(toggleUse(uses, use, on))}
-              />
-            )
-          })}
-        </div>
-        <div className="flex flex-col gap-2">
-          <span className="text-2xs tracking-[0.06em] text-subtle-foreground uppercase">
-            Servidores MCP
-          </span>
-          {servers.length === 0 && (
-            <p className="text-xs text-muted-foreground">Nenhum servidor no Orkio ainda.</p>
-          )}
-          {servers.map((s) => {
-            const use: SecretUse = { kind: 'mcp', id: s.id }
-            return (
-              <CheckboxField
-                key={s.id}
-                label={s.name}
-                checked={hasUse(uses, use)}
-                disabled={disabled}
-                onChange={(on) => onChange(toggleUse(uses, use, on))}
-              />
-            )
-          })}
-        </div>
+      <div className="flex flex-col gap-2">
+        <span className="label-caps">Agentes</span>
+        <CheckCardGrid
+          label="Agentes"
+          disabled={disabled}
+          items={agents.map((a) => ({
+            key: a.key,
+            name: a.name,
+            description: a.description,
+            face: { color: a.color, seed: a.key }
+          }))}
+          checked={(key) => hasUse(uses, agentUse(key))}
+          onToggle={(key, on) => onChange(toggleUse(uses, agentUse(key), on))}
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        <span className="label-caps">Servidores MCP</span>
+        {servers.length === 0 ? (
+          <p className="text-xs text-muted-foreground">Nenhum servidor no Orkio ainda.</p>
+        ) : (
+          <CheckCardGrid
+            label="Servidores MCP"
+            disabled={disabled}
+            items={servers.map((s) => ({
+              key: s.id,
+              name: s.name,
+              description: s.description,
+              icon: <McpPlugIcon className="size-4" />
+            }))}
+            checked={(id) => hasUse(uses, serverUse(id))}
+            onToggle={(id, on) => onChange(toggleUse(uses, serverUse(id), on))}
+          />
+        )}
       </div>
     </fieldset>
   )

@@ -16,6 +16,7 @@ import { suggestAlvaTargets, type AlvaTargets } from './alva-targets'
 import { stageWithRole } from '../../../../shared/board'
 import type { BoardView } from '../../../../shared/board'
 import { ipcResult } from '../../lib/ipc'
+import { SURFACE } from '../../components/surface'
 
 export function AlvaPage({
   projectId,
@@ -104,7 +105,7 @@ export function AlvaPage({
     >
       <div className="flex flex-col gap-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base font-medium">alva-flow</h2>
+          <h2 className="text-base font-medium">Modelos do alva-flow</h2>
           {precheck?.pluginVersion && (
             <code className="font-mono text-xs text-subtle-foreground">
               v{precheck.pluginVersion}
@@ -137,10 +138,7 @@ export function AlvaPage({
         {precheck === null ? (
           <Skeleton className="h-40" aria-label="Verificando o projeto" />
         ) : (
-          <ul
-            aria-label="Itens da pré-checagem"
-            className="overflow-hidden rounded-xl border border-border-soft bg-card"
-          >
+          <ul aria-label="Itens da pré-checagem" className={SURFACE.list}>
             {precheck.items.map((i) => (
               <li
                 key={i.id}

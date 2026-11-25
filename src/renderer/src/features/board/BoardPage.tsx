@@ -8,7 +8,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { CheckboxField } from '@/components/form'
 import { cn } from '@/lib/utils'
 import { ScreenTitle } from '../../components/ScreenTitle'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
@@ -21,6 +20,7 @@ import {
   BoardNoticeAlert,
   BoardViewControl,
   PendingWritesAlert,
+  BlockedFilter,
   PriorityFilter,
   StageIssuesAlert,
   TruncatedNote
@@ -359,7 +359,7 @@ function Board({
         onQuery={setQuery}
       >
         <PriorityFilter priorities={priorities} value={priority} onChange={setPriority} />
-        <CheckboxField label="Só bloqueadas" checked={onlyBlocked} onChange={setOnlyBlocked} />
+        <BlockedFilter checked={onlyBlocked} onChange={setOnlyBlocked} />
         <div className="flex-1" />
         <AutomationLine status={automation.status} onOpenIntegrations={onOpenIntegrations} />
       </BoardFilters>
@@ -526,8 +526,8 @@ function AgentRow({
                 pressed={selected === key}
                 onPressedChange={(pressed) => onSelect(pressed ? key : null)}
                 className={cn(
-                  'relative h-7 min-w-7 gap-1 px-1 font-mono text-2xs text-subtle-foreground',
-                  'data-[state=on]:bg-muted data-[state=on]:text-foreground data-[state=on]:ring-1 data-[state=on]:ring-border'
+                  'relative h-7 min-w-7 gap-1 rounded-full border border-transparent px-1 pr-1.5 font-mono text-2xs text-subtle-foreground',
+                  'aria-pressed:border-border aria-pressed:bg-foreground/12 aria-pressed:text-foreground aria-pressed:hover:bg-foreground/15'
                 )}
               >
                 <AgentAvatar name={a.name} color={a.color} seed={key} />

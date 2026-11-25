@@ -17,6 +17,8 @@ import {
   seedConfig
 } from './fixtures'
 
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
+
 /**
  * 6E: navegação reorganizada. Cada tela do projeto é um item do menu (Quadro, Etapas e
  * automações, Fluxos, Contexto do Claude); clicar num item sai de qualquer subtela; a tarefa
@@ -73,9 +75,9 @@ test('menu com três telas; Configurações reúne as telas do projeto e sai das
   const { page } = orkio
   await page.evaluate((t) => window.orkio.notion.connect({ kind: 'token', token: t }), TOKEN)
 
-  // O menu principal tem só Quadro, Agentes e Configurações.
-  await expect(telas(page).getByRole('button')).toHaveCount(3)
-  for (const name of ['Quadro', 'Agentes', 'Configurações']) {
+  // O menu principal tem Quadro, Agentes, Terminais e Configurações.
+  await expect(telas(page).getByRole('listitem')).toHaveCount(4)
+  for (const name of ['Quadro', 'Agentes', 'Terminais', 'Configurações']) {
     await expect(telas(page).getByRole('button', { name, exact: true })).toBeVisible()
   }
 
@@ -102,7 +104,7 @@ test('menu com três telas; Configurações reúne as telas do projeto e sai das
   await boardSettingsTab(page, 'Entrega')
   const approval = page
     .getByRole('region', { name: 'Entrega' })
-    .getByRole('checkbox', { name: 'Exigir minha aprovação para push' })
+    .getByRole('switch', { name: 'Exigir minha aprovação para push' })
   await expect(approval).toBeChecked()
   await approval.click()
   await expect(approval).not.toBeChecked()
@@ -115,6 +117,8 @@ test('menu com três telas; Configurações reúne as telas do projeto e sai das
   // Fluxos (com os modelos do alva-flow) também é uma aba.
   await boardSettingsTab(page, 'Fluxos')
   await expect(page.getByRole('region', { name: 'Fluxos do projeto' })).toBeVisible()
+  // Os modelos do alva-flow ficam numa aba própria.
+  await boardSettingsTab(page, 'alva-flow')
   await expect(page.getByRole('region', { name: 'Modelos do alva-flow' })).toBeVisible()
   // Contexto do Claude não existe mais.
   await expect(page.getByRole('button', { name: 'Contexto do Claude' })).toHaveCount(0)
@@ -130,20 +134,31 @@ test('tarefa: tela com fases, conversa e painel; janela estreita; tarefa que sum
   const task = taskScreen(page, 'ORK-2')
   await expect(task).toBeVisible()
   await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()
-  // Fases na barra do topo (fora da região da tela).
+  // Sem fluxo, as fases seriam as colunas do quadro: a barra do topo não as repete (a etapa
+  // fica em Detalhes).
   await expect(
     page.getByTestId('top-bar').getByRole('list', { name: 'Fases da tarefa' })
-  ).toBeVisible()
+  ).toHaveCount(0)
   const session = task.getByRole('region', { name: 'Sessão da tarefa' })
   await expect(session.getByRole('list', { name: 'Conversa da tarefa' })).toContainText(
     'Entrou no quadro'
   )
   await expect(session.getByRole('textbox', { name: /^Mensagem para/ })).toBeVisible()
   const panel = task.getByRole('complementary', { name: 'Detalhes de ORK-2' })
-  await expect(panel.getByRole('tab')).toHaveCount(3)
-  for (const name of ['Mudanças', 'PR & CI', 'Detalhes']) {
+  // Painel como no Claude Desktop: ícones no topo e as subtelas pelas linhas de Detalhes.
+  await expect(panel.getByRole('tab')).toHaveCount(4)
+  for (const name of ['Detalhes', 'Mudanças', 'Sidechat', 'Terminal']) {
     await expect(panel.getByRole('tab', { name, exact: true })).toBeVisible()
   }
+  await panel.getByRole('button', { name: 'PR & CI', exact: true }).click()
+  await expect(panel.getByRole('region', { name: 'PR & CI', exact: true })).toBeVisible()
+  await panel.getByRole('button', { name: 'Detalhes', exact: true }).click()
+  await expect(panel.getByRole('combobox', { name: /^Mover para/ })).toBeVisible()
+  // Dá para esconder o painel e mostrar de novo.
+  await page.getByRole('button', { name: 'Esconder o painel da tarefa' }).click()
+  await expect(panel).toHaveCount(0)
+  await page.getByRole('button', { name: 'Mostrar o painel da tarefa' }).click()
+  await expect(panel).toBeVisible()
   await expectTaskHistory(task, 'Entrou no quadro')
   await expect(telas(page).getByRole('button', { name: 'Quadro' })).toHaveAttribute(
     'aria-current',
@@ -195,14 +210,14 @@ test('Command Palette e atalhos: Ctrl+K acha a tarefa, Ctrl+número troca de tel
   await expect(palette.getByRole('option', { name: 'Modelos do alva-flow' })).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('tab', { name: 'Fluxos', selected: true })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'alva-flow', selected: true })).toBeVisible()
   await page.keyboard.press('Control+4')
   await expect(h1(page, 'Integrações')).toBeVisible()
   await page.keyboard.press('Alt+ArrowLeft')
   await expect(h1(page, 'Quadro e automações')).toBeVisible()
-  await page.keyboard.press('Control+1')
-  await expect(h1(page, 'Quadro')).toBeVisible()
   await page.keyboard.press('Control+5')
+  await expect(page.getByRole('tablist', { name: 'Terminais do projeto' })).toBeAttached()
+  await page.keyboard.press('Control+1')
   await expect(h1(page, 'Quadro')).toBeVisible()
 
   // Quadro pelo teclado: menu do card e Ctrl+Enter abre a tela da tarefa.
@@ -223,7 +238,8 @@ test('Buscar tarefa: o banco do Notion inteiro; fora do quadro abre no Notion; c
   // Sem GitHub, a conta é a do Notion (nome da pessoa, sem e-mail).
   await expect(nav.getByRole('button', { name: /^Conta: Ada Lovelace/ })).toBeVisible()
 
-  await nav.getByRole('button', { name: /^Buscar tarefa/ }).click()
+  // A busca fica no menu Sessão do cabeçalho (Ctrl/⌘+P), não mais na lateral.
+  await page.keyboard.press(`${MOD}+p`)
   const search = page.getByRole('dialog', { name: 'Buscar tarefas no Notion' })
   await expect(search).toBeVisible()
   // Tarefa de outra pessoa (não está no seu quadro) também aparece, marcada para abrir no Notion.
@@ -234,7 +250,7 @@ test('Buscar tarefa: o banco do Notion inteiro; fora do quadro abre no Notion; c
   await expect.poll(() => openedUrls(app)).toContain('https://www.notion.so/ORK-9-bbbb9')
 
   // Pelo ID: a sua abre a tela da tarefa no Orkio.
-  await nav.getByRole('button', { name: /^Buscar tarefa/ }).click()
+  await page.keyboard.press(`${MOD}+p`)
   await page.keyboard.type('ORK-2')
   await search.getByRole('option', { name: /Listar tarefas do Notion/ }).click()
   await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()

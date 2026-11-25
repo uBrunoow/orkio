@@ -1458,9 +1458,9 @@ export async function navTo(page: Page, name: string): Promise<void> {
       .click()
     return
   }
-  if (name === 'Fluxos') {
+  if (name === 'Fluxos' || name === 'alva-flow') {
     await openSettings(page, 'Quadro e automações')
-    await page.getByRole('tab', { name: 'Fluxos', exact: true }).click()
+    await page.getByRole('tab', { name, exact: true }).click()
     return
   }
   const section = name === 'Etapas e automações' ? 'Quadro e automações' : name
@@ -1498,9 +1498,15 @@ export async function expectTaskHistory(scope: Locator, ...texts: string[]): Pro
  */
 export async function taskTab(
   screen: Locator,
-  name: 'Sessão' | 'Spec' | 'Plano' | 'Mudanças' | 'PR & CI' | 'Revisão' | 'Detalhes'
+  name: 'Sessão' | 'Spec' | 'Plano' | 'Mudanças' | 'PR & CI' | 'Revisão' | 'Contexto' | 'Detalhes'
 ): Promise<Locator> {
   if (name === 'Sessão') return screen
+  // PR & CI, Revisão e Contexto são subtelas abertas pelas linhas de Detalhes (com "voltar").
+  if (name === 'PR & CI' || name === 'Revisão' || name === 'Contexto') {
+    await screen.getByRole('tab', { name: 'Detalhes', exact: true }).click()
+    await screen.getByRole('button', { name, exact: true }).click()
+    return screen.getByRole('region', { name, exact: true })
+  }
   await screen.getByRole('tab', { name, exact: true }).click()
   return screen.getByRole('tabpanel', { name, exact: true })
 }

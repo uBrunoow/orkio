@@ -1,6 +1,8 @@
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { SegmentedControl } from '@/components/form'
+import { cn } from '@/lib/utils'
+import { LockIcon } from '../../components/icons'
 import { Alert } from '../../components/Alert'
 import type { BoardLayout } from '../../app/routes'
 import type { BoardState } from '../../app/sources'
@@ -50,8 +52,35 @@ export function PriorityFilter({
       options={priorities.map((p) => ({ value: p, label: p }))}
       value={value}
       onChange={(v) => onChange(v)}
-      className="w-48"
+      className="w-44"
     />
+  )
+}
+
+/** "Só bloqueadas" como chip da barra (papel de checkbox, mesma altura dos outros filtros). */
+export function BlockedFilter({
+  checked,
+  onChange
+}: {
+  checked: boolean
+  onChange(checked: boolean): void
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        'inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-xs whitespace-nowrap transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+        checked
+          ? 'border-danger-tint-border bg-danger-tint text-foreground'
+          : 'border-border text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+      )}
+    >
+      <LockIcon className={cn('size-3.5', checked ? 'text-danger' : 'text-subtle-foreground')} />
+      Só bloqueadas
+    </button>
   )
 }
 

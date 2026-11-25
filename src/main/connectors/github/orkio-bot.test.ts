@@ -32,7 +32,8 @@ function project(name: string, owner: string, repo: string, host = 'github.com')
     local: null,
     health: { state: 'ok' },
     notices: [],
-    notionProject: null
+    notionProject: null,
+    archived: false
   }
 }
 

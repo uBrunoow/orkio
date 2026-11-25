@@ -1,7 +1,7 @@
 /*
  * Tema do Orkio (Tailwind v4 + shadcn/ui). Fonte da verdade das cores e medidas: o mockup
  * (docs/superpowers/specs/2026-11-23-orkio-ui-mockup.html) e o protótipo Alva Tasks.
- * Só escuro. Hex só aqui; componentes usam as classes (bg-card, text-muted-foreground...).
+ * Escuro (padrão) e claro (`html[data-theme='light']`, Configurações › Aparência). Hex só aqui; componentes usam as classes (bg-card, text-muted-foreground...).
  * Compilado para um .css estático no build: nada de <style> em runtime (CSP estrita).
  */
 @import 'tailwindcss';
@@ -11,6 +11,14 @@
 
 :root {
   --radius: 0.5rem;
+  color-scheme: dark;
+
+  /* Fontes e larguras escolhidas em Configurações (Aparência, Layout) */
+  --app-font-sans: 'Inter', system-ui, sans-serif;
+  --app-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --page-form: 48rem;
+  --page-list: 64rem;
+  --page-wide: 96rem;
 
   /* Superfícies (do fundo para cima) */
   --background: #0a0a0b;
@@ -56,9 +64,32 @@
   --danger-tint-border: #5a2226;
   --destructive: #f2555a;
   --info: #6ca8ff;
+  /* Texto sobre os tons cheios (ok/aviso/erro/info): preto no escuro, branco no claro */
+  --on-tone: #000000;
+  /* Marca do Claude (logo no seletor de modelo); só no símbolo, nunca como cor de interface */
+  --claude: #d97757;
   /* Cores de categoria (etapas, avatares de agente; mockup .a4/.a6) */
   --purple: #c9a2ff;
   --pink: #ff8fa3;
+  /* Paletas dos fundos (Aparência › Fundo): base, luz principal e luz de apoio */
+  --wp-esmeralda-base: #11141b;
+  --wp-esmeralda-1: #1bb7a5;
+  --wp-esmeralda-2: #31d3be;
+  --wp-oceano-base: #0d121d;
+  --wp-oceano-1: #4f8cff;
+  --wp-oceano-2: #8fb4ff;
+  --wp-orquidea-base: #141017;
+  --wp-orquidea-1: #f472b6;
+  --wp-orquidea-2: #f9a8d4;
+  --wp-dracula-base: #21222c;
+  --wp-dracula-1: #bd93f9;
+  --wp-dracula-2: #8be9fd;
+  --wp-nord-base: #242933;
+  --wp-nord-1: #88c0d0;
+  --wp-nord-2: #a3be8c;
+  --wp-catppuccin-base: #1e1e2e;
+  --wp-catppuccin-1: #cba6f7;
+  --wp-catppuccin-2: #74c7ec;
 
   --sidebar: #111113;
   --sidebar-foreground: #8f8f94;
@@ -68,8 +99,8 @@
 }
 
 @theme inline {
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
   --font-display: 'Jost', 'Inter', system-ui, sans-serif;
 
   --text-2xs: 0.6875rem;
@@ -116,6 +147,8 @@
   --color-danger-tint: var(--danger-tint);
   --color-danger-tint-border: var(--danger-tint-border);
   --color-info: var(--info);
+  --color-on-tone: var(--on-tone);
+  --color-claude: var(--claude);
   --color-purple: var(--purple);
   --color-pink: var(--pink);
 
@@ -142,7 +175,6 @@
   }
   body {
     @apply bg-background text-foreground font-sans text-sm antialiased;
-    color-scheme: dark;
   }
   ::selection {
     background: var(--brand-tint);
@@ -165,6 +197,136 @@
   }
 }
 
+/* Rótulo de seção em caixa-alta pequena (cabeçalho de coluna, grupo de menu): um jeito só. */
+/* Rolagem lateral limpa (abas de fluxos etc.): sem a barra, com a ponta direita esmaecida. */
+@utility scroll-x-clean {
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent);
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility label-caps {
+  font-size: var(--text-2xs);
+  line-height: var(--text-2xs--line-height);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle-foreground);
+}
+
+/* Tema claro: as mesmas peças, do papel para cima. Laranja continua só para ação e foco; o texto
+   de tom (aviso, erro, ok) escurece para passar de 4.5:1 no branco. */
+html[data-theme='light'] {
+  color-scheme: light;
+
+  --background: #f4f4f5;
+  --surface: #ededef;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --muted: #e7e7ea;
+  --muted-foreground: #5b5b63;
+  --subtle-foreground: #7c7c85;
+  --foreground: #18181b;
+
+  --border: #d4d4d9;
+  --border-soft: #e3e3e7;
+  --input: #d4d4d9;
+  --ring: #ff5b1f;
+
+  --brand: #ff5b1f;
+  --brand-hover: #e8490f;
+  --brand-tint: #ffe9df;
+  --brand-tint-foreground: #a8370a;
+  --brand-tint-border: #ffc7ad;
+  --primary: #ff5b1f;
+  --primary-foreground: #000000;
+
+  --secondary: #e7e7ea;
+  --secondary-foreground: #18181b;
+  --accent: #e7e7ea;
+  --accent-foreground: #18181b;
+
+  --ok: #0f8a52;
+  --ok-tint: #e2f5ea;
+  --ok-tint-border: #aee0c4;
+  --warn: #9a6200;
+  --warn-tint: #fdf3d8;
+  --warn-tint-border: #ecd08a;
+  --danger: #cc2a31;
+  --danger-tint: #fce8e9;
+  --danger-tint-border: #f2b8bb;
+  --destructive: #cc2a31;
+  --info: #1f5fd1;
+  --on-tone: #ffffff;
+  --claude: #c15f3c;
+  --purple: #7444d6;
+  --pink: #cf2f67;
+  --wp-esmeralda-base: #f8fafc;
+  --wp-esmeralda-1: #159387;
+  --wp-esmeralda-2: #0e7a70;
+  --wp-oceano-base: #f7f9fc;
+  --wp-oceano-1: #2563eb;
+  --wp-oceano-2: #1d4ed8;
+  --wp-orquidea-base: #fbf8fb;
+  --wp-orquidea-1: #be185d;
+  --wp-orquidea-2: #f472b6;
+  --wp-dracula-base: #f4f4f5;
+  --wp-dracula-1: #bd93f9;
+  --wp-dracula-2: #8be9fd;
+  --wp-nord-base: #eceff4;
+  --wp-nord-1: #88c0d0;
+  --wp-nord-2: #a3be8c;
+  --wp-catppuccin-base: #e6e9ef;
+  --wp-catppuccin-1: #8839ef;
+  --wp-catppuccin-2: #1957d6;
+
+  --sidebar: #ededef;
+  --sidebar-foreground: #5b5b63;
+  --sidebar-accent: #e1e1e5;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #e3e3e7;
+}
+
+/* Fontes (Configurações › Aparência, `data-ui-font` / `data-code-font`). */
+html[data-ui-font='geist'] {
+  --app-font-sans: 'Geist Sans', 'Inter', system-ui, sans-serif;
+}
+html[data-ui-font='figtree'] {
+  --app-font-sans: 'Figtree', 'Inter', system-ui, sans-serif;
+}
+html[data-ui-font='system'] {
+  --app-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+html[data-code-font='geist-mono'] {
+  --app-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+html[data-code-font='system'] {
+  --app-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Espaço entre letras (`data-tracking`): herdado por tudo que não tem tracking próprio. */
+html[data-tracking='tight'] body {
+  letter-spacing: -0.012em;
+}
+html[data-tracking='relaxed'] body {
+  letter-spacing: 0.012em;
+}
+html[data-tracking='wide'] body {
+  letter-spacing: 0.028em;
+}
+
+/* Largura das páginas (Configurações › Layout, `data-page-width`). */
+html[data-page-width='full'] {
+  --page-form: none;
+  --page-list: none;
+  --page-wide: none;
+}
+
 /* Movimento reduzido: o do sistema ou "Reduzir sempre" (Configurações › Aparência, `data-motion`). */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -184,6 +346,9 @@ html[data-motion='reduce'] *::after {
 }
 
 /* Tamanho do texto (Configurações › Aparência, `data-text-size`): escala o rem (texto e espaços). */
+html[data-text-size='small'] {
+  font-size: 93.75%;
+}
 html[data-text-size='large'] {
   font-size: 112.5%;
 }

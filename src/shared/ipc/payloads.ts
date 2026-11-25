@@ -299,12 +299,14 @@ function parseRuntimePatch(value: unknown): Parsed<RuntimePatch> {
 
 export function parseSendMessageRequest(value: unknown): Parsed<SendMessageRequest> {
   if (!isRecord(value)) return INVALID
-  const { projectId, taskId, text, fresh, asAgent } = value
+  const { projectId, taskId, text, fresh, asAgent, session, side } = value
   if (
     !isProjectId(projectId) ||
     !isTaskId(taskId) ||
     !str(text, MESSAGE_MAX) ||
     !(fresh === undefined || typeof fresh === 'boolean') ||
+    !(session === undefined || isSessionUuid(session)) ||
+    !(side === undefined || typeof side === 'boolean') ||
     !(asAgent === undefined || typeof asAgent === 'boolean')
   ) {
     return INVALID
@@ -320,6 +322,8 @@ export function parseSendMessageRequest(value: unknown): Parsed<SendMessageReque
     text,
     ...(fork !== undefined ? { fork } : {}),
     ...(fresh !== undefined ? { fresh } : {}),
+    ...(session !== undefined ? { session } : {}),
+    ...(side !== undefined ? { side } : {}),
     ...(asAgent !== undefined ? { asAgent } : {}),
     ...(runtime !== undefined ? { runtime } : {}),
     ...(attachments !== undefined ? { attachments } : {})

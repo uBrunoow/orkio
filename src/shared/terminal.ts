@@ -7,6 +7,12 @@
 import { isRecord } from './guards'
 
 /** `shell`: terminal comum na pasta da tarefa; `claude`: a sessão da tarefa no Claude Code. */
+/**
+ * "Tarefa" dos terminais na pasta do projeto (tela Terminais), que não são de uma tarefa: um id no
+ * formato de página do Notion que nunca existe, para passar pelas mesmas validações e eventos.
+ */
+export const PROJECT_TERMINAL_TASK = '00000000-0000-0000-0000-000000000000'
+
 export const TERMINAL_KINDS = ['shell', 'claude'] as const
 export type TerminalKind = (typeof TERMINAL_KINDS)[number]
 

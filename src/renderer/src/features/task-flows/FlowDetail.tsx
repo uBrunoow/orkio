@@ -55,13 +55,14 @@ export function FlowDetail({
   return (
     <SentenceDetail
       label={`Fluxo ${flow.name}`}
+      compactSentence
       sentence={describeFlow(flow, bindings, stageName)}
       starts={
         <div className="flex flex-col gap-1">
           {bindings.length === 0 ? (
             <p>
-              Não está ligado a nenhuma coluna. Ligue em Etapas e automações (“Fluxo desta coluna”)
-              ou rode pelo painel da tarefa.
+              Não está ligado a nenhuma coluna. Ligue em Colunas (“Fluxo desta coluna”) ou rode pelo
+              painel da tarefa.
             </p>
           ) : (
             bindings.map((b) => (

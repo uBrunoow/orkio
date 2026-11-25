@@ -213,3 +213,54 @@ export function toggleAgent(list: readonly string[], key: string, on: boolean): 
   const without = list.filter((k) => k !== key)
   return on ? [...without, key] : without
 }
+
+/** Marca de um servidor MCP (para o logo), pelo nome, endereço ou comando. `null` = genérico. */
+export type McpBrand =
+  | 'github'
+  | 'notion'
+  | 'linear'
+  | 'aws'
+  | 'vercel'
+  | 'figma'
+  | 'slack'
+  | 'docker'
+  | 'browser'
+  | 'stripe'
+  | 'sentry'
+  | 'supabase'
+  | 'gitlab'
+  | 'jira'
+  | 'mongodb'
+  | 'firebase'
+  | 'drive'
+  | 'shop'
+  | 'docs'
+  | 'database'
+
+const BRAND_RULES: readonly (readonly [McpBrand, RegExp])[] = [
+  ['github', /github|octocode/],
+  ['notion', /notion/],
+  ['linear', /linear/],
+  ['aws', /\baws\b|amazonaws/],
+  ['vercel', /vercel/],
+  ['figma', /figma/],
+  ['slack', /slack/],
+  ['docker', /docker/],
+  ['browser', /chrome|playwright|puppeteer|browser/],
+  ['stripe', /stripe/],
+  ['sentry', /sentry/],
+  ['supabase', /supabase/],
+  ['gitlab', /gitlab/],
+  ['jira', /jira|atlassian|confluence/],
+  ['mongodb', /mongo/],
+  ['firebase', /firebase/],
+  ['drive', /google.?drive|gdrive/],
+  ['shop', /shopify|asaas|omie/],
+  ['database', /postgres|mysql|sqlite|database|\bdb\b/],
+  ['docs', /context7|docs|knowledge|backlog/]
+]
+
+export function mcpBrand(...texts: readonly (string | null | undefined)[]): McpBrand | null {
+  const t = texts.filter(Boolean).join(' ').toLowerCase()
+  return BRAND_RULES.find(([, re]) => re.test(t))?.[0] ?? null
+}
