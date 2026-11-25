@@ -17,6 +17,19 @@ export interface ProjectRepo {
   archived: boolean
   /** Confirmado na API do GitHub com a conta conectada. */
   verified: boolean
+  /**
+   * Como o Orkio fala com o GitHub deste repositório: `app` (padrão, campo ausente) = pela conexão
+   * do GitHub do Orkio; `git` = só o git e o `gh` desta máquina (nada de API do Orkio: para repos de
+   * organização sem o OAuth App aprovado).
+   */
+  access?: RepoAccess
+}
+
+export type RepoAccess = 'app' | 'git'
+
+/** Modo do repositório (ausente = `app`, o formato antigo continua igual no disco). */
+export function repoAccess(repo: ProjectRepo): RepoAccess {
+  return repo.access ?? 'app'
 }
 
 /** Repositório no github.com, nas coordenadas da API (`api.github.com`). */
@@ -36,7 +49,22 @@ export function githubRepoOf(
   project: { repo: ProjectRepo | null } | null | undefined
 ): GitHubRepoRef | null {
   const repo = project?.repo
-  if (!repo || !repo.verified || repo.host.toLowerCase() !== 'github.com') return null
+  if (!repo || !repo.verified || repoAccess(repo) === 'git') return null
+  if (repo.host.toLowerCase() !== 'github.com') return null
+  return { owner: repo.owner, name: repo.name }
+}
+
+/**
+ * O repositório do projeto no github.com para quem só precisa do nome (entrega, links, regras do
+ * push e do `gh`): verificado pela API (`app`) ou só com git local (`git`). Os sinais, a aba Revisão
+ * e a revisão publicada continuam no `githubRepoOf` (precisam da API do Orkio).
+ */
+export function gitRepoOf(
+  project: { repo: ProjectRepo | null } | null | undefined
+): GitHubRepoRef | null {
+  const repo = project?.repo
+  if (!repo || repo.host.toLowerCase() !== 'github.com') return null
+  if (!repo.verified && repoAccess(repo) !== 'git') return null
   return { owner: repo.owner, name: repo.name }
 }
 
@@ -163,6 +191,8 @@ export interface CreateProjectInput {
   /** O usuário confirmou que um host de alias/Enterprise é GitHub. */
   hostConfirmed: boolean
   name?: string
+  /** Salvar só com o git desta máquina, sem consultar a API do GitHub do Orkio. */
+  gitOnly?: boolean
 }
 
 export type ProjectMutationResult =

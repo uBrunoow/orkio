@@ -63,18 +63,25 @@ const str = (value: unknown, max: number): value is string =>
 /** Criar projeto: só a seleção feita no main e o remote; nunca caminhos. */
 export function parseCreateProjectInput(value: unknown): Parsed<CreateProjectInput> {
   if (!isRecord(value)) return INVALID
-  const { selectionId, remoteName, hostConfirmed, name } = value
+  const { selectionId, remoteName, hostConfirmed, name, gitOnly } = value
   if (
     !isLocalId(selectionId) ||
     typeof remoteName !== 'string' ||
     remoteName.length === 0 ||
     remoteName.length > 100 ||
     typeof hostConfirmed !== 'boolean' ||
-    !(name === undefined || str(name, 200))
+    !(name === undefined || str(name, 200)) ||
+    !(gitOnly === undefined || typeof gitOnly === 'boolean')
   ) {
     return INVALID
   }
-  return { selectionId, remoteName, hostConfirmed, ...(name !== undefined ? { name } : {}) }
+  return {
+    selectionId,
+    remoteName,
+    hostConfirmed,
+    ...(name !== undefined ? { name } : {}),
+    ...(gitOnly !== undefined ? { gitOnly } : {})
+  }
 }
 
 export function parseWorkspaceInput(value: unknown): Parsed<NotionWorkspaceInput> {
