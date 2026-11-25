@@ -84,6 +84,8 @@ import type { Result } from '../result'
 import type { ReviewThreadsResult } from '../review'
 import type { Flow, FlowRunView, OpenPrResult, TaskFlowsProject } from '../task-flow'
 import type { TaskSignalsResult } from '../task-signals'
+import type { PersonalTasksSnapshot } from '../task-lanes'
+import type { ColumnSetupsView, RunSetup, TaskSetupView } from '../task-setup'
 import {
   UPDATE_CHANNELS,
   UPDATE_INSTALL_MODES,
@@ -114,7 +116,8 @@ import {
   parseOrchestratorConfig,
   parseSendMessageRequest,
   parseStartRunRequest,
-  parseWorkspaceInput
+  parseWorkspaceInput,
+  parseRunSetupPayload
 } from './payloads'
 import {
   agentKey,
@@ -903,6 +906,36 @@ export const ORKIO_API = {
       onChanged: IPC_EVENTS.taskFlowChanged
     }
   ),
+  /**
+   * "Como deve rodar?" (Fase 1): padrão por coluna e o que cada tarefa trocou. Rodar continua em
+   * `taskFlows.start` (o modo da tarefa vence o fluxo da coluna).
+   */
+  taskSetup: group(
+    { needs: 'db', unexpected: 'Não foi possível ler como a tarefa roda. Tente novamente.' },
+    {
+      get: call<(projectId: string, taskId: string) => Promise<Result<TaskSetupView>>>()({
+        channel: 'task-setup:get',
+        args: [projectId, taskId]
+      }),
+      /** Grava o que a tarefa trocou (`{}` = volta a herdar). Recusado com fluxo ativo. */
+      save: call<
+        (projectId: string, taskId: string, setup: RunSetup) => Promise<Result<TaskSetupView>>
+      >()({
+        channel: 'task-setup:save',
+        args: [projectId, taskId, parseRunSetupPayload]
+      }),
+      columns: call<(projectId: string) => Promise<Result<ColumnSetupsView>>>()({
+        channel: 'task-setup:columns',
+        args: [projectId]
+      }),
+      saveColumn: call<
+        (projectId: string, stageId: string, setup: RunSetup) => Promise<Result<ColumnSetupsView>>
+      >()({
+        channel: 'task-setup:save-column',
+        args: [projectId, stageId, parseRunSetupPayload]
+      })
+    }
+  ),
   /** Claude Code (4A): CLI do usuário rodando a tarefa num worktree isolado. */
   claude: group(
     { needs: 'db', unexpected: 'Algo deu errado. Tente novamente.' },
@@ -1164,6 +1197,11 @@ export const ORKIO_API = {
       activity: call<(query?: ActivityQuery) => Promise<Result<ActivityPage>>>()({
         channel: 'overview:activity',
         args: [parseActivityQuery]
+      }),
+      /** Fase 1: kanban derivado pessoal (raias calculadas do fluxo e da PR). */
+      tasks: call<() => Promise<Result<PersonalTasksSnapshot>>>()({
+        channel: 'overview:tasks',
+        args: []
       }),
       /** Algo mudou (gate, pergunta, execução, automação). */
       onChanged: IPC_EVENTS.overviewChanged

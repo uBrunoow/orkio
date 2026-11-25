@@ -43,8 +43,8 @@ Claude Code. Hoje existem:
   `shared/diagnostics.ts`, IPC `updates.diagnostics`): versões, banco (`quick_check`, contagens),
   filas, conexões só pelo estado e versões de git/gh/claude. Nada de conta, token, título ou caminho
   (teste prova). Ver também `docs/adr/` (decisões de segurança).
-- **Interface (reestruturação, fase 9):** menu com só Quadro, Agentes e Configurações
-  (Ctrl/Cmd+1…3), numa coluna larga com seletor de projeto, "Buscar tarefa" (Command Palette,
+- **Interface (reestruturação, fase 9):** menu com Quadro, Tarefas (Fase 1), Agentes e Configurações
+  (Ctrl/Cmd+1…4), numa coluna larga com seletor de projeto, "Buscar tarefa" (Command Palette,
   Ctrl/Cmd+K), "Falta N passos · continuar" e as listas "Esperando você", "Rodando" e "A fazer"
   (`app/task-groups.ts`); barra superior com o caminho, as fases da tarefa e o sino. A tarefa abre
   numa tela própria (`features/task/TaskScreen.tsx`: fases no topo, conversa no centro, painel da
@@ -62,6 +62,9 @@ Claude Code. Hoje existem:
 - **Casca do app (Fase 0):** barra do app (marca, menus Sessão/Ir/Janela/Ajuda, medidor de uso do
   Claude, paleta, sino, conta), dock de telas, abas e a lista lateral (Ctrl/Cmd+B). Ver "Casca do
   app (Fase 0)" abaixo.
+- **Tarefas (Fase 1):** "Como deve rodar?" por tarefa (Rodar uma vez / Com aprovação / Quebrar em
+  passos) com fluxos nativos (sem alva-flow), padrão por coluna, revisor que não é o autor e a tela
+  Tarefas (kanban derivado). Ver "Tarefas (Fase 1)" abaixo.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
   Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -156,6 +159,9 @@ src/
   shared/agent-presets.ts  # 8B: agentes embutidos (catálogo `builtin:<id>`, só leitura)
   shared/orchestrator.ts   # 8B: config, validação, sugestão, prioridade e `planTick` (motor puro)
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
+  shared/task-setup.ts     # Fase 1: "Como deve rodar?" (RunSetup, resolveRunSetup, origens, revisor ≠ autor)
+  shared/native-flows.ts   # Fase 1: fluxos nativos (rápido, aprovação, passos, comentários da PR)
+  shared/task-lanes.ts     # Fase 1: kanban derivado (deriveLane, chips da PR, filtros)
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, registro do IPC e chamar a composição
     composition/           # app.ts: cria os serviços → start() → stop({ waitMs }) (único desligamento);
@@ -207,6 +213,8 @@ src/
                            # `flow_runs`: as consultas dos outros passam por ele), flows.service.ts,
                            # flow-integration.ts (integração por marcador), open-pr.ts ("Abrir PR")
     power/                 # keep-awake.ts (manter o computador acordado com trabalho rodando)
+    task-setup/            # Fase 1: task-setup.service.ts (padrão da coluna, troca da tarefa,
+                           # `nativePlan` para o FlowRunner; dono de `task_run_setup`)
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker +
                            # buildCliArgs), run-spec.ts (RunRequest/RunSpec: a execução num tipo
                            # só), stream, policy (+ delivery-policy, 5C), github-rules.ts (tabela
@@ -256,6 +264,8 @@ src/
       task-flows/          # fluxos de tarefa: editor, bloco do fluxo, plano (`flow-plan.ts`,
                            # PlanStep com tipo/comando/ação/fase) e textos dos passos (`step-text.ts`)
       setup/               # 9: Primeiros passos (SetupPage, setup-steps puro)
+      tasks/               # Fase 1: TasksPage (kanban/lista derivados), ModeCards, ColumnSetupsDialog,
+                           # TaskRunSetup (seção "Como deve rodar?" da aba Detalhes)
       settings/            # Configurações (SettingsNav, seções), UpdateBanner, WhatsNewDialog (modal)
     components/ui/         # shadcn/ui (copiados pelo CLI e ajustados: Select próprio, Dialog/Menu não modais)
     components/form.tsx    # campos (TextField, SelectField, CheckboxField, RadioListField, SegmentedControl...)
@@ -1148,8 +1158,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   sino (`app/WaitingBell.tsx`: esperando você de todos os projetos + PRs com atenção). Semana e
   atividade continuam calculadas no serviço, sem tela por enquanto.
 - **Abertura** (`app/initial-route.ts`): sem projeto, Primeiros passos; com uma tarefa esperando
-  você, a tela dela; senão o Quadro. Dock: Quadro · Agentes · Configurações, atalhos Ctrl/Cmd+1…3
-  (registro de comandos, `aria-keyshortcuts` no item).
+  você, a tela dela; senão o Quadro. Dock: Quadro · Tarefas · Agentes · Configurações, atalhos
+  Ctrl/Cmd+1…4 (registro de comandos, `aria-keyshortcuts` no item).
 - **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs** nem faz
   SQL em tabela alheia: consultas com nome dos donos (`BoardStore`: `allStates`, `recentEvents`,
   `unsettledRejections`, `stuckWrites`, `stageEvents`; `RunService`: `startInfo`, `costsSince`;
@@ -1210,6 +1220,50 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   vencido não é renovado. Falha = `usage: null` (some). Cache de 60 s no main; o renderer só
   consulta com a janela em foco. Config `usageMeter: false` desliga (IPC `usage.*`; Configurações ›
   Atualizações e o próprio medidor). E2E: `writeClaudeCredentials` + `claudeUsage` no fixture.
+
+## Tarefas (Fase 1)
+
+- **"Como deve rodar?"** (`shared/task-setup.ts`): `RunSetup` = `mode` (`quick` Rodar uma vez,
+  `approval` Com aprovação, `steps` Quebrar em passos), `model` (quem implementa), `reviewer`
+  (chave de agente ou `none`) e `evidence`; campo ausente = herda. Ordem: tarefa (SQLite v13
+  `task_run_setup`, só o que ela trocou) → coluna (`orkio-config.runSetup[projeto][etapa]`, campo
+  opcional sem migração) → Orkio (`APP_RUN_SETUP`: Revisor embutido, sem evidência). `resolveRunSetup`
+  devolve valor + origem (`setupOriginText`: "Herdado da coluna X"). Quem implementa = o agente
+  atribuído (8A, com a regra da coluna de lá); `reviewerProblem`: o autor nunca revisa a si mesmo
+  (tela, `TaskSetupService.save` e `FlowRunner.start`). Com fluxo ativo, `save` é recusado (`locked`).
+- **Fluxos nativos** (`shared/native-flows.ts`, ids `orkio:*`, sem `tags`): só `claude_command` com
+  `prompt`, gates, ações (`push`, `review_snapshot`...) e saltos, gerados na hora com o revisor e a
+  evidência (a cópia vai para `flow_json`). Rápido: implementar → [evidência] → revisão → [corrigir,
+  até 2] → gate do diff → push → `abrir-pr` (modo entrega, `gh pr create`). Aprovação: spec e plano
+  só leitura com gate `show: 'result'` + "Pedir ajustes" antes. Passos: plano em fatias (`@orkio
+  fatias=N`) → gate → `fatia` em laço até `@orkio restam=0` (trava de 12; paralelo é da Fase 5).
+  Coluna de papel `reviewed` = "Corrigir comentários da PR" (o modelo Alva sem o plugin); `queue`,
+  `review`, `done` não rodam nada (`nativeFlow` → `null`). Os pedidos ficam em `NATIVE_PROMPTS`.
+- **Passo do revisor**: `claude_command.agent = 'reviewer'` roda com o revisor do fluxo
+  (`flow_runs.reviewer_json`, cópia no início) numa **sessão nova** com o briefing; os outros pedidos
+  continuam a sessão mais recente **sem** a do revisor (`session.latest.excludeAgent` →
+  `RunService.lastSession(taskId, excludeAgent)`). `withLastResult` junta o texto final do passo
+  anterior (redigido, ≤ 6000) ao pedido (a correção recebe a revisão). O modelo da configuração vale
+  só para quem implementa (`Persisted.model`; o modelo do passo vence).
+- **Quem roda o quê** (`FlowRunnerDeps.nativePlan` → `TaskSetupService.nativePlan`): na entrada da
+  coluna, o modo da tarefa vale se a coluna "roda" (modo padrão ou fluxo `on_enter`); o modo da
+  coluna roda mesmo sem fluxo ligado; "Rodar agora"/"Rodar fluxo" (`startManual`) usa o modo da
+  tarefa em qualquer coluna de trabalho. Precedência: modo da tarefa > fluxo preferido do agente >
+  modo da coluna > fluxo ligado. Sem modo, tudo como antes (fluxos 5A/5B intactos).
+- **UI:** aba Detalhes da tarefa › "Como deve rodar?" (`tasks/TaskRunSetup.tsx`: Simples = cartões
+  `ModeCards`, grupo de rádio; Avançado = quem implementa, revisor, modelo, evidência; "Rodar
+  agora"); "Mover para X" no menu do card vira submenu quando a coluna tem modo (padrão ou outro modo
+  só para a tarefa); tela **Tarefas** (rota `tasks`, Ctrl/Cmd+2) com "Como as colunas rodam"
+  (`ColumnSetupsDialog`) e o estado vazio com os três modelos ("Usar em <coluna de trabalho>").
+- **Kanban derivado** (`shared/task-lanes.ts`, `OverviewService.tasks()`, IPC `overview.tasks`): só
+  dados locais. Raias, nesta ordem: Precisa de você (o mesmo `waiting` do sino) → Trabalhando →
+  Aguardando (fila de vaga/agente, CI rodando, PR rascunho) → Em revisão (PR aberta; chips CI
+  falhando, mudanças pedidas, conflito, comentários, pronta, esperando review) → Concluído (PR
+  mergeada ou fluxo terminado nos últimos 7 dias, `FlowRunner.recentFinished`). Conflito vem do
+  GraphQL `mergeable` (`PullRequestDetails.conflict`). Filtros: Em andamento (sem Concluído) e
+  Precisa de atenção (espera você ou chip de atenção). Uma cor alta só: a raia "Precisa de você".
+- E2E `e2e/tasks.spec.ts`: modelo na coluna pela tela, "Rodar agora" com o Rápido, revisão pelo
+  Revisor (só leitura, sem `--resume`) no `agent-args.log` e a tarefa em "Precisa de você".
 
 ## Agentes (Etapa 8A)
 
@@ -1596,6 +1650,8 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
 | CI de PR só no Linux (smoke do pacote incluso)                                                              | Em repo privado, minuto de macOS custava 10x; o mac roda no release e no teste manual.                                                                                                                                                                      |
 | Abas: um lugar = uma aba; só a ativa montada (Fase 0)                                                     | Abrir de novo uma tarefa/tela ativa a aba que já existe (sem duplicatas); manter abas ocultas montadas dobraria polls/atalhos das telas e confundiria os testes. |
 | Medidor de uso do Claude pelo endpoint OAuth não documentado, ligado por padrão e desligável (Fase 0)      | É o único jeito de ver as janelas de 5 h/semana da assinatura; o token do Claude Code é lido só no main e na hora, e qualquer falha só esconde o medidor. |
+| Fluxos nativos montados com as primitivas da 5A, gerados na hora (Fase 1)                                | Nascem prontos e sem o alva-flow; a cópia em `flow_json` mantém a execução estável e o motor/validação/retomada são os de sempre. |
+| Revisor em sessão própria; quem implementa nunca pega a sessão dele (Fase 1)                             | O autor não revisa a si mesmo (nem pela conversa); a correção recebe o texto final da revisão em vez de herdar a sessão. |
 | Menu nativo mínimo (Fase 0)                                                                                 | Os menus vivem na barra do app; o menu padrão do Electron fecharia a janela no Ctrl+W e recarregaria no Ctrl+R. |
 
 ## shadcn/Radix e CSP (regra inegociável)

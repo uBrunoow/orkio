@@ -35,7 +35,9 @@ import { activityByTask } from '../overview/task-activity'
 import { useOverview } from '../overview/useOverview'
 import { useBoard } from './useBoard'
 import { useSources } from '../../app/sources'
-import { ipcCall, useSource } from '../../lib/ipc'
+import { ipcCall, ipcResult, unwrap, useIpcResource, useSource } from '../../lib/ipc'
+import type { CardActions } from './BoardCardView'
+import type { RunMode } from '../../../../shared/task-setup'
 import type { AutomationStatus } from '../../../../shared/automation'
 import type { ProjectView } from '../../../../shared/projects'
 import { formatTime } from '../../lib/format'
@@ -88,6 +90,14 @@ function Board({
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
   const agentBadges = useAgentBadges(projectId)
+  const columnSetups = useIpcResource(projectId, (id) =>
+    window.orkio.taskSetup.columns(id).then(unwrap)
+  ).value
+  const runModes = useMemo(() => {
+    const out: Record<string, RunMode> = {}
+    for (const s of columnSetups?.stages ?? []) if (s.setup.mode) out[s.id] = s.setup.mode
+    return out
+  }, [columnSetups])
   const { snapshot } = useOverview()
   const taskActivity = useMemo(() => activityByTask(snapshot, projectId), [snapshot, projectId])
   const [query, setQuery] = useState('')
@@ -149,9 +159,20 @@ function Board({
     )
   }
 
-  const actions = {
+  const actions: CardActions = {
     onOpen: onOpenTask,
     onMove: (taskId: string, stageId: string) => void board.move(taskId, stageId),
+    // Fase 1: coluna com modo padrão → escolher como esta tarefa roda ao mover.
+    runModes,
+    onMoveWithMode: (taskId: string, stageId: string, mode: RunMode | null) => {
+      void ipcResult(async () => {
+        const current = await window.orkio.taskSetup.get(projectId, taskId)
+        const task = current.ok ? { ...current.value.task } : {}
+        if (mode) task.mode = mode
+        else delete task.mode
+        return window.orkio.taskSetup.save(projectId, taskId, task)
+      }).then(() => void board.move(taskId, stageId))
+    },
     onToggleBlocked: (taskId: string, blocked: boolean) => void board.setBlocked(taskId, blocked),
     onToggleAutomation: (taskId: string, paused: boolean) =>
       void board.setAutomationPaused(taskId, paused)

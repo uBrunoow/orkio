@@ -25,6 +25,7 @@ import { ACTIVITY_GROUPS, type ActivityGroup } from '../task-events'
 import type { CreateProjectInput } from '../projects'
 import { isBranchKind } from '../slug'
 import { parseFlowDef, type Flow, type StageFlow } from '../task-flow'
+import { parseRunSetup, type RunSetup } from '../task-setup'
 import { INVALID, type Invalid } from './define'
 import {
   isAgentKey,
@@ -453,6 +454,12 @@ export function parseGateValues(value: unknown): Parsed<string[] | undefined> {
   return Array.isArray(value) && value.length <= 20 && value.every(isReviewer)
     ? [...value]
     : INVALID
+}
+
+/** "Como deve rodar?" (Fase 1): só os campos conhecidos e válidos; campo ruim recusa tudo. */
+export function parseRunSetupPayload(value: unknown): Parsed<RunSetup> {
+  if (!isRecord(value) || Object.keys(value).length > 4) return INVALID
+  return parseRunSetup(value) ?? INVALID
 }
 
 export function parseDeliverySettings(value: unknown): Parsed<{ requirePushApproval: boolean }> {

@@ -27,7 +27,13 @@ import {
   type WaitingItem
 } from '../../shared/overview'
 import type { FlowRunView } from '../../shared/task-flow'
-import { stageWithRole } from '../../shared/board'
+import {
+  DONE_WINDOW_MS,
+  deriveLane,
+  type PersonalTask,
+  type PersonalTasksSnapshot
+} from '../../shared/task-lanes'
+import { stageWithRole, type StageRole } from '../../shared/board'
 import type { PullRequestSummary, TaskSignals } from '../../shared/task-signals'
 import { describeEvent, branchUrl, prUrl } from '../../shared/task-history'
 import { ACTIVITY_KINDS, activityGroup } from '../../shared/task-events'
@@ -54,6 +60,13 @@ export interface OverviewDeps {
   /** Lista local dos projetos (sem GitHub). */
   projects(): Promise<ProjectView[]>
   flows(): FlowRunView[]
+  /** Fase 1: último fluxo terminado de cada tarefa desde `since` (dono: `FlowRunner`). */
+  finishedFlows?(since: string): {
+    projectId: string
+    taskId: string
+    result: 'done' | 'rejected' | 'cancelled' | null
+    endedAt: string
+  }[]
   /** Perguntas e permissões em memória (4A). */
   requests(): (PendingRequest & { projectId: string; taskId: string })[]
   runs(): { runId: string; projectId: string; taskId: string; status: RunStatus }[]
@@ -147,6 +160,92 @@ export class OverviewService {
       week: this.week(config, now),
       notices
     }
+  }
+
+  /**
+   * Fase 1: kanban derivado pessoal. As tarefas em que o Orkio mexeu (esperando você, rodando, com
+   * PR, fluxo terminado nos últimos 7 dias), cada uma na raia calculada do fluxo e da PR. Só dados
+   * locais e caches (sem rede).
+   */
+  tasks(): PersonalTasksSnapshot {
+    const config = this.deps.config()
+    const now = this.now()
+    const resolve = this.resolver(config)
+    const key = (projectId: string, taskId: string): string => `${projectId}\u0000${taskId}`
+    const ids = new Map<string, { projectId: string; taskId: string }>()
+    const add = (projectId: string, taskId: string): void => {
+      if (this.hasProject(config, projectId)) ids.set(key(projectId, taskId), { projectId, taskId })
+    }
+
+    const waiting = new Map<string, WaitingItem>()
+    for (const w of this.waitingItems(config, resolve)) {
+      const k = key(w.task.projectId, w.task.taskId)
+      if (!waiting.has(k)) waiting.set(k, w)
+      add(w.task.projectId, w.task.taskId)
+    }
+    const flows = this.deps.flows().filter((f) => this.hasProject(config, f.projectId))
+    const runRows = this.deps.runs().filter((r) => this.hasProject(config, r.projectId))
+    const runInfo = this.deps.runStore.startInfo(runRows.map((r) => r.runId))
+    const running = new Map<string, ReturnType<typeof buildRunning>[number]>()
+    for (const item of buildRunning(
+      runRows.map((r) => ({
+        runId: r.runId,
+        projectId: r.projectId,
+        taskId: r.taskId,
+        state: r.status === 'queued' ? 'queued' : 'running',
+        startedAt: runInfo.get(r.runId)?.startedAt ?? now.toISOString(),
+        command: runInfo.get(r.runId)?.command ?? null
+      })),
+      flows,
+      resolve
+    )) {
+      const k = key(item.task.projectId, item.task.taskId)
+      // Rodando vence a fila (uma execução avulsa pode rodar com o fluxo na fila).
+      if (!running.has(k) || item.state === 'running') running.set(k, item)
+      add(item.task.projectId, item.task.taskId)
+    }
+    const since = new Date(now.getTime() - DONE_WINDOW_MS).toISOString()
+    const finished = new Map<
+      string,
+      { result: 'done' | 'rejected' | 'cancelled' | null; endedAt: string }
+    >()
+    for (const f of this.deps.finishedFlows?.(since) ?? []) {
+      finished.set(key(f.projectId, f.taskId), { result: f.result, endedAt: f.endedAt })
+      add(f.projectId, f.taskId)
+    }
+    const prs = new Map<string, NonNullable<TaskSignals['pr']>>()
+    for (const p of config.projects) {
+      for (const sig of Object.values(this.deps.signals(p.id) ?? {})) {
+        const pr = sig.pr
+        if (!pr) continue
+        const open = pr.state === 'open' || pr.state === 'draft'
+        const merged = pr.state === 'merged' && (pr.closedAt ?? pr.updatedAt) >= since
+        if (!open && !merged) continue
+        prs.set(key(p.id, sig.taskId), pr)
+        add(p.id, sig.taskId)
+      }
+    }
+    const roles = new Map<string, StageRole | null>()
+    for (const st of this.deps.board.allStates()) {
+      const stage = config.boards[st.projectId]?.stages.find((s) => s.id === st.stageId)
+      roles.set(key(st.projectId, st.taskPageId), stage?.role ?? null)
+    }
+
+    const tasks: PersonalTask[] = []
+    for (const [k, { projectId, taskId }] of ids) {
+      const role = roles.get(k) ?? null
+      const lane = deriveLane({
+        task: resolve(projectId, taskId),
+        waiting: waiting.get(k) ?? null,
+        running: running.get(k) ?? null,
+        pr: prs.get(k) ?? null,
+        stageRole: role,
+        lastFlow: finished.get(k) ?? null,
+        now: now.toISOString()
+      })
+      if (lane) tasks.push(lane)
+    }
+    return { generatedAt: now.toISOString(), tasks }
   }
 
   /** Só "Esperando você" (badge e menu): barato, sem a lista de projetos. */

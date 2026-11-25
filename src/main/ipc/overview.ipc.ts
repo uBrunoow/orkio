@@ -4,11 +4,12 @@ import type { Impl } from './register'
 
 /** Visão geral (6D): leituras locais; o renderer manda no máximo um filtro. */
 export function overviewHandlers(
-  service: Pick<OverviewService, 'snapshot' | 'refresh' | 'activity'>
+  service: Pick<OverviewService, 'snapshot' | 'refresh' | 'activity' | 'tasks'>
 ): Impl<typeof ORKIO_API.overview> {
   return {
     get: async () => ({ ok: true, value: await service.snapshot() }),
     refresh: async () => ({ ok: true, value: await service.refresh() }),
-    activity: (query) => ({ ok: true, value: service.activity(query) })
+    activity: (query) => ({ ok: true, value: service.activity(query) }),
+    tasks: () => ({ ok: true, value: service.tasks() })
   }
 }

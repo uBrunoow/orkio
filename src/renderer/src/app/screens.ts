@@ -7,6 +7,7 @@ import {
   AgentsIcon,
   BoardIcon,
   HomeIcon,
+  ListIcon,
   SettingsIcon,
   TasksIcon,
   type SvgIcon
@@ -47,13 +48,22 @@ export const SCREENS: readonly ScreenDef[] = [
     needsProject: true
   },
   {
+    name: 'tasks',
+    title: ROUTE_TITLES.tasks,
+    hint: 'Em que pé está cada tarefa: precisa de você, trabalhando, em revisão',
+    icon: ListIcon,
+    route: { name: 'tasks' },
+    dock: 'main',
+    keys: 'mod+2'
+  },
+  {
     name: 'agents',
     title: ROUTE_TITLES.agents,
     hint: 'Colegas de IA que pegam tarefas',
     icon: AgentsIcon,
     route: { name: 'agents' },
     dock: 'main',
-    keys: 'mod+2'
+    keys: 'mod+3'
   },
   {
     name: 'settings',
@@ -62,7 +72,7 @@ export const SCREENS: readonly ScreenDef[] = [
     icon: SettingsIcon,
     route: { name: 'settings' },
     dock: 'bottom',
-    keys: 'mod+3'
+    keys: 'mod+4'
   },
   {
     name: 'task',

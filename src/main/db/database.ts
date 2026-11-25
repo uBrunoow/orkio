@@ -266,6 +266,18 @@ export const MIGRATIONS: readonly string[] = [
   CREATE INDEX task_events_task ON task_events (task_page_id, id);
   CREATE UNIQUE INDEX task_events_key ON task_events (project_id, task_page_id, event_key)
     WHERE event_key IS NOT NULL;
+  `,
+  // v13 (Fase 1): "Como deve rodar?" por tarefa (só o que a tarefa trocou: modo, modelo, revisor,
+  // evidência; o resto herda da coluna) e o revisor de cada fluxo (cópia do perfil no início,
+  // como `agent_json`).
+  `
+  CREATE TABLE task_run_setup (
+    task_page_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    setup_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  ALTER TABLE flow_runs ADD COLUMN reviewer_json TEXT;
   `
 ]
 
