@@ -44,9 +44,9 @@ Claude Code. Hoje existem:
   filas, conexões só pelo estado e versões de git/gh/claude. Nada de conta, token, título ou caminho
   (teste prova). Ver também `docs/adr/` (decisões de segurança).
 - **Interface (reestruturação, fase 9):** menu com Quadro, Agentes e Configurações
-  (Ctrl/Cmd+1…3; Ctrl/Cmd+2 = Quadro de todos os projetos), numa coluna larga com seletor de projeto,
-  "Buscar tarefa" (Command Palette,
-  Ctrl/Cmd+K), "Falta N passos · continuar" e as listas "Esperando você", "Rodando" e "A fazer"
+  (Ctrl/Cmd+1 Quadro, 2 Quadro de todos os projetos, 3 Agentes, 4 Configurações), numa coluna larga
+  com seletor de projeto, "Buscar tarefa" (Command Palette, Ctrl/Cmd+K), "Falta N passos ·
+  continuar" e as listas "Esperando você", "Rodando" e "A fazer"
   (`app/task-groups.ts`); barra superior com o caminho, as fases da tarefa e o sino. A tarefa abre
   numa tela própria (`features/task/TaskScreen.tsx`: fases no topo, conversa no centro, painel da
   fase ao lado; abaixo de 1200 px o painel vai para cima da conversa). Configurações com navegação
@@ -65,7 +65,8 @@ Claude Code. Hoje existem:
   app (Fase 0)" abaixo.
 - **Tarefas (Fase 1):** "Como deve rodar?" por tarefa (Rodar uma vez / Com aprovação / Quebrar em
   passos) com fluxos nativos (sem alva-flow), padrão por coluna, revisor que não é o autor e a
-  situação da tarefa (raias) no Quadro; a tela Tarefas não existe mais. Ver "Tarefas (Fase 1)" abaixo.
+  situação da tarefa (raias) no Quadro; a tela Tarefas não existe mais. Ver "Tarefas (Fase 1)"
+  abaixo.
 - **Sessão (Fase 2):** terminal embutido (node-pty + xterm.js) na pasta da tarefa, "Continuar no
   Claude" (a sessão vai travada para o terminal e volta), "Editar mensagem"/"Ramificar daqui" e a
   conversa compacta. Ver "Sessão (Fase 2)" abaixo.
@@ -174,7 +175,7 @@ src/
   shared/flow.ts           # editor do fluxo: describeRule, validateFlow, simulate, diffFlow, export/import
   shared/task-setup.ts     # Fase 1: "Como deve rodar?" (RunSetup, resolveRunSetup, origens, revisor ≠ autor)
   shared/native-flows.ts   # Fase 1: fluxos nativos (rápido, aprovação, passos, comentários da PR)
-  shared/task-lanes.ts     # Fase 1: kanban derivado (deriveLane, chips da PR, filtros)
+  shared/task-lanes.ts     # Fase 1: situação da tarefa (deriveLane, chips da PR, filtros)
   shared/terminal.ts       # Fase 2: terminal embutido (tipos, limites, validadores, `unseenPart`)
   shared/handoff.ts        # Fase 2: "Continuar no Claude" (HandoffView, textos, `resumeCommand`)
   shared/vault.ts          # Fase 4: Segredos (nome/valor/usos, nomes reservados, `vaultStoreKey`)
@@ -647,7 +648,8 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   fonte `personalTasks`), sincronização, "Bloqueada" e a PR no "#n" com os chips (`prButtonText`).
   Filtros `all/attention/active/review` (com a contagem de "Precisa de você"), Kanban | Lista
   (agrupada por coluna). "Mais ações do quadro": Configurar etapas e regras, Como as colunas rodam.
-  Modelo puro em `features/board/board-model.ts`; peças da barra em `features/board/BoardBarParts.tsx`.
+  Modelo puro em `features/board/board-model.ts`; peças da barra em
+  `features/board/BoardBarParts.tsx`.
   Arrasto por ponteiro adaptado do template
   `kanban-board` (sem StyleX; `style` só no card arrastável/flutuante e no `flexShrink` da coluna)
   e "Mover para…" no menu do card e no painel (teclado). Painel lateral dentro da página (sem gaveta).
@@ -1194,9 +1196,10 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   sino (`app/WaitingBell.tsx`: esperando você de todos os projetos + PRs com atenção). Semana e
   atividade continuam calculadas no serviço, sem tela por enquanto.
 - **Abertura** (`app/initial-route.ts`): sem projeto, Primeiros passos; com uma tarefa esperando
-  você, a tela dela; senão o Quadro. Dock: Quadro · Agentes · Configurações, atalhos
-  Ctrl/Cmd+1…3 (registro de comandos, `aria-keyshortcuts` no item); Ctrl/⌘2 = Quadro de todos os
-  projetos (comando `go:board:all`). Abas/desktops com a rota `tasks` viram a aba de Quadro com
+  você, a tela dela; senão o Quadro. Dock: Quadro · Agentes · Configurações. Atalhos
+  Ctrl/Cmd+1…4 (registro de comandos, `aria-keyshortcuts` no item): 1 = Quadro, 2 = Quadro de
+  todos os projetos (comando `go:board:all`, sem item no dock), 3 = Agentes, 4 = Configurações.
+  Abas/desktops com a rota `tasks` viram a aba de Quadro com
   todos os projetos (`parseRoute` + `parseSavedTabs` juntam o lugar repetido).
 - **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs** nem faz
   SQL em tabela alheia: consultas com nome dos donos (`BoardStore`: `allStates`, `recentEvents`,
@@ -1297,7 +1300,8 @@ A tela Tarefas não existe mais: o Quadro absorveu o que ela tinha (ver "Quadro 
   só para a tarefa); "Como as colunas rodam" fica no menu "Mais ações do quadro"
   (`ColumnSetupsDialog`, ainda em `features/tasks/`, ao lado de `ModeCards`/`TaskRunSetup`) e o
   estado vazio com os três modelos ("Usar em <coluna de trabalho>").
-- **Situação da tarefa** (`shared/task-lanes.ts`, `OverviewService.tasks()`, IPC `overview.tasks`): só
+- **Situação da tarefa** (`shared/task-lanes.ts`, `OverviewService.tasks()`, IPC
+  `overview.tasks`): só
   dados locais. Raias, nesta ordem: Precisa de você (o mesmo `waiting` do sino) → Trabalhando →
   Aguardando (fila de vaga/agente, CI rodando, PR rascunho) → Em revisão (PR aberta; chips CI
   falhando, mudanças pedidas, conflito, comentários, pronta, esperando review) → Concluído (PR
@@ -1413,7 +1417,7 @@ A tela Tarefas não existe mais: o Quadro absorveu o que ela tinha (ver "Quadro 
   blocked, exhausted, stuck, failed, cancelled. Saltos para `$fim`, `$fim:nada|bloqueado|esgotado|
   travado` (opções "Encerrar: …" no editor); cancelar um fluxo parado por falha = `failed`. Só
   done/nothing passam a tarefa adiante (orquestrador, `detachedFrom`); exhausted/stuck/blocked/
-  failed vão para "Precisa de você" no kanban derivado e aparecem no sino como concluídos com o
+  failed vão para "Precisa de você" no Quadro e aparecem no sino como concluídos com o
   final no texto. Gate: Aprovar / **Pedir mudanças** (volta ao passo com o comentário) / Recusar.
 - E2E `e2e/agent-memory.spec.ts` (editor + Memória) e `e2e/tasks.spec.ts` (o revisor lê o
   `diff.md`, `git diff` passa sem pedir, "lembrar" grava e a nota aparece na Memória do Revisor).
