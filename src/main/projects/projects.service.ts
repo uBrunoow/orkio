@@ -452,6 +452,11 @@ export class ProjectsService {
     if (!project) return fail('project_not_found', 'Projeto não encontrado.')
     const repo = project.repo
     if (!repo) return fail('not_github', 'Este projeto não tem repositório do GitHub.')
+    // O modo só existe no github.com: verificar um repo do Enterprise na API do github.com ligaria o
+    // projeto a outro repositório com o mesmo nome.
+    if (repo.host.toLowerCase() !== 'github.com') {
+      return fail('not_github', 'Só repositórios do github.com trocam de modo.')
+    }
     let next: ProjectRepo
     if (access === 'git') {
       next = { ...repo, verified: false, visibility: 'unknown', canPush: null, access: 'git' }

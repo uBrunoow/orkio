@@ -372,7 +372,7 @@ function ProjectRow({
                     Reapontar pasta
                   </DropdownMenuItem>
                 )}
-                {project.repo && (
+                {project.repo?.host.toLowerCase() === 'github.com' && (
                   <DropdownMenuItem onSelect={() => void switchAccess()}>
                     {gitOnly ? 'Voltar a usar o GitHub do Orkio' : 'Usar só o git desta máquina'}
                   </DropdownMenuItem>

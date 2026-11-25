@@ -1,4 +1,3 @@
-import { githubRepoOf } from '../../../../shared/projects'
 import { useEffect } from 'react'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
@@ -91,7 +90,7 @@ export function TaskScreen({
       setAutomationPaused={(paused) => void board.setAutomationPaused(card.taskId, paused)}
       refreshSignals={() => void refreshSignals(true)}
       focusSection={section}
-      githubRepo={githubRepoOf(project)}
+      project={project}
       session={session}
       selectSession={onSelectSession}
       onOpenBoard={onBackToBoard}

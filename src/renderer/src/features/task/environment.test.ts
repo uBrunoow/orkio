@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  branchTreeUrl,
   contextTone,
   folderName,
   latestContextPercent,
@@ -56,5 +57,31 @@ describe('contexto com outro modelo', () => {
       contextWindow: 1_000_000
     })
     expect(usageForModel(usage, 'sonnet')).toEqual(usage)
+  })
+})
+
+describe('branchTreeUrl', () => {
+  const repo = {
+    host: 'github.com',
+    owner: 'acme',
+    name: 'api',
+    remoteName: 'origin',
+    defaultBranch: 'main',
+    visibility: 'unknown',
+    canPush: null,
+    archived: false,
+    verified: false
+  } as const
+  it('projeto só git local também tem o link da branch', () => {
+    expect(branchTreeUrl({ repo: { ...repo, access: 'git' } }, 'feat/ORK-1-a b')).toBe(
+      'https://github.com/acme/api/tree/feat/ORK-1-a%20b'
+    )
+  })
+  it('verificado pela API: link; não verificado sem modo git ou Enterprise: nenhum', () => {
+    expect(branchTreeUrl({ repo: { ...repo, verified: true } }, 'x')).toBe(
+      'https://github.com/acme/api/tree/x'
+    )
+    expect(branchTreeUrl({ repo }, 'x')).toBeNull()
+    expect(branchTreeUrl({ repo: { ...repo, host: 'ghe.acme.com', access: 'git' } }, 'x')).toBeNull()
   })
 })

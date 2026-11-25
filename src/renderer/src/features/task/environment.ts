@@ -1,5 +1,18 @@
 import type { RunLogEvent } from '../../../../shared/agent-run'
 import { contextPercent, contextWindowFor } from '../../../../shared/context-usage'
+import { gitRepoOf, type ProjectRepo } from '../../../../shared/projects'
+
+/**
+ * Link da branch no github.com (`gitRepoOf`: verificado pela API ou só git local), ou `null`
+ * (sem repositório, Enterprise, não verificado).
+ */
+export function branchTreeUrl(project: { repo: ProjectRepo | null }, branch: string): string | null {
+  const repo = gitRepoOf(project)
+  if (!repo) return null
+  return `https://github.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(
+    repo.name
+  )}/tree/${branch.split('/').map(encodeURIComponent).join('/')}`
+}
 
 /** Último trecho do caminho da pasta de trabalho (funciona com `/` e `\`). */
 export function folderName(path: string): string {

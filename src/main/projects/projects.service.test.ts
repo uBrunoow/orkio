@@ -681,6 +681,39 @@ describe('ProjectsService', () => {
       expect(back.ok && back.project.repo?.access).toBeUndefined()
     })
 
+    it('GitHub Enterprise não troca de modo (não verifica no github.com um repo de outro host)', async () => {
+      repos['/code/ghe'] = {
+        remotes: [{ name: 'origin', url: 'https://github.acme.com/team/app.git' }],
+        branch: 'main',
+        dirty: false
+      }
+      existing.add('/code/ghe')
+      const service = makeService()
+      await load(service)
+      const selection = await select(service, '/code/ghe')
+      const created = await service.create({
+        selectionId: selection.selectionId,
+        remoteName: 'origin',
+        hostConfirmed: true
+      })
+      if (!created.ok) throw new Error('create falhou')
+      const id = created.project.id
+      expect(await service.setAccess(id, 'app')).toMatchObject({
+        ok: false,
+        error: { code: 'not_github' }
+      })
+      expect(await service.setAccess(id, 'git')).toMatchObject({
+        ok: false,
+        error: { code: 'not_github' }
+      })
+      expect(github.getRepository).not.toHaveBeenCalled()
+      expect((await service.list()).projects[0]!.repo).toMatchObject({
+        host: 'github.acme.com',
+        verified: false
+      })
+      expect((await service.list()).projects[0]!.repo?.access).toBeUndefined()
+    })
+
     it('reapontar: pasta de outro repositório é recusada; do mesmo repo é aceita', async () => {
       const { service, id } = await withProject()
       existing.delete('/code/orkio')
