@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { stageDotClass } from './stage-dot'
+import { NO_STAGE } from './board-model'
 import { ColumnCollapseIcon, ColumnExpandIcon } from '../../components/icons'
 import { BoardCardBody, BoardCardItem, CARD_CLASS, type CardActions } from './BoardCardView'
 import type { BoardCard, BoardStage } from '../../../../shared/board'
@@ -10,8 +11,7 @@ import type { TaskSignals } from '../../../../shared/task-signals'
 
 /** Movimento mínimo (px) para virar arrasto: cliques e o menu do card continuam funcionando. */
 const DRAG_THRESHOLD = 5
-/** Coluna "Sem etapa" (status do Notion que nenhuma etapa usa). Não aceita cards. */
-export const NO_STAGE = '__sem-etapa__'
+export { NO_STAGE }
 
 interface DragState {
   taskId: string
