@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import {
   NOTION_FAKE,
+  NOTION_MAPPING,
   NOTION_TASK_IDS,
   createUserDataDir,
   cspViolations,
@@ -61,6 +62,31 @@ const tabNames = async (page: Page): Promise<string[]> =>
   )
 const pagePatches = async (app: OrkioApp['app']) =>
   (await externalCalls(app)).filter((c) => c.url.startsWith('https://api.notion.com/v1/pages/'))
+/** Status gravado por cada PATCH de uma tarefa, na ordem. */
+const patchedStatuses = async (app: OrkioApp['app'], taskId: string): Promise<string[]> =>
+  (await pagePatches(app))
+    .filter((p) => p.url === `https://api.notion.com/v1/pages/${taskId}`)
+    .map(
+      (p) =>
+        (
+          JSON.parse(p.body!) as {
+            properties: Record<string, { status?: { name: string } }>
+          }
+        ).properties[NOTION_MAPPING.status.id]?.status?.name ?? '?'
+    )
+
+/**
+ * Asserção negativa que precisa continuar verdadeira: a escrita no Notion é assíncrona, então
+ * confere várias vezes ao longo de `ms` (um PATCH tardio derruba o teste).
+ */
+async function holds(check: () => Promise<void>, ms = 2_000): Promise<void> {
+  const end = Date.now() + ms
+  do {
+    await check()
+    await new Promise((r) => setTimeout(r, 200))
+  } while (Date.now() < end)
+  await check()
+}
 
 /**
  * Arrasta o card até a coluna pelo ponteiro (como o critério 3 de `board.spec.ts`); `during` roda
@@ -179,8 +205,10 @@ test('vários projetos: colunas pelo papel, projeto no card, arrastar no projeto
     await expect(column(page, 'Concluída')).toHaveAttribute('aria-disabled', 'true')
     await expect(column(page, 'A fazer')).not.toHaveAttribute('data-drop', 'blocked')
   })
-  await expect(column(page, 'Outras etapas').getByRole('listitem', { name: ORK3 })).toBeVisible()
-  expect((await pagePatches(app)).filter((p) => p.url.endsWith(NOTION_TASK_IDS.ork3))).toEqual([])
+  await holds(async () => {
+    await expect(column(page, 'Outras etapas').getByRole('listitem', { name: ORK3 })).toBeVisible()
+    expect(await patchedStatuses(app, NOTION_TASK_IDS.ork3)).toEqual([])
+  })
   await expect(column(page, 'Concluída')).not.toHaveAttribute('data-drop', 'blocked')
 
   // 5. "A fazer" = Prioridades do site → Notion "Prioridades".
@@ -190,7 +218,9 @@ test('vários projetos: colunas pelo papel, projeto no card, arrastar no projeto
     .poll(async () => (await notionState(app)).status[NOTION_TASK_IDS.ork3])
     .toBe('Prioridades')
 
-  // 6. "Concluída" = Finalizada do orkio-app → Notion "Finalizadas".
+  // 6. "Concluída" = Finalizada do orkio-app → Notion "Finalizadas". O projeto atual é o site:
+  // o destino sai do projeto do card, não do projeto atual.
+  await expect(projectSwitcher(page, 'site')).toBeVisible()
   await drag(page, ORK2, 'Concluída')
   await expect(column(page, 'Concluída').getByRole('listitem', { name: ORK2 })).toBeVisible()
   await expect
@@ -198,12 +228,16 @@ test('vários projetos: colunas pelo papel, projeto no card, arrastar no projeto
     .toBe('Finalizadas')
 
   // 7. "Outras etapas" também não aceita cards.
-  const patches = (await pagePatches(app)).length
   await drag(page, ORK2, 'Outras etapas', async () => {
     await expect(column(page, 'Outras etapas')).toHaveAttribute('data-drop', 'blocked')
   })
-  await expect(column(page, 'Concluída').getByRole('listitem', { name: ORK2 })).toBeVisible()
-  expect(await pagePatches(app)).toHaveLength(patches)
+  // No fim, um PATCH por movimento válido e nenhum dos arrastes bloqueados (nem tardio).
+  await holds(async () => {
+    await expect(column(page, 'Concluída').getByRole('listitem', { name: ORK2 })).toBeVisible()
+    expect(await patchedStatuses(app, NOTION_TASK_IDS.ork3)).toEqual(['Prioridades'])
+    expect(await patchedStatuses(app, NOTION_TASK_IDS.ork2)).toEqual(['Finalizadas'])
+    expect(await pagePatches(app)).toHaveLength(2)
+  })
   expect(await cspViolations(page)).toEqual([])
 })
 
@@ -216,7 +250,7 @@ test('filtro e visão na rota sobrevivem a reabrir; Ctrl/⌘1 mantém, Ctrl/⌘2
   await inProgress(page).click()
   await expect(inProgress(page)).toHaveAttribute('aria-pressed', 'true')
   await expect.poll(() => columnNames(page)).toEqual(ROLE_COLUMNS)
-  for (const name of ROLE_COLUMNS.slice(0, -1)) {
+  for (const name of ROLE_COLUMNS) {
     await expect(column(page, name).getByTestId('column-count')).toHaveText('0')
   }
   await expect(card(page, ORK2)).toHaveCount(0)
