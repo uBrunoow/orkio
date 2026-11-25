@@ -367,6 +367,7 @@ export class ClaudeService {
     hasFiles: boolean,
     save: () => Promise<string>
   ): Promise<Result<TaskRunsState>> {
+    if (req.side) return this.sendSide(req, text, save)
     // Ramificar/editar (Fase 2): escolhe um ponto da conversa; com o fluxo ativo, não (o fluxo
     // segue a sessão dele).
     if (req.fork) {
@@ -382,8 +383,56 @@ export class ClaudeService {
     if ('error' in used) return fail('flow_message', used.error)
     if (used.used) return ok(await this.taskState(req.taskId))
     if (this.deps.flowBusy(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
-    const last = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
+    // Sessão escolhida na lista "Sessões" (tem que ser desta tarefa); senão a mais recente.
+    if (req.session && !req.fresh && !this.deps.runs.hasSession(req.taskId, req.session)) {
+      return fail('invalid', CLAUDE_MESSAGES.forkNotFound)
+    }
+    const last = req.fresh ? null : (req.session ?? this.deps.runs.lastSession(req.taskId))
     return this.sendInSession(req, text, save, last ? { kind: 'resume', id: last } : null)
+  }
+
+  /**
+   * Sidechat: pergunta ao lado, só de leitura, sem interromper nada. Continua o sidechat escolhido
+   * ou abre um a partir do ponto atual da sessão principal (sem sessão ainda, começa com o
+   * briefing). Nunca vira a sessão da tarefa (`lastSession` ignora) e não passa pelo fluxo.
+   */
+  private async sendSide(
+    req: SendMessageRequest,
+    text: string,
+    save: () => Promise<string>
+  ): Promise<Result<TaskRunsState>> {
+    let session: RunSession
+    if (req.session) {
+      if (
+        !this.deps.runs.hasSession(req.taskId, req.session) ||
+        !this.deps.runs.isSideSession(req.session)
+      ) {
+        return fail('invalid', CLAUDE_MESSAGES.forkNotFound)
+      }
+      session = { kind: 'resume', id: req.session }
+    } else {
+      const main = this.deps.runs.lastSession(req.taskId)
+      const point = main ? await this.deps.runs.lastPoint(main) : null
+      if (point) session = { kind: 'fork', from: point.session, at: point.at, reason: 'branch' }
+      else {
+        const prep = await this.prepare(req.projectId, req.taskId)
+        if (!prep.ok) return prep
+        session = { kind: 'new', briefing: prep.value.briefing, includeBriefing: true }
+      }
+    }
+    const started = await this.startRun({
+      projectId: req.projectId,
+      taskId: req.taskId,
+      input: { kind: 'prompt', text: text + (await save()) },
+      session,
+      access: { tools: 'read_only', github: 'read' },
+      agent: null,
+      runtime: req.runtime ?? null,
+      timeoutMin: null,
+      side: true
+    })
+    if (!started.ok) return started
+    return ok(await this.taskState(req.taskId))
   }
 
   /**
@@ -571,7 +620,8 @@ export class ClaudeService {
         },
         timeoutMin: request.timeoutMin,
         // Sem agente: "Pergunta antes de editar" das Configurações (com agente, a dele).
-        ...(!agent && prefs.autonomy === 'ask' ? { askEdits: true } : {})
+        ...(!agent && prefs.autonomy === 'ask' ? { askEdits: true } : {}),
+        ...(request.side ? { side: true } : {})
       })
       return ok(view.id)
     })
@@ -816,7 +866,8 @@ export class ClaudeService {
 
   private async taskState(taskId: string): Promise<TaskRunsState> {
     const runs = this.deps.runs.list(taskId)
-    const active = runs.find((r) => isRunLive(r.status))
+    // A execução "da tarefa" é a da sessão principal: um sidechat rodando não ocupa o campo.
+    const active = runs.find((r) => isRunLive(r.status) && !r.side)
     const wt = this.deps.worktrees.get(taskId)
     let workspace: TaskWorkspace | null = null
     if (wt) {

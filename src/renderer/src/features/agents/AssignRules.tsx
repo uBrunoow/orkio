@@ -70,7 +70,7 @@ export function AssignRules({
                 </span>
                 <Button
                   size="icon-sm"
-                  variant="ghost"
+                  variant="danger"
                   aria-label={`Remover regra de ${stageName(r.stageId)}`}
                   onClick={() => setRules(rules.filter((x) => x.stageId !== r.stageId))}
                 >
@@ -115,7 +115,7 @@ export function AssignRules({
       </div>
       {dirty && (
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={() => setRules(state.rules)}>
+          <Button variant="danger" onClick={() => setRules(state.rules)}>
             Descartar
           </Button>
           <Button onClick={() => void onSave(rules)}>Salvar regras</Button>

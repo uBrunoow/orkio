@@ -138,6 +138,12 @@ export interface AgentRunView {
   hasSession: boolean
   /** Agente (8A) que rodou, ou `null`. */
   agentKey: string | null
+  /** Sessão do Claude Code desta execução (várias execuções continuam a mesma sessão). */
+  sessionId: string | null
+  /** Sessão de onde esta saiu ("Ramificar daqui"/"Editar mensagem"), só na primeira execução dela. */
+  forkedFrom: string | null
+  /** É de um sidechat (conversa ao lado, só de leitura; nunca a sessão da tarefa). */
+  side: boolean
 }
 
 /** Evento main → renderer (`onRunEvent`). */
@@ -146,6 +152,8 @@ export interface RunEventMessage {
   projectId: string
   taskId: string
   event: RunLogEvent
+  /** É de um sidechat (a conversa principal não segue esta execução). */
+  side?: boolean
 }
 
 export const PERMISSION_ANSWERS = ['allow_once', 'allow_always', 'deny'] as const
@@ -235,6 +243,13 @@ export interface SendMessageRequest {
   text: string
   /** Começa uma sessão nova (com o briefing do Notion) em vez de continuar a última. */
   fresh?: boolean
+  /** Continua esta sessão da tarefa (lista "Sessões") em vez da mais recente. */
+  session?: string
+  /**
+   * Sidechat: conversa ao lado, só de leitura, sem interromper a sessão principal. Com `session`
+   * (de um sidechat), continua ele; sem, abre um a partir do ponto atual da sessão principal.
+   */
+  side?: boolean
   /** 8A: rodar com as instruções do agente da tarefa (padrão: sim, se houver agente). */
   asAgent?: boolean
   /** Modelo e/ou raciocínio só desta mensagem (vence o passo e o agente). */

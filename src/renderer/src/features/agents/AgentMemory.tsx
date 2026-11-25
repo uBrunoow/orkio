@@ -345,7 +345,7 @@ export function AgentMemory({
                 </Button>
                 <Button
                   size="icon-sm"
-                  variant="ghost"
+                  variant="danger"
                   aria-label="Apagar nota"
                   title="Apagar (dá para voltar pelo histórico)"
                   disabled={busy}

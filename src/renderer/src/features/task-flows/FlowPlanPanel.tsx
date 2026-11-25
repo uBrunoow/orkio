@@ -37,7 +37,7 @@ export function FlowPlanPanel({ onCancelled }: { onCancelled(): void }): React.J
       <AutopilotPlan plan={plan ?? []} />
       {error && <Alert tone="danger">{error}</Alert>}
       <div className="flex">
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void cancel()}>
+        <Button size="sm" variant="danger" disabled={busy} onClick={() => void cancel()}>
           Cancelar fluxo
         </Button>
       </div>

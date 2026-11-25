@@ -41,7 +41,7 @@ export function SaveBar({
               : `${changes} alterações não salvas`}
         </p>
         <div className="flex-1" />
-        <Button variant="ghost" disabled={changes === 0} onClick={onDiscard}>
+        <Button variant="danger" disabled={changes === 0} onClick={onDiscard}>
           Descartar alterações
         </Button>
         <Button disabled={isDisabled || isSaving} onClick={onSave}>

@@ -369,7 +369,7 @@ function RememberedRules(): React.JSX.Element {
                     </Button>
                   </div>
                 ) : (
-                  <Button size="sm" variant="ghost" onClick={() => setConfirming(key)}>
+                  <Button size="sm" variant="danger" onClick={() => setConfirming(key)}>
                     Revogar
                   </Button>
                 )}

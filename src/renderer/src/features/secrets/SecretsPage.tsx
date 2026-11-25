@@ -524,7 +524,7 @@ function SecretRow({
                     key={a.mode}
                     disabled={a.disabled ?? false}
                     onSelect={() => toggle(a.mode)}
-                    className={a.mode === 'remove' ? 'text-danger' : undefined}
+                    variant={a.mode === 'remove' ? 'destructive' : 'default'}
                   >
                     {a.label}
                   </DropdownMenuItem>

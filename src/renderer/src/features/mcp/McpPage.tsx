@@ -690,7 +690,8 @@ function ServerCard({
           </Button>
           <Button
             size="xs"
-            variant={panel === 'remove' ? 'secondary' : 'ghost'}
+            variant="danger"
+            className={panel === 'remove' ? 'bg-danger-tint' : undefined}
             aria-expanded={panel === 'remove'}
             aria-label={`Remover ${server.name}`}
             onClick={onToggleRemove}

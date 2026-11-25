@@ -97,7 +97,7 @@ export function useTaskRuns(
         return
       }
       setState(r.value)
-      const runId = r.value.activeRunId ?? r.value.runs[0]?.id ?? null
+      const runId = r.value.activeRunId ?? r.value.runs.find((x) => !x.side)?.id ?? null
       selected.current = runId
       setSelectedRunId(runId)
       const events = runId ? await ipcCall(() => window.orkio.claude.readLog(runId), []) : []
@@ -112,6 +112,12 @@ export function useTaskRuns(
     () =>
       window.orkio.claude.onRunEvent((m) => {
         if (m.taskId !== taskId) return
+        // Sidechat: tem o painel próprio; a conversa principal não muda de execução por ele.
+        if (m.side) {
+          if (m.event.kind === 'status') void reload()
+          listener.current?.(m)
+          return
+        }
         const isNew =
           m.runId !== selected.current && m.event.kind === 'status' && isRunLive(m.event.status)
         if (selected.current === null || isNew) {

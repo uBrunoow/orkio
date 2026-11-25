@@ -227,8 +227,7 @@ export function DisconnectButton({
 
   if (!confirming && !disconnecting) {
     return (
-      // Vermelho só na confirmação: a ação ainda não aconteceu.
-      <Button variant="ghost" onClick={() => setConfirming(true)} disabled={busy}>
+      <Button variant="danger" onClick={() => setConfirming(true)} disabled={busy}>
         Desconectar
       </Button>
     )

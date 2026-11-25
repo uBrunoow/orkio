@@ -179,7 +179,7 @@ export function BoardSettings({
                 </Button>
                 <Button
                   size="icon-sm"
-                  variant="ghost"
+                  variant="danger"
                   aria-label={`Remover ${stage.name || `etapa ${index + 1}`}`}
                   onClick={() => setStages((list) => list.filter((s) => s.key !== stage.key))}
                 >

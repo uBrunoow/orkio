@@ -91,7 +91,7 @@ export function TaskChanges(): React.JSX.Element {
         <TaskArtifacts
           projectId={projectId}
           taskId={taskId}
-          runId={state.runs[0]?.id ?? null}
+          runId={state.runs.find((r) => !r.side)?.id ?? null}
           refreshKey={`${state.runs.length}:${state.activeRunId ?? ''}:${state.workspace?.changes ?? ''}`}
         />
       )}

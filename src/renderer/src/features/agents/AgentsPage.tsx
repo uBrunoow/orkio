@@ -17,6 +17,7 @@ import { useOverview } from '../overview/useOverview'
 import { useProjects } from '../projects/useProjects'
 import { AgentCard, AgentRow, type AgentHandlers } from './AgentCards'
 import { AgentDetail, type AgentSetupPart } from './AgentDetail'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { AgentEditor, type Editing } from './AgentEditor'
 import { OrchestratorCard, OrchestratorDetail, OrchestratorRow } from './OrchestratorAgent'
 import { AgentMemory } from './AgentMemory'
@@ -245,7 +246,7 @@ export function AgentsPage({
   return (
     <div role="region" aria-label="Agentes" className="-mx-6 -mt-5 flex flex-col">
       {header}
-      {hasAgents && !detailOf && !memoryOf && !editing && (
+      {hasAgents && !detailOf && !memoryOf && editing?.mode !== 'edit' && (
         <div
           role="toolbar"
           aria-label="Filtros de agentes"
@@ -312,6 +313,7 @@ export function AgentsPage({
       <div className="flex flex-col gap-4 px-[18px] py-4">
         {loadError && !message && <Alert tone="danger">{loadError}</Alert>}
         {message &&
+          !(editing?.mode === 'new' && message.tone === 'error') &&
           (message.tone === 'error' ? (
             <Alert tone="danger">{message.text}</Alert>
           ) : (
@@ -329,7 +331,7 @@ export function AgentsPage({
           />
         )}
 
-        {showOrchestrator && !editing && (
+        {showOrchestrator && editing?.mode !== 'edit' && (
           <OrchestratorDetail
             projectId={projectId}
             agents={state}
@@ -337,7 +339,7 @@ export function AgentsPage({
           />
         )}
 
-        {detailAgent && !editing && !memoryAgent && (
+        {detailAgent && editing?.mode !== 'edit' && !memoryAgent && (
           <AgentDetail
             key={detailAgent.key}
             projectId={projectId}
@@ -357,7 +359,7 @@ export function AgentsPage({
           />
         )}
 
-        {editing && (
+        {editing && editing.mode === 'edit' && (
           <AgentEditor
             key={editing.key ?? 'novo'}
             initialAdvanced={editAdvanced}
@@ -371,10 +373,41 @@ export function AgentsPage({
           />
         )}
 
+        <Dialog
+          open={editing?.mode === 'new'}
+          onOpenChange={(open) => {
+            if (!open) {
+              setEditing(null)
+              setMessage(null)
+            }
+          }}
+        >
+          <DialogContent className="max-h-[88vh] gap-0 overflow-y-auto sm:max-w-4xl">
+            {editing?.mode === 'new' && (
+              <AgentEditor
+                key="novo"
+                bare
+                initialAdvanced={editAdvanced}
+                editing={editing}
+                state={state}
+                commands={commands}
+                busy={busy}
+                error={message?.tone === 'error' ? message.text : null}
+                onChange={setEditing}
+                onCancel={() => {
+                  setEditing(null)
+                  setMessage(null)
+                }}
+                onSave={(e) => void save(e)}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+
         {memoryAgent || detailAgent || showOrchestrator ? null : state === null ? (
           <Skeleton className="h-30" aria-label="Carregando agentes" />
         ) : state.agents.length === 0 ? (
-          !editing && (
+          editing?.mode !== 'edit' && (
             <EmptyState
               title="Nenhum agente ainda"
               description="Crie um agente (ex.: Ana, implementadora) e atribua tarefas a ele no quadro."

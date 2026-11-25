@@ -7,7 +7,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '../components/StatusToken'
-import { SearchIcon, SwitchIcon } from '../components/icons'
+import { ForkIcon, ListIcon, SwitchIcon } from '../components/icons'
+import { Timestamp } from '@/components/Timestamp'
+import { taskSessions, visibleSessionId } from '../features/task/task-sessions'
+import { useTaskSessionList } from '../features/task/useTaskSessionList'
 import type { Route } from './routes'
 import type { SidebarTask, TaskGroups } from './task-groups'
 import type { ProjectView } from '../../../shared/projects'
@@ -66,8 +69,92 @@ function Section({
 }
 
 /**
- * Coluna do projeto (ao lado do dock): projeto atual, "Buscar tarefa", o que falta configurar e as
- * listas "Esperando você", "Rodando" e "A fazer"; a conta no pé. Mostrar/esconder: Ctrl/Cmd+B.
+ * Sessões do Claude Code da tarefa aberta (como no Compozy): cada "Nova sessão", "Ramificar daqui"
+ * e "Editar mensagem" é uma conversa à parte (cada comando do piloto automático também). A bolinha
+ * laranja = rodando agora. "Conversa completa" mostra todas, como o fluxo as encadeia; escolher uma
+ * mostra só ela e o campo continua nela.
+ */
+function TaskSessions({
+  projectId,
+  taskId,
+  chosen,
+  onSelect
+}: {
+  projectId: string
+  taskId: string
+  chosen: string | null
+  onSelect(session: string | null): void
+}): React.JSX.Element | null {
+  const runs = useTaskSessionList({ projectId, taskId })
+  if (!runs) return null
+  const sessions = taskSessions(runs)
+  if (sessions.length === 0) return null
+  const shown = visibleSessionId(runs, chosen)
+  const row =
+    'flex w-full min-w-0 items-start gap-2 rounded-[7px] px-2 py-1.5 text-left text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40'
+  return (
+    <div className="mt-1.5">
+      <Section title="Sessões" count={sessions.length}>
+        <li>
+          <button
+            type="button"
+            aria-current={shown === null ? 'true' : undefined}
+            onClick={() => onSelect(null)}
+            className={cn(
+              row,
+              'items-center',
+              shown === null && 'bg-sidebar-accent text-foreground'
+            )}
+          >
+            <ListIcon aria-hidden="true" className="size-3.5 shrink-0 text-subtle-foreground" />
+            <span className="truncate">Conversa completa</span>
+          </button>
+        </li>
+        {sessions.map((s) => {
+          const selected = s.id === shown
+          return (
+            <li key={s.id}>
+              <button
+                type="button"
+                aria-current={selected ? 'true' : undefined}
+                aria-label={`Sessão ${s.number}: ${s.title}${s.live ? ', rodando' : ''}`}
+                onClick={() => onSelect(s.id)}
+                className={cn(row, selected && 'bg-sidebar-accent text-foreground')}
+              >
+                <span className="mt-[5px] grid size-2 shrink-0 place-items-center">
+                  {s.live ? (
+                    <span
+                      aria-hidden="true"
+                      className="size-2 animate-pulse rounded-full bg-brand motion-reduce:animate-none"
+                    />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className="size-1.5 rounded-full bg-subtle-foreground/50"
+                    />
+                  )}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate">{s.title}</span>
+                  <span className="flex items-center gap-1 text-2xs text-subtle-foreground">
+                    {s.origin === 'fork' && <ForkIcon aria-hidden="true" className="size-3" />}
+                    {s.origin === 'fork' ? 'Ramificada' : `Sessão ${s.number}`} ·{' '}
+                    <Timestamp value={s.lastAt} />
+                  </span>
+                </span>
+              </button>
+            </li>
+          )
+        })}
+      </Section>
+    </div>
+  )
+}
+
+/**
+ * Coluna do projeto (ao lado do dock): projeto atual, as sessões da tarefa aberta, o que falta
+ * configurar e as listas "Esperando você", "Rodando" e "A fazer"; a conta no pé. A busca de
+ * tarefas fica no menu Sessão do cabeçalho (Ctrl/Cmd+P). Mostrar/esconder: Ctrl/Cmd+B.
  */
 export function Sidebar({
   route,
@@ -77,7 +164,7 @@ export function Sidebar({
   setupMissing,
   onChooseProject,
   onManageProjects,
-  onSearch,
+  onSelectSession,
   onOpenTask,
   onNavigate,
   onContinueSetup,
@@ -91,7 +178,8 @@ export function Sidebar({
   setupMissing: number
   onChooseProject(id: string): void
   onManageProjects(): void
-  onSearch(): void
+  /** Lista "Sessões" da tarefa aberta: mostra a conversa daquela sessão (`null` = a mais recente). */
+  onSelectSession(session: string | null): void
   onOpenTask(task: SidebarTask): void
   onNavigate(route: Route): void
   onContinueSetup(): void
@@ -142,18 +230,14 @@ export function Sidebar({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <button
-        type="button"
-        onClick={onSearch}
-        aria-label="Buscar tarefa no Notion, em todos os projetos"
-        className="mt-1.5 flex w-full items-center gap-2 rounded-lg px-2 py-[7px] text-left text-foreground outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/40"
-      >
-        <SearchIcon className="size-4 text-subtle-foreground" />
-        <span className="flex-1">Buscar tarefa</span>
-        <span aria-hidden="true" className="font-mono text-[10px] text-subtle-foreground">
-          Notion
-        </span>
-      </button>
+      {route.name === 'task' && (
+        <TaskSessions
+          projectId={route.projectId}
+          taskId={route.taskId}
+          chosen={route.session ?? null}
+          onSelect={onSelectSession}
+        />
+      )}
 
       <div className="-mx-1 flex min-h-0 flex-1 flex-col overflow-y-auto px-1">
         {project && setupMissing > 0 && (

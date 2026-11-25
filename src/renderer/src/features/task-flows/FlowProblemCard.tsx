@@ -109,7 +109,7 @@ export function FlowProblemCard({
         <Button size="sm" variant="outline" onClick={onSkip}>
           Pular
         </Button>
-        <Button size="sm" variant="ghost" onClick={onCancel}>
+        <Button size="sm" variant="danger" onClick={onCancel}>
           Cancelar fluxo
         </Button>
       </div>

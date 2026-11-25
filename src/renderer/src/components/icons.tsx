@@ -71,6 +71,7 @@ import {
   IconPlugConnected,
   IconPuzzle,
   IconRefresh,
+  IconRotate,
   IconTrash,
   IconTerminal2,
   IconPlayerPlay,
@@ -100,6 +101,7 @@ import {
   IconLayoutBoardSplit,
   IconHome,
   IconLayoutSidebar,
+  IconLayoutSidebarRight,
   IconKeyboard,
   IconCommand,
   IconGauge,
@@ -139,6 +141,8 @@ export const LinkIcon = adapt(IconLink)
 export const UnlinkIcon = adapt(IconLinkOff)
 export const TasksIcon = adapt(IconListCheck)
 export const RefreshIcon = adapt(IconRefresh)
+/** Tentar de novo (mandar a mesma mensagem outra vez). */
+export const RetryIcon = adapt(IconRotate)
 export const GitBranchIcon = adapt(IconGitBranch)
 export const PullRequestIcon = adapt(IconGitPullRequest)
 export const BoardIcon = adapt(IconLayoutKanban)
@@ -207,6 +211,8 @@ export const MoonIcon = adapt(IconMoon)
 export const OrchestratorIcon = adapt(IconRoute)
 export const HomeIcon = adapt(IconHome)
 export const SidebarIcon = adapt(IconLayoutSidebar)
+/** Painel à direita (detalhes da tarefa): mostrar/esconder. */
+export const PanelRightIcon = adapt(IconLayoutSidebarRight)
 export const KeyboardIcon = adapt(IconKeyboard)
 export const CommandIcon = adapt(IconCommand)
 export const GaugeIcon = adapt(IconGauge)

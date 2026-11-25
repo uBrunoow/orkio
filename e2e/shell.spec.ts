@@ -168,7 +168,7 @@ test('paleta faz qualquer coisa: ações do registro (esconder a lista) e Ctrl+B
   const { page } = orkio!
   const search = page
     .getByRole('navigation', { name: 'Navegação principal' })
-    .getByRole('button', { name: /^Buscar tarefa/ })
+    .getByRole('button', { name: /^Projeto atual/ })
   await expect(search).toBeVisible()
   await page.keyboard.press(`${MOD}+k`)
   const palette = page.getByRole('dialog', { name: 'Buscar tarefas e comandos' })

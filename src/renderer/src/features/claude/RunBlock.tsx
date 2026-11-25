@@ -10,7 +10,7 @@ import {
   type RunSummary
 } from '../../../../shared/agent-run'
 import { StatusToken } from '../../components/StatusToken'
-import { AutomationIcon, ClaudeLogo, DiffIcon, ReadIcon, UserIcon } from '../../components/icons'
+import { AutomationIcon, ClaudeLogo, DiffIcon, ReadIcon } from '../../components/icons'
 import type { FlowStepOrigin } from '../task-flows/flow-plan'
 import { BacklogDocumentView } from '../alva/BacklogDocumentView'
 import { formatDuration, formatUsd, plural } from '../../lib/format'
@@ -33,8 +33,11 @@ export function RunBlock({
   focused = false,
   showDocument = false,
   changesOpen = false,
-  origin = null
+  origin = null,
+  side = false
 }: {
+  /** Execução de um sidechat: sem ramificar/editar (o campo principal é da sessão da tarefa). */
+  side?: boolean
   run: AgentRunView
   /**
    * Passo de fluxo que disparou esta execução: em vez de "Você", o turno é do piloto automático
@@ -57,7 +60,7 @@ export function RunBlock({
   const view = useTaskView()
   const canOpenPr = view.openPr.available
   // Fase 2: ramificar/editar só com a sessão guardada, sem fluxo e com a execução terminada.
-  const setDraft = run.hasSession && !isRunLive(run.status) ? view.setDraft : null
+  const setDraft = !side && run.hasSession && !isRunLive(run.status) ? view.setDraft : null
   const [loaded, setLoaded] = useState<RunLogEvent[] | null>(null)
   const ref = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -87,6 +90,15 @@ export function RunBlock({
     .filter(Boolean)
     .join(' · ')
   const youSaid = !origin && run.mode === 'prompt' && run.text ? run.text : null
+  // A última resposta do Claude nesta execução (ponto do "Ramificar daqui" da sua mensagem).
+  const lastAnswerId = useMemo(() => {
+    const log = liveLog ?? loaded ?? []
+    for (let i = log.length - 1; i >= 0; i--) {
+      const e = log[i]
+      if (e?.kind === 'text' && e.uuid) return e.uuid
+    }
+    return null
+  }, [liveLog, loaded])
   const autopilotSaid = origin
     ? [run.command ? `/${run.command}` : null, run.text].filter(Boolean).join(' ')
     : null
@@ -101,17 +113,39 @@ export function RunBlock({
     >
       {youSaid && (
         <div className="group/message ml-auto flex max-w-[70%] flex-col items-end gap-1">
-          <div className="flex flex-col gap-1 rounded-[10px] border border-border bg-muted px-3 py-2.5">
+          <div className="rounded-[10px] border border-border bg-muted px-3 py-2.5">
             <p className="text-sm break-words whitespace-pre-wrap">{youSaid}</p>
-            <p className="flex items-center gap-1 text-[11.5px] text-subtle-foreground">
-              <UserIcon className="size-3" />
-              Você · <Timestamp value={run.startedAt} />
-            </p>
           </div>
           <MessageActions
             text={youSaid}
+            meta={
+              <>
+                <span className="sr-only">Você · </span>
+                <Timestamp value={run.startedAt} />
+              </>
+            }
             {...(setDraft
               ? {
+                  // Ramificar a partir da resposta a esta mensagem (a última do Claude nela).
+                  ...(lastAnswerId
+                    ? {
+                        onBranch: () =>
+                          setDraft({
+                            kind: 'branch',
+                            text: '',
+                            fork: { runId: run.id, at: lastAnswerId },
+                            excerpt: draftExcerpt(youSaid)
+                          })
+                      }
+                    : {}),
+                  onRetry: () =>
+                    setDraft({
+                      kind: 'edit',
+                      text: youSaid,
+                      fork: { runId: run.id, at: null },
+                      excerpt: draftExcerpt(youSaid),
+                      send: true
+                    }),
                   onEdit: () =>
                     setDraft({
                       kind: 'edit',

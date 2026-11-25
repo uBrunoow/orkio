@@ -157,7 +157,8 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
   await expect(section.getByTestId('session-context')).toContainText(
     'Começa uma sessão nova com o resumo da tarefa no Notion.'
   )
-  await section.getByRole('button', { name: 'Nova sessão…' }).click()
+  await section.getByRole('button', { name: 'Mais ações da sessão' }).click()
+  await page.getByRole('menuitem', { name: /Nova sessão…/ }).click()
 
   await expect(section.getByTestId('run-branch')).toHaveText('feat/ORK-2-listar-tarefas-do-notion')
   const briefing = section.getByRole('textbox', { name: /^Resumo da tarefa/ })
@@ -225,21 +226,28 @@ test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e res
 
   // Ambiente (topo de Detalhes): branch, pasta, "+N −M" do git, contexto do último turno e
   // terminal na pasta do worktree.
-  const env = (await tab(page, 'Detalhes')).getByTestId('environment-panel')
+  const details = await tab(page, 'Detalhes')
+  const env = details.getByTestId('environment-panel')
   await expect(env.getByTestId('environment-branch')).toHaveText(
     'feat/ORK-2-listar-tarefas-do-notion'
   )
   await expect(env.getByTestId('environment-folder')).toHaveText('ORK-2')
-  await expect(env.getByTestId('environment-shortstat')).toContainText(/\+\d+\s+−\d+/)
-  await expect(env.getByTestId('environment-context')).toContainText('41%')
-  await expect(env.getByRole('progressbar', { name: 'Contexto usado' })).toHaveAttribute(
-    'aria-valuenow',
-    '41'
-  )
+  await expect(details.getByTestId('environment-shortstat')).toContainText(/\+\d+\s+−\d+/)
+  // Contexto do último turno: o anel ao lado do campo (sempre à vista) abre a aba Contexto.
+  await expect(page.getByTestId('context-meter')).toHaveAttribute('aria-valuenow', '41')
   await env.getByRole('button', { name: 'Abrir terminal aqui' }).click()
   await expect.poll(() => terminalCalls(userDataDir).length).toBe(1)
   expect(terminalCalls(userDataDir)[0]).toContain('/worktrees/')
   expect(terminalCalls(userDataDir)[0]).toMatch(/ORK-2/)
+  await page.getByRole('button', { name: 'Contexto da sessão: 41%. Ver detalhes' }).click()
+  const contextPanel = page.getByTestId('session-context-panel')
+  await expect(contextPanel.getByRole('progressbar', { name: 'Contexto usado' })).toHaveAttribute(
+    'aria-valuenow',
+    '41'
+  )
+  await expect(contextPanel.getByRole('region', { name: 'Custo e tempo' })).toContainText(
+    'Custo total'
+  )
   await tab(page, 'Sessão')
 
   // Pasta principal intocada: mesma branch, mesma mudança não commitada, nenhum arquivo novo.
@@ -326,7 +334,8 @@ test('catálogo de comandos: "/" sugere no campo; nova sessão agrupada, com bus
   await expect(field).toHaveValue('/revisar ')
   await field.fill('')
 
-  await section.getByRole('button', { name: 'Nova sessão…' }).click()
+  await section.getByRole('button', { name: 'Mais ações da sessão' }).click()
+  await page.getByRole('menuitem', { name: /Nova sessão…/ }).click()
   await section.getByRole('radio', { name: 'Comando instalado' }).click()
   await section.getByRole('button', { name: /^Comando/ }).click()
   await expect(page.getByText('Seus comandos')).toBeVisible()

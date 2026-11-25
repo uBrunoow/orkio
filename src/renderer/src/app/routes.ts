@@ -52,7 +52,8 @@ export type Route =
       view?: BoardLayout
       filter?: TaskFilter
     }
-  | { name: 'task'; projectId: string; taskId: string; section?: TaskSection }
+  /** `session`: a sessão do Claude Code que a conversa mostra (lista "Sessões"); sem = a mais recente. */
+  | { name: 'task'; projectId: string; taskId: string; section?: TaskSection; session?: string }
   /** Fase 2: terminais da tarefa (pasta de trabalho) e "Continuar no Claude". */
   | {
       name: 'terminal'
@@ -266,7 +267,8 @@ export function parseRoute(v: unknown): Route | null {
         name: 'task',
         projectId: v['projectId'],
         taskId: v['taskId'],
-        ...(section ? { section } : {})
+        ...(section ? { section } : {}),
+        ...(str(v['session']) ? { session: v['session'] } : {})
       }
     }
     case 'terminal':

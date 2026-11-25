@@ -106,10 +106,9 @@ export function ProjectNotionSection({
           </Button>
           <Button
             size="sm"
-            variant="ghost"
+            variant="danger"
             disabled={busy}
             onClick={() => void unlink()}
-            className="text-muted-foreground"
           >
             {busy ? <Spinner /> : <UnlinkIcon />}
             Desvincular

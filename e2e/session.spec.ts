@@ -146,8 +146,13 @@ test('Continuar no Claude: sessão travada no terminal e devolvida ao Orkio', as
   expect(sessionId).toMatch(/^[0-9a-f-]{36}$/)
 
   await section.getByRole('button', { name: 'Continuar no Claude' }).click()
-  // Vai para a aba Terminal com o Claude retomando a sessão da tarefa.
-  const bar = page.getByTestId('handoff-bar')
+  // O terminal abre no painel da tarefa (aba Terminal), com o Claude retomando a sessão.
+  const panel = page.getByRole('complementary', { name: /^Detalhes de / })
+  await expect(panel.getByRole('tab', { name: 'Terminal', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  const bar = panel.getByTestId('handoff-bar')
   await expect(bar).toContainText('Com você no terminal')
   await expect(bar).toContainText('não as regras do Orkio')
   await expect.poll(() => terminalClaudeLog().length).toBe(1)
@@ -175,8 +180,7 @@ test('Continuar no Claude: sessão travada no terminal e devolvida ao Orkio', as
   })
   expect(waiting).toEqual([['handoff', 'Com você no terminal']])
 
-  // Na tarefa, o campo dá lugar ao aviso com os dois jeitos de devolver.
-  await page.getByRole('button', { name: 'Ver tarefa' }).click()
+  // Na conversa, ao lado, o campo dá lugar ao aviso com os dois jeitos de devolver.
   await expect(section.getByTestId('handoff-bar')).toBeVisible()
   await expect(section.getByRole('textbox', { name: 'Mensagem para o Claude Code' })).toHaveCount(0)
   const runs = argsLog().length
@@ -197,13 +201,17 @@ test('Continuar no Claude: sessão travada no terminal e devolvida ao Orkio', as
   expect(await cspViolations(page)).toEqual([])
 })
 
-test('Editar mensagem e Ramificar daqui: a próxima mensagem sai daquele ponto, numa sessão nova', async () => {
+test('Editar mensagem e Ramificar daqui: cada uma vira uma sessão na lista "Sessões"', async () => {
   const { page } = orkio!
   const section = session(page)
   const runs = section.getByTestId('session-run')
+  const sessions = page
+    .getByRole('navigation', { name: 'Navegação principal' })
+    .getByRole('group', { name: 'Sessões' })
   const [first, second] = argsLog() as { sessionId: string | null; resume: string | null }[]
   const original = first!.sessionId!
   expect(second!.resume).toBe(original)
+  await expect(sessions.getByRole('button', { name: /^Sessão \d/ })).toHaveCount(1)
 
   // "Editar mensagem" na segunda: o texto volta ao campo e a conversa volta até antes dele.
   const edited = runs.nth(1)
@@ -214,7 +222,9 @@ test('Editar mensagem e Ramificar daqui: a próxima mensagem sai daquele ponto, 
   await expect(section.getByTestId('composer-fork')).toContainText('Editando a mensagem')
   await composer.fill('Mensagem editada')
   await section.getByRole('button', { name: 'Enviar' }).click()
-  await expect(runs).toHaveCount(3)
+  // A conversa passa a mostrar a sessão nova (só ela) e a lista ganha a sessão.
+  await expect(sessions.getByRole('button', { name: /^Sessão \d/ })).toHaveCount(2)
+  await expect(runs).toHaveCount(1)
   await expect(runs.last().getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
   await expect(runs.last()).toContainText('Ramifiquei a sessão: Mensagem editada')
   await expect(runs.last()).toContainText('Mensagem editada: a conversa voltou até antes dela')
@@ -226,7 +236,10 @@ test('Editar mensagem e Ramificar daqui: a próxima mensagem sai daquele ponto, 
   expect(edit['sessionId']).not.toBe(original)
   expect(edit['briefingInPrompt']).toBe(false)
 
-  // "Ramificar daqui" numa resposta da primeira execução.
+  // Volta à primeira sessão pela lista: a conversa dela (duas execuções) e "Ramificar daqui" numa
+  // resposta da primeira execução.
+  await sessions.getByRole('button', { name: /^Sessão 1:/ }).click()
+  await expect(runs).toHaveCount(2)
   const answer = runs.first().getByRole('list', { name: 'Log da execução' })
   await answer.hover()
   await answer.getByRole('button', { name: 'Ramificar daqui' }).first().click()
@@ -234,7 +247,8 @@ test('Editar mensagem e Ramificar daqui: a próxima mensagem sai daquele ponto, 
   await expect(composer).toHaveValue('')
   await composer.fill('Outro caminho')
   await section.getByRole('button', { name: 'Enviar' }).click()
-  await expect(runs).toHaveCount(4)
+  await expect(sessions.getByRole('button', { name: /^Sessão \d/ })).toHaveCount(3)
+  await expect(runs).toHaveCount(1)
   await expect(runs.last().getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
   const branch = argsLog().at(-1)!
   expect(branch['forkSession']).toBe(true)
@@ -242,13 +256,73 @@ test('Editar mensagem e Ramificar daqui: a próxima mensagem sai daquele ponto, 
   expect(branch['resumeSessionAt']).toMatch(/^[0-9a-f-]{36}$/)
   expect(branch['sessionId']).not.toBe(edit['sessionId'])
 
-  // A próxima mensagem comum continua a sessão ramificada (a mais recente).
+  // A próxima mensagem comum continua a sessão mostrada (a ramificada, a mais recente).
   await composer.fill('E agora?')
   await section.getByRole('button', { name: 'Enviar' }).click()
-  await expect(runs).toHaveCount(5)
+  await expect(runs).toHaveCount(2)
   await expect(runs.last().getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
   const next = argsLog().at(-1)!
   expect(next['resume']).toBe(branch['sessionId'])
   expect(next['forkSession']).toBe(false)
+
+  // Escolher a primeira sessão na lista e mandar: continua ela, não a mais recente.
+  await sessions.getByRole('button', { name: /^Sessão 1:/ }).click()
+  await expect(runs).toHaveCount(2)
+  await composer.fill('De volta à primeira')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(runs).toHaveCount(3)
+  await expect(runs.last().getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  const back = argsLog().at(-1)!
+  expect(back['resume']).toBe(original)
+  expect(back['forkSession']).toBe(false)
+  expect(await cspViolations(page)).toEqual([])
+})
+
+test('sidechat: pergunta ao lado, só de leitura, sem mexer na sessão principal', async () => {
+  const { page } = orkio!
+  const section = session(page)
+  const sessions = page
+    .getByRole('navigation', { name: 'Navegação principal' })
+    .getByRole('group', { name: 'Sessões' })
+  const before = await sessions.getByRole('button', { name: /^Sessão \d/ }).count()
+  // A sessão principal agora: a que a última mensagem continuou (a primeira da tarefa).
+  const mainBefore = argsLog().at(-1)!['resume']
+
+  // Pelo "…" do campo, a aba Sidechat abre ao lado.
+  await section.getByRole('button', { name: 'Mais ações da sessão' }).click()
+  await page.getByRole('menuitem', { name: /Abrir sidechat/ }).click()
+  const side = page.getByRole('region', { name: 'Sidechat' })
+  await expect(side.getByTestId('sidechat-empty')).toBeVisible()
+  const field = side.getByRole('textbox', { name: 'Mensagem do sidechat' })
+  await field.fill('Por que assim?')
+  await field.press('Enter')
+  const chat = side.getByRole('list', { name: 'Conversa do sidechat' })
+  await expect(chat.getByTestId('run-status').last()).toHaveText('Concluída', { timeout: 30_000 })
+  await expect(chat).toContainText('Sidechat: conversa ao lado da sessão principal')
+  const asked = argsLog().at(-1)!
+  // Saiu do ponto atual da sessão principal, numa sessão nova, sem ferramentas de edição.
+  expect(asked['forkSession']).toBe(true)
+  expect(asked['resume']).toBe(mainBefore)
+  expect(String(asked['disallowedTools'])).toContain('Edit')
+
+  // Continuar o sidechat usa a sessão dele.
+  await field.fill('E o teste?')
+  await field.press('Enter')
+  await expect(chat.getByTestId('session-run')).toHaveCount(2)
+  await expect(chat.getByTestId('run-status').last()).toHaveText('Concluída', { timeout: 30_000 })
+  expect(argsLog().at(-1)!['resume']).toBe(asked['sessionId'])
+
+  // A lista "Sessões" e a sessão principal não mudam: a próxima mensagem continua a principal.
+  await expect(sessions.getByRole('button', { name: /^Sessão \d/ })).toHaveCount(before)
+  const composer = section.getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+  const mainRuns = section.getByTestId('session-run')
+  const count = await mainRuns.count()
+  await composer.fill('Segue o trabalho')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(mainRuns).toHaveCount(count + 1)
+  await expect(mainRuns.last().getByTestId('run-status')).toHaveText('Concluída', {
+    timeout: 30_000
+  })
+  expect(argsLog().at(-1)!['resume']).toBe(mainBefore)
   expect(await cspViolations(page)).toEqual([])
 })

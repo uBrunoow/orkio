@@ -11,14 +11,20 @@ import type {
   ProjectSelection
 } from '../../../../shared/projects'
 import { SURFACE } from '../../components/surface'
+import { DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
+import { FolderPlusIcon } from '../../components/icons'
 
 const mono = 'font-mono text-xs text-muted-foreground'
 
 export function AddProjectPanel({
   selection,
   onCreate,
-  onCancel
+  onCancel,
+  bare = false
 }: {
+  /** Dentro de um modal: sem moldura, título do diálogo e botões à direita. */
+  bare?: boolean
   selection: ProjectSelection
   onCreate(input: CreateProjectInput): Promise<ProjectMutationResult>
   onCancel(): void
@@ -57,15 +63,36 @@ export function AddProjectPanel({
   }
 
   return (
-    <section aria-labelledby="add-project-title" className={SURFACE.section}>
-      <div className="flex flex-col gap-1">
-        <h2 id="add-project-title" className="text-base font-medium">
-          Adicionar projeto
-        </h2>
-        <p>
-          <code className={mono}>{selection.rootPath}</code>
-        </p>
-      </div>
+    <section
+      {...(bare
+        ? { 'aria-label': 'Adicionar projeto', className: 'flex flex-col gap-4' }
+        : { 'aria-labelledby': 'add-project-title', className: SURFACE.section })}
+    >
+      {bare ? (
+        <div className="flex items-center gap-3 pr-8">
+          <span
+            aria-hidden="true"
+            className="grid size-9 shrink-0 place-items-center rounded-lg border border-border-soft bg-muted text-muted-foreground"
+          >
+            <FolderPlusIcon className="size-[18px]" />
+          </span>
+          <div className="flex min-w-0 flex-col">
+            <DialogTitle className="text-base font-medium">Adicionar projeto</DialogTitle>
+            <DialogDescription asChild>
+              <code className={cn(mono, 'truncate')}>{selection.rootPath}</code>
+            </DialogDescription>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          <h2 id="add-project-title" className="text-base font-medium">
+            Adicionar projeto
+          </h2>
+          <p>
+            <code className={mono}>{selection.rootPath}</code>
+          </p>
+        </div>
+      )}
 
       {selection.resolvedFromSubfolder && (
         <Alert tone="warning">
@@ -147,7 +174,7 @@ export function AddProjectPanel({
         </Alert>
       )}
 
-      <div className="flex gap-2">
+      <div className={cn('flex gap-2', bare && 'flex-row-reverse justify-start')}>
         <Button
           disabled={saving || (needsConfirmation && !confirmed)}
           onClick={() => void submit()}

@@ -1,3 +1,4 @@
+import { githubRepoOf } from '../../../../shared/projects'
 import { useEffect } from 'react'
 import { PageHeader } from '../../components/PageHeader'
 import { PageState } from '../../components/PageState'
@@ -12,12 +13,17 @@ export function TaskScreen({
   project,
   taskId,
   section,
+  session,
+  onSelectSession,
   onBackToBoard,
   onOpenTerminal
 }: {
   project: ProjectView | null
   taskId: string
   section: TaskSection | null
+  /** Sessão do Claude Code que a conversa mostra (`null` = a mais recente). */
+  session: string | null
+  onSelectSession(session: string | null): void
   onBackToBoard(): void
   /** Fase 2: aba Terminal da tarefa. */
   onOpenTerminal?(): void
@@ -85,6 +91,9 @@ export function TaskScreen({
       setAutomationPaused={(paused) => void board.setAutomationPaused(card.taskId, paused)}
       refreshSignals={() => void refreshSignals(true)}
       focusSection={section}
+      githubRepo={githubRepoOf(project)}
+      session={session}
+      selectSession={onSelectSession}
       onOpenBoard={onBackToBoard}
       {...(onOpenTerminal ? { openTerminal: onOpenTerminal } : {})}
     />

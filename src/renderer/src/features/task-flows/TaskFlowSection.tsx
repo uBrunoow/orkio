@@ -288,7 +288,7 @@ export function TaskFlowSection({
           </Alert>
           <Button
             size="sm"
-            variant="ghost"
+            variant="danger"
             onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
           >
             Cancelar fluxo
@@ -323,7 +323,7 @@ export function TaskFlowSection({
             </Button>
             <Button
               size="sm"
-              variant="ghost"
+              variant="danger"
               onClick={() => void act(() => window.orkio.taskFlows.decideLeft(run.id, 'cancel'))}
             >
               Cancelar fluxo
@@ -336,7 +336,7 @@ export function TaskFlowSection({
         <div className="flex">
           <Button
             size="sm"
-            variant="ghost"
+            variant="danger"
             onClick={() => void act(() => window.orkio.taskFlows.cancel(run.id))}
           >
             Cancelar fluxo

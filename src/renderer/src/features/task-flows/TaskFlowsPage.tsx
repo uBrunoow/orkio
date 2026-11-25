@@ -410,7 +410,7 @@ function FlowEditor({
         <Button variant="outline" onClick={onDone}>
           Ver em frase
         </Button>
-        <Button variant="ghost" onClick={onRemove}>
+        <Button variant="danger" onClick={onRemove}>
           <TrashIcon />
           Remover fluxo
         </Button>
@@ -520,7 +520,7 @@ function FlowEditor({
             </Button>
             <Button
               size="icon-sm"
-              variant="ghost"
+              variant="danger"
               aria-label="Remover passo"
               onClick={() => {
                 onChange({ ...flow, steps: flow.steps.filter((_, i) => i !== index) })
@@ -968,7 +968,7 @@ function BranchForm({
           {rows.length > 1 && (
             <Button
               size="icon-sm"
-              variant="ghost"
+              variant="danger"
               aria-label={`Remover condição ${i + 1}`}
               onClick={() => setRows(rows.filter((_, k) => k !== i))}
             >

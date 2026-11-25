@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { cn } from '@/lib/utils'
@@ -12,7 +12,7 @@ import {
   EditIcon,
   ForkIcon,
   PaperclipIcon,
-  SendIcon,
+  ArrowUpIcon,
   StopIcon
 } from '../../components/icons'
 import { HANDOFF_TEXT } from '../../../../shared/handoff'
@@ -21,12 +21,13 @@ import { formatBytes } from '../../lib/format'
 import { ATTACHMENT_ACCEPT } from '../../../../shared/attachments'
 import { checkNewAttachments, type PendingAttachment } from './attachments-ui'
 import { RuntimePicker, useSupportsEffort } from './RuntimePicker'
-import { isMac } from '../../lib/platform'
 import { useTaskView } from '../task/task-view'
+import { ContextMeter } from '../task/ContextMeter'
+import { SessionMenu } from './SessionMenu'
+import { taskSessions, visibleSessionId } from '../task/task-sessions'
+import { latestContextUsage, usageForModel } from '../task/environment'
 import { useCatalog } from './useCatalog'
 import { ipcResult } from '../../lib/ipc'
-
-const SEND_KEY = `${isMac() ? '⌘' : 'Ctrl'} ⏎ enviar`
 
 export function matchCommands(
   commands: readonly CatalogCommand[],
@@ -84,7 +85,7 @@ export function SessionComposer({
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   // O campo é da tela da tarefa: "Pedir ajuste…" no gate leva até ele.
-  const { setComposer, draft, clearDraft } = useTaskView()
+  const { setComposer, draft, clearDraft, runs, showPanel, session, selectSession } = useTaskView()
   // Fase 2: "Editar mensagem"/"Ramificar daqui": a próxima mensagem sai daquele ponto. Cada clique
   // é um rascunho novo (outro objeto): o campo o adota uma vez, sem efeito (ajuste no render).
   const [fork, setFork] = useState<ComposerDraft | null>(null)
@@ -99,8 +100,18 @@ export function SessionComposer({
   const nextKey = useRef(0)
 
   const activeRunId = state?.activeRunId ?? null
-  const latest = state?.runs[0] ?? null
+  // A sessão principal (sidechats têm o painel deles).
+  const latest = state?.runs.find((r) => !r.side) ?? null
   const resumes = !!latest?.hasSession
+  const allRuns = (state?.runs ?? []).filter((r) => !r.side)
+  const shownSession = visibleSessionId(allRuns, session)
+  const chosenSession =
+    shownSession && shownSession !== taskSessions(allRuns)[0]?.id ? shownSession : null
+  // Contexto da sessão: o último `usage` da execução mais recente (o log ao vivo dela).
+  const lastUsage = latest && runs.selectedRunId === latest.id ? latestContextUsage(runs.log) : null
+  // Trocou o modelo no seletor: a mesma conversa medida na janela dele (ex.: `[1m]` = 1 milhão).
+  const contextUsage =
+    lastUsage && runtime.model ? usageForModel(lastUsage, runtime.model) : lastUsage
   const who = agent?.name ?? 'o Claude Code'
 
   const slash = /^\/(\S*)$/.exec(text)
@@ -160,7 +171,9 @@ export function SessionComposer({
         text: message,
         ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
         ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
-        ...(fork ? { fork: fork.fork } : {})
+        ...(fork ? { fork: fork.fork } : {}),
+        // Sessão escolhida na lista "Sessões" que não é a mais recente: continua ela.
+        ...(!fork && chosenSession ? { session: chosenSession } : {})
       })
     )
     setSending(false)
@@ -169,6 +182,8 @@ export function SessionComposer({
       setRuntime({})
       setAttachments([])
       setAttachError(null)
+      // Ramificou/editou: a conversa passa a mostrar só a sessão nova (separada das outras).
+      if (fork) selectSession(r.value.runs.find((x) => !x.side)?.sessionId ?? null)
       setFork(null)
       clearDraft()
       onSent(r.value)
@@ -176,11 +191,21 @@ export function SessionComposer({
       setError(r.error.message)
     }
   }
+  // "Tentar de novo": o rascunho já adotado (texto + ponto da conversa) vai direto. A ref evita
+  // mandar duas vezes o mesmo rascunho (efeito repetido no modo estrito do React).
+  const autoSent = useRef<ComposerDraft | null>(null)
+  useEffect(() => {
+    if (!adopted?.send || autoSent.current === adopted || fork !== adopted) return
+    autoSent.current = adopted
+    void send()
+    // `send` lê o texto e o rascunho já adotados neste render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adopted, fork])
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault()
-      void send()
-    }
+    // Enter envia; Shift+Enter quebra a linha. Durante a composição (acentos, IME) o Enter é dela.
+    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.nativeEvent.isComposing) return
+    e.preventDefault()
+    void send()
   }
 
   return (
@@ -241,7 +266,7 @@ export function SessionComposer({
       )}
       <div
         className={cn(
-          'flex flex-col gap-1.5 rounded-[10px] border border-border bg-card py-1.5 pr-1.5 pl-3 focus-within:border-ring',
+          'flex flex-col gap-1 rounded-xl border border-border bg-card p-2 focus-within:border-ring',
           dragging && 'border-brand bg-brand-tint'
         )}
         onDragOver={(e) => {
@@ -269,7 +294,7 @@ export function SessionComposer({
                 <span className="shrink-0 text-subtle-foreground">{formatBytes(a.file.size)}</span>
                 <Button
                   size="icon-xs"
-                  variant="ghost"
+                  variant="danger"
                   aria-label={`Remover ${a.file.name}`}
                   onClick={() => {
                     setAttachments((cur) => cur.filter((x) => x.key !== a.key))
@@ -282,24 +307,24 @@ export function SessionComposer({
             ))}
           </ul>
         )}
-        <div className="flex items-end gap-2">
-          <textarea
-            ref={(el) => {
-              ref.current = el
-              setComposer(el)
-            }}
-            aria-label={`Mensagem para ${who}`}
-            placeholder={
-              working
-                ? `Escreva para interromper e mudar o rumo de ${who}…`
-                : `Escreva para ${who}… ( / para comandos)`
-            }
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={onKeyDown}
-            rows={1}
-            className="field-sizing-content max-h-48 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-1 text-sm outline-none placeholder:text-subtle-foreground disabled:cursor-not-allowed"
-          />
+        <textarea
+          ref={(el) => {
+            ref.current = el
+            setComposer(el)
+          }}
+          aria-label={`Mensagem para ${who}`}
+          placeholder={
+            working
+              ? `Escreva para interromper e mudar o rumo de ${who}…`
+              : `Escreva para ${who}… ( / para comandos)`
+          }
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+          rows={1}
+          className="field-sizing-content max-h-48 min-h-10 w-full min-w-0 resize-none bg-transparent px-1 py-1 text-sm outline-none placeholder:text-subtle-foreground disabled:cursor-not-allowed"
+        />
+        <div className="flex items-center gap-1">
           <input
             ref={fileInput}
             type="file"
@@ -317,7 +342,7 @@ export function SessionComposer({
             variant="ghost"
             aria-label="Anexar arquivo"
             title="Anexar imagem, PDF, Markdown ou texto"
-            className="mb-0.5 shrink-0"
+            className="shrink-0 text-subtle-foreground"
             onClick={() => fileInput.current?.click()}
           >
             <PaperclipIcon />
@@ -337,26 +362,46 @@ export function SessionComposer({
                 : 'Padrão do Claude Code'
             }
             {...(flowRunning ? { title: 'No piloto automático vale o modelo do passo.' } : {})}
-            className="mb-1 shrink-0"
+            className="shrink-0"
           />
-          {(!activeRunId || text.trim()) && (
-            <span className="mb-2 shrink-0 font-mono text-2xs text-subtle-foreground">
-              {SEND_KEY}
-            </span>
+          {contextUsage && (
+            <ContextMeter
+              usage={contextUsage}
+              {...(showPanel ? { onClick: () => showPanel('context') } : {})}
+            />
           )}
+          <div className="flex-1" />
+          <SessionMenu
+            canStartNew={!activeRunId && !flowRunning}
+            onNewSession={onNewSession}
+            onRunCommand={() => {
+              setText('/')
+              ref.current?.focus()
+            }}
+            state={state}
+            {...(showPanel ? { onSidechat: () => showPanel('sidechat') } : {})}
+          />
           {activeRunId && !text.trim() ? (
             <Button
-              size="sm"
+              size="icon-sm"
               variant="secondary"
+              aria-label="Parar"
+              title="Parar"
+              className="shrink-0 rounded-full"
               onClick={() => void window.orkio.claude.cancel(activeRunId)}
             >
               <StopIcon />
-              Parar
             </Button>
           ) : (
-            <Button size="sm" disabled={!text.trim() || sending} onClick={() => void send()}>
-              {sending ? <Spinner /> : <SendIcon />}
-              Enviar
+            <Button
+              size="icon-sm"
+              aria-label="Enviar"
+              title="Enviar (Enter) · Shift+Enter quebra a linha"
+              className="shrink-0 rounded-full"
+              disabled={!text.trim() || sending}
+              onClick={() => void send()}
+            >
+              {sending ? <Spinner /> : <ArrowUpIcon className="size-4" />}
             </Button>
           )}
         </div>
@@ -381,11 +426,6 @@ export function SessionComposer({
           >
             <ClaudeLogo aria-hidden="true" />
             {continuing ? 'Abrindo…' : HANDOFF_TEXT.start}
-          </Button>
-        )}
-        {!activeRunId && !flowRunning && (
-          <Button size="xs" variant="ghost" onClick={onNewSession}>
-            Nova sessão…
           </Button>
         )}
       </div>

@@ -241,7 +241,7 @@ function BindingsEditor({
               <Button
                 type="button"
                 size="icon-sm"
-                variant="ghost"
+                variant="danger"
                 aria-label={`Tirar ${label}`}
                 onClick={() => onChange(list.filter((_, j) => j !== i))}
               >

@@ -78,10 +78,11 @@ async function goToBoard(page: Page): Promise<void> {
     .click()
 }
 const card = (page: Page): Locator => page.getByRole('listitem', { name: ORK2, exact: true })
-/** Etapa da tarefa na tela dela (seletor "Mover para" na barra do topo, fora da região da tela). */
+/** Etapa da tarefa na tela dela (seletor "Mover para" na coluna Detalhes do painel). */
 async function expectStage(screen: Locator, stage: string): Promise<void> {
-  const bar = screen.page().getByTestId('top-bar')
-  await expect(bar.getByRole('combobox', { name: /^Mover para/ })).toContainText(stage, {
+  const panel = screen.page().getByRole('complementary', { name: /^Detalhes de / })
+  await panel.getByRole('tab', { name: 'Detalhes', exact: true }).click()
+  await expect(panel.getByRole('combobox', { name: /^Mover para/ })).toContainText(stage, {
     timeout: 30_000
   })
 }
@@ -638,7 +639,7 @@ test('Abrir PR: botão na aba PR & CI → gate do push → aprovar → /pr em mo
   await taskTab(panel, 'PR & CI')
   await expect(panel.getByRole('button', { name: 'Abrir PR' })).toBeDisabled()
   await expect(
-    panel.getByRole('tabpanel', { name: 'PR & CI' }).getByText('Espere o fluxo atual terminar')
+    panel.getByRole('region', { name: 'PR & CI' }).getByText('Espere o fluxo atual terminar')
   ).toBeVisible()
   await push.getByRole('button', { name: 'Fazer push' }).click()
 

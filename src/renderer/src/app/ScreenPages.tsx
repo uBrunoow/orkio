@@ -227,6 +227,16 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
         project={ctx.projects === null ? null : ctx.linkedProject}
         taskId={route.taskId}
         section={route.section ?? null}
+        session={route.session ?? null}
+        onSelectSession={(session) =>
+          ctx.replace({
+            name: 'task',
+            projectId: route.projectId,
+            taskId: route.taskId,
+            ...(route.section ? { section: route.section } : {}),
+            ...(session ? { session } : {})
+          })
+        }
         onBackToBoard={() => ctx.navigate({ name: 'board', projectId: route.projectId })}
         onOpenTerminal={() =>
           ctx.navigate({ name: 'terminal', projectId: route.projectId, taskId: route.taskId })

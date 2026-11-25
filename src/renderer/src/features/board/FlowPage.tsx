@@ -895,7 +895,7 @@ export function FlowPage({
                       </Button>
                       <Button
                         size="icon-sm"
-                        variant="ghost"
+                        variant="danger"
                         aria-label={`Remover ${stageLabel}`}
                         onClick={() => {
                           removeStage(stage.id)

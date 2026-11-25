@@ -1,37 +1,106 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { StatusToken } from '@/components/StatusToken'
 import { cn } from '@/lib/utils'
 import { Alert } from '../../components/Alert'
-import { EditorIcon, GitBranchIcon, PullRequestIcon, TerminalIcon } from '../../components/icons'
+import { StatusBadge } from '../../components/StatusToken'
+import {
+  BoardIcon,
+  ChevronRightIcon,
+  EditorIcon,
+  FolderSearchIcon,
+  GaugeIcon,
+  GitBranchIcon,
+  ProjectsIcon,
+  PullRequestIcon,
+  ReviewRequestIcon,
+  TerminalIcon
+} from '../../components/icons'
+import { prPills } from '../../lib/status-text'
+import { ipcResult } from '../../lib/ipc'
+import { plural } from '../../lib/format'
 import { OpenPrButton, OpenPrFeedback } from './OpenPrButton'
 import { canOpenPr } from './open-pr'
-import { PrHoverCard } from '../../components/PrHoverCard'
-import { CI_STATUS, isPrOpen } from '../../lib/status-text'
+import { contextTone, folderName, latestContextUsage } from './environment'
+import type { PanelTab } from './panel-tab'
 import { useTaskDiff, useTaskView } from './task-view'
-import { contextTone, folderName, latestContextPercent } from './environment'
-import { ipcResult } from '../../lib/ipc'
+import { StageSelector } from './TaskDetails'
 
-const TITLE = 'font-medium label-caps'
+const TITLE = 'px-2 text-xs font-medium text-muted-foreground'
+const ROW = 'flex min-h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1 text-sm'
+const LINK = 'outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 text-left'
 const BAR: Record<'ok' | 'warn' | 'danger', string> = {
   ok: 'bg-ok',
   warn: 'bg-warn',
   danger: 'bg-danger'
 }
 
-export function EnvironmentPanel(): React.JSX.Element {
+/** Linha de informação: ícone, texto e (opcional) ações à direita. */
+function Row({
+  icon,
+  children,
+  trailing,
+  className
+}: {
+  icon: React.ReactNode
+  children: React.ReactNode
+  trailing?: React.ReactNode
+  className?: string
+}): React.JSX.Element {
+  return (
+    <div className={cn(ROW, className)}>
+      <span aria-hidden="true" className="flex size-4 shrink-0 items-center text-subtle-foreground">
+        {icon}
+      </span>
+      <span className="flex min-w-0 flex-1 items-center gap-2">{children}</span>
+      {trailing && <span className="flex shrink-0 items-center gap-0.5">{trailing}</span>}
+    </div>
+  )
+}
+
+/** Linha que abre uma subtela do painel (PR & CI, Revisão, Contexto): texto › e o resumo. */
+function LinkRow({
+  icon,
+  label,
+  summary,
+  onClick
+}: {
+  icon: React.ReactNode
+  label: string
+  summary?: React.ReactNode
+  onClick(): void
+}): React.JSX.Element {
+  return (
+    <button type="button" aria-label={label} onClick={onClick} className={cn(ROW, LINK)}>
+      <span aria-hidden="true" className="flex size-4 shrink-0 items-center text-subtle-foreground">
+        {icon}
+      </span>
+      <span className="flex shrink-0 items-center gap-1 text-foreground">
+        {label}
+        <ChevronRightIcon aria-hidden="true" className="size-3.5 text-subtle-foreground" />
+      </span>
+      <span className="flex min-w-0 flex-1 items-center justify-end gap-2 text-xs text-muted-foreground">
+        {summary}
+      </span>
+    </button>
+  )
+}
+
+/**
+ * Topo da coluna Detalhes (como o painel do Claude Desktop): Ambiente (projeto, pasta, branch e os
+ * atalhos de editor/terminal), Contexto (abre a subtela) e Mudanças (diff, PR com o estado e a
+ * revisão). Cada linha que tem mais coisa abre a subtela dela com `onOpen`.
+ */
+export function EnvironmentPanel({ onOpen }: { onOpen(tab: PanelTab): void }): React.JSX.Element {
   const view = useTaskView()
   const { projectId, taskId, projectName, signals, runs } = view
   const workspace = runs.state?.workspace ?? null
   const [error, setError] = useState<string | null>(null)
-  // Contexto (%) da execução mais recente: o log ao vivo dela (a conversa já o acompanha).
-  const latestId = runs.state?.runs[0]?.id ?? null
-  const context =
-    latestId && runs.selectedRunId === latestId ? latestContextPercent(runs.log) : null
   // `+N −M` da branch contra a base: o mesmo diff da tela (sem ler de novo).
   const stat = useTaskDiff(workspace !== null).value?.shortstat ?? null
   const pr = signals?.pr ?? null
-  const ci = isPrOpen(pr) && pr?.checks ? CI_STATUS[pr.checks] : null
+  const latest = runs.state?.runs.find((r) => !r.side) ?? null
+  const usage = latest && runs.selectedRunId === latest.id ? latestContextUsage(runs.log) : null
+  const files = latest ? (runs.state?.runs.find((r) => r.summary)?.summary?.files.length ?? 0) : 0
 
   async function open(kind: 'cursor' | 'code' | 'terminal'): Promise<void> {
     const r =
@@ -40,130 +109,179 @@ export function EnvironmentPanel(): React.JSX.Element {
         : await ipcResult(() => window.orkio.claude.openEditor(projectId, taskId, kind))
     setError(r.ok ? null : r.error.message)
   }
+  const iconButton = (
+    label: string,
+    icon: React.ReactNode,
+    onClick: () => void
+  ): React.ReactNode => (
+    <Button
+      size="icon-xs"
+      variant="ghost"
+      aria-label={label}
+      title={label}
+      className="text-subtle-foreground hover:text-foreground"
+      onClick={onClick}
+    >
+      {icon}
+    </Button>
+  )
 
   return (
-    <section
-      aria-label="Ambiente"
-      data-testid="environment-panel"
-      className="flex flex-col gap-4 border-b border-border-soft pb-5"
-    >
-      <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-4">
+      <section
+        aria-label="Ambiente"
+        data-testid="environment-panel"
+        className="flex flex-col gap-0.5"
+      >
         <h3 className={TITLE}>Ambiente</h3>
-        <dl className="grid grid-cols-[auto_1fr] items-baseline gap-x-3 gap-y-1 text-xs">
-          {projectName && (
-            <>
-              <dt className="text-muted-foreground">Projeto</dt>
-              <dd className="truncate text-foreground">{projectName}</dd>
-            </>
-          )}
+        {projectName && (
+          <Row icon={<ProjectsIcon className="size-4" />}>
+            <span className="truncate text-foreground">{projectName}</span>
+          </Row>
+        )}
+        {/* Etapa no quadro (antes ficava na barra do topo): trocar aqui move a tarefa. */}
+        <Row icon={<BoardIcon className="size-4" />}>
+          <StageSelector />
+        </Row>
+        <Row
+          icon={<FolderSearchIcon className="size-4" />}
+          trailing={
+            workspace && (
+              <>
+                {iconButton('Abrir no Cursor', <EditorIcon />, () => void open('cursor'))}
+                {iconButton('Abrir no VS Code', <EditorIcon />, () => void open('code'))}
+                {view.openTerminal &&
+                  iconButton('Terminal no Orkio', <TerminalIcon />, view.openTerminal)}
+                {iconButton('Abrir terminal aqui', <TerminalIcon />, () => void open('terminal'))}
+              </>
+            )
+          }
+        >
           {workspace ? (
-            <>
-              <dt className="text-muted-foreground">Pasta</dt>
-              <dd className="truncate font-mono text-foreground" title={workspace.path}>
-                <span data-testid="environment-folder">{folderName(workspace.path)}</span>
-              </dd>
-              <dt className="text-muted-foreground">Branch</dt>
-              <dd className="flex min-w-0 items-center gap-1.5 font-mono text-foreground">
-                <GitBranchIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate" data-testid="environment-branch">
-                  {workspace.branch}
-                </span>
-              </dd>
-            </>
+            <span
+              className="truncate font-mono text-xs text-foreground"
+              title={workspace.path}
+              data-testid="environment-folder"
+            >
+              {folderName(workspace.path)}
+            </span>
           ) : (
-            <>
-              <dt className="text-muted-foreground">Pasta</dt>
-              <dd className="text-muted-foreground">Criada quando o agente começar.</dd>
-            </>
+            <span className="text-xs text-muted-foreground">
+              Pasta criada quando o agente começar
+            </span>
           )}
-        </dl>
+        </Row>
         {workspace && (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => void open('cursor')}>
-              <EditorIcon />
-              Cursor
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => void open('code')}>
-              <EditorIcon />
-              VS Code
-            </Button>
-            {view.openTerminal && (
-              <Button size="sm" variant="outline" onClick={view.openTerminal}>
-                <TerminalIcon />
-                Terminal no Orkio
-              </Button>
-            )}
-            <Button size="sm" variant="outline" onClick={() => void open('terminal')}>
-              <TerminalIcon />
-              Abrir terminal aqui
-            </Button>
-          </div>
+          <Row icon={<GitBranchIcon className="size-4" />}>
+            <span
+              className="truncate font-mono text-xs text-foreground"
+              data-testid="environment-branch"
+            >
+              {workspace.branch}
+            </span>
+          </Row>
         )}
         {error && <Alert tone="danger">{error}</Alert>}
-      </div>
+      </section>
 
-      {context !== null && (
-        <div className="flex flex-col gap-1.5" data-testid="environment-context">
-          <div className="flex items-center justify-between text-xs">
-            <h3 className={TITLE}>Contexto</h3>
-            <span className="text-foreground tabular">{context}%</span>
-          </div>
-          <div
-            role="progressbar"
-            aria-label="Contexto usado"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={context}
-            className="h-1 overflow-hidden rounded-full bg-muted"
-          >
-            <div
-              className={cn('h-full rounded-full', BAR[contextTone(context)])}
-              style={{ width: `${context}%` }}
-            />
-          </div>
-          <span className="sr-only">Contexto: {context}%</span>
-        </div>
-      )}
+      <section
+        aria-label="Contexto e mudanças"
+        className="flex flex-col gap-0.5 border-t border-border-soft pt-3"
+      >
+        <LinkRow
+          icon={<GaugeIcon className="size-4" />}
+          label="Contexto"
+          onClick={() => onOpen('context')}
+          summary={
+            usage ? (
+              <>
+                <span className="tabular-nums" data-testid="environment-context">
+                  {usage.percent}%
+                </span>
+                <span aria-hidden="true" className="h-1 w-10 overflow-hidden rounded-full bg-muted">
+                  <span
+                    className={cn('block h-full rounded-full', BAR[contextTone(usage.percent)])}
+                    style={{ width: `${usage.percent}%` }}
+                  />
+                </span>
+              </>
+            ) : (
+              'depois do primeiro turno'
+            )
+          }
+        />
+        <LinkRow
+          icon={<PullRequestIcon className="size-4" />}
+          label="PR & CI"
+          onClick={() => onOpen('pr')}
+          summary={
+            pr ? (
+              <>
+                <span className="truncate font-mono">#{pr.number}</span>
+                {prPills(pr)
+                  .filter((p) => p.kind !== 'comments')
+                  .slice(0, 2)
+                  .map((p) => (
+                    <StatusBadge key={p.kind} label={p.label} tone={p.tone} />
+                  ))}
+              </>
+            ) : (
+              'sem PR'
+            )
+          }
+        />
+        {pr && (
+          <LinkRow
+            icon={<ReviewRequestIcon className="size-4" />}
+            label="Revisão"
+            onClick={() => onOpen('review')}
+            summary={
+              pr.unresolvedComments ? (
+                <StatusBadge
+                  label={plural(pr.unresolvedComments, 'comentário', 'comentários')}
+                  tone="warning"
+                />
+              ) : (
+                'comentários da PR'
+              )
+            }
+          />
+        )}
+      </section>
 
-      {workspace && (
-        <div className="flex flex-col gap-2">
-          <h3 className={TITLE}>Mudanças</h3>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
+      {(workspace || files > 0) && (
+        <section
+          aria-label="Mudanças"
+          className="flex flex-col gap-1.5 border-t border-border-soft pt-3"
+        >
+          <div className="flex items-center justify-between pr-1">
+            <h3 className={TITLE}>Mudanças</h3>
+            <Button size="xs" variant="ghost" onClick={() => onOpen('changes')}>
+              Ver mudanças
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2 text-xs">
             {stat && (
               <span className="font-mono" data-testid="environment-shortstat">
                 <span className="text-ok">+{stat.added}</span>{' '}
                 <span className="text-danger">−{stat.removed}</span>
               </span>
             )}
-            {pr && (
-              <>
-                <PrHoverCard pr={pr}>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="font-mono"
-                    aria-label={`Abrir a PR #${pr.number} no GitHub`}
-                    onClick={() => void window.orkio.openExternal(pr.url)}
-                  >
-                    <PullRequestIcon />#{pr.number}
-                  </Button>
-                </PrHoverCard>
-                {pr.additions !== undefined && pr.deletions !== undefined && (
-                  <span className="font-mono text-muted-foreground">
-                    +{pr.additions} −{pr.deletions}
-                  </span>
-                )}
-                {ci && <StatusToken {...ci} />}
-              </>
+            {files > 0 && (
+              <span className="text-muted-foreground">{plural(files, 'arquivo', 'arquivos')}</span>
             )}
-            {canOpenPr(pr) && <OpenPrButton size="sm" hint={false} />}
+            {canOpenPr(pr) && workspace && <OpenPrButton size="sm" hint={false} />}
           </div>
           {canOpenPr(pr) && view.openPr.blocked && (
-            <span className="text-xs text-muted-foreground">Espere o fluxo atual terminar</span>
+            <span className="px-2 text-xs text-muted-foreground">
+              Espere o fluxo atual terminar
+            </span>
           )}
-          <OpenPrFeedback />
-        </div>
+          <div className="px-2">
+            <OpenPrFeedback />
+          </div>
+        </section>
       )}
-    </section>
+    </div>
   )
 }

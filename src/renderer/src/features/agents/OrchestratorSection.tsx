@@ -388,7 +388,7 @@ export function OrchestratorEditor({
               onChange={(v) => setLane(i, { next: v || null })}
             />
             <Button
-              variant="ghost"
+              variant="danger"
               size="icon"
               aria-label={`Remover etapa de trabalho ${i + 1}`}
               onClick={() => set({ lanes: draft.lanes.filter((_, j) => j !== i) })}

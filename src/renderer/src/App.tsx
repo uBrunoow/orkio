@@ -427,7 +427,19 @@ export function App(): React.JSX.Element | null {
                 )
               }}
               onManageProjects={() => navigate({ name: 'settings', section: 'projects' })}
-              onSearch={() => setPalette('tasks')}
+              onSelectSession={(session) => {
+                if (route.name !== 'task') return
+                dispatch({
+                  type: 'replace',
+                  route: {
+                    name: 'task',
+                    projectId: route.projectId,
+                    taskId: route.taskId,
+                    ...(route.section ? { section: route.section } : {}),
+                    ...(session ? { session } : {})
+                  }
+                })
+              }}
               onOpenTask={(t) =>
                 linkedProject &&
                 openTask({

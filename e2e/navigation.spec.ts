@@ -17,6 +17,8 @@ import {
   seedConfig
 } from './fixtures'
 
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control'
+
 /**
  * 6E: navegação reorganizada. Cada tela do projeto é um item do menu (Quadro, Etapas e
  * automações, Fluxos, Contexto do Claude); clicar num item sai de qualquer subtela; a tarefa
@@ -132,20 +134,31 @@ test('tarefa: tela com fases, conversa e painel; janela estreita; tarefa que sum
   const task = taskScreen(page, 'ORK-2')
   await expect(task).toBeVisible()
   await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()
-  // Fases na barra do topo (fora da região da tela).
+  // Sem fluxo, as fases seriam as colunas do quadro: a barra do topo não as repete (a etapa
+  // fica em Detalhes).
   await expect(
     page.getByTestId('top-bar').getByRole('list', { name: 'Fases da tarefa' })
-  ).toBeVisible()
+  ).toHaveCount(0)
   const session = task.getByRole('region', { name: 'Sessão da tarefa' })
   await expect(session.getByRole('list', { name: 'Conversa da tarefa' })).toContainText(
     'Entrou no quadro'
   )
   await expect(session.getByRole('textbox', { name: /^Mensagem para/ })).toBeVisible()
   const panel = task.getByRole('complementary', { name: 'Detalhes de ORK-2' })
-  await expect(panel.getByRole('tab')).toHaveCount(3)
-  for (const name of ['Mudanças', 'PR & CI', 'Detalhes']) {
+  // Painel como no Claude Desktop: ícones no topo e as subtelas pelas linhas de Detalhes.
+  await expect(panel.getByRole('tab')).toHaveCount(4)
+  for (const name of ['Detalhes', 'Mudanças', 'Sidechat', 'Terminal']) {
     await expect(panel.getByRole('tab', { name, exact: true })).toBeVisible()
   }
+  await panel.getByRole('button', { name: 'PR & CI', exact: true }).click()
+  await expect(panel.getByRole('region', { name: 'PR & CI', exact: true })).toBeVisible()
+  await panel.getByRole('button', { name: 'Detalhes', exact: true }).click()
+  await expect(panel.getByRole('combobox', { name: /^Mover para/ })).toBeVisible()
+  // Dá para esconder o painel e mostrar de novo.
+  await page.getByRole('button', { name: 'Esconder o painel da tarefa' }).click()
+  await expect(panel).toHaveCount(0)
+  await page.getByRole('button', { name: 'Mostrar o painel da tarefa' }).click()
+  await expect(panel).toBeVisible()
   await expectTaskHistory(task, 'Entrou no quadro')
   await expect(telas(page).getByRole('button', { name: 'Quadro' })).toHaveAttribute(
     'aria-current',
@@ -225,7 +238,8 @@ test('Buscar tarefa: o banco do Notion inteiro; fora do quadro abre no Notion; c
   // Sem GitHub, a conta é a do Notion (nome da pessoa, sem e-mail).
   await expect(nav.getByRole('button', { name: /^Conta: Ada Lovelace/ })).toBeVisible()
 
-  await nav.getByRole('button', { name: /^Buscar tarefa/ }).click()
+  // A busca fica no menu Sessão do cabeçalho (Ctrl/⌘+P), não mais na lateral.
+  await page.keyboard.press(`${MOD}+p`)
   const search = page.getByRole('dialog', { name: 'Buscar tarefas no Notion' })
   await expect(search).toBeVisible()
   // Tarefa de outra pessoa (não está no seu quadro) também aparece, marcada para abrir no Notion.
@@ -236,7 +250,7 @@ test('Buscar tarefa: o banco do Notion inteiro; fora do quadro abre no Notion; c
   await expect.poll(() => openedUrls(app)).toContain('https://www.notion.so/ORK-9-bbbb9')
 
   // Pelo ID: a sua abre a tela da tarefa no Orkio.
-  await nav.getByRole('button', { name: /^Buscar tarefa/ }).click()
+  await page.keyboard.press(`${MOD}+p`)
   await page.keyboard.type('ORK-2')
   await search.getByRole('option', { name: /Listar tarefas do Notion/ }).click()
   await expect(h1(page, 'Listar tarefas do Notion')).toBeVisible()

@@ -26,6 +26,7 @@ import { ProjectNotionSection } from '../notion-workspace/ProjectNotionSection'
 import { useNotionWorkspace } from '../notion-workspace/useNotionWorkspace'
 import { ActionLink } from './ActionLink'
 import { missingSteps, projectChecks, type ProjectCheck } from './project-checks'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { AddProjectPanel } from './AddProjectPanel'
 import { useProjects } from './useProjects'
 import { PAGE_WIDTH } from '../../components/page-width'
@@ -139,18 +140,23 @@ export function ProjectsPage({
         </Alert>
       )}
 
-      {selection && (
-        <AddProjectPanel
-          key={selection.selectionId}
-          selection={selection}
-          onCreate={async (input) => {
-            const result = await projects.create(input)
-            if (result.ok) setSelection(null)
-            return result
-          }}
-          onCancel={() => setSelection(null)}
-        />
-      )}
+      <Dialog open={selection !== null} onOpenChange={(open) => !open && setSelection(null)}>
+        <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto sm:max-w-xl">
+          {selection && (
+            <AddProjectPanel
+              key={selection.selectionId}
+              bare
+              selection={selection}
+              onCreate={async (input) => {
+                const result = await projects.create(input)
+                if (result.ok) setSelection(null)
+                return result
+              }}
+              onCancel={() => setSelection(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {list === null ? (
         <div className="flex flex-col gap-3" aria-label="Carregando projetos">
@@ -354,7 +360,7 @@ function ProjectRow({
                 <DropdownMenuItem onSelect={() => void onArchive(!project.archived)}>
                   {project.archived ? 'Desarquivar' : 'Arquivar'}
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setConfirmingRemove(true)}>
+                <DropdownMenuItem variant="destructive" onSelect={() => setConfirmingRemove(true)}>
                   Remover do Orkio
                 </DropdownMenuItem>
               </DropdownMenuContent>
