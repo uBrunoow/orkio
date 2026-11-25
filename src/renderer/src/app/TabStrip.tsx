@@ -13,11 +13,15 @@ import type { Tab, TabsAction } from './tabs'
 /** Título da aba: o da tela; a tarefa mostra ID e título (do quadro já carregado). */
 function useTabTitle(route: Route): { id: string | null; title: string } {
   const { board } = useSources()
-  const projectId = route.name === 'task' ? route.projectId : null
+  const projectId = route.name === 'task' || route.name === 'terminal' ? route.projectId : null
   const view = useSource(board, projectId).value?.view ?? null
   if (route.name === 'task') {
     const card = view?.cards.find((c) => c.taskId === route.taskId)
     return { id: card?.displayId ?? null, title: card?.title ?? 'Tarefa' }
+  }
+  if (route.name === 'terminal') {
+    const card = view?.cards.find((c) => c.taskId === route.taskId)
+    return { id: card?.displayId ?? null, title: 'Terminal' }
   }
   if (route.name === 'settings' && route.section) {
     return { id: null, title: SETTINGS_TITLES[route.section] }

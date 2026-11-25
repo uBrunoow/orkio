@@ -21,6 +21,7 @@ import type {
   RunLogEvent,
   RunPreparation,
   SendMessageRequest,
+  SessionFork,
   StartRunRequest,
   TaskRunsState,
   TaskWorkspace,
@@ -59,6 +60,8 @@ import type { Result } from '../../shared/result'
 import type { NotionTask } from '../../shared/notion'
 import type { TaskSignalsResult } from '../../shared/task-signals'
 import { projectById } from '../config/queries'
+import type { HandoffView } from '../../shared/handoff'
+import { HANDOFF_MESSAGES } from './handoff.service'
 import { isApiError } from '../net/http'
 
 export const CLAUDE_MESSAGES = {
@@ -79,6 +82,9 @@ export const CLAUDE_MESSAGES = {
   flowActive:
     'Esta tarefa tem um fluxo em andamento. Use o fluxo (ou cancele-o) para rodar o Claude Code.',
   noSession: 'Esta tarefa não tem uma sessão do Claude Code para continuar. Rode o passo de novo.',
+  forkNotFound: 'Não achei esse ponto da conversa. Atualize a tela e tente de novo.',
+  forkFlow:
+    'Com um fluxo em andamento, ramificar ou editar a conversa fica para depois: termine ou cancele o fluxo.',
   flowRunning:
     'O fluxo está rodando um passo agora. Espere ele parar ou pedir algo para mandar a mensagem.',
   pageUnavailable: 'Não deu para ler a página da tarefa no Notion; o briefing usa só os campos.',
@@ -136,6 +142,13 @@ export interface ClaudeServiceDeps {
   openEditor(editor: EditorId, path: string): Promise<void>
   /** Abre o terminal do sistema na pasta (`TerminalError` se a pasta sumiu ou não há terminal). */
   openTerminal(path: string): Promise<void>
+  /**
+   * Fase 2: a sessão da tarefa está com você no terminal ("Continuar no Claude"). Com ela, toda
+   * execução da tarefa é recusada (mensagem, "Rodar", passo de fluxo).
+   */
+  handoff?(taskId: string): HandoffView | null
+  /** Fase 2: terminais embutidos rodando na tarefa (o worktree não sai por baixo deles). */
+  terminalsRunning?(taskId: string): boolean
   /**
    * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
    * pt-BR quando há agente, mas ele não pode rodar (sem aprovação, limite do dia, comando negado).
@@ -276,6 +289,7 @@ export class ClaudeService {
     return this.wrap(async () => {
       const text = req.text.trim()
       if (!text) return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
+      if (this.deps.handoff?.(req.taskId)) return fail('handoff', HANDOFF_MESSAGES.locked)
       // Anexos: validados pelo conteúdo antes de qualquer efeito; gravados no worktree da tarefa
       // só depois das recusas baratas (CLI, fluxo ocupado, briefing, agente) e apagados se a
       // mensagem acabar recusada. O fluxo ativo já tem worktree: lá gravamos antes de entregar.
@@ -347,6 +361,14 @@ export class ClaudeService {
     hasFiles: boolean,
     save: () => Promise<string>
   ): Promise<Result<TaskRunsState>> {
+    // Ramificar/editar (Fase 2): escolhe um ponto da conversa; com o fluxo ativo, não (o fluxo
+    // segue a sessão dele).
+    if (req.fork) {
+      if (this.deps.flowActive(req.taskId)) return fail('flow_active', CLAUDE_MESSAGES.forkFlow)
+      const fork = await this.forkSession(req.taskId, req.fork)
+      if (!fork.ok) return fork
+      return this.sendInSession(req, text, save, fork.value)
+    }
     // Como no Claude Code: a mensagem não espera o piloto automático; o fluxo a usa (escolha,
     // interromper o passo e continuar com ela, responder e continuar).
     const note = hasFiles && this.deps.flowActive(req.taskId) ? await save() : ''
@@ -354,15 +376,27 @@ export class ClaudeService {
     if ('error' in used) return fail('flow_message', used.error)
     if (used.used) return ok(await this.taskState(req.taskId))
     if (this.deps.flowBusy(req.taskId)) return fail('flow_running', CLAUDE_MESSAGES.flowRunning)
-    // Execução avulsa no meio de um turno: interrompe e continua a sessão com a mensagem.
+    const last = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
+    return this.sendInSession(req, text, save, last ? { kind: 'resume', id: last } : null)
+  }
+
+  /**
+   * Manda a mensagem na sessão escolhida (`null` = sessão nova com o briefing). Uma execução avulsa
+   * no meio de um turno é interrompida antes (a sessão continua com a mensagem).
+   */
+  private async sendInSession(
+    req: SendMessageRequest,
+    text: string,
+    save: () => Promise<string>,
+    chosen: RunSession | null
+  ): Promise<Result<TaskRunsState>> {
     const current = (await this.taskState(req.taskId)).activeRunId
     if (current) await this.cancelAndWait(current)
     const slash = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(text)
     const command = slash ? slash[1]! : null
     let args = slash ? (slash[2] ?? '').trim() : text
-    const last = req.fresh ? null : this.deps.runs.lastSession(req.taskId)
     let session: RunSession
-    if (last) session = { kind: 'resume', id: last }
+    if (chosen) session = chosen
     else {
       const prep = await this.prepare(req.projectId, req.taskId)
       if (!prep.ok) return prep
@@ -386,6 +420,23 @@ export class ClaudeService {
     })
     if (!started.ok) return started
     return ok(await this.taskState(req.taskId))
+  }
+
+  /**
+   * O ponto de onde a mensagem sai (Fase 2): a resposta escolhida ("Ramificar daqui") ou logo antes
+   * do pedido da execução ("Editar mensagem"; o pedido que abriu a sessão = sessão nova, `null`).
+   * A execução tem que ser desta tarefa e a resposta, dela.
+   */
+  private async forkSession(taskId: string, fork: SessionFork): Promise<Result<RunSession | null>> {
+    const run = this.deps.runs.view(fork.runId)
+    if (!run || run.taskId !== taskId) return fail('invalid', CLAUDE_MESSAGES.forkNotFound)
+    if (fork.at !== null) {
+      const point = await this.deps.runs.pointIn(fork.runId, fork.at)
+      if (!point) return fail('invalid', CLAUDE_MESSAGES.forkNotFound)
+      return ok({ kind: 'fork', from: point.session, at: point.at, reason: 'branch' })
+    }
+    const point = await this.deps.runs.pointBefore(fork.runId)
+    return ok(point ? { kind: 'fork', from: point.session, at: point.at, reason: 'edit' } : null)
   }
 
   /**
@@ -428,6 +479,8 @@ export class ClaudeService {
   startRun(request: RunRequest): Promise<Result<string>> {
     return this.wrap(async () => {
       this.project(request.projectId)
+      // A sessão está com você no terminal: nada do Orkio roda na tarefa até você devolver.
+      if (this.deps.handoff?.(request.taskId)) return fail('handoff', HANDOFF_MESSAGES.locked)
       const cli = await this.readyCli()
       if (!cli.ok) return cli
       const { input } = request
@@ -501,8 +554,13 @@ export class ClaudeService {
     })
   }
 
+  /** Execução viva da tarefa (rodando ou na fila), ou `null`. */
+  activeRunId(taskId: string): string | null {
+    return this.deps.runs.list(taskId).find((r) => isRunLive(r.status))?.id ?? null
+  }
+
   /** Cancela e espera a execução terminar (até 15 s), para a próxima continuar a sessão. */
-  private cancelAndWait(runId: string): Promise<void> {
+  cancelAndWait(runId: string): Promise<void> {
     return new Promise((resolve) => {
       const timer = setTimeout(done, 15_000)
       const off = this.deps.runs.onFinished((info) => {
@@ -523,6 +581,10 @@ export class ClaudeService {
       const project = this.project(projectId)
       if (this.deps.runs.isRunning(taskId)) {
         return fail('busy', 'Cancele a execução em andamento antes de limpar o ambiente.')
+      }
+      if (this.deps.handoff?.(taskId)) return fail('handoff', HANDOFF_MESSAGES.locked)
+      if (this.deps.terminalsRunning?.(taskId)) {
+        return fail('busy', 'Feche os terminais desta tarefa antes de limpar o ambiente.')
       }
       await this.deps.worktrees.remove(this.worktreeProject(project), taskId, force)
       return ok(await this.taskState(taskId))
@@ -735,7 +797,12 @@ export class ClaudeService {
         .catch(() => null)
       workspace = { branch: wt.branch, path: wt.path, changes }
     }
-    return { runs, activeRunId: active?.id ?? null, workspace }
+    return {
+      runs,
+      activeRunId: active?.id ?? null,
+      workspace,
+      handoff: this.deps.handoff?.(taskId) ?? null
+    }
   }
 
   private async pageBlocks(pageId: string): Promise<NotionBlock[]> {

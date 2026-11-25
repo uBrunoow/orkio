@@ -66,6 +66,22 @@ describe('summarizeSteps', () => {
 })
 
 describe('buildTranscript', () => {
+  it('texto do agente inteiro, com o id da mensagem para "Ramificar daqui"', () => {
+    const uuid = '0f8c2a3e-1b2c-4d5e-8f90-123456789abc'
+    const long = 'Linha um.\n\n'.repeat(40)
+    const items = buildTranscript(
+      [
+        { kind: 'text', text: long, uuid },
+        { kind: 'text', text: 'Sem id' }
+      ],
+      false
+    )
+    expect(items).toEqual([
+      { kind: 'message', key: 'e0', text: long, uuid },
+      { kind: 'message', key: 'e1', text: 'Sem id' }
+    ])
+  })
+
   it('agrupa ferramentas seguidas e separa por mensagens', () => {
     const items = buildTranscript(
       [

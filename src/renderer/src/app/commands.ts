@@ -19,6 +19,7 @@ import {
   SwitchIcon,
   BackIcon,
   CloseIcon,
+  TerminalIcon,
   type SvgIcon
 } from '../components/icons'
 import { matchesKeys, type KeyInput } from './keys'
@@ -102,6 +103,13 @@ export function isAvailable(command: Command, ctx: CommandState): boolean {
   return (command.visible?.(ctx) ?? true) && (command.enabled?.(ctx) ?? true)
 }
 
+/** A tarefa da tela atual (tela da tarefa ou o terminal dela), ou `null`. */
+export function taskOf(route: Route | null): { projectId: string; taskId: string } | null {
+  return route && (route.name === 'task' || route.name === 'terminal')
+    ? { projectId: route.projectId, taskId: route.taskId }
+    : null
+}
+
 /** "Ir para" de cada tela do dock (Quadro, Agentes, Configurações). */
 function screenCommands(): Command[] {
   return SCREENS.filter((s) => s.dock).map((s) => ({
@@ -179,6 +187,33 @@ export const APP_COMMANDS: readonly Command[] = [
     keywords: ['esperando', 'aprovar', 'pendente', 'sino'],
     enabled: (ctx) => ctx.waiting > 0,
     run: (ctx) => ctx.openWaiting()
+  },
+  {
+    id: 'task:terminal',
+    label: 'Abrir o terminal da tarefa',
+    menu: 'session',
+    block: 1,
+    icon: TerminalIcon,
+    keys: 'mod+shift+j',
+    keywords: ['terminal', 'shell', 'console', 'worktree'],
+    visible: (ctx) => taskOf(ctx.route) !== null,
+    run: (ctx) => {
+      const task = taskOf(ctx.route)
+      if (task) ctx.navigate({ name: 'terminal', ...task })
+    }
+  },
+  {
+    id: 'task:continue-in-claude',
+    label: 'Continuar no Claude',
+    menu: 'session',
+    block: 1,
+    icon: TerminalIcon,
+    keywords: ['claude', 'terminal', 'resume', 'assumir', 'permissão', 'na mão'],
+    visible: (ctx) => taskOf(ctx.route) !== null,
+    run: (ctx) => {
+      const task = taskOf(ctx.route)
+      if (task) ctx.navigate({ name: 'terminal', ...task, start: 'claude' })
+    }
   },
   {
     id: 'refresh',

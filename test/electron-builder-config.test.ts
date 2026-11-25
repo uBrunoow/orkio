@@ -100,9 +100,25 @@ describe('electron-builder.ts', () => {
     expect(c.electronFuses?.runAsNode).toBe(true)
     expect(c.electronFuses?.onlyLoadAppFromAsar).toBe(true)
     expect(c.npmRebuild).toBe(false)
-    // O main e a ponte (out/main/permission-mcp.js) vão no asar; node_modules não é excluído.
+    // O main e a ponte (out/main/permission-mcp.js) vão no asar; node_modules não é excluído
+    // (só sobras do node-pty: fontes, .pdb, prebuilds de outro sistema).
     expect(c.files).toContain('out/**')
-    expect(JSON.stringify(c.files)).not.toContain('!node_modules')
+    const excluded = (c.files as string[]).filter((f) => f.startsWith('!'))
+    expect(excluded.every((f) => f.startsWith('!node_modules/node-pty/'))).toBe(true)
+    // Terminal embutido (Fase 2): o módulo nativo roda de fora do asar.
+    expect(c.asarUnpack).toContain('node_modules/node-pty/**')
+  })
+
+  it('cada sistema leva só os prebuilds do node-pty dele', () => {
+    const c = builderConfig({})
+    const files = (k: 'mac' | 'win' | 'linux'): string[] =>
+      ((c[k] as { files?: string[] }).files ?? []).filter((f) => f.includes('prebuilds'))
+    expect(files('mac')).toEqual(['!node_modules/node-pty/prebuilds/win32-*/**'])
+    expect(files('win')).toEqual(['!node_modules/node-pty/prebuilds/darwin-*/**'])
+    expect(files('linux')).toEqual([
+      '!node_modules/node-pty/prebuilds/darwin-*/**',
+      '!node_modules/node-pty/prebuilds/win32-*/**'
+    ])
   })
 
   it('sem Developer ID: ad-hoc e sem hardened runtime', () => {

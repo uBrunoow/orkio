@@ -278,6 +278,20 @@ export const MIGRATIONS: readonly string[] = [
     updated_at TEXT NOT NULL
   );
   ALTER TABLE flow_runs ADD COLUMN reviewer_json TEXT;
+  `,
+  // v14 (Fase 2): "Continuar no Claude". A sessão da tarefa fica travada com você no terminal:
+  // nenhuma execução do Orkio roda na tarefa até você devolver. Sobrevive a fechar o app. E a
+  // origem das sessões ramificadas (para "Editar mensagem" achar o ponto de antes do pedido).
+  `
+  CREATE TABLE session_handoffs (
+    task_page_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    flow_run_id TEXT,
+    started_at TEXT NOT NULL
+  );
+  -- "Ramificar daqui"/"Editar mensagem": de que sessão e de que resposta a sessão nova saiu.
+  ALTER TABLE agent_runs ADD COLUMN fork_json TEXT;
   `
 ]
 

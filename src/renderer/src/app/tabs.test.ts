@@ -116,6 +116,17 @@ describe('abas salvas e rotas', () => {
     ).toEqual({ routes: [{ name: 'agents' }], active: 0 })
   })
 
+  it('terminal da tarefa (Fase 2): uma aba por tarefa, separada da tela da tarefa', () => {
+    const term: Route = { name: 'terminal', projectId: 'p1', taskId: 't1' }
+    expect(placeOf(term)).toBe('terminal:p1:t1')
+    expect(placeOf(term)).not.toBe(placeOf(task('t1')))
+    const s = run(nav(task('t1')), nav(term), nav(task('t1')), nav({ ...term, start: 'claude' }))
+    expect(routes(s)).toEqual([task('t1'), { ...term, start: 'claude' }])
+    // "Continuar no Claude" pela paleta não volta sozinho ao reabrir o app.
+    expect(parseRoute({ ...term, start: 'claude' })).toEqual(term)
+    expect(parseRoute({ name: 'terminal', projectId: 'p1' })).toBeNull()
+  })
+
   it('parseRoute fica só com campos conhecidos', () => {
     expect(
       parseRoute({ name: 'settings', section: 'board', tab: 'nada', projectId: 'p', x: 1 })

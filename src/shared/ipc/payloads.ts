@@ -8,8 +8,10 @@ import {
   BRIEFING_MAX,
   MESSAGE_MAX,
   type SendMessageRequest,
+  type SessionFork,
   type StartRunRequest
 } from '../agent-run'
+import { isSessionUuid } from '../terminal'
 import type { AgentProfile, AgentScope, ProjectAgents } from '../agent'
 import { ATTACHMENT_LIMITS } from '../attachments'
 import { parseRule, type AutomationRule } from '../automation'
@@ -294,16 +296,26 @@ export function parseSendMessageRequest(value: unknown): Parsed<SendMessageReque
   const runtime = value['runtime'] === undefined ? undefined : parseRuntimePatch(value['runtime'])
   const attachments =
     value['attachments'] === undefined ? undefined : parseAttachments(value['attachments'])
-  if (runtime === INVALID || attachments === INVALID) return INVALID
+  const fork = value['fork'] === undefined ? undefined : parseSessionFork(value['fork'])
+  if (runtime === INVALID || attachments === INVALID || fork === INVALID) return INVALID
   return {
     projectId,
     taskId,
     text,
+    ...(fork !== undefined ? { fork } : {}),
     ...(fresh !== undefined ? { fresh } : {}),
     ...(asAgent !== undefined ? { asAgent } : {}),
     ...(runtime !== undefined ? { runtime } : {}),
     ...(attachments !== undefined ? { attachments } : {})
   }
+}
+
+/** Ponto da conversa de onde a mensagem sai (execução + id da resposta, ou antes do pedido). */
+function parseSessionFork(value: unknown): Parsed<SessionFork> {
+  if (!isRecord(value)) return INVALID
+  const { runId, at } = value
+  if (!isLocalId(runId) || !(at === null || isSessionUuid(at))) return INVALID
+  return { runId, at }
 }
 
 /** Respostas a uma pergunta do Claude (`AskUserQuestion`): pergunta → resposta. */

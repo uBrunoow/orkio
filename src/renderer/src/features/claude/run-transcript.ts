@@ -37,7 +37,8 @@ const PUBLISH_BLOCK: ReadonlySet<PermissionBlockCode> = new Set(['push', 'gh'])
 
 export type TranscriptItem =
   | { kind: 'started'; key: string; model: string | null }
-  | { kind: 'message'; key: string; text: string }
+  /** Texto do agente (inteiro); `uuid` = ponto da conversa para "Ramificar daqui". */
+  | { kind: 'message'; key: string; text: string; uuid?: string }
   | { kind: 'work'; key: string; steps: WorkStep[]; approvals: number; live: boolean }
   | { kind: 'subagents'; key: string; agents: SubagentRow[] }
   | {
@@ -213,7 +214,7 @@ export function buildTranscript(
         break
       case 'text':
         lastMessage = norm(e.text)
-        push({ kind: 'message', key, text: e.text })
+        push({ kind: 'message', key, text: e.text, ...(e.uuid ? { uuid: e.uuid } : {}) })
         break
       case 'subagent': {
         const row: SubagentRow = {

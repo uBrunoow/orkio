@@ -94,7 +94,8 @@ export const FLOW_MESSAGES = {
   longRevise: `O pedido de ajuste passa de ${MAX_PROMPT_CHARS} caracteres. Encurte e tente de novo.`,
   notRevisable: 'Este gate não aceita pedidos de ajuste. Aprove ou recuse.',
   reviseLimit: (max: number): string =>
-    `Limite de ajustes atingido (${max}). Aprove ou recuse no cartão.`
+    `Limite de ajustes atingido (${max}). Aprove ou recuse no cartão.`,
+  doneByYou: 'Feito por você no terminal.'
 } as const
 
 export class FlowError extends DomainError {
@@ -917,6 +918,45 @@ export class FlowRunner {
       await this.apply(flowRunId, skipStep(this.flow(row), p.engine, row.current_step, as))
     })
     return this.view(flowRunId)
+  }
+
+  /**
+   * "Passo feito" (Fase 2, Continuar no Claude): você terminou no terminal o comando do Claude Code
+   * em que o fluxo parou. O passo conta como certo (as condições veem `ok`) e o fluxo segue.
+   */
+  async completeByYou(flowRunId: string): Promise<FlowRunView> {
+    await this.withLock(flowRunId, async () => {
+      const row = this.row(flowRunId)
+      const step = this.flow(row).steps.find((s) => s.id === row.current_step)
+      if (row.status !== 'paused' || !row.current_step || step?.type !== 'claude_command') {
+        throw new FlowError('wrong_state', FLOW_MESSAGES.wrongState)
+      }
+      this.deps.db.run(
+        `UPDATE flow_steps SET status = 'ok', result_json = ? WHERE id = (SELECT MAX(id) FROM flow_steps WHERE flow_run_id = ?) AND status IN ('failed', 'interrupted', 'cancelled')`,
+        JSON.stringify({ message: FLOW_MESSAGES.doneByYou }),
+        flowRunId
+      )
+      this.event(row, 'step_finished', {
+        step: row.current_step,
+        message: FLOW_MESSAGES.doneByYou
+      })
+      const p = this.persisted(row)
+      await this.apply(
+        flowRunId,
+        afterStep(this.flow(row), p.engine, row.current_step, { outcome: 'ok', vars: {} })
+      )
+    })
+    return this.view(flowRunId)
+  }
+
+  /** Fluxo ativo da tarefa: id, estado e se parou (ou roda) num comando do Claude Code. */
+  activeFor(
+    taskId: string
+  ): { id: string; status: FlowRunView['status']; claudeStep: boolean } | null {
+    const row = this.activeRow(taskId)
+    if (!row) return null
+    const step = this.flow(row).steps.find((s) => s.id === row.current_step)
+    return { id: row.id, status: row.status, claudeStep: step?.type === 'claude_command' }
   }
 
   async cancel(flowRunId: string): Promise<FlowRunView> {

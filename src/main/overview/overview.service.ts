@@ -12,6 +12,7 @@ import {
   costSum,
   finishedCount,
   flowWaitingItem,
+  handoffWaitingItem,
   notionWaitingItem,
   prAttention,
   projectCard,
@@ -67,6 +68,8 @@ export interface OverviewDeps {
     result: 'done' | 'rejected' | 'cancelled' | null
     endedAt: string
   }[]
+  /** Fase 2: sessões com você no terminal ("Continuar no Claude"). */
+  handoffs?(): { projectId: string; taskId: string; since: string }[]
   /** Perguntas e permissões em memória (4A). */
   requests(): (PendingRequest & { projectId: string; taskId: string })[]
   runs(): { runId: string; projectId: string; taskId: string; status: RunStatus }[]
@@ -332,8 +335,16 @@ export class OverviewService {
     resolve: (projectId: string, taskId: string) => OverviewTask
   ): WaitingItem[] {
     const items: WaitingItem[] = []
+    // Com você no terminal: é isso que a tarefa espera (o fluxo parado por isso não repete).
+    const handoffs = (this.deps.handoffs?.() ?? []).filter((h) =>
+      this.hasProject(config, h.projectId)
+    )
+    const withYou = new Set(handoffs.map((h) => h.taskId))
+    for (const h of handoffs) {
+      items.push(handoffWaitingItem(h, resolve(h.projectId, h.taskId)))
+    }
     for (const flow of this.deps.flows()) {
-      if (!this.hasProject(config, flow.projectId)) continue
+      if (!this.hasProject(config, flow.projectId) || withYou.has(flow.taskId)) continue
       const item = flowWaitingItem(flow, resolve(flow.projectId, flow.taskId))
       if (item) items.push(item)
     }

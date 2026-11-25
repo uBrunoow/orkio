@@ -81,6 +81,17 @@ import type {
   ProjectsListResult
 } from '../projects'
 import type { Result } from '../result'
+import { HANDOFF_RETURNS, type HandoffReturn, type HandoffView } from '../handoff'
+import {
+  TERMINAL_LIMITS,
+  isTerminalId,
+  parseTerminalSize,
+  type TaskTerminals,
+  type TerminalChangedEvent,
+  type TerminalDataEvent,
+  type TerminalSnapshot,
+  type TerminalView
+} from '../terminal'
 import type { ReviewThreadsResult } from '../review'
 import type { Flow, FlowRunView, OpenPrResult, TaskFlowsProject } from '../task-flow'
 import type { TaskSignalsResult } from '../task-signals'
@@ -236,6 +247,23 @@ export const IPC_EVENTS = {
         ? (v as unknown as UpdateStatus)
         : INVALID
   }),
+  /** Fase 2: saída de um terminal embutido (lote). */
+  terminalData: event<TerminalDataEvent>({
+    channel: 'terminal:data',
+    parse: (v) =>
+      isRecord(v) &&
+      isTerminalId(v['id']) &&
+      typeof v['data'] === 'string' &&
+      typeof v['at'] === 'number' &&
+      Number.isSafeInteger(v['at'])
+        ? { id: v['id'], data: v['data'], at: v['at'] }
+        : INVALID
+  }),
+  /** Fase 2: um terminal da tarefa abriu, saiu ou fechou (relê a lista). */
+  terminalChanged: event<TerminalChangedEvent>({
+    channel: 'terminal:changed',
+    parse: taskRef
+  }),
   /** Algo relevante mudou, com o total de "Esperando você". */
   overviewChanged: event<{ waiting: number }>({
     channel: 'overview:changed',
@@ -277,6 +305,10 @@ const messageText = text(MESSAGE_MAX)
 const choiceValue = text(200)
 const branchName = text(250)
 const url = text(2048)
+const terminalId = guard(isTerminalId)
+const terminalInput = text(TERMINAL_LIMITS.maxInput)
+const terminalSize: Parser<{ cols: number; rows: number }> = (v) => parseTerminalSize(v) ?? INVALID
+const handoffReturn = oneOf(HANDOFF_RETURNS)
 const tokenCredentials: Parser<ConnectorCredentials> = (v) =>
   isTokenCredentials(v) ? { kind: 'token', token: v.token } : INVALID
 
@@ -1072,7 +1104,71 @@ export const ORKIO_API = {
         channel: 'claude:publish-artifact',
         args: [projectId, localId, publishMode]
       }),
+      /**
+       * Fase 2, "Continuar no Claude": interrompe o que roda na tarefa, trava a sessão e abre
+       * `claude --resume <sessão>` no terminal embutido (o main escolhe pasta e sessão).
+       */
+      continueInClaude: call<(projectId: string, taskId: string) => Promise<Result<HandoffView>>>()(
+        {
+          channel: 'claude:continue-in-claude',
+          args: [projectId, taskId]
+        }
+      ),
+      /** Reabre o Claude no terminal (a sessão continua com você). */
+      reopenHandoff: call<(projectId: string, taskId: string) => Promise<Result<HandoffView>>>()({
+        channel: 'claude:reopen-handoff',
+        args: [projectId, taskId]
+      }),
+      /** Devolve a sessão ao Orkio: o Claude continua o passo, ou o passo está feito. */
+      giveBack: call<
+        (projectId: string, taskId: string, mode: HandoffReturn) => Promise<Result<TaskRunsState>>
+      >()({
+        channel: 'claude:give-back',
+        args: [projectId, taskId, handoffReturn]
+      }),
       onRunEvent: IPC_EVENTS.runEvent
+    }
+  ),
+  /**
+   * Terminal embutido (Fase 2): PTY no main, na pasta da tarefa. O renderer só manda teclas e
+   * tamanho para um terminal pelo id; a saída chega por `onData`.
+   */
+  terminal: group(
+    { needs: 'db', unexpected: 'Não foi possível usar o terminal. Tente novamente.' },
+    {
+      /** Terminais da tarefa e se o terminal embutido existe neste computador. */
+      list: call<(projectId: string, taskId: string) => Promise<Result<TaskTerminals>>>()({
+        channel: 'terminal:list',
+        args: [projectId, taskId]
+      }),
+      /** Abre um shell na pasta de trabalho da tarefa. */
+      open: call<(projectId: string, taskId: string) => Promise<Result<TerminalView>>>()({
+        channel: 'terminal:open',
+        args: [projectId, taskId]
+      }),
+      /** O que já saiu (para redesenhar ao voltar à aba). */
+      snapshot: call<(id: string) => Promise<TerminalSnapshot | null>>()({
+        channel: 'terminal:snapshot',
+        args: [terminalId],
+        fallback: null
+      }),
+      write: call<(id: string, data: string) => Promise<void>>()({
+        channel: 'terminal:write',
+        args: [terminalId, terminalInput],
+        fallback: undefined
+      }),
+      resize: call<(id: string, size: { cols: number; rows: number }) => Promise<void>>()({
+        channel: 'terminal:resize',
+        args: [terminalId, terminalSize],
+        fallback: undefined
+      }),
+      close: call<(id: string) => Promise<void>>()({
+        channel: 'terminal:close',
+        args: [terminalId],
+        fallback: undefined
+      }),
+      onData: IPC_EVENTS.terminalData,
+      onChanged: IPC_EVENTS.terminalChanged
     }
   ),
   /** Atualizações automáticas (6C). Tudo roda no main; o renderer só vê o status. */

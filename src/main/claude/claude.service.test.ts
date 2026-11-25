@@ -283,6 +283,91 @@ describe('ClaudeService', () => {
     })
   })
 
+  it('sessão com você no terminal (Continuar no Claude): nada do Orkio roda na tarefa', async () => {
+    const handoff = {
+      projectId: 'p1',
+      taskId: 'task-1',
+      sessionId: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc',
+      since: '2026-11-24T10:00:00.000Z',
+      terminalId: null,
+      flowStep: false
+    }
+    const { service, runs, worktrees } = setup({
+      handoff: (taskId) => (taskId === 'task-1' ? handoff : null),
+      terminalsRunning: () => true
+    })
+    expect(await service.startRun(flowRequest())).toMatchObject({
+      ok: false,
+      error: { code: 'handoff' }
+    })
+    expect(
+      await service.send({ projectId: 'p1', taskId: 'task-1', text: 'continue' })
+    ).toMatchObject({ ok: false, error: { code: 'handoff' } })
+    expect(await service.cleanup('p1', 'task-1', false)).toMatchObject({
+      ok: false,
+      error: { code: 'handoff' }
+    })
+    expect(runs.start).not.toHaveBeenCalled()
+    expect(worktrees.remove).not.toHaveBeenCalled()
+    expect(await service.state('p1', 'task-1')).toMatchObject({ ok: true, value: { handoff } })
+  })
+
+  it('Ramificar daqui / Editar mensagem: a mensagem sai do ponto escolhido, numa sessão nova', async () => {
+    const view = vi.fn((id: string) => (id === 'run-a' ? { id, taskId: 'task-1' } : null))
+    const pointIn = vi.fn(async (_id: string, at: string) =>
+      at === '1a2b3c4d-1b2c-4d5e-8f90-123456789abc'
+        ? { session: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc', at }
+        : null
+    )
+    const pointBefore = vi.fn(async () => null as null | { session: string; at: string })
+    const t = setup()
+    Object.assign(t.runs, { view, pointIn, pointBefore })
+    t.runs.lastSession.mockReturnValue('0f8c2a3e-1b2c-4d5e-8f90-123456789abc')
+    const send = (fork: { runId: string; at: string | null }) =>
+      t.service.send({ projectId: 'p1', taskId: 'task-1', text: 'Outro caminho', fork })
+
+    expect((await send({ runId: 'run-a', at: '1a2b3c4d-1b2c-4d5e-8f90-123456789abc' })).ok).toBe(
+      true
+    )
+    expect(t.lastSpec().session).toEqual({
+      kind: 'fork',
+      from: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc',
+      at: '1a2b3c4d-1b2c-4d5e-8f90-123456789abc',
+      reason: 'branch'
+    })
+    expect(t.lastSpec().input).toEqual({ kind: 'prompt', text: 'Outro caminho' })
+
+    // Editar a mensagem que abriu a sessão: sessão nova com o briefing (não continua a antiga).
+    expect((await send({ runId: 'run-a', at: null })).ok).toBe(true)
+    expect(t.lastSpec().session.kind).toBe('new')
+    pointBefore.mockResolvedValueOnce({
+      session: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc',
+      at: '1a2b3c4d-1b2c-4d5e-8f90-123456789abc'
+    })
+    expect((await send({ runId: 'run-a', at: null })).ok).toBe(true)
+    expect(t.lastSpec().session).toMatchObject({ kind: 'fork', reason: 'edit' })
+
+    // Resposta que não é da execução, execução de outra tarefa, ou fluxo ativo: recusado.
+    expect(
+      await send({ runId: 'run-a', at: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc' })
+    ).toMatchObject({ ok: false, error: { code: 'invalid' } })
+    expect(await send({ runId: 'run-x', at: null })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid' }
+    })
+    const flow = setup({ flowActive: () => true })
+    Object.assign(flow.runs, { view, pointIn, pointBefore })
+    expect(
+      await flow.service.send({
+        projectId: 'p1',
+        taskId: 'task-1',
+        text: 'x',
+        fork: { runId: 'run-a', at: '1a2b3c4d-1b2c-4d5e-8f90-123456789abc' }
+      })
+    ).toMatchObject({ ok: false, error: { code: 'flow_active' } })
+    expect(flow.runs.start).not.toHaveBeenCalled()
+  })
+
   it('tarefa já com execução: RunBusyError vira o código busy', async () => {
     const { service, runs } = setup()
     runs.start.mockRejectedValueOnce(new RunBusyError())

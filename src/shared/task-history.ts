@@ -209,6 +209,14 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
       return deliveryText(e)
     case 'rolled_back':
       return `O Notion recusou a mudança; voltou para ${stageName(e.toStage)}`
+    case 'handoff_started':
+      return 'Sessão do Claude Code com você no terminal'
+    case 'handoff_returned':
+      return e.detail.mode === 'done'
+        ? 'Você devolveu a sessão: passo feito no terminal'
+        : e.detail.mode === 'continue'
+          ? 'Você devolveu a sessão: o Claude continua o passo'
+          : 'Você devolveu a sessão ao Orkio'
     default:
       return unreachable(e)
   }
