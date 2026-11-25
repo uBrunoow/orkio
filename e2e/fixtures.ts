@@ -73,6 +73,11 @@ export interface FakeServices {
   githubPrFiles?: Record<string, { filename: string; patch?: string }[]>
   /** Repositórios (`owner/repo`) com o orkio[bot] instalado (`POST <site>/github/installation`). */
   orkioBotInstalled?: string[]
+  /**
+   * Fase 0: resposta do `GET api.anthropic.com/api/oauth/usage` (medidor de uso do Claude) para o
+   * token `CLAUDE_USAGE_TOKEN`; ausente = 404 (o medidor some).
+   */
+  claudeUsage?: unknown
   /** 'no_scope': todo GraphQL falha com INSUFFICIENT_SCOPES (`data: null`), como um token sem permissão. */
   githubGraphql?: 'ok' | 'no_scope'
   /** Detalhes via GraphQL por número da PR. */
@@ -491,6 +496,13 @@ export async function launchOrkio(
           })
         }
 
+        // Fase 0: medidor de uso do Claude (só com o token das credenciais simuladas do Claude Code).
+        if (url.startsWith('https://api.anthropic.com/api/oauth/usage')) {
+          if (!g.__fakes.claudeUsage || call.auth !== `Bearer ${contract.claudeToken}`) {
+            return json({ error: 'not_found' }, 404)
+          }
+          return json(g.__fakes.claudeUsage)
+        }
         if (url === 'https://github.com/login/device/code') {
           return json({
             device_code: 'e2e-device-code',
@@ -1098,7 +1110,7 @@ export async function launchOrkio(
       initial: { ...DEFAULT_FAKES, ...fakes },
       siteUrl: E2E_SITE_URL,
       ids: NOTION_FAKE,
-      contract: { installUrl: E2E_INSTALL_URL }
+      contract: { installUrl: E2E_INSTALL_URL, claudeToken: CLAUDE_USAGE_TOKEN }
     }
   )
 
@@ -1306,6 +1318,21 @@ export async function queueSavePaths(app: ElectronApplication, paths: string[]):
  * Versão do `claude` simulado (`--version`; aceita `--effort`) e os trechos dos pedidos do Orkio
  * que escolhem o cenário dele. Vão para `fake-claude.json` ao lado da cópia do script.
  */
+/** Fase 0: token OAuth simulado do Claude Code (credenciais no HOME de teste). */
+export const CLAUDE_USAGE_TOKEN = 'sk-ant-oat01-E2E-NAO-PODE-IR-PARA-A-TELA'
+
+/** Grava as credenciais simuladas do Claude Code no HOME de teste (antes de abrir o app). */
+export function writeClaudeCredentials(userDataDir: string): void {
+  const dir = join(`${userDataDir}-home`, '.claude')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, '.credentials.json'),
+    JSON.stringify({
+      claudeAiOauth: { accessToken: CLAUDE_USAGE_TOKEN, expiresAt: Date.now() + 3_600_000 }
+    })
+  )
+}
+
 export const FAKE_CLAUDE = {
   version: '2.1.331',
   markers: {

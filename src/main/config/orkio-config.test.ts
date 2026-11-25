@@ -761,6 +761,16 @@ describe('keepAwake (campo opcional, sem migração)', () => {
   })
 })
 
+describe('usageMeter (campo opcional, sem migração)', () => {
+  const base = { schemaVersion: ORKIO_CONFIG_VERSION, projects: [], notion: null }
+  it('ausente ou inválido = ligado; só false é guardado', () => {
+    expect(validateConfig({ ...base })?.value.usageMeter).toBeUndefined()
+    expect(validateConfig({ ...base, usageMeter: true })?.value.usageMeter).toBeUndefined()
+    expect(validateConfig({ ...base, usageMeter: 'não' })?.value.usageMeter).toBeUndefined()
+    expect(validateConfig({ ...base, usageMeter: false })?.value.usageMeter).toBe(false)
+  })
+})
+
 describe('parseStep: modelo e raciocínio do passo', () => {
   const step = {
     id: 'a',

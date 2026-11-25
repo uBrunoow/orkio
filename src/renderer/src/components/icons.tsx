@@ -63,6 +63,14 @@ import {
   IconFileText,
   IconDots,
   IconLayoutGrid,
+  IconHome,
+  IconLayoutSidebar,
+  IconKeyboard,
+  IconCommand,
+  IconGauge,
+  IconAppWindow,
+  IconSparkles,
+  IconArrowBackUp,
   type Icon as TablerIcon,
   type IconProps as TablerIconProps
 } from '@tabler/icons-react'
@@ -153,6 +161,14 @@ export const ProblemIcon = adapt(IconAlertCircle)
 export const CopyIcon = adapt(IconCopy)
 export const MoreIcon = adapt(IconDots)
 export const GridIcon = adapt(IconLayoutGrid)
+export const HomeIcon = adapt(IconHome)
+export const SidebarIcon = adapt(IconLayoutSidebar)
+export const KeyboardIcon = adapt(IconKeyboard)
+export const CommandIcon = adapt(IconCommand)
+export const GaugeIcon = adapt(IconGauge)
+export const TabIcon = adapt(IconAppWindow)
+export const NewsIcon = adapt(IconSparkles)
+export const ReopenIcon = adapt(IconArrowBackUp)
 
 export const BrainIcon = adapt(IconBrain)
 export const CheckIcon = adapt(IconCheck)

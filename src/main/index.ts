@@ -1,8 +1,9 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { app, BrowserWindow, ipcMain, screen, session } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, screen, session } from 'electron'
 import appIcon from '../../resources/icon.png?asset'
 import { createApp } from './composition/app'
+import { appMenuTemplate } from './platform/app-menu'
 import { errorName } from './errors'
 import { registerHandlers } from './ipc/register'
 import { createSenderGuard } from './ipc/trusted-sender'
@@ -40,6 +41,8 @@ function createMainWindow(): BrowserWindow {
     }
   })
 
+  // Os menus do Orkio ficam na barra do app (Fase 0); a barra nativa só existe no macOS.
+  if (process.platform !== 'darwin') win.setMenuBarVisibility(false)
   win.once('ready-to-show', () => win.show())
 
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -69,6 +72,10 @@ void app.whenReady().then(() => {
 
   // Em dev no macOS não há bundle .app: aplicamos o ícone no Dock manualmente.
   if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(appIcon)
+
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(appMenuTemplate({ platform: process.platform, dev: !app.isPackaged }))
+  )
 
   const orkio = createApp()
   // IPC só de quem é a janela do app (origem conferida em cada chamada).

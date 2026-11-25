@@ -1,5 +1,5 @@
 import { useEffect, type RefObject } from 'react'
-import { isTextField } from '../app/shortcuts'
+import { isTextField } from '../app/keys'
 
 /** "/" foca o campo de busca (fora de campos de texto), como nas listas das referências. */
 export function useSlashFocus(target: RefObject<HTMLElement | null>): void {

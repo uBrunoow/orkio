@@ -113,7 +113,7 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
       const el = document.querySelector(selector)
       return el ? String(getComputedStyle(el)[prop]) : ''
     }
-    const sidebarLogo = document.querySelector<HTMLElement>('nav .orkio-logo')
+    const sidebarLogo = document.querySelector<HTMLElement>('[data-testid="app-bar"] .orkio-logo')
     return {
       fonts: [...document.fonts]
         .filter((f) => f.status === 'loaded')
@@ -125,10 +125,10 @@ test('abre na tela de Integrações, isolado e com a identidade visual', async (
         css('[data-primary-probe]', 'color')
       ],
       sidebarVariant: sidebarLogo?.dataset['variant'],
-      sidebarColor: css('nav .orkio-logo', 'color'),
+      sidebarColor: css('[data-testid="app-bar"] .orkio-logo', 'color'),
       wordmark: [
-        css('nav .orkio-logo__wordmark', 'fontFamily'),
-        css('nav .orkio-logo__wordmark', 'fontWeight')
+        css('[data-testid="app-bar"] .orkio-logo__wordmark', 'fontFamily'),
+        css('[data-testid="app-bar"] .orkio-logo__wordmark', 'fontWeight')
       ]
     }
   })

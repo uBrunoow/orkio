@@ -9,8 +9,15 @@ import {
 } from '@/components/ui/command'
 import { Kbd } from '@/components/ui/kbd'
 import { Spinner } from '@/components/Spinner'
-import { SETTINGS_TITLES, type Route, type SettingsSection } from './routes'
-import { SHORTCUTS } from './shortcuts'
+import type { Route } from './routes'
+import {
+  commandLabel,
+  paletteGroup,
+  type Command,
+  type CommandState,
+  type PaletteMode
+} from './commands'
+import { formatKeys as formatKeysFor } from './keys'
 import type { BoardCard } from '../../../shared/board'
 import type { ProjectView } from '../../../shared/projects'
 import { normalizeLabel } from '../../../shared/text'
@@ -20,6 +27,8 @@ import { ipcResult } from '../lib/ipc'
 
 export interface CommandData {
   group: string
+  /** Comando do registro (`commands.ts`) a rodar. */
+  commandId?: string
   route?: Route
   projectId?: string
   taskRef?: { displayId: string | null; where: string }
@@ -31,6 +40,8 @@ export interface CommandData {
 export interface CommandItem {
   id: string
   label: string
+  /** Palavras a mais para a busca (não aparecem). */
+  keywords?: readonly string[]
   auxiliaryData?: CommandData
 }
 
@@ -39,33 +50,18 @@ interface SearchSource {
   search(query: string): Promise<CommandItem[]>
 }
 
-function navigationItems(hasProject: boolean): CommandItem[] {
-  const group = 'Ir para'
-  const items: CommandItem[] = SHORTCUTS.filter((s) => hasProject || !s.isProjectScreen).map(
-    (s) => ({
-      id: `go:${s.route.name}`,
-      label: s.label,
-      auxiliaryData: { group, route: s.route, keys: s.keys }
-    })
-  )
-  const sections = (Object.keys(SETTINGS_TITLES) as SettingsSection[]).filter(
-    (section) => hasProject || (section !== 'board' && section !== 'agents')
-  )
-  for (const section of sections) {
-    items.push({
-      id: `go:settings:${section}`,
-      label: SETTINGS_TITLES[section],
-      auxiliaryData: { group, route: { name: 'settings', section } }
-    })
-  }
-  if (hasProject) {
-    items.push({
-      id: 'go:settings:board:flows',
-      label: 'Modelos do alva-flow',
-      auxiliaryData: { group, route: { name: 'settings', section: 'board', tab: 'flows' } }
-    })
-  }
-  return items
+/** Comandos do registro que a paleta mostra agora (telas, seções, ações). */
+function commandItems(commands: readonly Command[], ctx: CommandState): CommandItem[] {
+  return commands.map((c) => ({
+    id: `cmd:${c.id}`,
+    label: commandLabel(c, ctx),
+    keywords: c.keywords ?? [],
+    auxiliaryData: {
+      group: paletteGroup(c),
+      commandId: c.id,
+      ...(c.keys ? { keys: c.keys } : {})
+    }
+  }))
 }
 
 /** Tarefas de todos os projetos vinculados (o main responde do cache de 60 s quando pode). */
@@ -131,38 +127,45 @@ async function searchNotionTasks(
 }
 
 /**
- * Command Palette (Ctrl/Cmd+K): tarefas, telas e troca de projeto. `mode="tasks"` (botão "Buscar
- * tarefa" da lateral) busca só tarefas, direto no Notion. Só navega; nada aqui escreve
- * no Notion nem roda agentes.
+ * Paleta (Ctrl/Cmd+K): "fazer qualquer coisa". Telas, seções e ações do registro de comandos,
+ * troca de projeto e as tarefas dos quadros. `mode="tasks"` (Buscar tarefa, Ctrl/Cmd+P) busca só
+ * tarefas, direto no Notion; `mode="projects"` (Trocar de projeto) só os projetos. Nada aqui
+ * escreve no Notion nem roda agentes: as ações são as mesmas dos menus.
  */
 export function CommandMenu({
   isOpen,
   onOpenChange,
   projects,
   currentProjectId,
+  commands,
+  commandState,
   onRun,
   mode = 'all'
 }: {
-  mode?: 'all' | 'tasks'
+  mode?: PaletteMode
   isOpen: boolean
   onOpenChange(isOpen: boolean): void
   projects: readonly ProjectView[]
   currentProjectId: string | null
+  /** Comandos disponíveis agora (`paletteCommands`). */
+  commands: readonly Command[]
+  commandState: CommandState
   onRun(item: CommandData): void
 }): React.JSX.Element {
   const { board } = useSources()
   const source = useMemo((): SearchSource => {
+    const switchItems: CommandItem[] = projects
+      .filter((p) => p.id !== currentProjectId)
+      .map((p) => ({
+        id: `project:${p.id}`,
+        label: `Trocar para ${p.name}`,
+        auxiliaryData: { group: 'Projetos', projectId: p.id }
+      }))
+    const actions = commandItems(commands, commandState)
     let tasks: Promise<CommandItem[]> | null = null
     const all = async (): Promise<CommandItem[]> => {
       tasks ??= loadTasks(board, projects)
-      const switchItems: CommandItem[] = projects
-        .filter((p) => p.id !== currentProjectId)
-        .map((p) => ({
-          id: `project:${p.id}`,
-          label: `Trocar para ${p.name}`,
-          auxiliaryData: { group: 'Projetos', projectId: p.id }
-        }))
-      return [...(await tasks), ...navigationItems(projects.length > 0), ...switchItems]
+      return [...(await tasks), ...actions, ...switchItems]
     }
     let onBoard: Promise<Set<string>> | null = null
     const notion = async (query: string): Promise<CommandItem[]> => {
@@ -178,8 +181,17 @@ export function CommandMenu({
       )
       return searchNotionTasks(query, await onBoard)
     }
+    const matches = (item: CommandItem, q: string): boolean =>
+      [item.label, ...(item.keywords ?? [])].some((t) => normalizeLabel(t).includes(q))
     if (mode === 'tasks') {
       return { bootstrap: () => notion(''), search: (query) => notion(query) }
+    }
+    if (mode === 'projects') {
+      return {
+        bootstrap: () => Promise.resolve(switchItems),
+        search: (query) =>
+          Promise.resolve(switchItems.filter((i) => matches(i, normalizeLabel(query))))
+      }
     }
     return {
       bootstrap: async () => {
@@ -190,7 +202,7 @@ export function CommandMenu({
       search: async (query) => {
         const q = normalizeLabel(query)
         const items = await all()
-        return items.filter((i) => normalizeLabel(i.label).includes(q)).slice(0, 50)
+        return items.filter((i) => matches(i, q)).slice(0, 50)
       }
     }
     // Recria a fonte (e relê as tarefas) a cada abertura.
@@ -231,7 +243,12 @@ export function CommandMenu({
     return [...map.entries()]
   }, [items])
 
-  const label = mode === 'tasks' ? 'Buscar tarefas no Notion' : 'Buscar tarefas e comandos'
+  const label =
+    mode === 'tasks'
+      ? 'Buscar tarefas no Notion'
+      : mode === 'projects'
+        ? 'Trocar de projeto'
+        : 'Buscar tarefas e comandos'
   return (
     <CommandDialog
       open={isOpen}
@@ -240,7 +257,9 @@ export function CommandMenu({
       description={
         mode === 'tasks'
           ? 'Título ou ID de qualquer tarefa do banco de Tarefas do Notion.'
-          : 'Tarefas, telas e projetos.'
+          : mode === 'projects'
+            ? 'Projetos do Orkio.'
+            : 'Telas, ações, tarefas e projetos.'
       }
       showCloseButton={false}
       shouldFilter={false}
@@ -249,7 +268,11 @@ export function CommandMenu({
         value={query}
         onValueChange={setQuery}
         placeholder={
-          mode === 'tasks' ? 'Título ou ID (ex.: ORK-142)…' : 'Buscar tarefa, tela ou projeto…'
+          mode === 'tasks'
+            ? 'Título ou ID (ex.: ORK-142)…'
+            : mode === 'projects'
+              ? 'Nome do projeto…'
+              : 'Buscar tarefa, tela ou ação…'
         }
         aria-label={label}
       />
@@ -286,6 +309,20 @@ export function CommandMenu({
           </CommandGroup>
         ))}
       </CommandList>
+      <div
+        aria-hidden="true"
+        className="flex items-center gap-3 border-t border-border-soft px-3 py-2 text-2xs text-subtle-foreground"
+      >
+        <span className="flex items-center gap-1">
+          <Kbd>↑↓</Kbd> mover
+        </span>
+        <span className="flex items-center gap-1">
+          <Kbd>Enter</Kbd> abrir
+        </span>
+        <span className="ml-auto flex items-center gap-1">
+          <Kbd>Esc</Kbd> fechar
+        </span>
+      </div>
     </CommandDialog>
   )
 }
@@ -318,11 +355,7 @@ function CommandRow({ item }: { item: CommandItem }): React.JSX.Element {
   )
 }
 
-/** "mod+1" → "Ctrl 1" / "⌘ 1". */
+/** "mod+1" → "Ctrl 1" / "⌘ 1" (formato de `keys.ts`). */
 export function formatKeys(keys: string): string {
-  const mac = isMac()
-  return keys
-    .split('+')
-    .map((k) => (k === 'mod' ? (mac ? '⌘' : 'Ctrl') : k.length === 1 ? k.toUpperCase() : k))
-    .join(' ')
+  return formatKeysFor(keys, isMac())
 }

@@ -82,6 +82,8 @@ import { userDataPaths, type UserDataPaths } from '../platform/paths'
 import { execExitCode, toolEnv } from '../platform/process'
 import { allowsLoopbackSite, siteOrigin } from '../platform/site'
 import { KeepAwake } from '../power/keep-awake'
+import { ClaudeUsageService, readClaudeCredentials } from '../claude/usage'
+import { usageHandlers } from '../ipc/usage.ipc'
 import { ProjectsService } from '../projects/projects.service'
 import { createReviewActions } from '../signals/review-action'
 import { ReviewThreadsService } from '../signals/review-threads'
@@ -274,6 +276,12 @@ export function createApp(): OrkioApp {
   })
   keepAwakeRef.set(keepAwake)
 
+  // Medidor de uso do Claude (experimental): token lido na hora, só no main.
+  const claudeUsage = new ClaudeUsageService({
+    enabled: () => configStore.get().usageMeter !== false,
+    readCredentials: () => readClaudeCredentials()
+  })
+
   // Atualizações automáticas (6C). Funcionam mesmo com a config em modo só leitura ou sem o banco
   // local: é assim que se sai de um downgrade.
   const updates = createUpdates({
@@ -390,6 +398,7 @@ export function createApp(): OrkioApp {
         return configStore.get().keepAwake === true
       }
     },
+    usage: usageHandlers(claudeUsage, configStore),
     openExternal: openExternalHandler((url) => shell.openExternal(url), siteUrlRules(site))
   }
 

@@ -28,6 +28,7 @@ import type { TaskFlowsProject } from '../../../shared/task-flow'
 import type { ActivityGroup } from '../../../shared/task-events'
 import type { TaskSignalsResult } from '../../../shared/task-signals'
 import type { UpdateStatus } from '../../../shared/updates'
+import type { ClaudeUsageView } from '../../../shared/claude-usage'
 
 /** Relê a visão (só dados locais) a cada minuto com a janela visível: PRs e saúde mudam sozinhos. */
 const OVERVIEW_POLL_MS = 60_000
@@ -35,6 +36,10 @@ const OVERVIEW_POLL_MS = 60_000
 const SIGNALS_POLL_MS = 60_000
 /** Estado das automações do projeto (próxima verificação, erro) enquanto o Quadro está aberto. */
 const AUTOMATION_POLL_MS = 15_000
+/** Medidor de uso do Claude: só com a janela em foco (o main ainda guarda 60 s de cache). */
+const USAGE_POLL_MS = 60_000
+/** Quantos eventos de fluxo/execução o sino lê para montar o "Concluído". */
+const FINISHED_SCAN = 60
 
 export type ConnectorKind = 'notion' | 'github'
 
@@ -75,6 +80,10 @@ export interface AppSources {
   automation: Source<AutomationStatus>
   /** Atividade recente do projeto por grupo, chave `activityKey(projeto, grupo)`. */
   activity: Source<ActivityItem[]>
+  /** Sino: fluxos e execuções que terminaram, de todos os projetos (o sino filtra). */
+  finished: Source<ActivityItem[]>
+  /** Medidor de uso do Claude (% e quando renova); `usage: null` = some. */
+  claudeUsage: Source<ClaudeUsageView>
 }
 
 export const catalogKey = (projectId: string, taskId: string | null): string =>
@@ -278,6 +287,23 @@ export function createAppSources(): AppSources {
         window.orkio.overview.onChanged(() => {
           for (const key of src.keys()) void src.reload(key)
         })
+    }),
+    finished: createSource({
+      load: async () => {
+        const read = (group: ActivityGroup): Promise<ActivityItem[]> =>
+          ipcResult(() => window.orkio.overview.activity({ group, limit: FINISHED_SCAN })).then(
+            (r) => (r.ok ? r.value.items : [])
+          )
+        const [flows, runs] = await Promise.all([read('flow'), read('claude')])
+        return [...flows, ...runs]
+      },
+      listen: (src) => window.orkio.overview.onChanged(() => void src.reload(''))
+    }),
+    claudeUsage: createSource({
+      load: () => ipcCall(() => window.orkio.usage.claude(), { enabled: true, usage: null }),
+      pollMs: USAGE_POLL_MS,
+      pollWhen: () => document.visibilityState === 'visible' && document.hasFocus(),
+      refreshOnFocus: true
     })
   }
 }

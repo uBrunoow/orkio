@@ -38,6 +38,7 @@ import {
 } from '../agent-run'
 import type { AlvaPrecheck, AlvaStatusView, BacklogTaskDocument, BacklogTaskInfo } from '../alva'
 import type { AutomationStatus } from '../automation'
+import type { ClaudeUsageView } from '../claude-usage'
 import type {
   BoardCard,
   BoardHistoryEntry,
@@ -1121,6 +1122,26 @@ export const ORKIO_API = {
         channel: 'power:set-keep-awake',
         args: [bool],
         fallback: sameAs('keepAwake')
+      })
+    }
+  ),
+  /**
+   * Medidor de uso do Claude (experimental): % das janelas de 5 h e semanal e quando renovam. O
+   * token do Claude Code é lido e usado só no main; falha = `usage: null` (o medidor some).
+   */
+  usage: group(
+    { needs: 'config', unexpected: 'Algo deu errado. Tente novamente.' },
+    {
+      claude: call<() => Promise<ClaudeUsageView>>()({
+        channel: 'usage:claude',
+        args: [],
+        fallback: { enabled: true, usage: null }
+      }),
+      /** Liga ou desliga o medidor (Configurações); devolve se ficou ligado. */
+      setEnabled: call<(enabled: boolean) => Promise<boolean>>()({
+        channel: 'usage:set-enabled',
+        args: [bool],
+        fallback: true
       })
     }
   ),

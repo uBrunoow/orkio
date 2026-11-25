@@ -59,6 +59,9 @@ Claude Code. Hoje existem:
   `ScreenBarStart`/`ScreenBarEnd`), linhas divisórias entre lateral, conteúdo e painel, tabelas
   com borda e cabeçalho de coluna, IDs em mono. Trabalho de design com as skills `impeccable` e
   `frontend-design`; histórico das fases em `docs/ui-redesign.md`.
+- **Casca do app (Fase 0):** barra do app (marca, menus Sessão/Ir/Janela/Ajuda, medidor de uso do
+  Claude, paleta, sino, conta), dock de telas, abas e a lista lateral (Ctrl/Cmd+B). Ver "Casca do
+  app (Fase 0)" abaixo.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
   Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -214,12 +217,16 @@ src/
                            # (servidor MCP stdio → out/main/permission-mcp.js)
   preload/index.ts         # contextBridge → window.orkio, gerado de `ORKIO_API` (API mínima e tipada)
   renderer/src/            # React. Sem acesso a Node; só usa window.orkio.
-    app/routes.ts          # 6E: rotas tipadas + routerReducer (chave nova a cada navegação)
-    app/shortcuts.ts       # 6E: atalhos globais (puro) e isTextField
-    app/CommandMenu.tsx    # 6E: Command Palette (tarefas, telas, trocar projeto)
+    app/routes.ts          # 6E: rotas tipadas + routerReducer; Fase 0: placeOf (lugar da aba), parseRoute
+    app/screens.ts         # Fase 0: registro das telas (dock, menu Ir, paleta, atalhos, Início)
+    app/ScreenPages.tsx    # Fase 0: o desenho de cada tela (um por rota; o tipo cobra)
+    app/commands.ts        # Fase 0: registro único de comandos (menus, paleta e atalhos)
+    app/keys.ts            # Fase 0: atalhos (`mod+shift+t`): match, texto, aria; isTextField
+    app/tabs.ts            # Fase 0: abas (reducer puro, um lugar = uma aba, salvar/restaurar)
+    app/CommandMenu.tsx    # paleta: comandos do registro, tarefas, projetos (modos all/tasks/projects)
     app/task-groups.ts     # 9: grupos da lista lateral (esperando, rodando, a fazer), puro
     app/initial-route.ts   # 9: tela ao abrir (Primeiros passos, tarefa esperando ou Quadro), puro
-    app/WaitingBell.tsx    # 9: sino (esperando você de todos os projetos + PRs com atenção)
+    app/WaitingBell.tsx    # sino: Precisa de você (+ PRs) e Concluído (`attention.ts`) com Limpar
     app/sources.tsx        # fontes compartilhadas (SourcesProvider no topo): visão geral, sinais
                            # por projeto, quadro por projeto, projetos, conexões, bancos do Notion,
                            # Claude Code, atualizações, fluxos do projeto, catálogo, pré-checagem
@@ -1141,8 +1148,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   sino (`app/WaitingBell.tsx`: esperando você de todos os projetos + PRs com atenção). Semana e
   atividade continuam calculadas no serviço, sem tela por enquanto.
 - **Abertura** (`app/initial-route.ts`): sem projeto, Primeiros passos; com uma tarefa esperando
-  você, a tela dela; senão o Quadro. Menu: Quadro · Agentes · Configurações, atalhos Ctrl/Cmd+1…3
-  (`keydown` no renderer, `aria-keyshortcuts` no item).
+  você, a tela dela; senão o Quadro. Dock: Quadro · Agentes · Configurações, atalhos Ctrl/Cmd+1…3
+  (registro de comandos, `aria-keyshortcuts` no item).
 - **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs** nem faz
   SQL em tabela alheia: consultas com nome dos donos (`BoardStore`: `allStates`, `recentEvents`,
   `unsettledRejections`, `stuckWrites`, `stageEvents`; `RunService`: `startInfo`, `costsSince`;
@@ -1175,6 +1182,34 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - **Clique:** `routeForTaskRef(ref)` abre a tela da tarefa (troca o projeto atual se preciso);
   `BoardTaskRef.section` (`flow`/`claude`/`history`) → `focusSection` da tela: a seção (`sectionRef`)
   rola para a vista quando aparece (sem espera fixa; o histórico já abre).
+
+## Casca do app (Fase 0)
+
+- **Registro único** (`app/commands.ts` + `app/screens.ts`): os menus da barra (`AppMenus`, Radix
+  Menubar), a paleta (`paletteCommands`), os atalhos (`commandForKey`, um `keydown` no App) e a
+  Ajuda › Atalhos leem a mesma lista. Comando novo = uma entrada em `APP_COMMANDS` (`menu`,
+  `block`, `keys`, `visible`/`enabled`, `run(ctx)`); o que ele precisa do app entra em
+  `CommandState`/`CommandActions`. Tela nova = rota em `routes.ts` + entrada em `SCREENS` (dock,
+  atalho, Início, "Ir para") + desenho em `SCREEN_PAGES` (o tipo exige). Um atalho = um comando
+  (teste). Num campo de texto só valem atalhos com Ctrl/⌘.
+- **Abas** (`app/tabs.ts`): cada aba tem o próprio roteador ("Voltar" por aba); `placeOf(route)`
+  = um lugar, uma aba (navegar ativa a que existe); "Nova aba" abre `home` (Início), que vira o
+  lugar navegado; fechar a última deixa uma Início; limite `MAX_TABS` (sai a menos usada). Só a
+  aba ativa fica montada. Salvas em `localStorage` (`orkio.tabs`, só a rota, validada por
+  `parseRoute`); ao abrir, restaura e aplica a tela inicial (`initial-route.ts`) por cima.
+  Primeiros passos não são aba (`overlay`). Desktops/divisão (Fase 5) = vários `TabsState`.
+- **Menu nativo** (`main/platform/app-menu.ts`): sem o padrão do Electron (Ctrl+W fecharia a
+  janela); macOS mantém menu do app e Editar; dev ganha Exibir; fora do macOS a barra fica oculta.
+- **Sino**: "Precisa de você" = `OverviewSnapshot.waiting` + PRs; "Concluído" = `flow_finished`
+  (done) e `run_finished` da atividade (fonte `finished`), um por tarefa, depois de "Limpar"
+  (`orkio.bell.clearedAt`; sem limpar, últimas 24 h).
+- **Medidor de uso do Claude** (experimental, `main/claude/usage.ts`): `GET
+  api.anthropic.com/api/oauth/usage` com o token do Claude Code lido na hora
+  (`CLAUDE_CONFIG_DIR`/`~/.claude/.credentials.json`; macOS: Keychain via `security`, sem shell),
+  nunca guardado/logado/enviado ao renderer (só % e horários, `shared/claude-usage.ts`). Token
+  vencido não é renovado. Falha = `usage: null` (some). Cache de 60 s no main; o renderer só
+  consulta com a janela em foco. Config `usageMeter: false` desliga (IPC `usage.*`; Configurações ›
+  Atualizações e o próprio medidor). E2E: `writeClaudeCredentials` + `claudeUsage` no fixture.
 
 ## Agentes (Etapa 8A)
 
@@ -1559,6 +1594,9 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
 | mac sem Developer ID = ad-hoc sem hardened runtime                                                          | Apple Silicon exige assinatura; hardened runtime com ad-hoc recusa o Electron Framework (validação de bibliotecas).                                                                                                                                         |
 | Fuse `RunAsNode` ligado                                                                                     | A ponte MCP de permissões é um processo que o CLI do Claude abre com o executável do Orkio + `ELECTRON_RUN_AS_NODE`.                                                                                                                                        |
 | CI de PR só no Linux (smoke do pacote incluso)                                                              | Em repo privado, minuto de macOS custava 10x; o mac roda no release e no teste manual.                                                                                                                                                                      |
+| Abas: um lugar = uma aba; só a ativa montada (Fase 0)                                                     | Abrir de novo uma tarefa/tela ativa a aba que já existe (sem duplicatas); manter abas ocultas montadas dobraria polls/atalhos das telas e confundiria os testes. |
+| Medidor de uso do Claude pelo endpoint OAuth não documentado, ligado por padrão e desligável (Fase 0)      | É o único jeito de ver as janelas de 5 h/semana da assinatura; o token do Claude Code é lido só no main e na hora, e qualquer falha só esconde o medidor. |
+| Menu nativo mínimo (Fase 0)                                                                                 | Os menus vivem na barra do app; o menu padrão do Electron fecharia a janela no Ctrl+W e recarregaria no Ctrl+R. |
 
 ## shadcn/Radix e CSP (regra inegociável)
 

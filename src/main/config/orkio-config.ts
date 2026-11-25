@@ -53,6 +53,8 @@ export interface OrkioConfig {
   updates: UpdatesConfig
   /** Manter o computador acordado enquanto agentes trabalham. Ausente = desligado. */
   keepAwake?: boolean
+  /** Medidor de uso do Claude na barra (experimental). Ausente = ligado; `false` = desligado. */
+  usageMeter?: false
 }
 
 export interface UpdatesConfig {
@@ -223,7 +225,8 @@ export function validateConfig(
     agents,
     orchestrator,
     updates: parseUpdates(data['updates']),
-    ...(data['keepAwake'] === true ? { keepAwake: true } : {})
+    ...(data['keepAwake'] === true ? { keepAwake: true } : {}),
+    ...(data['usageMeter'] === false ? { usageMeter: false as const } : {})
   }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
 }

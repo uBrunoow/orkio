@@ -9,7 +9,8 @@ import { useUpdates } from './useUpdates'
 import { formatDateTime } from '../../lib/format'
 import { WhatsNewDialog } from './WhatsNewDialog'
 import { StatusToken } from '../../components/StatusToken'
-import { ipcCall, useIpcResource } from '../../lib/ipc'
+import { ipcCall, useIpcResource, useSource } from '../../lib/ipc'
+import { useSources } from '../../app/sources'
 import { isUpdateDownloading, updatePhaseText } from '../../lib/status-text'
 
 export function UpdatesSection(): React.JSX.Element {
@@ -123,6 +124,34 @@ export function PowerSection(): React.JSX.Element {
         onChange={(value) => {
           keepAwake.set(value)
           void ipcCall(() => window.orkio.power.setKeepAwake(value), !value).then(keepAwake.set)
+        }}
+      />
+    </section>
+  )
+}
+
+/**
+ * Medidor de uso do Claude na barra (experimental, ligado por padrão). Lê a mesma fonte da barra:
+ * mudar aqui some/aparece lá na hora.
+ */
+export function UsageMeterSection(): React.JSX.Element {
+  const { claudeUsage } = useSources()
+  const view = useSource(claudeUsage, '').value
+  return (
+    <section aria-labelledby="usage-title" className={SECTION_CLASS}>
+      <h2 id="usage-title" className="text-sm font-medium text-foreground">
+        Uso do Claude
+      </h2>
+      <SwitchField
+        label="Mostrar o uso do Claude na barra (experimental)"
+        description="Quanto da janela de 5 horas e da semanal a sua assinatura já usou, e quando renovam. O Orkio lê do login do Claude Code neste computador, só na hora, sem guardar nada. Se a Anthropic mudar algo, o medidor some sozinho."
+        checked={view?.enabled !== false}
+        disabled={view === null}
+        onChange={(value) => {
+          claudeUsage.set('', (v) => (v ? { ...v, enabled: value } : v))
+          void ipcCall(() => window.orkio.usage.setEnabled(value), !value).then(() =>
+            claudeUsage.reload('')
+          )
         }}
       />
     </section>
