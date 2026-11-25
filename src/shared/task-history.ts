@@ -2,6 +2,7 @@
  * Texto e links de um evento do histórico da tarefa (`task_events`). Puro: usado no histórico da
  * tarefa e na atividade recente.
  */
+import { finalText, type FlowResult } from './flow-final'
 import { EVENT_META } from './automation'
 import type { TaskEvent } from './task-events'
 import { FLOW_PAUSES } from './flow-run-state'
@@ -192,15 +193,11 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
     case 'gate_rejected':
       return `Aprovação recusada: ${stepLabel(e.detail)}`
     case 'gate_revised':
-      return `Ajustes pedidos: ${stepLabel(e.detail)}`
+      return `Mudanças pedidas: ${stepLabel(e.detail)}`
     case 'flow_paused':
       return `Fluxo parado: ${e.detail.reason ? FLOW_PAUSES[e.detail.reason].label : 'motivo desconhecido'}`
     case 'flow_finished':
-      return e.detail.result === 'cancelled'
-        ? 'Fluxo cancelado'
-        : e.detail.result === 'rejected'
-          ? 'Fluxo encerrado (recusado)'
-          : 'Fluxo concluído'
+      return flowFinishedText(e.detail.result)
     case 'artifact_attached':
       return `Documento anexado: ${e.detail.path ?? ''}`
     case 'artifact_published':
@@ -233,4 +230,18 @@ function rule(name: string | null | undefined): string {
 
 function filesChanged(n: number): string {
   return n === 1 ? '1 arquivo alterado' : `${n} arquivos alterados`
+}
+
+/** Linha do fim de um fluxo, com o final honesto (`shared/flow-final.ts`). */
+export function flowFinishedText(result: FlowResult | null | undefined): string {
+  switch (result ?? 'done') {
+    case 'done':
+      return 'Fluxo concluído'
+    case 'cancelled':
+      return 'Fluxo cancelado'
+    case 'rejected':
+      return 'Fluxo encerrado (recusado)'
+    default:
+      return `Fluxo terminou: ${finalText(result).label.toLowerCase()}`
+  }
 }

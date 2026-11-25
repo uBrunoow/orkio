@@ -1,9 +1,4 @@
-import {
-  buildAgentPrompt,
-  AGENT_ROLE_LABELS,
-  type AgentsState,
-  type AgentView
-} from '../../../../shared/agent'
+import { buildAgentPrompt, type AgentsState, type AgentView } from '../../../../shared/agent'
 import type { OrchestratorAgentLoad } from '../../../../shared/orchestrator'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,20 +11,14 @@ import { cn } from '@/lib/utils'
 import { Alert } from '../../components/Alert'
 import { Spinner } from '../../components/Spinner'
 import { StatusToken } from '../../components/StatusToken'
-import { CopyIcon, EditIcon, MoreIcon } from '../../components/icons'
-import { AGENTS_DIR } from '../../../../shared/orkio-scratch'
+import { BrainIcon, CopyIcon, EditIcon, MoreIcon } from '../../components/icons'
 import { formatUsd } from '../../lib/format'
 import { AGENT_STATUS } from '../../lib/status-text'
 import { AgentAvatar } from './AgentAvatar'
+import { AgentCardHead, SCOPE_TAG, agentRoleLine } from './AgentCardFace'
 import { ProfileSummary, ReadOnlyText } from './AgentEditor'
 import type { AgentNow } from './agent-state'
 import { Sparkline } from './Sparkline'
-
-const SCOPE_TAG: Record<AgentView['scope'], string> = {
-  builtin: 'Embutido',
-  repo: AGENTS_DIR,
-  local: 'Este computador'
-}
 
 /** Perfil que não roda até alguém agir (revisar ou corrigir): o "agora" do card já diz isso. */
 function profileBlocked(view: AgentView): boolean {
@@ -38,9 +27,7 @@ function profileBlocked(view: AgentView): boolean {
 
 /** "Revisor(a) · Embutido": o catálogo do Orkio se distingue dos perfis do time. */
 function roleLine(view: AgentView): string {
-  if (!view.profile) return view.file
-  const role = AGENT_ROLE_LABELS[view.profile.role]
-  return view.scope === 'builtin' ? `${role} · Embutido` : role
+  return view.profile ? agentRoleLine(view.profile, view.scope) : view.file
 }
 
 export interface AgentHandlers {
@@ -53,6 +40,8 @@ export interface AgentHandlers {
   onArchive(): void
   onReview(): void
   onApprove(): void
+  /** Fase 3: abre a Memória do agente. */
+  onMemory(): void
 }
 
 function Tag({ hot = false, children }: { hot?: boolean; children: string }): React.JSX.Element {
@@ -158,26 +147,42 @@ function AgentActions({
   view,
   onEdit,
   onDuplicate,
-  onArchive
+  onArchive,
+  onMemory
 }: { view: AgentView } & AgentHandlers): React.JSX.Element | null {
   const p = view.profile
   if (!p) return null
   const name = p.name
+  const memory = (
+    <Button
+      size="icon-sm"
+      variant="ghost"
+      aria-label={`Memória de ${name}`}
+      title="Memória"
+      onClick={onMemory}
+    >
+      <BrainIcon />
+    </Button>
+  )
   if (view.scope === 'builtin') {
     return (
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        aria-label={`Duplicar ${name}`}
-        title="Duplicar"
-        onClick={onDuplicate}
-      >
-        <CopyIcon />
-      </Button>
+      <div className="flex shrink-0 items-center">
+        {memory}
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={`Duplicar ${name}`}
+          title="Duplicar"
+          onClick={onDuplicate}
+        >
+          <CopyIcon />
+        </Button>
+      </div>
     )
   }
   return (
     <div className="flex shrink-0 items-center">
+      {memory}
       <Button
         size="icon-sm"
         variant="ghost"
@@ -222,6 +227,11 @@ export function AgentRow(
           <span className="truncate font-medium">{name}</span>
           {p && <span className="text-xs text-muted-foreground">{roleLine(view)}</span>}
         </div>
+        {p?.description && (
+          <p className="truncate text-xs text-muted-foreground" data-testid="agent-description">
+            {p.description}
+          </p>
+        )}
         <StatusToken tone={now.tone} label={now.text} data-testid="agent-now" />
         <AgentDetails {...props} />
       </div>
@@ -257,13 +267,10 @@ export function AgentCard(
       className="flex flex-col gap-3 rounded-xl border border-border-soft bg-card p-3.5"
     >
       <div className="flex items-start gap-3">
-        <AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} size="lg" />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 pt-0.5">
-          <p className="truncate font-medium">{name}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {p ? (p.instructions.split('\n').find((l) => l.trim()) ?? roleLine(view)) : view.file}
-          </p>
-        </div>
+        {/* Fase 3: "O que faz" (ou o papel) e o grupo, iguais à prévia do editor. */}
+        <AgentCardHead name={name} profile={p} scope={view.scope} seed={view.key}>
+          {view.file}
+        </AgentCardHead>
         <AgentActions {...props} />
       </div>
       <div className="flex items-center gap-2">

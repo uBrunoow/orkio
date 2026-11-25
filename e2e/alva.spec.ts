@@ -461,8 +461,8 @@ test('5C critério 3 + Task 16: alterações pedidas → Revisado → plano → 
   await page.keyboard.press('Escape')
 
   // Pedir ajustes: o plano roda de novo na MESMA sessão com o seu texto.
-  await gate.getByRole('button', { name: 'Pedir ajustes…' }).click()
-  await gate.getByRole('textbox', { name: 'O que ajustar' }).fill('Inclua um teste do caso vazio')
+  await gate.getByRole('button', { name: 'Pedir mudanças…' }).click()
+  await gate.getByRole('textbox', { name: 'O que mudar' }).fill('Inclua um teste do caso vazio')
   await gate.getByRole('button', { name: 'Enviar' }).click()
   await expect(gate.getByRole('region', { name: 'Resultado para aprovar' })).toContainText(
     'Ajuste pedido: Inclua um teste do caso vazio',
@@ -472,7 +472,7 @@ test('5C critério 3 + Task 16: alterações pedidas → Revisado → plano → 
   expect(revised['resume']).toBe(planRun['resume'])
   expect(revised['disallowedTools']).toBe('Edit,Write,MultiEdit,NotebookEdit')
   expect(revised['permissionMode']).toBe('manual')
-  await expect(flow.getByTestId('flow-steps-summary')).toContainText('1 ajustes pedidos')
+  await expect(flow.getByTestId('flow-steps-summary')).toContainText('1 mudanças pedidas')
 
   // Aprovar: o agente aplica em modo entrega e tenta o push: você recusa (o Orkio oferece o
   // próprio push depois).
@@ -523,7 +523,7 @@ test('5C critério 3 + Task 16: alterações pedidas → Revisado → plano → 
   ).toBeVisible()
   await expectTaskHistory(
     panel,
-    'Ajustes pedidos: Aprovar correções',
+    'Mudanças pedidas: Aprovar correções',
     'Conversa de review resolvida',
     'Review pedido na PR #7 pelo Orkio'
   )

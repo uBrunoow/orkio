@@ -158,7 +158,12 @@ export interface ClaudeServiceDeps {
   agentInfo(
     projectId: string,
     taskId: string
-  ): Promise<{ name: string; problem: string | null } | null>
+  ): Promise<{ name: string; problem: string | null; command?: string | null } | null>
+  /**
+   * Fase 3: bloco da memória do agente para o fim do `--append-system-prompt` (as notas válidas
+   * deste projeto + como usar a ferramenta `lembrar`). Falha = sem memória (a execução segue).
+   */
+  agentMemory?(agentKey: string, projectId: string): Promise<string>
 }
 
 export class ClaudeService {
@@ -512,8 +517,11 @@ export class ClaudeService {
         }
       }
       let access: RunSpec['access']
-      if (request.access.tools === 'read_only') access = { tools: 'read_only', github: read() }
-      else if (request.access.github === 'read') access = { tools: 'full', github: read() }
+      // Agente que só lê (Fase 3): a execução roda como o passo só de leitura, venha de onde vier
+      // (mensagem, "Rodar", passo de fluxo); a entrega some (o `checkAgentFlow` já recusa o fluxo).
+      if (request.access.tools === 'read_only' || request.agent?.autonomy === 'read_only') {
+        access = { tools: 'read_only', github: read() }
+      } else if (request.access.github === 'read') access = { tools: 'full', github: read() }
       else {
         let deliver: GithubDeliver
         try {
@@ -541,7 +549,8 @@ export class ClaudeService {
         input,
         session,
         access,
-        agent,
+        // Sem agente = sem memória; com agente, as notas dele vão no fim do system prompt.
+        agent: agent ? await this.withMemory(agent, request.projectId) : null,
         runtime: {
           // De novo, antes de chegar ao CLI: nome fora do padrão ou raciocínio desconhecido some;
           // CLI sem `--effort`, o raciocínio some (o seletor também some na UI).
@@ -552,6 +561,12 @@ export class ClaudeService {
       })
       return ok(view.id)
     })
+  }
+
+  /** O agente com o bloco da memória no fim do prompt (lido do store pela chave + projeto). */
+  private async withMemory(agent: RunAgent, projectId: string): Promise<RunAgent> {
+    const memory = await this.deps.agentMemory?.(agent.key, projectId).catch(() => '')
+    return memory ? { ...agent, prompt: `${agent.prompt}\n\n${memory}` } : agent
   }
 
   /** Execução viva da tarefa (rodando ou na fila), ou `null`. */

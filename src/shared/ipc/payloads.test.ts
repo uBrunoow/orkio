@@ -187,6 +187,17 @@ describe('payloads: forma e cópia só com campos conhecidos', () => {
     expect(ultra !== INVALID && validateAgent(ultra)).toContain('Raciocínio inválido')
     const long = parseAgentProfile({ ...ana, model: 'claude-sonnet-4-5-20250929', effort: 'high' })
     expect(long !== INVALID && validateAgent(long)).toEqual([])
+
+    // Fase 3: campos novos opcionais (renderer antigo não manda); forma checada aqui.
+    const old: Record<string, unknown> = { ...ana }
+    for (const k of ['description', 'group', 'autonomy', 'command']) delete old[k]
+    expect(parseAgentProfile(old)).toEqual(ana)
+    const full = { ...ana, description: 'Faz', group: 'a/b', autonomy: 'ask', command: 'revisar' }
+    expect(parseAgentProfile(full)).toEqual(full)
+    expect(parseAgentProfile({ ...ana, description: 7 })).toBe(INVALID)
+    expect(parseAgentProfile({ ...ana, command: ['x'] })).toBe(INVALID)
+    const odd = parseAgentProfile({ ...ana, autonomy: 'root' })
+    expect(odd !== INVALID && validateAgent(odd)).toContain('Autonomia desconhecida.')
   })
 
   it('filtro da atividade: só campos válidos', () => {

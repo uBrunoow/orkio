@@ -108,6 +108,13 @@ function bridge(config) {
       })
       return JSON.parse(res.result.content[0].text)
     },
+    /** Fase 3: ferramenta `lembrar` (memória do agente); `null` = não está no tools/list. */
+    async remember(input) {
+      const list = await request('tools/list', {})
+      if (!list.result.tools.some((t) => t.name === 'lembrar')) return null
+      const res = await request('tools/call', { name: 'lembrar', arguments: input })
+      return { ok: !res.result.isError, text: res.result.content[0].text }
+    },
     close: () => child.kill()
   }
 }
@@ -211,6 +218,24 @@ async function main() {
   const denied = args.includes('--disallowedTools')
     ? args[args.indexOf('--disallowedTools') + 1].split(',')
     : []
+  // Fase 3: revisão nativa até ficar limpo. O revisor lê o diff que o Orkio gravou, roda um
+  // `git diff` (num passo só de leitura, ler o git não pede aprovação), anota na memória dele e
+  // responde nas três seções.
+  if (prompt.includes(MARK.nativeReview)) {
+    const orkioDir = join(process.cwd(), '.orkio')
+    mkdirSync(orkioDir, { recursive: true })
+    const fs = require('node:fs')
+    const log = (line) => fs.appendFileSync(join(orkioDir, 'review-tools.log'), `${line}\n`)
+    log(`diff.md:${existsSync(join(process.cwd(), MARK.nativeReview))}`)
+    const r = await mcp.approve('Bash', { command: 'git diff origin/main...HEAD' }, 'toolu_gd')
+    log(`git diff:${r.behavior}`)
+    const m = await mcp.remember({ texto: 'Neste projeto os testes ficam ao lado do código.', escopo: 'projeto' })
+    log(`lembrar:${m ? (m.ok ? 'ok' : 'erro') : 'sem-ferramenta'}`)
+    const text = '## Bloqueios\n- Nenhum\n\n## Detalhes\n- [D-1] src/exportar.ts:1 — nome poderia ser mais claro\n\n## Evidência\nLi o diff.'
+    assistant([{ type: 'text', text }])
+    finishRun(mcp, text, 0.01)
+    return
+  }
   if (prompt.includes(MARK.reviewFile) || denied.includes('Write')) {
     const adjust = prompt.includes(MARK.reviewFile) ? null : prompt.split('\n')[0].trim()
     const plan = [

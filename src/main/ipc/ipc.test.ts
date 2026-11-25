@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { ORKIO_API } from '../../shared/ipc/api'
 import type { DeviceFlowConnector, OAuthConnector } from '../connectors/types'
 import { AgentError } from '../agents/agents.service'
+import type { AgentMemoryStore } from '../agents/agent-memory.store'
 import type { AgentsService } from '../agents/agents.service'
 import { DeliveryError } from '../delivery/delivery.service'
 import { FlowError, type FlowRunner } from '../flows/flow-runner'
@@ -805,7 +806,12 @@ describe('agentes e orquestrador', () => {
       approve: vi.fn(async () => ({})),
       assign: vi.fn(async () => undefined),
       setRules: vi.fn(async () => state),
-      badges: vi.fn(async () => ({}))
+      badges: vi.fn(async () => ({})),
+      get: vi.fn(async (_p: string, key: string) => (key === 'repo:ana' ? { key } : null))
+    }
+    const memory = {
+      read: vi.fn(async () => ({ notes: [] })),
+      add: vi.fn(async () => ({ notes: [] }))
     }
     const orchestrator = {
       state: vi.fn(async () => ({})),
@@ -818,10 +824,11 @@ describe('agentes e orquestrador', () => {
       ch,
       agentsHandlers(
         service as unknown as AgentsService,
-        orchestrator as unknown as OrchestratorService
+        orchestrator as unknown as OrchestratorService,
+        memory as unknown as AgentMemoryStore
       )
     )
-    return { ipc, service, orchestrator }
+    return { ipc, service, orchestrator, memory }
   }
 
   it('valida o payload antes de chegar ao serviço', async () => {
@@ -851,6 +858,31 @@ describe('agentes e orquestrador', () => {
     expect(
       await ipc.invoke(ch.setRules.channel, 'p1', [{ stageId: 's1', agentKey: 'x' }])
     ).toMatchObject(invalid)
+  })
+
+  it('memória: valida digest, nota e ação, e recusa agente que não existe', async () => {
+    const { ipc, memory } = setup()
+    const digest = 'a'.repeat(64)
+    const note = { text: 'Testes sempre', scope: 'geral', until: null }
+    expect(await ipc.invoke(ch.memory.channel, 'p1', 'repo:ana')).toMatchObject({ ok: true })
+    expect(memory.read).toHaveBeenCalledWith('repo:ana', 'p1')
+    expect(await ipc.invoke(ch.memory.channel, 'p1', 'repo:outro')).toMatchObject({ ok: false })
+    expect(await ipc.invoke(ch.addMemory.channel, 'p1', 'repo:ana', 'curto', note)).toMatchObject(
+      invalid
+    )
+    expect(
+      await ipc.invoke(ch.addMemory.channel, 'p1', 'repo:ana', digest, { ...note, scope: 'tudo' })
+    ).toMatchObject(invalid)
+    expect(
+      await ipc.invoke(ch.changeMemory.channel, 'p1', 'repo:ana', digest, '0123abcd', 'sumir')
+    ).toMatchObject(invalid)
+    expect(
+      await ipc.invoke(ch.rollbackMemory.channel, 'p1', 'repo:ana', digest, '../x')
+    ).toMatchObject(invalid)
+    expect(await ipc.invoke(ch.addMemory.channel, 'p1', 'repo:ana', digest, note)).toMatchObject({
+      ok: true
+    })
+    expect(memory.add).toHaveBeenCalledWith('repo:ana', 'p1', note, digest)
   })
 
   it('regras e orquestrador aceitam etapa com "_" como o quadro (antes: "Pedido inválido")', async () => {

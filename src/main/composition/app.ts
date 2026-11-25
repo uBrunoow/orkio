@@ -64,6 +64,7 @@ import { errorName } from '../errors'
 import type { FlowRunner } from '../flows/flow-runner'
 import { createGit } from '../git/git'
 import { agentsHandlers } from '../ipc/agents.ipc'
+import { AgentMemoryStore } from '../agents/agent-memory.store'
 import { boardHandlers } from '../ipc/board.ipc'
 import { createEmitter, type Emit } from '../ipc/emit'
 import { flowHandlers, type FlowFiles } from '../ipc/flow.ipc'
@@ -92,6 +93,7 @@ import { ClaudeUsageService, readClaudeCredentials } from '../claude/usage'
 import { usageHandlers } from '../ipc/usage.ipc'
 import { ProjectsService } from '../projects/projects.service'
 import { createReviewActions } from '../signals/review-action'
+import { createReviewRoundActions } from '../flows/review-round-actions'
 import { ReviewThreadsService } from '../signals/review-threads'
 import { TaskSignalsService } from '../signals/task-signals.service'
 import type { ConfigStore } from '../storage/config-store'
@@ -496,6 +498,8 @@ function createWork(core: {
     actor: core.actor,
     emit: (projectId) => emit('agentsChanged', { projectId })
   })
+  // Fase 3: memória por agente (MEMORY.md em <userData>/agent-memory, fora do projeto).
+  const agentMemory = new AgentMemoryStore({ root: core.paths.agentMemory })
   const board = new BoardService({
     config: configStore,
     store: boardStore,
@@ -555,6 +559,7 @@ function createWork(core: {
     // 8A: "Rodar como <agente>" (instruções e modelo; mesmas permissões).
     agentFor: (projectId, taskId, command) => agents.runAgentFor(projectId, taskId, command),
     agentInfo: (projectId, taskId) => agents.problemFor(projectId, taskId),
+    agentMemory,
     flowRunner,
     notify: core.notify,
     emit
@@ -615,6 +620,15 @@ function createWork(core: {
       createReviewActions({
         reviews: core.reviewThreads,
         ensureWorktree: (projectId, taskId) => claude.service.ensureWorktreePath(projectId, taskId)
+      }),
+      // Fase 3: revisão até ficar limpo (diff para o revisor e as rodadas em .orkio/revisao/).
+      createReviewRoundActions({
+        worktree: (taskId) => {
+          const wt = claude.worktrees.get(taskId)
+          return wt ? { path: wt.path, baseRef: wt.baseRef } : null
+        },
+        git: core.git,
+        finalText: async (runId) => finalText(await claude.runs.readLog(runId))
       }),
       // Revisão do agente publicada na PR como orkio[bot] (pelo site, depois do gate).
       createPublishReviewAction({
@@ -745,7 +759,7 @@ function createWork(core: {
         }
       },
       alva: flows.handlers.alva,
-      agents: agentsHandlers(agents, orchestrator),
+      agents: agentsHandlers(agents, orchestrator, agentMemory),
       taskFlows: flows.handlers.taskFlows,
       taskSetup: taskSetupHandlers(taskSetup),
       claude: claudeHandlers(claude.service, claude.runs, claude.handoff),

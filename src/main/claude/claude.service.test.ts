@@ -421,7 +421,14 @@ describe('ClaudeService', () => {
       runtime: { model: 'opus', effort: 'high' }
     })
     expect(lastSpec().runtime).toEqual({ model: 'opus', effort: 'high' })
-    const agent = { key: 'a', name: 'A', prompt: 'p', model: 'sonnet', effort: 'max' as const }
+    const agent = {
+      key: 'a',
+      name: 'A',
+      prompt: 'p',
+      model: 'sonnet',
+      effort: 'max' as const,
+      autonomy: 'edits' as const
+    }
     // null do passo = padrão de propósito; o agente define o resto.
     await service.startRun(flowRequest({ agent, runtime: { model: null } }))
     expect(lastSpec().runtime).toEqual({ model: null, effort: 'max' })
@@ -482,6 +489,21 @@ describe('ClaudeService', () => {
     })
     await service.startRun(flowRequest({ access: { tools: 'read_only', github: 'read' } }))
     expect(lastSpec().access).toEqual({ tools: 'read_only', github: { mode: 'read', target } })
+    // Fase 3: agente que só lê roda só leitura em qualquer pedido (a entrega some); os outros não.
+    const agent = {
+      key: 'builtin:revisor',
+      name: 'Revisor',
+      prompt: 'p',
+      model: null,
+      effort: null,
+      autonomy: 'read_only' as const
+    }
+    for (const github of ['read', 'deliver'] as const) {
+      await service.startRun(flowRequest({ agent, access: { tools: 'full', github } }))
+      expect(lastSpec().access).toEqual({ tools: 'read_only', github: { mode: 'read', target } })
+    }
+    await service.startRun(flowRequest({ agent: { ...agent, autonomy: 'ask' } }))
+    expect(lastSpec().access).toEqual({ tools: 'full', github: { mode: 'read', target } })
     // Sem repositório verificado: leitura vira "nada"; entrega falha com a mensagem.
     const none = setup({
       deliveryTarget: () => {

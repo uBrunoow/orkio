@@ -125,6 +125,42 @@ describe('perfis', () => {
     expect(await readFile(repoFile(), 'utf8')).not.toContain('ghp_')
   })
 
+  it('Fase 3: grava descrição, grupo, autonomia e comando; recusa segredo e grupo inválido', async () => {
+    const full = {
+      ...ANA,
+      description: '  Implementa com testes.  ',
+      group: 'operacoes/incidentes',
+      autonomy: 'read_only' as const,
+      command: '/revisar'
+    }
+    const view = await service.save({ projectId: 'p1', scope: 'repo', profile: full, isNew: true })
+    expect(view.profile).toMatchObject({
+      description: 'Implementa com testes.',
+      group: 'operacoes/incidentes',
+      autonomy: 'read_only',
+      command: 'revisar'
+    })
+    await service.assign('p1', 't1', 'repo:ana')
+    expect((await service.problemFor('p1', 't1'))?.command).toBe('revisar')
+    expect((await service.runAgentFor('p1', 't1', null))?.autonomy).toBe('read_only')
+    await expect(
+      service.save({
+        projectId: 'p1',
+        scope: 'repo',
+        profile: { ...full, description: 'token ghp_abcdefghijklmnopqrstuvwxyz0123' },
+        isNew: false
+      })
+    ).rejects.toMatchObject({ code: 'secret' })
+    await expect(
+      service.save({
+        projectId: 'p1',
+        scope: 'repo',
+        profile: { ...full, group: '../x' },
+        isNew: false
+      })
+    ).rejects.toMatchObject({ code: 'invalid' })
+  })
+
   it('perfil inválido não é gravado', async () => {
     await expect(
       service.save({ projectId: 'p1', scope: 'repo', profile: { ...ANA, name: '' }, isNew: true })
@@ -296,7 +332,11 @@ describe('"Rodar como <agente>" (runAgentFor / problemFor)', () => {
       model: 'sonnet',
       prompt: expect.stringContaining('Testes sempre.')
     })
-    expect(await service.problemFor('p1', 't1')).toEqual({ name: 'Ana', problem: null })
+    expect(await service.problemFor('p1', 't1')).toEqual({
+      name: 'Ana',
+      problem: null,
+      command: null
+    })
   })
 
   it('comando fora da lista e limite do dia: recusa ao rodar; o limite aparece no formulário', async () => {
@@ -316,12 +356,14 @@ describe('"Rodar como <agente>" (runAgentFor / problemFor)', () => {
     await writeFile(repoFile(), serializeAgent({ ...ANA, instructions: 'Outra coisa' }))
     expect(await service.problemFor('p1', 't1')).toEqual({
       name: 'Ana',
-      problem: AGENT_MESSAGES.needsReview
+      problem: AGENT_MESSAGES.needsReview,
+      command: null
     })
     await rm(repoFile())
     expect(await service.problemFor('p1', 't1')).toEqual({
       name: 'repo:ana',
-      problem: AGENT_MESSAGES.gone
+      problem: AGENT_MESSAGES.gone,
+      command: null
     })
   })
 })

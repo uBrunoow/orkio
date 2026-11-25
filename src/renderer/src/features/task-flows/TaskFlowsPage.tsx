@@ -1,3 +1,4 @@
+import { FLOW_END_OPTIONS } from '../../../../shared/flow-final'
 import { useId, useMemo, useState } from 'react'
 import { useProjectActivity } from '../overview/useProjectActivity'
 import { useProjectFlows } from './useProjectFlows'
@@ -756,7 +757,13 @@ function StepForm({
         />
       )
     case 'branch':
-      return <BranchForm step={step} stepOptions={stepOptions} onChange={onChange} />
+      return (
+        <BranchForm
+          step={step}
+          stepOptions={[...stepOptions, ...FLOW_END_OPTIONS]}
+          onChange={onChange}
+        />
+      )
   }
 }
 

@@ -22,8 +22,9 @@ import {
   BRIDGE_ENV,
   BRIDGE_PROMPT_TOOL,
   BRIDGE_SERVER,
-  decodeBridgeRequest,
+  decodeBridgeMessage,
   type BridgeDecision,
+  type BridgeRememberReply,
   type BridgeRequest
 } from './bridge/protocol'
 import { cliDenyInDelivery, cliDenyOutsideDelivery } from './github-rules'
@@ -32,9 +33,12 @@ import { deliveryOf, type RunSpec } from './run-spec'
 import { parseStreamLine } from './stream'
 
 export type SpawnFn = typeof nodeSpawn
-export type { BridgeDecision, BridgeRequest }
+export type { BridgeDecision, BridgeRememberReply, BridgeRequest }
 
-/** Socket local de uso único entre o servidor MCP (bridge) e o main. */
+/**
+ * Socket local de uso único entre o servidor MCP (bridge) e o main: pedidos de permissão e, com
+ * `onRemember`, as notas da ferramenta `lembrar` (memória do agente).
+ */
 export class PermissionBroker {
   private server: Server | null = null
   readonly token = randomBytes(24).toString('hex')
@@ -43,7 +47,10 @@ export class PermissionBroker {
       ? `\\\\.\\pipe\\orkio-${randomUUID()}`
       : join(tmpdir(), `orkio-${randomUUID().slice(0, 12)}.sock`)
 
-  constructor(private readonly onRequest: (req: BridgeRequest) => Promise<BridgeDecision>) {}
+  constructor(
+    private readonly onRequest: (req: BridgeRequest) => Promise<BridgeDecision>,
+    private readonly onRemember?: (input: Record<string, unknown>) => Promise<BridgeRememberReply>
+  ) {}
 
   async open(): Promise<void> {
     this.server = createServer((socket) => this.handle(socket))
@@ -73,15 +80,23 @@ export class PermissionBroker {
     socket.on('error', () => socket.destroy())
   }
 
-  private async answer(line: string): Promise<BridgeDecision> {
-    const msg = decodeBridgeRequest(line)
+  private async answer(line: string): Promise<BridgeDecision | BridgeRememberReply> {
+    const msg = decodeBridgeMessage(line)
     if (!msg) return { behavior: 'deny', message: 'Pedido inválido.' }
     const token = Buffer.from(msg.token)
     const expected = Buffer.from(this.token)
-    if (token.length !== expected.length || !timingSafeEqual(token, expected)) {
-      return { behavior: 'deny', message: 'Pedido não autorizado.' }
+    const authorized = token.length === expected.length && timingSafeEqual(token, expected)
+    if (msg.message.kind === 'remember') {
+      if (!authorized) return { ok: false, message: 'Pedido não autorizado.' }
+      if (!this.onRemember)
+        return { ok: false, message: 'A memória não está ligada nesta execução.' }
+      return this.onRemember(msg.message.input).catch((): BridgeRememberReply => ({
+        ok: false,
+        message: 'Falha ao gravar a memória.'
+      }))
     }
-    return this.onRequest(msg.request).catch((): BridgeDecision => ({
+    if (!authorized) return { behavior: 'deny', message: 'Pedido não autorizado.' }
+    return this.onRequest(msg.message.request).catch((): BridgeDecision => ({
       behavior: 'deny',
       message: 'Falha ao decidir a permissão.'
     }))
@@ -153,6 +168,8 @@ export function buildCliArgs(
   run: { sessionId: string; mcpConfig: string }
 ): string[] {
   const readOnly = spec.access.tools === 'read_only'
+  // Agente que pede antes de editar (Fase 3): nada é aprovado sozinho pelo CLI; a política decide.
+  const askEdits = spec.agent?.autonomy === 'ask'
   const { model, effort } = spec.runtime
   return [
     '-p',
@@ -168,7 +185,7 @@ export function buildCliArgs(
     '--permission-mode',
     // Só leitura: nada é aprovado sozinho (nem comandos de arquivo no shell); tudo passa pela
     // ferramenta de permissão do Orkio.
-    readOnly ? 'manual' : 'acceptEdits',
+    readOnly || askEdits ? 'manual' : 'acceptEdits',
     '--settings',
     JSON.stringify(deliveryOf(spec) ? DELIVERY_RUN_SETTINGS : RUN_SETTINGS),
     '--mcp-config',
@@ -204,7 +221,9 @@ export class ClaudeRun {
             env: {
               ELECTRON_RUN_AS_NODE: '1',
               [BRIDGE_ENV.socket]: o.broker.socketPath,
-              [BRIDGE_ENV.token]: o.broker.token
+              [BRIDGE_ENV.token]: o.broker.token,
+              // Memória do agente (Fase 3): a ferramenta `lembrar` só existe com agente.
+              ...(o.spec.agent ? { [BRIDGE_ENV.memory]: '1' } : {})
             }
           }
         }

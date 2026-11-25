@@ -5,6 +5,9 @@ import { ArtifactsService, type ArtifactsDeps } from '../claude/artifacts.servic
 import { ClaudeService, type ClaudeServiceDeps } from '../claude/claude.service'
 import { detectClaude } from '../claude/detect'
 import { ClaudeRun } from '../claude/runner'
+import { BRIDGE_MEMORY_TOOL_NAME } from '../claude/bridge/protocol'
+import type { AgentMemoryStore } from '../agents/agent-memory.store'
+import { memoryPrompt } from '../../shared/agent-memory'
 import { RunService } from '../claude/run.service'
 import { onPath, terminalCommand, TerminalError } from '../claude/terminal'
 import { WorktreeService } from '../claude/worktree.service'
@@ -57,6 +60,8 @@ export function createClaude(deps: {
   getBlockChildren: ClaudeServiceDeps['getBlockChildren']
   agentFor: ClaudeServiceDeps['agentFor']
   agentInfo: ClaudeServiceDeps['agentInfo']
+  /** Fase 3: memória por agente (resumo no prompt e a ferramenta `lembrar`). */
+  agentMemory: AgentMemoryStore
   /** Escritas no Notion para publicar artefatos (o token fica no conector). */
   notionInsert: ArtifactsDeps['notion']
   /** O executor de fluxos nasce depois (ele usa o Claude Code). */
@@ -117,7 +122,8 @@ export function createClaude(deps: {
       service().onRunEvent(message.event)
       deps.emit('runEvent', message)
     },
-    notify: deps.notify
+    notify: deps.notify,
+    remember: (agentKey, projectId, input) => deps.agentMemory.remember(agentKey, projectId, input)
   })
   service.set(
     new ClaudeService({
@@ -145,6 +151,8 @@ export function createClaude(deps: {
       detect: () => detectClaude({ env }),
       agentFor: deps.agentFor,
       agentInfo: deps.agentInfo,
+      agentMemory: async (agentKey, projectId) =>
+        memoryPrompt(await deps.agentMemory.summary(agentKey, projectId), BRIDGE_MEMORY_TOOL_NAME),
       flowActive: (taskId) => deps.flowRunner().hasActive(taskId),
       flowBusy: (taskId) => deps.flowRunner().isBusy(taskId),
       flowMessage: async (taskId, text, note) => {

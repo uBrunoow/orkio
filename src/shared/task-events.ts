@@ -11,6 +11,7 @@ import { EVENT_KINDS, type EventKind } from './automation'
 import { ARTIFACT_PUBLISH_MODES } from './agent-run'
 import { isRecord } from './guards'
 import { FLOW_PAUSE_REASONS } from './flow-run-state'
+import { FLOW_RESULTS } from './flow-final'
 
 /**
  * Quem causou o evento: você (`manual`), o Notion, uma automação (regra, orquestrador, regra de
@@ -326,7 +327,7 @@ export const TASK_EVENTS = {
     actor: 'flow',
     detail: {
       flowRunId: req(str),
-      result: req(field(orNull(oneOf(['done', 'rejected', 'cancelled']))))
+      result: req(field(orNull(oneOf(FLOW_RESULTS))))
     }
   }),
   /** Entrega (5C): push/PR/comentário/resolução/pedido de review feitos pelo Orkio ou pelo Claude. */

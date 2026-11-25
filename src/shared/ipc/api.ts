@@ -81,6 +81,12 @@ import type {
   ProjectsListResult
 } from '../projects'
 import type { Result } from '../result'
+import {
+  MEMORY_ACTIONS,
+  type AgentMemoryView,
+  type MemoryAction,
+  type MemoryNoteInput
+} from '../agent-memory'
 import { HANDOFF_RETURNS, type HandoffReturn, type HandoffView } from '../handoff'
 import {
   TERMINAL_LIMITS,
@@ -124,6 +130,7 @@ import {
   parseFlowDraft,
   parseFlows,
   parseGateValues,
+  parseMemoryNoteInput,
   parseOrchestratorConfig,
   parseSendMessageRequest,
   parseStartRunRequest,
@@ -139,6 +146,9 @@ import {
   isNotionPropertyId,
   isTokenCredentials,
   localId,
+  memoryDigest,
+  memoryNoteId,
+  memorySnapshotId,
   notionId,
   nullable,
   oneOf,
@@ -148,6 +158,8 @@ import {
   text,
   type ForceOption
 } from './validate'
+
+const MEMORY_UNEXPECTED = 'Algo deu errado com a memória do agente. Tente novamente.'
 
 const projectRef: Parser<{ projectId: string }> = (v) =>
   isRecord(v) && typeof v['projectId'] === 'string' ? { projectId: v['projectId'] } : INVALID
@@ -293,6 +305,7 @@ const leftChoice = oneOf(['cancel', 'continue'])
 const requestId = guard(isRequestId)
 const permissionAnswer = oneOf(PERMISSION_ANSWERS)
 const editorId = oneOf(EDITOR_IDS)
+const memoryAction = oneOf(MEMORY_ACTIONS)
 const repoPath = guard(isRepoPath)
 const localIdOrNull = nullable(localId)
 const taskIdOrNull = nullable(taskId)
@@ -842,6 +855,67 @@ export const ORKIO_API = {
         channel: 'agents:run-orchestrator',
         args: [projectId],
         unexpected: 'Algo deu errado com o orquestrador. Tente novamente.'
+      }),
+      /**
+       * Fase 3: memória do agente (notas, arquivadas, histórico). Toda edição manda o `digest` lido
+       * (memória mudou no meio = recusa). Nunca devolve caminhos.
+       */
+      memory: call<(projectId: string, key: AgentKey) => Promise<Result<AgentMemoryView>>>()({
+        channel: 'agents:memory',
+        args: [projectId, agentKey],
+        unexpected: MEMORY_UNEXPECTED
+      }),
+      addMemory: call<
+        (
+          projectId: string,
+          key: AgentKey,
+          digest: string,
+          note: MemoryNoteInput
+        ) => Promise<Result<AgentMemoryView>>
+      >()({
+        channel: 'agents:memory-add',
+        args: [projectId, agentKey, memoryDigest, parseMemoryNoteInput],
+        unexpected: MEMORY_UNEXPECTED
+      }),
+      editMemory: call<
+        (
+          projectId: string,
+          key: AgentKey,
+          digest: string,
+          id: string,
+          note: MemoryNoteInput
+        ) => Promise<Result<AgentMemoryView>>
+      >()({
+        channel: 'agents:memory-edit',
+        args: [projectId, agentKey, memoryDigest, memoryNoteId, parseMemoryNoteInput],
+        unexpected: MEMORY_UNEXPECTED
+      }),
+      /** `remove` apaga; `archive` manda para as arquivadas; `unarchive` traz de volta. */
+      changeMemory: call<
+        (
+          projectId: string,
+          key: AgentKey,
+          digest: string,
+          id: string,
+          action: MemoryAction
+        ) => Promise<Result<AgentMemoryView>>
+      >()({
+        channel: 'agents:memory-change',
+        args: [projectId, agentKey, memoryDigest, memoryNoteId, memoryAction],
+        unexpected: MEMORY_UNEXPECTED
+      }),
+      /** Volta o `MEMORY.md` para uma foto do histórico (a atual vira foto também). */
+      rollbackMemory: call<
+        (
+          projectId: string,
+          key: AgentKey,
+          digest: string,
+          snapshotId: string
+        ) => Promise<Result<AgentMemoryView>>
+      >()({
+        channel: 'agents:memory-rollback',
+        args: [projectId, agentKey, memoryDigest, memorySnapshotId],
+        unexpected: MEMORY_UNEXPECTED
       }),
       onChanged: IPC_EVENTS.agentsChanged
     }

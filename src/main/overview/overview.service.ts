@@ -3,6 +3,7 @@
  * perguntas em memória, fluxos, cache de sinais e o cache em memória das tarefas do Notion).
  * Nunca chama APIs: "Atualizar" pede o ciclo das automações (3B), que relê git/GitHub/Notion.
  */
+import type { FlowResult } from '../../shared/flow-final'
 import {
   NOTION_PENDING_ATTEMPTS,
   NOTION_REJECT_WINDOW_MS,
@@ -65,7 +66,7 @@ export interface OverviewDeps {
   finishedFlows?(since: string): {
     projectId: string
     taskId: string
-    result: 'done' | 'rejected' | 'cancelled' | null
+    result: FlowResult | null
     endedAt: string
   }[]
   /** Fase 2: sessões com você no terminal ("Continuar no Claude"). */
@@ -208,10 +209,7 @@ export class OverviewService {
       add(item.task.projectId, item.task.taskId)
     }
     const since = new Date(now.getTime() - DONE_WINDOW_MS).toISOString()
-    const finished = new Map<
-      string,
-      { result: 'done' | 'rejected' | 'cancelled' | null; endedAt: string }
-    >()
+    const finished = new Map<string, { result: FlowResult | null; endedAt: string }>()
     for (const f of this.deps.finishedFlows?.(since) ?? []) {
       finished.set(key(f.projectId, f.taskId), { result: f.result, endedAt: f.endedAt })
       add(f.projectId, f.taskId)

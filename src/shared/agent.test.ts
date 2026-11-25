@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  agentAutonomy,
+  agentGroupFromText,
+  agentGroupLabel,
   agentIdFromName,
   agentInitials,
   buildAgentPrompt,
@@ -226,5 +229,133 @@ describe('modelo livre e raciocínio', () => {
     expect(!m.ok && m.errors).toContain('Modelo inválido')
     const e = parseAgentFile(withKeys('sonnet', 'ultra'))
     expect(!e.ok && e.errors).toContain('Raciocínio inválido')
+  })
+})
+
+describe('Fase 3: descrição, grupo, autonomia e comando preferido', () => {
+  const FULL: AgentProfile = {
+    ...ANA,
+    commands: ['alva-flow:spec', 'alva-flow:implement'],
+    description: 'Implementa tarefas de "operações": rápido e com testes.',
+    group: 'operacoes/incidentes',
+    autonomy: 'ask',
+    command: 'alva-flow:implement'
+  }
+
+  it('perfil antigo (sem os campos) lê com os padrões e grava igual, byte a byte', () => {
+    const r = parseAgentFile(FILE)
+    expect(r.ok && r.profile).toMatchObject({
+      description: '',
+      group: '',
+      autonomy: 'edits',
+      command: null
+    })
+    const text = serializeAgent(ANA)
+    for (const key of ['description', 'group', 'autonomy', 'command:']) {
+      expect(text).not.toContain(key)
+    }
+    expect(parseAgentFile(text)).toEqual({ ok: true, profile: ANA, warnings: [] })
+  })
+
+  it('volta igual com todos os campos novos', () => {
+    const text = serializeAgent(FULL)
+    expect(text).toContain(
+      'description: "Implementa tarefas de \\"operações\\": rápido e com testes."\n'
+    )
+    expect(text).toContain('group: "operacoes/incidentes"\n')
+    expect(text).toContain('autonomy: ask\n')
+    expect(text).toContain('command: "alva-flow:implement"\n')
+    const r = parseAgentFile(text)
+    expect(r.ok && r.profile).toEqual(FULL)
+  })
+
+  it('valida os campos novos', () => {
+    expect(validateAgent(FULL)).toEqual([])
+    expect(validateAgent({ ...FULL, description: 'x'.repeat(141) })).toContain(
+      '“O que faz” com mais de 140 caracteres.'
+    )
+    expect(validateAgent({ ...FULL, description: 'a\nb' })).toContain(
+      '“O que faz” precisa caber numa linha.'
+    )
+    for (const group of ['Operações', 'a//b', '/a', 'a/b/c/d', 'x'.repeat(61), '../x']) {
+      expect(validateAgent({ ...FULL, group }).join(' ')).toMatch(/Grupo inválido/)
+    }
+    expect(validateAgent({ ...FULL, autonomy: 'tudo' as never })).toContain(
+      'Autonomia desconhecida.'
+    )
+    expect(validateAgent({ ...FULL, command: '--x' })).toContain('Comando preferido inválido.')
+    expect(validateAgent({ ...FULL, command: 'outro' })).toContain(
+      'O comando preferido precisa estar entre os comandos permitidos.'
+    )
+    expect(validateAgent({ ...FULL, commands: [], command: 'outro' })).toEqual([])
+    const bad = parseAgentFile(FILE.replace('delivery: true', 'delivery: true\nautonomy: root'))
+    expect(!bad.ok && bad.errors).toContain('Autonomia desconhecida.')
+  })
+
+  it('grupo a partir do texto e rótulo', () => {
+    expect(agentGroupFromText(' Operações / Incidentes graves ')).toBe(
+      'operacoes/incidentes-graves'
+    )
+    expect(agentGroupFromText('')).toBe('')
+    expect(agentGroupLabel('operacoes/incidentes-graves')).toBe('Operacoes › Incidentes graves')
+  })
+
+  it('o prompt menciona o que ele faz (sem mudar o resto)', () => {
+    expect(buildAgentPrompt(FULL)).toContain('O que você faz: Implementa tarefas')
+    expect(buildAgentPrompt(ANA)).not.toContain('O que você faz')
+    expect(buildAgentPrompt(FULL).startsWith('Você é Ana (implementador(a))')).toBe(true)
+  })
+
+  it('cópia antiga do perfil (sem autonomia) conta como "edita"', () => {
+    const old: Partial<AgentProfile> = { ...FULL }
+    delete old.autonomy
+    expect(agentAutonomy(old as AgentProfile)).toBe('edits')
+    expect(agentAutonomy({ autonomy: 'read_only' })).toBe('read_only')
+  })
+
+  it('só lê: recusa fluxo que entrega; passos de comando rodam só leitura; revisor não conta', () => {
+    const ro = { ...ANA, delivery: true, autonomy: 'read_only' as const }
+    const implement: Flow = {
+      id: 'f',
+      name: 'Implementar',
+      steps: [
+        {
+          id: 'a',
+          name: 'Implementar',
+          type: 'claude_command',
+          command: 'alva-flow:implement',
+          args: '',
+          timeoutMin: 30
+        }
+      ]
+    } as Flow
+    expect(checkAgentFlow(ro, implement)).toBeNull()
+    const push = {
+      ...implement,
+      steps: [...implement.steps, { id: 'b', name: 'Push', type: 'orkio_action', action: 'push' }]
+    } as Flow
+    expect(checkAgentFlow(ro, push)).toMatch(/só lê .*“Push”/)
+    const delivering = {
+      ...implement,
+      steps: [{ ...implement.steps[0]!, delivery: true }]
+    } as Flow
+    expect(checkAgentFlow(ro, delivering)).toMatch(/só lê/)
+    const reviewerStep = {
+      ...implement,
+      steps: [{ ...implement.steps[0]!, delivery: true, agent: 'reviewer' }]
+    } as Flow
+    expect(checkAgentFlow(ro, reviewerStep)).toBeNull()
+    // O Revisor embutido só lê e continua rodando a "revisão publicada".
+    const revisor = builtinAgent('revisor')!
+    expect(revisor.autonomy).toBe('read_only')
+    expect(checkAgentFlow(revisor, alvaReviewPublishFlow())).toBeNull()
+  })
+
+  it('embutidos têm descrição válida', () => {
+    for (const id of ['implementador', 'revisor', 'qa', 'triagem', 'documentador', 'corretor-pr']) {
+      const a = builtinAgent(id)!
+      expect(a.description.length).toBeGreaterThan(10)
+      expect(validateAgent(a)).toEqual([])
+    }
   })
 })

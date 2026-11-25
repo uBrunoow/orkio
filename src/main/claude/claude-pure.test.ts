@@ -7,7 +7,7 @@ import {
   shellSegments,
   suggestPattern
 } from './policy'
-import { decidePermission } from './policy'
+import { decidePermission, isGitRead } from './policy'
 import { isEnvFile, redactSecrets, sanitizeEnv } from '../platform/redact'
 import { parseStreamLine } from './stream'
 
@@ -258,6 +258,63 @@ describe('política: só leitura e contexto pedido pela política', () => {
     expect(
       evaluatePermission({ tool: 'Read', input: { file_path: `${WT}/a.ts` } }, ro).decision
     ).toBe('allow')
+  })
+
+  it('Fase 3: só leitura — ler o git na pasta passa sem perguntar; o resto continua perguntando', () => {
+    const ro = { worktree: WT, allowRules: rules, readOnly: true }
+    const bash = (command: string) =>
+      evaluatePermission({ tool: 'Bash', input: { command } }, ro).decision
+    expect(bash('git diff origin/main...HEAD')).toBe('allow')
+    expect(bash('git --no-pager log --oneline -5')).toBe('allow')
+    expect(bash('git show HEAD~1 && git status')).toBe('allow')
+    // Opções que gravam ou rodam programa, opção global, subcomando que escreve, redireção.
+    expect(bash('git diff --output=x.patch')).toBe('ask')
+    expect(bash('git diff --ext-diff')).toBe('ask')
+    expect(bash('git -c core.pager=sh diff')).toBe('ask')
+    expect(bash('git -C /tmp log')).not.toBe('allow')
+    expect(bash('git checkout -b x')).toBe('ask')
+    expect(bash('git diff > patch.txt')).toBe('ask')
+    expect(bash('git diff $(rm -rf .)')).not.toBe('allow')
+    expect(bash('git push')).toBe('deny')
+    // Fora do só leitura, nada muda (pergunta, como antes).
+    expect(
+      evaluatePermission(
+        { tool: 'Bash', input: { command: 'git diff' } },
+        { ...ro, readOnly: false }
+      ).decision
+    ).toBe('ask')
+    expect(isGitRead({ name: 'git', args: ['diff', '--stat'] })).toBe(true)
+    expect(isGitRead({ name: 'git', args: ['grep', '-O', 'x'] })).toBe(false)
+  })
+
+  it('Fase 3: a ferramenta "lembrar" do Orkio passa sem perguntar (só ela; outra MCP pergunta)', () => {
+    const ro = { worktree: WT, allowRules: rules, readOnly: true }
+    expect(
+      evaluatePermission({ tool: 'mcp__orkio__lembrar', input: { texto: 'x' } }, ro).decision
+    ).toBe('allow')
+    expect(evaluatePermission({ tool: 'mcp__outro__lembrar', input: {} }, ro).decision).toBe('ask')
+  })
+
+  it('Fase 3: agente que pede antes de agir — editar pergunta (sem "sempre"), regra não libera', () => {
+    const ask = { worktree: WT, allowRules: rules, askEdits: true }
+    const edit = (file: string, c: { worktree: string; allowRules: typeof rules }) =>
+      evaluatePermission({ tool: 'Edit', input: { file_path: file } }, c)
+    expect(edit(`${WT}/a.ts`, ask)).toEqual({ decision: 'ask', suggestion: '' })
+    expect(edit(`${WT}/a.ts`, { worktree: WT, allowRules: rules }).decision).toBe('allow')
+    // Fora do worktree continua bloqueado (a autonomia só restringe).
+    expect(edit('/etc/passwd', ask)).toMatchObject({ decision: 'deny', code: 'outside' })
+    expect(
+      evaluatePermission({ tool: 'Write', input: { file_path: `${WT}/b.ts` } }, ask).decision
+    ).toBe('ask')
+    expect(
+      evaluatePermission({ tool: 'Read', input: { file_path: `${WT}/a.ts` } }, ask).decision
+    ).toBe('allow')
+    expect(evaluatePermission({ tool: 'Bash', input: { command: 'npm test' } }, ask).decision).toBe(
+      'ask'
+    )
+    expect(evaluatePermission({ tool: 'Bash', input: { command: 'git push' } }, ask).decision).toBe(
+      'deny'
+    )
   })
 
   it('bug: push por alias no modo entrega — a política pede a branch atual (só quando precisa)', async () => {

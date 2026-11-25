@@ -3,6 +3,7 @@
  * cores de opção do Notion, Claude Code, saúde do projeto, agente, execuções, CI/PR/revisão e
  * atualização. As telas leem daqui (nada de cor intermediária: os mapas falam só `StatusTone`).
  */
+import { finalText } from '../../../shared/flow-final'
 import type { StatusTone } from '../components/StatusToken'
 import type { ClaudeCodeStatus, RunStatus } from '../../../shared/agent-run'
 import type { AgentStatus } from '../../../shared/agent'
@@ -152,10 +153,17 @@ const FLOW_RUN_STATUS: Record<FlowRunStatus, StatusText> = {
   cancelled: { label: 'Cancelado', tone: 'neutral' }
 }
 
-/** Estado de uma execução de fluxo: terminado por um gate recusado é "Recusado", não "Concluído". */
+/**
+ * Estado de uma execução de fluxo com o final honesto (`shared/flow-final.ts`): recusado por um
+ * gate é "Recusado", nada a fazer não é "Concluído", cancelar depois de uma falha é "Falhou".
+ */
 export function flowRunText(run: Pick<FlowRunView, 'status' | 'result'>): StatusText {
   if (run.status === 'finished' && run.result === 'rejected') {
     return { label: 'Recusado', tone: 'danger' }
+  }
+  if ((run.status === 'finished' || run.status === 'cancelled') && run.result) {
+    const t = finalText(run.result)
+    return { label: t.label, tone: t.tone }
   }
   return FLOW_RUN_STATUS[run.status]
 }

@@ -17,7 +17,12 @@ export const FINISHED_LIMIT = 8
 
 function isFinished(item: ActivityItem): boolean {
   if (item.kind === 'run_finished') return true
-  return item.kind === 'flow_finished' && item.detail.result === 'done'
+  // Todo fim que não foi decisão sua (cancelar/recusar) aparece, com o final honesto no texto.
+  return (
+    item.kind === 'flow_finished' &&
+    item.detail.result !== 'cancelled' &&
+    item.detail.result !== 'rejected'
+  )
 }
 
 /** O que terminou depois de `clearedAt` (ISO), o mais recente primeiro, um por tarefa. */

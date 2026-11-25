@@ -2,6 +2,7 @@
  * Textos de um passo de fluxo por tipo, num lugar só: o nome curto (frase-título do fluxo), a linha
  * do editor, a frase da lista "Faz" e o que o plano mostra ("Sua aprovação", "Ação do Orkio: …").
  */
+import { FLOW_END_OPTIONS } from '../../../../shared/flow-final'
 import { orkioAction } from '../../../../shared/orkio-actions'
 import { isPromptStep, type GateShow, type Step } from '../../../../shared/task-flow'
 
@@ -68,7 +69,7 @@ export function stepSummary(step: Step): string {
         `“${step.message}”`,
         GATE_SHOW_TEXT[step.show].summary,
         `recusar → ${step.onReject === 'stop' ? 'encerra' : step.onReject}`,
-        step.revise ? `ajustes → ${step.revise.step} (até ${step.revise.max})` : null
+        step.revise ? `mudanças → ${step.revise.step} (até ${step.revise.max})` : null
       ]
         .filter(Boolean)
         .join(' · ')
@@ -79,7 +80,10 @@ export function stepSummary(step: Step): string {
   }
 }
 
-export function stepSentence(step: Step, stepName: (id: string) => string): string {
+export function stepSentence(step: Step, name: (id: string) => string): string {
+  // Alvo de fim (`$fim:…`): o final que fica no fluxo, não um passo.
+  const stepName = (id: string): string =>
+    FLOW_END_OPTIONS.find((o) => o.value === id)?.label.toLowerCase() ?? name(id)
   switch (step.type) {
     case 'claude_command': {
       const mode = [
@@ -97,7 +101,7 @@ export function stepSentence(step: Step, stepName: (id: string) => string): stri
           ? 'recusar encerra'
           : `recusar volta para ${stepName(step.onReject)}`
       const revise = step.revise
-        ? `; pedir ajustes volta para ${stepName(step.revise.step)}, até ${step.revise.max} vezes`
+        ? `; pedir mudanças volta para ${stepName(step.revise.step)}, até ${step.revise.max} vezes`
         : ''
       return `Pede sua aprovação${GATE_SHOW_TEXT[step.show].sentence}: “${step.message}” (${reject}${revise}).`
     }

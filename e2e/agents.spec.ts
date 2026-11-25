@@ -187,8 +187,10 @@ test('critérios 1–4: cria a Ana pela tela, regra da coluna, fluxo dela com as
   const region = page.getByRole('region', { name: 'Agentes' })
   await page.getByRole('button', { name: 'Novo agente' }).click()
   const form = page.getByRole('form', { name: 'Novo agente' })
-  await form.getByRole('textbox', { name: /^Nome/ }).fill('Ana')
-  await expect(form.getByRole('textbox', { name: /^Id/ })).toHaveValue('ana')
+  await form.getByRole('textbox', { name: /^Nome \(obrigatório\)/ }).fill('Ana')
+  // Fase 3: nome curto, fluxo preferido e a prévia do prompt ficam no Avançado.
+  await form.getByRole('radio', { name: 'Avançado' }).click()
+  await expect(form.getByRole('textbox', { name: /^Nome curto/ })).toHaveValue('ana')
   await choose(page, form, 'Fluxo preferido', 'Implementar e entregar')
   await form.getByRole('textbox', { name: /^Instruções/ }).fill(INSTRUCTIONS)
   await expect(

@@ -24,6 +24,11 @@ const FILL: Record<AgentColor, string> = {
   teal: 'color-mix(in oklch, var(--ok) 55%, var(--info))'
 }
 
+/** Cor do avatar como valor CSS (seletor de cor do editor). */
+export function agentFill(color: AgentColor): string {
+  return FILL[color]
+}
+
 /** Olhos no quadro 24×24 (unidades do viewBox; o mockup tem 40 px: escala 0,6). */
 const FACES: readonly ((ink: string) => React.JSX.Element)[] = [
   // dois traços em pé

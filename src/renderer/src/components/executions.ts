@@ -1,3 +1,4 @@
+import { finalText, type FlowResult } from '../../../shared/flow-final'
 import type { ActivityItem } from '../../../shared/overview'
 import type { StatusTone } from './StatusToken'
 
@@ -37,11 +38,11 @@ export function ruleExecutions(items: readonly ActivityItem[], ruleId: string): 
   })
 }
 
-const FLOW_END = {
-  done: { outcome: 'Concluído', tone: 'success' },
-  rejected: { outcome: 'Recusado', tone: 'danger' },
-  cancelled: { outcome: 'Cancelado', tone: 'neutral' }
-} as const satisfies Record<string, Pick<Execution, 'outcome' | 'tone'>>
+function flowEnd(result: FlowResult | null | undefined): Pick<Execution, 'outcome' | 'tone'> {
+  if (result === 'rejected') return { outcome: 'Recusado', tone: 'danger' }
+  const t = finalText(result)
+  return { outcome: t.label, tone: t.tone }
+}
 
 /**
  * Execuções de um fluxo: cada início com o fim da mesma execução (`flowRunId`). Sem fim ainda:
@@ -60,7 +61,7 @@ export function flowExecutions(
     )
     const result =
       end?.kind === 'flow_finished'
-        ? FLOW_END[end.detail.result ?? 'done']
+        ? flowEnd(end.detail.result)
         : { outcome: 'Em andamento', tone: 'running' as const }
     return [
       {
