@@ -29,6 +29,21 @@ import type { CreateProjectInput } from '../projects'
 import { isBranchKind } from '../slug'
 import { parseFlowDef, type Flow, type StageFlow } from '../task-flow'
 import { parseRunSetup, type RunSetup } from '../task-setup'
+import {
+  SECRET_NOTE_MAX,
+  SECRET_VALUE_MAX,
+  isSecretName,
+  parseSecretUses,
+  type SecretSaveInput,
+  type SecretUse
+} from '../vault'
+import { parseMcpServer, type ClaudeMcpRef, type McpServer } from '../mcp'
+import {
+  isPreferencesPatch,
+  parsePreferences,
+  parseSkillNames,
+  type AppPreferences
+} from '../preferences'
 import { INVALID, type Invalid } from './define'
 import {
   isAgentKey,
@@ -536,4 +551,70 @@ export function parseActivityQuery(value: unknown): Parsed<ActivityQuery> {
 export function parseMemoryNoteInput(value: unknown): Parsed<MemoryNoteInput> {
   if (!isMemoryNoteInput(value)) return INVALID
   return { text: value.text, scope: value.scope, until: value.until }
+}
+
+/** Fase 4: salvar um segredo (o valor só vai do renderer ao main, nunca volta). */
+export function parseSecretSaveInput(value: unknown): Parsed<SecretSaveInput> {
+  if (!isRecord(value)) return INVALID
+  const { name, note, value: secret } = value
+  if (!isSecretName(name)) return INVALID
+  if (typeof note !== 'string' || note.length > SECRET_NOTE_MAX) return INVALID
+  if (secret !== undefined && (typeof secret !== 'string' || secret.length > SECRET_VALUE_MAX)) {
+    return INVALID
+  }
+  return { name, note, ...(secret !== undefined ? { value: secret } : {}) }
+}
+
+export function parseSecretUsesPayload(value: unknown): Parsed<SecretUse[]> {
+  return parseSecretUses(value) ?? INVALID
+}
+
+/** Fase 4: servidor MCP do Orkio (forma e regras de `parseMcpServer`). */
+export function parseMcpServerPayload(value: unknown): Parsed<McpServer> {
+  return parseMcpServer(value) ?? INVALID
+}
+
+/** Segredos escolhidos ao adicionar do catálogo: nome do campo (variável/cabeçalho) → segredo. */
+export function parseCatalogSecrets(value: unknown): Parsed<Record<string, string>> {
+  if (!isRecord(value)) return INVALID
+  const out: Record<string, string> = {}
+  const entries = Object.entries(value)
+  if (entries.length > 10) return INVALID
+  for (const [k, v] of entries) {
+    if (k.length > 64 || !isSecretName(v)) return INVALID
+    out[k] = v
+  }
+  return out
+}
+
+export function parseClaudeMcpRef(value: unknown): Parsed<ClaudeMcpRef> {
+  if (!isRecord(value)) return INVALID
+  const { scope, name, projectId } = value
+  if (scope !== 'user' && scope !== 'local' && scope !== 'project') return INVALID
+  if (typeof name !== 'string' || name.length === 0 || name.length > 100) return INVALID
+  if (scope === 'user' ? projectId !== null : !isProjectId(projectId)) return INVALID
+  return { scope, name, projectId: scope === 'user' ? null : (projectId as string) }
+}
+
+export function parseSkillNamesPayload(value: unknown): Parsed<string[]> {
+  return parseSkillNames(value) ?? INVALID
+}
+
+export function parsePreferencesPatch(value: unknown): Parsed<Partial<AppPreferences>> {
+  if (!isPreferencesPatch(value)) return INVALID
+  // Normaliza campo a campo pelo parser completo (o que não veio não entra no patch).
+  const full = parsePreferences(value)
+  const out: Partial<AppPreferences> = {}
+  for (const key of Object.keys(value) as (keyof AppPreferences)[]) {
+    ;(out as Record<string, unknown>)[key] = full[key]
+  }
+  return out
+}
+
+export function parseRuleRef(value: unknown): Parsed<{ tool: string; pattern: string }> {
+  if (!isRecord(value)) return INVALID
+  const { tool, pattern } = value
+  if (typeof tool !== 'string' || tool.length === 0 || tool.length > 200) return INVALID
+  if (typeof pattern !== 'string' || pattern.length > 1000) return INVALID
+  return { tool, pattern }
 }

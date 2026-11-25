@@ -119,6 +119,10 @@ function bridge(config) {
   }
 }
 
+function sha(value) {
+  return require('node:crypto').createHash('sha256').update(String(value)).digest('hex')
+}
+
 async function main() {
   const configPath = args[args.indexOf('--mcp-config') + 1]
   const config = JSON.parse(readFileSync(configPath, 'utf8'))
@@ -154,7 +158,39 @@ async function main() {
         resumeSessionAt: flag('--resume-session-at'),
         permissionTool: flag('--permission-prompt-tool'),
         permissionMode: flag('--permission-mode'),
-        disallowedTools: flag('--disallowedTools')
+        disallowedTools: flag('--disallowedTools'),
+        // Fase 4: servidores MCP do Orkio (sem a ponte), com o hash dos valores (nunca o valor),
+        // o deny do --settings e os segredos E2E_* no ambiente (hash).
+        mcp: Object.fromEntries(
+          Object.entries(config.mcpServers || {})
+            .filter(([name]) => name !== 'orkio')
+            .map(([name, def]) => [
+              name,
+              {
+                type: def.type,
+                command: def.command || null,
+                url: def.url || null,
+                values: Object.fromEntries(
+                  Object.entries({ ...(def.env || {}), ...(def.headers || {}) }).map(([k, v]) => [
+                    k,
+                    sha(v)
+                  ])
+                )
+              }
+            ])
+        ),
+        deny: (() => {
+          try {
+            return JSON.parse(flag('--settings')).permissions.deny.filter((d) => d.startsWith('Skill('))
+          } catch {
+            return []
+          }
+        })(),
+        secretEnv: Object.fromEntries(
+          Object.entries(process.env)
+            .filter(([k]) => k.startsWith('E2E_'))
+            .map(([k, v]) => [k, sha(v)])
+        )
       }) + '\n'
     )
   }

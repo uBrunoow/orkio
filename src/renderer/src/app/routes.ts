@@ -11,10 +11,20 @@ export const TASKS_VIEWS = ['kanban', 'list'] as const
 export type TasksView = (typeof TASKS_VIEWS)[number]
 
 export const SETTINGS_SECTIONS = [
+  'general',
+  'appearance',
+  'notifications',
+  'shortcuts',
+  'terminal',
   'integrations',
   'projects',
+  'providers',
   'board',
   'agents',
+  'skills',
+  'mcp',
+  'secrets',
+  'diagnostics',
   'updates',
   'about'
 ] as const
@@ -57,12 +67,22 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
 }
 
 export const SETTINGS_TITLES: Record<SettingsSection, string> = {
+  general: 'Geral',
+  appearance: 'Aparência',
+  notifications: 'Notificações',
+  shortcuts: 'Atalhos',
+  terminal: 'Terminal',
   integrations: 'Integrações',
   projects: 'Projetos',
+  providers: 'Provedores e uso',
   board: 'Quadro e automações',
   agents: 'Agentes do projeto',
+  skills: 'Skills',
+  mcp: 'Servidores MCP',
+  secrets: 'Segredos',
+  diagnostics: 'Diagnóstico',
   updates: 'Atualizações',
-  about: 'Sobre e diagnóstico'
+  about: 'Sobre'
 }
 
 export function routeForTaskRef(ref: BoardTaskRef): Route {

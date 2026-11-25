@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Field, SegmentedControl, SwitchField } from '@/components/form'
+import { SegmentedControl, SwitchField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import type { ReleaseNotes, UpdateStatus } from '../../../../shared/updates'
 import { InstallControls } from './InstallControls'
@@ -9,8 +8,7 @@ import { useUpdates } from './useUpdates'
 import { formatDateTime } from '../../lib/format'
 import { WhatsNewDialog } from './WhatsNewDialog'
 import { StatusToken } from '../../components/StatusToken'
-import { ipcCall, useIpcResource, useSource } from '../../lib/ipc'
-import { useSources } from '../../app/sources'
+import { ipcCall, useIpcResource } from '../../lib/ipc'
 import { isUpdateDownloading, updatePhaseText } from '../../lib/status-text'
 
 export function UpdatesSection(): React.JSX.Element {
@@ -130,34 +128,6 @@ export function PowerSection(): React.JSX.Element {
   )
 }
 
-/**
- * Medidor de uso do Claude na barra (experimental, ligado por padrão). Lê a mesma fonte da barra:
- * mudar aqui some/aparece lá na hora.
- */
-export function UsageMeterSection(): React.JSX.Element {
-  const { claudeUsage } = useSources()
-  const view = useSource(claudeUsage, '').value
-  return (
-    <section aria-labelledby="usage-title" className={SECTION_CLASS}>
-      <h2 id="usage-title" className="text-sm font-medium text-foreground">
-        Uso do Claude
-      </h2>
-      <SwitchField
-        label="Mostrar o uso do Claude na barra (experimental)"
-        description="Quanto da janela de 5 horas e da semanal a sua assinatura já usou, e quando renovam. O Orkio lê do login do Claude Code neste computador, só na hora, sem guardar nada. Se a Anthropic mudar algo, o medidor some sozinho."
-        checked={view?.enabled !== false}
-        disabled={view === null}
-        onChange={(value) => {
-          claudeUsage.set('', (v) => (v ? { ...v, enabled: value } : v))
-          void ipcCall(() => window.orkio.usage.setEnabled(value), !value).then(() =>
-            claudeUsage.reload('')
-          )
-        }}
-      />
-    </section>
-  )
-}
-
 const SECTION_CLASS = 'flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5'
 
 function PhaseToken({ status }: { status: UpdateStatus }): React.JSX.Element | null {
@@ -192,10 +162,7 @@ function StatusLine({ status }: { status: UpdateStatus }): React.JSX.Element {
 export function AboutSection(): React.JSX.Element {
   const about = useIpcResource('', () => window.orkio.updates.about()).value
   return (
-    <section aria-labelledby="about-title" className={SECTION_CLASS}>
-      <h2 id="about-title" className="text-sm font-medium text-foreground">
-        Sobre
-      </h2>
+    <section aria-label="Sobre" className={SECTION_CLASS}>
       <div className="flex items-center gap-2">
         <span className="text-sm text-foreground">Orkio</span>
         {about && (
@@ -215,67 +182,7 @@ export function AboutSection(): React.JSX.Element {
           Site, privacidade e termos aparecem aqui nas versões publicadas.
         </p>
       )}
-      <DiagnosticsBlock />
     </section>
-  )
-}
-
-/**
- * "Copiar diagnóstico": versões, banco local, filas e conexões (só o estado), para colar ao pedir
- * ajuda. Sem tokens, contas, títulos, prompts ou caminhos (montado e conferido no main).
- */
-function DiagnosticsBlock(): React.JSX.Element {
-  const [text, setText] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const load = async (): Promise<string> => {
-    setLoading(true)
-    const t = await window.orkio.updates.diagnostics()
-    setLoading(false)
-    setText(t)
-    return t
-  }
-  const copy = async (): Promise<void> => {
-    const t = text ?? (await load())
-    await navigator.clipboard.writeText(t).then(
-      () => setCopied(true),
-      () => setCopied(false)
-    )
-  }
-  return (
-    <div
-      role="group"
-      aria-label="Diagnóstico"
-      className="flex flex-col gap-2 border-t border-border-soft pt-4"
-    >
-      <p className="text-xs text-muted-foreground">
-        Para pedir ajuda: versões, banco local, filas e conexões, sem tokens, contas, títulos de
-        tarefas ou caminhos.
-      </p>
-      <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" disabled={loading} onClick={() => void copy()}>
-          {loading && <Spinner />}
-          Copiar diagnóstico
-        </Button>
-        {!text && (
-          <Button size="sm" variant="ghost" onClick={() => void load()}>
-            Ver antes
-          </Button>
-        )}
-        {copied && (
-          <span role="status" className="text-xs text-muted-foreground">
-            Copiado.
-          </span>
-        )}
-      </div>
-      {text && (
-        <Field label="Diagnóstico">
-          {({ id }) => (
-            <Textarea id={id} value={text} readOnly rows={10} className="font-mono text-xs" />
-          )}
-        </Field>
-      )}
-    </div>
   )
 }
 

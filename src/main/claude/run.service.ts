@@ -41,6 +41,7 @@ import {
 } from './policy'
 import { envFileValues, isEnvFile, redactSecrets, redactValues } from '../platform/redact'
 import { MEMORY_MESSAGES } from '../../shared/agent-memory'
+import { NO_EXTRAS, type RunExtras } from '../mcp/run-extras'
 import {
   deliveryOf,
   runInputRecord,
@@ -83,9 +84,16 @@ export interface RunServiceDeps {
     /** Id da sessão (o da sessão retomada, no `--resume`). */
     sessionId: string
     broker: PermissionBroker
+    /** Fase 4: servidores MCP, segredos do agente e skills negadas desta execução. */
+    extras: RunExtras
     onEvent(event: RunLogEvent): void
     onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   }): RunHandle
+  /**
+   * Fase 4: resolve na hora de rodar o que a configuração acrescenta (servidores MCP do Orkio,
+   * segredos do agente, skills desligadas). Sem isto, nada a mais.
+   */
+  extras?(run: { projectId: string; agentKey: string | null }): Promise<RunExtras>
   /** Aliases do git/gh e `push.default`, lidos no começo da execução (política). */
   policyInputs(dir: string): Promise<{ aliases: PolicyAliases; pushDefault: string | null }>
   /** Branch atual do worktree; a política pede quando precisa (push no modo entrega). */
@@ -410,6 +418,18 @@ export class RunService {
           if (runtime.effort) parts.push(`Raciocínio: ${EFFORT_LABELS[runtime.effort]}`)
           this.log(run, { kind: 'info', text: parts.join(' · ') })
         }
+        // Fase 4: os valores dos segredos entram no filtro do log antes de qualquer saída do CLI.
+        const extras = await (
+          this.deps.extras?.({
+            projectId: spec.project.id,
+            agentKey: agent?.key ?? null
+          }) ?? Promise.resolve(NO_EXTRAS)
+        ).catch((): RunExtras => ({
+          ...NO_EXTRAS,
+          notes: ['Não deu para carregar os servidores MCP e segredos do Orkio nesta execução.']
+        }))
+        for (const v of extras.secretValues) run.secrets.add(v)
+        for (const text of extras.notes) this.log(run, { kind: 'info', text })
         const broker = new PermissionBroker(
           (req) => this.onPermission(run, req),
           (input) => this.onRemember(run, input)
@@ -421,6 +441,7 @@ export class RunService {
           prompt: RunService.composePrompt(spec.input, spec.session),
           sessionId,
           broker,
+          extras,
           onEvent: (event) => this.onEvent(run, event),
           onExit: (result) => void this.onExit(run, result)
         })
@@ -513,6 +534,30 @@ export class RunService {
       behavior: 'allow',
       updatedInput: { ...p.input, answers }
     })
+  }
+
+  /** Fase 4: decisões "sempre neste projeto" de todos os projetos (Configurações › Geral). */
+  rememberedRules(): { projectId: string; tool: string; pattern: string; createdAt: string }[] {
+    return this.deps.db
+      .all<{ project_id: string; tool: string; pattern: string; created_at: string }>(
+        'SELECT project_id, tool, pattern, created_at FROM permission_rules ORDER BY created_at DESC LIMIT 500'
+      )
+      .map((r) => ({
+        projectId: r.project_id,
+        tool: r.tool,
+        pattern: r.pattern,
+        createdAt: r.created_at
+      }))
+  }
+
+  /** Fase 4: revoga uma decisão lembrada (o próximo pedido igual volta a perguntar). */
+  revokeRule(projectId: string, tool: string, pattern: string): void {
+    this.deps.db.run(
+      'DELETE FROM permission_rules WHERE project_id = ? AND tool = ? AND pattern = ?',
+      projectId,
+      tool,
+      pattern
+    )
   }
 
   allowRules(projectId: string): AllowRule[] {
@@ -731,7 +776,8 @@ export class RunService {
         aliases: run.aliases,
         repo: github?.mode === 'read' ? github.target : null,
         readOnly: run.spec.access.tools === 'read_only',
-        askEdits: run.spec.agent?.autonomy === 'ask',
+        askEdits:
+          run.spec.agent?.autonomy === 'ask' || (!run.spec.agent && run.spec.askEdits === true),
         delivery: delivery
           ? {
               target: delivery.target,

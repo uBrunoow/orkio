@@ -115,7 +115,7 @@ test('Configurações: versão, canal e "Procurar atualizações"; banner com a 
   await expect(updates.getByRole('button', { name: 'Procurar atualizações' })).toBeDisabled()
   await expect(banner(page)).toHaveCount(0)
   // Sobre: versão; o build do E2E não tem site https de verdade, mas o intermediário é https.
-  await openSettings(page, 'Sobre e diagnóstico')
+  await openSettings(page, 'Sobre')
   await expect(page.getByRole('region', { name: 'Sobre' })).toContainText(APP_VERSION)
   await openSettings(page, 'Atualizações')
 

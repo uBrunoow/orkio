@@ -106,6 +106,21 @@ import { createFlows } from './flows'
 import { late } from './late'
 import { createStop, type StopOptions } from './lifecycle'
 import { createUpdates } from './updates'
+import { homedir } from 'node:os'
+import { VaultService } from '../vault/vault.service'
+import { McpService } from '../mcp/mcp.service'
+import { claudeJsonPath } from '../mcp/claude-mcp'
+import { resolveRunExtras, type RunExtras } from '../mcp/run-extras'
+import { SkillsService } from '../settings/skills.service'
+import {
+  PreferencesService,
+  notificationAllowed,
+  storageUsage
+} from '../settings/preferences.service'
+import { buildCatalog } from '../claude/catalog'
+import { applyGlobalShortcut, clearGlobalShortcut } from '../platform/global-shortcut'
+import { mcpHandlers, prefsHandlers, skillsHandlers, vaultHandlers } from '../ipc/settings.ipc'
+import type { AppPreferences } from '../../shared/preferences'
 
 /** Ao instalar uma atualização: quanto esperar as execuções do Claude Code saírem. */
 const UPDATE_SHUTDOWN_WAIT_MS = 12_000
@@ -156,8 +171,16 @@ export function createApp(): OrkioApp {
       keepAwake: () => keepAwakeRef().evaluate()
     }
   })
+  // Fase 4: avisos do sistema seguem Configurações › Notificações (a config carrega antes de
+  // qualquer aviso: nada notifica antes do `start()`).
+  const prefsRef = late<PreferencesService>('Preferências')
+  const notifyPrefs = (): AppPreferences => prefsRef().get()
   const notify = (title: string, body: string, ref: { projectId: string; taskId: string }): void =>
-    showNotification({ title, body, projectId: ref.projectId, taskId: ref.taskId }, emit)
+    showNotification(
+      { title, body, projectId: ref.projectId, taskId: ref.taskId },
+      emit,
+      notifyPrefs()
+    )
 
   const secrets = new SecureStore(paths.secrets, safeStorage)
   const notion = new NotionConnector({
@@ -185,6 +208,37 @@ export function createApp(): OrkioApp {
     onMigrationNote: (note) => migrationNotes.push(note)
   })
   const configReady = configStore.load().then(() => undefined)
+
+  // Fase 4: Segredos (valores no SecureStore), servidores MCP e skills (config) e preferências.
+  const vault = new VaultService({ store: secrets, config: configStore })
+  const mcp = new McpService({
+    config: configStore,
+    vault,
+    claudeSources: () => ({
+      claudeJson: claudeJsonPath(process.env, homedir()),
+      projects: configStore
+        .get()
+        .projects.map((p) => ({ id: p.id, name: p.name, localPath: p.localPath }))
+    })
+  })
+  const skills = new SkillsService({
+    config: configStore,
+    catalog: (projectDir) => buildCatalog({ projectDir })
+  })
+  const preferences = new PreferencesService({
+    config: configStore,
+    onChange: (p) => void applyGlobalShortcut(p.globalShortcut)
+  })
+  prefsRef.set(preferences)
+  const runExtras = (run: { projectId: string; agentKey: string | null }): Promise<RunExtras> =>
+    resolveRunExtras(
+      {
+        servers: () => configStore.get().mcpServers ?? [],
+        skillsDisabled: (projectId) => skills.disabled(projectId),
+        vault
+      },
+      run
+    )
 
   const projects = new ProjectsService({
     store: configStore,
@@ -267,6 +321,8 @@ export function createApp(): OrkioApp {
           actor,
           emit,
           notify,
+          notifyPrefs,
+          runExtras,
           projects,
           notion,
           github,
@@ -419,6 +475,21 @@ export function createApp(): OrkioApp {
       }
     },
     usage: usageHandlers(claudeUsage, configStore),
+    vault: vaultHandlers(vault),
+    mcp: mcpHandlers(mcp),
+    skills: skillsHandlers(skills),
+    prefs: prefsHandlers({
+      prefs: preferences,
+      runs: () => work?.claude.runs ?? null,
+      projectName: (projectId) => projectById(configStore.get(), projectId)?.name ?? null,
+      storage: () =>
+        storageUsage({
+          runs: paths.runs,
+          worktrees: paths.worktrees,
+          agentMemory: paths.agentMemory,
+          keepPerTask: 10
+        })
+    }),
     openExternal: openExternalHandler((url) => shell.openExternal(url), siteUrlRules(site))
   }
 
@@ -447,6 +518,8 @@ export function createApp(): OrkioApp {
     work?.board.writes.start()
     keepAwake.start()
     updates.start()
+    applyGlobalShortcut(preferences.get().globalShortcut)
+    app.once('will-quit', clearGlobalShortcut)
     // Eventos locais (troca de branch) na hora; depois, os ciclos das automações.
     await projects.watch().catch((error: unknown) => {
       console.error(`[orkio] HeadWatchers: ${errorName(error)}`)
@@ -468,6 +541,8 @@ function createWork(core: {
   actor: () => string
   emit: Emit
   notify: (title: string, body: string, ref: { projectId: string; taskId: string }) => void
+  notifyPrefs: () => AppPreferences
+  runExtras: (run: { projectId: string; agentKey: string | null }) => Promise<RunExtras>
   projects: ProjectsService
   notion: NotionConnector
   github: GitHubConnector
@@ -562,6 +637,7 @@ function createWork(core: {
     agentMemory,
     flowRunner,
     notify: core.notify,
+    runExtras: core.runExtras,
     emit
   })
 
@@ -674,7 +750,7 @@ function createWork(core: {
     store: boardStore,
     board,
     signals,
-    notify: (n) => showNotification(n, emit),
+    notify: (n) => showNotification(n, emit, core.notifyPrefs()),
     onChanged: (projectId) => emit('boardChanged', { projectId })
   })
   scheduler.set(
@@ -786,9 +862,11 @@ function recordMigrationNotes(store: BoardStore, notes: ConfigMigrationNote[]): 
 }
 
 /** Notificação de desktop (opcional por regra). Clique: foca o Orkio e abre a tarefa. */
-function showNotification(n: AutomationNotification, emit: Emit): void {
+function showNotification(n: AutomationNotification, emit: Emit, prefs: AppPreferences): void {
   if (!Notification.isSupported()) return
-  const notification = new Notification({ title: n.title, body: n.body, silent: false })
+  const allowed = notificationAllowed(prefs, n.projectId)
+  if (!allowed.show) return
+  const notification = new Notification({ title: n.title, body: n.body, silent: allowed.silent })
   notification.on('click', () => {
     const win = BrowserWindow.getAllWindows()[0]
     if (win && !win.isDestroyed()) {

@@ -122,6 +122,11 @@ export interface RunSpec {
   /** Já resolvido (mensagem/passo > agente > padrão) e cortado pela versão do CLI. */
   runtime: RuntimeChoice
   timeoutMin: number | null
+  /**
+   * Fase 4: sem agente, "Pergunta antes de editar" (Configurações › Geral). Com agente vale a
+   * autonomia dele.
+   */
+  askEdits?: boolean
 }
 
 /** Modo e comando como o histórico guarda (`agent_runs.mode/command/input_text`). */

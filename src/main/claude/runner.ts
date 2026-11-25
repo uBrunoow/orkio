@@ -31,6 +31,7 @@ import { cliDenyInDelivery, cliDenyOutsideDelivery } from './github-rules'
 import { redactSecrets, sanitizeEnv } from '../platform/redact'
 import { deliveryOf, type RunSpec } from './run-spec'
 import { parseStreamLine } from './stream'
+import type { RunExtras } from '../mcp/run-extras'
 
 export type SpawnFn = typeof nodeSpawn
 export type { BridgeDecision, BridgeRememberReply, BridgeRequest }
@@ -118,6 +119,11 @@ export interface RunnerOptions {
   /** Pasta para o mcp-config temporário (0600, apagado no fim). */
   tmpDir: string
   env: NodeJS.ProcessEnv
+  /**
+   * Fase 4: servidores MCP do Orkio (no mcp-config, com os segredos de cada um), segredos do agente
+   * (ambiente do processo) e skills negadas (deny do `--settings`). Resolvido pelo RunService.
+   */
+  extras?: RunExtras
   onEvent(event: RunLogEvent): void
   onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   spawn?: SpawnFn
@@ -164,12 +170,21 @@ export function sessionArgs(session: RunSpec['session'], sessionId: string): str
 
 /** Argumentos do `claude` para uma execução (puro). */
 export function buildCliArgs(
-  spec: Pick<RunSpec, 'session' | 'access' | 'agent' | 'runtime'>,
-  run: { sessionId: string; mcpConfig: string }
+  spec: Pick<RunSpec, 'session' | 'access' | 'agent' | 'runtime' | 'askEdits'>,
+  run: { sessionId: string; mcpConfig: string; deny?: readonly string[] }
 ): string[] {
+  const base = deliveryOf(spec) ? DELIVERY_RUN_SETTINGS : RUN_SETTINGS
+  // Fase 4: skills desligadas no projeto entram no deny (só regras `Skill(nome)` validadas).
+  const extraDeny = (run.deny ?? []).filter((d) =>
+    /^Skill\([A-Za-z0-9][A-Za-z0-9:._-]{0,99}\)$/.test(d)
+  )
+  const settings =
+    extraDeny.length > 0
+      ? { permissions: { ...base.permissions, deny: [...base.permissions.deny, ...extraDeny] } }
+      : base
   const readOnly = spec.access.tools === 'read_only'
   // Agente que pede antes de editar (Fase 3): nada é aprovado sozinho pelo CLI; a política decide.
-  const askEdits = spec.agent?.autonomy === 'ask'
+  const askEdits = spec.agent?.autonomy === 'ask' || (!spec.agent && spec.askEdits === true)
   const { model, effort } = spec.runtime
   return [
     '-p',
@@ -187,7 +202,7 @@ export function buildCliArgs(
     // ferramenta de permissão do Orkio.
     readOnly || askEdits ? 'manual' : 'acceptEdits',
     '--settings',
-    JSON.stringify(deliveryOf(spec) ? DELIVERY_RUN_SETTINGS : RUN_SETTINGS),
+    JSON.stringify(settings),
     '--mcp-config',
     run.mcpConfig,
     '--permission-prompt-tool',
@@ -215,6 +230,10 @@ export class ClaudeRun {
       this.mcpConfig,
       JSON.stringify({
         mcpServers: {
+          // Servidores do Orkio primeiro; a ponte por último (o nome dela nunca é sobrescrito).
+          ...Object.fromEntries(
+            Object.entries(o.extras?.mcpServers ?? {}).filter(([name]) => name !== BRIDGE_SERVER)
+          ),
           [BRIDGE_SERVER]: {
             command: o.nodePath,
             args: [o.bridgeScript],
@@ -230,11 +249,16 @@ export class ClaudeRun {
       }),
       { mode: 0o600 }
     )
-    const args = buildCliArgs(o.spec, { sessionId: o.sessionId, mcpConfig: this.mcpConfig })
+    const args = buildCliArgs(o.spec, {
+      sessionId: o.sessionId,
+      mcpConfig: this.mcpConfig,
+      deny: o.extras?.deny ?? []
+    })
     const spawn = o.spawn ?? nodeSpawn
     const child = spawn(o.claudeCommand, args, {
       cwd: o.cwd,
-      env: sanitizeEnv(o.env),
+      // Segredos do agente (Fase 4) depois do filtro: os nomes reservados já foram recusados.
+      env: { ...sanitizeEnv(o.env), ...(o.extras?.env ?? {}) },
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
       windowsHide: true
