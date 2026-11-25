@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.14] - 2026-11-25
+
+### Mudado
+
+- feat(sessao): terminal embutido, Continuar no Claude, editar mensagem e ramificar daqui (Fase 2).
+
 ## [0.2.13] - 2026-11-25
 
 ### Mudado
