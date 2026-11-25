@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.19] - 2026-11-25
+
+### Mudado
+
+- feat(ui): Configurações no estilo do Compozy, Quadro e automações em abas e seletor de projeto por tela.
+
 ## [0.2.18] - 2026-11-25
 
 ### Mudado
