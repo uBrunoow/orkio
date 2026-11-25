@@ -26,7 +26,15 @@ import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
 import { activityByTask, type TaskActivity } from '../overview/task-activity'
-import { attentionCount, boardEntries, singleBoardColumns, visibleEntries } from './board-model'
+import {
+  attentionCount,
+  boardEntries,
+  boardSelection,
+  singleBoardColumns,
+  visibleEntries
+} from './board-model'
+import { BoardProjectPicker } from './BoardProjectPicker'
+import { MultiBoard } from './MultiBoard'
 import { usePersonalTasks } from './usePersonalTasks'
 import { useOverview } from '../overview/useOverview'
 import { useBoard } from './useBoard'
@@ -37,14 +45,17 @@ import type { CardActions } from './BoardCardView'
 import type { RunMode } from '../../../../shared/task-setup'
 import type { AutomationStatus } from '../../../../shared/automation'
 import type { ProjectView } from '../../../../shared/projects'
+import type { BoardTaskRef } from '../../../../shared/overview'
 import { formatTime } from '../../lib/format'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { SignalsMessages } from '../notion-workspace/SignalsMessages'
 
 export function BoardPage({
   project,
+  linkedProjects,
   route,
   onRoute,
+  chooseProject,
   onOpenIntegrations,
   onOpenProjects,
   onOpenBoardSettings,
@@ -52,14 +63,62 @@ export function BoardPage({
 }: {
   /** Projeto atual vinculado ao Notion (null = nenhum). */
   project: ProjectView | null
+  /** Projetos vinculados ao Notion (os que o seletor oferece). */
+  linkedProjects: readonly ProjectView[]
   route: Extract<Route, { name: 'board' }>
   onRoute(route: Route): void
+  /** Troca o projeto atual do app (um projeto escolhido no seletor). */
+  chooseProject(id: string): void
   onOpenIntegrations(): void
   onOpenProjects(): void
   onOpenBoardSettings(projectId: string): void
-  onOpenTask(taskId: string): void
+  onOpenTask(ref: BoardTaskRef): void
 }): React.JSX.Element {
-  if (!project) {
+  const linkedIds = useMemo(() => linkedProjects.map((p) => p.id), [linkedProjects])
+  const selection = boardSelection(route, linkedIds, project?.id ?? null)
+  const { view, filter } = route
+  const keep = { ...(view ? { view } : {}), ...(filter ? { filter } : {}) }
+  const openSingle = (id: string): void => {
+    chooseProject(id)
+    onRoute(boardRoute({ projectId: id, ...keep }))
+  }
+  const manyIds = selection.kind === 'many' ? selection.projectIds : null
+  const chosen = manyIds ? linkedProjects.filter((p) => manyIds.includes(p.id)) : []
+  const picker = (
+    <BoardProjectPicker
+      projects={linkedProjects}
+      selection={
+        manyIds ?? (selection.kind === 'one' && selection.projectId ? [selection.projectId] : [])
+      }
+      all={route.projectIds === 'all' && manyIds !== null}
+      current={project?.id ?? null}
+      onChange={({ projectIds }) => {
+        if (projectIds !== 'all' && projectIds.length === 1) openSingle(projectIds[0]!)
+        else onRoute(boardRoute({ projectIds, ...keep }))
+      }}
+    />
+  )
+
+  if (manyIds) {
+    return (
+      <MultiBoard
+        route={route}
+        projects={chosen}
+        picker={picker}
+        onRoute={onRoute}
+        onOpenTask={onOpenTask}
+        onOpenIntegrations={onOpenIntegrations}
+        onOpenBoardSettings={onOpenBoardSettings}
+        onOpenSingle={openSingle}
+      />
+    )
+  }
+
+  const single =
+    selection.kind === 'one' && selection.projectId
+      ? (linkedProjects.find((p) => p.id === selection.projectId) ?? project)
+      : project
+  if (!single) {
     return (
       <div className="flex flex-col gap-5 p-4">
         <ScreenBarStart>
@@ -76,13 +135,14 @@ export function BoardPage({
   }
   return (
     <Board
-      projectId={project.id}
-      projectName={project.name}
+      projectId={single.id}
+      projectName={single.name}
+      picker={picker}
       route={route}
       onRoute={onRoute}
       onOpenIntegrations={onOpenIntegrations}
       onOpenBoardSettings={onOpenBoardSettings}
-      onOpenTask={onOpenTask}
+      onOpenTask={(taskId) => onOpenTask({ projectId: single.id, taskId })}
     />
   )
 }
@@ -90,6 +150,7 @@ export function BoardPage({
 function Board({
   projectId,
   projectName,
+  picker,
   route,
   onRoute,
   onOpenIntegrations,
@@ -98,6 +159,7 @@ function Board({
 }: {
   projectId: string
   projectName: string
+  picker: React.ReactNode
   route: Extract<Route, { name: 'board' }>
   onRoute(route: Route): void
   onOpenIntegrations(): void
@@ -169,6 +231,7 @@ function Board({
   const header = (): React.JSX.Element => (
     <ScreenBarStart>
       <ScreenTitle look={5}>Quadro</ScreenTitle>
+      {picker}
     </ScreenBarStart>
   )
 
@@ -221,6 +284,7 @@ function Board({
     <div className="flex h-full min-h-0 flex-col gap-3 p-3.5">
       <ScreenBarStart>
         <ScreenTitle look={5}>Quadro</ScreenTitle>
+        {picker}
         <SegmentedControl
           label="Visualização do quadro"
           size="sm"

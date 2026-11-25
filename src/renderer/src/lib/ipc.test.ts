@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSource, IPC_FAILURE, ipcResult, ResultFailure, unwrap } from './ipc'
+import { createSource, IPC_FAILURE, ipcResult, manySnapshot, ResultFailure, unwrap } from './ipc'
 
 function deferred<T>(): { promise: Promise<T>; resolve(v: T): void; reject(e: unknown): void } {
   let resolve!: (v: T) => void
@@ -119,5 +119,31 @@ describe('ipcResult / unwrap', () => {
       error: IPC_FAILURE
     })
     expect(() => unwrap({ ok: false, error: { code: 'c', message: 'm' } })).toThrow(ResultFailure)
+  })
+})
+
+describe('manySnapshot', () => {
+  it('devolve o mesmo array enquanto cada chave tem o mesmo estado', async () => {
+    const src = createSource<string>({ load: (k) => Promise.resolve(`v-${k}`) })
+    const offA = src.subscribe('a', () => undefined)
+    const offB = src.subscribe('b', () => undefined)
+    await flush()
+    const first = manySnapshot(src, ['a', 'b'], null)
+    expect(first.map((s) => s.value)).toEqual(['v-a', 'v-b'])
+    expect(manySnapshot(src, ['a', 'b'], first)).toBe(first)
+    src.set('b', 'novo')
+    const next = manySnapshot(src, ['a', 'b'], first)
+    expect(next).not.toBe(first)
+    expect(next.map((s) => s.value)).toEqual(['v-a', 'novo'])
+    expect(next[0]).toBe(first[0])
+    offA()
+    offB()
+  })
+
+  it('troca o array quando as chaves mudam', () => {
+    const src = createSource<string>({ load: () => new Promise(() => undefined) })
+    const first = manySnapshot(src, ['a'], null)
+    expect(manySnapshot(src, ['a', 'b'], first)).not.toBe(first)
+    expect(manySnapshot(src, [], first)).toEqual([])
   })
 })

@@ -2,7 +2,7 @@
  * Chamadas ao main pelo renderer: uma regra para falha de IPC (exceção do `invoke`, ex.: processo
  * principal caiu) e para carregar dados com estado, assinatura de eventos, poll e foco.
  */
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { Result, ResultError } from '../../../shared/result'
 
 export const IPC_FAILURE_MESSAGE =
@@ -180,6 +180,43 @@ export function useSource<T, A>(source: Source<T, A>, key: string | null): Sourc
     [source, key]
   )
   return useSyncExternalStore(subscribe, () => (key === null ? EMPTY : source.get(key)))
+}
+
+/**
+ * Foto de várias chaves de uma fonte: devolve `last` enquanto cada item for `===` ao
+ * `source.get(key)` (o `useSyncExternalStore` exige foto estável), senão um array novo.
+ */
+export function manySnapshot<T, A>(
+  source: Pick<Source<T, A>, 'get'>,
+  keys: readonly string[],
+  last: readonly SourceState<T>[] | null
+): readonly SourceState<T>[] {
+  const next = keys.map((key) => source.get(key))
+  if (last && last.length === next.length && next.every((s, i) => s === last[i])) return last
+  return next
+}
+
+/** Lê várias chaves de uma fonte (ex.: um quadro por projeto), na ordem de `keys`. */
+export function useSourceMany<T, A>(
+  source: Source<T, A>,
+  keys: readonly string[]
+): readonly SourceState<T>[] {
+  // Chaves vazias não existem aqui (ids de projeto); o separador não aparece num id.
+  const joined = keys.join('\u0000')
+  const list = useMemo(() => (joined === '' ? [] : joined.split('\u0000')), [joined])
+  const last = useRef<readonly SourceState<T>[] | null>(null)
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const offs = list.map((key) => source.subscribe(key, listener))
+      return () => offs.forEach((off) => off())
+    },
+    [source, list]
+  )
+  const getSnapshot = useCallback(() => {
+    last.current = manySnapshot(source, list, last.current)
+    return last.current
+  }, [source, list])
+  return useSyncExternalStore(subscribe, getSnapshot)
 }
 
 class LatestBox<T> {
