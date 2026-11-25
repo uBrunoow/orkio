@@ -370,6 +370,20 @@ export const TASK_EVENTS = {
       agent: req(str),
       by: req(field(oneOf(['manual', 'rule', 'orchestrator'])))
     }
+  }),
+  /** Fase 2: "Continuar no Claude": a sessão da tarefa foi para o seu terminal (travada). */
+  handoff_started: meta({
+    source: 'manual',
+    groups: ['claude'],
+    actor: 'you',
+    detail: { sessionId: str }
+  }),
+  /** Você devolveu a sessão ao Orkio: o Claude continua o passo ou o passo está feito. */
+  handoff_returned: meta({
+    source: 'manual',
+    groups: ['claude'],
+    actor: 'you',
+    detail: { mode: req(field(oneOf(['continue', 'done', 'release']))) }
   })
 } as const satisfies Record<string, KindMeta>
 

@@ -3,6 +3,7 @@
  * projeto, semana e atividade recente, de todos os projetos. Só tipos e agregações puras (main e
  * renderer); o `OverviewService` (main) lê os stores e chama estas funções. Nada de rede.
  */
+import { HANDOFF_TEXT } from './handoff'
 import type { BoardStage } from './board'
 import type { TaskSignals } from './task-signals'
 import { FLOW_PAUSES, waitingKind } from './flow-run-state'
@@ -40,6 +41,8 @@ export type WaitingKind =
   | 'question'
   | 'permission'
   | 'notion_write'
+  /** Fase 2: a sessão do Claude Code está com você no terminal ("Continuar no Claude"). */
+  | 'handoff'
 
 export interface WaitingItem {
   key: string
@@ -269,6 +272,18 @@ export function notionWaitingItem(
     what: `Mudança ainda não chegou ao Notion (${input.attempts} tentativas)`,
     since: input.since,
     section: 'history'
+  }
+}
+
+/** "Continuar no Claude": a sessão está com você até você devolver ao Orkio. */
+export function handoffWaitingItem(handoff: { since: string }, task: OverviewTask): WaitingItem {
+  return {
+    key: `handoff:${task.taskId}`,
+    kind: 'handoff',
+    task,
+    what: HANDOFF_TEXT.state,
+    since: handoff.since,
+    section: 'claude'
   }
 }
 

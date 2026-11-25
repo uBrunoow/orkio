@@ -10,6 +10,7 @@ function parts(log: string[], active: { queued: boolean }[]): StopParts {
         cancelAll: step('runs.cancelAll'),
         activeRuns: () => active
       },
+      terminals: { stopAll: step('terminals.stopAll') },
       writes: { stop: step('writes.stop') },
       scheduler: { stop: step('scheduler.stop') },
       overview: { dispose: step('overview.dispose') }
@@ -29,6 +30,7 @@ describe('createStop', () => {
     expect(log).toEqual([
       'flows.dispose',
       'runs.cancelAll',
+      'terminals.stopAll',
       'writes.stop',
       'scheduler.stop',
       'overview.dispose',

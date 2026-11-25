@@ -70,6 +70,8 @@ export interface TaskViewInput {
   refreshSignals(): void
   /** Seção a mostrar ao abrir (sino, notificação): fluxo, Claude Code ou histórico. */
   focusSection: TaskSection | null
+  /** Fase 2: abre a aba Terminal da tarefa. */
+  openTerminal?: () => void
 }
 
 export interface TaskView extends TaskViewInput {
@@ -133,6 +135,7 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
   const runs = useTaskRuns(projectId, taskId, (m) => {
     if (touchesTask(m)) bump()
   })
+  const reloadRuns = runs.reload
 
   const [flowRuns, setFlowRuns] = useState<FlowRunView[] | null>(null)
   const projectFlows = useProjectFlows(projectId).value
@@ -148,9 +151,12 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
   useEffect(
     () =>
       window.orkio.taskFlows.onChanged((e) => {
-        if (e.taskId === taskId) bump()
+        if (e.taskId !== taskId) return
+        bump()
+        // "Continuar no Claude" avisa pelo mesmo evento: o estado da sessão muda.
+        void reloadRuns()
       }),
-    [taskId, bump]
+    [taskId, bump, reloadRuns]
   )
   useEffect(() => {
     let active = true

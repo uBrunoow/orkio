@@ -6,7 +6,8 @@ import type { AgentBadge } from '../../../../shared/agent'
 import type { CatalogCommand, TaskRunsState } from '../../../../shared/agent-run'
 import { runtimeLabel, type RuntimeChoice } from '../../../../shared/agent-runtime'
 import { Alert } from '../../components/Alert'
-import { CloseIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/icons'
+import { ClaudeLogo, CloseIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/icons'
+import { HANDOFF_TEXT } from '../../../../shared/handoff'
 import { formatBytes } from '../../lib/format'
 import { ATTACHMENT_ACCEPT } from '../../../../shared/attachments'
 import { checkNewAttachments, type PendingAttachment } from './attachments-ui'
@@ -46,7 +47,9 @@ export function SessionComposer({
   flowRunning,
   autopilotStep = null,
   onSent,
-  onNewSession
+  onNewSession,
+  onContinueInClaude,
+  continuing = false
 }: {
   projectId: string
   taskId: string
@@ -57,6 +60,9 @@ export function SessionComposer({
   autopilotStep?: string | null
   onSent(state: TaskRunsState): void
   onNewSession(): void
+  /** Fase 2: pausa o Orkio e leva esta sessão para o terminal ("Continuar no Claude"). */
+  onContinueInClaude?(): void
+  continuing?: boolean
 }): React.JSX.Element {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
@@ -315,6 +321,18 @@ export function SessionComposer({
                 ? `Continua a sessão${latest?.command ? ` de /${latest.command}` : ''} na pasta de trabalho da tarefa.`
                 : 'Começa uma sessão nova com o resumo da tarefa no Notion.'}
         </p>
+        {onContinueInClaude && resumes && (
+          <Button
+            size="xs"
+            variant="ghost"
+            title={HANDOFF_TEXT.startHint}
+            disabled={continuing}
+            onClick={onContinueInClaude}
+          >
+            <ClaudeLogo aria-hidden="true" />
+            {continuing ? 'Abrindo…' : HANDOFF_TEXT.start}
+          </Button>
+        )}
         {!activeRunId && !flowRunning && (
           <Button size="xs" variant="ghost" onClick={onNewSession}>
             Nova sessão…

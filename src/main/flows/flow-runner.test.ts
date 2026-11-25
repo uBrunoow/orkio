@@ -267,6 +267,26 @@ describe('FlowRunner', () => {
     expect(v.history.map((h) => h.status)).toEqual(['failed', 'skipped', 'waiting'])
   })
 
+  it('"Passo feito" (Continuar no Claude): o comando parado conta como certo e o fluxo segue', async () => {
+    const runner = makeRunner()
+    const { id } = await runner.startManual('p1', 't1')
+    expect(runner.activeFor('t1')).toEqual({ id, status: 'running', claudeStep: true })
+    // Só com o passo parado: rodando, é recusado.
+    await expect(runner.completeByYou(id)).rejects.toBeInstanceOf(FlowError)
+    finish(runner, 'run-1', 'cancelled')
+    await flush()
+    expect(runner.activeFor('t1')).toMatchObject({ status: 'paused', claudeStep: true })
+    await runner.completeByYou(id)
+    const v = runner.view(id)
+    expect(v.status).toBe('waiting_gate')
+    expect(v.history.map((h) => h.status)).toEqual(['ok', 'waiting'])
+    expect(v.history[0]?.message).toBe(FLOW_MESSAGES.doneByYou)
+    expect(started).toHaveLength(1) // o Claude não rodou de novo
+    // No gate (não é comando do Claude Code): "Passo feito" não vale.
+    await expect(runner.completeByYou(id)).rejects.toBeInstanceOf(FlowError)
+    expect(runner.activeFor('t1')).toMatchObject({ status: 'waiting_gate', claudeStep: false })
+  })
+
   it('"Responder e continuar": o passo parado segue na mesma sessão com a sua resposta (uma vez só)', async () => {
     const runner = makeRunner()
     const { id } = await runner.startManual('p1', 't1')

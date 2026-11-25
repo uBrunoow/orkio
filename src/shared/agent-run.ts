@@ -2,6 +2,7 @@
  * Execuções do Claude Code numa tarefa (Etapa 4A): tipos compartilhados main ↔ renderer.
  * O log é normalizado a partir do `stream-json` do CLI (ver main/claude/stream.ts).
  */
+import type { HandoffView } from './handoff'
 import type { BranchKind } from './slug'
 import type { RuntimeChoice } from './agent-runtime'
 import { isScratchPath } from './orkio-scratch'
@@ -164,6 +165,8 @@ export interface TaskRunsState {
   runs: AgentRunView[]
   activeRunId: string | null
   workspace: TaskWorkspace | null
+  /** Fase 2: a sessão da tarefa está com você no terminal ("Continuar no Claude"). */
+  handoff?: HandoffView | null
 }
 
 /** Antes de rodar: briefing montado do Notion (editável) e a branch que será usada. */

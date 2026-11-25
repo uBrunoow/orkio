@@ -12,12 +12,15 @@ export function TaskScreen({
   project,
   taskId,
   section,
-  onBackToBoard
+  onBackToBoard,
+  onOpenTerminal
 }: {
   project: ProjectView | null
   taskId: string
   section: TaskSection | null
   onBackToBoard(): void
+  /** Fase 2: aba Terminal da tarefa. */
+  onOpenTerminal?(): void
 }): React.JSX.Element {
   const projectId = project?.id ?? null
   const board = useBoard(projectId)
@@ -83,6 +86,7 @@ export function TaskScreen({
       refreshSignals={() => void refreshSignals(true)}
       focusSection={section}
       onOpenBoard={onBackToBoard}
+      {...(onOpenTerminal ? { openTerminal: onOpenTerminal } : {})}
     />
   )
 }

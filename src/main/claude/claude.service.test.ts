@@ -283,6 +283,35 @@ describe('ClaudeService', () => {
     })
   })
 
+  it('sessão com você no terminal (Continuar no Claude): nada do Orkio roda na tarefa', async () => {
+    const handoff = {
+      projectId: 'p1',
+      taskId: 'task-1',
+      sessionId: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc',
+      since: '2026-11-24T10:00:00.000Z',
+      terminalId: null,
+      flowStep: false
+    }
+    const { service, runs, worktrees } = setup({
+      handoff: (taskId) => (taskId === 'task-1' ? handoff : null),
+      terminalsRunning: () => true
+    })
+    expect(await service.startRun(flowRequest())).toMatchObject({
+      ok: false,
+      error: { code: 'handoff' }
+    })
+    expect(
+      await service.send({ projectId: 'p1', taskId: 'task-1', text: 'continue' })
+    ).toMatchObject({ ok: false, error: { code: 'handoff' } })
+    expect(await service.cleanup('p1', 'task-1', false)).toMatchObject({
+      ok: false,
+      error: { code: 'handoff' }
+    })
+    expect(runs.start).not.toHaveBeenCalled()
+    expect(worktrees.remove).not.toHaveBeenCalled()
+    expect(await service.state('p1', 'task-1')).toMatchObject({ ok: true, value: { handoff } })
+  })
+
   it('tarefa já com execução: RunBusyError vira o código busy', async () => {
     const { service, runs } = setup()
     runs.start.mockRejectedValueOnce(new RunBusyError())

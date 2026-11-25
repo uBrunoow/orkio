@@ -60,6 +60,8 @@ import {
   IconHelpCircle,
   IconInfoCircle,
   IconTool,
+  IconGitFork,
+  IconArrowBackUpDouble,
   IconFileText,
   IconDots,
   IconLayoutGrid,
@@ -172,3 +174,5 @@ export const ReopenIcon = adapt(IconArrowBackUp)
 
 export const BrainIcon = adapt(IconBrain)
 export const CheckIcon = adapt(IconCheck)
+export const ForkIcon = adapt(IconGitFork)
+export const HandBackIcon = adapt(IconArrowBackUpDouble)
