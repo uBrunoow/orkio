@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.13] - 2026-11-25
+
+### Mudado
+
+- feat(tarefas): "Como deve rodar?" com fluxos nativos, configuração por tarefa e kanban derivado (Fase 1).
+
 ## [0.2.12] - 2026-11-25
 
 ### Adicionado
