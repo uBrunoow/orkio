@@ -10,6 +10,8 @@
 import type { StageRole } from './board'
 import { ACTION_VARS, ORKIO_ACTIONS } from './orkio-actions'
 import { BRIEFING_PATH, REVIEW_PATH } from './orkio-scratch'
+import { REVIEW_DIFF_PATH, REVIEW_MAX_ROUNDS, REVIEW_VARS } from './review-rounds'
+import type { FlowEndTarget } from './flow-final'
 import { FLOW_END, FLOW_YES, type Condition, type Flow, type Step } from './task-flow'
 import { RUN_MODE_TEXT, type RunMode } from './task-setup'
 
@@ -29,12 +31,14 @@ export const LINES_EXTRACTOR = 'linhas_orkio'
 
 /** Variáveis que os pedidos nativos pedem ao Claude no fim da resposta. */
 export const NATIVE_VARS = {
-  blockers: 'bloqueios',
   slicesLeft: 'restam'
 } as const
 
-/** Voltas de correção depois da revisão e fatias no máximo (trava contra laço). */
-export const NATIVE_LIMITS = { fixes: 2, slices: 12, revise: 3 } as const
+/**
+ * Rodadas de revisão (a 1ª + correções), fatias no máximo (trava contra laço) e "Pedir mudanças"
+ * por gate.
+ */
+export const NATIVE_LIMITS = { reviewRounds: REVIEW_MAX_ROUNDS, slices: 12, revise: 3 } as const
 
 const v = (key: string): string => `{{${key}}}`
 
@@ -49,8 +53,21 @@ export const NATIVE_PROMPTS = {
     'Spec e plano aprovados. Implemente seguindo o plano, com testes e a suíte verde. Faça commits pequenos com mensagens claras. Não faça push nem abra PR: o Orkio cuida disso depois.',
   slicePlan: `Quebre a tarefa descrita em ${BRIEFING_PATH} em fatias pequenas e independentes, cada uma entregável sozinha com teste (de 2 a 8). Para cada fatia: o objetivo, os arquivos e como testar. Não altere arquivos. Responda em pt-BR com as fatias numeradas e, na última linha, @orkio fatias=<quantidade>.`,
   slice: `Implemente a próxima fatia ainda não feita do plano aprovado (uma só), com teste e a suíte verde, e faça o commit dela. Não faça push. Na última linha da resposta, escreva @orkio ${NATIVE_VARS.slicesLeft}=<quantas fatias faltam depois desta>.`,
-  review: `Revise o trabalho desta tarefa: o diff da branch contra a base (git diff e git log), comparado ao pedido em ${BRIEFING_PATH}. Procure primeiro o que quebra (bugs, casos de borda, segurança), depois a aderência ao pedido e às convenções. Liste cada achado com arquivo, linha e a correção sugerida, separando os que bloqueiam. Não altere arquivos. Na última linha, escreva @orkio ${NATIVE_VARS.blockers}=<quantos achados bloqueiam>.`,
-  fix: 'O revisor apontou problemas que bloqueiam (revisão abaixo). Corrija cada um com testes, rode a suíte e faça o commit. Não faça push.',
+  review: `Revise o trabalho desta tarefa (rodada ${v(REVIEW_VARS.round)} de ${REVIEW_MAX_ROUNDS}). O pedido está em ${BRIEFING_PATH}; o diff da branch contra a base, os commits e os arquivos novos estão em ${REVIEW_DIFF_PATH} (leia esse arquivo em vez de rodar git). Rodada anterior: ${v(REVIEW_VARS.previous)}; se houver, confira se cada bloqueio dela foi corrigido. Leia o código que precisar, só leitura: não altere arquivos nem rode comandos que mudam algo. Procure primeiro o que quebra (bugs, casos de borda, segurança), depois a aderência ao pedido e às convenções do projeto.
+
+Responda em pt-BR exatamente com estas três seções:
+
+## Bloqueios
+- [B-1] arquivo:linha — o problema observável e a correção sugerida
+
+## Detalhes
+- [D-1] arquivo:linha — o que melhorar (não impede a entrega)
+
+## Evidência
+O que você conferiu (arquivos, testes, critérios do pedido) e o que não deu para conferir.
+
+Cada achado tem um ID estável: numa rodada seguinte, o mesmo problema mantém o mesmo ID e problema novo ganha número novo. Seção sem achados: escreva "- Nenhum". Só é bloqueio o que impede entregar (bug, quebra, falta algo pedido); o resto é detalhe.`,
+  fix: `O revisor apontou bloqueios na rodada ${v(REVIEW_VARS.round)} (estão em ${v(REVIEW_VARS.file)}). Corrija cada bloqueio, com testes, rode a suíte e faça o commit. Os detalhes são opcionais. Não faça push.`,
   pr: `Abra a pull request desta branch com gh pr create: título curto no padrão do repositório, descrição com o que mudou, como testar e o link da tarefa (${v('notion_url')}). Se a PR já existir, atualize a descrição com gh pr edit. Não faça merge.`,
   prCommentsPlan: `Leia ${REVIEW_PATH} (comentários de revisão não resolvidos da PR #${v(ACTION_VARS.reviewPr)}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.`,
   prCommentsApply: `Corrija os comentários de revisão não resolvidos da PR (estão em ${REVIEW_PATH}), rode os testes, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).`,
@@ -118,7 +135,18 @@ function withEvidence(text: string, evidence: boolean): string {
   return evidence ? `${text}\n\n${EVIDENCE_LINE}` : text
 }
 
-/** Evidência (se pedida) → revisão e correções (se há revisor) → diff → push → PR. */
+const end = (id: string, name: string, key: string, value: string, to: FlowEndTarget): Step =>
+  jump(id, name, { type: 'var', key, op: 'eq', value }, to)
+
+/**
+ * Evidência (se pedida) → revisão até ficar limpo (se há revisor) → diff → push → PR.
+ *
+ * Revisão até ficar limpo (Fase 3): o Orkio grava o diff para o revisor (`review_prepare`), o
+ * revisor (outro agente, só leitura, sessão nova) responde com Bloqueios/Detalhes/Evidência, o
+ * Orkio grava a rodada e decide (`review_record`): limpo segue; travado (mesmos bloqueios) e
+ * esgotado (limite de rodadas) encerram o fluxo com esse final; senão quem implementou corrige e
+ * o revisor olha de novo.
+ */
 function deliverTail(
   implementStep: string,
   opts: NativeFlowOptions
@@ -129,7 +157,7 @@ function deliverTail(
       gate(
         'conferir-evidencia',
         'Conferir a evidência',
-        'Confira a evidência (testes rodados e como cada critério foi verificado). “Pedir ajustes” volta para quem implementa.',
+        'Confira a evidência (testes rodados e como cada critério foi verificado). “Pedir mudanças” volta para quem implementa.',
         'result',
         implementStep
       )
@@ -138,34 +166,62 @@ function deliverTail(
   const tail: Step[] = []
   if (opts.review) {
     main.push(
+      {
+        id: 'preparar-revisao',
+        name: 'Preparar a revisão (diff para o revisor)',
+        type: 'orkio_action',
+        action: ORKIO_ACTIONS.review_prepare.id
+      },
       prompt('revisar', 'Revisão (outro agente, só leitura)', NATIVE_PROMPTS.review, 30, {
         readOnly: true,
-        agent: 'reviewer',
-        extract: { extractor: LINES_EXTRACTOR }
+        agent: 'reviewer'
       }),
+      {
+        id: 'registrar-revisao',
+        name: 'Registrar a rodada de revisão',
+        type: 'orkio_action',
+        action: ORKIO_ACTIONS.review_record.id
+      },
+      end(
+        'revisao-travada',
+        'Os mesmos bloqueios voltaram? (travado)',
+        REVIEW_VARS.verdict,
+        'travado',
+        '$fim:travado'
+      ),
+      end(
+        'revisao-esgotada',
+        `Chegou ao limite de ${NATIVE_LIMITS.reviewRounds} rodadas? (esgotado)`,
+        REVIEW_VARS.verdict,
+        'esgotado',
+        '$fim:esgotado'
+      ),
       jump(
         'tem-bloqueios',
-        `Revisão pediu correções? (até ${NATIVE_LIMITS.fixes} voltas)`,
-        {
-          type: 'all',
-          of: [
-            { type: 'var', key: NATIVE_VARS.blockers, op: 'exists' },
-            { type: 'var', key: NATIVE_VARS.blockers, op: 'neq', value: '0' },
-            { type: 'visits', step: 'corrigir', lt: NATIVE_LIMITS.fixes }
-          ]
-        },
+        'A revisão pediu correções?',
+        { type: 'var', key: REVIEW_VARS.verdict, op: 'eq', value: 'corrigir' },
         'corrigir'
       )
     )
     tail.push(
-      prompt('corrigir', 'Corrigir o que a revisão apontou', NATIVE_PROMPTS.fix, 60, {
-        withLastResult: true
-      }),
+      prompt('corrigir', 'Corrigir os bloqueios da revisão', NATIVE_PROMPTS.fix, 60),
       jump(
         'revisar-de-novo',
         'Revisar de novo',
-        { type: 'all', of: [{ type: 'visits', step: 'corrigir', lt: NATIVE_LIMITS.fixes + 1 }] },
-        'revisar'
+        {
+          type: 'all',
+          // Trava de segurança: quem conta as rodadas é o `review_record` (esgotado). Cada
+          // "Pedir mudanças" no gate do diff começa outra série, então a trava cobre todas.
+          of: [
+            {
+              type: 'visits',
+              step: 'corrigir',
+              lt: NATIVE_LIMITS.reviewRounds * (NATIVE_LIMITS.revise + 1)
+            }
+          ]
+        },
+        'preparar-revisao',
+        '$fim:esgotado'
       )
     )
   }
@@ -173,8 +229,9 @@ function deliverTail(
     gate(
       'ver-diff',
       'Conferir o diff',
-      'Confira o diff antes de enviar. Aprovar envia a branch e abre a PR; recusar encerra sem enviar nada.',
-      'diff'
+      'Confira o diff antes de enviar. Aprovar envia a branch e abre a PR; “Pedir mudanças” volta para quem implementa com o seu comentário; recusar encerra sem enviar nada.',
+      'diff',
+      implementStep
     ),
     {
       id: 'push',
@@ -286,9 +343,9 @@ export function nativePrCommentsFlow(mode: RunMode): Flow {
       },
       jump(
         'sem-comentarios',
-        'Nenhum comentário pendente?',
+        'Nenhum comentário pendente? (nada a fazer)',
         { type: 'var', key: ACTION_VARS.reviewCount, op: 'eq', value: '0' },
-        FLOW_END
+        '$fim:nada'
       ),
       ...(approve
         ? [

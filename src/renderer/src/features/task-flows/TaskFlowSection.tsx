@@ -50,7 +50,7 @@ const STEP_STATUS: Record<FlowStepStatus, string> = {
   interrupted: 'interrompido',
   approved: 'aprovado',
   rejected: 'recusado',
-  revised: 'ajustes pedidos'
+  revised: 'mudanças pedidas'
 }
 
 /** "passo 3 de 7": o passo atual entre os que contam (sem os que o fluxo não precisou). */
@@ -675,7 +675,7 @@ function GateCard({
       )}
       {revising && revise && (
         <form
-          aria-label="Pedir ajustes"
+          aria-label="Pedir mudanças"
           className="flex flex-col gap-2"
           onSubmit={(e) => {
             e.preventDefault()
@@ -683,8 +683,8 @@ function GateCard({
           }}
         >
           <TextAreaField
-            label="O que ajustar"
-            description={`${reviseStep ? `“${reviseStep}” roda de novo na mesma conversa com o seu pedido` : 'O passo roda de novo na mesma conversa com o seu pedido'}; depois esta aprovação volta. Ajuste ${revise.used + 1} de ${revise.max}.`}
+            label="O que mudar"
+            description={`${reviseStep ? `“${reviseStep}” roda de novo na mesma conversa com o seu comentário (nada do que já foi feito se perde)` : 'O passo roda de novo na mesma conversa com o seu comentário (nada do que já foi feito se perde)'}; depois esta aprovação volta. Pedido ${revise.used + 1} de ${revise.max}.`}
             value={adjust}
             rows={3}
             onChange={(v) => setAdjust(v.slice(0, MAX_PROMPT_CHARS))}
@@ -713,12 +713,12 @@ function GateCard({
               disabled={busy || limitReached}
               onClick={() => setRevising(true)}
             >
-              {limitReached ? `Limite de ajustes atingido (${revise.max})` : 'Pedir ajustes…'}
+              {limitReached ? `Limite de pedidos atingido (${revise.max})` : 'Pedir mudanças…'}
             </Button>
           ) : (
             // Sem ajuste pelo gate: o pedido vai pelo campo da sessão (o texto chega ao Claude).
             <Button size="sm" variant="outline" onClick={view.focusComposer}>
-              Pedir ajuste…
+              Pedir mudanças…
             </Button>
           )}
           <Button size="sm" variant="ghost" onClick={onReject}>

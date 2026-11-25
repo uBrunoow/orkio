@@ -90,7 +90,14 @@ describe('buildCliArgs', () => {
   it('agente: instruções no --append-system-prompt; permissões iguais', () => {
     const base = args()
     const a = args({
-      agent: { key: 'k', name: 'Ana', prompt: 'Você é Ana.', model: null, effort: null },
+      agent: {
+        key: 'k',
+        name: 'Ana',
+        prompt: 'Você é Ana.',
+        model: null,
+        effort: null,
+        autonomy: 'edits'
+      },
       runtime: { model: 'sonnet' }
     })
     expect(after(a, '--append-system-prompt')).toBe('Você é Ana.')
@@ -124,6 +131,24 @@ describe('buildCliArgs', () => {
     const plain = args()
     expect(plain).not.toContain('--disallowedTools')
     expect(after(plain, '--permission-mode')).toBe('acceptEdits')
+  })
+
+  it('Fase 3: agente que pede antes de agir — nada aprovado sozinho, ferramentas completas', () => {
+    const agent = {
+      key: 'k',
+      name: 'Ana',
+      prompt: 'Você é Ana.',
+      model: null,
+      effort: null,
+      autonomy: 'ask' as const
+    }
+    const a = args({ agent })
+    expect(after(a, '--permission-mode')).toBe('manual')
+    expect(a).not.toContain('--disallowedTools')
+    expect(after(a, '--permission-prompt-tool')).toBe(BRIDGE_PROMPT_TOOL)
+    expect(after(args({ agent: { ...agent, autonomy: 'edits' } }), '--permission-mode')).toBe(
+      'acceptEdits'
+    )
   })
 
   it('o deny do CLI é o da entrega só no modo entrega', () => {

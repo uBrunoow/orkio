@@ -17,6 +17,7 @@ import { useOverview } from '../overview/useOverview'
 import { useProjects } from '../projects/useProjects'
 import { AgentCard, AgentRow, type AgentHandlers } from './AgentCards'
 import { AgentEditor, type Editing } from './AgentEditor'
+import { AgentMemory } from './AgentMemory'
 import { useAgentBadges } from './agent-badges'
 import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
 import { useAgentsState, useCommandNames, useOrchestrator } from './useAgents'
@@ -41,6 +42,8 @@ export function AgentsPage({
   const state = agents.value
   const [editing, setEditing] = useState<Editing | null>(null)
   const [reviewing, setReviewing] = useState<string | null>(null)
+  /** Fase 3: agente com a Memória aberta (no lugar da lista). */
+  const [memoryOf, setMemoryOf] = useState<string | null>(null)
   const commands = useCommandNames(projectId)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -77,6 +80,7 @@ export function AgentsPage({
               value={projectId}
               onChange={(value) => {
                 setEditing(null)
+                setMemoryOf(null)
                 setChosen(value)
               }}
             />
@@ -90,6 +94,7 @@ export function AgentsPage({
             <Button
               onClick={() => {
                 setMessage(null)
+                setMemoryOf(null)
                 setEditing({ mode: 'new', scope: 'repo', draft: defaultAgent(), key: null })
               }}
             >
@@ -161,6 +166,8 @@ export function AgentsPage({
         matchesFilter(a, allNow.get(a.key)!, filter) &&
         (!q ||
           normalizeLabel(a.profile?.name ?? a.id).includes(q) ||
+          normalizeLabel(a.profile?.description ?? '').includes(q) ||
+          normalizeLabel(a.profile?.group ?? '').includes(q) ||
           (a.profile ? normalizeLabel(AGENT_ROLE_LABELS[a.profile.role]).includes(q) : false))
     )
     .sort((a, b) => ORDER[allNow.get(a.key)!.filter] - ORDER[allNow.get(b.key)!.filter])
@@ -202,8 +209,14 @@ export function AgentsPage({
       })
     },
     onReview: () => setReviewing(reviewing === a.key ? null : a.key),
-    onApprove: () => void approve(a)
+    onApprove: () => void approve(a),
+    onMemory: () => {
+      setMessage(null)
+      setEditing(null)
+      setMemoryOf(a.key)
+    }
   })
+  const memoryAgent = memoryOf ? (state?.agents.find((a) => a.key === memoryOf) ?? null) : null
   const hasAgents = state !== null && state.agents.length > 0
 
   return (
@@ -284,8 +297,18 @@ export function AgentsPage({
             </p>
           ))}
 
+        {memoryAgent && (
+          <AgentMemory
+            key={memoryAgent.key}
+            projectId={projectId}
+            agent={memoryAgent}
+            onBack={() => setMemoryOf(null)}
+          />
+        )}
+
         {editing && (
           <AgentEditor
+            key={editing.key ?? 'novo'}
             editing={editing}
             state={state}
             commands={commands}
@@ -296,7 +319,7 @@ export function AgentsPage({
           />
         )}
 
-        {state === null ? (
+        {memoryAgent ? null : state === null ? (
           <Skeleton className="h-30" aria-label="Carregando agentes" />
         ) : state.agents.length === 0 ? (
           !editing && (

@@ -41,6 +41,63 @@ export const AGENT_ROLE_LABELS: Record<AgentRole, string> = {
 export const AGENT_COLORS = ['orange', 'blue', 'green', 'purple', 'pink', 'teal', 'yellow'] as const
 export type AgentColor = (typeof AGENT_COLORS)[number]
 
+/**
+ * Fase 3: o que o agente pode fazer sozinho. Só restringe (o agente nunca ganha permissão):
+ * - `edits` (padrão): edita arquivos na pasta da tarefa; comandos pedem sua aprovação.
+ * - `ask`: pede antes de toda ação, inclusive editar (a política transforma a edição em pergunta).
+ * - `read_only`: só lê; roda como o passo só de leitura e não pega fluxo que entrega.
+ */
+export const AGENT_AUTONOMIES = ['edits', 'ask', 'read_only'] as const
+export type AgentAutonomy = (typeof AGENT_AUTONOMIES)[number]
+
+export const AGENT_AUTONOMY_TEXT: Record<AgentAutonomy, { label: string; description: string }> = {
+  edits: {
+    label: 'Edita arquivos sozinho',
+    description: 'Edita arquivos na pasta da tarefa; comandos pedem sua aprovação.'
+  },
+  ask: {
+    label: 'Pede antes de agir',
+    description: 'Pede sua aprovação antes de toda ação, inclusive editar um arquivo.'
+  },
+  read_only: {
+    label: 'Só lê',
+    description: 'Nunca altera arquivos nem entrega: lê o código e responde.'
+  }
+}
+
+/** Autonomia de um perfil (cópia antiga guardada num fluxo, sem o campo = `edits`). */
+export function agentAutonomy(p: Pick<AgentProfile, 'autonomy'>): AgentAutonomy {
+  return AGENT_AUTONOMIES.includes(p.autonomy) ? p.autonomy : 'edits'
+}
+
+/** Grupo: `operacoes/incidentes` (minúsculas, números e hífens; até 3 níveis com “/”). */
+export const AGENT_GROUP = /^[a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*){0,2}$/
+
+/** "Operações/Incidentes " → "operacoes/incidentes" (o que o campo grava). */
+export function agentGroupFromText(text: string): string {
+  return text
+    .split('/')
+    .map((part) =>
+      normalizeLabel(part)
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+    )
+    .filter(Boolean)
+    .join('/')
+    .slice(0, AGENT_LIMITS.group)
+}
+
+/** "operacoes/incidentes" → "Operacoes › Incidentes" (rótulo da lista). */
+export function agentGroupLabel(group: string): string {
+  return group
+    .split('/')
+    .map((part) => {
+      const t = part.replace(/-/g, ' ')
+      return t.charAt(0).toUpperCase() + t.slice(1)
+    })
+    .join(' › ')
+}
+
 export const AGENT_MODEL_LABELS: Record<string, string> = Object.fromEntries(
   CLAUDE_MODELS.map((m) => [m.id, m.label])
 )
@@ -50,6 +107,8 @@ export const AGENT_LIMITS = {
   fileBytes: 16 * 1024,
   instructions: 8_000,
   name: 40,
+  description: 140,
+  group: 60,
   commands: 50,
   parallel: 4,
   stepsPerDay: 500,
@@ -71,6 +130,10 @@ export interface AgentLimits {
 export interface AgentProfile {
   id: string
   name: string
+  /** "O que faz", uma linha (≤ 140); `''` = sem descrição (o card mostra o papel). */
+  description: string
+  /** Grupo para organizar a lista (`AGENT_GROUP`); `''` = sem grupo. */
+  group: string
   role: AgentRole
   color: AgentColor
   /** `default` (padrão do Claude Code) ou um nome de modelo (`isModelName`). */
@@ -83,6 +146,10 @@ export interface AgentProfile {
   commands: string[]
   /** Pode rodar passos em modo entrega, push e pedir review. */
   delivery: boolean
+  /** O que ele pode fazer sozinho (Fase 3); só restringe. */
+  autonomy: AgentAutonomy
+  /** Comando preferido do catálogo (sem barra): já vem escolhido ao rodar como ele; `null` = nenhum. */
+  command: string | null
   limits: AgentLimits
   archived: boolean
   /** Markdown; entra no `--append-system-prompt` (nunca no lugar do briefing). */
@@ -119,6 +186,8 @@ export function defaultAgent(partial: Partial<AgentProfile> = {}): AgentProfile 
   return {
     id: '',
     name: '',
+    description: '',
+    group: '',
     role: 'implementer',
     color: 'orange',
     model: 'default',
@@ -126,6 +195,8 @@ export function defaultAgent(partial: Partial<AgentProfile> = {}): AgentProfile 
     flow: null,
     commands: [],
     delivery: true,
+    autonomy: 'edits',
+    command: null,
     limits: { parallel: 1, stepsPerDay: 40, costPerDayUsd: null },
     archived: false,
     instructions: '',
@@ -159,6 +230,8 @@ const KNOWN_KEYS = new Set([
   'orkio',
   'id',
   'name',
+  'description',
+  'group',
   'role',
   'color',
   'model',
@@ -166,6 +239,8 @@ const KNOWN_KEYS = new Set([
   'flow',
   'commands',
   'delivery',
+  'autonomy',
+  'command',
   'limits',
   'archived'
 ])
@@ -209,6 +284,8 @@ export function parseAgentFile(text: string): AgentParse {
   const profile: AgentProfile = {
     id: str('id') ?? '',
     name: str('name') ?? '',
+    description: v['description'] === undefined ? '' : (v['description'] as string),
+    group: v['group'] === undefined ? '' : (v['group'] as string),
     role: (str('role') ?? base.role) as AgentRole,
     color: (str('color') ?? base.color) as AgentColor,
     model: str('model') ?? base.model,
@@ -216,6 +293,8 @@ export function parseAgentFile(text: string): AgentParse {
     flow: v['flow'] === null || v['flow'] === undefined ? null : (str('flow') ?? '\u0000'),
     commands: Array.isArray(commandsRaw) ? commandsRaw : [],
     delivery: v['delivery'] === undefined ? base.delivery : (v['delivery'] as boolean),
+    autonomy: v['autonomy'] === undefined ? base.autonomy : (v['autonomy'] as AgentAutonomy),
+    command: v['command'] === undefined || v['command'] === null ? null : (v['command'] as string),
     limits: {
       parallel: (limitsObj['parallel'] ?? base.limits.parallel) as number,
       stepsPerDay: (limitsObj['stepsPerDay'] ?? base.limits.stepsPerDay) as number,
@@ -237,6 +316,16 @@ export function validateAgent(p: AgentProfile): string[] {
   if (typeof p.name !== 'string' || !p.name.trim()) errors.push('Dê um nome ao agente.')
   else if (p.name.length > AGENT_LIMITS.name) errors.push('Nome com mais de 40 caracteres.')
   else if (/[\n\r]/.test(p.name)) errors.push('O nome não pode ter quebras de linha.')
+  if (typeof p.description !== 'string') errors.push('Descrição inválida.')
+  else if (p.description.length > AGENT_LIMITS.description) {
+    errors.push(`“O que faz” com mais de ${AGENT_LIMITS.description} caracteres.`)
+  } else if (/[\n\r]/.test(p.description)) errors.push('“O que faz” precisa caber numa linha.')
+  if (
+    typeof p.group !== 'string' ||
+    (p.group !== '' && (p.group.length > AGENT_LIMITS.group || !AGENT_GROUP.test(p.group)))
+  ) {
+    errors.push('Grupo inválido: use minúsculas, números e hífens, com “/” entre níveis (até 60).')
+  }
   if (!AGENT_ROLES.includes(p.role)) errors.push('Papel desconhecido.')
   if (!AGENT_COLORS.includes(p.color)) errors.push('Cor desconhecida.')
   if (!isModelName(p.model)) errors.push('Modelo inválido')
@@ -250,6 +339,17 @@ export function validateAgent(p: AgentProfile): string[] {
     errors.push('Há um comando com nome inválido na lista.')
   }
   if (typeof p.delivery !== 'boolean') errors.push('“delivery” precisa ser true ou false.')
+  if (!AGENT_AUTONOMIES.includes(p.autonomy)) errors.push('Autonomia desconhecida.')
+  if (p.command !== null && (typeof p.command !== 'string' || !isCommandName(p.command))) {
+    errors.push('Comando preferido inválido.')
+  } else if (
+    p.command !== null &&
+    Array.isArray(p.commands) &&
+    p.commands.length > 0 &&
+    !p.commands.includes(p.command)
+  ) {
+    errors.push('O comando preferido precisa estar entre os comandos permitidos.')
+  }
   if (typeof p.archived !== 'boolean') errors.push('“archived” precisa ser true ou false.')
   const l = p.limits
   if (!isInt(l.parallel, 1, AGENT_LIMITS.parallel)) {
@@ -287,6 +387,9 @@ export function serializeAgent(p: AgentProfile): string {
     `orkio: ${AGENT_FORMAT}`,
     `id: ${p.id}`,
     `name: ${quote(p.name)}`,
+    // Fase 3: só quando diferente do padrão (perfil antigo lê e grava igual).
+    ...(p.description ? [`description: ${quote(p.description)}`] : []),
+    ...(p.group ? [`group: ${quote(p.group)}`] : []),
     `role: ${p.role}`,
     `color: ${p.color}`,
     `model: ${p.model}`,
@@ -294,6 +397,8 @@ export function serializeAgent(p: AgentProfile): string {
     `flow: ${p.flow === null ? 'null' : quote(p.flow)}`,
     `commands: [${p.commands.map(quote).join(', ')}]`,
     `delivery: ${p.delivery}`,
+    ...(p.autonomy !== 'edits' ? [`autonomy: ${p.autonomy}`] : []),
+    ...(p.command !== null ? [`command: ${quote(p.command)}`] : []),
     'limits:',
     `  parallel: ${p.limits.parallel}`,
     `  stepsPerDay: ${p.limits.stepsPerDay}`,
@@ -313,6 +418,7 @@ export function buildAgentPrompt(p: AgentProfile): string {
   const role = AGENT_ROLE_LABELS[p.role] ?? AGENT_ROLE_LABELS.custom
   const parts = [
     `Você é ${p.name} (${role.toLowerCase()}), um agente do Orkio trabalhando numa tarefa do quadro.`,
+    ...(p.description?.trim() ? [`O que você faz: ${p.description.trim()}`] : []),
     'Regras do Orkio (valem acima das instruções abaixo): você trabalha só no worktree desta tarefa; push, PR e GitHub só quando o passo do fluxo permitir, e o Orkio pede aprovação quando precisa; não tente contornar bloqueios nem pedidos de permissão.'
   ]
   if (p.instructions.trim()) parts.push(`Instruções de ${p.name}:\n\n${p.instructions.trim()}`)
@@ -321,9 +427,21 @@ export function buildAgentPrompt(p: AgentProfile): string {
 
 /**
  * O fluxo pode rodar com este agente? Checagem estática (o fluxo em execução é uma cópia):
- * entrega e comandos permitidos. `null` = pode.
+ * autonomia "só lê", entrega e comandos permitidos. `null` = pode.
  */
 export function checkAgentFlow(p: AgentProfile, flow: Flow): string | null {
+  // Só lê (Fase 3): os passos de comando dele rodam só leitura (o `ClaudeService` corta as
+  // ferramentas); um passo que entrega não tem como dar certo. Passos do revisor não são dele.
+  if (agentAutonomy(p) === 'read_only') {
+    const step = flow.steps.find(
+      (s) =>
+        (s.type === 'claude_command' && s.delivery === true && s.agent !== 'reviewer') ||
+        (s.type === 'orkio_action' && orkioAction(s.action)?.delivers === true)
+    )
+    if (step) {
+      return `${p.name} só lê e não pode entregar (push, PR ou pedir review), e o fluxo “${flow.name}” tem o passo “${step.name}” que entrega.`
+    }
+  }
   if (!p.delivery) {
     const step = flow.steps.find(
       (s) =>

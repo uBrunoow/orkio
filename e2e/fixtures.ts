@@ -19,6 +19,7 @@ import {
 } from '@playwright/test'
 import { isInstallUrl } from '../src/shared/github-names'
 import { REVIEW_APPLY_PROMPT, REVIEW_JSON_PROMPT } from '../src/shared/alva-templates'
+import { REVIEW_DIFF_PATH } from '../src/shared/review-rounds'
 
 export const ROOT = resolve(__dirname, '..')
 /** Endereço do site no build de E2E (`MAIN_VITE_SITE_URL` do `.env.e2e`; `--mode e2e`). */
@@ -1350,7 +1351,9 @@ export const FAKE_CLAUDE = {
     /** Passo de plano da revisão da PR (cita o arquivo da revisão). */
     reviewFile: 'revisao.md',
     reviewApply: REVIEW_APPLY_PROMPT.split('.')[0]!,
-    reviewJson: REVIEW_JSON_PROMPT.split(' no JSON')[0]!
+    reviewJson: REVIEW_JSON_PROMPT.split(' no JSON')[0]!,
+    /** Fase 3: o pedido da revisão nativa cita o diff que o Orkio gravou. */
+    nativeReview: REVIEW_DIFF_PATH
   }
 } as const
 

@@ -40,6 +40,7 @@ import {
   type PolicyAliases
 } from './policy'
 import { envFileValues, isEnvFile, redactSecrets, redactValues } from '../platform/redact'
+import { MEMORY_MESSAGES } from '../../shared/agent-memory'
 import {
   deliveryOf,
   runInputRecord,
@@ -47,7 +48,12 @@ import {
   type RunSession,
   type RunSpec
 } from './run-spec'
-import { PermissionBroker, type BridgeDecision, type BridgeRequest } from './runner'
+import {
+  PermissionBroker,
+  type BridgeDecision,
+  type BridgeRememberReply,
+  type BridgeRequest
+} from './runner'
 import { ensureScratch } from './scratch'
 import { summarizeTool } from './stream'
 import type { WorktreeRecord, WorktreeService } from './worktree.service'
@@ -90,6 +96,15 @@ export interface RunServiceDeps {
   emit(message: { runId: string; projectId: string; taskId: string; event: RunLogEvent }): void
   /** Notificação de desktop (pedido de aprovação/pergunta). */
   notify(title: string, body: string, ref: { projectId: string; taskId: string }): void
+  /**
+   * Memória do agente (Fase 3): grava a nota da ferramenta `lembrar` (o store valida e redige).
+   * Sem isto, a ferramenta responde que a memória não está ligada.
+   */
+  remember?(
+    agentKey: string,
+    projectId: string,
+    input: Record<string, unknown>
+  ): Promise<{ ok: true; text: string; message: string } | { ok: false; message: string }>
   maxParallel?: number
   keepPerTask?: number
   approvalTimeoutMs?: number
@@ -395,7 +410,10 @@ export class RunService {
           if (runtime.effort) parts.push(`Raciocínio: ${EFFORT_LABELS[runtime.effort]}`)
           this.log(run, { kind: 'info', text: parts.join(' · ') })
         }
-        const broker = new PermissionBroker((req) => this.onPermission(run, req))
+        const broker = new PermissionBroker(
+          (req) => this.onPermission(run, req),
+          (input) => this.onRemember(run, input)
+        )
         await broker.open()
         run.handle = this.deps.createRun({
           spec,
@@ -681,6 +699,26 @@ export class RunService {
     }
   }
 
+  /**
+   * Ferramenta `lembrar` (memória do agente): só com agente; o texto passa pela redação desta
+   * execução (inclusive os valores dos `.env`) antes do store, e a nota anotada vira linha `info`.
+   */
+  private async onRemember(
+    run: ActiveRun,
+    input: Record<string, unknown>
+  ): Promise<BridgeRememberReply> {
+    const agent = run.spec.agent
+    if (!agent || !this.deps.remember) return { ok: false, message: MEMORY_MESSAGES.noAgent }
+    if (run.cancelled) return { ok: false, message: RUN_MESSAGES.cancelled }
+    const clean =
+      typeof input['texto'] === 'string'
+        ? { ...input, texto: scrubText(input['texto'], run.secrets) }
+        : input
+    const r = await this.deps.remember(agent.key, run.projectId, clean)
+    if (r.ok) this.log(run, { kind: 'info', text: `Anotou na memória: ${r.text}` })
+    return { ok: r.ok, message: r.message }
+  }
+
   private async onPermission(run: ActiveRun, req: BridgeRequest): Promise<BridgeDecision> {
     if (run.cancelled) return { behavior: 'deny', message: RUN_MESSAGES.cancelled }
     const delivery = deliveryOf(run.spec)
@@ -693,6 +731,7 @@ export class RunService {
         aliases: run.aliases,
         repo: github?.mode === 'read' ? github.target : null,
         readOnly: run.spec.access.tools === 'read_only',
+        askEdits: run.spec.agent?.autonomy === 'ask',
         delivery: delivery
           ? {
               target: delivery.target,

@@ -10,6 +10,7 @@ import {
 import { ORKIO_ACTIONS } from './orkio-actions'
 import { afterStep, startFlow, validateTaskFlow, type Flow, type FlowDecision } from './task-flow'
 import { RUN_MODES } from './task-setup'
+import { REVIEW_VARS } from './review-rounds'
 
 const CTX = {
   commands: null,
@@ -26,7 +27,13 @@ const OPTION_SETS = [
 ]
 
 /** Roda o motor puro: cada passo do Claude Code termina com o texto dado por `answer`. */
-function walk(flow: Flow, answer: (stepId: string, visit: number) => string, max = 60): string[] {
+function walk(
+  flow: Flow,
+  answer: (stepId: string, visit: number) => string,
+  max = 60,
+  act: (stepId: string, visit: number) => Record<string, string> = (id) =>
+    id === 'registrar-revisao' ? { [REVIEW_VARS.verdict]: 'limpo' } : {}
+): string[] {
   const path: string[] = []
   const visits: Record<string, number> = {}
   let d: FlowDecision = startFlow(flow)
@@ -43,6 +50,8 @@ function walk(flow: Flow, answer: (stepId: string, visit: number) => string, max
         vars[m[1]!] = m[2]!
       }
       d = afterStep(flow, d.state, step.id, { outcome: 'ok', vars })
+    } else if (step.type === 'orkio_action') {
+      d = afterStep(flow, d.state, step.id, { outcome: 'ok', vars: act(step.id, visits[step.id]!) })
     } else {
       d = afterStep(flow, d.state, step.id, { outcome: 'ok' })
     }
@@ -81,9 +90,11 @@ describe('fluxos nativos', () => {
 
   it('Rodar uma vez: implementa → revisão (outro agente) → diff → push → PR', () => {
     const flow = nativeFlow('quick', { review: true, evidence: false })!
-    expect(walk(flow, () => '@orkio bloqueios=0')).toEqual([
+    expect(walk(flow, () => '')).toEqual([
       'implementar',
+      'preparar-revisao',
       'revisar',
+      'registrar-revisao',
       'ver-diff',
       'push',
       'abrir-pr',
@@ -94,12 +105,49 @@ describe('fluxos nativos', () => {
     expect(flow.steps.find((s) => s.id === 'abrir-pr')).toMatchObject({ delivery: true })
   })
 
-  it('revisão com bloqueios corrige no máximo 2 vezes e segue para o diff', () => {
+  it('revisão até ficar limpo: corrige e revisa de novo; limpo segue para o diff', () => {
     const flow = nativeFlow('quick', { review: true, evidence: false })!
-    const path = walk(flow, () => '@orkio bloqueios=3')
-    expect(path.filter((s) => s === 'corrigir')).toHaveLength(2)
-    expect(path.filter((s) => s === 'revisar')).toHaveLength(3)
+    const verdicts = ['corrigir', 'limpo']
+    const path = walk(
+      flow,
+      () => '',
+      60,
+      (id, visit) =>
+        id === 'registrar-revisao' ? { [REVIEW_VARS.verdict]: verdicts[visit - 1]! } : {}
+    )
+    expect(path.filter((s) => s === 'corrigir')).toHaveLength(1)
+    expect(path.filter((s) => s === 'revisar')).toHaveLength(2)
     expect(path.slice(-4)).toEqual(['ver-diff', 'push', 'abrir-pr', 'fim:done'])
+  })
+
+  it('finais honestos da revisão: esgotado no limite de rodadas, travado com os mesmos bloqueios', () => {
+    const flow = nativeFlow('quick', { review: true, evidence: false })!
+    const verdicts = ['corrigir', 'corrigir', 'esgotado']
+    const exhausted = walk(
+      flow,
+      () => '',
+      60,
+      (id, visit) =>
+        id === 'registrar-revisao' ? { [REVIEW_VARS.verdict]: verdicts[visit - 1]! } : {}
+    )
+    expect(exhausted.filter((s) => s === 'revisar')).toHaveLength(3)
+    expect(exhausted.at(-1)).toBe('fim:exhausted')
+    expect(exhausted).not.toContain('push')
+    const stuck = walk(
+      flow,
+      () => '',
+      60,
+      (id) => (id === 'registrar-revisao' ? { [REVIEW_VARS.verdict]: 'travado' } : {})
+    )
+    expect(stuck.at(-1)).toBe('fim:stuck')
+    expect(stuck).not.toContain('ver-diff')
+  })
+
+  it('o gate do diff aceita "Pedir mudanças" (volta para quem implementa)', () => {
+    const flow = nativeFlow('quick', { review: true, evidence: false })!
+    expect(flow.steps.find((s) => s.id === 'ver-diff')).toMatchObject({
+      revise: { step: 'implementar' }
+    })
   })
 
   it('sem revisor: sem passo de revisão; com evidência: gate antes do diff', () => {
@@ -116,12 +164,13 @@ describe('fluxos nativos', () => {
 
   it('Com aprovação: spec e plano passam por você antes de implementar', () => {
     const flow = nativeFlow('approval', { review: true, evidence: false })!
-    expect(walk(flow, () => '@orkio bloqueios=0').slice(0, 6)).toEqual([
+    expect(walk(flow, () => '').slice(0, 7)).toEqual([
       'spec',
       'aprovar-spec',
       'plano',
       'aprovar-plano',
       'implementar',
+      'preparar-revisao',
       'revisar'
     ])
     expect(flow.steps.find((s) => s.id === 'aprovar-spec')).toMatchObject({

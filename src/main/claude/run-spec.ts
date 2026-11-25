@@ -4,7 +4,12 @@
  * modelo/raciocínio cortados pela versão do CLI) num `RunSpec`, que o `RunService` e o processo
  * (`buildCliArgs` em `runner.ts`) usam sem desmontar. Opção nova = um campo aqui + quem a usa.
  */
-import { buildAgentPrompt, type AgentProfile } from '../../shared/agent'
+import {
+  agentAutonomy,
+  buildAgentPrompt,
+  type AgentAutonomy,
+  type AgentProfile
+} from '../../shared/agent'
 import type { DeliveryTarget } from '../../shared/delivery'
 import type { Effort, RuntimeChoice } from '../../shared/agent-runtime'
 import type { RunMode } from '../../shared/agent-run'
@@ -46,6 +51,12 @@ export interface RunAgent {
   model: string | null
   /** Raciocínio (`--effort`); `null` = padrão. */
   effort: Effort | null
+  /**
+   * Fase 3: o que ele faz sozinho. `read_only` = a execução roda só leitura (o `ClaudeService`
+   * corta as ferramentas e a entrega); `ask` = editar também pede aprovação (`askEdits` na política
+   * e `--permission-mode manual`). Só restringe.
+   */
+  autonomy: AgentAutonomy
 }
 
 /** O agente (perfil lido ou a cópia guardada no fluxo) como vai para a execução. */
@@ -55,7 +66,9 @@ export function toRunAgent(agent: { key: string; profile: AgentProfile }): RunAg
     name: agent.profile.name,
     prompt: buildAgentPrompt(agent.profile),
     model: agent.profile.model === 'default' ? null : agent.profile.model,
-    effort: agent.profile.effort
+    effort: agent.profile.effort,
+    // Cópia antiga guardada no fluxo (sem o campo) = `edits`.
+    autonomy: agentAutonomy(agent.profile)
   }
 }
 
