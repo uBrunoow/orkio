@@ -1,6 +1,6 @@
 # Quadro unificado (fim da tela Tarefas)
 
-Data: 2026-11-25 · Branch: `feat/quadro-unificado` (base `feat/fase-5-extras`)
+Data: 2026-11-25 · Branch: `feat/quadro-unificado` (base `main`, v0.2.17)
 
 ## Intenção
 
@@ -30,12 +30,12 @@ O Bruno acha isso redundante. Ele gosta do que Tarefas trouxe, mas quer tudo no 
   - O alvo não existe (o projeto não tem etapa com aquele papel): a coluna aparece desabilitada para aquele card durante o arraste e o card não sai do lugar.
   - Não dá para soltar em "Outras etapas" (destino ambíguo).
 - **Badge de situação em cada card,** a partir do `PersonalTask.lane` de `shared/task-lanes.ts`:
-  - "Precisa de você" é o **único** com a cor forte (laranja); Trabalhando, Aguardando e Em revisão ficam neutros.
+  - Cores: ver "Decisões tomadas depois da leitura do revisor", item 1.
   - Card sem fluxo nem PR fica sem badge.
   - "Concluído" não precisa de badge, porque a coluna já diz.
   - O texto curto `what` (o que espera você, o passo rodando…) aparece no tooltip ou na segunda linha.
-- **Chips da PR** (`PR_CHIP_TEXT`) no card, reaproveitando os chips que o card do Quadro já tem. Não pode duplicar.
-- **Filtros:** Todas / Precisa de você (com contagem) / Rodando / Em revisão, mais a busca.
+- **Chips da PR** (`PR_CHIP_TEXT`) dentro do botão "#n" que o card já tem (ver "Decisões", item 1). Não pode duplicar.
+- **Filtros:** Todas / Precisa de você (com contagem) / Em andamento / Em revisão, mais a busca (definição de cada um em "Decisões", item 4).
   - O filtro esconde cards e **mantém as colunas**.
   - Contagem por coluna = cards visíveis.
 - **Visão Lista:** agrupada por coluna (etapa ou papel), com badge, chip da PR e projeto.
@@ -50,7 +50,7 @@ O Bruno acha isso redundante. Ele gosta do que Tarefas trouxe, mas quer tudo no 
 
 - Não mudar o Notion nem a forma de mover. A coluna continua sendo a etapa; a situação nunca é estado manual.
 - Não criar etapas novas nem obrigar papel em toda etapa.
-- Configurar etapas e regras continua sendo coisa de **um projeto**. Com vários selecionados, esses botões levam a escolher o projeto.
+- Configurar etapas e regras continua sendo coisa de **um projeto**. Com vários selecionados, esses botões abrem um menu com a lista dos projetos selecionados.
 
 ## Antiobjetivos (falha mesmo funcionando)
 
@@ -78,7 +78,6 @@ O Bruno escolheu a 1.
 1. **Badge e cores.** O badge de situação **substitui a parte de fluxo** do estado que o card mostra hoje (`cardStatus`: "Fluxo rodando", "Esperando você"…).
    - Ficam como estão: o estado de sincronização ("Não sincronizou", "Sincronizando") e "Bloqueada".
    - As cores seguem a convenção do app (`StatusToken`): "Precisa de você" = `warning`, "Trabalhando" = `running`, Aguardando e Em revisão = `neutral`. Sem cor nova, para o card bater com o sino e a lista lateral.
-   - Isso troca o "laranja único" e o antiobjetivo "mais de uma cor forte" da versão anterior deste documento. Uma tela inteira com cards vermelhos e amarelos era coisa do kanban derivado, não do Quadro.
    - A PR continua no botão "#n" do card. Os chips de `PR_CHIP_TEXT` entram dentro dele, como hoje faz o `cardDetail`, sem duplicar.
 2. **Projeto atual × seleção do Quadro.**
    - Com **um** projeto selecionado, ele é o projeto atual do app: escolher no seletor troca o projeto atual (como hoje), e trocar o projeto em outro lugar muda o Quadro de um projeto.
