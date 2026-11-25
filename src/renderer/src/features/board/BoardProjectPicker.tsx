@@ -44,8 +44,9 @@ export function BoardProjectPicker({
   function toggle(id: string, checked: boolean): void {
     const next = checked ? [...chosen, id] : chosen.filter((x) => x !== id)
     if (next.length === 0) return
-    // Na ordem da lista de projetos (a mesma das colunas e do menu).
-    onChange({ projectIds: projects.map((p) => p.id).filter((x) => next.includes(x)) })
+    // Na ordem da lista de projetos (a mesma das colunas e do menu); todos marcados = "Todos".
+    const ids = projects.map((p) => p.id).filter((x) => next.includes(x))
+    onChange({ projectIds: projects.length > 1 && ids.length === projects.length ? 'all' : ids })
   }
 
   function toggleAll(checked: boolean): void {

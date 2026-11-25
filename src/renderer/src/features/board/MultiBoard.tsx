@@ -9,9 +9,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { Select } from '@/components/ui/select'
-import { CheckboxField, SegmentedControl } from '@/components/form'
-import { Alert } from '../../components/Alert'
+import { CheckboxField } from '@/components/form'
 import { ErrorAlert } from '../../components/ErrorAlert'
 import { ScreenTitle } from '../../components/ScreenTitle'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
@@ -20,6 +18,12 @@ import { Spinner } from '../../components/Spinner'
 import { MoreIcon, RefreshIcon } from '../../components/icons'
 import { ColumnSetupsDialog } from '../tasks/ColumnSetupsDialog'
 import { BoardColumns } from './BoardColumns'
+import {
+  BoardNoticeAlert,
+  BoardViewControl,
+  PendingWritesAlert,
+  PriorityFilter
+} from './BoardBarParts'
 import { BoardFilters } from './BoardFilters'
 import { BoardList } from './BoardList'
 import {
@@ -166,21 +170,29 @@ export function MultiBoard({
 
   const refresh = async (): Promise<void> => {
     setRefreshing(true)
-    await Promise.all(
-      ids.map(async (id) => {
-        const next = await ipcCall(() => window.orkio.automation.runNow(id), null)
-        if (next) automation.set(id, next)
-        await boardSource.reload(id, { force: true })
-      })
-    )
-    await personal.reload()
-    setRefreshing(false)
+    try {
+      await Promise.all(
+        ids.map(async (id) => {
+          const next = await ipcCall(() => window.orkio.automation.runNow(id), null)
+          if (next) automation.set(id, next)
+          await boardSource.reload(id, { force: true })
+        })
+      )
+      await personal.reload()
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   const setPaused = async (paused: boolean): Promise<void> => {
     if (!firstId) return
     const next = await ipcCall(() => window.orkio.automation.setPaused(firstId, paused), null)
-    if (next) for (const id of ids) automation.set(id, next)
+    if (!next) return
+    // Só a pausa é global: o resto do estado (GitHub, horários, erro) é de cada projeto.
+    for (const id of ids) {
+      if (id === firstId) automation.set(id, next)
+      else automation.set(id, (s) => (s ? { ...s, paused: next.paused } : s))
+    }
   }
 
   const loading = boards.some((b) => b.state.value === null && b.state.error === null)
@@ -193,17 +205,9 @@ export function MultiBoard({
       <ScreenBarStart>
         <ScreenTitle look={5}>Quadro</ScreenTitle>
         {picker}
-        <SegmentedControl
-          label="Visualização do quadro"
-          size="sm"
+        <BoardViewControl
           value={layout}
-          onChange={(v) =>
-            onRoute(boardRoute({ ...route, view: v === 'list' ? 'list' : 'kanban' }))
-          }
-          options={[
-            { value: 'kanban', label: 'Kanban' },
-            { value: 'list', label: 'Lista' }
-          ]}
+          onChange={(view) => onRoute(boardRoute({ ...route, view }))}
         />
       </ScreenBarStart>
       <ScreenBarEnd>
@@ -251,36 +255,10 @@ export function MultiBoard({
         query={query}
         onQuery={setQuery}
       >
-        {priorities.length > 0 && (
-          <Select
-            aria-label="Prioridade"
-            size="sm"
-            placeholder="Todas as prioridades"
-            clearLabel="Todas as prioridades"
-            onClear={() => setPriority(null)}
-            options={priorities.map((p) => ({ value: p, label: p }))}
-            value={priority}
-            onChange={(value) => setPriority(value)}
-            className="w-48"
-          />
-        )}
+        <PriorityFilter priorities={priorities} value={priority} onChange={setPriority} />
         <CheckboxField label="Só bloqueadas" checked={onlyBlocked} onChange={setOnlyBlocked} />
       </BoardFilters>
-      {pending > 0 && (
-        <Alert
-          tone="warning"
-          action={
-            <Button size="sm" variant="outline" onClick={() => void boards[0]?.controls.retryNow()}>
-              Tentar agora
-            </Button>
-          }
-        >
-          {pending === 1
-            ? '1 alteração aguardando o Notion.'
-            : `${pending} alterações aguardando o Notion.`}{' '}
-          Elas são enviadas sozinhas quando a conexão voltar, mesmo depois de fechar o Orkio.
-        </Alert>
-      )}
+      <PendingWritesAlert count={pending} onRetry={() => void boards[0]?.controls.retryNow()} />
       {boards.map(({ projectId, state }) =>
         state.error ? (
           <ErrorAlert
@@ -290,30 +268,15 @@ export function MultiBoard({
           />
         ) : null
       )}
-      {boards.map(({ projectId, state, controls }) => {
-        const notice = state.value?.notice
-        if (!notice) return null
-        return (
-          <Alert
-            key={`notice-${projectId}`}
-            tone="danger"
-            action={
-              <>
-                {notice.canReconnect && (
-                  <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
-                    Ir para Integrações
-                  </Button>
-                )}
-                <Button size="sm" variant="ghost" onClick={controls.dismissNotice}>
-                  Fechar aviso
-                </Button>
-              </>
-            }
-          >
-            {nameOf.get(projectId)}: {notice.message}
-          </Alert>
-        )
-      })}
+      {boards.map(({ projectId, state, controls }) => (
+        <BoardNoticeAlert
+          key={`notice-${projectId}`}
+          notice={state.value?.notice ?? null}
+          prefix={nameOf.get(projectId) ?? projectId}
+          onDismiss={controls.dismissNotice}
+          onOpenIntegrations={onOpenIntegrations}
+        />
+      ))}
       {withoutBoard.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted-foreground">
           <p>Sem quadro ainda: {withoutBoard.map((b) => nameOf.get(b.projectId)).join(', ')}</p>

@@ -6,10 +6,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { Select } from '@/components/ui/select'
 import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { CheckboxField, SegmentedControl } from '@/components/form'
+import { CheckboxField } from '@/components/form'
 import { cn } from '@/lib/utils'
 import { Alert } from '../../components/Alert'
 import { ScreenTitle } from '../../components/ScreenTitle'
@@ -19,6 +18,12 @@ import { Spinner } from '../../components/Spinner'
 import { AutomationIcon, MoreIcon, PauseIcon, RefreshIcon } from '../../components/icons'
 import { ColumnSetupsDialog } from '../tasks/ColumnSetupsDialog'
 import { BoardFilters } from './BoardFilters'
+import {
+  BoardNoticeAlert,
+  BoardViewControl,
+  PendingWritesAlert,
+  PriorityFilter
+} from './BoardBarParts'
 import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
@@ -285,17 +290,9 @@ function Board({
       <ScreenBarStart>
         <ScreenTitle look={5}>Quadro</ScreenTitle>
         {picker}
-        <SegmentedControl
-          label="Visualização do quadro"
-          size="sm"
+        <BoardViewControl
           value={layout}
-          onChange={(v) =>
-            onRoute(boardRoute({ ...route, view: v === 'list' ? 'list' : 'kanban' }))
-          }
-          options={[
-            { value: 'kanban', label: 'Kanban' },
-            { value: 'list', label: 'Lista' }
-          ]}
+          onChange={(view) => onRoute(boardRoute({ ...route, view }))}
         />
         <AgentRow
           cards={view.cards}
@@ -348,59 +345,19 @@ function Board({
         query={query}
         onQuery={setQuery}
       >
-        {priorities.length > 0 && (
-          <Select
-            aria-label="Prioridade"
-            size="sm"
-            placeholder="Todas as prioridades"
-            clearLabel="Todas as prioridades"
-            onClear={() => setPriority(null)}
-            options={priorities.map((p) => ({ value: p, label: p }))}
-            value={priority}
-            onChange={(value) => setPriority(value)}
-            className="w-48"
-          />
-        )}
+        <PriorityFilter priorities={priorities} value={priority} onChange={setPriority} />
         <CheckboxField label="Só bloqueadas" checked={onlyBlocked} onChange={setOnlyBlocked} />
         <div className="flex-1" />
         <AutomationLine status={automation.status} onOpenIntegrations={onOpenIntegrations} />
       </BoardFilters>
-      {view.pendingCount > 0 && (
-        <Alert
-          tone="warning"
-          action={
-            <Button size="sm" variant="outline" onClick={() => void board.retryNow()}>
-              Tentar agora
-            </Button>
-          }
-        >
-          {view.pendingCount === 1
-            ? '1 alteração aguardando o Notion.'
-            : `${view.pendingCount} alterações aguardando o Notion.`}{' '}
-          Elas são enviadas sozinhas quando a conexão voltar, mesmo depois de fechar o Orkio.
-        </Alert>
-      )}
+      <PendingWritesAlert count={view.pendingCount} onRetry={() => void board.retryNow()} />
       <SignalsMessages result={signals.result} />
       {board.error && <ErrorAlert error={board.error} onOpenIntegrations={onOpenIntegrations} />}
-      {board.notice && (
-        <Alert
-          tone="danger"
-          action={
-            <>
-              {board.notice.canReconnect && (
-                <Button size="sm" variant="ghost" onClick={onOpenIntegrations}>
-                  Ir para Integrações
-                </Button>
-              )}
-              <Button size="sm" variant="ghost" onClick={board.dismissNotice}>
-                Fechar aviso
-              </Button>
-            </>
-          }
-        >
-          {board.notice.message}
-        </Alert>
-      )}
+      <BoardNoticeAlert
+        notice={board.notice}
+        onDismiss={board.dismissNotice}
+        onOpenIntegrations={onOpenIntegrations}
+      />
       {view.issues.length > 0 && (
         <Alert tone={view.issues.some((i) => i.level === 'error') ? 'danger' : 'warning'}>
           <div className="flex flex-col gap-1">
