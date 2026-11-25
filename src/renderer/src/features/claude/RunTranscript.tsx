@@ -6,7 +6,9 @@ import { Alert } from '../../components/Alert'
 import { MarkdownText } from '../../components/MarkdownText'
 import {
   AgentsIcon,
+  CopyIcon,
   EditIcon,
+  ForkIcon,
   InfoIcon,
   PermissionIcon,
   PlayIcon,
@@ -42,8 +44,12 @@ const CATEGORY_ICON: Record<StepCategory, SvgIcon> = {
 /** Mais recentes primeiro quando o log é longo; o resto abre em "Mostrar anteriores". */
 const TAIL = 40
 
-const TOOLS_BOX =
-  'rounded-lg border border-border-soft bg-surface px-2.5 py-2 font-mono text-xs text-muted-foreground'
+/**
+ * Rodadas de ferramentas compactas (Fase 2): uma linha discreta ("Rodou 3 comandos · Usou 1
+ * ferramenta") que abre a lista; o texto do agente fica inteiro, fora dela.
+ */
+const TOOLS_LINE = 'font-mono text-xs text-muted-foreground'
+const TOOLS_LIST = 'mt-1.5 ml-[7px] flex flex-col gap-1 border-l border-border-soft py-0.5 pl-3'
 
 function StepRow({ step }: { step: WorkStep }): React.JSX.Element {
   const failed = step.state === 'failed'
@@ -92,7 +98,7 @@ function WorkGroup({
   const only = item.steps.length === 1 ? item.steps[0] : undefined
   if (only) {
     return (
-      <div className={TOOLS_BOX}>
+      <div data-testid="work-step" className={TOOLS_LINE}>
         <StepRow step={only} />
       </div>
     )
@@ -104,21 +110,20 @@ function WorkGroup({
       open={open}
       onOpenChange={onToggle}
       data-testid="work-group"
-      className={cn(TOOLS_BOX, 'flex flex-col')}
+      className={cn(TOOLS_LINE, 'flex flex-col')}
     >
-      <CollapsibleHeader open={open} className="flex-wrap font-sans text-xs text-muted-foreground">
+      <CollapsibleHeader
+        open={open}
+        className="w-auto flex-wrap self-start font-sans text-xs text-muted-foreground"
+      >
         <GroupIcon className="size-3.5 text-subtle-foreground" />
-        <span className="text-foreground">{summary.label}</span>
+        <span>{summary.label}</span>
         {item.approvals > 0 && <span>· {plural(item.approvals, 'aprovação', 'aprovações')}</span>}
         {summary.failed > 0 && <StatusToken tone="danger" label={failedLabel(summary.failed)} />}
         {item.live && <StatusToken tone="running" label="rodando" />}
       </CollapsibleHeader>
       <CollapsibleContent>
-        <div
-          role="group"
-          aria-label="Chamadas de ferramenta"
-          className="mt-1.5 flex flex-col gap-1"
-        >
+        <div role="group" aria-label="Chamadas de ferramenta" className={TOOLS_LIST}>
           {item.steps.map((s) => (
             <StepRow key={s.id} step={s} />
           ))}
@@ -193,15 +198,84 @@ function ResultFooter({
   )
 }
 
+/** Texto do agente inteiro, com "Copiar" e "Ramificar daqui" ao passar o mouse (ou com foco). */
+function AgentMessage({
+  text,
+  onBranch
+}: {
+  text: string
+  onBranch?: () => void
+}): React.JSX.Element {
+  return (
+    <div className="group/message flex min-w-0 flex-col gap-1">
+      <MarkdownText text={text} />
+      <MessageActions text={text} {...(onBranch ? { onBranch } : {})} />
+    </div>
+  )
+}
+
+/** Ações de uma mensagem: discretas, aparecem no hover/foco (Compozy: Copiar · Ramificar). */
+export function MessageActions({
+  text,
+  onBranch,
+  onEdit,
+  className
+}: {
+  text: string
+  onBranch?: () => void
+  onEdit?: () => void
+  className?: string
+}): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div
+      className={cn(
+        'flex items-center gap-0.5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100 motion-reduce:transition-none',
+        className
+      )}
+    >
+      <Button
+        size="xs"
+        variant="ghost"
+        aria-label="Copiar mensagem"
+        onClick={() =>
+          void navigator.clipboard?.writeText(text).then(
+            () => setCopied(true),
+            () => setCopied(false)
+          )
+        }
+      >
+        <CopyIcon aria-hidden="true" />
+        {copied ? 'Copiado' : 'Copiar'}
+      </Button>
+      {onBranch && (
+        <Button size="xs" variant="ghost" onClick={onBranch}>
+          <ForkIcon aria-hidden="true" />
+          Ramificar daqui
+        </Button>
+      )}
+      {onEdit && (
+        <Button size="xs" variant="ghost" onClick={onEdit}>
+          <EditIcon aria-hidden="true" />
+          Editar mensagem
+        </Button>
+      )}
+    </div>
+  )
+}
+
 export function RunTranscript({
   items,
   tail = TAIL,
-  openPr
+  openPr,
+  onBranch
 }: {
   items: readonly TranscriptItem[]
   tail?: number
   /** A tarefa pode abrir PR agora (sem PR aberta, com ambiente): recibos de push/gh ganham o botão. */
   openPr?: boolean
+  /** Fase 2: "Ramificar daqui" numa resposta do Claude (id da mensagem e o texto). */
+  onBranch?: (uuid: string, text: string) => void
 }): React.JSX.Element {
   const [showAll, setShowAll] = useState(false)
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -226,7 +300,14 @@ export function RunTranscript({
                 Sessão iniciada{item.model ? ` (${item.model})` : ''}
               </p>
             )}
-            {item.kind === 'message' && <MarkdownText text={item.text} />}
+            {item.kind === 'message' && (
+              <AgentMessage
+                text={item.text}
+                {...(onBranch && item.uuid
+                  ? { onBranch: () => onBranch(item.uuid!, item.text) }
+                  : {})}
+              />
+            )}
             {item.kind === 'work' && (
               <WorkGroup
                 item={item}

@@ -40,9 +40,24 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   você, Trabalhando, Aguardando, Em revisão (com CI falhando, mudanças pedidas, conflito ou pronta)
   e Concluído —, calculado do fluxo e da PR, em Kanban ou Lista, com os filtros "Em andamento" e
   "Precisa de atenção". O quadro do Notion continua sendo o do time.
+- **Terminal dentro do Orkio**: a aba "Terminal" da tarefa (Ctrl/⌘+Shift+J, ou "Terminal no Orkio"
+  em Detalhes) abre um terminal na pasta de trabalho da tarefa, já na branch dela. Trocar de aba não
+  fecha nada: o que rodou continua lá quando você volta.
+- **Continuar no Claude**: quando o Orkio empaca (uma permissão que ele não consegue resolver, por
+  exemplo), o botão ao lado do campo da sessão pausa o que está rodando e abre essa mesma conversa
+  do Claude Code no terminal, para você resolver na mão. Enquanto ela está com você, o Orkio não
+  roda nada na tarefa, e a tarefa aparece como "Com você no terminal" no sino e na tela Tarefas.
+  Para devolver: "O Claude continua o passo" (ele retoma de onde você parou) ou "Passo feito" (o que
+  você fez conta como o passo e o fluxo segue). No terminal valem as configurações do seu Claude
+  Code, não as regras do Orkio.
+- **Editar mensagem** e **Ramificar daqui** na conversa da tarefa: editar devolve o seu texto ao campo
+  e a conversa volta até antes dele; ramificar abre uma conversa nova a partir de uma resposta do
+  Claude. Os arquivos da pasta de trabalho continuam como estão.
 
 ### Alterado
 
+- A conversa da tarefa ficou mais compacta: as rodadas de ferramentas viram uma linha discreta
+  ("Rodou 3 comandos · Usou 1 ferramenta") que abre a lista, e o texto do Claude aparece inteiro.
 - Ctrl/⌘+W fecha a aba, não mais a janela; o menu nativo do sistema saiu (no macOS ficam só o menu
   do app e Editar).
 - Atalhos das telas: Quadro Ctrl/⌘+1, Tarefas Ctrl/⌘+2, Agentes Ctrl/⌘+3, Configurações Ctrl/⌘+4.

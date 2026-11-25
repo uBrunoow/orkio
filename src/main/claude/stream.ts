@@ -7,6 +7,7 @@ import type { RunLogEvent } from '../../shared/agent-run'
 import { toolInfo, toolPath } from '../../shared/claude-tools'
 import { contextWindowFor, inputTokensOf } from '../../shared/context-usage'
 import { redactSecrets } from '../platform/redact'
+import { isSessionUuid } from '../../shared/terminal'
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -89,6 +90,8 @@ export function parseStreamLine(
     if (!Array.isArray(content)) return []
     const events: RunLogEvent[] = []
     const inputTokens = main ? inputTokensOf(msg['message']['usage']) : null
+    // Id da mensagem na sessão: o ponto de "Ramificar daqui"/"Editar mensagem" (`--resume-session-at`).
+    const uuid = main && isSessionUuid(msg['uuid']) ? msg['uuid'] : null
     if (inputTokens !== null) {
       events.push({ kind: 'usage', inputTokens, contextWindow: contextWindowFor(model) })
     }
@@ -100,7 +103,11 @@ export function parseStreamLine(
         typeof block['text'] === 'string' &&
         block['text'].trim()
       ) {
-        events.push({ kind: 'text', text: redactSecrets(block['text']) })
+        events.push({
+          kind: 'text',
+          text: redactSecrets(block['text']),
+          ...(uuid ? { uuid } : {})
+        })
       } else if (block['type'] === 'tool_use' && typeof block['id'] === 'string') {
         const tool = str(block['name']) ?? 'ferramenta'
         events.push({

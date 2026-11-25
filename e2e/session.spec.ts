@@ -196,3 +196,59 @@ test('Continuar no Claude: sessão travada no terminal e devolvida ao Orkio', as
   expect(after).toBe(0)
   expect(await cspViolations(page)).toEqual([])
 })
+
+test('Editar mensagem e Ramificar daqui: a próxima mensagem sai daquele ponto, numa sessão nova', async () => {
+  const { page } = orkio!
+  const section = session(page)
+  const runs = section.getByTestId('session-run')
+  const [first, second] = argsLog() as { sessionId: string | null; resume: string | null }[]
+  const original = first!.sessionId!
+  expect(second!.resume).toBe(original)
+
+  // "Editar mensagem" na segunda: o texto volta ao campo e a conversa volta até antes dele.
+  const edited = runs.nth(1)
+  await edited.hover()
+  await edited.getByRole('button', { name: 'Editar mensagem' }).click()
+  const composer = section.getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+  await expect(composer).toHaveValue(/Voltei do terminal/)
+  await expect(section.getByTestId('composer-fork')).toContainText('Editando a mensagem')
+  await composer.fill('Mensagem editada')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(runs).toHaveCount(3)
+  await expect(runs.last().getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  await expect(runs.last()).toContainText('Ramifiquei a sessão: Mensagem editada')
+  await expect(runs.last()).toContainText('Mensagem editada: a conversa voltou até antes dela')
+  await expect(section.getByTestId('composer-fork')).toHaveCount(0)
+  const edit = argsLog().at(-1)!
+  expect(edit['forkSession']).toBe(true)
+  expect(edit['resume']).toBe(original)
+  expect(edit['resumeSessionAt']).toMatch(/^[0-9a-f-]{36}$/)
+  expect(edit['sessionId']).not.toBe(original)
+  expect(edit['briefingInPrompt']).toBe(false)
+
+  // "Ramificar daqui" numa resposta da primeira execução.
+  const answer = runs.first().getByRole('list', { name: 'Log da execução' })
+  await answer.hover()
+  await answer.getByRole('button', { name: 'Ramificar daqui' }).first().click()
+  await expect(section.getByTestId('composer-fork')).toContainText('Ramificando desta resposta')
+  await expect(composer).toHaveValue('')
+  await composer.fill('Outro caminho')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(runs).toHaveCount(4)
+  await expect(runs.last().getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  const branch = argsLog().at(-1)!
+  expect(branch['forkSession']).toBe(true)
+  expect(branch['resume']).toBe(original)
+  expect(branch['resumeSessionAt']).toMatch(/^[0-9a-f-]{36}$/)
+  expect(branch['sessionId']).not.toBe(edit['sessionId'])
+
+  // A próxima mensagem comum continua a sessão ramificada (a mais recente).
+  await composer.fill('E agora?')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  await expect(runs).toHaveCount(5)
+  await expect(runs.last().getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  const next = argsLog().at(-1)!
+  expect(next['resume']).toBe(branch['sessionId'])
+  expect(next['forkSession']).toBe(false)
+  expect(await cspViolations(page)).toEqual([])
+})

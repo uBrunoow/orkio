@@ -131,6 +131,21 @@ describe('payloads: forma e cópia só com campos conhecidos', () => {
     expect(parseSendMessageRequest({ ...base, fresh: 'sim' })).toBe(INVALID)
     expect(parseSendMessageRequest({ ...base, text: 'x'.repeat(300_000) })).toBe(INVALID)
 
+    // Fase 2: ponto da conversa (execução + resposta, ou antes do pedido).
+    expect(parseSendMessageRequest({ ...base, fork: { runId: 'run-1', at: null } })).toEqual({
+      ...base,
+      fork: { runId: 'run-1', at: null }
+    })
+    expect(
+      ok(
+        parseSendMessageRequest({
+          ...base,
+          fork: { runId: 'run-1', at: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc' }
+        })
+      )
+    ).toBe(true)
+    expect(parseSendMessageRequest({ ...base, fork: { runId: 'run-1', at: '--x' } })).toBe(INVALID)
+    expect(parseSendMessageRequest({ ...base, fork: { runId: '../x', at: null } })).toBe(INVALID)
     const file = { name: 'a.md', mime: 'text/markdown', data: new Uint8Array(3) }
     expect(ok(parseSendMessageRequest({ ...base, attachments: [file] }))).toBe(true)
     for (const attachments of [

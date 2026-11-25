@@ -24,6 +24,11 @@ export type RunSession =
       includeBriefing: boolean
     }
   | { kind: 'resume'; id: string }
+  /**
+   * Fase 2: sessão nova a partir de um ponto de outra (`--resume <from> --resume-session-at <at>
+   * --fork-session`): "Ramificar daqui" (`branch`) ou "Editar mensagem" (`edit`).
+   */
+  | { kind: 'fork'; from: string; at: string; reason: 'branch' | 'edit' }
 
 /**
  * Ferramentas e GitHub. Só leitura nunca entrega (o tipo não deixa): o passo só de leitura não

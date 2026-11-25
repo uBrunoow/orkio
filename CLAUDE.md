@@ -65,6 +65,9 @@ Claude Code. Hoje existem:
 - **Tarefas (Fase 1):** "Como deve rodar?" por tarefa (Rodar uma vez / Com aprovação / Quebrar em
   passos) com fluxos nativos (sem alva-flow), padrão por coluna, revisor que não é o autor e a tela
   Tarefas (kanban derivado). Ver "Tarefas (Fase 1)" abaixo.
+- **Sessão (Fase 2):** terminal embutido (node-pty + xterm.js) na pasta da tarefa, "Continuar no
+  Claude" (a sessão vai travada para o terminal e volta), "Editar mensagem"/"Ramificar daqui" e a
+  conversa compacta. Ver "Sessão (Fase 2)" abaixo.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
   Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -162,6 +165,8 @@ src/
   shared/task-setup.ts     # Fase 1: "Como deve rodar?" (RunSetup, resolveRunSetup, origens, revisor ≠ autor)
   shared/native-flows.ts   # Fase 1: fluxos nativos (rápido, aprovação, passos, comentários da PR)
   shared/task-lanes.ts     # Fase 1: kanban derivado (deriveLane, chips da PR, filtros)
+  shared/terminal.ts       # Fase 2: terminal embutido (tipos, limites, validadores, `unseenPart`)
+  shared/handoff.ts        # Fase 2: "Continuar no Claude" (HandoffView, textos, `resumeCommand`)
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, registro do IPC e chamar a composição
     composition/           # app.ts: cria os serviços → start() → stop({ waitMs }) (único desligamento);
@@ -215,12 +220,15 @@ src/
     power/                 # keep-awake.ts (manter o computador acordado com trabalho rodando)
     task-setup/            # Fase 1: task-setup.service.ts (padrão da coluna, troca da tarefa,
                            # `nativePlan` para o FlowRunner; dono de `task_run_setup`)
+    terminal/              # Fase 2: terminal.service.ts (PTYs do node-pty: shell ou
+                           # `claude --resume`, lotes de saída com posição, foto para redesenhar)
     claude/                # 4A: detect, worktree.service, runner (spawn + PermissionBroker +
                            # buildCliArgs), run-spec.ts (RunRequest/RunSpec: a execução num tipo
                            # só), stream, policy (+ delivery-policy, 5C), github-rules.ts (tabela
                            # única do GitHub/push: política, deny do CLI e textos),
                            # run.service, claude.service, scratch.ts (`ensureScratch`),
-                           # attachments.ts (anexos), terminal.ts (terminal externo);
+                           # attachments.ts (anexos), terminal.ts (terminal externo),
+                           # handoff.service.ts (Fase 2: "Continuar no Claude", `session_handoffs`);
                            # bridge/protocol.ts (contrato da ponte), bridge/permission-mcp.ts
                            # (servidor MCP stdio → out/main/permission-mcp.js)
   preload/index.ts         # contextBridge → window.orkio, gerado de `ORKIO_API` (API mínima e tipada)
@@ -266,6 +274,8 @@ src/
       setup/               # 9: Primeiros passos (SetupPage, setup-steps puro)
       tasks/               # Fase 1: TasksPage (kanban/lista derivados), ModeCards, ColumnSetupsDialog,
                            # TaskRunSetup (seção "Como deve rodar?" da aba Detalhes)
+      terminal/            # Fase 2: TerminalPage (aba Terminal), TerminalView (xterm), HandoffBar,
+                           # useTaskTerminals/useHandoff, xterm-csp.ts (xterm sob a CSP estrita)
       settings/            # Configurações (SettingsNav, seções), UpdateBanner, WhatsNewDialog (modal)
     components/ui/         # shadcn/ui (copiados pelo CLI e ajustados: Select próprio, Dialog/Menu não modais)
     components/form.tsx    # campos (TextField, SelectField, CheckboxField, RadioListField, SegmentedControl...)
@@ -1265,6 +1275,64 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - E2E `e2e/tasks.spec.ts`: modelo na coluna pela tela, "Rodar agora" com o Rápido, revisão pelo
   Revisor (só leitura, sem `--resume`) no `agent-args.log` e a tarefa em "Precisa de você".
 
+## Sessão (Fase 2)
+
+- **Terminal embutido** (`main/terminal/terminal.service.ts`, IPC `terminal.*`): PTY do `node-pty` no
+  main, sempre na pasta da tarefa (o worktree, resolvido pelo main; o renderer só passa ids). Shell =
+  `$SHELL` absoluto (login `-l` em bash/zsh/fish/ksh) ou `/bin/zsh`→`/bin/bash`→`/bin/sh`; Windows
+  `powershell`/`COMSPEC`. Ambiente por `ptyEnv` (`sanitizeEnv` + `TERM`/`COLORTERM`). Até 8 abertos;
+  terminados ficam (só leitura) até fechar, 4 por tarefa. Saída em lotes de 16 ms com a posição
+  (`at`) e foto do fim (`snapshot`, 256 mil caracteres, `end`): a aba remonta, desenha a foto e
+  descarta os lotes que ela já tinha (`unseenPart`). `write` (≤ 64 KB) e `resize` validados no IPC.
+  Fechar espera o processo sair (até 3 s). O app saindo fecha todos (`stopAll` no `createStop`).
+  "Limpar ambiente" recusa com terminal rodando. Módulo nativo que não carrega = `available: false`
+  (o app segue; a aba mostra o estado e o "Continuar no Claude" dá o comando para copiar).
+- **Tela** (`features/terminal/`): rota `terminal` (uma aba por tarefa, `placeOf`), Ctrl/⌘+Shift+J
+  (comando `task:terminal`), "Terminal no Orkio" no painel Ambiente; abas internas por terminal
+  (shell / Claude), "Novo terminal", início com dois cartões. `TerminalView` (xterm.js + fit +
+  WebGL carregado antes de abrir, para o xterm nem criar o renderizador DOM); o foco fica no xterm
+  e ele consome as teclas (Ctrl+W/K vão para o shell, não para os atalhos do app).
+- **xterm e a CSP** (`xterm-csp.ts`): o xterm cria `<style>` (Viewport sempre; DOM sem WebGL) e o
+  renderizador DOM usa `setAttribute('style')` nas cores 24 bits. Enquanto um terminal está montado
+  (contador), `document.createElement('style')` devolve `<orkio-xterm-style>` (CSS por
+  `CSSStyleSheet` em `adoptedStyleSheets`) e `setAttribute('style')` vira `style.cssText`. Sai ao
+  desmontar o último. O E2E confere zero violações com o terminal aberto.
+- **Continuar no Claude** (`claude/handoff.service.ts`, SQLite v14 `session_handoffs`, IPC
+  `claude.continueInClaude|reopenHandoff|giveBack`): cancela a execução viva da tarefa e espera o
+  processo sair (passo do fluxo pausa interrompido), trava a tarefa, abre `claude --resume <uuid>`
+  (UUID validado, executável achado no PATH, sem shell) num terminal `claude`. Com a trava, o
+  `ClaudeService` recusa `startRun`/`send`/`cleanup` (código `handoff`), então nenhuma execução do
+  Orkio (mensagem, Rodar, passo de fluxo) usa a sessão. Devolver fecha o Claude do terminal (espera
+  sair), solta a trava e: "O Claude continua o passo" = `FlowRunner.resumeWithReply` com
+  `HANDOFF_TEXT.continuePrompt` (fluxo parado num comando) ou mensagem na sessão (sem fluxo);
+  "Passo feito" = `FlowRunner.completeByYou` (passo `ok` com "Feito por você no terminal", o fluxo
+  segue). Terminal que não abre (sem `claude` no PATH) desfaz a trava. Visão geral: `WaitingKind`
+  `handoff` ("Com você no terminal", seção `claude`), que esconde o "Fluxo pausado" da mesma tarefa;
+  histórico `handoff_started`/`handoff_returned`. Na conversa, o campo dá lugar à `HandoffBar` (aviso
+  de que no terminal valem as configurações do Claude do usuário). Paleta: "Continuar no Claude"
+  abre a rota `terminal` com `start: 'claude'` (não volta ao restaurar abas).
+- **Editar mensagem / Ramificar daqui** (`SendMessageRequest.fork`, `RunSession` `fork`): o stream
+  guarda o `uuid` das mensagens de texto da conversa principal (`text.uuid`). Ramificar = a resposta
+  escolhida (`RunService.pointIn` confere que é da execução); editar = a última resposta antes do
+  pedido na mesma sessão, ou o ponto de onde a sessão ramificada saiu (`agent_runs.fork_json`,
+  v14; `pointBefore`); o pedido que abriu a sessão = sessão nova com o briefing. CLI: `--resume
+  <origem> --resume-session-at <uuid> --fork-session --session-id <novo>` (`sessionArgs`, ids pelo
+  formato). Com fluxo ativo é recusado (`flow_active`). O rascunho passa pela tela da tarefa
+  (`TaskView.draft/setDraft`, `composer-draft.ts`); o campo mostra a faixa "Editando…/Ramificando…"
+  com Cancelar. Os arquivos do worktree não voltam (a faixa e o log dizem).
+- **Conversa compacta** (`RunTranscript`): rodadas de ferramentas viram uma linha (`work-group`/
+  `work-step`) que abre a lista com uma régua à esquerda; texto do agente inteiro com "Copiar ·
+  Ramificar daqui" no hover/foco; a sua mensagem com "Copiar · Editar mensagem".
+- **Empacotamento:** `node-pty` 1.1 é N-API (ABI estável): o binário da instalação serve ao Electron
+  sem rebuild (`npmRebuild: false` continua); prebuilds no mac/Windows, compilado pelo node-gyp no
+  Linux (`pnpm.onlyBuiltDependencies`). `asarUnpack` inclui `node_modules/node-pty/**`; `files` tira
+  fontes, `.pdb` e os prebuilds de outros sistemas (`NODE_PTY_TRIM`, por sistema). O smoke do pacote
+  carrega o node-pty de dentro do app e roda um comando num PTY.
+- E2E `e2e/session.spec.ts`: terminal (teclas → saída pela foto, pasta = worktree, sem violação de
+  CSP), Continuar no Claude (o Claude simulado sem `-p` imita a tela interativa e grava
+  `.orkio/terminal-claude.log`), trava, sino e devolução; editar/ramificar (`forkSession`,
+  `resumeSessionAt` no `agent-args.log`). O fixture usa `SHELL=/bin/sh` (sem o perfil de quem roda).
+
 ## Agentes (Etapa 8A)
 
 - **Perfil** (`shared/agent.ts`, formato `orkio: agent/v1`): `.orkio/agents/<id>.md` no projeto
@@ -1462,8 +1530,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - **Fuses:** `runAsNode` **ligado** (a ponte MCP roda o executável com `ELECTRON_RUN_AS_NODE=1`; não
   desligue), `onlyLoadAppFromAsar` e cookies criptografados ligados, `NODE_OPTIONS`/`--inspect`
   desligados. Integridade do asar ainda desligada (falta testar no mac/Windows).
-- Sem dependências de runtime hoje; `npmRebuild: false`. Não exclua `node_modules` em `files` (o
-  `electron-updater` da 6C é dependência de runtime).
+- Dependências de runtime: `electron-updater` (6C) e `node-pty` (Fase 2, nativo, N-API, fora do
+  asar); `npmRebuild: false`. Não exclua `node_modules` em `files` (só as sobras do node-pty).
 - **Smoke** (`e2e-packaged/`, config própria): abre o binário de `dist/` com
   `--remote-debugging-port` e conecta por CDP (o `_electron` do Playwright precisa do `--inspect`,
   desligado pelo fuse), confere tela inicial/CSP, e roda `app.asar/out/main/permission-mcp.js` com
@@ -1653,6 +1721,10 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
 | Fluxos nativos montados com as primitivas da 5A, gerados na hora (Fase 1)                                | Nascem prontos e sem o alva-flow; a cópia em `flow_json` mantém a execução estável e o motor/validação/retomada são os de sempre. |
 | Revisor em sessão própria; quem implementa nunca pega a sessão dele (Fase 1)                             | O autor não revisa a si mesmo (nem pela conversa); a correção recebe o texto final da revisão em vez de herdar a sessão. |
 | Menu nativo mínimo (Fase 0)                                                                                 | Os menus vivem na barra do app; o menu padrão do Electron fecharia a janela no Ctrl+W e recarregaria no Ctrl+R. |
+| Terminal embutido com node-pty no main + xterm.js, sem rebuild (Fase 2)                                    | O processo sobrevive à troca de aba (só a ativa fica montada); N-API dispensa recompilar para o Electron e o smoke do pacote prova que carrega. |
+| xterm sob a CSP por folha construída, só com terminal montado (Fase 2)                                    | Relaxar `style-src` valeria para o app todo; o ajuste é contado e some ao desmontar o último terminal. |
+| "Continuar no Claude" trava a tarefa no SQLite e recusa no `ClaudeService` (Fase 2)                        | Duas instâncias do CLI na mesma sessão brigam; a recusa no ponto único de execução cobre mensagem, Rodar e passo de fluxo, e sobrevive a fechar o app. |
+| Editar/ramificar por `--fork-session` (Fase 2)                                                             | A sessão antiga fica intacta (dá para voltar a ela pelo histórico); o Orkio só passa a continuar a sessão nova. Arquivos do worktree não voltam: avisado na tela. |
 
 ## shadcn/Radix e CSP (regra inegociável)
 
