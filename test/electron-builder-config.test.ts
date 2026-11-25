@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type {
@@ -7,7 +8,7 @@ import type {
   NsisOptions,
   WindowsConfiguration
 } from 'electron-builder'
-import { builderConfig, isMacSigned } from '../electron-builder'
+import { builderConfig, isMacSigned, markPtyHelpersExecutable } from '../electron-builder'
 import { releaseAssets } from '../scripts/release-assets.mjs'
 import {
   RELEASE_ARTIFACTS,
@@ -159,5 +160,30 @@ describe('electron-builder.ts', () => {
     for (const size of [16, 32, 48, 128, 256, 512]) {
       expect(existsSync(join(ROOT, String(c.linux?.icon), `${size}x${size}.png`))).toBe(true)
     }
+  })
+})
+
+describe('spawn-helper do node-pty no pacote', () => {
+  it('fica executável depois de empacotar (sem isso o macOS falha com posix_spawnp)', async () => {
+    const out = mkdtempSync(join(tmpdir(), 'orkio-afterpack-'))
+    try {
+      const pty = join(out, 'Orkio.app/Contents/Resources/app.asar.unpacked/node_modules/node-pty')
+      const helper = join(pty, 'prebuilds/darwin-arm64/spawn-helper')
+      const other = join(pty, 'prebuilds/darwin-arm64/pty.node')
+      mkdirSync(join(pty, 'prebuilds/darwin-arm64'), { recursive: true })
+      writeFileSync(helper, '')
+      writeFileSync(other, '')
+      chmodSync(helper, 0o644)
+      chmodSync(other, 0o644)
+      expect(await markPtyHelpersExecutable(out)).toEqual([helper])
+      expect(statSync(helper).mode & 0o111).toBe(0o111)
+      expect(statSync(other).mode & 0o111).toBe(0)
+    } finally {
+      rmSync(out, { recursive: true, force: true })
+    }
+  })
+
+  it('a config roda o ajuste depois de empacotar', () => {
+    expect(typeof builderConfig({}).afterPack).toBe('function')
   })
 })
