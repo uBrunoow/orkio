@@ -5,6 +5,10 @@
  */
 import { TASK_SECTIONS, type TaskSection, type BoardTaskRef } from '../../../shared/overview'
 import { isRecord } from '../../../shared/guards'
+import { TASK_FILTERS, type TaskFilter } from '../../../shared/task-lanes'
+
+export const TASKS_VIEWS = ['kanban', 'list'] as const
+export type TasksView = (typeof TASKS_VIEWS)[number]
 
 export const SETTINGS_SECTIONS = [
   'integrations',
@@ -25,6 +29,8 @@ export type Route =
   | { name: 'board'; projectId?: string }
   | { name: 'task'; projectId: string; taskId: string; section?: TaskSection }
   | { name: 'agents' }
+  /** Fase 1: kanban derivado pessoal (raias calculadas do fluxo e da PR). */
+  | { name: 'tasks'; view?: TasksView; filter?: TaskFilter }
   | { name: 'settings'; section?: SettingsSection; tab?: BoardSettingsTab; projectId?: string }
   /** Aba nova (Fase 0): ponto de partida com as telas e o que espera você. */
   | { name: 'home' }
@@ -35,6 +41,7 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
   setup: 'Primeiros passos',
   board: 'Quadro',
   task: 'Tarefa',
+  tasks: 'Tarefas',
   agents: 'Agentes',
   settings: 'Configurações',
   home: 'Nova aba'
@@ -129,6 +136,11 @@ export function parseRoute(v: unknown): Route | null {
       return { name: 'board', ...projectId }
     case 'agents':
       return { name: 'agents' }
+    case 'tasks': {
+      const view = pick(TASKS_VIEWS, v['view'])
+      const filter = pick(TASK_FILTERS, v['filter'])
+      return { name: 'tasks', ...(view ? { view } : {}), ...(filter ? { filter } : {}) }
+    }
     case 'home':
       return { name: 'home' }
     case 'task': {

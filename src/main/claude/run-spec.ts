@@ -63,7 +63,14 @@ export interface RunRequest {
    * `latest`: continua a sessão mais recente da tarefa; sem sessão, começa uma com `orNew` (ou
    * falha com `no_session`, se `null`).
    */
-  session: RunSession | { kind: 'latest'; orNew: Extract<RunSession, { kind: 'new' }> | null }
+  session:
+    | RunSession
+    | {
+        kind: 'latest'
+        orNew: Extract<RunSession, { kind: 'new' }> | null
+        /** Ignora as sessões deste agente (ex.: o revisor, que tem sessão própria). */
+        excludeAgent?: string
+      }
   /**
    * `read`: lê a PR do projeto (se houver repositório verificado); `deliver`: modo entrega (5C),
    * só num passo de fluxo marcado.

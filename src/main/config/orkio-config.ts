@@ -16,6 +16,7 @@ import { migrateV3 } from './migrations/v3-default-rules'
 export const ORKIO_CONFIG_FILE = 'orkio-config.json'
 import { clampAlvaParallel } from '../../shared/alva'
 import { parseFlowDef, type Flow, type ProjectFlows, type StageFlow } from '../../shared/task-flow'
+import { parseColumnSetups, type RunSetup } from '../../shared/task-setup'
 import type { UpdateChannel } from '../../shared/updates'
 import type {
   NotionColor,
@@ -55,6 +56,11 @@ export interface OrkioConfig {
   keepAwake?: boolean
   /** Medidor de uso do Claude na barra (experimental). Ausente = ligado; `false` = desligado. */
   usageMeter?: false
+  /**
+   * Fase 1: "Como deve rodar?" padrão de cada coluna (projeto → etapa → configuração). Ausente =
+   * nenhuma coluna com padrão (campo opcional, sem migração).
+   */
+  runSetup?: Record<string, Record<string, RunSetup>>
 }
 
 export interface UpdatesConfig {
@@ -226,9 +232,21 @@ export function validateConfig(
     orchestrator,
     updates: parseUpdates(data['updates']),
     ...(data['keepAwake'] === true ? { keepAwake: true } : {}),
-    ...(data['usageMeter'] === false ? { usageMeter: false as const } : {})
+    ...(data['usageMeter'] === false ? { usageMeter: false as const } : {}),
+    ...runSetupOf(data['runSetup'])
   }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
+}
+
+/** Padrões "Como deve rodar?" por coluna; coluna inválida some (nunca derruba a config). */
+function runSetupOf(value: unknown): Pick<OrkioConfig, 'runSetup'> {
+  if (!isRecord(value)) return {}
+  const out: Record<string, Record<string, RunSetup>> = {}
+  for (const [projectId, raw] of Object.entries(value)) {
+    const stages = parseColumnSetups(raw)
+    if (projectId && Object.keys(stages).length > 0) out[projectId] = stages
+  }
+  return Object.keys(out).length > 0 ? { runSetup: out } : {}
 }
 
 /** Bloco de atualizações inválido volta ao padrão (nunca derruba a config). */

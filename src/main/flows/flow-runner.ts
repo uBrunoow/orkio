@@ -61,6 +61,7 @@ import { BRIEFING_PATH } from '../../shared/orkio-scratch'
 import { redactSecrets } from '../platform/redact'
 import { toRunAgent, type RunAgent, type RunRequest } from '../claude/run-spec'
 import { checkAgentFlow, type AgentProfile } from '../../shared/agent'
+import { reviewerProblem } from '../../shared/task-setup'
 import type { Db } from '../db/database'
 import { DomainError, errorName } from '../errors'
 
@@ -85,6 +86,8 @@ export const FLOW_MESSAGES = {
   flowMissing: 'O fluxo ligado a esta etapa não existe mais. Revise o Fluxo do projeto.',
   invalidStep: 'Esse passo não pode ser rodado de novo agora. Atualize a tela.',
   emptyReply: 'Escreva a resposta para o Claude.',
+  noReviewer:
+    'Este passo é do revisor, mas a tarefa está sem revisor. Escolha um em “Como deve rodar?” e retome.',
   choiceUnclear:
     'O fluxo está esperando você escolher uma opção. Diga qual (ex.: TASK-5) ou escolha no cartão.',
   emptyRevise: 'Escreva o que ajustar.',
@@ -208,9 +211,36 @@ export interface FlowRunnerDeps {
    * começaria, porque ela foi alcançada com outro fluxo ainda ativo.
    */
   enterStage(change: StageChange): void
+  /**
+   * Fase 1 ("Como deve rodar?"): o fluxo nativo da tarefa nesta coluna, com o revisor e o modelo da
+   * configuração; `null` = a tarefa não tem modo (vale o fluxo ligado à coluna). `manual`: "Rodar
+   * agora" na tela da tarefa (o modo vale mesmo numa coluna sem regra). Lança `FlowError` quando a
+   * configuração não pode rodar (revisor indisponível, revisor = quem implementa).
+   */
+  nativePlan?(
+    projectId: string,
+    taskId: string,
+    stageId: string | null,
+    manual: boolean
+  ): Promise<NativePlan | null>
+  /** Texto final de uma execução (para `withLastResult`), já redigido; `null` = sem texto. */
+  lastResult?(runId: string): Promise<string | null>
   now?: () => Date
   newId?: () => string
 }
+
+/** Fluxo nativo escolhido para a tarefa (Fase 1) e o que a configuração dela traz. */
+export interface NativePlan {
+  flow: Flow
+  /** De onde veio o modo: da tarefa (vence o fluxo preferido do agente) ou da coluna. */
+  source: 'task' | 'column'
+  reviewer: FlowAgent | null
+  /** Modelo de quem implementa (`null` = o do agente). */
+  model: string | null
+}
+
+/** Tamanho máximo do resultado anterior juntado a um pedido (`withLastResult`). */
+const LAST_RESULT_MAX = 6000
 
 /** Agente de um fluxo: a cópia do perfil feita no início (editar o perfil não muda o fluxo). */
 export interface FlowAgent {
@@ -234,6 +264,8 @@ interface RunRow {
   ended_at: string | null
   agent_key: string | null
   agent_json: string | null
+  /** Fase 1: revisor do fluxo (cópia do perfil no início). */
+  reviewer_json?: string | null
 }
 
 interface StepRow {
@@ -273,6 +305,8 @@ interface Persisted {
   detachedFrom?: string | null
   /** Resposta ao Claude no passo parado; o próximo início desse passo a manda na mesma sessão. */
   pendingReply?: { stepId: string; text: string } | null
+  /** Fase 1: modelo de quem implementa escolhido na configuração da tarefa. */
+  model?: string | null
 }
 
 const ACTIVE_SQL = `(${ACTIVE_FLOW_STATUSES.map((s) => `'${s}'`).join(', ')})`
@@ -380,11 +414,21 @@ export class FlowRunner {
         return
       }
       if (!isStageEntry(change) || active) return
+      const plan =
+        (await this.deps.nativePlan?.(change.projectId, change.taskId, change.to, false)) ?? null
       const binding = this.deps
         .flows(change.projectId)
         .bindings.find((b) => b.stageId === change.to && b.enabled && b.mode === 'on_enter')
-      if (!binding) return
-      await this.start(change.projectId, change.taskId, change.to, binding.flowId, true)
+      if (!plan && !binding) return
+      await this.start(
+        change.projectId,
+        change.taskId,
+        change.to,
+        binding?.flowId ?? null,
+        true,
+        null,
+        plan
+      )
     } catch (error) {
       // Não começou ao entrar na coluna (ex.: projeto não pronto): avisa, sem quebrar o quadro.
       if (error instanceof FlowError && error.code !== 'busy') {
@@ -413,12 +457,17 @@ export class FlowRunner {
 
   /** Botão "Rodar fluxo": o fluxo ligado à etapa atual (ao entrar ou manual). */
   async startManual(projectId: string, taskId: string): Promise<FlowRunView> {
+    if (this.activeRow(taskId)) throw new FlowError('busy', FLOW_MESSAGES.busy)
     const stageId = this.deps.currentStage(projectId, taskId)
+    // Fase 1: o modo da tarefa (ou o padrão da coluna) vence o fluxo ligado à coluna.
+    const plan = (await this.deps.nativePlan?.(projectId, taskId, stageId, true)) ?? null
     const binding = this.deps
       .flows(projectId)
       .bindings.find((b) => b.stageId === stageId && b.enabled)
-    if (!stageId || !binding) throw new FlowError('no_binding', FLOW_MESSAGES.noBinding)
-    return this.start(projectId, taskId, stageId, binding.flowId, true)
+    if (!plan && (!stageId || !binding)) {
+      throw new FlowError('no_binding', FLOW_MESSAGES.noBinding)
+    }
+    return this.start(projectId, taskId, stageId, binding?.flowId ?? null, true, null, plan)
   }
 
   /**
@@ -446,21 +495,32 @@ export class FlowRunner {
     projectId: string,
     taskId: string,
     stageId: string | null,
-    columnFlowId: string,
+    columnFlowId: string | null,
     useAgentFlow: boolean,
-    builtin: Flow | null = null
+    builtin: Flow | null = null,
+    plan: NativePlan | null = null
   ): Promise<FlowRunView> {
     if (this.activeRow(taskId)) throw new FlowError('busy', FLOW_MESSAGES.busy)
     const agent = await this.deps.agentFor(projectId, taskId)
     const flows = this.deps.flows(projectId).flows
-    const preferred = useAgentFlow && agent?.profile.flow ? agent.profile.flow : null
-    const flowId = preferred && flows.some((f) => f.id === preferred) ? preferred : columnFlowId
-    const flow = builtin ?? flows.find((f) => f.id === flowId)
+    // O fluxo preferido do agente substitui o da coluna (fluxo ligado ou modo padrão da coluna);
+    // o modo escolhido na tarefa vence os dois.
+    const preferred =
+      useAgentFlow && agent?.profile.flow && plan?.source !== 'task' ? agent.profile.flow : null
+    const usePreferred = preferred !== null && flows.some((f) => f.id === preferred)
+    const native = usePreferred ? null : plan
+    const flow =
+      builtin ??
+      native?.flow ??
+      flows.find((f) => f.id === (usePreferred ? preferred : columnFlowId))
     if (!flow) throw new FlowError('flow_missing', FLOW_MESSAGES.flowMissing)
     if (agent) {
       const denied = checkAgentFlow(agent.profile, flow)
       if (denied) throw new FlowError('agent_denied', denied)
     }
+    const reviewer = native?.reviewer ?? null
+    const sameReviewer = reviewerProblem(agent?.key ?? null, reviewer?.key ?? null)
+    if (sameReviewer) throw new FlowError('same_reviewer', sameReviewer)
     for (const integration of this.integrations(flow)) {
       const blocked = await integration.canStart(projectId)
       if (blocked) throw new FlowError('not_ready', blocked)
@@ -469,14 +529,15 @@ export class FlowRunner {
     const persisted: Persisted = {
       engine: { vars: {}, visits: {}, outcomes: {}, executed: 0 },
       displayId: '',
-      notionUrl: null
+      notionUrl: null,
+      ...(native?.model ? { model: native.model } : {})
     }
     const wait = this.slot(projectId, flow, agent)
     const waits = wait !== null
     this.deps.store.transaction(() => {
       this.deps.db.run(
-        `INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, stage_id, status, pause_reason, state_json, started_at, agent_key, agent_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO flow_runs (id, task_page_id, project_id, flow_id, flow_json, stage_id, status, pause_reason, state_json, started_at, agent_key, agent_json, reviewer_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         taskId,
         projectId,
@@ -488,7 +549,8 @@ export class FlowRunner {
         JSON.stringify(persisted),
         this.now(),
         agent?.key ?? null,
-        agent ? JSON.stringify(agent) : null
+        agent ? JSON.stringify(agent) : null,
+        reviewer ? JSON.stringify(reviewer) : null
       )
       this.event(this.row(id), 'flow_started', {
         flowId: flow.id,
@@ -587,6 +649,15 @@ export class FlowRunner {
     if (!row.agent_json) return null
     try {
       return JSON.parse(row.agent_json) as FlowAgent
+    } catch {
+      return null
+    }
+  }
+
+  private reviewerOf(row: RunRow): FlowAgent | null {
+    if (!row.reviewer_json) return null
+    try {
+      return JSON.parse(row.reviewer_json) as FlowAgent
     } catch {
       return null
     }
@@ -1137,6 +1208,29 @@ export class FlowRunner {
       : null
   }
 
+  /** Último fluxo terminado de cada tarefa desde `since` (Fase 1: raia "Concluído"). */
+  recentFinished(
+    since: string
+  ): { projectId: string; taskId: string; result: RunRow['result']; endedAt: string }[] {
+    return this.deps.db
+      .all<{
+        project_id: string
+        task_page_id: string
+        result: RunRow['result']
+        ended_at: string
+      }>(
+        `SELECT project_id, task_page_id, result, MAX(ended_at) AS ended_at FROM flow_runs
+         WHERE ended_at IS NOT NULL AND ended_at >= ? GROUP BY task_page_id`,
+        since
+      )
+      .map((r) => ({
+        projectId: r.project_id,
+        taskId: r.task_page_id,
+        result: r.result,
+        endedAt: r.ended_at
+      }))
+  }
+
   counts(): { total: number; active: number } {
     const n = (sql: string): number => this.deps.db.get<{ n: number }>(sql)?.n ?? 0
     return {
@@ -1201,6 +1295,10 @@ export class FlowRunner {
       confirm: row.status === 'waiting_gate' ? (this.persisted(row).pendingConfirm ?? null) : null,
       agent: (() => {
         const a = this.agentOf(row)
+        return a ? { key: a.key, name: a.profile.name, color: a.profile.color } : null
+      })(),
+      reviewer: (() => {
+        const a = this.reviewerOf(row)
         return a ? { key: a.key, name: a.profile.name, color: a.profile.color } : null
       })(),
       revise:
@@ -1325,6 +1423,29 @@ export class FlowRunner {
         briefing: ctx.briefing,
         includeBriefing: step.includeBriefing !== false
       } as const
+      // Fase 1: o revisor é outro agente, numa sessão só dele (nunca a conversa de quem fez);
+      // quem implementa continua a própria sessão, sem pegar a do revisor.
+      const reviewer = this.reviewerOf(row)
+      const byReviewer = step.agent === 'reviewer'
+      if (byReviewer && !reviewer) {
+        throw new FlowError('no_reviewer', FLOW_MESSAGES.noReviewer)
+      }
+      let promptText = text
+      if (prompt && step.withLastResult === true) {
+        const lastRun = this.lastRunId(row.id)
+        const last = lastRun ? await this.deps.lastResult?.(lastRun).catch(() => null) : null
+        if (last) {
+          const cut = last.length > LAST_RESULT_MAX ? `${last.slice(0, LAST_RESULT_MAX)}…` : last
+          promptText = `${text}\n\n---\nResultado do passo anterior:\n\n${cut}`
+        }
+      }
+      const stepRuntime =
+        step.model !== undefined || step.effort !== undefined
+          ? {
+              ...(step.model !== undefined ? { model: step.model } : {}),
+              ...(step.effort !== undefined ? { effort: step.effort } : {})
+            }
+          : null
       const runId = await this.deps.startClaude({
         projectId: row.project_id,
         taskId: row.task_page_id,
@@ -1334,27 +1455,33 @@ export class FlowRunner {
           reply !== undefined
             ? { kind: 'prompt', text: reply }
             : prompt
-              ? { kind: 'prompt', text }
+              ? { kind: 'prompt', text: promptText }
               : { kind: 'command', name: step.command, args: text },
         session:
-          reply !== undefined
-            ? { kind: 'latest', orNew: null }
-            : prompt
-              ? { kind: 'latest', orNew: fresh }
-              : fresh,
+          byReviewer && reply === undefined
+            ? { kind: 'new', briefing: ctx.briefing, includeBriefing: true }
+            : reply !== undefined
+              ? {
+                  kind: 'latest',
+                  orNew: null,
+                  ...(reviewer && !byReviewer ? { excludeAgent: reviewer.key } : {})
+                }
+              : prompt
+                ? {
+                    kind: 'latest',
+                    orNew: fresh,
+                    ...(reviewer ? { excludeAgent: reviewer.key } : {})
+                  }
+                : fresh,
         // Só leitura nunca entrega (o validador já recusa os dois juntos).
         access:
           step.readOnly === true
             ? { tools: 'read_only', github: 'read' }
             : { tools: 'full', github: step.delivery === true ? 'deliver' : 'read' },
-        agent: this.runAgent(row),
+        agent: byReviewer ? toRunAgent(reviewer!) : this.runAgent(row),
+        // Passo com modelo próprio > modelo da configuração da tarefa (só quem implementa) > agente.
         runtime:
-          step.model !== undefined || step.effort !== undefined
-            ? {
-                ...(step.model !== undefined ? { model: step.model } : {}),
-                ...(step.effort !== undefined ? { effort: step.effort } : {})
-              }
-            : null,
+          stepRuntime ?? (!byReviewer && persisted.model ? { model: persisted.model } : null),
         timeoutMin: step.timeoutMin
       })
       this.deps.db.run('UPDATE flow_steps SET run_id = ? WHERE id = ?', runId, rowId)

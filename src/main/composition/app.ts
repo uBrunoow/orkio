@@ -23,7 +23,12 @@ import {
   shell,
   type IpcMainInvokeEvent
 } from 'electron'
-import { AgentsService } from '../agents/agents.service'
+import { AgentError, AgentsService } from '../agents/agents.service'
+import { agentDisplayName } from '../../shared/agent-presets'
+import { FlowError } from '../flows/flow-runner'
+import { redactSecrets } from '../platform/redact'
+import { TaskSetupService } from '../task-setup/task-setup.service'
+import { taskSetupHandlers } from '../ipc/task-setup.ipc'
 import { AutomationService, type AutomationNotification } from '../automation/automation.service'
 import { AutomationScheduler } from '../automation/scheduler'
 import { BoardService } from '../board/board.service'
@@ -119,7 +124,15 @@ interface Work {
   overview: OverviewService
   handlers: Pick<
     Handlers,
-    'board' | 'flow' | 'automation' | 'alva' | 'agents' | 'taskFlows' | 'claude' | 'overview'
+    | 'board'
+    | 'flow'
+    | 'automation'
+    | 'alva'
+    | 'agents'
+    | 'taskFlows'
+    | 'taskSetup'
+    | 'claude'
+    | 'overview'
   >
 }
 
@@ -338,6 +351,7 @@ export function createApp(): OrkioApp {
     alva: work?.handlers.alva ?? null,
     agents: work?.handlers.agents ?? null,
     taskFlows: work?.handlers.taskFlows ?? null,
+    taskSetup: work?.handlers.taskSetup ?? null,
     claude: work?.handlers.claude ?? null,
     overview: work?.handlers.overview ?? null,
     updates: updatesHandlers(
@@ -542,6 +556,31 @@ function createWork(core: {
     emit
   })
 
+  // Fase 1: "Como deve rodar?" (padrão da coluna, troca por tarefa, fluxo nativo e revisor).
+  const taskSetup = new TaskSetupService({
+    db: boardStore.db,
+    config: configStore,
+    currentStage: (taskId) => boardStore.state(taskId)?.stageId ?? null,
+    assignment: (taskId) => agents.assignment(taskId),
+    agentName: async (projectId, key) =>
+      (await agents.get(projectId, key).catch(() => null))?.profile?.name ?? agentDisplayName(key),
+    runtime: async (projectId, key) => {
+      try {
+        return await agents.runtimeByKey(projectId, key)
+      } catch (error) {
+        if (error instanceof AgentError) {
+          throw new FlowError(error.code, `Revisor: ${error.message}`)
+        }
+        throw error
+      }
+    },
+    agentFlow: async (projectId, taskId) => {
+      const key = agents.assignedKey(taskId)
+      return key ? ((await agents.get(projectId, key))?.profile?.flow ?? null) : null
+    },
+    hasActiveFlow: (taskId) => flowRunner().hasActive(taskId)
+  })
+
   const githubRepo = (projectId: string): { owner: string; repo: string } | null => {
     const repo = githubRepoOf(projectById(configStore.get(), projectId))
     return repo ? { owner: repo.owner, repo: repo.name } : null
@@ -587,7 +626,13 @@ function createWork(core: {
     emit,
     notify: core.notify,
     onFlowFinished: (projectId) => orchestratorRef().runSoon(projectId),
-    enterStage: (change) => enterStage()(change)
+    enterStage: (change) => enterStage()(change),
+    nativePlan: (projectId, taskId, stageId, manual) =>
+      taskSetup.nativePlan(projectId, taskId, stageId, manual),
+    lastResult: async (runId) => {
+      const text = finalText(await claude.runs.readLog(runId))
+      return text ? redactSecrets(text) : null
+    }
   })
   flowRunner.set(flows.runner)
   const runner = flows.runner
@@ -649,6 +694,7 @@ function createWork(core: {
     config: () => configStore.get(),
     projects: async () => (await core.projects.list()).projects,
     flows: () => runner.activeViews(),
+    finishedFlows: (since) => runner.recentFinished(since),
     requests: () => claude.runs.waitingRequests(),
     runs: () => claude.runs.activeRuns(),
     cachedTasks: (projectId) => notionWorkspace.cachedTasks(projectId),
@@ -696,6 +742,7 @@ function createWork(core: {
       alva: flows.handlers.alva,
       agents: agentsHandlers(agents, orchestrator),
       taskFlows: flows.handlers.taskFlows,
+      taskSetup: taskSetupHandlers(taskSetup),
       claude: claudeHandlers(claude.service, claude.runs),
       overview: overviewHandlers(overview)
     }

@@ -14,7 +14,7 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   Ctrl/⌘+Shift+T, passe de uma para outra com Ctrl+Tab e arraste para reordenar. As abas voltam
   quando você reabre o Orkio. "Nova aba" (Ctrl/⌘+T) abre um ponto de partida com as telas e o que
   espera você.
-- Dock à esquerda com as telas (Quadro, Agentes, Configurações) e o botão para mostrar ou esconder
+- Dock à esquerda com as telas (Quadro, Tarefas, Agentes, Configurações) e o botão para mostrar ou esconder
   a lista de tarefas (Ctrl/⌘+B).
 - A paleta (Ctrl/⌘+K) agora faz qualquer coisa: além de tarefas, telas e projetos, roda as ações
   dos menus (nova aba, verificar agora, abrir o que espera você, conectar o Notion...). Ctrl/⌘+P
@@ -25,11 +25,25 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   assinatura já usou e quando renovam. O Orkio lê do login do Claude Code neste computador, só na
   hora e sem guardar nada; desligue em Configurações › Atualizações ou no próprio medidor.
 - Ajuda › Atalhos do teclado lista todos os atalhos.
+- "Como deve rodar?" em cada tarefa: **Rodar uma vez** (o Claude faz, um revisor confere, você vê o
+  diff e a PR sai), **Com aprovação** (a spec e o plano passam por você antes de mexer no código) ou
+  **Quebrar em passos** (o plano vira fatias pequenas, feitas uma de cada vez). Funcionam sem o
+  plugin alva-flow; os fluxos Alva continuam como opção.
+- Cada coluna do quadro define o padrão ("Como as colunas rodam", na tela Tarefas) e cada tarefa
+  troca o que quiser na aba Detalhes, ou ao mover o card para uma coluna que roda: o modo, quem
+  revisa (outro agente; quem implementa nunca revisa o próprio trabalho), o modelo e se pede
+  evidência. Cada item diz se veio da coluna ou foi escolhido para a tarefa, e fica travado
+  enquanto o fluxo roda.
+- Tela **Tarefas** (Ctrl/⌘+2): em que pé está cada tarefa em que os agentes mexeram — Precisa de
+  você, Trabalhando, Aguardando, Em revisão (com CI falhando, mudanças pedidas, conflito ou pronta)
+  e Concluído —, calculado do fluxo e da PR, em Kanban ou Lista, com os filtros "Em andamento" e
+  "Precisa de atenção". O quadro do Notion continua sendo o do time.
 
 ### Alterado
 
 - Ctrl/⌘+W fecha a aba, não mais a janela; o menu nativo do sistema saiu (no macOS ficam só o menu
   do app e Editar).
+- Atalhos das telas: Quadro Ctrl/⌘+1, Tarefas Ctrl/⌘+2, Agentes Ctrl/⌘+3, Configurações Ctrl/⌘+4.
 
 ## [0.2.11] - 2026-11-24
 

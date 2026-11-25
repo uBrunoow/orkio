@@ -439,7 +439,7 @@ export class ClaudeService {
       }
       let session: RunSession
       if (request.session.kind === 'latest') {
-        const last = this.deps.runs.lastSession(request.taskId)
+        const last = this.deps.runs.lastSession(request.taskId, request.session.excludeAgent)
         if (last) session = { kind: 'resume', id: last }
         else if (request.session.orNew) session = request.session.orNew
         else return fail('no_session', CLAUDE_MESSAGES.noSession)
