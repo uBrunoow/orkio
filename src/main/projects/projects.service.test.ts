@@ -460,6 +460,59 @@ describe('ProjectsService', () => {
       expect(github.getRepository).not.toHaveBeenCalled()
     })
 
+    it('só git local com o GitHub desconectado: salva sem a API, branch padrão do git', async () => {
+      github.isConnected.mockResolvedValue(false)
+      const service = makeService()
+      await load(service)
+      const selection = await select(service, '/code/orkio')
+      const result = await service.create({
+        selectionId: selection.selectionId,
+        remoteName: 'origin',
+        hostConfirmed: false,
+        gitOnly: true
+      })
+      expect(result).toMatchObject({
+        ok: true,
+        project: {
+          repo: {
+            host: 'github.com',
+            access: 'git',
+            verified: false,
+            defaultBranch: 'main',
+            visibility: 'unknown',
+            canPush: null,
+            archived: false
+          },
+          notices: [],
+          health: { state: 'ok' }
+        }
+      })
+      expect(github.getRepository).not.toHaveBeenCalled()
+    })
+
+    it('só git local por alias de SSH confirmado: host vira github.com', async () => {
+      repos['/code/work'] = {
+        remotes: [{ name: 'origin', url: 'git@github-trabalho:acme/api.git' }],
+        branch: 'dev',
+        dirty: false
+      }
+      existing.add('/code/work')
+      const service = makeService()
+      await load(service)
+      const selection = await select(service, '/code/work')
+      const result = await service.create({
+        selectionId: selection.selectionId,
+        remoteName: 'origin',
+        hostConfirmed: true,
+        gitOnly: true
+      })
+      expect(result).toMatchObject({
+        ok: true,
+        project: { repo: { host: 'github.com', owner: 'acme', name: 'api', access: 'git' } }
+      })
+      expect(github.getRepository).not.toHaveBeenCalled()
+    })
+
     it('mesma pasta duas vezes → already_added', async () => {
       const service = makeService()
       await load(service)
@@ -592,6 +645,40 @@ describe('ProjectsService', () => {
         state: 'no_access',
         message: 'Sem acesso.'
       })
+    })
+
+    it('trocar o modo: só git sai da API; voltar ao GitHub do Orkio revalida (e recusa sem acesso)', async () => {
+      const { service, id } = await withProject()
+      const git = await service.setAccess(id, 'git')
+      expect(git).toMatchObject({ ok: true, project: { repo: { access: 'git', verified: false } } })
+
+      // Reaberto e revalidado: continua só git, saúde ok, nenhuma chamada à API.
+      github.getRepository.mockClear()
+      github.isConnected.mockResolvedValue(false)
+      const reopened = makeService()
+      await load(reopened)
+      const revalidated = await reopened.revalidate()
+      expect(revalidated.projects[0]).toMatchObject({
+        repo: { access: 'git' },
+        health: { state: 'ok' }
+      })
+      expect(github.getRepository).not.toHaveBeenCalled()
+
+      // Voltar sem acesso: continua só git e devolve o erro.
+      github.isConnected.mockResolvedValue(true)
+      github.getRepository.mockRejectedValueOnce(new ApiError('github', 'not_found', 'Sem acesso.'))
+      const refused = await reopened.setAccess(id, 'app')
+      expect(refused).toMatchObject({
+        ok: false,
+        cancelled: false,
+        error: { message: 'Sem acesso.' }
+      })
+      expect((await reopened.list()).projects[0]!.repo).toMatchObject({ access: 'git' })
+
+      // Com acesso: volta a ser verificado pela API, sem o campo `access`.
+      const back = await reopened.setAccess(id, 'app')
+      expect(back).toMatchObject({ ok: true, project: { repo: { verified: true } } })
+      expect(back.ok && back.project.repo?.access).toBeUndefined()
     })
 
     it('reapontar: pasta de outro repositório é recusada; do mesmo repo é aceita', async () => {

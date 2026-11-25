@@ -83,6 +83,7 @@ import type {
   CreateProjectInput,
   PickFolderResult,
   ProjectMutationResult,
+  RepoAccess,
   ProjectsListResult
 } from '../projects'
 import type { Result } from '../result'
@@ -336,6 +337,7 @@ const repoPath = guard(isRepoPath)
 const localIdOrNull = nullable(localId)
 const taskIdOrNull = nullable(taskId)
 const publishMode = oneOf(ARTIFACT_PUBLISH_MODES)
+const repoAccess = oneOf(['app', 'git'])
 const updateChannel = oneOf(UPDATE_CHANNELS)
 const installMode = oneOf(UPDATE_INSTALL_MODES)
 const searchQuery = text(200)
@@ -608,6 +610,20 @@ export const ORKIO_API = {
       relocate: call<(projectId: string) => Promise<ProjectMutationResult>>()({
         channel: 'projects:relocate',
         args: [projectId],
+        fallback: projectMutationFallback,
+        invalid: {
+          ok: false,
+          cancelled: false,
+          error: { code: 'project_not_found', message: 'Projeto inválido.' }
+        }
+      }),
+      /**
+       * Só git desta máquina (`git`) ou o GitHub do Orkio (`app`, verifica de novo pela API; se
+       * recusar, o projeto continua só git e o erro volta).
+       */
+      setAccess: call<(projectId: string, access: RepoAccess) => Promise<ProjectMutationResult>>()({
+        channel: 'projects:set-access',
+        args: [projectId, repoAccess],
         fallback: projectMutationFallback,
         invalid: {
           ok: false,

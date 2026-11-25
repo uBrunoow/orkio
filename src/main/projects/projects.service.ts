@@ -20,7 +20,8 @@ import type {
   ProjectSelection,
   ProjectView,
   ProjectsListResult,
-  RemoteCandidate
+  RemoteCandidate,
+  RepoAccess
 } from '../../shared/projects'
 import { isApiError, isTransientApiError } from '../net/http'
 
@@ -198,7 +199,10 @@ export class ProjectsService {
       return fail('already_added', 'Esta pasta já está no Orkio.')
     }
 
-    const resolved = await this.resolveRepo(selection.root, candidate)
+    // "Só git desta máquina": nada de API do GitHub do Orkio (repos de org sem o app aprovado).
+    const resolved = input.gitOnly
+      ? { ok: true as const, repo: await this.localRepo(selection.root, candidate) }
+      : await this.resolveRepo(selection.root, candidate)
     if (!resolved.ok) return { ok: false, cancelled: false, error: resolved.error }
 
     const timestamp = this.now().toISOString()
@@ -417,6 +421,63 @@ export class ProjectsService {
     }
   }
 
+  /**
+   * Repositório salvo só com o git local (`access: 'git'`): coordenadas do remote, branch padrão do
+   * git e nada verificado. Alias de SSH confirmado vira github.com; Enterprise fica com o host dele.
+   */
+  private async localRepo(root: string, candidate: RemoteCandidate): Promise<ProjectRepo> {
+    return {
+      host: candidate.hostKind === 'enterprise' ? candidate.host : 'github.com',
+      owner: candidate.owner,
+      name: candidate.name,
+      remoteName: candidate.remoteName,
+      defaultBranch: await this.deps.git
+        .remoteDefaultBranch(root, candidate.remoteName)
+        .catch(() => null),
+      visibility: 'unknown',
+      canPush: null,
+      archived: false,
+      verified: false,
+      access: 'git'
+    }
+  }
+
+  /**
+   * Troca como o Orkio fala com o GitHub deste projeto. `git`: deixa de usar a API (fica só o git e
+   * o `gh` da máquina). `app`: verifica de novo pela API; se ela recusar, o projeto continua `git` e
+   * o erro volta.
+   */
+  async setAccess(projectId: string, access: RepoAccess): Promise<ProjectMutationResult> {
+    const project = this.findProject(projectId)
+    if (!project) return fail('project_not_found', 'Projeto não encontrado.')
+    const repo = project.repo
+    if (!repo) return fail('not_github', 'Este projeto não tem repositório do GitHub.')
+    let next: ProjectRepo
+    if (access === 'git') {
+      next = { ...repo, verified: false, visibility: 'unknown', canPush: null, access: 'git' }
+    } else {
+      if (!(await this.deps.github.isConnected().catch(() => false))) {
+        return fail(
+          'github_disconnected',
+          'Conecte sua conta do GitHub em Integrações para usar o GitHub do Orkio.'
+        )
+      }
+      try {
+        next = toProjectRepo(
+          await this.deps.github.getRepository(repo.owner, repo.name),
+          repo.remoteName
+        )
+      } catch (error) {
+        return { ok: false, cancelled: false, error: await this.githubFailure(error) }
+      }
+    }
+    const saved = await this.replaceRepo(project, next)
+    if (!saved) return fail('storage', 'Não foi possível salvar o projeto. Tente de novo.')
+    this.remoteHealth.set(projectId, { state: 'ok' })
+    const local = await this.localState(saved)
+    return { ok: true, project: this.view(saved, local, this.remoteHealth.get(projectId)) }
+  }
+
   private async resolveRepo(
     root: string,
     candidate: RemoteCandidate
@@ -491,6 +552,16 @@ export class ProjectsService {
         }
       }
     }
+  }
+
+  /** Grava o repositório como veio (sem o campo `access` quando é `app`: formato antigo no disco). */
+  private async replaceRepo(
+    project: StoredProject,
+    repo: ProjectRepo
+  ): Promise<StoredProject | null> {
+    const clean: ProjectRepo = { ...repo }
+    if (clean.access !== 'git') delete clean.access
+    return this.saveRepo(project, clean)
   }
 
   private async saveRepo(project: StoredProject, repo: ProjectRepo): Promise<StoredProject | null> {
@@ -683,7 +754,8 @@ export class ProjectsService {
 export function noticesFor(repo: ProjectRepo | null): ProjectNotice[] {
   if (!repo) return []
   const notices: ProjectNotice[] = []
-  if (!repo.verified) {
+  // Só git local é escolha do usuário (o cartão mostra "Git local"), não um aviso.
+  if (!repo.verified && repo.access !== 'git') {
     notices.push({
       code: 'enterprise_unverified',
       message: `GitHub Enterprise (${repo.host}) ainda não é suportado: o repositório não foi verificado.`
