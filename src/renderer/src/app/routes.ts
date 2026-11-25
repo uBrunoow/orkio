@@ -7,8 +7,8 @@ import { TASK_SECTIONS, type TaskSection, type BoardTaskRef } from '../../../sha
 import { isRecord } from '../../../shared/guards'
 import { TASK_FILTERS, type TaskFilter } from '../../../shared/task-lanes'
 
-export const TASKS_VIEWS = ['kanban', 'list'] as const
-export type TasksView = (typeof TASKS_VIEWS)[number]
+export const BOARD_LAYOUTS = ['kanban', 'list'] as const
+export type BoardLayout = (typeof BOARD_LAYOUTS)[number]
 
 export const SETTINGS_SECTIONS = [
   'general',
@@ -36,7 +36,14 @@ export type BoardSettingsTab = (typeof BOARD_SETTINGS_TABS)[number]
 export type Route =
   /** Primeiros passos; com `projectId`, só os passos que faltam para aquele projeto. */
   | { name: 'setup'; projectId?: string }
-  | { name: 'board'; projectId?: string }
+  /** Quadro: recorte (um projeto, vários ou todos), visão e filtro. Veja `boardRoute`. */
+  | {
+      name: 'board'
+      projectId?: string
+      projectIds?: readonly string[] | 'all'
+      view?: BoardLayout
+      filter?: TaskFilter
+    }
   | { name: 'task'; projectId: string; taskId: string; section?: TaskSection }
   /** Fase 2: terminais da tarefa (pasta de trabalho) e "Continuar no Claude". */
   | {
@@ -48,7 +55,7 @@ export type Route =
     }
   | { name: 'agents' }
   /** Fase 1: kanban derivado pessoal (raias calculadas do fluxo e da PR). */
-  | { name: 'tasks'; view?: TasksView; filter?: TaskFilter }
+  | { name: 'tasks'; view?: BoardLayout; filter?: TaskFilter }
   | { name: 'settings'; section?: SettingsSection; tab?: BoardSettingsTab; projectId?: string }
   /** Aba nova (Fase 0): ponto de partida com as telas e o que espera você. */
   | { name: 'home' }
@@ -83,6 +90,59 @@ export const SETTINGS_TITLES: Record<SettingsSection, string> = {
   diagnostics: 'Diagnóstico',
   updates: 'Atualizações',
   about: 'Sobre'
+}
+
+type BoardRoute = Extract<Route, { name: 'board' }>
+
+const MAX_BOARD_PROJECTS = 50
+const MAX_ID_LENGTH = 200
+
+/**
+ * Normaliza a rota do Quadro: sem ids repetidos (até 50, cada um até 200 caracteres), lista vazia
+ * some, lista com 1 vira `projectId`, e `projectIds` (2+ ou 'all') tira o `projectId`.
+ */
+export function boardRoute(input: Omit<BoardRoute, 'name'>): BoardRoute {
+  const { view, filter } = input
+  let projectId = input.projectId
+  let projectIds: readonly string[] | 'all' | undefined
+  if (input.projectIds === 'all') projectIds = 'all'
+  else if (input.projectIds) {
+    const ids = [
+      ...new Set(input.projectIds.filter((id) => id.length > 0 && id.length <= MAX_ID_LENGTH))
+    ].slice(0, MAX_BOARD_PROJECTS)
+    if (ids.length === 1) projectId = ids[0]
+    else if (ids.length > 1) projectIds = ids
+  }
+  if (projectIds) projectId = undefined
+  return {
+    name: 'board',
+    ...(projectId ? { projectId } : {}),
+    ...(projectIds ? { projectIds } : {}),
+    ...(view ? { view } : {}),
+    ...(filter ? { filter } : {})
+  }
+}
+
+/**
+ * Abrir o Quadro "sem nada" (Ctrl/⌘1, dock, tela inicial) em cima de um Quadro mantém o recorte, a
+ * visão e o filtro da aba. O `projectId` de uma aba não passa: ele segue o projeto atual do app.
+ */
+export function boardRouteAsIs(current: Route, next: Route): Route {
+  if (
+    next.name !== 'board' ||
+    current.name !== 'board' ||
+    next.projectId !== undefined ||
+    next.projectIds !== undefined ||
+    next.view !== undefined ||
+    next.filter !== undefined
+  ) {
+    return next
+  }
+  return boardRoute({
+    ...(current.projectIds ? { projectIds: current.projectIds } : {}),
+    ...(current.view ? { view: current.view } : {}),
+    ...(current.filter ? { filter: current.filter } : {})
+  })
 }
 
 export function routeForTaskRef(ref: BoardTaskRef): Route {
@@ -163,12 +223,22 @@ export function parseRoute(v: unknown): Route | null {
   if (!isRecord(v)) return null
   const projectId = str(v['projectId']) ? { projectId: v['projectId'] } : {}
   switch (v['name']) {
-    case 'board':
-      return { name: 'board', ...projectId }
+    case 'board': {
+      const raw = v['projectIds']
+      const projectIds = raw === 'all' ? 'all' : Array.isArray(raw) ? raw.filter(str) : undefined
+      const view = pick(BOARD_LAYOUTS, v['view'])
+      const filter = pick(TASK_FILTERS, v['filter'])
+      return boardRoute({
+        ...projectId,
+        ...(projectIds ? { projectIds } : {}),
+        ...(view ? { view } : {}),
+        ...(filter ? { filter } : {})
+      })
+    }
     case 'agents':
       return { name: 'agents' }
     case 'tasks': {
-      const view = pick(TASKS_VIEWS, v['view'])
+      const view = pick(BOARD_LAYOUTS, v['view'])
       const filter = pick(TASK_FILTERS, v['filter'])
       return { name: 'tasks', ...(view ? { view } : {}), ...(filter ? { filter } : {}) }
     }

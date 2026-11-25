@@ -144,9 +144,11 @@ function settingsPage(
  * que esquecer daqui não compila.
  */
 export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
-  board: (_route, ctx) => ({
+  board: (route, ctx) => ({
     node: (
       <BoardPage
+        route={route}
+        onRoute={ctx.replace}
         project={ctx.projects === null ? null : ctx.linkedProject}
         onOpenIntegrations={() => ctx.navigate({ name: 'settings', section: 'integrations' })}
         onOpenProjects={() => ctx.navigate({ name: 'settings', section: 'projects' })}

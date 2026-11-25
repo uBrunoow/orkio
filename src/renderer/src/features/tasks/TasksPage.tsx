@@ -8,7 +8,7 @@ import { PageState } from '../../components/PageState'
 import { ScreenTitle } from '../../components/ScreenTitle'
 import { RefreshIcon, SearchIcon, SettingsIcon } from '../../components/icons'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
-import type { Route, TasksView } from '../../app/routes'
+import type { Route, BoardLayout } from '../../app/routes'
 import { ipcResult, unwrap, useIpcResource } from '../../lib/ipc'
 import { formatDateTime } from '../../lib/format'
 import type { BoardTaskRef } from '../../../../shared/overview'
@@ -48,7 +48,7 @@ export function TasksPage({
   onOpenTask(ref: BoardTaskRef): void
   onOpenBoard(): void
 }): React.JSX.Element {
-  const view: TasksView = route.view ?? 'kanban'
+  const view: BoardLayout = route.view ?? 'kanban'
   const filter: TaskFilter = route.filter ?? 'all'
   const [query, setQuery] = useState('')
   const [columns, setColumns] = useState<{ stage: string | null } | null>(null)

@@ -34,6 +34,7 @@ import { TaskActivityProvider, type TaskActivityMap } from './task-activity'
 import { activityByTask } from '../overview/task-activity'
 import { useOverview } from '../overview/useOverview'
 import { useBoard } from './useBoard'
+import { boardRoute, type BoardLayout, type Route } from '../../app/routes'
 import { useSources } from '../../app/sources'
 import { ipcCall, ipcResult, unwrap, useIpcResource, useSource } from '../../lib/ipc'
 import type { CardActions } from './BoardCardView'
@@ -46,12 +47,16 @@ import { SignalsMessages } from '../notion-workspace/SignalsMessages'
 
 export function BoardPage({
   project,
+  route,
+  onRoute,
   onOpenIntegrations,
   onOpenProjects,
   onOpenTask
 }: {
   /** Projeto atual vinculado ao Notion (null = nenhum). */
   project: ProjectView | null
+  route: Extract<Route, { name: 'board' }>
+  onRoute(route: Route): void
   onOpenIntegrations(): void
   onOpenProjects(): void
   onOpenTask(taskId: string): void
@@ -72,16 +77,26 @@ export function BoardPage({
     )
   }
   return (
-    <Board projectId={project.id} onOpenIntegrations={onOpenIntegrations} onOpenTask={onOpenTask} />
+    <Board
+      projectId={project.id}
+      route={route}
+      onRoute={onRoute}
+      onOpenIntegrations={onOpenIntegrations}
+      onOpenTask={onOpenTask}
+    />
   )
 }
 
 function Board({
   projectId,
+  route,
+  onRoute,
   onOpenIntegrations,
   onOpenTask
 }: {
   projectId: string
+  route: Extract<Route, { name: 'board' }>
+  onRoute(route: Route): void
   onOpenIntegrations(): void
   onOpenTask(taskId: string): void
 }): React.JSX.Element {
@@ -104,7 +119,7 @@ function Board({
   const [priority, setPriority] = useState<string | null>(null)
   const [onlyBlocked, setOnlyBlocked] = useState(false)
   const [agentKey, setAgentKey] = useState<string | null>(null)
-  const [layout, setLayout] = useState<'kanban' | 'list'>('kanban')
+  const layout: BoardLayout = route.view ?? 'kanban'
   const { view } = board
 
   const fetchedAt = view?.fetchedAt
@@ -187,7 +202,9 @@ function Board({
           label="Visualização do quadro"
           size="sm"
           value={layout}
-          onChange={(v) => setLayout(v === 'list' ? 'list' : 'kanban')}
+          onChange={(v) =>
+            onRoute(boardRoute({ ...route, view: v === 'list' ? 'list' : 'kanban' }))
+          }
           options={[
             { value: 'kanban', label: 'Kanban' },
             { value: 'list', label: 'Lista' }

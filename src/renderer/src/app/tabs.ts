@@ -12,6 +12,7 @@ import {
   initialRouter,
   parseRoute,
   placeOf,
+  boardRouteAsIs,
   routerReducer,
   type Route,
   type RouterState
@@ -114,10 +115,12 @@ function navigate(state: TabsState, route: Route, reset: boolean): TabsState {
   const base: TabsState = { ...state, overlay: null }
   const active = activeTab(base)
   const place = placeOf(route)
-  const go = (router: RouterState): RouterState =>
-    reset
-      ? initialRouter(route, router.key + 1)
-      : routerReducer(router, { type: 'navigate', route })
+  const go = (router: RouterState): RouterState => {
+    const target = boardRouteAsIs(router.route, route)
+    return reset
+      ? initialRouter(target, router.key + 1)
+      : routerReducer(router, { type: 'navigate', route: target })
+  }
 
   if (active && place !== null && placeOf(active.router.route) === place) {
     return withRouter(base, active.id, go(active.router))
