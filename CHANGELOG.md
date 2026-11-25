@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.18] - 2026-11-25
+
 ### Mudado
 
 - **Um Quadro só:** a tela Tarefas saiu e o Quadro ficou com o que ela tinha de bom. Cada card
