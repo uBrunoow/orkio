@@ -7,7 +7,7 @@ import {
   nativeFlow,
   nativePrCommentsFlow
 } from './native-flows'
-import { ORKIO_ACTIONS } from './orkio-actions'
+import { ACTION_VARS, ORKIO_ACTIONS } from './orkio-actions'
 import { afterStep, startFlow, validateTaskFlow, type Flow, type FlowDecision } from './task-flow'
 import { RUN_MODES } from './task-setup'
 import { REVIEW_VARS } from './review-rounds'
@@ -34,6 +34,10 @@ function walk(
   act: (stepId: string, visit: number) => Record<string, string> = (id) =>
     id === 'registrar-revisao' ? { [REVIEW_VARS.verdict]: 'limpo' } : {}
 ): string[] {
+  // A PR é mergeada logo na primeira espera (a menos que o teste diga outra coisa).
+  const base = act
+  act = (id, visit) =>
+    id === 'esperar-pr' ? { [ACTION_VARS.prEvent]: 'merge', ...base(id, visit) } : base(id, visit)
   const path: string[] = []
   const visits: Record<string, number> = {}
   let d: FlowDecision = startFlow(flow)
@@ -98,6 +102,8 @@ describe('fluxos nativos', () => {
       'ver-diff',
       'push',
       'abrir-pr',
+      'esperar-pr',
+      'concluir-tarefa',
       'fim:done'
     ])
     const review = flow.steps.find((s) => s.id === 'revisar')!
@@ -117,7 +123,14 @@ describe('fluxos nativos', () => {
     )
     expect(path.filter((s) => s === 'corrigir')).toHaveLength(1)
     expect(path.filter((s) => s === 'revisar')).toHaveLength(2)
-    expect(path.slice(-4)).toEqual(['ver-diff', 'push', 'abrir-pr', 'fim:done'])
+    expect(path.slice(-6)).toEqual([
+      'ver-diff',
+      'push',
+      'abrir-pr',
+      'esperar-pr',
+      'concluir-tarefa',
+      'fim:done'
+    ])
   })
 
   it('finais honestos da revisão: esgotado no limite de rodadas, travado com os mesmos bloqueios', () => {
@@ -158,6 +171,8 @@ describe('fluxos nativos', () => {
       'ver-diff',
       'push',
       'abrir-pr',
+      'esperar-pr',
+      'concluir-tarefa',
       'fim:done'
     ])
   })
@@ -188,6 +203,51 @@ describe('fluxos nativos', () => {
     expect(path.at(-1)).toBe('fim:done')
     const forever = walk(flow, (id) => (id === 'fatia' ? '@orkio restam=9' : ''))
     expect(forever.filter((s) => s === 'fatia')).toHaveLength(12)
+  })
+
+  it('a PR acorda o fluxo: CI falhou e comentários corrigem e voltam a esperar; merge conclui', () => {
+    const flow = nativeFlow('quick', { review: false, evidence: false })!
+    const events = ['ci_falhou', 'comentarios', 'merge']
+    const path = walk(
+      flow,
+      () => '',
+      80,
+      (id, visit) => {
+        if (id === 'esperar-pr') return { [ACTION_VARS.prEvent]: events[visit - 1]! }
+        if (id === 'ler-comentarios-pr') return { [ACTION_VARS.reviewCount]: '2' }
+        if (id === 'conferir-envio') return { [ACTION_VARS.prPushed]: 'nao' }
+        return {}
+      }
+    )
+    expect(path.slice(path.indexOf('abrir-pr'))).toEqual([
+      'abrir-pr',
+      'esperar-pr',
+      'corrigir-ci',
+      'conferir-envio',
+      'enviar-correcoes',
+      'esperar-pr',
+      'ler-comentarios-pr',
+      'corrigir-comentarios',
+      'conferir-envio',
+      'enviar-correcoes',
+      'esperar-pr',
+      'concluir-tarefa',
+      'fim:done'
+    ])
+    expect(flow.steps.find((s) => s.id === 'corrigir-comentarios')).toMatchObject({
+      delivery: true
+    })
+    const closed = walk(flow, () => '', 80, (id) =>
+      id === 'esperar-pr' ? { [ACTION_VARS.prEvent]: 'fechada' } : {}
+    )
+    expect(closed.at(-1)).toBe('fim:nothing')
+    // Trava: o executor zera a contagem de passos a cada despertar (evento de fora, não laço);
+    // quem limita as voltas é a visita à espera.
+    expect(flow.steps.find((s) => s.id === 'voltar-a-esperar')).toMatchObject({
+      when: { of: [{ type: 'visits', step: 'esperar-pr', lt: 20 }] },
+      then: 'esperar-pr',
+      else: '$fim:esgotado'
+    })
   })
 
   it('comentários da PR: "Rodar uma vez" corrige direto; os outros pedem sua aprovação', () => {

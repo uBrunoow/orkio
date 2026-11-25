@@ -20,6 +20,10 @@ import {
   type OrkioAction
 } from '../flows/flow-runner'
 import { FlowsService } from '../flows/flows.service'
+import { createMoveDoneAction, PrWakeService, WAIT_PR_ACTION } from '../flows/pr-wake'
+import type { PrWatch } from '../../shared/pr-wake'
+import { isScratchPath } from '../../shared/orkio-scratch'
+import type { Git } from '../git/git'
 import type { OpenPrDeps } from '../flows/open-pr'
 import { alvaHandlers } from '../ipc/alva.ipc'
 import type { Emit } from '../ipc/emit'
@@ -49,7 +53,16 @@ export function createFlows(deps: {
   nativePlan: NonNullable<FlowRunnerDeps['nativePlan']>
   /** Texto final de uma execução (o fix recebe a revisão). */
   lastResult: NonNullable<FlowRunnerDeps['lastResult']>
-}): { runner: FlowRunner; handlers: Pick<Handlers, 'alva' | 'taskFlows'> } {
+  /** Fase 5: foto da PR da tarefa (sinais em cache). */
+  prWatch(projectId: string, taskId: string): PrWatch | null
+  /** Fase 5: segurar a automação pelo uso do Claude. */
+  usageHold: NonNullable<FlowRunnerDeps['usageHold']>
+  git: Pick<Git, 'headCommit' | 'statusPorcelain'>
+}): {
+  runner: FlowRunner
+  prWake: PrWakeService
+  handlers: Pick<Handlers, 'alva' | 'taskFlows'>
+} {
   const { claude } = deps
   const neutralDir = deps.paths.alvaCheck
   void mkdir(neutralDir, { recursive: true }).catch(() => undefined)
@@ -91,7 +104,16 @@ export function createFlows(deps: {
   })
 
   const extractors = [ORKIO_LINES_EXTRACTOR, alva.extractor]
-  const actions = [NOOP_ACTION, ...deps.deliveryActions]
+  const actions = [
+    NOOP_ACTION,
+    ...deps.deliveryActions,
+    WAIT_PR_ACTION,
+    createMoveDoneAction({
+      store: deps.boardStore,
+      board: deps.board,
+      stages: (projectId) => deps.configStore.get().boards[projectId]?.stages ?? []
+    })
+  ]
   const runner = new FlowRunner({
     db: deps.boardStore.db,
     store: deps.boardStore,
@@ -126,8 +148,22 @@ export function createFlows(deps: {
     onFinished: (ref) => deps.onFlowFinished(ref.projectId),
     enterStage: deps.enterStage,
     nativePlan: deps.nativePlan,
-    lastResult: deps.lastResult
+    lastResult: deps.lastResult,
+    prWatch: deps.prWatch,
+    usageHold: deps.usageHold,
+    // "Parou sem entregar": o topo e o que falta commitar no worktree (sem a pasta `.orkio/`).
+    workState: async (taskId) => {
+      const path = claude.worktrees.get(taskId)?.path
+      if (!path) return null
+      const [head, status] = await Promise.all([
+        deps.git.headCommit(path).catch(() => null),
+        deps.git.statusPorcelain(path)
+      ])
+      const dirty = status.some((line) => !isScratchPath(line.slice(3).replace(/^"|"$/g, '')))
+      return { head, dirty }
+    }
   })
+  const prWake = new PrWakeService({ runner, prWatch: deps.prWatch })
   claude.runs.onFinished((info) => runner.onRunFinished(info))
   const service = new FlowsService({
     config: deps.configStore,
@@ -146,6 +182,7 @@ export function createFlows(deps: {
   }
   return {
     runner,
+    prWake,
     handlers: {
       alva: alvaHandlers(alvaFlows),
       taskFlows: taskFlowsHandlers(service, runner, openPrDeps)

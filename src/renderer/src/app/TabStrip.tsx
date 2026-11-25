@@ -1,4 +1,12 @@
 import { useRef, useState } from 'react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
@@ -11,7 +19,7 @@ import { useSources } from './sources'
 import type { Tab, TabsAction } from './tabs'
 
 /** Título da aba: o da tela; a tarefa mostra ID e título (do quadro já carregado). */
-function useTabTitle(route: Route): { id: string | null; title: string } {
+export function useTabTitle(route: Route): { id: string | null; title: string } {
   const { board } = useSources()
   const projectId = route.name === 'task' || route.name === 'terminal' ? route.projectId : null
   const view = useSource(board, projectId).value?.view ?? null
@@ -29,18 +37,31 @@ function useTabTitle(route: Route): { id: string | null; title: string } {
   return { id: null, title: screenOf(route.name).title }
 }
 
+/** Para onde a aba pode ir (menu de contexto da aba). */
+export interface TabMoveTargets {
+  /** Os outros desktops (sem o atual). */
+  desktops: readonly { id: string; name: string }[]
+  canCreate: boolean
+  onMove(tabId: string, to: string | 'new'): void
+}
+
 function TabItem({
   tab,
   index,
   isActive,
+  isVisible,
   dispatch,
+  moveTargets,
   onDragStart,
   onDrop
 }: {
   tab: Tab
   index: number
   isActive: boolean
+  /** Visível num painel da divisão (sem ser a ativa). */
+  isVisible: boolean
   dispatch(action: TabsAction): void
+  moveTargets: TabMoveTargets | null
   onDragStart(id: string): void
   onDrop(index: number): void
 }): React.JSX.Element {
@@ -49,8 +70,15 @@ function TabItem({
   const Icon = screenOf(route.name).icon
   const name = id ? `${id} ${title}` : title
   const [over, setOver] = useState(false)
+  const [menu, setMenu] = useState(false)
+  const tabButton = useRef<HTMLButtonElement>(null)
   return (
     <div
+      onContextMenu={(e) => {
+        if (!moveTargets) return
+        e.preventDefault()
+        setMenu(true)
+      }}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = 'move'
@@ -74,7 +102,9 @@ function TabItem({
         'group relative flex h-8 max-w-[220px] min-w-[120px] flex-1 items-center rounded-md border border-transparent text-sm',
         isActive
           ? 'border-border-soft bg-card text-foreground'
-          : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+          : isVisible
+            ? 'border-dashed border-border-soft text-foreground hover:bg-muted/60'
+            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
         over && 'ring-1 ring-ring/40'
       )}
     >
@@ -83,13 +113,20 @@ function TabItem({
         role="tab"
         id={`tab-${tab.id}`}
         aria-selected={isActive}
-        aria-controls="tab-panel"
+        ref={tabButton}
+        aria-controls={isActive || isVisible ? `tab-panel-${tab.id}` : undefined}
+        aria-haspopup={moveTargets ? 'menu' : undefined}
         tabIndex={isActive ? 0 : -1}
         onClick={() => dispatch({ type: 'activate', id: tab.id })}
         onKeyDown={(e) => {
           if (e.key === 'Delete') {
             e.preventDefault()
             dispatch({ type: 'close', id: tab.id })
+          }
+          // Menu da aba pelo teclado (tecla Menu ou Shift+F10), como o botão direito.
+          if (moveTargets && (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey))) {
+            e.preventDefault()
+            setMenu(true)
           }
         }}
         className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md pr-1 pl-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
@@ -110,6 +147,47 @@ function TabItem({
       >
         <CloseIcon className="size-3" />
       </button>
+      {moveTargets && (
+        <DropdownMenu open={menu} onOpenChange={setMenu}>
+          {/* Âncora do menu de contexto (o botão direito abre; clicar na aba não). */}
+          <DropdownMenuTrigger asChild>
+            <span
+              aria-hidden="true"
+              tabIndex={-1}
+              className="pointer-events-none absolute bottom-0 left-2 size-0"
+            />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            aria-labelledby={`tab-${tab.id}`}
+            onCloseAutoFocus={(e) => {
+              e.preventDefault()
+              tabButton.current?.focus()
+            }}
+          >
+            <DropdownMenuLabel className="text-2xs font-normal tracking-wider text-subtle-foreground uppercase">
+              Mover para
+            </DropdownMenuLabel>
+            {moveTargets.desktops.map((d) => (
+              <DropdownMenuItem key={d.id} onSelect={() => moveTargets.onMove(tab.id, d.id)}>
+                {d.name}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuItem
+              disabled={!moveTargets.canCreate}
+              onSelect={() => moveTargets.onMove(tab.id, 'new')}
+            >
+              <PlusIcon />
+              Novo desktop
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => dispatch({ type: 'close', id: tab.id })}>
+              <CloseIcon />
+              Fechar aba
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </div>
   )
 }
@@ -121,13 +199,23 @@ function TabItem({
 export function TabStrip({
   tabs,
   activeId,
+  visibleIds,
   isMac,
-  dispatch
+  dispatch,
+  moveTargets = null,
+  start,
+  end
 }: {
   tabs: readonly Tab[]
   activeId: string | null
+  /** Abas visíveis na divisão (a ativa inclusa). */
+  visibleIds?: ReadonlySet<string>
   isMac: boolean
   dispatch(action: TabsAction): void
+  moveTargets?: TabMoveTargets | null
+  /** Antes das abas (seletor de desktops) e depois do "+" (arranjo). */
+  start?: React.ReactNode
+  end?: React.ReactNode
 }): React.JSX.Element {
   const dragging = useRef<string | null>(null)
   const list = useRef<HTMLDivElement>(null)
@@ -140,6 +228,7 @@ export function TabStrip({
 
   return (
     <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border-soft bg-background px-2">
+      {start}
       <div
         ref={list}
         role="tablist"
@@ -159,7 +248,9 @@ export function TabStrip({
             tab={tab}
             index={i}
             isActive={tab.id === activeId}
+            isVisible={tab.id !== activeId && (visibleIds?.has(tab.id) ?? false)}
             dispatch={dispatch}
+            moveTargets={moveTargets}
             onDragStart={(id) => (dragging.current = id)}
             onDrop={(index) => {
               if (dragging.current) dispatch({ type: 'move', id: dragging.current, index })
@@ -183,6 +274,7 @@ export function TabStrip({
           Nova aba <Kbd>{formatKeys('mod+t', isMac)}</Kbd>
         </TooltipContent>
       </Tooltip>
+      {end}
     </div>
   )
 }

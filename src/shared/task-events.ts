@@ -170,7 +170,7 @@ export const TASK_EVENTS = {
       orchestrator: field(oneOf(['pull', 'handoff'])),
       agent: str,
       agentKey: str,
-      flow: field(oneOf(['stage_removed'])),
+      flow: field(oneOf(['stage_removed', 'pr_merged'])),
       removedStage: str,
       notionStatus: str
     }

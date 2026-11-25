@@ -316,6 +316,8 @@ export function buildRunning(
     const running = flow.status === 'running'
     // Na fila (vaga do projeto ou do agente): começa sozinho, então conta como rodando.
     const waitingSlot = waitingKind(flow) === 'queue'
+    // Fase 5: esperando a PR não é trabalho: a tarefa aparece pela PR (Em revisão).
+    if (flow.pauseReason === 'waiting_pr' && !running) continue
     if (!running && !waitingSlot) continue
     const current = flow.history[flow.history.length - 1]
     if (current?.runId) flowRunIds.add(current.runId)
@@ -330,7 +332,7 @@ export function buildRunning(
       kind: 'flow',
       task: task(flow.projectId, flow.taskId),
       label: waitingSlot
-        ? `${flow.flowName} · ${flow.pauseReason === 'waiting_agent' ? 'aguardando o agente' : 'aguardando vaga'}`
+        ? `${flow.flowName} · ${(flow.pauseReason && FLOW_PAUSES[flow.pauseReason].short) || 'aguardando vaga'}`
         : `${flow.flowName}${stepLabel ? ` · ${stepLabel}` : ''}`,
       state: waitingSlot ? 'queued' : 'running',
       startedAt: flow.startedAt,

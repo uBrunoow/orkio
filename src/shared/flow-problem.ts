@@ -23,6 +23,7 @@ export type FailureProblemKind =
   | 'review_not_configured'
   | 'review_no_site'
   | 'review_maybe_posted'
+  | 'no_delivery'
   | 'generic'
 
 export type ProblemKind = FailureProblemKind | PauseProblemKind
@@ -50,8 +51,13 @@ const KIND_BY_CODE: Readonly<Record<string, FailureProblemKind>> = {
   review_not_installed: 'review_not_installed',
   review_not_configured: 'review_not_configured',
   review_no_site: 'review_no_site',
-  review_maybe_posted: 'review_maybe_posted'
+  review_maybe_posted: 'review_maybe_posted',
+  // Fase 5: o passo terminou sem commit, sem mudanças e sem resposta (`NO_DELIVERY_CODE`).
+  no_delivery: 'no_delivery'
 }
+
+/** Código do passo que "parou sem entregar" (gravado pelo executor dos fluxos). */
+export const NO_DELIVERY_CODE = 'no_delivery'
 
 export function classifyFailure(code: string | null): FailureProblemKind {
   return (code !== null && KIND_BY_CODE[code]) || 'generic'
@@ -84,6 +90,8 @@ const HINT: Record<FailureProblemKind, string> = {
     'Este build do Orkio está sem o endereço do site (MAIN_VITE_SITE_URL). Defina e reinicie o app (em dev, no .env.development) e retome. Nada foi publicado.',
   review_maybe_posted:
     'O site do Orkio demorou e a revisão pode já estar na PR. Abra a PR e confira: se estiver lá, pule este passo; se não, retome (o Orkio mostra a revisão de novo antes de publicar).',
+  no_delivery:
+    'O Claude terminou o passo sem fazer commit, sem deixar mudanças e sem responder nada. Veja a sessão do passo, responda ao Claude para ele continuar ou retome para rodar o passo de novo.',
   generic:
     'Veja a sessão do passo para entender o que aconteceu. Retome para tentar de novo, pule o passo ou cancele o fluxo.'
 }

@@ -20,9 +20,12 @@ import {
   BackIcon,
   CloseIcon,
   TerminalIcon,
+  GridIcon,
+  TabIcon,
   type SvgIcon
 } from '../components/icons'
-import { matchesKeys, type KeyInput } from './keys'
+import { ARRANGEMENTS, MAX_DESKTOPS, type Arrangement, type DesktopsAction } from './desktops'
+import { formatKeys, matchesKeys, type KeyInput } from './keys'
 import { SETTINGS_TITLES, type Route } from './routes'
 import { SCREENS, settingsSections } from './screens'
 import type { TabsAction } from './tabs'
@@ -53,6 +56,15 @@ export interface CommandState {
   waiting: number
   notionConnected: boolean
   githubConnected: boolean
+  /** Desktops (Fase 5); ausente = um desktop só, sem divisão (ex.: listas de atalhos). */
+  desktops?: DesktopsInfo
+}
+
+export interface DesktopsInfo {
+  list: readonly { id: string; name: string }[]
+  /** Posição do desktop atual em `list`. */
+  index: number
+  arrangement: Arrangement
 }
 
 /** O que os comandos podem fazer no app. */
@@ -67,6 +79,10 @@ export interface CommandActions {
   showShortcuts(): void
   showWhatsNew(): void
   checkUpdates(): void
+  desktop(action: DesktopsAction): void
+  /** Abre a lista de todos os desktops (o seletor da faixa de abas). */
+  showDesktops(): void
+  renameDesktop(): void
 }
 
 export type CommandContext = CommandState & CommandActions
@@ -86,6 +102,11 @@ export interface Command {
   altKeys?: readonly string[]
   /** Palavras a mais para a busca da paleta. */
   keywords?: readonly string[]
+  /**
+   * Como aparece nas listas de atalhos (Ajuda › Atalhos): `false` = não aparece (ex.: os
+   * "Ir para o desktop 2…9", resumidos numa linha só pelo primeiro).
+   */
+  shortcutRow?: false | { label: string; keys: string; suffix?: string }
   /** `false` = fora da paleta (ex.: abrir a própria paleta). */
   inPalette?: boolean
   /** Aparece agora? (ex.: "Conectar o Notion" só sem conexão). */
@@ -141,6 +162,123 @@ function settingsCommands(): Command[] {
     run: (ctx) => ctx.navigate({ name: 'settings', section: 'board', tab: 'flows' })
   })
   return all
+}
+
+const desktopCount = (ctx: CommandState): number => ctx.desktops?.list.length ?? 1
+const desktopAt = (ctx: CommandState, i: number): { id: string; name: string } | null =>
+  ctx.desktops?.list[i] ?? null
+
+/** Desktops e arranjos (Fase 5), no menu Janela e na paleta. */
+function desktopCommands(): Command[] {
+  const goTo = Array.from({ length: MAX_DESKTOPS }, (_, i): Command => ({
+    id: `desktop:go:${i + 1}`,
+    label: (ctx) => `Ir para ${desktopAt(ctx, i)?.name ?? `Desktop ${i + 1}`}`,
+    keys: `mod+alt+${i + 1}`,
+    shortcutRow:
+      i === 0
+        ? {
+            label: `Ir para o desktop 1 a ${MAX_DESKTOPS}`,
+            keys: 'mod+alt+1',
+            suffix: `–${MAX_DESKTOPS}`
+          }
+        : false,
+    keywords: ['desktop', 'área de trabalho', 'trocar'],
+    visible: (ctx) => desktopAt(ctx, i) !== null,
+    enabled: (ctx) => (ctx.desktops?.index ?? 0) !== i,
+    run: (ctx) => {
+      const d = desktopAt(ctx, i)
+      if (d) ctx.desktop({ type: 'switch', id: d.id })
+    }
+  }))
+  const moveTo = Array.from({ length: MAX_DESKTOPS }, (_, i): Command => ({
+    id: `desktop:move-tab:${i + 1}`,
+    label: (ctx) => `Mover aba para ${desktopAt(ctx, i)?.name ?? `Desktop ${i + 1}`}`,
+    keywords: ['desktop', 'levar', 'aba'],
+    visible: (ctx) => desktopAt(ctx, i) !== null && (ctx.desktops?.index ?? 0) !== i,
+    enabled: (ctx) => ctx.tabCount > 0,
+    run: (ctx) => {
+      const d = desktopAt(ctx, i)
+      if (d) ctx.desktop({ type: 'move-tab', to: d.id })
+    }
+  }))
+  const arrange = ARRANGEMENTS.map((a): Command => ({
+    id: `layout:${a.id}`,
+    label: `Arranjo: ${a.label}`,
+    menu: 'window',
+    block: 5,
+    ...(a.id === 'grid' ? { icon: GridIcon } : {}),
+    keywords: ['dividir', 'lado a lado', 'divisão', 'layout', a.hint],
+    enabled: (ctx) => (ctx.desktops?.arrangement ?? 'single') !== a.id,
+    run: (ctx) => ctx.desktop({ type: 'arrange', arrangement: a.id })
+  }))
+  return [
+    {
+      id: 'desktop:all',
+      label: 'Todos os desktops…',
+      menu: 'window',
+      block: 3,
+      icon: TabIcon,
+      keys: 'mod+shift+d',
+      keywords: ['desktop', 'área de trabalho', 'trocar'],
+      run: (ctx) => ctx.showDesktops()
+    },
+    {
+      id: 'desktop:new',
+      label: 'Novo desktop',
+      menu: 'window',
+      block: 3,
+      icon: PlusIcon,
+      keys: 'mod+alt+n',
+      keywords: ['desktop', 'área de trabalho', 'criar'],
+      enabled: (ctx) => desktopCount(ctx) < MAX_DESKTOPS,
+      run: (ctx) => ctx.desktop({ type: 'create' })
+    },
+    {
+      id: 'desktop:next',
+      label: 'Próximo desktop',
+      menu: 'window',
+      block: 3,
+      keys: 'mod+alt+arrowright',
+      keywords: ['desktop'],
+      enabled: (ctx) => desktopCount(ctx) > 1,
+      run: (ctx) => ctx.desktop({ type: 'cycle', offset: 1 })
+    },
+    {
+      id: 'desktop:previous',
+      label: 'Desktop anterior',
+      menu: 'window',
+      block: 3,
+      keys: 'mod+alt+arrowleft',
+      keywords: ['desktop'],
+      enabled: (ctx) => desktopCount(ctx) > 1,
+      run: (ctx) => ctx.desktop({ type: 'cycle', offset: -1 })
+    },
+    {
+      id: 'desktop:move-tab:new',
+      label: 'Mover aba para um novo desktop',
+      menu: 'window',
+      block: 3,
+      keywords: ['desktop', 'levar', 'aba'],
+      enabled: (ctx) => ctx.tabCount > 0 && desktopCount(ctx) < MAX_DESKTOPS,
+      run: (ctx) => ctx.desktop({ type: 'move-tab', to: 'new' })
+    },
+    {
+      id: 'desktop:rename',
+      label: 'Renomear desktop…',
+      keywords: ['desktop', 'nome'],
+      run: (ctx) => ctx.renameDesktop()
+    },
+    {
+      id: 'desktop:remove',
+      label: 'Apagar desktop',
+      keywords: ['desktop', 'fechar', 'remover'],
+      enabled: (ctx) => desktopCount(ctx) > 1,
+      run: (ctx) => ctx.desktop({ type: 'remove' })
+    },
+    ...goTo,
+    ...moveTo,
+    ...arrange
+  ]
 }
 
 export const APP_COMMANDS: readonly Command[] = [
@@ -351,6 +489,7 @@ export const APP_COMMANDS: readonly Command[] = [
     keywords: ['medidor', 'limite', 'cota'],
     run: (ctx) => ctx.setUsageMeter(!ctx.usageMeter)
   },
+  ...desktopCommands(),
   // Ajuda
   {
     id: 'shortcuts',
@@ -422,6 +561,28 @@ export function commandForKey(
     if (keys.some((k) => matchesKeys(k, e, ctx.isMac)) && isAvailable(c, ctx)) return c
   }
   return null
+}
+
+/**
+ * Linhas da lista de atalhos de um menu (Ajuda › Atalhos): todo comando com atalho, menos os
+ * resumidos (`shortcutRow: false`); "Ir para o desktop 1 a 9" vira uma linha com "Ctrl Alt 1–9".
+ */
+export function shortcutRows(
+  commands: readonly Command[],
+  menu: MenuId,
+  ctx: CommandState
+): { id: string; label: string; keys: string }[] {
+  return commands
+    .filter((c) => c.keys && (c.menu ?? 'go') === menu && c.shortcutRow !== false)
+    .map((c) =>
+      c.shortcutRow
+        ? {
+            id: c.id,
+            label: c.shortcutRow.label,
+            keys: `${formatKeys(c.shortcutRow.keys, ctx.isMac)}${c.shortcutRow.suffix ?? ''}`
+          }
+        : { id: c.id, label: commandLabel(c, ctx), keys: formatKeys(c.keys!, ctx.isMac) }
+    )
 }
 
 /** Comandos que vão para a paleta agora (disponíveis e não escondidos dela). */

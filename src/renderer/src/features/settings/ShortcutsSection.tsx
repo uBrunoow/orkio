@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import { Kbd } from '@/components/ui/kbd'
 import { GLOBAL_SHORTCUTS, type GlobalShortcut } from '../../../../shared/preferences'
-import { APP_COMMANDS, MENUS, commandLabel, type CommandState } from '../../app/commands'
+import { APP_COMMANDS, MENUS, shortcutRows, type CommandState } from '../../app/commands'
 import { formatKeys } from '../../app/keys'
 import { Alert } from '../../components/Alert'
 import { ChoiceCards, type ChoiceCard } from '../../components/ChoiceCards'
@@ -49,7 +49,8 @@ export function ShortcutsSection({ isMac }: { isMac: boolean }): React.JSX.Eleme
   ]
   const groups = MENUS.map((m) => ({
     label: m.label,
-    items: APP_COMMANDS.filter((c) => c.keys && (c.menu ?? 'go') === m.id)
+    // Fase 5: atalhos em série (desktop 1 a 9) viram uma linha só, como na Ajuda › Atalhos.
+    items: shortcutRows(APP_COMMANDS, m.id, ctx)
   })).filter((g) => g.items.length > 0)
 
   return (
@@ -84,8 +85,8 @@ export function ShortcutsSection({ isMac }: { isMac: boolean }): React.JSX.Eleme
               <ul className="flex flex-col gap-1">
                 {g.items.map((c) => (
                   <li key={c.id} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="text-foreground">{commandLabel(c, ctx)}</span>
-                    <Kbd>{formatKeys(c.keys!, isMac)}</Kbd>
+                    <span className="text-foreground">{c.label}</span>
+                    <Kbd>{c.keys}</Kbd>
                   </li>
                 ))}
               </ul>

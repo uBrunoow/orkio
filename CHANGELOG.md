@@ -112,6 +112,28 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   Se os mesmos bloqueios voltam, o fluxo para como "Travado"; no limite de rodadas, "Esgotado".
 
 
+- **A PR acorda o fluxo:** depois de abrir a PR, "Rodar uma vez", "Com aprovação" e "Quebrar em
+  passos" ficam esperando a PR, sem prender o Claude nem você (a conversa continua livre). Se o CI
+  falhar ou chegar revisão ou comentário novo, o Orkio espera uns 2 minutos a poeira baixar e o
+  fluxo corrige, responde as threads e envia; quando a PR é mergeada, a tarefa vai para Concluída.
+  O Claude não pode mais ficar esperando no terminal (`gh pr checks --watch`, `sleep` longo,
+  `tail -f`): quem acompanha a PR é o Orkio.
+- **Parou sem entregar:** um passo em que o Claude termina sem commit, sem mudanças e sem resposta
+  vai para "Precisa de você", com o que fazer (responder, rodar de novo ou pular).
+- **O uso do Claude decide quando a automação roda:** com a janela de 5 horas perto do limite (90%
+  por padrão), os fluxos que a automação começou esperam a janela renovar e seguem sozinhos. O que
+  você pede roda sempre. Ligue, desligue e escolha o limite em Configurações › Provedores e uso; se
+  o medidor falhar, nada é segurado.
+- **Quebrar em passos com o git como checkpoint:** o plano diz de quais fatias cada uma depende,
+  cada fatia vira um commit só com a linha `Spec-Slice: <n>`, e o Orkio confere no git o que já
+  está pronto antes de cada fatia: retomar nunca refaz uma fatia feita e a ordem respeita as
+  dependências.
+- **Desktops:** guarde conjuntos de abas separados (um por projeto ou atividade), troque com
+  Ctrl/⌘+Alt+1…9 ou pelo seletor ao lado das abas, renomeie e leve uma aba de um desktop para outro
+  pelo botão direito. Suas abas de antes continuam lá, agora no "Desktop 1".
+- **Tela dividida:** veja duas a quatro abas ao mesmo tempo (Principal + pilha, Colunas ou Grade)
+  pelo botão ao lado do "+" ou pelo menu Janela; clique num painel para trabalhar nele.
+
 ### Alterado
 
 - O revisor não pede mais a sua aprovação a cada `git diff`: o Orkio grava o diff da tarefa para

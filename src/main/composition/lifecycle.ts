@@ -7,6 +7,8 @@ export interface StopParts {
     terminals: { stopAll(): void }
     writes: { stop(): void }
     scheduler: { stop(): void }
+    /** Fase 5: a conferência das PRs que acordam fluxos. */
+    prWake?: { stop(): void }
     overview: { dispose(): void }
   } | null
   projects: { dispose(): void }
@@ -43,6 +45,7 @@ export function createStop(
       }
       work?.writes.stop()
       work?.scheduler.stop()
+      work?.prWake?.stop()
       work?.overview.dispose()
       projects.dispose()
       keepAwake.dispose()

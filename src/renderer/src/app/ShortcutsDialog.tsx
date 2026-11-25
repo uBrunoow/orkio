@@ -1,6 +1,6 @@
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Kbd } from '@/components/ui/kbd'
-import { MENUS, commandLabel, type Command, type CommandState } from './commands'
+import { MENUS, shortcutRows, type Command, type CommandState } from './commands'
 import { formatKeys } from './keys'
 
 /** Ajuda › Atalhos do teclado: todo comando do registro que tem atalho, pelo menu dele. */
@@ -17,7 +17,7 @@ export function ShortcutsDialog({
 }): React.JSX.Element {
   const groups = MENUS.map((m) => ({
     label: m.label,
-    items: commands.filter((c) => c.keys && (c.menu ?? 'go') === m.id)
+    items: shortcutRows(commands, m.id, ctx)
   })).filter((g) => g.items.length > 0)
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -38,8 +38,8 @@ export function ShortcutsDialog({
               <ul className="flex flex-col gap-1">
                 {g.items.map((c) => (
                   <li key={c.id} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="text-foreground">{commandLabel(c, ctx)}</span>
-                    <Kbd>{formatKeys(c.keys!, ctx.isMac)}</Kbd>
+                    <span className="text-foreground">{c.label}</span>
+                    <Kbd>{c.keys}</Kbd>
                   </li>
                 ))}
               </ul>

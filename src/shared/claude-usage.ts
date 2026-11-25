@@ -25,6 +25,52 @@ export interface ClaudeUsage {
 export interface ClaudeUsageView {
   enabled: boolean
   usage: ClaudeUsage | null
+  /** Fase 5: segurar a automação perto do limite (Configurações › Provedores e uso). */
+  hold?: UsageHold
+}
+
+/**
+ * Fase 5: o uso do Claude decide quando a automação roda. Com a janela de 5 h em `percent`% ou
+ * mais, os fluxos que a automação começou (coluna movida por regra, orquestrador, a PR que acorda
+ * o fluxo) esperam a janela renovar antes do próximo passo do Claude Code. Medidor desligado ou
+ * falhando = nada é segurado.
+ */
+export interface UsageHold {
+  enabled: boolean
+  percent: number
+}
+
+export const USAGE_HOLD_DEFAULT: UsageHold = { enabled: true, percent: 90 }
+export const USAGE_HOLD_RANGE = { min: 50, max: 100 } as const
+
+/** Configuração lida do disco ou do IPC; inválida = `null`. */
+export function parseUsageHold(value: unknown): UsageHold | null {
+  if (!isRecord(value)) return null
+  const { enabled, percent } = value
+  if (typeof enabled !== 'boolean') return null
+  if (
+    typeof percent !== 'number' ||
+    !Number.isInteger(percent) ||
+    percent < USAGE_HOLD_RANGE.min ||
+    percent > USAGE_HOLD_RANGE.max
+  ) {
+    return null
+  }
+  return { enabled, percent }
+}
+
+/**
+ * Segura agora? Só a janela de 5 h decide (a semanal não renova em horas). `null` = pode rodar
+ * (desligado, sem leitura do medidor ou abaixo do limite).
+ */
+export function usageHoldOf(
+  hold: UsageHold,
+  usage: ClaudeUsage | null
+): { percent: number; resetsAt: string | null } | null {
+  if (!hold.enabled || !usage?.session) return null
+  return usage.session.percent >= hold.percent
+    ? { percent: usage.session.percent, resetsAt: usage.session.resetsAt }
+    : null
 }
 
 function window(value: unknown): UsageWindow | null {
