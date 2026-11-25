@@ -11,6 +11,7 @@
  * - Tarefa que entra numa etapa de trabalho por outro caminho (você, automação) ganha um agente da
  *   etapa (`onStageChanged`), a não ser que você tenha escolhido o agente à mão.
  */
+import { isSuccessResult } from '../../shared/flow-final'
 import { DomainError } from '../errors'
 import { FlowError, type FlowRunner } from '../flows/flow-runner'
 import {
@@ -401,7 +402,8 @@ export class OrchestratorService {
     const entry = this.deps.store.lastEntryAt(taskId, stageId)
     if (!entry) return null
     const last = this.deps.flows.lastFlow(taskId)
-    if (!last || last.status !== 'finished' || last.result !== 'done' || !last.endedAt) return null
+    if (!last || last.status !== 'finished' || !isSuccessResult(last.result) || !last.endedAt)
+      return null
     if (!since || last.endedAt < since) return null
     if (last.startedAt >= entry) return last.stageId === stageId ? 'finished_here' : null
     return last.endedAt >= entry ? 'carried_in' : null

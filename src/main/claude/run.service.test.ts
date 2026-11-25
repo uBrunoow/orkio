@@ -321,7 +321,14 @@ describe('RunService', () => {
 
   it('agente (8A): instruções e modelo vão para o CLI; execução fica com o agente; política igual', async () => {
     const view = await start(1, {
-      agent: { key: 'repo:ana', name: 'Ana', prompt: 'Você é Ana.', model: 'sonnet', effort: null }
+      agent: {
+        key: 'repo:ana',
+        name: 'Ana',
+        prompt: 'Você é Ana.',
+        model: 'sonnet',
+        effort: null,
+        autonomy: 'edits'
+      }
     })
     await spawned(1)
     const run = runs[0]!

@@ -14,6 +14,7 @@ import {
 import { isSessionUuid } from '../terminal'
 import type { AgentProfile, AgentScope, ProjectAgents } from '../agent'
 import { ATTACHMENT_LIMITS } from '../attachments'
+import { isMemoryNoteInput, type MemoryNoteInput } from '../agent-memory'
 import { parseRule, type AutomationRule } from '../automation'
 import { STAGE_LIMITS, isStageRole, type BoardSaveInput, type OrkioStageChoice } from '../board'
 import type { FlowDraft, FlowStageDraft } from '../flow'
@@ -340,6 +341,11 @@ export function parseAgentProfile(value: unknown): Parsed<AgentProfile> {
   if (
     !str(v['id'], 40) ||
     !str(v['name'], 200) ||
+    // Fase 3: opcionais na forma (perfil de antes não manda); as regras são do `validateAgent`.
+    !(v['description'] === undefined || str(v['description'], 1000)) ||
+    !(v['group'] === undefined || str(v['group'], 200)) ||
+    !(v['autonomy'] === undefined || str(v['autonomy'], 20)) ||
+    !(v['command'] === undefined || v['command'] === null || str(v['command'], 100)) ||
     !str(v['role'], 20) ||
     !str(v['color'], 20) ||
     !str(v['model'], MODEL_NAME_MAX) ||
@@ -360,6 +366,10 @@ export function parseAgentProfile(value: unknown): Parsed<AgentProfile> {
   return {
     id: v['id'],
     name: v['name'],
+    description: v['description'] === undefined ? '' : (v['description'] as string),
+    group: v['group'] === undefined ? '' : (v['group'] as string),
+    autonomy: v['autonomy'] === undefined ? 'edits' : (v['autonomy'] as AgentProfile['autonomy']),
+    command: v['command'] === undefined ? null : (v['command'] as string | null),
     role: v['role'] as AgentProfile['role'],
     color: v['color'] as AgentProfile['color'],
     model: v['model'],
@@ -520,4 +530,10 @@ export function parseActivityQuery(value: unknown): Parsed<ActivityQuery> {
     query.limit = Math.min(value['limit'] as number, 200)
   }
   return query
+}
+
+/** Nota da memória vinda da tela: só texto, escopo e validade (o main confere as regras). */
+export function parseMemoryNoteInput(value: unknown): Parsed<MemoryNoteInput> {
+  if (!isMemoryNoteInput(value)) return INVALID
+  return { text: value.text, scope: value.scope, until: value.until }
 }

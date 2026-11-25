@@ -3,6 +3,7 @@
  * Cada conceito tem UMA regra; os limites vêm das constantes do domínio. Puro: sem Node nem DOM.
  */
 import { parseAgentKey, type AgentKey } from '../agent'
+import { isMemoryDigest, isMemoryNoteId, isMemorySnapshotId } from '../agent-memory'
 import type { ConnectorCredentials } from '../connection'
 import { isRecord } from '../guards'
 import { NOTION_ID_PATTERN } from '../notion'
@@ -91,3 +92,8 @@ export interface ForceOption {
 export const forceOption: Parser<{ force: boolean }> = (value) => ({
   force: isRecord(value) && value['force'] === true
 })
+
+/** Memória do agente (Fase 3): digest lido, id da nota e id da foto do histórico. */
+export const memoryDigest = guard(isMemoryDigest)
+export const memoryNoteId = guard(isMemoryNoteId)
+export const memorySnapshotId = guard(isMemorySnapshotId)

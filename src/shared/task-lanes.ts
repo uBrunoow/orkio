@@ -4,6 +4,7 @@
  * quadro do Notion (o do time). Puro (main e renderer); o `OverviewService` junta as entradas.
  */
 import type { StageRole } from './board'
+import { finalText, isUnfinishedResult, type FlowResult } from './flow-final'
 import type { OverviewTask, RunningItem, WaitingItem } from './overview'
 import type { TaskPullRequest } from './task-signals'
 
@@ -48,7 +49,7 @@ export interface LaneInput {
   pr: TaskPullRequest | null
   stageRole: StageRole | null
   /** Último fluxo terminado (o ativo entra por `waiting`/`running`). */
-  lastFlow: { result: 'done' | 'rejected' | 'cancelled' | null; endedAt: string | null } | null
+  lastFlow: { result: FlowResult | null; endedAt: string | null } | null
   now: string
 }
 
@@ -120,12 +121,25 @@ export function deriveLane(input: LaneInput): PersonalTask | null {
     }
   }
   if (last && recent(last.endedAt, now)) {
+    // Final honesto: esgotado, travado, bloqueado ou falhou não é "concluído"; alguém precisa olhar.
+    if (isUnfinishedResult(last.result)) {
+      const t = finalText(last.result)
+      return {
+        ...base,
+        lane: 'needs_you',
+        what: `Fluxo ${t.label.toLowerCase()}`,
+        chips: [],
+        since: last.endedAt!
+      }
+    }
     const what =
-      last.result === 'done'
-        ? 'Fluxo concluído'
-        : last.result === 'rejected'
-          ? 'Recusado por você'
-          : 'Fluxo cancelado'
+      last.result === 'rejected'
+        ? 'Recusado por você'
+        : last.result === 'cancelled'
+          ? 'Fluxo cancelado'
+          : last.result === 'nothing'
+            ? 'Nada a fazer'
+            : 'Fluxo concluído'
     return { ...base, lane: 'done', what, chips: [], since: last.endedAt! }
   }
   return null

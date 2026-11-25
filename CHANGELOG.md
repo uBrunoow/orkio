@@ -51,8 +51,35 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 - **Editar mensagem** e **Ramificar daqui** na conversa da tarefa: editar devolve o seu texto ao campo
   e a conversa volta até antes dele; ramificar abre uma conversa nova a partir de uma resposta do
   Claude. Os arquivos da pasta de trabalho continuam como estão.
+- **Criar agente ficou simples**: cor, nome, "O que faz?", instruções (com "Começar de" um modelo:
+  implementar, revisar código, escrever testes, documentar) e o modelo, com a prévia do card ao
+  lado, mudando enquanto você escreve. No **Avançado**: nome curto, grupo, "O que ele pode fazer
+  sozinho?" em cartões (edita arquivos sozinho, pede antes de agir ou só lê — e isso vale de
+  verdade nas execuções), comando preferido (já vem escolhido quando você roda como ele), limites,
+  entrega e fluxo preferido. O card da lista mostra o que o agente faz e o grupo.
+- **Memória dos agentes**: cada agente guarda notas curtas que voltam no início das próximas
+  conversas dele. Ele mesmo anota o que vai servir de novo (preferências, convenções do projeto) e
+  você vê, edita, arquiva ou apaga em Agentes › Memória (botão com o cérebro no card). Notas podem
+  valer em todo lugar ou só no projeto, e ter validade; segredos são apagados ao gravar e o
+  histórico deixa voltar para uma versão anterior.
+- **Revisão até ficar limpo** nos fluxos nativos: o revisor (outro agente, só leitura) responde com
+  Bloqueios, Detalhes e Evidência; quem implementou corrige os bloqueios e o revisor olha de novo,
+  até não sobrar bloqueio (no máximo 3 rodadas). Cada rodada fica em `.orkio/revisao/rodada-N.md`.
+  Se os mesmos bloqueios voltam, o fluxo para como "Travado"; no limite de rodadas, "Esgotado".
 
 ### Alterado
+
+- O revisor não pede mais a sua aprovação a cada `git diff`: o Orkio grava o diff da tarefa para
+  ele antes da revisão, e ler o git na pasta da tarefa passa sozinho nos passos só de leitura. O
+  limite por dia e de fluxos ao mesmo tempo do revisor agora também vale para os passos de revisão
+  (sem vaga, a revisão espera e começa sozinha).
+- Pontos de aprovação: "Pedir ajustes" virou **Pedir mudanças** (o seu comentário volta para o
+  passo anterior sem perder o que já foi feito). O gate do diff dos fluxos nativos também aceita
+  "Pedir mudanças", além de Aprovar e Recusar.
+- Finais honestos: um fluxo termina como Concluído, Nada a fazer, Bloqueado, Esgotado, Travado,
+  Falhou ou Cancelado (antes, quase tudo era "Concluído" ou "Cancelado"). Esgotado, travado e
+  falhou vão para "Precisa de você" na tela Tarefas; encerrar um fluxo parado por falha conta como
+  "Falhou".
 
 - A conversa da tarefa ficou mais compacta: as rodadas de ferramentas viram uma linha discreta
   ("Rodou 3 comandos · Usou 1 ferramenta") que abre a lista, e o texto do Claude aparece inteiro.

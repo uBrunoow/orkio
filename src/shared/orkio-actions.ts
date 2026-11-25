@@ -5,6 +5,7 @@
  * leem daqui. Ação nova = entrada nova (e a implementação no main com o mesmo id).
  */
 import { FLOW_NO, FLOW_YES } from './task-flow'
+import { REVIEW_VARS, REVIEW_VERDICTS } from './review-rounds'
 import type { TaskPhaseId } from './task-phase'
 
 /**
@@ -94,6 +95,40 @@ export const ORKIO_ACTIONS = {
     outputs: [
       { key: ACTION_VARS.reviewCount, about: 'comentários pendentes (abertos + não lidos)' },
       { key: ACTION_VARS.reviewPr, about: 'número da PR' }
+    ]
+  },
+  /**
+   * Fase 3 ("revisão até ficar limpo"): grava o diff da branch em `.orkio/revisao/diff.md` para o
+   * revisor ler sem pedir `git diff`, e conta a rodada.
+   */
+  review_prepare: {
+    id: 'review_prepare',
+    label: 'Preparar a revisão (diff para o revisor)',
+    delivers: false,
+    onStageMoved: 'ask',
+    phase: 'review',
+    outputs: [
+      { key: REVIEW_VARS.round, about: 'número da rodada de revisão (1, 2...)' },
+      { key: REVIEW_VARS.file, about: 'arquivo desta rodada (.orkio/revisao/rodada-N.md)' },
+      { key: REVIEW_VARS.previous, about: 'arquivo da rodada anterior (vazio na primeira)' }
+    ]
+  },
+  /** Fase 3: grava a resposta do revisor em `rodada-N.md` e decide a próxima volta. */
+  review_record: {
+    id: 'review_record',
+    label: 'Registrar a rodada de revisão',
+    delivers: false,
+    onStageMoved: 'ask',
+    phase: 'review',
+    outputs: [
+      { key: REVIEW_VARS.blockers, about: 'quantos achados bloqueiam' },
+      { key: REVIEW_VARS.details, about: 'quantos detalhes (não bloqueiam)' },
+      { key: REVIEW_VARS.ids, about: 'IDs dos bloqueios desta rodada' },
+      {
+        key: REVIEW_VARS.verdict,
+        values: REVIEW_VERDICTS,
+        about: 'limpo, corrigir, esgotado (limite de rodadas) ou travado (mesmos bloqueios)'
+      }
     ]
   },
   // Não é entrega (o Revisor, sem entrega, roda), mas publica e muda a etapa de propósito.

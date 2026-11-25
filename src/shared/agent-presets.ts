@@ -5,7 +5,8 @@
  * `.orkio/agents/` ou neste computador.
  *
  * Mesmas regras de qualquer agente: só instruções, modelo e limites por cima do Claude Code do
- * usuário. Nenhuma permissão a mais; os que não entregam têm `delivery: false`.
+ * usuário. Nenhuma permissão a mais; os que não entregam têm `delivery: false` e o Revisor só lê
+ * (`autonomy: 'read_only'`).
  */
 import { agentKey, defaultAgent, parseAgentKey, type AgentKey, type AgentProfile } from './agent'
 import { BRIEFING_PATH } from './orkio-scratch'
@@ -27,6 +28,7 @@ export const BUILTIN_AGENTS: readonly AgentProfile[] = [
   defaultAgent({
     id: BUILTIN_AGENT_IDS.implementer,
     name: 'Implementador',
+    description: 'Implementa a tarefa de ponta a ponta, com testes, e deixa a suíte verde.',
     role: 'implementer',
     color: 'orange',
     delivery: true,
@@ -43,9 +45,12 @@ ${COMMON}`
   defaultAgent({
     id: BUILTIN_AGENT_IDS.reviewer,
     name: 'Revisor',
+    description: 'Revisa o diff da tarefa e aponta bugs, riscos e desvios, sem alterar o código.',
     role: 'reviewer',
     color: 'blue',
     delivery: false,
+    // Fase 3: só lê (roda como o passo só de leitura; aponta, não corrige).
+    autonomy: 'read_only',
     limits: { parallel: 2, stepsPerDay: 60, costPerDayUsd: null },
     instructions: `Você revisa o que foi feito na tarefa (o diff da branch contra a base) antes de seguir.
 
@@ -59,6 +64,7 @@ ${COMMON}`
   defaultAgent({
     id: 'qa',
     name: 'QA',
+    description: 'Confere os critérios de aceite, roda a suíte e escreve os testes que faltam.',
     role: 'qa',
     color: 'green',
     delivery: false,
@@ -75,6 +81,7 @@ ${COMMON}`
   defaultAgent({
     id: 'triagem',
     name: 'Triagem',
+    description: 'Prepara a tarefa: entendimento, critérios de aceite, riscos e tamanho.',
     role: 'triager',
     color: 'purple',
     delivery: false,
@@ -91,6 +98,7 @@ ${COMMON}`
   defaultAgent({
     id: 'documentador',
     name: 'Documentador',
+    description: 'Mantém README, docs e CHANGELOG em dia com o que a tarefa mudou.',
     role: 'documenter',
     color: 'teal',
     delivery: false,
@@ -106,6 +114,7 @@ ${COMMON}`
   defaultAgent({
     id: 'corretor-pr',
     name: 'Corretor de PR',
+    description: 'Trata os comentários de review e o CI vermelho da PR já aberta.',
     role: 'implementer',
     color: 'pink',
     delivery: true,

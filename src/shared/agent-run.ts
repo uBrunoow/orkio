@@ -189,8 +189,11 @@ export interface RunPreparation extends TaskRunsState {
   branchIsNew: boolean
   /** Comandos vistos na última sessão do Claude Code (system/init). */
   commands: string[]
-  /** Agente da tarefa (8A): "Rodar como <nome>"; `problem` = não pode rodar agora (e por quê). */
-  agent: { name: string; problem: string | null } | null
+  /**
+   * Agente da tarefa (8A): "Rodar como <nome>"; `problem` = não pode rodar agora (e por quê);
+   * `command` = comando preferido dele (Fase 3: o formulário já vem no modo comando com ele).
+   */
+  agent: { name: string; problem: string | null; command?: string | null } | null
   /** A página da tarefa no Notion foi lida e está vazia (fluxos não rodam assim). */
   descriptionEmpty: boolean
 }

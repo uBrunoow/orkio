@@ -3,7 +3,8 @@
  * ferramenta de permissão (`--permission-prompt-tool`) para cada pedido do CLI.
  *
  * - Ler/editar DENTRO do worktree: permitido. Fora: bloqueado (ferramentas pelo catálogo
- *   `shared/claude-tools.ts`). Passo só de leitura: editar é bloqueado.
+ *   `shared/claude-tools.ts`). Passo só de leitura: editar é bloqueado. Agente que pede antes de
+ *   agir (`askEdits`, Fase 3): editar pergunta.
  * - `git push` (qualquer forma, ex. `git -C . push`, aliases) e o GitHub CLI (`github-rules.ts`):
  *   bloqueados, mesmo que o usuário tenha aprovado "sempre", menos a leitura da PR do projeto.
  *   Exceção (5C): passo com "modo entrega", com as regras de `delivery-policy.ts` (só a branch da
@@ -27,6 +28,7 @@ import {
   type DeliveryPolicyContext
 } from './delivery-policy'
 import { GH_READ_TEXT, GH_RULED } from './github-rules'
+import { BRIDGE_MEMORY_TOOL_NAME } from './bridge/protocol'
 
 export interface PermissionRequest {
   tool: string
@@ -220,9 +222,16 @@ export interface PolicyContext {
   repo?: DeliveryTarget | null
   /**
    * Passo só de leitura: editar arquivo é bloqueado e nenhum comando passa sozinho (nem regra
-   * "sempre neste projeto", nem leitura do GitHub): todo comando pede sua aprovação.
+   * "sempre neste projeto", nem leitura do GitHub): todo comando pede sua aprovação, MENOS a
+   * leitura do git dentro da pasta (`isGitRead`: diff, log, show, status... sem opção que grave ou
+   * rode programa), que passa sem perguntar (Fase 3: o revisor não pede a cada `git diff`).
    */
   readOnly?: boolean
+  /**
+   * Fase 3: agente que pede antes de toda ação. Editar no worktree vira pergunta (sem "sempre"), e
+   * as regras "sempre neste projeto" não valem para os comandos dele (ler continua livre).
+   */
+  askEdits?: boolean
 }
 
 /** Comando simples já resolvido (aliases expandidos). */
@@ -332,6 +341,37 @@ function blockedOutsideDelivery(cmd: Cmd, repo: DeliveryTarget | null): PolicyDe
 
 export const GH_READ_ALLOWED = 'leitura do GitHub no repositório do projeto'
 
+export const GIT_READ_ALLOWED = 'leitura do git (passo só de leitura)'
+
+/** Subcomandos do git que só leem (sem `grep`: `-O` abre programa; sem `branch`: cria/apaga). */
+const GIT_READ_SUBS = new Set([
+  'diff',
+  'log',
+  'show',
+  'status',
+  'blame',
+  'ls-files',
+  'rev-parse',
+  'merge-base',
+  'shortlog'
+])
+/** Opções que gravam arquivo ou rodam programa externo (`--output`, diff externo, pager...). */
+const GIT_WRITE_OPTIONS =
+  /^(?:--output(?:=|$)|--output-directory|--ext-diff$|--open-files-in-pager|-O|--exec|--upload-pack|--receiver-pack)/
+
+/**
+ * Comando do git que só lê: subcomando da lista, sem opção global (só `--no-pager`/`-P`; nada de
+ * `-c`, `-C`, `--git-dir`...) e sem opção que grave ou rode programa. Aliases já vêm expandidos
+ * (`resolveCommands`); um alias com nome de subcomando de verdade é ignorado pelo git.
+ */
+export function isGitRead(cmd: { name: string; args: readonly string[] }): boolean {
+  if (cmd.name !== 'git') return false
+  const { globals, sub, rest } = gitParse(cmd.args)
+  if (!sub || !GIT_READ_SUBS.has(sub)) return false
+  if (globals.some((g) => g !== '--no-pager' && g !== '-P')) return false
+  return !rest.some((a) => GIT_WRITE_OPTIONS.test(a))
+}
+
 /** Caminhos absolutos/relativos que saem do worktree (heurística sobre as palavras). */
 function escapesWorktree(segment: string, worktree: string): boolean {
   const words = shellWords(segment)
@@ -408,11 +448,17 @@ function evaluate(
   const category = toolCategory(tool)
   if (category === 'question') return { decision: 'question' }
   if (category === 'subagent' || category === 'plan') return { decision: 'allow' }
+  // Memória do agente (Fase 3): `mcp__orkio__lembrar` é do próprio Orkio, não toca no projeto nem
+  // na rede (o main valida, redige segredos e grava na pasta do agente). Passa sem perguntar, até
+  // em passo só de leitura. Só ela: qualquer outra MCP continua perguntando (fim da função).
+  if (tool === BRIDGE_MEMORY_TOOL_NAME) return { decision: 'allow' }
 
   if (category === 'edit' || category === 'read' || category === 'search') {
     if (category === 'edit' && ctx.readOnly) return deny('read_only', POLICY_MESSAGES.readOnly)
     const path = toolPath(tool, input)
     if (path && !isInside(path, ctx.worktree)) return deny('outside', POLICY_MESSAGES.outside)
+    // "Sempre neste projeto" nunca vale para editar (sugestão vazia).
+    if (category === 'edit' && ctx.askEdits) return { decision: 'ask', suggestion: '' }
     return { decision: 'allow' }
   }
 
@@ -445,7 +491,8 @@ function evaluate(
     if (segments.some((s) => escapesWorktree(s, ctx.worktree))) {
       return deny('outside', POLICY_MESSAGES.outside)
     }
-    const rules = ctx.readOnly ? [] : ctx.allowRules.filter((r) => r.tool === 'Bash')
+    const rules =
+      ctx.readOnly || ctx.askEdits ? [] : ctx.allowRules.filter((r) => r.tool === 'Bash')
     const repo = ctx.repo ?? null
     if (
       !ctx.delivery &&
@@ -472,9 +519,19 @@ function evaluate(
     ) {
       return { decision: 'allow', reason: 'aprovado sempre neste projeto' }
     }
+    // Fase 3: num passo só de leitura (ex.: o revisor), ler o git dentro da pasta não pergunta.
+    if (
+      ctx.readOnly &&
+      !ctx.delivery &&
+      commands.length > 0 &&
+      !/[<>`]|\$\(/.test(command) &&
+      commands.every(isGitRead)
+    ) {
+      return { decision: 'allow', reason: GIT_READ_ALLOWED }
+    }
     return { decision: 'ask', suggestion: suggestPattern(command) }
   }
 
-  // WebFetch, WebSearch, MCP e ferramentas desconhecidas: perguntar.
+  // WebFetch, WebSearch, MCP (menos `mcp__orkio__lembrar`, acima) e ferramentas desconhecidas: perguntar.
   return { decision: 'ask', suggestion: tool }
 }

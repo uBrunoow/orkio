@@ -62,6 +62,7 @@ import { redactSecrets } from '../platform/redact'
 import { toRunAgent, type RunAgent, type RunRequest } from '../claude/run-spec'
 import { checkAgentFlow, type AgentProfile } from '../../shared/agent'
 import { reviewerProblem } from '../../shared/task-setup'
+import { isSuccessResult, type FlowResult } from '../../shared/flow-final'
 import type { Db } from '../db/database'
 import { DomainError, errorName } from '../errors'
 
@@ -94,7 +95,7 @@ export const FLOW_MESSAGES = {
   longRevise: `O pedido de ajuste passa de ${MAX_PROMPT_CHARS} caracteres. Encurte e tente de novo.`,
   notRevisable: 'Este gate não aceita pedidos de ajuste. Aprove ou recuse.',
   reviseLimit: (max: number): string =>
-    `Limite de ajustes atingido (${max}). Aprove ou recuse no cartão.`,
+    `Limite de mudanças pedidas atingido (${max}). Aprove ou recuse no cartão.`,
   doneByYou: 'Feito por você no terminal.'
 } as const
 
@@ -142,7 +143,13 @@ export interface ActionContext {
 
 /** Resultado de uma ação: variáveis (só as declaradas em `outputs`) ou a falha do passo. */
 export type ActionResult =
-  { ok: true; vars?: Record<string, string> } | ({ ok: false } & StepFailure)
+  | {
+      ok: true
+      vars?: Record<string, string>
+      /** Uma linha do que a ação fez (fica no passo, ex.: "Rodada 2: 1 bloqueio"). */
+      message?: string
+    }
+  | ({ ok: false } & StepFailure)
 
 /**
  * Ação do próprio Orkio: o descritor de `shared/orkio-actions.ts` (o que ela é) + o comportamento.
@@ -260,7 +267,8 @@ interface RunRow {
   current_step: string | null
   state_json: string
   pause_reason: FlowPauseReason | null
-  result: 'done' | 'rejected' | 'cancelled' | null
+  /** Final honesto (`shared/flow-final.ts`). */
+  result: FlowResult | null
   started_at: string
   ended_at: string | null
   agent_key: string | null
@@ -308,6 +316,11 @@ interface Persisted {
   pendingReply?: { stepId: string; text: string } | null
   /** Fase 1: modelo de quem implementa escolhido na configuração da tarefa. */
   model?: string | null
+  /**
+   * Fase 3: passo do revisor esperando vaga dele (limite de paralelo do revisor). O passo já foi
+   * contado pelo motor; ao liberar, roda direto (sem visitar de novo).
+   */
+  waitingStep?: string | null
 }
 
 const ACTIVE_SQL = `(${ACTIVE_FLOW_STATUSES.map((s) => `'${s}'`).join(', ')})`
@@ -321,7 +334,7 @@ const QUEUE_SQL = `(${FLOW_PAUSE_REASONS.filter((r) => FLOW_PAUSES[r].waits === 
 export interface LastFlow {
   stageId: string | null
   status: FlowRunStatus
-  result: 'done' | 'rejected' | 'cancelled' | null
+  result: FlowResult | null
   startedAt: string
   endedAt: string | null
 }
@@ -635,6 +648,26 @@ export class FlowRunner {
       `SELECT * FROM flow_runs WHERE status = 'paused' AND pause_reason IN ${QUEUE_SQL} ORDER BY started_at`
     )
     for (const row of waiting) {
+      const waitingStep = this.persisted(row).waitingStep
+      if (waitingStep) {
+        // Fase 3: passo do revisor no meio do fluxo esperando a vaga dele: roda direto o passo.
+        const reviewer = this.reviewerOf(row)
+        if (reviewer && this.reviewerSlotTaken(row.id, reviewer)) continue
+        this.deps.db.run(
+          `UPDATE flow_runs SET status = 'running', pause_reason = NULL WHERE id = ? AND status = 'paused'`,
+          row.id
+        )
+        void this.withLock(row.id, async () => {
+          const fresh = this.row(row.id)
+          if (fresh.status !== 'running') return
+          this.savePersisted(row.id, { ...this.persisted(fresh), waitingStep: null })
+          if (this.agentLimitReached(row.id, waitingStep)) return
+          await this.runStep(this.row(row.id), waitingStep)
+        }).catch((error: unknown) => {
+          console.error(`[orkio] fluxo (vaga do revisor): ${errorName(error)}`)
+        })
+        continue
+      }
       if (this.slot(row.project_id, this.flow(row), this.agentOf(row), row.id) !== null) continue
       this.deps.db.run(
         `UPDATE flow_runs SET status = 'running', pause_reason = NULL WHERE id = ? AND status = 'paused'`,
@@ -860,7 +893,7 @@ export class FlowRunner {
       this.clearGateTimer(flowRunId)
       // O banco não tem o estado "ajustes pedidos" (CHECK da v6): grava como pulado com a marca;
       // a visão mostra `revised`.
-      this.closeStep(flowRunId, 'skipped', { message: 'Ajustes pedidos', revised: true })
+      this.closeStep(flowRunId, 'skipped', { message: 'Mudanças pedidas', revised: true })
       this.event(row, 'gate_revised', {
         step: gate.id,
         round: decision.state.revisions?.[gate.id] ?? 1
@@ -970,7 +1003,9 @@ export class FlowRunner {
       )
       if (running?.run_id) this.deps.cancelClaude(running.run_id)
       if (running) this.closeStep(flowRunId, 'cancelled', { message: 'Fluxo cancelado.' })
-      this.finishRun(row, 'cancelled', 'cancelled')
+      // Final honesto: encerrar um fluxo parado porque um passo falhou é "falhou", não "cancelado".
+      const failed = row.status === 'paused' && row.pause_reason === 'step_failed'
+      this.finishRun(row, 'cancelled', failed ? 'failed' : 'cancelled')
     })
     return this.view(flowRunId)
   }
@@ -1088,6 +1123,8 @@ export class FlowRunner {
       )
     })
       .then(async () => {
+        // Fase 3: um passo de revisão terminou: a vaga do revisor pode ter liberado outro fluxo.
+        this.promoteWaiting()
         // Você mandou uma mensagem com o passo rodando: o cancelamento pausou o fluxo; o passo
         // segue na mesma sessão com a sua mensagem (como no Claude Code).
         const reply = this.interrupts.get(ref.flowRunId)
@@ -1364,7 +1401,48 @@ export class FlowRunner {
       return
     }
     if (this.agentLimitReached(flowRunId, decision.stepId)) return
+    if (this.reviewerWaits(flowRunId, decision.stepId)) return
     await this.runStep(this.row(flowRunId), decision.stepId)
+  }
+
+  /** Quem roda o passo: o revisor nos passos `agent: 'reviewer'`, senão o agente do fluxo. */
+  private stepAgent(row: RunRow, step: Step | undefined): FlowAgent | null {
+    if (step?.type === 'claude_command' && step.agent === 'reviewer') return this.reviewerOf(row)
+    return this.agentOf(row)
+  }
+
+  /**
+   * Fase 3: o limite de paralelo vale também para o revisor. Ocupam a vaga dele os fluxos em que
+   * ele é o agente (como no `slot`) e os passos de revisão dele rodando agora em outras tarefas.
+   */
+  private reviewerSlotTaken(self: string, reviewer: FlowAgent): boolean {
+    const busy = this.deps.db
+      .all<RunRow>(`SELECT * FROM flow_runs WHERE status IN ${ACTIVE_SQL}`)
+      .filter((r) => {
+        if (r.id === self) return false
+        if (waitingKind({ status: r.status, pauseReason: r.pause_reason }) === 'queue') return false
+        if (r.agent_key === reviewer.key) return true
+        if (r.status !== 'running') return false
+        const step = this.flow(r).steps.find((st) => st.id === r.current_step)
+        return (
+          step?.type === 'claude_command' &&
+          step.agent === 'reviewer' &&
+          this.reviewerOf(r)?.key === reviewer.key
+        )
+      }).length
+    return busy >= reviewer.profile.limits.parallel
+  }
+
+  /** Passo do revisor sem vaga: o fluxo espera na fila (`waiting_agent`) e começa sozinho. */
+  private reviewerWaits(flowRunId: string, stepId: string): boolean {
+    const row = this.row(flowRunId)
+    const step = this.flow(row).steps.find((st) => st.id === stepId)
+    if (step?.type !== 'claude_command' || step.agent !== 'reviewer') return false
+    const reviewer = this.reviewerOf(row)
+    if (!reviewer || !this.reviewerSlotTaken(row.id, reviewer)) return false
+    this.savePersisted(flowRunId, { ...this.persisted(row), waitingStep: stepId })
+    this.pause(row, 'waiting_agent', { step: stepId, body: null })
+    return true
   }
 
   /**
@@ -1373,8 +1451,9 @@ export class FlowRunner {
    */
   private agentLimitReached(flowRunId: string, stepId: string): boolean {
     const row = this.row(flowRunId)
-    const agent = this.agentOf(row)
     const step = this.flow(row).steps.find((s) => s.id === stepId)
+    // Fase 3: o passo do revisor conta no limite do dia do revisor (não no de quem implementa).
+    const agent = this.stepAgent(row, step)
     if (!agent || step?.type !== 'claude_command') return false
     const p = this.persisted(row)
     if (p.limitBypass) {
@@ -1604,6 +1683,7 @@ export class FlowRunner {
     const engine = this.persisted(this.row(row.id)).engine
     let end: StepEnd
     let failure: StepFailure | null = null
+    let note: string | null = null
     try {
       const r = await action.run({
         projectId: row.project_id,
@@ -1613,8 +1693,10 @@ export class FlowRunner {
         ...(input ? { input } : {}),
         ...(confirmed ? { confirmed } : {})
       })
-      if (r.ok) end = { outcome: 'ok', ...(r.vars ? { vars: cleanVars(r.vars) } : {}) }
-      else {
+      if (r.ok) {
+        end = { outcome: 'ok', ...(r.vars ? { vars: cleanVars(r.vars) } : {}) }
+        note = r.message ? redactSecrets(r.message).slice(0, 300) : null
+      } else {
         end = { outcome: 'failed' }
         failure = { code: r.code, message: r.message, ...(r.link ? { link: r.link } : {}) }
       }
@@ -1623,7 +1705,7 @@ export class FlowRunner {
       end = { outcome: 'failed' }
       failure = { code: FLOW_FAILURES.actionFailed, message: 'A ação do Orkio falhou.' }
     }
-    await this.endAction(row, step, end, failure)
+    await this.endAction(row, step, end, failure, note)
   }
 
   private lastRunId(flowRunId: string): string | null {
@@ -1639,13 +1721,18 @@ export class FlowRunner {
     row: RunRow,
     step: Extract<Step, { type: 'orkio_action' }>,
     end: StepEnd,
-    failure: StepFailure | null
+    failure: StepFailure | null,
+    note: string | null = null
   ): Promise<void> {
     const engine = this.persisted(this.row(row.id)).engine
-    this.closeStep(row.id, end.outcome === 'ok' ? 'ok' : 'failed', failure ?? {})
+    this.closeStep(
+      row.id,
+      end.outcome === 'ok' ? 'ok' : 'failed',
+      failure ?? (note ? { message: note } : {})
+    )
     this.event(row, end.outcome === 'ok' ? 'step_finished' : 'step_failed', {
       step: step.id,
-      ...(failure ? { message: failure.message } : {})
+      ...(failure ? { message: failure.message } : note ? { message: note } : {})
     })
     await this.apply(row.id, afterStep(this.flow(row), engine, step.id, end))
   }
@@ -1683,7 +1770,7 @@ export class FlowRunner {
     // agora começa o fluxo dela (ex.: revisão publicada com "Pedir alterações" → Revisado →
     // comentários da PR).
     const from = p.detachedFrom ?? null
-    if (status === 'finished' && result === 'done' && from) {
+    if (status === 'finished' && isSuccessResult(result) && from) {
       const to = this.deps.currentStage(row.project_id, row.task_page_id)
       if (to && to !== from) {
         this.deps.enterStage({

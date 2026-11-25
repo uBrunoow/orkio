@@ -143,6 +143,39 @@ test('Tarefas: modelo na coluna, "Rodar uma vez" nativo com revisor e o kanban d
   expect(review!['disallowedTools']).toContain('Write')
   expect(review!['resume']).toBeNull()
 
+  // Fase 3: revisão até ficar limpo. O Orkio gravou o diff para o revisor; o `git diff` dele num
+  // passo só de leitura passou sem pedir aprovação; ele anotou na memória pela ferramenta
+  // "lembrar"; a rodada ficou em .orkio/revisao/rodada-1.md.
+  await expect
+    .poll(
+      () => {
+        try {
+          return readFileSync(join(worktree(), '.orkio', 'review-tools.log'), 'utf8')
+        } catch {
+          return ''
+        }
+      },
+      { timeout: 20_000 }
+    )
+    .toContain('lembrar:ok')
+  const tools = readFileSync(join(worktree(), '.orkio', 'review-tools.log'), 'utf8')
+  expect(tools).toContain('diff.md:true')
+  expect(tools).toContain('git diff:allow')
+  await expect
+    .poll(
+      () => {
+        try {
+          return readFileSync(join(worktree(), '.orkio', 'revisao', 'rodada-1.md'), 'utf8')
+        } catch {
+          return ''
+        }
+      },
+      { timeout: 20_000 }
+    )
+    .toContain('## Bloqueios')
+  // A memória do revisor entra no início da conversa dele.
+  expect(String(review!['appendSystemPrompt'])).toContain('## Sua memória')
+
   // Kanban derivado: a tarefa espera você (o gate do diff), sem estado manual.
   await navTo(page, 'Tarefas')
   const needsYou = lane(page, 'Precisa de você')
@@ -158,6 +191,15 @@ test('Tarefas: modelo na coluna, "Rodar uma vez" nativo com revisor e o kanban d
   // Clicar abre a tarefa.
   await page.getByRole('table', { name: 'Lista de tarefas' }).getByRole('button').first().click()
   await expect(taskScreen(page, 'ORK-2')).toBeVisible()
+
+  // A nota que o Revisor anotou aparece em Agentes › Memória.
+  await navTo(page, 'Agentes')
+  await page.getByRole('button', { name: 'Memória de Revisor' }).first().click()
+  const memory = page.getByRole('region', { name: 'Memória de Revisor' })
+  await expect(memory.getByRole('list', { name: 'Notas' })).toContainText(
+    'Neste projeto os testes ficam ao lado do código.'
+  )
+  await expect(memory).toContainText('Só neste projeto')
 
   expect(await cspViolations(page)).toEqual([])
 })

@@ -225,17 +225,24 @@ export class AgentsService {
   async problemFor(
     projectId: string,
     taskId: string
-  ): Promise<{ name: string; problem: string | null } | null> {
+  ): Promise<{ name: string; problem: string | null; command: string | null } | null> {
     const key = this.assignedKey(taskId)
     if (!key) return null
     const view = await this.get(projectId, key)
-    if (!view?.profile) return { name: key, problem: AGENT_MESSAGES.gone }
+    if (!view?.profile) return { name: key, problem: AGENT_MESSAGES.gone, command: null }
+    // Fase 3: o comando preferido já vem escolhido no "Nova sessão…" (perfil antigo: nenhum).
+    const command = view.profile.command ?? null
     try {
       const runtime = await this.runtimeFor(projectId, taskId)
-      return { name: view.profile.name, problem: runtime ? this.limitProblem(runtime) : null }
+      return {
+        name: view.profile.name,
+        problem: runtime ? this.limitProblem(runtime) : null,
+        command
+      }
     } catch (error) {
       return {
         name: view.profile.name,
+        command,
         problem: error instanceof AgentError ? error.message : AGENT_MESSAGES.unavailable
       }
     }
@@ -371,7 +378,8 @@ export class AgentsService {
     if (errors.length > 0) throw new AgentError('invalid', errors.join(' '))
     if (
       redactSecrets(profile.instructions) !== profile.instructions ||
-      redactSecrets(profile.name) !== profile.name
+      redactSecrets(profile.name) !== profile.name ||
+      redactSecrets(profile.description) !== profile.description
     ) {
       throw new AgentError('secret', AGENT_MESSAGES.secret)
     }
@@ -725,6 +733,9 @@ function normalize(p: AgentProfile): AgentProfile {
   return {
     ...p,
     name: typeof p.name === 'string' ? p.name.trim() : p.name,
+    description: typeof p.description === 'string' ? p.description.trim() : p.description,
+    group: typeof p.group === 'string' ? p.group.trim() : p.group,
+    command: typeof p.command === 'string' ? p.command.trim().replace(/^\//, '') : p.command,
     commands: Array.isArray(p.commands)
       ? [...new Set(p.commands.map((c) => String(c).trim()))]
       : p.commands,

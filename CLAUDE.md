@@ -68,6 +68,9 @@ Claude Code. Hoje existem:
 - **Sessão (Fase 2):** terminal embutido (node-pty + xterm.js) na pasta da tarefa, "Continuar no
   Claude" (a sessão vai travada para o terminal e volta), "Editar mensagem"/"Ramificar daqui" e a
   conversa compacta. Ver "Sessão (Fase 2)" abaixo.
+- **Agentes (Fase 3):** editor Simples|Avançado com prévia do card, autonomia que vale nas
+  execuções, memória por agente (ferramenta "lembrar"), revisão até ficar limpo e finais honestos
+  dos fluxos. Ver "Agentes (Fase 3)" abaixo.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
   Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -727,7 +730,8 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   `run_blocked`, com `code` no evento `permission`), **menos a leitura da PR** (`isGhRead` = acesso
   `read` da tabela, só no repositório do projeto), que passa sem perguntar; sem repositório
   verificado, segue bloqueado. Passo só de leitura (`readOnly` no `PolicyContext`): editar é
-  bloqueado e nada passa sozinho (nem regra "sempre", nem leitura da PR). Contexto caro a política
+  bloqueado e nada passa sozinho (nem regra "sempre", nem leitura da PR), menos ler o git na pasta
+  (`isGitRead`, Fase 3). Contexto caro a política
   pede (`decidePermission`: a branch atual só é lida num push do modo entrega, depois dos aliases). Escrever no GitHub continua só no modo entrega; shell → pergunta (uma vez /
   sempre neste projeto por prefixo em `permission_rules` / negar), com notificação; 10 min sem
   resposta → nega. `AskUserQuestion` → card de pergunta; respostas voltam em `updatedInput.answers`.
@@ -1243,8 +1247,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   (tela, `TaskSetupService.save` e `FlowRunner.start`). Com fluxo ativo, `save` é recusado (`locked`).
 - **Fluxos nativos** (`shared/native-flows.ts`, ids `orkio:*`, sem `tags`): só `claude_command` com
   `prompt`, gates, ações (`push`, `review_snapshot`...) e saltos, gerados na hora com o revisor e a
-  evidência (a cópia vai para `flow_json`). Rápido: implementar → [evidência] → revisão → [corrigir,
-  até 2] → gate do diff → push → `abrir-pr` (modo entrega, `gh pr create`). Aprovação: spec e plano
+  evidência (a cópia vai para `flow_json`). Rápido: implementar → [evidência] → revisão até ficar limpo
+  (Fase 3) → gate do diff → push → `abrir-pr` (modo entrega, `gh pr create`). Aprovação: spec e plano
   só leitura com gate `show: 'result'` + "Pedir ajustes" antes. Passos: plano em fatias (`@orkio
   fatias=N`) → gate → `fatia` em laço até `@orkio restam=0` (trava de 12; paralelo é da Fase 5).
   Coluna de papel `reviewed` = "Corrigir comentários da PR" (o modelo Alva sem o plugin); `queue`,
@@ -1253,7 +1257,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   (`flow_runs.reviewer_json`, cópia no início) numa **sessão nova** com o briefing; os outros pedidos
   continuam a sessão mais recente **sem** a do revisor (`session.latest.excludeAgent` →
   `RunService.lastSession(taskId, excludeAgent)`). `withLastResult` junta o texto final do passo
-  anterior (redigido, ≤ 6000) ao pedido (a correção recebe a revisão). O modelo da configuração vale
+  anterior (redigido, ≤ 6000) ao pedido (Fase 3: a correção nativa lê `.orkio/revisao/rodada-N.md`
+  em vez disso). O modelo da configuração vale
   só para quem implementa (`Persisted.model`; o modelo do passo vence).
 - **Quem roda o quê** (`FlowRunnerDeps.nativePlan` → `TaskSetupService.nativePlan`): na entrada da
   coluna, o modo da tarefa vale se a coluna "roda" (modo padrão ou fluxo `on_enter`); o modo da
@@ -1332,6 +1337,57 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   CSP), Continuar no Claude (o Claude simulado sem `-p` imita a tela interativa e grava
   `.orkio/terminal-claude.log`), trava, sino e devolução; editar/ramificar (`forkSession`,
   `resumeSessionAt` no `agent-args.log`). O fixture usa `SHELL=/bin/sh` (sem o perfil de quem roda).
+
+## Agentes (Fase 3)
+
+- **Perfil** (`shared/agent.ts`, campos opcionais, gravados só quando fogem do padrão: perfil antigo
+  lê e grava igual): `description` ("O que faz", 1 linha ≤ 140, entra no prompt), `group`
+  (`AGENT_GROUP`, ex.: `operacoes/incidentes`), `autonomy` (`edits` padrão | `ask` | `read_only`) e
+  `command` (comando preferido, `isCommandName`, dentro de `commands` se houver). Validados no
+  parse, no `validateAgent`, no IPC e no serviço (segredo na descrição = recusa). A autonomia **só
+  restringe**: `read_only` → o `ClaudeService.startRun` roda como passo só de leitura (mensagem,
+  "Rodar" ou fluxo) e `checkAgentFlow` recusa fluxo que entrega; `ask` → `--permission-mode manual`
+  e `askEdits` na política (editar pergunta, sem "sempre"). O Revisor embutido é `read_only`.
+- **Editor** (`features/agents/AgentEditor.tsx`): Simples = cor, nome, "O que faz?", instruções com
+  "Começar de" (`shared/agent-starters.ts`, com Desfazer), "Como trabalha" (Sob demanda, o único
+  modo) e modelo; Avançado = nome curto (id), grupo, autonomia em cartões (`components/ChoiceCards`),
+  comando preferido, papel, fluxo, comandos, entrega, limites, onde salvar e a prévia do prompt. A
+  prévia do card ao vivo (`AgentCardFace.tsx`) é a mesma cabeça do card da lista.
+- **Memória** (`shared/agent-memory.ts` puro, `main/agents/agent-memory.store.ts`): `<userData>/
+  agent-memory/{local|builtin}/<id>/` (vale em todos os projetos) ou `repo/<projeto>/<id>/`.
+  `MEMORY.md` (uma nota por linha: `- [AAAA-MM-DD · geral|projeto:<id> · até AAAA-MM-DD] texto`,
+  ≤ 1000), `archive.md` (vencidas, estouro do orçamento de 8000 caracteres — saem as datadas mais
+  antigas — e as que você arquiva; gravado antes do `MEMORY.md`) e `history/` (foto antes de cada
+  mudança, 50). 0700/0600, escrita atômica, `redactSecrets` em toda escrita, uma escrita por pasta,
+  digest da leitura em toda edição da tela (`stale`). O resumo (≤ 2000, válidas, gerais ou deste
+  projeto) + como usar a ferramenta vão no fim do `--append-system-prompt` (`withMemory`).
+- **Ferramenta `lembrar`** (`mcp__orkio__lembrar`): o servidor MCP da ponte só a lista com agente
+  (`ORKIO_BRIDGE_MEMORY=1`); a chamada vai ao main pelo mesmo socket (`kind: 'remember'`, mesmo
+  token), o `RunService.onRemember` redige (inclusive valores dos `.env`) e o store valida e grava;
+  o log ganha "Anotou na memória: …". A política libera só essa MCP sem perguntar.
+- **Tela** Agentes › Memória (`AgentMemory.tsx`, botão "Memória de X" no card, no lugar da lista):
+  "% cheio", notas (editar/arquivar/apagar), Simples|Avançado no formulário (onde vale e validade),
+  sugestões no estado vazio e, recolhido, arquivadas (Restaurar) e histórico (Voltar, com
+  confirmação). IPC `agents.memory|addMemory|editMemory|changeMemory|rollbackMemory` (agente
+  precisa existir no projeto).
+- **Revisão até ficar limpo** (`shared/review-rounds.ts`, `main/flows/review-round-actions.ts`):
+  `review_prepare` grava `.orkio/revisao/diff.md` (commits, stat, arquivos novos, diff redigido
+  ≤ 400 mil) e conta a rodada; o revisor responde em `## Bloqueios / ## Detalhes / ## Evidência`
+  com IDs estáveis (`[B-1]`; sem ID, hash do texto); `review_record` grava `rodada-N.md` e decide
+  `revisao.veredito`: limpo | corrigir | travado (mesmos IDs da rodada anterior) | esgotado
+  (`REVIEW_MAX_ROUNDS` = 3). "Pedir mudanças" no gate do diff começa outra série. Resposta fora do
+  formato = passo falha com motivo.
+- **Revisor com limites**: o passo `agent: 'reviewer'` conta no limite do dia do revisor
+  (`stepAgent`) e no paralelo dele (`reviewerSlotTaken`: fluxos dele + passos de revisão rodando);
+  sem vaga, pausa `waiting_agent` com `waitingStep` e o `promoteWaiting` roda o passo direto.
+- **Finais honestos** (`shared/flow-final.ts`, `flow_runs.result` TEXT): done, nothing, rejected,
+  blocked, exhausted, stuck, failed, cancelled. Saltos para `$fim`, `$fim:nada|bloqueado|esgotado|
+  travado` (opções "Encerrar: …" no editor); cancelar um fluxo parado por falha = `failed`. Só
+  done/nothing passam a tarefa adiante (orquestrador, `detachedFrom`); exhausted/stuck/blocked/
+  failed vão para "Precisa de você" no kanban derivado e aparecem no sino como concluídos com o
+  final no texto. Gate: Aprovar / **Pedir mudanças** (volta ao passo com o comentário) / Recusar.
+- E2E `e2e/agent-memory.spec.ts` (editor + Memória) e `e2e/tasks.spec.ts` (o revisor lê o
+  `diff.md`, `git diff` passa sem pedir, "lembrar" grava e a nota aparece na Memória do Revisor).
 
 ## Agentes (Etapa 8A)
 

@@ -1516,11 +1516,11 @@ describe('FlowRunner: plano aprovado antes de corrigir (pedido em texto, só lei
     expect(v.revise).toEqual({ used: 2, max: 2 })
     // Limite: recusado, o gate continua esperando.
     await expect(runner.reviseGate('t1', 'mais um')).rejects.toThrow(
-      'Limite de ajustes atingido (2). Aprove ou recuse no cartão.'
+      'Limite de mudanças pedidas atingido (2). Aprove ou recuse no cartão.'
     )
     // Pelo campo da sessão, a mesma mensagem (o fluxo usa a mensagem e recusa).
     await expect(runner.handleMessage('t1', 'mais um')).rejects.toThrow(
-      'Limite de ajustes atingido (2). Aprove ou recuse no cartão.'
+      'Limite de mudanças pedidas atingido (2). Aprove ou recuse no cartão.'
     )
     expect(runner.view(id).status).toBe('waiting_gate')
     expect(started).toHaveLength(3)

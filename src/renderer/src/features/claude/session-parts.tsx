@@ -56,8 +56,13 @@ export function Composer({
   onCancel(): void
   onStarted(state: NonNullable<ReturnType<typeof useTaskRuns>['state']>): void
 }): React.JSX.Element {
-  const [mode, setMode] = useState<RunMode>(initial.mode)
-  const [command, setCommand] = useState(initial.command)
+  // Fase 3: rodando como o agente, o comando preferido dele já vem escolhido (formulário vazio).
+  const preferred =
+    prep.agent && !prep.agent.problem && prep.agent.command && !initial.command && !initial.text
+      ? prep.agent.command
+      : null
+  const [mode, setMode] = useState<RunMode>(preferred ? 'command' : initial.mode)
+  const [command, setCommand] = useState(preferred ?? initial.command)
   const [text, setText] = useState(initial.text)
   const [briefing, setBriefing] = useState(prep.briefing)
   const [starting, setStarting] = useState(false)
