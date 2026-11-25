@@ -6,6 +6,10 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Projeto só com git local: repositórios de organização sem o app do Orkio aprovado funcionam com o seu git e o seu `gh` ("Usar só o git desta máquina" ao adicionar ou no menu do projeto).
+
 ## [0.2.19] - 2026-11-25
 
 ### Mudado
