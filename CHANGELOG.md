@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.16] - 2026-11-25
+
 ### Adicionado
 
 - Configurações reorganizadas: menu lateral em grupos (Básico, Conexões, Agentes e ferramentas,
@@ -110,7 +112,6 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   Bloqueios, Detalhes e Evidência; quem implementou corrige os bloqueios e o revisor olha de novo,
   até não sobrar bloqueio (no máximo 3 rodadas). Cada rodada fica em `.orkio/revisao/rodada-N.md`.
   Se os mesmos bloqueios voltam, o fluxo para como "Travado"; no limite de rodadas, "Esgotado".
-
 
 ### Alterado
 
