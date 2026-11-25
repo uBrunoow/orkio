@@ -3,18 +3,22 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { stageDotClass } from './stage-dot'
-import { NO_STAGE } from './board-model'
+import {
+  dropStageFor,
+  taskKey,
+  type BoardColumnDef,
+  type BoardEntry,
+  type BoardMode
+} from './board-model'
 import { ColumnCollapseIcon, ColumnExpandIcon } from '../../components/icons'
 import { BoardCardBody, BoardCardItem, CARD_CLASS, type CardActions } from './BoardCardView'
-import type { BoardCard, BoardStage } from '../../../../shared/board'
-import type { TaskSignals } from '../../../../shared/task-signals'
 
 /** Movimento mínimo (px) para virar arrasto: cliques e o menu do card continuam funcionando. */
 const DRAG_THRESHOLD = 5
-export { NO_STAGE }
 
 interface DragState {
-  taskId: string
+  /** `entry.key` do card arrastado. */
+  key: string
   width: number
   height: number
   offsetX: number
@@ -30,15 +34,16 @@ interface DragState {
  * cada card.
  */
 export function BoardColumns({
-  stages,
-  cards,
-  signals,
-  actions
+  mode,
+  columns,
+  entries,
+  actionsFor
 }: {
-  stages: readonly BoardStage[]
-  cards: readonly BoardCard[]
-  signals: Record<string, TaskSignals>
-  actions: CardActions
+  mode: BoardMode
+  columns: readonly BoardColumnDef[]
+  /** Entradas visíveis (já filtradas). */
+  entries: readonly BoardEntry[]
+  actionsFor(projectId: string): CardActions
 }): React.JSX.Element {
   const [drag, setDrag] = useState<DragState | null>(null)
   // Colunas recolhidas (só nesta sessão da tela): viram uma faixa estreita com nome e contagem.
@@ -53,38 +58,33 @@ export function BoardColumns({
   const columnEls = useRef(new Map<string, HTMLElement>())
   const cardEls = useRef(new Map<string, HTMLElement>())
   const teardown = useRef<(() => void) | null>(null)
+  const showProject = mode === 'roles'
 
   const byColumn = useMemo(() => {
-    const map = new Map<string, BoardCard[]>(stages.map((s) => [s.id, []]))
-    map.set(NO_STAGE, [])
-    for (const card of cards) {
-      const key = card.stageId && map.has(card.stageId) ? card.stageId : NO_STAGE
-      map.get(key)!.push(card)
-    }
+    const map = new Map<string, BoardEntry[]>(columns.map((c) => [c.id, []]))
+    for (const entry of entries) map.get(entry.columnId)?.push(entry)
     return map
-  }, [stages, cards])
+  }, [columns, entries])
 
-  const columns: { id: string; name: string; stage: BoardStage | null }[] = [
-    ...stages.map((s) => ({ id: s.id, name: s.name, stage: s })),
-    ...((byColumn.get(NO_STAGE)?.length ?? 0) > 0
-      ? [{ id: NO_STAGE, name: 'Sem etapa', stage: null }]
-      : [])
-  ]
+  const dragged = drag ? entries.find((e) => e.key === drag.key) : undefined
+  /** Destino do card arrastado nesta coluna; `null` = não dá para soltar ali. */
+  const dropTarget = (entry: BoardEntry, columnId: string): string | null =>
+    dropStageFor(entry, columnId, mode)
 
   function targetAt(x: number, y: number): string | null {
     for (const [id, el] of columnEls.current) {
-      if (id === NO_STAGE) continue
       const r = el.getBoundingClientRect()
       if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return id
     }
     return null
   }
 
-  function onPointerDown(e: React.PointerEvent, taskId: string): void {
+  function onPointerDown(e: React.PointerEvent, key: string): void {
     if (e.button !== 0) return
     if ((e.target as HTMLElement).closest('button, a, [role="menuitem"], [role="menu"]')) return
-    const el = cardEls.current.get(taskId)
-    if (!el) return
+    const el = cardEls.current.get(key)
+    const entry = entries.find((x) => x.key === key)
+    if (!el || !entry) return
     const rect = el.getBoundingClientRect()
     const startX = e.clientX
     const startY = e.clientY
@@ -101,7 +101,7 @@ export function BoardColumns({
       started = true
       target = targetAt(ev.clientX, ev.clientY)
       setDrag({
-        taskId,
+        key,
         width: rect.width,
         height: rect.height,
         offsetX: startX - rect.left,
@@ -113,9 +113,10 @@ export function BoardColumns({
     }
     const onUp = (): void => {
       teardown.current?.()
-      const card = cards.find((c) => c.taskId === taskId)
-      if (started && target && card && card.stageId !== target) actions.onMove(taskId, target)
-      if (!started) actions.onOpen(taskId)
+      const { projectId, card } = entry
+      const stageId = started && target ? dropTarget(entry, target) : null
+      if (stageId && stageId !== card.stageId) actionsFor(projectId).onMove(card.taskId, stageId)
+      if (!started) actionsFor(projectId).onOpen(card.taskId)
       setDrag(null)
     }
     teardown.current = () => {
@@ -134,22 +135,24 @@ export function BoardColumns({
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-task-id]')
     if (!el || e.target !== el || e.altKey || e.shiftKey) return
     const taskId = el.dataset['taskId'] ?? ''
+    const projectId = el.dataset['projectId'] ?? ''
+    const key = taskKey(projectId, taskId)
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault()
-      actions.onOpen(taskId)
+      actionsFor(projectId).onOpen(taskId)
       return
     }
     if (e.ctrlKey || e.metaKey) return
     const grid = columns.map((c) => (collapsed.has(c.id) ? [] : (byColumn.get(c.id) ?? [])))
-    const col = grid.findIndex((list) => list.some((c) => c.taskId === taskId))
-    const row = grid[col]?.findIndex((c) => c.taskId === taskId) ?? -1
+    const col = grid.findIndex((list) => list.some((x) => x.key === key))
+    const row = grid[col]?.findIndex((x) => x.key === key) ?? -1
     if (col < 0 || row < 0) return
-    let next: BoardCard | undefined
-    const key = e.key.toLowerCase()
-    if (key === 'j' || key === 'arrowdown') next = grid[col]?.[row + 1]
-    else if (key === 'k' || key === 'arrowup') next = grid[col]?.[row - 1]
-    else if (key === 'arrowleft' || key === 'arrowright') {
-      const step = key === 'arrowleft' ? -1 : 1
+    let next: BoardEntry | undefined
+    const pressed = e.key.toLowerCase()
+    if (pressed === 'j' || pressed === 'arrowdown') next = grid[col]?.[row + 1]
+    else if (pressed === 'k' || pressed === 'arrowup') next = grid[col]?.[row - 1]
+    else if (pressed === 'arrowleft' || pressed === 'arrowright') {
+      const step = pressed === 'arrowleft' ? -1 : 1
       for (let c = col + step; c >= 0 && c < grid.length; c += step) {
         const list = grid[c] ?? []
         if (list.length > 0) {
@@ -157,7 +160,7 @@ export function BoardColumns({
           break
         }
       }
-    } else if (key === 'm') {
+    } else if (pressed === 'm') {
       e.preventDefault()
       // O gatilho do Radix abre no pointerdown ou no teclado (não no .click()): manda um Enter.
       const trigger = el.querySelector<HTMLButtonElement>('button[aria-label^="Ações de"]')
@@ -166,10 +169,8 @@ export function BoardColumns({
       return
     } else return
     e.preventDefault()
-    if (next) cardEls.current.get(next.taskId)?.focus()
+    if (next) cardEls.current.get(next.key)?.focus()
   }
-
-  const dragged = drag ? cards.find((c) => c.taskId === drag.taskId) : undefined
 
   return (
     <>
@@ -182,8 +183,13 @@ export function BoardColumns({
       >
         {columns.map((column) => {
           const items = byColumn.get(column.id) ?? []
-          const visible = drag ? items.filter((c) => c.taskId !== drag.taskId) : items
-          const isTarget = drag?.target === column.id
+          const visible = drag ? items.filter((x) => x.key !== drag.key) : items
+          // Durante o arraste, coluna sem destino para o card (ex.: Sem etapa, Outras etapas).
+          const blocked = dragged ? dropTarget(dragged, column.id) === null : false
+          const isTarget = drag?.target === column.id && !blocked
+          const dropAttrs = blocked
+            ? { 'aria-disabled': true as const, 'data-drop': 'blocked' }
+            : {}
           const setColumnEl = (el: HTMLDivElement | null): void => {
             if (el) columnEls.current.set(column.id, el)
             else columnEls.current.delete(column.id)
@@ -198,6 +204,7 @@ export function BoardColumns({
                 aria-label={column.name}
                 data-stage-id={column.id}
                 data-collapsed="true"
+                {...dropAttrs}
                 className={cn(
                   'flex h-full w-9 shrink-0 flex-col items-center gap-2 rounded-[9px] border border-border-soft py-1.5',
                   isTarget ? 'bg-muted' : 'bg-surface'
@@ -231,6 +238,7 @@ export function BoardColumns({
               role="listitem"
               aria-label={column.name}
               data-stage-id={column.id}
+              {...dropAttrs}
               className={cn(
                 'group/col flex h-full w-[268px] shrink-0 flex-col gap-2 rounded-[10px] transition-colors',
                 isTarget && 'bg-muted/60'
@@ -245,9 +253,7 @@ export function BoardColumns({
                     </h3>
                   </TooltipTrigger>
                   <TooltipContent side="bottom" align="start">
-                    {column.stage
-                      ? `Status no Notion: ${column.stage.notionStatus.name}`
-                      : 'Status do Notion que nenhuma etapa usa'}
+                    {column.hint}
                   </TooltipContent>
                 </Tooltip>
                 <span
@@ -257,7 +263,7 @@ export function BoardColumns({
                   {items.length}
                 </span>
                 <span className="ml-auto min-w-0 truncate text-right font-mono text-[10.5px] text-subtle-foreground">
-                  {column.stage ? `Notion: ${column.stage.notionStatus.name}` : 'Sem etapa'}
+                  {column.aside}
                 </span>
                 <Button
                   size="icon-xs"
@@ -274,16 +280,15 @@ export function BoardColumns({
                 aria-label={`Tarefas em ${column.name}`}
                 className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-0.5"
               >
-                {visible.map((card) => (
+                {visible.map((entry) => (
                   <BoardCardItem
-                    key={card.taskId}
-                    card={card}
-                    stages={stages}
-                    signals={signals[card.taskId]}
-                    actions={actions}
+                    key={entry.key}
+                    entry={entry}
+                    showProject={showProject}
+                    actions={actionsFor(entry.projectId)}
                     cardRef={(el) => {
-                      if (el) cardEls.current.set(card.taskId, el)
-                      else cardEls.current.delete(card.taskId)
+                      if (el) cardEls.current.set(entry.key, el)
+                      else cardEls.current.delete(entry.key)
                     }}
                     onPointerDown={onPointerDown}
                   />
@@ -315,12 +320,7 @@ export function BoardColumns({
             transform: `translate(${drag.x - drag.offsetX}px, ${drag.y - drag.offsetY}px)`
           }}
         >
-          <BoardCardBody
-            card={dragged}
-            stages={stages}
-            signals={signals[dragged.taskId]}
-            actions={null}
-          />
+          <BoardCardBody entry={dragged} showProject={showProject} actions={null} />
         </div>
       )}
     </>

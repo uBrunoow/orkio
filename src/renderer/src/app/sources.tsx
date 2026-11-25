@@ -2,7 +2,7 @@
  * Fontes de dados compartilhadas pelas telas (uma por dado do main): criadas uma vez no topo do
  * App e lidas pelos hooks das features (`useOverview`, `useTaskSignals`, `useBoard`, `useProjects`,
  * `useConnection`, `useUpdates`, `useClaudeStatus`, `useProjectFlows`, `useCatalog`,
- * `useAlvaPrecheck`, `useAutomationStatus`, `useProjectActivity`). Cada fonte tem uma carga, uma assinatura de
+ * `useAlvaPrecheck`, `useAutomationStatus`, `useProjectActivity`, `usePersonalTasks`). Cada fonte tem uma carga, uma assinatura de
  * eventos e um poll, por mais telas que a leiam ao mesmo tempo.
  */
 import { createContext, useContext, useState } from 'react'
@@ -25,6 +25,7 @@ import type { ActivityItem, OverviewSnapshot } from '../../../shared/overview'
 import type { ProjectView } from '../../../shared/projects'
 import type { ResultError } from '../../../shared/result'
 import type { TaskFlowsProject } from '../../../shared/task-flow'
+import type { PersonalTasksSnapshot } from '../../../shared/task-lanes'
 import type { ActivityGroup } from '../../../shared/task-events'
 import type { TaskSignalsResult } from '../../../shared/task-signals'
 import type { UpdateStatus } from '../../../shared/updates'
@@ -36,6 +37,8 @@ const OVERVIEW_POLL_MS = 60_000
 const SIGNALS_POLL_MS = 60_000
 /** Estado das automações do projeto (próxima verificação, erro) enquanto o Quadro está aberto. */
 const AUTOMATION_POLL_MS = 15_000
+/** Situação das tarefas (raias do kanban derivado): só dados locais, com a janela visível. */
+const PERSONAL_TASKS_POLL_MS = 30_000
 /** Medidor de uso do Claude: só com a janela em foco (o main ainda guarda 60 s de cache). */
 const USAGE_POLL_MS = 60_000
 /** Quantos eventos de fluxo/execução o sino lê para montar o "Concluído". */
@@ -84,6 +87,8 @@ export interface AppSources {
   finished: Source<ActivityItem[]>
   /** Medidor de uso do Claude (% e quando renova); `usage: null` = some. */
   claudeUsage: Source<ClaudeUsageView>
+  /** Situação de cada tarefa (raia, o quê, chips da PR) de todos os projetos; chave `''`. */
+  personalTasks: Source<PersonalTasksSnapshot>
 }
 
 export const catalogKey = (projectId: string, taskId: string | null): string =>
@@ -304,6 +309,19 @@ export function createAppSources(): AppSources {
       pollMs: USAGE_POLL_MS,
       pollWhen: () => document.visibilityState === 'visible' && document.hasFocus(),
       refreshOnFocus: true
+    }),
+    personalTasks: createSource({
+      load: () => window.orkio.overview.tasks().then(unwrap),
+      listen: (src) => {
+        const reload = (): void => void src.reload('')
+        const offs = [
+          window.orkio.overview.onChanged(reload),
+          window.orkio.taskFlows.onChanged(reload),
+          window.orkio.board.onChanged(reload)
+        ]
+        return () => offs.forEach((off) => off())
+      },
+      pollMs: PERSONAL_TASKS_POLL_MS
     })
   }
 }

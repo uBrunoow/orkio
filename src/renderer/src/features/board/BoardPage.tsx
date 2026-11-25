@@ -30,8 +30,9 @@ import { useTaskSignals } from '../notion-workspace/useTaskSignals'
 import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
-import { TaskActivityProvider, type TaskActivityMap } from './task-activity'
-import { activityByTask } from '../overview/task-activity'
+import { activityByTask, type TaskActivity } from '../overview/task-activity'
+import { boardEntries, singleBoardColumns, visibleEntries } from './board-model'
+import { usePersonalTasks } from './usePersonalTasks'
 import { useOverview } from '../overview/useOverview'
 import { useBoard } from './useBoard'
 import { boardRoute, type BoardLayout, type Route } from '../../app/routes'
@@ -79,6 +80,7 @@ export function BoardPage({
   return (
     <Board
       projectId={project.id}
+      projectName={project.name}
       route={route}
       onRoute={onRoute}
       onOpenIntegrations={onOpenIntegrations}
@@ -89,12 +91,14 @@ export function BoardPage({
 
 function Board({
   projectId,
+  projectName,
   route,
   onRoute,
   onOpenIntegrations,
   onOpenTask
 }: {
   projectId: string
+  projectName: string
   route: Extract<Route, { name: 'board' }>
   onRoute(route: Route): void
   onOpenIntegrations(): void
@@ -104,6 +108,8 @@ function Board({
   const automation = useAutomationStatus(projectId)
   const signals = useTaskSignals(projectId)
   const refreshSignals = signals.refresh
+  const personal = usePersonalTasks()
+  const reloadPersonal = personal.reload
   const agentBadges = useAgentBadges(projectId)
   const columnSetups = useIpcResource(projectId, (id) =>
     window.orkio.taskSetup.columns(id).then(unwrap)
@@ -124,25 +130,38 @@ function Board({
 
   const fetchedAt = view?.fetchedAt
   useEffect(() => {
-    if (fetchedAt) void refreshSignals(false)
-  }, [fetchedAt, refreshSignals])
+    if (!fetchedAt) return
+    void refreshSignals(false)
+    void reloadPersonal()
+  }, [fetchedAt, refreshSignals, reloadPersonal])
 
   const priorities = useMemo(
     () => [...new Set((view?.cards ?? []).flatMap((c) => (c.priority ? [c.priority.name] : [])))],
     [view?.cards]
   )
-  const cards = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return (view?.cards ?? []).filter(
-      (c) =>
-        (!q ||
-          c.title.toLowerCase().includes(q) ||
-          (c.displayId ?? '').toLowerCase().includes(q)) &&
-        (!priority || c.priority?.name === priority) &&
-        (!onlyBlocked || c.blocked) &&
-        (!agentKey || agentBadges[c.taskId]?.key === agentKey)
-    )
-  }, [view?.cards, query, priority, onlyBlocked, agentKey, agentBadges])
+  const stages = view?.config?.stages ?? null
+  const signalsByTask = signals.result?.signals
+  const entries = useMemo(
+    () =>
+      boardEntries(
+        [{ projectId, projectName, stages, cards: view?.cards ?? [] }],
+        'single',
+        personal.byKey,
+        new Map([[projectId, signalsByTask ?? {}]])
+      ),
+    [projectId, projectName, stages, view?.cards, personal.byKey, signalsByTask]
+  )
+  const columns = useMemo(
+    () => (stages ? singleBoardColumns(stages, entries) : []),
+    [stages, entries]
+  )
+  const visible = useMemo(
+    () =>
+      visibleEntries(entries, { filter: 'all', query, priority, onlyBlocked }).filter(
+        (e) => !agentKey || agentBadges[e.card.taskId]?.key === agentKey
+      ),
+    [entries, query, priority, onlyBlocked, agentKey, agentBadges]
+  )
 
   const header = (): React.JSX.Element => (
     <ScreenBarStart>
@@ -192,6 +211,7 @@ function Board({
     onToggleAutomation: (taskId: string, paused: boolean) =>
       void board.setAutomationPaused(taskId, paused)
   }
+  const actionsFor = (): CardActions => actions
   const refreshing = board.loading || automation.running
 
   return (
@@ -235,7 +255,10 @@ function Board({
           variant="outline"
           disabled={refreshing}
           onClick={() => {
-            void automation.runNow().then(() => board.load(true))
+            void automation.runNow().then(() => {
+              void personal.reload()
+              return board.load(true)
+            })
           }}
         >
           {refreshing ? <Spinner className="size-3.5" /> : <RefreshIcon />}
@@ -336,25 +359,23 @@ function Board({
             description="As tarefas do Notion ligadas a este projeto aparecem aqui."
           />
         ) : (
-          <TaskActivityProvider value={taskActivity}>
-            <AgentBadgesProvider value={agentBadges}>
-              {layout === 'list' ? (
-                <BoardList
-                  stages={view.config.stages}
-                  cards={cards}
-                  signals={signals.result?.signals ?? {}}
-                  actions={actions}
-                />
-              ) : (
-                <BoardColumns
-                  stages={view.config.stages}
-                  cards={cards}
-                  signals={signals.result?.signals ?? {}}
-                  actions={actions}
-                />
-              )}
-            </AgentBadgesProvider>
-          </TaskActivityProvider>
+          <AgentBadgesProvider value={agentBadges}>
+            {layout === 'list' ? (
+              <BoardList
+                mode="single"
+                columns={columns}
+                entries={visible}
+                actionsFor={actionsFor}
+              />
+            ) : (
+              <BoardColumns
+                mode="single"
+                columns={columns}
+                entries={visible}
+                actionsFor={actionsFor}
+              />
+            )}
+          </AgentBadgesProvider>
         )}
       </div>
     </div>
@@ -444,7 +465,7 @@ function AgentRow({
 }: {
   cards: readonly { taskId: string }[]
   badges: AgentBadges
-  activity: TaskActivityMap
+  activity: ReadonlyMap<string, TaskActivity>
   selected: string | null
   onSelect(key: string | null): void
 }): React.JSX.Element | null {

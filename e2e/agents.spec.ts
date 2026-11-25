@@ -240,7 +240,7 @@ test('critérios 1–4: cria a Ana pela tela, regra da coluna, fluxo dela com as
   await expect(card(page).getByTestId('card-agent')).toHaveAttribute('aria-label', 'Agente: Ana', {
     timeout: 30_000
   })
-  await expect(card(page).getByTestId('card-flow')).toHaveText('Esperando você', {
+  await expect(card(page).getByTestId('card-lane')).toHaveText('Precisa de você', {
     timeout: 30_000
   })
 
