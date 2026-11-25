@@ -65,8 +65,41 @@ export const POLICY_MESSAGES = {
   gh: `Bloqueado pelo Orkio: comandos do GitHub CLI que publicam (gh pr, gh api) só são permitidos em um passo de fluxo com “modo entrega”. Ler a PR do projeto pode (${GH_READ_TEXT}). Para publicar, use “Abrir PR” na aba PR & CI da tarefa.`,
   alias:
     'Bloqueado pelo Orkio: alias definido na própria linha de comando (git -c alias.…) ou aninhado demais.',
-  readOnly: 'Bloqueado pelo Orkio: este passo é só de leitura (sem editar arquivos).'
+  readOnly: 'Bloqueado pelo Orkio: este passo é só de leitura (sem editar arquivos).',
+  wait: 'Bloqueado pelo Orkio: não espere no shell (gh pr checks --watch, gh run watch, sleep longo, tail -f). Termine o passo: o Orkio acompanha a PR e acorda o fluxo quando o CI ou a revisão mudarem.'
 } as const
+
+/** Maior `sleep` aceito (segundos): pausas curtas (esperar um servidor subir) continuam valendo. */
+export const MAX_SHELL_SLEEP_S = 30
+
+function sleepSeconds(arg: string): number | null {
+  const m = /^(\d+(?:\.\d+)?)([smhd]?)$/.exec(arg)
+  if (!m) return arg === 'infinity' ? Infinity : null
+  const mult = { '': 1, s: 1, m: 60, h: 3600, d: 86400 }[m[2] as '' | 's' | 'm' | 'h' | 'd']
+  return Number(m[1]) * mult
+}
+
+/**
+ * Fase 5: comandos que só esperam (acompanhar CI, seguir log, dormir muito). Num passo de fluxo
+ * eles prendem a execução e gastam a janela do Claude; quem espera a PR é o Orkio.
+ */
+export function isShellWait(cmd: { name: string; args: readonly string[] }): boolean {
+  const { name, args } = cmd
+  if (name === 'gh') {
+    if (args[0] === 'run' && args[1] === 'watch') return true
+    if (args[0] === 'pr' && args[1] === 'checks') return args.some((a) => a === '--watch' || a.startsWith('--watch='))
+    return false
+  }
+  if (name === 'tail') {
+    return args.some((a) => a === '--follow' || a.startsWith('--follow=') || /^-[a-zA-Z]*[fF]/.test(a))
+  }
+  if (name === 'watch') return true
+  if (name === 'sleep') {
+    const total = args.reduce((sum, a) => sum + (sleepSeconds(a) ?? 0), 0)
+    return total > MAX_SHELL_SLEEP_S
+  }
+  return false
+}
 
 const deny = (code: PolicyDenyCode, reason: string): PolicyDecision => ({
   decision: 'deny',
@@ -471,6 +504,8 @@ function evaluate(
       if (typeof resolved === 'string') return deny('alias', resolved)
       commands.push(...resolved)
     }
+    // Fase 5: esperar no shell nunca passa (nem com "sempre", nem no modo entrega).
+    if (commands.some(isShellWait)) return deny('wait', POLICY_MESSAGES.wait)
     const delivery: DeliveryAction[] = []
     const others: Cmd[] = []
     for (const cmd of commands) {

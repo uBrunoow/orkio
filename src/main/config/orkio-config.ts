@@ -2,6 +2,7 @@
  * Formato do arquivo de configuração não secreta do Orkio (userData/orkio-config.json).
  * Nada de tokens aqui: segredos vão no SecureStore.
  */
+import { parseUsageHold, type UsageHold } from '../../shared/claude-usage'
 import type { DeliverySettings } from '../../shared/delivery'
 import { parseProjectAgents, type ProjectAgents } from '../../shared/agent'
 import { parseOrchestrator, type OrchestratorConfig } from '../../shared/orchestrator'
@@ -59,6 +60,11 @@ export interface OrkioConfig {
   keepAwake?: boolean
   /** Medidor de uso do Claude na barra (experimental). Ausente = ligado; `false` = desligado. */
   usageMeter?: false
+  /**
+   * Fase 5: segurar a automação com a janela de 5 h do Claude perto do limite. Ausente = padrão
+   * (`USAGE_HOLD_DEFAULT`). Campo opcional, sem migração.
+   */
+  usageHold?: UsageHold
   /**
    * Fase 1: "Como deve rodar?" padrão de cada coluna (projeto → etapa → configuração). Ausente =
    * nenhuma coluna com padrão (campo opcional, sem migração).
@@ -244,6 +250,7 @@ export function validateConfig(
     updates: parseUpdates(data['updates']),
     ...(data['keepAwake'] === true ? { keepAwake: true } : {}),
     ...(data['usageMeter'] === false ? { usageMeter: false as const } : {}),
+    ...(parseUsageHold(data['usageHold']) ? { usageHold: parseUsageHold(data['usageHold'])! } : {}),
     ...runSetupOf(data['runSetup']),
     ...phase4Of(data)
   }

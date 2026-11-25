@@ -9,6 +9,8 @@
  */
 import type { StageRole } from './board'
 import { ACTION_VARS, ORKIO_ACTIONS } from './orkio-actions'
+import { PR_WAKE_MAX_CYCLES } from './pr-wake'
+import { SLICE_TRAILER, SLICE_VARS } from './slices'
 import { BRIEFING_PATH, REVIEW_PATH } from './orkio-scratch'
 import { REVIEW_DIFF_PATH, REVIEW_MAX_ROUNDS, REVIEW_VARS } from './review-rounds'
 import type { FlowEndTarget } from './flow-final'
@@ -51,8 +53,8 @@ export const NATIVE_PROMPTS = {
   plan: 'Com a spec aprovada, escreva o plano técnico: os passos em ordem, os arquivos a criar ou mudar e como testar cada parte. Não altere arquivos. Responda só com o plano, em pt-BR.',
   implementApproved:
     'Spec e plano aprovados. Implemente seguindo o plano, com testes e a suíte verde. Faça commits pequenos com mensagens claras. Não faça push nem abra PR: o Orkio cuida disso depois.',
-  slicePlan: `Quebre a tarefa descrita em ${BRIEFING_PATH} em fatias pequenas e independentes, cada uma entregável sozinha com teste (de 2 a 8). Para cada fatia: o objetivo, os arquivos e como testar. Não altere arquivos. Responda em pt-BR com as fatias numeradas e, na última linha, @orkio fatias=<quantidade>.`,
-  slice: `Implemente a próxima fatia ainda não feita do plano aprovado (uma só), com teste e a suíte verde, e faça o commit dela. Não faça push. Na última linha da resposta, escreva @orkio ${NATIVE_VARS.slicesLeft}=<quantas fatias faltam depois desta>.`,
+  slicePlan: `Quebre a tarefa descrita em ${BRIEFING_PATH} em fatias pequenas e independentes, cada uma entregável sozinha com teste (de 2 a 8). Para cada fatia: o objetivo, os arquivos, como testar e de quais outras fatias ela depende. Não altere arquivos. Responda em pt-BR com as fatias numeradas; no fim, uma linha @orkio depende_<n>=<fatias separadas por vírgula> para cada fatia que depende de outra e, na última linha, @orkio ${SLICE_VARS.total}=<quantidade>.`,
+  slice: `Implemente UMA fatia do plano aprovado, a de número ${v(SLICE_VARS.next)} (se houver mais de um número, escolha uma delas). Fatias já feitas, pelo git: ${v(SLICE_VARS.done)}. Com teste e a suíte verde, entregue a fatia num commit só (junte os seus commits dela num, com squash) cuja mensagem termina com a linha de trailer "${SLICE_TRAILER}: <número da fatia>". O Orkio usa esse trailer para saber o que está pronto: sem ele, a fatia é feita de novo. Não faça push. Na última linha da resposta, escreva @orkio ${NATIVE_VARS.slicesLeft}=<quantas fatias faltam depois desta>.`,
   review: `Revise o trabalho desta tarefa (rodada ${v(REVIEW_VARS.round)} de ${REVIEW_MAX_ROUNDS}). O pedido está em ${BRIEFING_PATH}; o diff da branch contra a base, os commits e os arquivos novos estão em ${REVIEW_DIFF_PATH} (leia esse arquivo em vez de rodar git). Rodada anterior: ${v(REVIEW_VARS.previous)}; se houver, confira se cada bloqueio dela foi corrigido. Leia o código que precisar, só leitura: não altere arquivos nem rode comandos que mudam algo. Procure primeiro o que quebra (bugs, casos de borda, segurança), depois a aderência ao pedido e às convenções do projeto.
 
 Responda em pt-BR exatamente com estas três seções:
@@ -70,6 +72,8 @@ Cada achado tem um ID estável: numa rodada seguinte, o mesmo problema mantém o
   fix: `O revisor apontou bloqueios na rodada ${v(REVIEW_VARS.round)} (estão em ${v(REVIEW_VARS.file)}). Corrija cada bloqueio, com testes, rode a suíte e faça o commit. Os detalhes são opcionais. Não faça push.`,
   pr: `Abra a pull request desta branch com gh pr create: título curto no padrão do repositório, descrição com o que mudou, como testar e o link da tarefa (${v('notion_url')}). Se a PR já existir, atualize a descrição com gh pr edit. Não faça merge.`,
   prCommentsPlan: `Leia ${REVIEW_PATH} (comentários de revisão não resolvidos da PR #${v(ACTION_VARS.reviewPr)}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.`,
+  ciFix:
+    'O CI da PR desta branch falhou. Veja quais checks falharam com gh pr checks e o log com gh run view --log-failed, corrija a causa, rode os testes e faça o commit. Não faça push e não espere o CI no shell (nada de --watch, sleep longo ou tail -f): o Orkio acompanha a PR e chama você de novo se precisar.',
   prCommentsApply: `Corrija os comentários de revisão não resolvidos da PR (estão em ${REVIEW_PATH}), rode os testes, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).`,
   prCommentsApplyApproved:
     'Plano aprovado. Aplique as correções, rode os testes do projeto, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).'
@@ -239,10 +243,89 @@ function deliverTail(
       type: 'orkio_action',
       action: ORKIO_ACTIONS.push.id
     },
-    prompt('abrir-pr', 'Abrir a PR (modo entrega)', NATIVE_PROMPTS.pr, 30, { delivery: true })
+    prompt('abrir-pr', 'Abrir a PR (modo entrega)', NATIVE_PROMPTS.pr, 30, { delivery: true }),
+    ...prWaitSteps()
   )
-  if (tail.length > 0) main.push(jump('fim', 'Fim', ALWAYS, FLOW_END))
   return { main, tail }
+}
+
+/**
+ * Fase 5: "a PR acorda o fluxo". Depois de abrir a PR, o fluxo dorme (`wait_pr`) e o Orkio o acorda
+ * pelos sinais da PR: mergeada → a tarefa vai para Concluída; fechada → fim sem nada a fazer; CI
+ * falhou → corrigir o CI; revisão/comentário novo → corrigir os comentários (respondendo as
+ * threads). Depois da correção, push (se faltar) e volta a esperar, até `PR_WAKE_MAX_CYCLES`.
+ */
+function prWaitSteps(): Step[] {
+  const event = (value: string): Condition => ({
+    type: 'var',
+    key: ACTION_VARS.prEvent,
+    op: 'eq',
+    value
+  })
+  return [
+    {
+      id: 'esperar-pr',
+      name: 'Esperar a PR (CI, revisão ou merge)',
+      type: 'orkio_action',
+      action: ORKIO_ACTIONS.wait_pr.id
+    },
+    jump('pr-mergeada', 'A PR foi mergeada?', event('merge'), 'concluir-tarefa'),
+    jump('pr-fechada', 'A PR foi fechada sem merge? (nada a fazer)', event('fechada'), '$fim:nada'),
+    jump('pr-ci-falhou', 'O CI falhou?', event('ci_falhou'), 'corrigir-ci'),
+    {
+      id: 'ler-comentarios-pr',
+      name: 'Ler os comentários da PR',
+      type: 'orkio_action',
+      action: ORKIO_ACTIONS.review_snapshot.id
+    },
+    jump(
+      'sem-comentarios-pr',
+      'Nenhum comentário pendente?',
+      { type: 'var', key: ACTION_VARS.reviewCount, op: 'eq', value: '0' },
+      'voltar-a-esperar'
+    ),
+    prompt(
+      'corrigir-comentarios',
+      'Corrigir os comentários da PR (modo entrega)',
+      NATIVE_PROMPTS.prCommentsApply,
+      60,
+      { delivery: true }
+    ),
+    jump('conferir-correcoes', 'Conferir o envio das correções', ALWAYS, 'conferir-envio'),
+    prompt('corrigir-ci', 'Corrigir o CI da PR', NATIVE_PROMPTS.ciFix, 60),
+    {
+      id: 'conferir-envio',
+      name: 'A PR já tem o commit atual?',
+      type: 'orkio_action',
+      action: ORKIO_ACTIONS.verify_pushed.id
+    },
+    jump(
+      'ja-enviado-pr',
+      'Já enviado?',
+      { type: 'var', key: ACTION_VARS.prPushed, op: 'eq', value: FLOW_YES },
+      'voltar-a-esperar'
+    ),
+    {
+      id: 'enviar-correcoes',
+      name: 'Push das correções (Orkio)',
+      type: 'orkio_action',
+      action: ORKIO_ACTIONS.push.id
+    },
+    jump(
+      'voltar-a-esperar',
+      `Esperar a PR de novo (até ${PR_WAKE_MAX_CYCLES} vezes)`,
+      { type: 'all', of: [{ type: 'visits', step: 'esperar-pr', lt: PR_WAKE_MAX_CYCLES }] },
+      'esperar-pr',
+      '$fim:esgotado'
+    ),
+    {
+      id: 'concluir-tarefa',
+      name: 'Mover a tarefa para Concluída',
+      type: 'orkio_action',
+      action: ORKIO_ACTIONS.move_done.id
+    },
+    jump('fim', 'Fim', ALWAYS, FLOW_END)
+  ]
 }
 
 export function nativeQuickFlow(opts: NativeFlowOptions): Flow {
@@ -296,6 +379,19 @@ export function nativeStepsFlow(opts: NativeFlowOptions): Flow {
         extract: { extractor: LINES_EXTRACTOR }
       }),
       gate('aprovar-plano', 'Aprovar as fatias', 'Aprovar as fatias', 'result', 'plano'),
+      // Fase 5: o git é o checkpoint: antes de cada fatia, o Orkio lê os trailers da branch.
+      {
+        id: 'conferir-fatias',
+        name: 'Conferir as fatias feitas (git)',
+        type: 'orkio_action',
+        action: ORKIO_ACTIONS.slices_checkpoint.id
+      },
+      jump(
+        'todas-feitas',
+        'Todas as fatias já estão no git?',
+        { type: 'var', key: NATIVE_VARS.slicesLeft, op: 'eq', value: '0' },
+        main[0]!.id
+      ),
       prompt(
         'fatia',
         'Implementar a próxima fatia',
@@ -310,13 +406,9 @@ export function nativeStepsFlow(opts: NativeFlowOptions): Flow {
         `Ainda faltam fatias? (até ${NATIVE_LIMITS.slices})`,
         {
           type: 'all',
-          of: [
-            { type: 'var', key: NATIVE_VARS.slicesLeft, op: 'exists' },
-            { type: 'var', key: NATIVE_VARS.slicesLeft, op: 'neq', value: '0' },
-            { type: 'visits', step: 'fatia', lt: NATIVE_LIMITS.slices }
-          ]
+          of: [{ type: 'visits', step: 'fatia', lt: NATIVE_LIMITS.slices }]
         },
-        'fatia'
+        'conferir-fatias'
       ),
       ...main,
       ...tail

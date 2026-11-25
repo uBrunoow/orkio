@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { SwitchField } from '@/components/form'
+import { SegmentedControl, SwitchField } from '@/components/form'
 import { Spinner } from '@/components/Spinner'
 import { PageHeader } from '../../components/PageHeader'
 import { PAGE_WIDTH } from '../../components/page-width'
@@ -10,6 +10,7 @@ import { ClaudeLogo } from '../../components/icons'
 import { useSources } from '../../app/sources'
 import type { SettingsSection } from '../../app/routes'
 import { ipcCall, useSource } from '../../lib/ipc'
+import { USAGE_HOLD_DEFAULT, type UsageHold } from '../../../../shared/claude-usage'
 import { claudeLoginText, claudeStatusText } from '../../lib/status-text'
 import { useClaudeStatus } from '../claude/useClaudeStatus'
 import { SettingsCard } from './SettingsCard'
@@ -28,6 +29,7 @@ export function ProvidersSection({
       />
       <ClaudeProvider onOpenIntegrations={() => onOpenSection('integrations')} />
       <UsageMeterSection />
+      <UsageHoldSection />
     </div>
   )
 }
@@ -92,6 +94,56 @@ export function UsageMeterSection(): React.JSX.Element {
           )
         }}
       />
+    </SettingsCard>
+  )
+}
+
+const HOLD_OPTIONS = [80, 90, 95].map((p) => ({ value: String(p), label: `${p}%` }))
+
+/**
+ * Fase 5: o uso do Claude decide quando a automação roda. Com a janela de 5 h no limite escolhido,
+ * os fluxos que a automação começou esperam renovar; o que você pede roda sempre.
+ */
+export function UsageHoldSection(): React.JSX.Element {
+  const { claudeUsage } = useSources()
+  const view = useSource(claudeUsage, '').value
+  const hold = view?.hold ?? USAGE_HOLD_DEFAULT
+  const meterOff = view?.enabled === false
+  const save = (next: UsageHold): void => {
+    claudeUsage.set('', (v) => (v ? { ...v, hold: next } : v))
+    void ipcCall(() => window.orkio.usage.setHold(next), hold).then(() => claudeUsage.reload(''))
+  }
+  return (
+    <SettingsCard
+      title="Segurar a automação perto do limite"
+      description={
+        meterOff
+          ? 'Precisa do medidor de uso ligado (acima). Com ele desligado, nada é segurado.'
+          : 'Quando a janela de 5 horas do Claude chega ao limite, os fluxos que a automação começou (regras das colunas, orquestrador, a PR que acorda o fluxo) esperam a janela renovar. O que você pede roda sempre. Se o medidor falhar, nada é segurado.'
+      }
+    >
+      <SwitchField
+        label="Esperar a janela renovar antes de rodar pela automação"
+        checked={hold.enabled}
+        disabled={view === null}
+        onChange={(enabled) => save({ ...hold, enabled })}
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm text-muted-foreground" aria-hidden="true">
+          Segurar a partir de
+        </span>
+        <SegmentedControl
+          label="Segurar a partir de"
+          size="sm"
+          options={
+            HOLD_OPTIONS.some((o) => o.value === String(hold.percent))
+              ? HOLD_OPTIONS
+              : [...HOLD_OPTIONS, { value: String(hold.percent), label: `${hold.percent}%` }]
+          }
+          value={String(hold.percent)}
+          onChange={(v) => save({ ...hold, percent: Number(v) })}
+        />
+      </div>
     </SettingsCard>
   )
 }

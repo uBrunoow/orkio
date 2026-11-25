@@ -26,7 +26,7 @@ describe('usageHandlers', () => {
     expect(config().usageMeter).toBe(false)
     expect(usage.reset).toHaveBeenCalled()
     usage.get.mockClear()
-    expect(await h.claude(event)).toEqual({ enabled: false, usage: null })
+    expect(await h.claude(event)).toMatchObject({ enabled: false, usage: null })
     expect(usage.get).not.toHaveBeenCalled()
     expect(await h.setEnabled(true, event)).toBe(true)
     expect(config()).not.toHaveProperty('usageMeter')

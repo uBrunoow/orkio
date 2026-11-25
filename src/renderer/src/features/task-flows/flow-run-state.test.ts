@@ -83,7 +83,8 @@ describe('estado do fluxo: todos concordam', () => {
     expect(flowWaitingItem(r, TASK) !== null).toBe(you)
     // Rodando ou na fila: aparece em "Rodando"; espera você não aparece lá.
     const running = buildRunning([], [r], () => TASK).length > 0
-    expect(running).toBe(status === 'running' || kind === 'queue')
+    // Fase 5: esperando a PR não é trabalho (a tarefa aparece pela PR, em Em revisão).
+    expect(running).toBe(status === 'running' || (kind === 'queue' && reason !== 'waiting_pr'))
     expect(running && you).toBe(false)
     // Cartão de problema ⇔ problema.
     expect(describeFlowProblem(r) !== null).toBe(kind === 'problem')

@@ -659,6 +659,10 @@ export type FlowPauseReason =
   | 'waiting_agent'
   /** Limite diário do agente (8A): "Retomar" passa por cima uma vez. */
   | 'agent_daily_limit'
+  /** Fase 5: passo "Esperar a PR": o Orkio acorda o fluxo quando o CI, a revisão ou o merge mudam. */
+  | 'waiting_pr'
+  /** Fase 5: a janela de 5 h do Claude está perto do limite: a automação espera renovar. */
+  | 'waiting_usage'
 
 /**
  * Por que um passo falhou: código estável de quem lançou (`DeliveryError`, `FlowError`, fim da

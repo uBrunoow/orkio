@@ -50,7 +50,8 @@ export const GH_COMMANDS = {
     revert: NEVER,
     'update-branch': NEVER
   },
-  run: { view: READ, list: READ, watch: READ, rerun: NEVER, cancel: NEVER, delete: NEVER },
+  // Fase 5: `gh run watch` só espera (quem acompanha o CI é o Orkio).
+  run: { view: READ, list: READ, watch: NEVER, rerun: NEVER, cancel: NEVER, delete: NEVER },
   label: { list: READ, create: NEVER, edit: NEVER, delete: NEVER, clone: NEVER }
 } as const satisfies Record<string, Record<string, GhRule>>
 
@@ -196,9 +197,25 @@ function pushOptionDeny(): string[] {
   return out
 }
 
+/**
+ * Fase 5: esperas no shell (a política do Orkio confere todas as formas, `isShellWait`); o CLI nega
+ * as formas comuns mesmo com uma regra "permitir" no `~/.claude` do usuário.
+ */
+export function cliDenyWaits(): string[] {
+  return [
+    bash('gh run watch'),
+    bash('gh run watch *'),
+    bash('gh pr checks *--watch*'),
+    bash('tail -f *'),
+    bash('tail -F *'),
+    bash('tail --follow*')
+  ]
+}
+
 export function cliDenyOutsideDelivery(): string[] {
   const fields = ['-f *', '-F *', '--field*', '--raw-field*']
   return [
+    ...cliDenyWaits(),
     bash('git push'),
     bash('git push *'),
     ...ghDeny(new Set<GhAccess>(['write', 'never'])),
@@ -212,6 +229,7 @@ export function cliDenyOutsideDelivery(): string[] {
 /** No modo entrega o CLI só nega o que nunca roda; o resto a política decide. */
 export function cliDenyInDelivery(): string[] {
   return [
+    ...cliDenyWaits(),
     ...pushOptionDeny(),
     ...ghDeny(new Set<GhAccess>(['never'])),
     ...apiMethodDeny(GH_API_NEVER_METHODS)

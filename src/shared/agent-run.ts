@@ -30,7 +30,15 @@ export const BRIEFING_MAX = 200_000
  * Por que a política do Orkio bloqueou um pedido (no evento `permission`): `push`/`gh` = publicar
  * fora do modo entrega (a tela oferece "Abrir PR"); `delivery` = regra do modo entrega.
  */
-export type PermissionBlockCode = 'outside' | 'push' | 'gh' | 'alias' | 'delivery' | 'read_only'
+export type PermissionBlockCode =
+  | 'outside'
+  | 'push'
+  | 'gh'
+  | 'alias'
+  | 'delivery'
+  | 'read_only'
+  /** Fase 5: esperar no shell (`gh pr checks --watch`, `sleep` longo, `tail -f`). */
+  | 'wait'
 
 export type RunMode = 'prompt' | 'command'
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'

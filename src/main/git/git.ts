@@ -83,6 +83,8 @@ export interface Git {
   diffStat(dir: string, base: string): Promise<{ stat: string; files: string[] }>
   /** Commits em `HEAD` que não estão em `base` (hash curto + assunto). */
   commitsSince(dir: string, base: string): Promise<{ hash: string; subject: string }[]>
+  /** Fase 5: valores de um trailer (ex.: `Spec-Slice`) nos commits desde a base, um por linha. */
+  trailersSince(dir: string, base: string, key: string): Promise<string[]>
   /** Commit atual (hash completo). */
   headCommit(dir: string): Promise<string>
   fileAtCommit(root: string, commit: string, path: string): Promise<string>
@@ -238,6 +240,18 @@ export function createGit(deps: { execFile?: ExecFileFn; timeoutMs?: number } = 
           const [hash, ...rest] = l.split('\t')
           return { hash: hash ?? '', subject: rest.join('\t') }
         })
+    },
+    async trailersSince(dir, base, key) {
+      if (!/^[A-Za-z][A-Za-z0-9-]{0,40}$/.test(key)) throw new Error('Trailer inválido.')
+      const out = await git(dir, [
+        'log',
+        `--format=%(trailers:key=${key},valueonly,separator=%x0a)`,
+        `${base}..HEAD`
+      ])
+      return out
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean)
     },
     async fileAtCommit(root, commit, path) {
       return git(root, ['show', `${commit}:${path}`])

@@ -234,7 +234,7 @@ describe('modo entrega: GitHub CLI', () => {
       [`gh pr create --head ${BRANCH} --title x`, 'pr_create'],
       ['gh pr view 12 --json headRefOid', null],
       ['gh pr edit 12 --add-label bug', 'pr_edit'],
-      ['gh pr checks 12 --watch', null],
+      ['gh pr checks 12', null],
       ['gh pr comment 12 --body ok', 'pr_comment'],
       ['gh run view 99 --log-failed', null],
       ['gh label list', null],

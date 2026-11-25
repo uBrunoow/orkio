@@ -127,6 +127,7 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
           e.detail.orchestrator === 'pull' ? 'puxada da fila' : 'fluxo da etapa concluído'
         return `Orquestrador (${reason}): ${path}${by(e)}`
       }
+      if (e.detail.flow === 'pr_merged') return `Fluxo (PR mergeada): ${path}`
       return `${automationEvent(e)} → regra ${rule(e.detail.ruleName)}: ${path}`
     }
     case 'automation':
