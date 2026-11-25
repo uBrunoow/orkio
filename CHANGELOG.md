@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.15] - 2026-11-25
+
+### Mudado
+
+- feat(agentes): editor simples, memória por agente e revisão até ficar limpo (Fase 3).
+
 ## [0.2.14] - 2026-11-25
 
 ### Mudado
