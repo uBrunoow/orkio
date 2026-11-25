@@ -45,6 +45,16 @@ export interface FlowPauseInfo {
   /** O que espera: você (`problem`/`choice`/`decision`) ou só a vaga (`queue`). */
   waits: Exclude<WaitingKind, 'gate'>
   /**
+   * Fila: o que o card e a lista mostram depois do nome do fluxo ("aguardando vaga"). Só nas
+   * esperas de `queue`.
+   */
+  short?: string
+  /**
+   * Fila que o Orkio promove sozinho quando a vaga libera (`promoteWaiting`). A espera da PR e a
+   * do uso do Claude têm os próprios gatilhos (Fase 5).
+   */
+  slot?: true
+  /**
    * Como o cartão de problema explica: pela falha do passo (`from_failure`), por esta causa e
    * dica, ou nenhum cartão (`null`: espera que tem tela própria).
    */
@@ -101,12 +111,30 @@ export const FLOW_PAUSES: Record<FlowPauseReason, FlowPauseInfo> = {
     label: 'Aguardando outro fluxo do projeto terminar',
     notify: 'Aguardando outro fluxo do projeto terminar.',
     waits: 'queue',
+    short: 'aguardando vaga',
+    slot: true,
     problem: null
   },
   waiting_agent: {
     label: 'Aguardando o agente terminar outra tarefa',
     notify: 'Aguardando o agente terminar outra tarefa.',
     waits: 'queue',
+    short: 'aguardando o agente',
+    slot: true,
+    problem: null
+  },
+  waiting_pr: {
+    label: 'Esperando a PR (CI, revisão ou merge)',
+    notify: 'Esperando a PR: o Orkio acorda o fluxo quando algo mudar.',
+    waits: 'queue',
+    short: 'esperando a PR',
+    problem: null
+  },
+  waiting_usage: {
+    label: 'Aguardando a janela de uso do Claude renovar',
+    notify: 'A janela de 5 horas do Claude está perto do limite. O fluxo segue quando renovar.',
+    waits: 'queue',
+    short: 'aguardando o uso do Claude renovar',
     problem: null
   },
   agent_daily_limit: {
@@ -143,6 +171,11 @@ export function waitingKind(run: RunState): WaitingKind | null {
 export function needsYou(run: RunState): boolean {
   const kind = waitingKind(run)
   return kind !== null && kind !== 'queue'
+}
+
+/** Fila que libera com a vaga (projeto/agente), não com a PR nem com o uso do Claude. */
+export function isSlotWait(reason: FlowPauseReason | null): boolean {
+  return reason !== null && FLOW_PAUSES[reason].slot === true
 }
 
 /** Pausa que é problema (o passo parou): cartão de problema e "parou aqui" no plano. */

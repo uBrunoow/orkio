@@ -32,14 +32,18 @@ import { TabStrip } from './app/TabStrip'
 import { UsageMeter } from './app/UsageMeter'
 import { ShortcutsDialog } from './app/ShortcutsDialog'
 import { renderScreen, type PageContext } from './app/ScreenPages'
+import { activeTab, currentRoute, type Tab, type TabsAction } from './app/tabs'
 import {
-  EMPTY_TABS,
-  activeTab,
-  currentRoute,
-  parseSavedTabs,
-  serializeTabs,
-  tabsReducer
-} from './app/tabs'
+  EMPTY_DESKTOPS,
+  MAX_DESKTOPS,
+  activeDesktop,
+  desktopsReducer,
+  loadSavedDesktops,
+  serializeDesktops,
+  visiblePanels
+} from './app/desktops'
+import { DesktopPanels } from './app/DesktopPanels'
+import { ArrangementMenu, DesktopSwitcher, RenameDesktopDialog } from './app/DesktopBar'
 import { useSources } from './app/sources'
 import { useProjects } from './features/projects/useProjects'
 import { useConnection, useConnectionStatus } from './features/integrations/useConnection'
@@ -53,7 +57,9 @@ import { isMac as detectMac } from './lib/platform'
 
 /** Preferências de interface (não secretas), neste computador. */
 const CURRENT_PROJECT_KEY = 'orkio.currentProject'
-const TABS_KEY = 'orkio.tabs'
+/** Abas de antes dos desktops (Fase 5): migradas para o "Desktop 1" e apagadas. */
+const LEGACY_TABS_KEY = 'orkio.tabs'
+const DESKTOPS_KEY = 'orkio.desktops'
 const SIDEBAR_KEY = 'orkio.sidebar'
 
 function readJson(key: string): unknown {
@@ -69,11 +75,22 @@ function routeProjectId(route: Route | null): string | undefined {
 }
 
 export function App(): React.JSX.Element | null {
-  const [tabs, dispatch] = useReducer(tabsReducer, EMPTY_TABS)
+  const [desktops, dispatchDesktops] = useReducer(desktopsReducer, EMPTY_DESKTOPS)
+  const desktop = activeDesktop(desktops)
+  const tabs = desktop.tabs
+  const dispatch = useCallback(
+    (action: TabsAction) => dispatchDesktops({ type: 'tabs', action }),
+    []
+  )
+  const [desktopsOpen, setDesktopsOpen] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   // A primeira tela é decidida por um `reset` (abaixo); até lá, nada na tela.
   const ready = tabs.tabs.length > 0 || tabs.overlay !== null
   const route = currentRoute(tabs)
-  const navigate = useCallback((next: Route) => dispatch({ type: 'navigate', route: next }), [])
+  const navigate = useCallback(
+    (next: Route) => dispatch({ type: 'navigate', route: next }),
+    [dispatch]
+  )
   const isMac = detectMac()
   const projects = useProjects().projects
   /** Projetos com página no Notion (onde há tarefas para buscar). */
@@ -116,8 +133,8 @@ export function App(): React.JSX.Element | null {
     if (decided.current || projects === null) return
     if (projects.length > 0 && linkedProject && sidebar.snapshot === null) return
     decided.current = true
-    const saved = parseSavedTabs(readJson(TABS_KEY))
-    if (saved) dispatch({ type: 'restore', ...saved })
+    const saved = loadSavedDesktops(readJson(DESKTOPS_KEY), readJson(LEGACY_TABS_KEY))
+    if (saved) dispatchDesktops({ type: 'restore', saved })
     dispatch({
       type: 'reset',
       route: initialRoute({
@@ -126,12 +143,13 @@ export function App(): React.JSX.Element | null {
         groups: sidebar.groups
       })
     })
-  }, [projects, linkedProject, sidebar.snapshot, sidebar.groups])
+  }, [projects, linkedProject, sidebar.snapshot, sidebar.groups, dispatch])
 
   useEffect(() => {
     if (!ready || tabs.tabs.length === 0) return
-    window.localStorage.setItem(TABS_KEY, JSON.stringify(serializeTabs(tabs)))
-  }, [ready, tabs])
+    window.localStorage.setItem(DESKTOPS_KEY, JSON.stringify(serializeDesktops(desktops)))
+    window.localStorage.removeItem(LEGACY_TABS_KEY)
+  }, [ready, tabs, desktops])
 
   const openTask = useCallback(
     (ref: BoardTaskRef) => {
@@ -180,7 +198,12 @@ export function App(): React.JSX.Element | null {
     waiting: waiting.length,
     // Sem resposta ainda = não oferece "Conectar" (evita piscar).
     notionConnected: notionStatus === null || notionStatus.state === 'connected',
-    githubConnected: githubStatus === null || githubStatus.state === 'connected'
+    githubConnected: githubStatus === null || githubStatus.state === 'connected',
+    desktops: {
+      list: desktops.desktops.map((d) => ({ id: d.id, name: d.name })),
+      index: desktops.desktops.indexOf(desktop),
+      arrangement: desktop.arrangement
+    }
   }
   const ctx: CommandContext = {
     ...commandState,
@@ -211,7 +234,10 @@ export function App(): React.JSX.Element | null {
     checkUpdates: () => {
       navigate({ name: 'settings', section: 'updates' })
       void ipcCall(() => window.orkio.updates.check(), null)
-    }
+    },
+    desktop: dispatchDesktops,
+    showDesktops: () => setDesktopsOpen(true),
+    renameDesktop: () => setRenaming(true)
   }
   const ctxRef = useRef(ctx)
   useLayoutEffect(() => {
@@ -271,23 +297,47 @@ export function App(): React.JSX.Element | null {
 
   if (!ready || !route) return null
 
-  const pageCtx: PageContext = {
-    projects,
-    project,
-    linkedProject,
-    snapshot: sidebar.snapshot,
-    isMac,
-    navigate,
-    replace: (next) => dispatch({ type: 'replace', route: next }),
-    chooseProject,
-    openTask,
-    palette: setPalette
+  /**
+   * O que cada painel recebe: o projeto da rota dele (numa divisão, a tarefa de outro projeto ao
+   * lado continua com o projeto certo) e o "trocar a rota sem remontar" da própria aba.
+   */
+  const pageCtxFor = (tab: Tab | null): PageContext => {
+    const own = tab ? routeProjectId(tab.router.route) : undefined
+    const p = (own && projects?.find((x) => x.id === own)) || project
+    return {
+      projects,
+      project: p,
+      linkedProject: p?.notionProject ? p : null,
+      snapshot: sidebar.snapshot,
+      isMac,
+      navigate,
+      replace: (next) => dispatch({ type: 'replace', route: next, ...(tab ? { id: tab.id } : {}) }),
+      chooseProject,
+      openTask,
+      palette: setPalette
+    }
   }
 
-  if (route.name === 'setup') return <>{renderScreen(route, pageCtx).node}</>
+  if (route.name === 'setup') return <>{renderScreen(route, pageCtxFor(null)).node}</>
 
-  const view = renderScreen(route, pageCtx)
-  const keyed = <Fragment key={`${active?.id}:${active?.router.key}`}>{view.node}</Fragment>
+  const shown = visiblePanels(desktop)
+  const panels = shown.map((tab) => {
+    const view = renderScreen(tab.router.route, pageCtxFor(tab))
+    const keyed = <Fragment key={`${desktop.id}:${tab.id}:${tab.router.key}`}>{view.node}</Fragment>
+    return {
+      id: tab.id,
+      active: tab.id === active?.id,
+      content: (
+        <ScreenFrame key={`${desktop.id}:${tab.id}`} crumbs={view.crumbs}>
+          {view.fullHeight ? (
+            <div className="h-full min-h-0">{keyed}</div>
+          ) : (
+            <div className="h-full min-h-0 overflow-y-auto px-6 py-5">{keyed}</div>
+          )}
+        </ScreenFrame>
+      )
+    }
+  })
   const accountMenu = (variant: 'row' | 'avatar'): React.JSX.Element => (
     <AccountMenu
       account={account}
@@ -359,21 +409,37 @@ export function App(): React.JSX.Element | null {
           )}
         </nav>
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <TabStrip tabs={tabs.tabs} activeId={tabs.activeId} isMac={isMac} dispatch={dispatch} />
-          <div
-            id="tab-panel"
-            role="tabpanel"
-            aria-labelledby={active ? `tab-${active.id}` : undefined}
-            className="min-h-0 flex-1"
-          >
-            <ScreenFrame crumbs={view.crumbs}>
-              {view.fullHeight ? (
-                <div className="h-full min-h-0">{keyed}</div>
-              ) : (
-                <div className="h-full min-h-0 overflow-y-auto px-6 py-5">{keyed}</div>
-              )}
-            </ScreenFrame>
-          </div>
+          <TabStrip
+            tabs={tabs.tabs}
+            activeId={tabs.activeId}
+            visibleIds={new Set(shown.map((t) => t.id))}
+            isMac={isMac}
+            dispatch={dispatch}
+            moveTargets={{
+              desktops: desktops.desktops
+                .filter((d) => d.id !== desktop.id)
+                .map((d) => ({ id: d.id, name: d.name })),
+              canCreate: desktops.desktops.length < MAX_DESKTOPS,
+              onMove: (tabId, to) => dispatchDesktops({ type: 'move-tab', tabId, to })
+            }}
+            start={
+              <DesktopSwitcher
+                desktops={desktops.desktops}
+                activeId={desktop.id}
+                isMac={isMac}
+                open={desktopsOpen}
+                onOpenChange={setDesktopsOpen}
+                dispatch={dispatchDesktops}
+                onRename={() => setRenaming(true)}
+              />
+            }
+            end={<ArrangementMenu arrangement={desktop.arrangement} dispatch={dispatchDesktops} />}
+          />
+          <DesktopPanels
+            arrangement={desktop.arrangement}
+            panels={panels}
+            onActivate={(id) => dispatch({ type: 'activate', id })}
+          />
         </main>
       </div>
       <CommandMenu
@@ -391,6 +457,11 @@ export function App(): React.JSX.Element | null {
         commands={APP_COMMANDS}
         ctx={commandState}
         onClose={() => setShortcutsOpen(false)}
+      />
+      <RenameDesktopDialog
+        desktop={renaming ? desktop : null}
+        onClose={() => setRenaming(false)}
+        onSave={(name) => dispatchDesktops({ type: 'rename', id: desktop.id, name })}
       />
       {notes && <WhatsNewDialog notes={notes} closeLabel="Fechar" onClose={() => setNotes(null)} />}
     </div>

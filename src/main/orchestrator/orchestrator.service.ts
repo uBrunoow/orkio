@@ -71,7 +71,7 @@ export interface OrchestratorDeps {
   >
   flows: Pick<FlowRunner, 'hasActive' | 'activeCountByAgent' | 'activeTasks' | 'lastFlow'> & {
     /** "Rodar fluxo": o fluxo ligado à etapa atual. Lança `FlowError` com mensagem pt-BR. */
-    startManual(projectId: string, taskId: string): Promise<unknown>
+    startManual(projectId: string, taskId: string, options?: { auto?: boolean }): Promise<unknown>
   }
   actor(): string
   /** Algo mudou (quadro, agentes, orquestrador): a tela recarrega. */
@@ -335,7 +335,7 @@ export class OrchestratorService {
         this.deps.store.transaction(() =>
           this.deps.agents.assignByOrchestrator(projectId, d.taskId, d.agent, name(d.agent))
         )
-        await this.deps.flows.startManual(projectId, d.taskId)
+        await this.deps.flows.startManual(projectId, d.taskId, { auto: true })
         actions++
       } catch (error) {
         // Mensagens do FlowError são pt-BR e curtas; qualquer outra coisa vira texto genérico.

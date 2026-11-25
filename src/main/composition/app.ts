@@ -103,6 +103,10 @@ import { githubRepoOf } from '../../shared/projects'
 import { finalText } from '../../shared/review-publish'
 import { createClaude, createWorktrees, type ClaudeParts } from './claude'
 import { createFlows } from './flows'
+import type { PrWakeService } from '../flows/pr-wake'
+import { createSliceActions } from '../flows/slice-actions'
+import { prWatchOf } from '../../shared/pr-wake'
+import { usageHoldOf, USAGE_HOLD_DEFAULT } from '../../shared/claude-usage'
 import { late } from './late'
 import { createStop, type StopOptions } from './lifecycle'
 import { createUpdates } from './updates'
@@ -138,6 +142,7 @@ interface Work {
   board: BoardService
   claude: ClaudeParts
   flows: FlowRunner
+  prWake: PrWakeService
   scheduler: AutomationScheduler
   overview: OverviewService
   handlers: Pick<
@@ -309,6 +314,23 @@ export function createApp(): OrkioApp {
     refresh: async (projectId) => void (await signals.get(projectId))
   })
 
+  // Medidor de uso do Claude (experimental): token lido na hora, só no main.
+  const claudeUsage = new ClaudeUsageService({
+    enabled: () => configStore.get().usageMeter !== false,
+    readCredentials: () => readClaudeCredentials()
+  })
+  // Fase 5: o uso do Claude decide quando a automação roda (medidor desligado/falhando = roda).
+  const usageHold = async (): Promise<string | null> => {
+    const config = configStore.get()
+    if (config.usageMeter === false) return null
+    const held = usageHoldOf(config.usageHold ?? USAGE_HOLD_DEFAULT, await claudeUsage.get())
+    if (!held) return null
+    const at = held.resetsAt
+      ? ` (renova às ${new Date(held.resetsAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })})`
+      : ''
+    return `A janela de 5 horas do Claude está em ${held.percent}%${at}. A automação espera renovar.`
+  }
+
   const work: Work | null =
     boardStore && worktrees
       ? createWork({
@@ -328,7 +350,8 @@ export function createApp(): OrkioApp {
           github,
           notionWorkspace,
           signals,
-          reviewThreads
+          reviewThreads,
+          usageHold
         })
       : null
   overviewRef.set(work?.overview ?? null)
@@ -349,11 +372,6 @@ export function createApp(): OrkioApp {
   })
   keepAwakeRef.set(keepAwake)
 
-  // Medidor de uso do Claude (experimental): token lido na hora, só no main.
-  const claudeUsage = new ClaudeUsageService({
-    enabled: () => configStore.get().usageMeter !== false,
-    readCredentials: () => readClaudeCredentials()
-  })
 
   // Atualizações automáticas (6C). Funcionam mesmo com a config em modo só leitura ou sem o banco
   // local: é assim que se sai de um downgrade.
@@ -380,6 +398,7 @@ export function createApp(): OrkioApp {
       terminals: work.claude.terminals,
       writes: work.board.writes,
       scheduler: work.scheduler,
+      prWake: work.prWake,
       overview: work.overview
     },
     projects,
@@ -525,6 +544,7 @@ export function createApp(): OrkioApp {
       console.error(`[orkio] HeadWatchers: ${errorName(error)}`)
     })
     work?.scheduler.start()
+    work?.prWake.start()
   }
 
   return { handlers, ready, start, stop }
@@ -549,6 +569,7 @@ function createWork(core: {
   notionWorkspace: NotionWorkspaceService
   signals: TaskSignalsService
   reviewThreads: ReviewThreadsService
+  usageHold: () => Promise<string | null>
 }): Work {
   const { boardStore, configStore, emit, notion, github, notionWorkspace, signals } = core
   // Ciclos: o quadro avisa a entrada na etapa (orquestrador, agentes, fluxos), que usam o quadro;
@@ -706,6 +727,14 @@ function createWork(core: {
         git: core.git,
         finalText: async (runId) => finalText(await claude.runs.readLog(runId))
       }),
+      // Fase 5: o git como checkpoint das fatias (trailer Spec-Slice).
+      createSliceActions({
+        worktree: (taskId) => {
+          const wt = claude.worktrees.get(taskId)
+          return wt ? { path: wt.path, baseRef: wt.baseRef } : null
+        },
+        git: core.git
+      }),
       // Revisão do agente publicada na PR como orkio[bot] (pelo site, depois do gate).
       createPublishReviewAction({
         poster: new GitHubReviewPoster({ github }),
@@ -726,7 +755,10 @@ function createWork(core: {
     lastResult: async (runId) => {
       const text = finalText(await claude.runs.readLog(runId))
       return text ? redactSecrets(text) : null
-    }
+    },
+    prWatch: (projectId, taskId) => prWatchOf(signals.cached(projectId)?.signals[taskId]?.pr),
+    usageHold: core.usageHold,
+    git: core.git
   })
   flowRunner.set(flows.runner)
   const runner = flows.runner
@@ -818,6 +850,7 @@ function createWork(core: {
     board,
     claude,
     flows: runner,
+    prWake: flows.prWake,
     scheduler: scheduler(),
     overview,
     handlers: {

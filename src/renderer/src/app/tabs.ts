@@ -35,15 +35,15 @@ export interface TabsState {
 }
 
 export const MAX_TABS = 12
-const MAX_CLOSED = 10
+export const MAX_CLOSED = 10
 
 export type TabsAction =
   /** Vai para a rota: na aba do lugar (se existir), na aba Início atual ou numa aba nova. */
   | { type: 'navigate'; route: Route }
   /** Primeira tela do app (sem "Voltar"). */
   | { type: 'reset'; route: Route }
-  /** Troca a rota da aba ativa sem remontar a tela (abas internas de uma tela). */
-  | { type: 'replace'; route: Route }
+  /** Troca a rota da aba (`id` ausente = a ativa) sem remontar a tela (abas internas). */
+  | { type: 'replace'; route: Route; id?: string }
   | { type: 'back' }
   /** Aba nova: Início (ou a rota pedida, respeitando um lugar = uma aba). */
   | { type: 'open'; route?: Route }
@@ -86,8 +86,16 @@ function withRouter(state: TabsState, id: string, router: RouterState): TabsStat
 
 /** Abre uma aba nova logo depois da ativa e a ativa; passou do limite, sai a menos usada. */
 function addTab(state: TabsState, route: Route): TabsState {
+  return insertTab(state, (seq) => ({
+    id: `t${seq}`,
+    router: initialRouter(route, seq),
+    seen: seq
+  }))
+}
+
+function insertTab(state: TabsState, make: (seq: number) => Tab): TabsState {
   const seq = state.seq + 1
-  const tab: Tab = { id: `t${seq}`, router: initialRouter(route, seq), seen: seq }
+  const tab = make(seq)
   const at = state.tabs.findIndex((t) => t.id === state.activeId)
   const tabs = [...state.tabs]
   tabs.splice(at === -1 ? tabs.length : at + 1, 0, tab)
@@ -150,7 +158,11 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       return navigate(state, action.route, false)
     case 'reset':
       return navigate(state, action.route, true)
-    case 'replace':
+    case 'replace': {
+      const tab = action.id ? state.tabs.find((t) => t.id === action.id) : activeTab(state)
+      if (!tab || state.overlay) return state
+      return withRouter(state, tab.id, routerReducer(tab.router, action))
+    }
     case 'back': {
       const active = activeTab(state)
       if (!active || state.overlay) return state
@@ -205,6 +217,51 @@ export function tabsReducer(state: TabsState, action: TabsAction): TabsState {
       return active ? touch(next, active.id) : next
     }
   }
+}
+
+// --- Divisão e mover entre desktops (Fase 5) -------------------------------------------------
+
+/**
+ * Abas visíveis numa divisão de até `max` painéis: a ativa e as usadas por último, na ordem da
+ * faixa de abas (a posição na tela segue a faixa; arrastar a aba muda o painel de lugar).
+ */
+export function visibleTabs(state: TabsState, max: number): Tab[] {
+  const active = activeTab(state)
+  if (!active) return []
+  if (max <= 1) return [active]
+  const others = state.tabs
+    .filter((t) => t.id !== active.id)
+    .sort((a, b) => b.seen - a.seen)
+    .slice(0, max - 1)
+  const ids = new Set([active.id, ...others.map((t) => t.id)])
+  return state.tabs.filter((t) => ids.has(t.id))
+}
+
+/**
+ * Tira a aba daqui para levar a outro desktop (não vai para "Reabrir aba fechada"). Sem abas,
+ * sobra uma Início, como ao fechar a última.
+ */
+export function takeTab(state: TabsState, id: string): { state: TabsState; tab: Tab } | null {
+  const tab = state.tabs.find((t) => t.id === id)
+  if (!tab) return null
+  const closed = close(state, id)
+  return { state: { ...closed, closed: state.closed }, tab }
+}
+
+/**
+ * Recebe uma aba de outro desktop (com o "Voltar" dela) e a ativa. Um lugar = uma aba: se o lugar
+ * já tem aba aqui, ativa a que existe e a que chegou some.
+ */
+export function adoptTab(state: TabsState, tab: Tab): TabsState {
+  const place = placeOf(tab.router.route)
+  const existing = place === null ? null : state.tabs.find((t) => placeOf(t.router.route) === place)
+  if (existing) return touch({ ...state, overlay: null }, existing.id)
+  // Entra no fim da faixa (insertTab põe logo depois da ativa: a última, aqui).
+  return insertTab({ ...state, overlay: null, activeId: state.tabs.at(-1)?.id ?? null }, (seq) => ({
+    id: `t${seq}`,
+    router: tab.router,
+    seen: seq
+  }))
 }
 
 // --- Abas salvas (reabrir o app) -------------------------------------------------------------

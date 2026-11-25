@@ -38,7 +38,10 @@ import {
 } from '../agent-run'
 import type { AlvaPrecheck, AlvaStatusView, BacklogTaskDocument, BacklogTaskInfo } from '../alva'
 import type { AutomationStatus } from '../automation'
-import type { ClaudeUsageView } from '../claude-usage'
+import {
+  parseUsageHold,
+  USAGE_HOLD_DEFAULT,
+  type ClaudeUsageView, type UsageHold } from '../claude-usage'
 import type {
   BoardCard,
   BoardHistoryEntry,
@@ -181,6 +184,7 @@ const mcpId = guard(isMcpId)
 
 const MEMORY_UNEXPECTED = 'Algo deu errado com a memória do agente. Tente novamente.'
 
+const usageHold: Parser<UsageHold> = (v) => parseUsageHold(v) ?? INVALID
 const projectRef: Parser<{ projectId: string }> = (v) =>
   isRecord(v) && typeof v['projectId'] === 'string' ? { projectId: v['projectId'] } : INVALID
 
@@ -1365,6 +1369,15 @@ export const ORKIO_API = {
         channel: 'usage:set-enabled',
         args: [bool],
         fallback: true
+      }),
+      /**
+       * Fase 5: segurar a automação perto do limite da janela de 5 h (liga/desliga e o %).
+       * Devolve o que ficou valendo.
+       */
+      setHold: call<(hold: UsageHold) => Promise<UsageHold>>()({
+        channel: 'usage:set-hold',
+        args: [usageHold],
+        fallback: USAGE_HOLD_DEFAULT
       })
     }
   ),

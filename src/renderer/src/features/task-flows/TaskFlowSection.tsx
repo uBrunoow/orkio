@@ -284,9 +284,7 @@ export function TaskFlowSection({
       {run && waitingKind(run) === 'queue' && (
         <div className="flex flex-col items-start gap-2">
           <Alert tone="warning" className="self-stretch">
-            {run.pauseReason === 'waiting_agent'
-              ? `Aguardando ${run.agent?.name ?? 'o agente'} terminar outra tarefa (limite de fluxos ao mesmo tempo). Começa sozinho.`
-              : 'Aguardando outro fluxo Alva deste projeto terminar (Docker e portas). Começa sozinho.'}
+            {queueText(run)}
           </Alert>
           <Button
             size="sm"
@@ -744,4 +742,18 @@ function describeSummary(s: RunSummary): string {
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/** Texto da espera que não precisa de você (fila, PR, uso do Claude). */
+function queueText(run: FlowRunView): string {
+  switch (run.pauseReason) {
+    case 'waiting_agent':
+      return `Aguardando ${run.agent?.name ?? 'o agente'} terminar outra tarefa (limite de fluxos ao mesmo tempo). Começa sozinho.`
+    case 'waiting_pr':
+      return 'Esperando a PR. O Orkio acorda o fluxo sozinho quando o CI falhar, chegar revisão ou comentário novo (corrige e envia) ou a PR for mergeada (a tarefa vai para Concluída). Você pode conversar com o Claude enquanto isso.'
+    case 'waiting_usage':
+      return 'A janela de 5 horas do Claude está perto do limite. Este fluxo começou pela automação e segue sozinho quando a janela renovar (ajuste em Configurações › Provedores e uso).'
+    default:
+      return 'Aguardando outro fluxo Alva deste projeto terminar (Docker e portas). Começa sozinho.'
+  }
 }

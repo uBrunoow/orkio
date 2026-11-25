@@ -44,8 +44,17 @@ export const ACTION_VARS = {
   prNumber: 'pr.number',
   prPushed: 'pr.pushed',
   reviewCount: 'review.count',
-  reviewPr: 'review.pr'
+  reviewPr: 'review.pr',
+  /** Fase 5: o que acordou o passo "Esperar a PR" (`PR_WAKE_EVENTS`). */
+  prEvent: 'pr.evento'
 } as const
+
+/**
+ * Fase 5: o que acorda o passo "Esperar a PR": o CI falhou, chegou review/comentário novo, a PR
+ * foi mergeada ou fechada sem merge.
+ */
+export const PR_WAKE_EVENTS = ['ci_falhou', 'comentarios', 'merge', 'fechada'] as const
+export type PrWakeEvent = (typeof PR_WAKE_EVENTS)[number]
 
 const YES_NO = [FLOW_YES, FLOW_NO] as const
 
@@ -130,6 +139,50 @@ export const ORKIO_ACTIONS = {
         about: 'limpo, corrigir, esgotado (limite de rodadas) ou travado (mesmos bloqueios)'
       }
     ]
+  },
+  /**
+   * Fase 5: o fluxo dorme até a PR mudar (o executor trata este id: pausa `waiting_pr`, e o
+   * `PrWakeService` acorda com `pr.evento`). Uma automação mover a tarefa enquanto espera (PR
+   * mergeada → Concluída, mudanças pedidas → Revisado) é consequência: segue sem acompanhar.
+   */
+  wait_pr: {
+    id: 'wait_pr',
+    label: 'Esperar a PR (CI, revisão ou merge)',
+    delivers: false,
+    onStageMoved: 'detach',
+    phase: 'review',
+    outputs: [
+      {
+        key: ACTION_VARS.prEvent,
+        values: PR_WAKE_EVENTS,
+        about: 'o que acordou o fluxo: ci_falhou, comentarios, merge ou fechada'
+      }
+    ]
+  },
+  /**
+   * Fase 5: o git é o checkpoint das fatias: lê os trailers `Spec-Slice:` da branch e diz quais
+   * fatias estão feitas, quantas faltam e quais podem entrar agora (dependências do plano).
+   */
+  slices_checkpoint: {
+    id: 'slices_checkpoint',
+    label: 'Conferir as fatias feitas (git)',
+    delivers: false,
+    onStageMoved: 'ask',
+    phase: null,
+    outputs: [
+      { key: 'fatias.feitas', about: 'fatias já no git (trailer Spec-Slice), ex.: "1, 3" ou "nenhuma"' },
+      { key: 'fatias.proximas', about: 'fatias que podem entrar agora (dependências feitas)' },
+      { key: 'restam', about: 'quantas fatias faltam (pelo git)' }
+    ]
+  },
+  /** Fase 5: PR mergeada → a tarefa vai para a coluna Concluída (papel `done`). */
+  move_done: {
+    id: 'move_done',
+    label: 'Mover a tarefa para Concluída',
+    delivers: false,
+    onStageMoved: 'detach',
+    phase: 'review',
+    outputs: []
   },
   // Não é entrega (o Revisor, sem entrega, roda), mas publica e muda a etapa de propósito.
   publish_review: {

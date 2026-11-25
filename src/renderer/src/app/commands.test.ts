@@ -6,6 +6,7 @@ import {
   commandLabel,
   menuBlocks,
   paletteCommands,
+  shortcutRows,
   type CommandActions,
   type CommandContext,
   type CommandState
@@ -52,7 +53,10 @@ function context(over: Partial<CommandState> = {}): Mocked {
     refresh: vi.fn(),
     showShortcuts: vi.fn(),
     showWhatsNew: vi.fn(),
-    checkUpdates: vi.fn()
+    checkUpdates: vi.fn(),
+    desktop: vi.fn(),
+    showDesktops: vi.fn(),
+    renameDesktop: vi.fn()
   }
 }
 
@@ -133,6 +137,51 @@ describe('registro de comandos', () => {
       type: 'shift',
       offset: 1
     })
+  })
+
+  it('desktops: Ctrl+Alt+número vai ao desktop; Ctrl+Alt+←/→ anda; sem o desktop, nada', () => {
+    const desktops = {
+      list: [
+        { id: 'd1', name: 'Desktop 1' },
+        { id: 'd2', name: 'Orkio' }
+      ],
+      index: 0,
+      arrangement: 'single' as const
+    }
+    expect(
+      fire(key('2', { ctrlKey: true, altKey: true }), { desktops }).ctx.desktop
+    ).toHaveBeenCalledWith({ type: 'switch', id: 'd2' })
+    // Ctrl+2 continua sendo Tarefas (Alt faz diferença).
+    expect(fire(key('2', { ctrlKey: true }), { desktops }).command?.id).toBe('go:tasks')
+    expect(fire(key('3', { ctrlKey: true, altKey: true }), { desktops }).command).toBeNull()
+    expect(fire(key('1', { ctrlKey: true, altKey: true }), { desktops }).command).toBeNull() // já está
+    expect(
+      fire(key('ArrowRight', { ctrlKey: true, altKey: true }), { desktops }).ctx.desktop
+    ).toHaveBeenCalledWith({ type: 'cycle', offset: 1 })
+    expect(fire(key('ArrowLeft', { ctrlKey: true, altKey: true })).command).toBeNull() // um só
+    expect(fire(key('D', { ctrlKey: true, shiftKey: true })).ctx.showDesktops).toHaveBeenCalled()
+    expect(fire(key('n', { ctrlKey: true, altKey: true })).ctx.desktop).toHaveBeenCalledWith({
+      type: 'create'
+    })
+    expect(
+      commandLabel(
+        APP_COMMANDS.find((c) => c.id === 'desktop:go:2')!,
+        state({ desktops })
+      )
+    ).toBe('Ir para Orkio')
+    const ids = paletteCommands(APP_COMMANDS, state({ desktops })).map((c) => c.id)
+    expect(ids).toContain('desktop:move-tab:2')
+    expect(ids).not.toContain('desktop:move-tab:1') // o atual
+    expect(ids).not.toContain('layout:single') // o arranjo atual
+    expect(ids).toContain('layout:columns')
+  })
+
+  it('Ajuda › Atalhos: os desktops 1 a 9 numa linha só', () => {
+    const rows = shortcutRows(APP_COMMANDS, 'go', state())
+    const desk = rows.filter((r) => r.id.startsWith('desktop:go:'))
+    expect(desk).toEqual([
+      { id: 'desktop:go:1', label: 'Ir para o desktop 1 a 9', keys: 'Ctrl Alt 1–9' }
+    ])
   })
 
   it('Voltar: Ctrl+[ e Alt+← (fora de campos), só com histórico', () => {

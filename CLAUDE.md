@@ -74,6 +74,9 @@ Claude Code. Hoje existem:
 - **Configurações, Segredos e MCPs (Fase 4):** menu agrupado com busca e "Vale para" no topo de
   cada seção, Segredos (Vault), servidores MCP do Orkio (catálogo, cópia dos do seu Claude, por
   agente) e skills desligadas por projeto. Ver "Configurações, Segredos e MCPs (Fase 4)" abaixo.
+- **O resto (Fase 5):** a PR acorda o fluxo, "parou sem entregar", o uso do Claude segurando a
+  automação, fatias com o git como checkpoint e desktops com divisão lado a lado. Ver "O resto
+  (Fase 5)" abaixo.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
   Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -176,6 +179,8 @@ src/
   shared/vault.ts          # Fase 4: Segredos (nome/valor/usos, nomes reservados, `vaultStoreKey`)
   shared/mcp.ts            # Fase 4: servidores MCP do Orkio (tipos, `parseMcpServer`, `MCP_CATALOG`)
   shared/preferences.ts    # Fase 4: preferências aplicadas no main, skills, decisões lembradas
+  shared/pr-wake.ts        # Fase 5: foto da PR, o que acorda o fluxo e o debounce (puro)
+  shared/slices.ts         # Fase 5: fatias (trailer Spec-Slice, dependências, ondas) (puro)
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, registro do IPC e chamar a composição
     composition/           # app.ts: cria os serviços → start() → stop({ waitMs }) (único desligamento);
@@ -1227,7 +1232,7 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   lugar navegado; fechar a última deixa uma Início; limite `MAX_TABS` (sai a menos usada). Só a
   aba ativa fica montada. Salvas em `localStorage` (`orkio.tabs`, só a rota, validada por
   `parseRoute`); ao abrir, restaura e aplica a tela inicial (`initial-route.ts`) por cima.
-  Primeiros passos não são aba (`overlay`). Desktops/divisão (Fase 5) = vários `TabsState`.
+  Primeiros passos não são aba (`overlay`). Desktops/divisão: ver "O resto (Fase 5)".
 - **Menu nativo** (`main/platform/app-menu.ts`): sem o padrão do Electron (Ctrl+W fecharia a
   janela); macOS mantém menu do app e Editar; dev ganha Exibir; fora do macOS a barra fica oculta.
 - **Sino**: "Precisa de você" = `OverviewSnapshot.waiting` + PRs; "Concluído" = `flow_finished`
@@ -1438,6 +1443,48 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   GitHub do catálogo desligado → ligado, `~/.claude.json` do HOME de teste só leitura e copiado,
   skill desligada; o Claude simulado grava `mcp` (hash dos valores), `deny` e `secretEnv` (`E2E_*`)
   no `agent-args.log`.
+
+## O resto (Fase 5)
+
+- **A PR acorda o fluxo** (`shared/pr-wake.ts`, `main/flows/pr-wake.ts`): os três fluxos nativos
+  terminam em `esperar-pr` (ação `wait_pr`, tratada pelo `FlowRunner`: foto da PR em
+  `Persisted.prWait`, pausa `waiting_pr` = fila que não precisa de você, não ocupa vaga e não trava a
+  conversa; `isSlotWait` separa as filas de vaga). O `PrWakeService` (30 s) compara a foto com os
+  sinais em cache (sem rede extra) e chama `FlowRunner.wakePr(id, evento)` depois do debounce
+  (`PR_WAKE_DEBOUNCE_MS` = 2 min; merge na hora; comentários esperam o CI): `pr.evento` = `merge`
+  (→ `move_done`, coluna de papel `done`, evento `moved` com `flow: 'pr_merged'`), `fechada`
+  (`$fim:nada`), `ci_falhou` (`NATIVE_PROMPTS.ciFix`) ou `comentarios` (`review_snapshot` +
+  correção em modo entrega); depois `verify_pushed`/`push` e volta a esperar (até
+  `PR_WAKE_MAX_CYCLES` = 20, senão esgotado). Acordar zera a trava de passos. Esperar a PR não
+  aparece em "Rodando" (a tarefa fica em Em revisão pela PR).
+- **Esperas no shell** (`isShellWait` em `policy.ts`, `cliDenyWaits` em `github-rules.ts`): `gh pr
+  checks --watch`, `gh run watch` (agora `never` na tabela), `tail -f/-F/--follow`, `watch` e
+  `sleep` > 30 s são negados (código `wait`) antes de qualquer regra "sempre" ou modo entrega.
+- **Parou sem entregar**: o `FlowRunner` guarda o HEAD antes de cada comando (`workState`: HEAD +
+  `git status` sem `.orkio/`); terminou bem com resposta vazia, mesmo HEAD e nada sem commit → passo
+  falha com `no_delivery` (`flow-problem.ts`), fluxo pausa → "Precisa de você".
+- **Uso do Claude segura a automação** (`usageHoldOf` em `shared/claude-usage.ts`,
+  `orkio-config.usageHold` opcional, IPC `usage.setHold`, Configurações › Provedores e uso): fluxo
+  com `Persisted.auto` (entrada na coluna por automação, orquestrador via `startManual(..., {auto})`,
+  PR que acorda) e janela de 5 h ≥ limite (90% padrão) pausa `waiting_usage` antes do comando
+  (`waitingStep`); `promoteUsage` (60 s) solta quando renova. Medidor desligado/falhando = roda.
+- **Fatias com o git como checkpoint** (`shared/slices.ts`, `main/flows/slice-actions.ts`): o plano
+  grava `fatias` e `depende_N`; antes de cada fatia a ação `slices_checkpoint` lê os trailers
+  `Spec-Slice:` (`Git.trailersSince`) e grava `fatias.feitas`, `fatias.proximas` (`nextSlices`:
+  dependências feitas) e `restam`; o pedido manda um commit por fatia com o trailer. Retomar não
+  refaz fatia pronta. **Paralelo (um worktree por fatia a partir de um branch de integração) ainda
+  não existe**: `sliceWaves` calcula as ondas, mas o fluxo roda uma fatia por passo.
+- **Desktops e divisão** (`app/desktops.ts` puro, `DesktopBar.tsx`, `DesktopPanels.tsx`):
+  `DesktopsState` = desktops com nome, `TabsState` e arranjo; ações de aba vão em `{type:'tabs'}`
+  para o desktop atual (navegar nunca troca de desktop). Máx. 9; o último não se apaga; apagar manda
+  as abas para "Reabrir aba fechada" do vizinho. Um lugar = uma aba vale por desktop; "Mover aba"
+  leva o "Voltar" (lugar já existente no destino = ativa o de lá). Arranjos: Uma aba (1), Principal
+  + pilha (3), Colunas (3), Grade (4); visíveis = ativa + usadas por último (`visibleTabs`), cada
+  painel com o próprio `ScreenFrame` e `replace` com `id`. Salvos em `orkio.desktops` (`parseRoute`);
+  o antigo `orkio.tabs` vira o "Desktop 1". Atalhos: Ctrl/⌘+Alt+1…9 (uma linha por `shortcutRows`),
+  Ctrl/⌘+Alt+←/→, Ctrl/⌘+Alt+N, Ctrl/⌘+Shift+D; menu da aba (botão direito/Shift+F10): Mover para…
+  Pendente: telas usam breakpoints da janela (não do painel) e "/" ouve a janela inteira.
+- Fora desta fase: Telegram (avisos e aprovar pelo bot).
 
 ## Agentes (Etapa 8A)
 

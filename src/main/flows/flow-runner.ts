@@ -44,13 +44,18 @@ import {
   ACTIVE_FLOW_STATUSES,
   FLOW_PAUSE_REASONS,
   FLOW_PAUSES,
+  isSlotWait,
   waitingKind
 } from '../../shared/flow-run-state'
 import {
+  ACTION_VARS,
   ORKIO_ACTIONS,
   type OrkioActionDescriptor,
+  type PrWakeEvent,
   type StageMoveBehavior
 } from '../../shared/orkio-actions'
+import { parsePrWatch, PR_WAKE_TEXT, type PrWatch } from '../../shared/pr-wake'
+import { NO_DELIVERY_CODE } from '../../shared/flow-problem'
 import { integrationsOf, type FlowIntegration } from './flow-integration'
 import type { BoardStore, TaskEventInput } from '../board/board.store'
 import type { TaskEventDetailInput } from '../../shared/task-events'
@@ -96,7 +101,8 @@ export const FLOW_MESSAGES = {
   notRevisable: 'Este gate não aceita pedidos de ajuste. Aprove ou recuse.',
   reviseLimit: (max: number): string =>
     `Limite de mudanças pedidas atingido (${max}). Aprove ou recuse no cartão.`,
-  doneByYou: 'Feito por você no terminal.'
+  doneByYou: 'Feito por você no terminal.',
+  noDelivery: 'O passo terminou sem commit, sem mudanças e sem resposta.'
 } as const
 
 export class FlowError extends DomainError {
@@ -233,6 +239,23 @@ export interface FlowRunnerDeps {
   ): Promise<NativePlan | null>
   /** Texto final de uma execução (para `withLastResult`), já redigido; `null` = sem texto. */
   lastResult?(runId: string): Promise<string | null>
+  /**
+   * Fase 5: foto da PR da tarefa agora (os sinais em cache, sem rede); `null` = nenhuma PR
+   * conhecida. Base do passo "Esperar a PR".
+   */
+  prWatch?(projectId: string, taskId: string): PrWatch | null
+  /**
+   * Fase 5 ("parou sem entregar"): commit no topo do worktree da tarefa e se há mudanças sem
+   * commit. `null` (ou erro) = não deu para ver: o passo conta como entregue.
+   */
+  workState?(taskId: string): Promise<{ head: string | null; dirty: boolean } | null>
+  /**
+   * Fase 5: a janela de uso do Claude está perto do limite? Texto do porquê (fluxos começados pela
+   * automação esperam) ou `null` (roda). Falha do medidor = `null`.
+   */
+  usageHold?(): Promise<string | null>
+  /** Intervalo em que a espera do uso do Claude é conferida de novo (padrão 60 s). */
+  usageRecheckMs?: number
   now?: () => Date
   newId?: () => string
 }
@@ -318,15 +341,28 @@ interface Persisted {
   model?: string | null
   /**
    * Fase 3: passo do revisor esperando vaga dele (limite de paralelo do revisor). O passo já foi
-   * contado pelo motor; ao liberar, roda direto (sem visitar de novo).
+   * contado pelo motor; ao liberar, roda direto (sem visitar de novo). Fase 5: também o passo que
+   * espera a janela de uso do Claude renovar (`waiting_usage`).
    */
   waitingStep?: string | null
+  /**
+   * Fase 5: o fluxo foi começado (ou acordado) pela automação — coluna movida por regra,
+   * orquestrador, a PR que acorda. Só esses esperam o uso do Claude renovar.
+   */
+  auto?: boolean
+  /** Fase 5: passo "Esperar a PR": a foto da PR quando começou a esperar. */
+  prWait?: { stepId: string; baseline: PrWatch | null; since: string } | null
+  /** Fase 5: por que o fluxo espera o uso do Claude (texto da tela). */
+  usageNote?: string | null
 }
 
 const ACTIVE_SQL = `(${ACTIVE_FLOW_STATUSES.map((s) => `'${s}'`).join(', ')})`
 const ACTIVE: readonly FlowRunStatus[] = ACTIVE_FLOW_STATUSES
-/** Pausas de fila (vaga do projeto ou do agente): começam sozinhas. */
-const QUEUE_SQL = `(${FLOW_PAUSE_REASONS.filter((r) => FLOW_PAUSES[r].waits === 'queue')
+/**
+ * Pausas de vaga (projeto ou agente): começam sozinhas quando a vaga libera. A espera da PR e a do
+ * uso do Claude (Fase 5) têm gatilhos próprios (`wakePr`, `promoteUsage`).
+ */
+const QUEUE_SQL = `(${FLOW_PAUSE_REASONS.filter((r) => isSlotWait(r))
   .map((r) => `'${r}'`)
   .join(', ')})`
 
@@ -352,6 +388,9 @@ export class FlowRunner {
   private readonly locks = new Map<string, Promise<void>>()
   /** Fechando o app: fins de execução (cancelAll) não contam; ao reabrir viram "interrompido". */
   private disposed = false
+  /** Fase 5: commit no topo antes de cada execução (só em memória), para "parou sem entregar". */
+  private readonly headsBefore = new Map<string, string | null>()
+  private usageTimer: NodeJS.Timeout | null = null
 
   constructor(private readonly deps: FlowRunnerDeps) {}
 
@@ -389,10 +428,20 @@ export class FlowRunner {
     }
     // Quem esperava vaga e já pode começar (ex.: o outro fluxo terminou com o app fechado).
     this.promoteWaiting()
+    if (this.deps.usageHold && !this.usageTimer) {
+      this.usageTimer = setInterval(() => {
+        void this.promoteUsage().catch((error: unknown) => {
+          console.error(`[orkio] fluxo (uso do Claude): ${errorName(error)}`)
+        })
+      }, this.deps.usageRecheckMs ?? 60_000)
+      this.usageTimer.unref?.()
+    }
   }
 
   dispose(): void {
     this.disposed = true
+    if (this.usageTimer) clearInterval(this.usageTimer)
+    this.usageTimer = null
     for (const t of this.gateTimers.values()) clearTimeout(t)
     this.gateTimers.clear()
   }
@@ -441,7 +490,8 @@ export class FlowRunner {
         binding?.flowId ?? null,
         true,
         null,
-        plan
+        plan,
+        change.source === 'automation'
       )
     } catch (error) {
       // Não começou ao entrar na coluna (ex.: projeto não pronto): avisa, sem quebrar o quadro.
@@ -469,8 +519,15 @@ export class FlowRunner {
     return 'ask'
   }
 
-  /** Botão "Rodar fluxo": o fluxo ligado à etapa atual (ao entrar ou manual). */
-  async startManual(projectId: string, taskId: string): Promise<FlowRunView> {
+  /**
+   * Botão "Rodar fluxo": o fluxo ligado à etapa atual (ao entrar ou manual). `auto`: quem pediu foi
+   * a automação (o orquestrador), não você (Fase 5: espera o uso do Claude renovar).
+   */
+  async startManual(
+    projectId: string,
+    taskId: string,
+    options: { auto?: boolean } = {}
+  ): Promise<FlowRunView> {
     if (this.activeRow(taskId)) throw new FlowError('busy', FLOW_MESSAGES.busy)
     const stageId = this.deps.currentStage(projectId, taskId)
     // Fase 1: o modo da tarefa (ou o padrão da coluna) vence o fluxo ligado à coluna.
@@ -481,7 +538,16 @@ export class FlowRunner {
     if (!plan && (!stageId || !binding)) {
       throw new FlowError('no_binding', FLOW_MESSAGES.noBinding)
     }
-    return this.start(projectId, taskId, stageId, binding?.flowId ?? null, true, null, plan)
+    return this.start(
+      projectId,
+      taskId,
+      stageId,
+      binding?.flowId ?? null,
+      true,
+      null,
+      plan,
+      options.auto === true
+    )
   }
 
   /**
@@ -512,7 +578,8 @@ export class FlowRunner {
     columnFlowId: string | null,
     useAgentFlow: boolean,
     builtin: Flow | null = null,
-    plan: NativePlan | null = null
+    plan: NativePlan | null = null,
+    auto = false
   ): Promise<FlowRunView> {
     if (this.activeRow(taskId)) throw new FlowError('busy', FLOW_MESSAGES.busy)
     const agent = await this.deps.agentFor(projectId, taskId)
@@ -544,7 +611,8 @@ export class FlowRunner {
       engine: { vars: {}, visits: {}, outcomes: {}, executed: 0 },
       displayId: '',
       notionUrl: null,
-      ...(native?.model ? { model: native.model } : {})
+      ...(native?.model ? { model: native.model } : {}),
+      ...(auto ? { auto: true } : {})
     }
     const wait = this.slot(projectId, flow, agent)
     const waits = wait !== null
@@ -1057,6 +1125,8 @@ export class FlowRunner {
     const ref = this.runIndex.get(info.runId)
     if (!ref) return
     this.runIndex.delete(info.runId)
+    const headBefore = this.headsBefore.get(info.runId)
+    this.headsBefore.delete(info.runId)
     void this.withLock(ref.flowRunId, async () => {
       const row = this.row(ref.flowRunId)
       const current = this.deps.db.get<StepRow>('SELECT * FROM flow_steps WHERE id = ?', ref.rowId)
@@ -1075,6 +1145,15 @@ export class FlowRunner {
         message = extracted.fail.message
         code = extracted.fail.code
         link = extracted.fail.link ?? null
+      } else if (
+        info.status === 'succeeded' &&
+        headBefore !== undefined &&
+        (await this.deliveredNothing(row.task_page_id, headBefore, info.resultText))
+      ) {
+        // Fase 5: "parou sem entregar": sem commit, sem mudanças e sem resposta → Precisa de você.
+        end = { outcome: 'failed' }
+        message = FLOW_MESSAGES.noDelivery
+        code = NO_DELIVERY_CODE
       } else if (info.status === 'succeeded') {
         end = { outcome: 'ok', vars: cleanVars(extracted.vars ?? {}) }
       } else {
@@ -1186,6 +1265,21 @@ export class FlowRunner {
     return null
   }
 
+  /**
+   * Fase 5: o passo terminou sem entregar nada? Só quando a resposta veio vazia; aí confere o
+   * worktree: mesmo commit no topo e nada sem commit. Sem como ver (erro, sem worktree) = entregou.
+   */
+  private async deliveredNothing(
+    taskId: string,
+    headBefore: string | null,
+    resultText: string
+  ): Promise<boolean> {
+    if (resultText.trim() !== '' || !this.deps.workState) return false
+    const now = await this.deps.workState(taskId).catch(() => null)
+    if (!now) return false
+    return now.head === headBefore && !now.dirty
+  }
+
   /** A sua mensagem volta ao passo parado (`acceptsReply`, a mesma regra da tela)? */
   private acceptsReply(row: RunRow): boolean {
     const step = this.flow(row).steps.find((s) => s.id === row.current_step)
@@ -1243,10 +1337,8 @@ export class FlowRunner {
   isBusy(taskId: string): boolean {
     const row = this.activeRow(taskId)
     if (!row) return false
-    return (
-      row.status === 'running' ||
-      waitingKind({ status: row.status, pauseReason: row.pause_reason }) === 'queue'
-    )
+    // Fase 5: esperando a PR ou o uso do Claude, a conversa continua livre (pode levar dias).
+    return row.status === 'running' || (row.status === 'paused' && isSlotWait(row.pause_reason))
   }
 
   /** Fluxos ativos por agente (todos os projetos), contando os que esperam vaga. */
@@ -1402,7 +1494,136 @@ export class FlowRunner {
     }
     if (this.agentLimitReached(flowRunId, decision.stepId)) return
     if (this.reviewerWaits(flowRunId, decision.stepId)) return
+    // Sem `await` quando não há o que segurar: a ordem dos passos não muda para os outros fluxos.
+    if (this.mayHoldUsage(flowRunId, decision.stepId)) {
+      if (await this.usageWaits(flowRunId, decision.stepId)) return
+    }
     await this.runStep(this.row(flowRunId), decision.stepId)
+  }
+
+  /**
+   * Fase 5: o uso do Claude decide quando a automação roda. Num fluxo começado (ou acordado) pela
+   * automação, antes de cada comando do Claude Code: com a janela de 5 h perto do limite, o fluxo
+   * espera (`waiting_usage`, não precisa de você) e segue sozinho quando ela renovar
+   * (`promoteUsage`). Medidor desligado ou falhando = roda.
+   */
+  private mayHoldUsage(flowRunId: string, stepId: string): boolean {
+    if (!this.deps.usageHold) return false
+    const row = this.row(flowRunId)
+    const step = this.flow(row).steps.find((s) => s.id === stepId)
+    return step?.type === 'claude_command' && this.persisted(row).auto === true
+  }
+
+  private async usageWaits(flowRunId: string, stepId: string): Promise<boolean> {
+    if (!this.deps.usageHold) return false
+    const note = await this.deps.usageHold().catch(() => null)
+    const p = this.persisted(this.row(flowRunId))
+    if (!note) return false
+    this.savePersisted(flowRunId, { ...p, waitingStep: stepId, usageNote: note })
+    this.pause(this.row(flowRunId), 'waiting_usage', { step: stepId, body: null })
+    return true
+  }
+
+  /**
+   * Fase 5: confere de novo a janela de uso do Claude; liberou → os fluxos que esperavam rodam o
+   * passo (sem visitar de novo). Chamado a cada minuto e nos testes.
+   */
+  async promoteUsage(): Promise<void> {
+    if (this.disposed || !this.deps.usageHold) return
+    const waiting = this.deps.db.all<RunRow>(
+      `SELECT * FROM flow_runs WHERE status = 'paused' AND pause_reason = 'waiting_usage' ORDER BY started_at`
+    )
+    if (waiting.length === 0) return
+    const note = await this.deps.usageHold().catch(() => null)
+    if (note) return
+    for (const row of waiting) {
+      await this.withLock(row.id, async () => {
+        const fresh = this.row(row.id)
+        if (fresh.status !== 'paused' || fresh.pause_reason !== 'waiting_usage') return
+        const p = this.persisted(fresh)
+        const stepId = p.waitingStep ?? fresh.current_step
+        this.savePersisted(row.id, { ...p, waitingStep: null, usageNote: null })
+        if (!stepId) return
+        this.setStatus(row.id, 'running', null)
+        if (this.agentLimitReached(row.id, stepId)) return
+        if (this.reviewerWaits(row.id, stepId)) return
+        await this.runStep(this.row(row.id), stepId)
+      })
+    }
+  }
+
+  /** Fase 5: fluxos parados no passo "Esperar a PR" (o `PrWakeService` confere a PR de cada um). */
+  waitingPr(): {
+    flowRunId: string
+    projectId: string
+    taskId: string
+    baseline: PrWatch | null
+  }[] {
+    return this.deps.db
+      .all<RunRow>(
+        `SELECT * FROM flow_runs WHERE status = 'paused' AND pause_reason = 'waiting_pr' ORDER BY started_at`
+      )
+      .map((row) => ({
+        flowRunId: row.id,
+        projectId: row.project_id,
+        taskId: row.task_page_id,
+        baseline: parsePrWatch(this.persisted(row).prWait?.baseline ?? null)
+      }))
+  }
+
+  /**
+   * Fase 5: a PR acordou o fluxo (`pr.evento`). O passo de espera termina bem com o evento e o
+   * fluxo segue pelos saltos (corrigir CI/comentários, concluir no merge). É um evento de fora,
+   * não um laço: a trava de passos zera (quem limita as voltas é a visita à espera).
+   */
+  async wakePr(flowRunId: string, event: PrWakeEvent): Promise<boolean> {
+    let woke = false
+    await this.withLock(flowRunId, async () => {
+      const row = this.row(flowRunId)
+      if (row.status !== 'paused' || row.pause_reason !== 'waiting_pr') return
+      const p = this.persisted(row)
+      const stepId = p.prWait?.stepId ?? row.current_step
+      if (!stepId) return
+      woke = true
+      this.savePersisted(flowRunId, { ...p, prWait: null, auto: true })
+      this.setStatus(flowRunId, 'running', null)
+      this.closeStep(flowRunId, 'ok', { message: PR_WAKE_TEXT[event] })
+      this.event(row, 'step_finished', { step: stepId, message: PR_WAKE_TEXT[event] })
+      if (event !== 'merge') {
+        this.notifyRow(row, 'A PR acordou o fluxo', PR_WAKE_TEXT[event])
+      }
+      await this.apply(
+        flowRunId,
+        afterStep(this.flow(row), { ...p.engine, executed: 0 }, stepId, {
+          outcome: 'ok',
+          vars: { [ACTION_VARS.prEvent]: event }
+        })
+      )
+    })
+    return woke
+  }
+
+  /**
+   * Fase 5: passo "Esperar a PR". Guarda a foto da PR de agora e o fluxo dorme (`waiting_pr`): não
+   * precisa de você, não ocupa vaga e a conversa da tarefa fica livre.
+   */
+  private beginPrWait(row: RunRow, step: Extract<Step, { type: 'orkio_action' }>): void {
+    let baseline: PrWatch | null = null
+    try {
+      baseline = this.deps.prWatch?.(row.project_id, row.task_page_id) ?? null
+    } catch (error) {
+      console.error(`[orkio] fluxo (foto da PR): ${errorName(error)}`)
+    }
+    const p = this.persisted(this.row(row.id))
+    this.savePersisted(row.id, {
+      ...p,
+      prWait: { stepId: step.id, baseline, since: this.now() }
+    })
+    this.deps.db.run(
+      `UPDATE flow_steps SET status = 'waiting' WHERE id = (SELECT MAX(id) FROM flow_steps WHERE flow_run_id = ?)`,
+      row.id
+    )
+    this.pause(this.row(row.id), 'waiting_pr', { step: step.id, body: null })
   }
 
   /** Quem roda o passo: o revisor nos passos `agent: 'reviewer'`, senão o agente do fluxo. */
@@ -1565,6 +1786,9 @@ export class FlowRunner {
               ...(step.effort !== undefined ? { effort: step.effort } : {})
             }
           : null
+      const before = await this.deps
+        .workState?.(row.task_page_id)
+        .catch(() => null)
       const runId = await this.deps.startClaude({
         projectId: row.project_id,
         taskId: row.task_page_id,
@@ -1605,6 +1829,7 @@ export class FlowRunner {
       })
       this.deps.db.run('UPDATE flow_steps SET run_id = ? WHERE id = ?', runId, rowId)
       this.runIndex.set(runId, { flowRunId: row.id, rowId })
+      if (before) this.headsBefore.set(runId, before.head)
       if (snap !== undefined) this.snapshots.set(runId, snap)
       this.deps.emit({ projectId: row.project_id, taskId: row.task_page_id })
     } catch (error) {
@@ -1631,6 +1856,10 @@ export class FlowRunner {
     row: RunRow,
     step: Extract<Step, { type: 'orkio_action' }>
   ): Promise<void> {
+    if (step.action === ORKIO_ACTIONS.wait_pr.id) {
+      this.beginPrWait(row, step)
+      return
+    }
     const action = this.deps.actions.find((a) => a.id === step.action)
     if (!action) {
       await this.endAction(row, step, { outcome: 'failed' }, unknownAction(step))

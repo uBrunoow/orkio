@@ -61,7 +61,7 @@ const READS = [
   'gh pr status',
   'gh run view 99',
   'gh run list',
-  'gh run watch 99',
+  'gh run view 99 --log-failed',
   'gh label list',
   'gh api repos/acme/app/pulls/14/comments',
   'gh api /repos/acme/app/pulls?state=open',
