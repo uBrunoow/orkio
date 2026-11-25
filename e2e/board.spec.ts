@@ -210,6 +210,33 @@ test('bloqueada: marca no card e filtra', async () => {
   expect(await cspViolations(page)).toEqual([])
 })
 
+test('filtros pela situação mantêm as colunas; Lista agrupa por etapa; Mais ações', async () => {
+  const { page } = orkio!
+  const stages = ['Prioridades', 'Em andamento', 'Revisando', 'Revisado', 'Finalizada']
+  await page.getByRole('button', { name: 'Em revisão', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Em revisão', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true'
+  )
+  // Sem fluxo nem PR neste spec: nenhuma tarefa está em revisão, mas as colunas ficam.
+  for (const name of stages) {
+    await expect(column(page, name)).toBeVisible()
+    await expect(column(page, name).getByTestId('column-count')).toHaveText('0')
+  }
+  await expect(card(page)).toHaveCount(0)
+  await page.getByRole('button', { name: 'Todas', exact: true }).click()
+  await expect(card(page)).toBeVisible()
+  await page.getByRole('radio', { name: 'Lista' }).click()
+  await expect(
+    page.getByTestId('board-list').getByRole('region').filter({ hasText: 'ORK-2' })
+  ).toHaveCount(1)
+  await page.getByRole('radio', { name: 'Kanban' }).click()
+  await page.getByRole('button', { name: 'Mais ações do quadro' }).click()
+  await page.getByRole('menuitem', { name: 'Como as colunas rodam' }).click()
+  await expect(page.getByTestId('column-setups')).toBeVisible()
+  await page.getByTestId('column-setups').getByRole('button', { name: 'Fechar' }).first().click()
+})
+
 test('nenhum token nos logs', async () => {
   await close()
   const logs = allLogs.join('\n')

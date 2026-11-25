@@ -152,6 +152,9 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
         project={ctx.projects === null ? null : ctx.linkedProject}
         onOpenIntegrations={() => ctx.navigate({ name: 'settings', section: 'integrations' })}
         onOpenProjects={() => ctx.navigate({ name: 'settings', section: 'projects' })}
+        onOpenBoardSettings={(projectId) =>
+          ctx.navigate({ name: 'settings', section: 'board', tab: 'columns', projectId })
+        }
         onOpenTask={(taskId) =>
           ctx.linkedProject &&
           ctx.navigate({ name: 'task', projectId: ctx.linkedProject.id, taskId })

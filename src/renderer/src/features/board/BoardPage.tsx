@@ -6,7 +6,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -17,13 +16,9 @@ import { ScreenTitle } from '../../components/ScreenTitle'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
 import { EmptyState, PageState } from '../../components/PageState'
 import { Spinner } from '../../components/Spinner'
-import {
-  AutomationIcon,
-  MoreIcon,
-  PauseIcon,
-  RefreshIcon,
-  SearchIcon
-} from '../../components/icons'
+import { AutomationIcon, MoreIcon, PauseIcon, RefreshIcon } from '../../components/icons'
+import { ColumnSetupsDialog } from '../tasks/ColumnSetupsDialog'
+import { BoardFilters } from './BoardFilters'
 import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { useTaskSignals } from '../notion-workspace/useTaskSignals'
@@ -31,7 +26,7 @@ import { BoardColumns } from './BoardColumns'
 import { BoardList } from './BoardList'
 import { BoardSettings } from './BoardSettings'
 import { activityByTask, type TaskActivity } from '../overview/task-activity'
-import { boardEntries, singleBoardColumns, visibleEntries } from './board-model'
+import { attentionCount, boardEntries, singleBoardColumns, visibleEntries } from './board-model'
 import { usePersonalTasks } from './usePersonalTasks'
 import { useOverview } from '../overview/useOverview'
 import { useBoard } from './useBoard'
@@ -52,6 +47,7 @@ export function BoardPage({
   onRoute,
   onOpenIntegrations,
   onOpenProjects,
+  onOpenBoardSettings,
   onOpenTask
 }: {
   /** Projeto atual vinculado ao Notion (null = nenhum). */
@@ -60,6 +56,7 @@ export function BoardPage({
   onRoute(route: Route): void
   onOpenIntegrations(): void
   onOpenProjects(): void
+  onOpenBoardSettings(projectId: string): void
   onOpenTask(taskId: string): void
 }): React.JSX.Element {
   if (!project) {
@@ -84,6 +81,7 @@ export function BoardPage({
       route={route}
       onRoute={onRoute}
       onOpenIntegrations={onOpenIntegrations}
+      onOpenBoardSettings={onOpenBoardSettings}
       onOpenTask={onOpenTask}
     />
   )
@@ -95,6 +93,7 @@ function Board({
   route,
   onRoute,
   onOpenIntegrations,
+  onOpenBoardSettings,
   onOpenTask
 }: {
   projectId: string
@@ -102,6 +101,7 @@ function Board({
   route: Extract<Route, { name: 'board' }>
   onRoute(route: Route): void
   onOpenIntegrations(): void
+  onOpenBoardSettings(projectId: string): void
   onOpenTask(taskId: string): void
 }): React.JSX.Element {
   const board = useBoard(projectId)
@@ -125,7 +125,9 @@ function Board({
   const [priority, setPriority] = useState<string | null>(null)
   const [onlyBlocked, setOnlyBlocked] = useState(false)
   const [agentKey, setAgentKey] = useState<string | null>(null)
+  const [setupsOpen, setSetupsOpen] = useState(false)
   const layout: BoardLayout = route.view ?? 'kanban'
+  const filter = route.filter ?? 'all'
   const { view } = board
 
   const fetchedAt = view?.fetchedAt
@@ -155,12 +157,13 @@ function Board({
     () => (stages ? singleBoardColumns(stages, entries) : []),
     [stages, entries]
   )
+  const attention = useMemo(() => attentionCount(entries), [entries])
   const visible = useMemo(
     () =>
-      visibleEntries(entries, { filter: 'all', query, priority, onlyBlocked }).filter(
+      visibleEntries(entries, { filter, query, priority, onlyBlocked }).filter(
         (e) => !agentKey || agentBadges[e.card.taskId]?.key === agentKey
       ),
-    [entries, query, priority, onlyBlocked, agentKey, agentBadges]
+    [entries, filter, query, priority, onlyBlocked, agentKey, agentBadges]
   )
 
   const header = (): React.JSX.Element => (
@@ -239,17 +242,6 @@ function Board({
         />
       </ScreenBarStart>
       <ScreenBarEnd>
-        <div className="relative w-56">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-subtle-foreground" />
-          <Input
-            type="search"
-            aria-label="Buscar tarefas"
-            placeholder="Filtrar por ID ou título"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="h-7 pl-7 text-xs"
-          />
-        </div>
         <Button
           size="sm"
           variant="outline"
@@ -271,6 +263,12 @@ function Board({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => onOpenBoardSettings(projectId)}>
+              Configurar etapas e regras
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setSetupsOpen(true)}>
+              Como as colunas rodam
+            </DropdownMenuItem>
             <DropdownMenuItem
               onSelect={() => void automation.setPaused(!automation.status?.paused)}
             >
@@ -279,10 +277,12 @@ function Board({
           </DropdownMenuContent>
         </DropdownMenu>
       </ScreenBarEnd>
-      <div
-        role="toolbar"
-        aria-label="Filtros do quadro"
-        className="flex flex-wrap items-center gap-4 px-1"
+      <BoardFilters
+        filter={filter}
+        attention={attention}
+        onFilter={(f) => onRoute(boardRoute({ ...route, filter: f }))}
+        query={query}
+        onQuery={setQuery}
       >
         {priorities.length > 0 && (
           <Select
@@ -300,7 +300,7 @@ function Board({
         <CheckboxField label="Só bloqueadas" checked={onlyBlocked} onChange={setOnlyBlocked} />
         <div className="flex-1" />
         <AutomationLine status={automation.status} onOpenIntegrations={onOpenIntegrations} />
-      </div>
+      </BoardFilters>
       {view.pendingCount > 0 && (
         <Alert
           tone="warning"
@@ -378,6 +378,9 @@ function Board({
           </AgentBadgesProvider>
         )}
       </div>
+      {setupsOpen && (
+        <ColumnSetupsDialog projectId={projectId} onClose={() => setSetupsOpen(false)} />
+      )}
     </div>
   )
 }

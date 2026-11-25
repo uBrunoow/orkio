@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { EmptyState } from '../../components/PageState'
 import { StatusToken } from '../../components/StatusToken'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
@@ -29,6 +30,7 @@ export function BoardList({
     .filter((g) => g.rows.length > 0)
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto" data-testid="board-list">
+      {groups.length === 0 && <EmptyState title="Nenhuma tarefa com esse filtro" />}
       {groups.map(({ column, rows }) => (
         <section
           key={column.id}
