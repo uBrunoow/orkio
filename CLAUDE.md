@@ -43,8 +43,9 @@ Claude Code. Hoje existem:
   `shared/diagnostics.ts`, IPC `updates.diagnostics`): versões, banco (`quick_check`, contagens),
   filas, conexões só pelo estado e versões de git/gh/claude. Nada de conta, token, título ou caminho
   (teste prova). Ver também `docs/adr/` (decisões de segurança).
-- **Interface (reestruturação, fase 9):** menu com Quadro, Tarefas (Fase 1), Agentes e Configurações
-  (Ctrl/Cmd+1…4), numa coluna larga com seletor de projeto, "Buscar tarefa" (Command Palette,
+- **Interface (reestruturação, fase 9):** menu com Quadro, Agentes e Configurações
+  (Ctrl/Cmd+1…3; Ctrl/Cmd+2 = Quadro de todos os projetos), numa coluna larga com seletor de projeto,
+  "Buscar tarefa" (Command Palette,
   Ctrl/Cmd+K), "Falta N passos · continuar" e as listas "Esperando você", "Rodando" e "A fazer"
   (`app/task-groups.ts`); barra superior com o caminho, as fases da tarefa e o sino. A tarefa abre
   numa tela própria (`features/task/TaskScreen.tsx`: fases no topo, conversa no centro, painel da
@@ -63,8 +64,8 @@ Claude Code. Hoje existem:
   Claude, paleta, sino, conta), dock de telas, abas e a lista lateral (Ctrl/Cmd+B). Ver "Casca do
   app (Fase 0)" abaixo.
 - **Tarefas (Fase 1):** "Como deve rodar?" por tarefa (Rodar uma vez / Com aprovação / Quebrar em
-  passos) com fluxos nativos (sem alva-flow), padrão por coluna, revisor que não é o autor e a tela
-  Tarefas (kanban derivado). Ver "Tarefas (Fase 1)" abaixo.
+  passos) com fluxos nativos (sem alva-flow), padrão por coluna, revisor que não é o autor e a
+  situação da tarefa (raias) no Quadro; a tela Tarefas não existe mais. Ver "Tarefas (Fase 1)" abaixo.
 - **Sessão (Fase 2):** terminal embutido (node-pty + xterm.js) na pasta da tarefa, "Continuar no
   Claude" (a sessão vai travada para o terminal e volta), "Editar mensagem"/"Ramificar daqui" e a
   conversa compacta. Ver "Sessão (Fase 2)" abaixo.
@@ -286,7 +287,7 @@ src/
       task-flows/          # fluxos de tarefa: editor, bloco do fluxo, plano (`flow-plan.ts`,
                            # PlanStep com tipo/comando/ação/fase) e textos dos passos (`step-text.ts`)
       setup/               # 9: Primeiros passos (SetupPage, setup-steps puro)
-      tasks/               # Fase 1: TasksPage (kanban/lista derivados), ModeCards, ColumnSetupsDialog,
+      tasks/               # Fase 1: ModeCards, ColumnSetupsDialog (aberto pelo Quadro),
                            # TaskRunSetup (seção "Como deve rodar?" da aba Detalhes)
       terminal/            # Fase 2: TerminalPage (aba Terminal), TerminalView (xterm), HandoffBar,
                            # useTaskTerminals/useHandoff, xterm-csp.ts (xterm sob a CSP estrita)
@@ -637,7 +638,17 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
 - "Etapa Orkio": select existente (opções faltando só com confirmação) ou criar via
   `PATCH /v1/data_sources/{id}` (só com confirmação explícita). "Bloqueada": local; opcionalmente
   sincronizada com um checkbox existente (aí o Notion manda na reconciliação).
-- UI: tela **Quadro** (projetos vinculados). Arrasto por ponteiro adaptado do template
+- UI: o Quadro mostra um projeto, vários ou todos (seletor "Projetos do quadro",
+  `BoardProjectPicker`; rota `board` com `projectId`/`projectIds`/`view`/`filter`, normalizada por
+  `boardRoute`; `boardRouteAsIs` = Ctrl/⌘1 e o dock abrem como estiver). Com vários (`MultiBoard`),
+  as colunas são os papéis (`roleBoardColumns`, `STAGE_ROLE_COLUMN`) mais "Outras etapas". Arrastar
+  vai para a etapa do papel no projeto do card (`dropStageFor`); coluna sem destino fica
+  desabilitada durante o arraste. Card: badge da situação (`laneBadge`, de `PersonalTask` pela
+  fonte `personalTasks`), sincronização, "Bloqueada" e a PR no "#n" com os chips (`prButtonText`).
+  Filtros `all/attention/active/review` (com a contagem de "Precisa de você"), Kanban | Lista
+  (agrupada por coluna). "Mais ações do quadro": Configurar etapas e regras, Como as colunas rodam.
+  Modelo puro em `features/board/board-model.ts`; peças da barra em `features/board/BoardBarParts.tsx`.
+  Arrasto por ponteiro adaptado do template
   `kanban-board` (sem StyleX; `style` só no card arrastável/flutuante e no `flexShrink` da coluna)
   e "Mover para…" no menu do card e no painel (teclado). Painel lateral dentro da página (sem gaveta).
 
@@ -1183,8 +1194,10 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   sino (`app/WaitingBell.tsx`: esperando você de todos os projetos + PRs com atenção). Semana e
   atividade continuam calculadas no serviço, sem tela por enquanto.
 - **Abertura** (`app/initial-route.ts`): sem projeto, Primeiros passos; com uma tarefa esperando
-  você, a tela dela; senão o Quadro. Dock: Quadro · Tarefas · Agentes · Configurações, atalhos
-  Ctrl/Cmd+1…4 (registro de comandos, `aria-keyshortcuts` no item).
+  você, a tela dela; senão o Quadro. Dock: Quadro · Agentes · Configurações, atalhos
+  Ctrl/Cmd+1…3 (registro de comandos, `aria-keyshortcuts` no item); Ctrl/⌘2 = Quadro de todos os
+  projetos (comando `go:board:all`). Abas/desktops com a rota `tasks` viram a aba de Quadro com
+  todos os projetos (`parseRoute` + `parseSavedTabs` juntam o lugar repetido).
 - **`OverviewService`** (`main/overview/`) só lê o que o app já tem e **nunca chama APIs** nem faz
   SQL em tabela alheia: consultas com nome dos donos (`BoardStore`: `allStates`, `recentEvents`,
   `unsettledRejections`, `stuckWrites`, `stageEvents`; `RunService`: `startInfo`, `costsSince`;
@@ -1248,6 +1261,8 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 
 ## Tarefas (Fase 1)
 
+A tela Tarefas não existe mais: o Quadro absorveu o que ela tinha (ver "Quadro (Etapa 3A)" › UI).
+
 - **"Como deve rodar?"** (`shared/task-setup.ts`): `RunSetup` = `mode` (`quick` Rodar uma vez,
   `approval` Com aprovação, `steps` Quebrar em passos), `model` (quem implementa), `reviewer`
   (chave de agente ou `none`) e `evidence`; campo ausente = herda. Ordem: tarefa (SQLite v13
@@ -1279,17 +1294,20 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
 - **UI:** aba Detalhes da tarefa › "Como deve rodar?" (`tasks/TaskRunSetup.tsx`: Simples = cartões
   `ModeCards`, grupo de rádio; Avançado = quem implementa, revisor, modelo, evidência; "Rodar
   agora"); "Mover para X" no menu do card vira submenu quando a coluna tem modo (padrão ou outro modo
-  só para a tarefa); tela **Tarefas** (rota `tasks`, Ctrl/Cmd+2) com "Como as colunas rodam"
-  (`ColumnSetupsDialog`) e o estado vazio com os três modelos ("Usar em <coluna de trabalho>").
-- **Kanban derivado** (`shared/task-lanes.ts`, `OverviewService.tasks()`, IPC `overview.tasks`): só
+  só para a tarefa); "Como as colunas rodam" fica no menu "Mais ações do quadro"
+  (`ColumnSetupsDialog`, ainda em `features/tasks/`, ao lado de `ModeCards`/`TaskRunSetup`) e o
+  estado vazio com os três modelos ("Usar em <coluna de trabalho>").
+- **Situação da tarefa** (`shared/task-lanes.ts`, `OverviewService.tasks()`, IPC `overview.tasks`): só
   dados locais. Raias, nesta ordem: Precisa de você (o mesmo `waiting` do sino) → Trabalhando →
   Aguardando (fila de vaga/agente, CI rodando, PR rascunho) → Em revisão (PR aberta; chips CI
   falhando, mudanças pedidas, conflito, comentários, pronta, esperando review) → Concluído (PR
   mergeada ou fluxo terminado nos últimos 7 dias, `FlowRunner.recentFinished`). Conflito vem do
-  GraphQL `mergeable` (`PullRequestDetails.conflict`). Filtros: Em andamento (sem Concluído) e
-  Precisa de atenção (espera você ou chip de atenção). Uma cor alta só: a raia "Precisa de você".
-- E2E `e2e/tasks.spec.ts`: modelo na coluna pela tela, "Rodar agora" com o Rápido, revisão pelo
-  Revisor (só leitura, sem `--resume`) no `agent-args.log` e a tarefa em "Precisa de você".
+  GraphQL `mergeable` (`PullRequestDetails.conflict`). As raias alimentam o badge do card e os
+  filtros do Quadro, sem colunas próprias; "Em andamento" = Trabalhando + Aguardando. Uma cor alta
+  só: "Precisa de você" (tom warning; "Trabalhando" = tom running).
+- E2E `e2e/tasks.spec.ts`: modelo na coluna pelo Quadro (Como as colunas rodam), "Rodar agora" com
+  o Rápido, revisão pelo Revisor (só leitura, sem `--resume`) no `agent-args.log` e o badge
+  "Precisa de você" no card do Quadro.
 
 ## Sessão (Fase 2)
 
@@ -1735,8 +1753,10 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
   e os trechos dos pedidos do Orkio que ele reconhece (briefing, plano/revisão) ficam em
   `FAKE_CLAUDE` (`e2e/fixtures.ts`, vindos de `src/shared` quando existem), gravados em
   `fake-claude.json` ao lado da cópia: nunca repita a string no script.
-- Config inicial dos specs: `seedConfig(userDataDir, projeto)` (config v2 com os bancos e o
-  mapeamento `NOTION_MAPPING` do Notion simulado; `FAKE_REPO` = `acme/orkio-app`).
+- Config inicial dos specs: `seedConfig(userDataDir, projeto, extras?)` (config v2 com os bancos e o
+  mapeamento `NOTION_MAPPING` do Notion simulado; `FAKE_REPO` = `acme/orkio-app`; projetos extras
+  para vários projetos). `e2e/board-projects.spec.ts`: seletor de projetos, colunas pelo papel,
+  arrasto no projeto do card, badge, filtros e a rota do Quadro.
   O fixture põe uma `ANTHROPIC_API_KEY` falsa no ambiente para provar o filtro.
 - 5B: `launchOrkio(..., { alva: { plugin, mcpBacklog, gh, blockers } })` instala o plugin
   simulado no HOME de teste, controla `claude mcp list` e um `gh` simulado no PATH. O Claude simulado
