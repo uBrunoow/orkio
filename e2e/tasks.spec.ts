@@ -181,7 +181,10 @@ test('Tarefas: modelo na coluna, "Rodar uma vez" nativo com revisor e o kanban d
   const needsYou = lane(page, 'Precisa de você')
   await expect(needsYou.getByRole('listitem', { name: 'ORK-2' })).toBeVisible({ timeout: 20_000 })
   await expect(needsYou.getByRole('listitem', { name: 'ORK-2' })).toContainText('Conferir o diff')
-  await page.getByRole('button', { name: 'Precisa de atenção' }).click()
+  await page
+    .getByRole('toolbar', { name: 'Filtros das tarefas' })
+    .getByRole('button', { name: 'Precisa de você' })
+    .click()
   await expect(needsYou.getByRole('listitem', { name: 'ORK-2' })).toBeVisible()
   // Lista: a mesma tarefa, com o estado.
   await page.getByRole('radio', { name: 'Lista' }).click()
