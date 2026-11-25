@@ -18,6 +18,8 @@ export interface UseProjects {
   create(input: CreateProjectInput): Promise<ProjectMutationResult>
   relocate(projectId: string): Promise<ProjectMutationResult>
   remove(projectId: string): Promise<boolean>
+  /** Arquiva/desarquiva (nada é apagado). */
+  setArchived(projectId: string, archived: boolean): Promise<boolean>
   refresh(): Promise<void>
 }
 
@@ -92,6 +94,22 @@ export function useProjects({ revalidate = false }: { revalidate?: boolean } = {
       if (ok) {
         source.set('', (s) =>
           s ? { ...s, projects: s.projects.filter((p) => p.id !== projectId) } : s
+        )
+      }
+      return ok
+    },
+    setArchived: async (projectId, archived) => {
+      const { ok } = await ipcCall(() => window.orkio.projects.setArchived(projectId, archived), {
+        ok: false
+      })
+      if (ok) {
+        source.set('', (s) =>
+          s
+            ? {
+                ...s,
+                projects: s.projects.map((p) => (p.id === projectId ? { ...p, archived } : p))
+              }
+            : s
         )
       }
       return ok

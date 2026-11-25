@@ -71,14 +71,14 @@ export function AgentAvatar({
   color: AgentColor
   /** Id estável do agente; sem ele, o nome. */
   seed?: string
-  size?: 'sm' | 'md' | 'lg'
+  size?: 'sm' | 'md' | 'lg' | 'xl'
   testId?: string
 }): React.JSX.Element {
   const h = hash(seed ?? name)
   const face = FACES[h % FACES.length]!
   const round = ((h >>> 4) & 3) === 0
   const fill = FILL[color]
-  const dim = size === 'lg' ? '2.5rem' : size === 'md' ? '2em' : '1.5em'
+  const dim = size === 'xl' ? '4rem' : size === 'lg' ? '2.5rem' : size === 'md' ? '2em' : '1.5em'
   return (
     <svg
       viewBox="0 0 24 24"

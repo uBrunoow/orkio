@@ -7,7 +7,9 @@ export function projectById(config: OrkioConfig, projectId: string): StoredProje
 }
 
 export function automationProjectIds(config: OrkioConfig): string[] {
-  return config.projects.filter((p) => p.notionProject && config.boards[p.id]).map((p) => p.id)
+  return config.projects
+    .filter((p) => p.notionProject && config.boards[p.id] && !p.archived)
+    .map((p) => p.id)
 }
 
 export function projectFlows(config: OrkioConfig, projectId: string): ProjectFlows {

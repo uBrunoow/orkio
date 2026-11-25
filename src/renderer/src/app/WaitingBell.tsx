@@ -46,8 +46,7 @@ function TaskLine({ task }: { task: OverviewTask }): React.JSX.Element {
   )
 }
 
-const heading =
-  'flex items-center justify-between text-2xs tracking-wider text-subtle-foreground uppercase'
+const heading = 'flex items-center justify-between label-caps'
 
 /**
  * Sino de atenção: "Precisa de você" (a regra única de esperando você, de todos os projetos, e as

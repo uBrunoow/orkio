@@ -240,11 +240,11 @@ export function BoardColumns({
               data-stage-id={column.id}
               {...dropAttrs}
               className={cn(
-                'group/col flex h-full w-[268px] shrink-0 flex-col gap-2 rounded-[10px] transition-colors',
-                isTarget && 'bg-muted/60'
+                'group/col flex h-full w-[268px] shrink-0 flex-col gap-1.5 rounded-xl border p-1.5 transition-colors motion-reduce:transition-none',
+                isTarget ? 'border-brand/40 bg-muted/70' : 'border-border-soft bg-surface/60'
               )}
             >
-              <div className="flex min-w-0 items-center gap-2 px-1 pt-1 pb-1.5 text-muted-foreground">
+              <div className="flex min-w-0 items-center gap-2 px-1.5 pt-1 pb-1 text-muted-foreground">
                 <span aria-hidden="true" className={cn('size-[7px] shrink-0 rounded-full', dot)} />
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -301,7 +301,7 @@ export function BoardColumns({
                   />
                 )}
                 {visible.length === 0 && !isTarget && (
-                  <p className="px-1 text-xs text-subtle-foreground">Nenhuma tarefa</p>
+                  <p className="px-1.5 py-1 text-xs text-subtle-foreground">Nenhuma tarefa</p>
                 )}
               </div>
             </div>

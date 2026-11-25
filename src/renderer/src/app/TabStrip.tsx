@@ -165,9 +165,7 @@ function TabItem({
               tabButton.current?.focus()
             }}
           >
-            <DropdownMenuLabel className="text-2xs font-normal tracking-wider text-subtle-foreground uppercase">
-              Mover para
-            </DropdownMenuLabel>
+            <DropdownMenuLabel className="font-normal label-caps">Mover para</DropdownMenuLabel>
             {moveTargets.desktops.map((d) => (
               <DropdownMenuItem key={d.id} onSelect={() => moveTargets.onMove(tab.id, d.id)}>
                 {d.name}

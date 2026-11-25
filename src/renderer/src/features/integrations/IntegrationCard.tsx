@@ -1,18 +1,17 @@
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { SvgIcon } from '../../components/icons'
-import { StatusDot, type StatusTone } from '../../components/StatusToken'
+import { StatusBadge, type StatusTone } from '../../components/StatusToken'
 
 /**
- * Um card de Integrações (grade): logo, nome, categoria, estado e a ação. A ação abre a
- * configuração (`children`) como uma linha inteira da grade logo abaixo do card.
+ * Uma integração (linha na largura do container): logo, nome, estado em badge e a ação. A ação
+ * abre a configuração (`children`) logo abaixo. A categoria não aparece; serve só à busca.
  */
 export function IntegrationCard({
   id,
   logo,
   logoClassName,
   name,
-  category,
   status,
   action,
   open,
@@ -23,8 +22,6 @@ export function IntegrationCard({
   logo: SvgIcon
   logoClassName?: string
   name: string
-  /** Rótulo pequeno em mono (também usado na busca). */
-  category: string
   status: { label: string; tone: StatusTone }
   action: string
   open: boolean
@@ -38,36 +35,25 @@ export function IntegrationCard({
       <article
         aria-labelledby={titleId}
         data-testid={`catalog-${id}`}
-        className="flex items-center gap-3 rounded-xl border border-border-soft bg-card p-3"
+        className="flex items-center gap-3 rounded-xl border border-border-soft bg-card px-4 py-3"
       >
         <span
           className={cn(
-            'grid size-8 shrink-0 place-items-center rounded-lg',
+            'grid size-9 shrink-0 place-items-center rounded-lg',
             logoClassName ?? 'bg-muted text-foreground'
           )}
         >
-          <Logo className="size-[18px]" />
+          <Logo className="size-5" />
         </span>
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <h3 id={titleId} className="text-sm font-medium text-foreground">
-            {name}
-          </h3>
-          <span className="font-mono text-2xs text-subtle-foreground">{category}</span>
-          <span
-            className="flex min-w-0 items-center gap-1.5 text-xs"
-            data-testid="integration-status"
-          >
-            <StatusDot tone={status.tone} />
-            <span
-              className={cn(
-                'truncate',
-                status.tone === 'neutral' ? 'text-muted-foreground' : 'text-foreground'
-              )}
-            >
-              {status.label}
-            </span>
-          </span>
-        </div>
+        <h3 id={titleId} className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+          {name}
+        </h3>
+        <StatusBadge
+          label={status.label}
+          tone={status.tone}
+          data-testid="integration-status"
+          className="max-w-[45%]"
+        />
         <Button
           size="sm"
           variant="secondary"

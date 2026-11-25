@@ -7,6 +7,7 @@ import { CardActionsMenu, PrButton, cardMenuItems, type CardActions } from './Bo
 import { stageDotClass } from './stage-dot'
 import { cardSyncStatus, laneBadge } from './card-status'
 import type { BoardColumnDef, BoardEntry, BoardMode } from './board-model'
+import { SURFACE } from '../../components/surface'
 
 /**
  * Visão em lista do quadro: as mesmas colunas do Kanban, uma seção por coluna com entradas
@@ -32,11 +33,7 @@ export function BoardList({
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto" data-testid="board-list">
       {groups.length === 0 && <EmptyState title="Nenhuma tarefa com esse filtro" />}
       {groups.map(({ column, rows }) => (
-        <section
-          key={column.id}
-          aria-label={column.name}
-          className="overflow-hidden rounded-xl border border-border-soft bg-card"
-        >
+        <section key={column.id} aria-label={column.name} className={SURFACE.list}>
           <div className="flex items-center gap-2 border-b border-border-soft px-4 py-2 text-muted-foreground">
             <span
               aria-hidden="true"

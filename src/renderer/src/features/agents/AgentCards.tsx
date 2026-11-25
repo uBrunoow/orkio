@@ -42,6 +42,8 @@ export interface AgentHandlers {
   onApprove(): void
   /** Fase 3: abre a Memória do agente. */
   onMemory(): void
+  /** Abre a página do agente (clique no card). */
+  onOpen(): void
 }
 
 function Tag({ hot = false, children }: { hot?: boolean; children: string }): React.JSX.Element {
@@ -91,7 +93,7 @@ function AgentDetails({
     return null
   }
   return (
-    <div className="flex flex-col gap-2">
+    <div className="relative z-10 flex flex-col gap-2">
       {!compact && <p className="text-xs text-muted-foreground">{details.join(' · ')}</p>}
       {view.errors.map((e) => (
         <Alert key={e} tone="danger">
@@ -166,7 +168,7 @@ function AgentActions({
   )
   if (view.scope === 'builtin') {
     return (
-      <div className="flex shrink-0 items-center">
+      <div className="relative z-10 flex shrink-0 items-center">
         {memory}
         <Button
           size="icon-sm"
@@ -181,7 +183,7 @@ function AgentActions({
     )
   }
   return (
-    <div className="flex shrink-0 items-center">
+    <div className="relative z-10 flex shrink-0 items-center">
       {memory}
       <Button
         size="icon-sm"
@@ -219,12 +221,19 @@ export function AgentRow(
   return (
     <li
       aria-label={name}
-      className="flex items-start gap-3 border-b border-border-soft px-4 py-3 last:border-b-0"
+      className="relative flex items-start gap-3 border-b border-border-soft px-4 py-3 last:border-b-0 hover:bg-muted/40"
     >
       <AgentAvatar name={name} color={p?.color ?? 'yellow'} seed={view.key} size="md" />
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <span className="truncate font-medium">{name}</span>
+          <button
+            type="button"
+            onClick={props.onOpen}
+            aria-label={`Abrir ${name}`}
+            className="truncate rounded-sm text-left font-medium outline-none after:absolute after:inset-0 focus-visible:after:ring-2 focus-visible:after:ring-ring/40 focus-visible:after:ring-inset"
+          >
+            {name}
+          </button>
           {p && <span className="text-xs text-muted-foreground">{roleLine(view)}</span>}
         </div>
         {p?.description && (
@@ -264,11 +273,17 @@ export function AgentCard(
       role="listitem"
       aria-label={name}
       data-testid="agent-card"
-      className="flex flex-col gap-3 rounded-xl border border-border-soft bg-card p-3.5"
+      className="relative flex flex-col gap-3 rounded-xl border border-border-soft bg-card p-3.5 hover:bg-muted/40"
     >
       <div className="flex items-start gap-3">
         {/* Fase 3: "O que faz" (ou o papel) e o grupo, iguais à prévia do editor. */}
-        <AgentCardHead name={name} profile={p} scope={view.scope} seed={view.key}>
+        <AgentCardHead
+          name={name}
+          profile={p}
+          scope={view.scope}
+          seed={view.key}
+          onOpen={props.onOpen}
+        >
           {view.file}
         </AgentCardHead>
         <AgentActions {...props} />

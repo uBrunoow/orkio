@@ -37,6 +37,7 @@ import { agentFill } from './AgentAvatar'
 import { AgentCardPreview } from './AgentCardFace'
 import { MultiSelectField } from './MultiSelectField'
 import { RuntimePicker, useSupportsEffort } from '../claude/RuntimePicker'
+import { SURFACE } from '../../components/surface'
 
 const COLOR_LABELS: Record<AgentColor, string> = {
   orange: 'Laranja',
@@ -117,8 +118,11 @@ export function AgentEditor({
   busy,
   onChange,
   onCancel,
-  onSave
+  onSave,
+  initialAdvanced = false
 }: {
+  /** Abre já no modo Avançado (a página do agente pediu ferramentas, permissões ou limites). */
+  initialAdvanced?: boolean
   editing: Editing
   state: AgentsState | null
   commands: string[]
@@ -133,7 +137,7 @@ export function AgentEditor({
   const set = (patch: Partial<AgentProfile>): void =>
     onChange({ ...editing, draft: { ...d, ...patch } })
   const isNew = editing.mode === 'new'
-  const [advanced, setAdvanced] = useState(false)
+  const [advanced, setAdvanced] = useState(initialAdvanced)
   const [idTouched, setIdTouched] = useState(false)
   // "Começar de" trocou instruções que você já tinha escrito: dá para desfazer.
   const [undo, setUndo] = useState<AgentProfile | null>(null)
@@ -168,11 +172,7 @@ export function AgentEditor({
   }
 
   return (
-    <div
-      role="form"
-      aria-label={title}
-      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
-    >
+    <div role="form" aria-label={title} className={SURFACE.section}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-base font-medium">{title}</h2>
         <SegmentedControl

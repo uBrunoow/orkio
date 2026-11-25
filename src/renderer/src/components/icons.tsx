@@ -14,6 +14,24 @@ import {
   IconCheck,
   IconBrandGithub,
   IconBrandNotion,
+  IconBrandAws,
+  IconBrandVercel,
+  IconBrandFigma,
+  IconBrandSlack,
+  IconBrandDocker,
+  IconBrandChrome,
+  IconBrandStripe,
+  IconBrandSentry,
+  IconBrandSupabase,
+  IconBrandGitlab,
+  IconBrandJira,
+  IconBrandMongodb,
+  IconBrandFirebase,
+  IconBrandGoogleDrive,
+  IconBrandNpm,
+  IconPlug,
+  IconBook2,
+  IconShoppingBag,
   IconDatabase,
   IconExternalLink,
   IconFolderPlus,
@@ -24,11 +42,17 @@ import {
   IconRobot,
   IconGitBranch,
   IconGitPullRequest,
+  IconGitMerge,
+  IconGitPullRequestClosed,
+  IconMessageCircle,
+  IconEyeCheck,
+  IconUserQuestion,
   IconLink,
   IconLinkOff,
   IconListCheck,
   IconLayoutKanban,
   IconLock,
+  IconKey,
   IconSettings,
   IconArrowUp,
   IconPointFilled,
@@ -65,6 +89,15 @@ import {
   IconFileText,
   IconDots,
   IconLayoutGrid,
+  IconPalette,
+  IconCpu,
+  IconPower,
+  IconSun,
+  IconChevronDown,
+  IconEye,
+  IconMoon,
+  IconRoute,
+  IconLayoutBoardSplit,
   IconHome,
   IconLayoutSidebar,
   IconKeyboard,
@@ -163,6 +196,15 @@ export const ProblemIcon = adapt(IconAlertCircle)
 export const CopyIcon = adapt(IconCopy)
 export const MoreIcon = adapt(IconDots)
 export const GridIcon = adapt(IconLayoutGrid)
+export const AppearanceIcon = adapt(IconPalette)
+export const LayoutIcon = adapt(IconLayoutBoardSplit)
+export const ModelIcon = adapt(IconCpu)
+export const PowerIcon = adapt(IconPower)
+export const SunIcon = adapt(IconSun)
+export const ChevronDownIcon = adapt(IconChevronDown)
+export const EyeIcon = adapt(IconEye)
+export const MoonIcon = adapt(IconMoon)
+export const OrchestratorIcon = adapt(IconRoute)
 export const HomeIcon = adapt(IconHome)
 export const SidebarIcon = adapt(IconLayoutSidebar)
 export const KeyboardIcon = adapt(IconKeyboard)
@@ -170,9 +212,36 @@ export const CommandIcon = adapt(IconCommand)
 export const GaugeIcon = adapt(IconGauge)
 export const TabIcon = adapt(IconAppWindow)
 export const NewsIcon = adapt(IconSparkles)
+export const InstructionsIcon = NewsIcon
 export const ReopenIcon = adapt(IconArrowBackUp)
 
 export const BrainIcon = adapt(IconBrain)
 export const CheckIcon = adapt(IconCheck)
 export const ForkIcon = adapt(IconGitFork)
 export const HandBackIcon = adapt(IconArrowBackUpDouble)
+
+/* Logos de servidores MCP (Configurações › Servidores MCP), escolhidos por `mcpBrand`. */
+export const McpPlugIcon = adapt(IconPlug)
+export const AwsLogo = adapt(IconBrandAws)
+export const VercelLogo = adapt(IconBrandVercel)
+export const FigmaLogo = adapt(IconBrandFigma)
+export const SlackLogo = adapt(IconBrandSlack)
+export const DockerLogo = adapt(IconBrandDocker)
+export const ChromeLogo = adapt(IconBrandChrome)
+export const StripeLogo = adapt(IconBrandStripe)
+export const SentryLogo = adapt(IconBrandSentry)
+export const SupabaseLogo = adapt(IconBrandSupabase)
+export const GitlabLogo = adapt(IconBrandGitlab)
+export const JiraLogo = adapt(IconBrandJira)
+export const MongodbLogo = adapt(IconBrandMongodb)
+export const FirebaseLogo = adapt(IconBrandFirebase)
+export const GoogleDriveLogo = adapt(IconBrandGoogleDrive)
+export const NpmLogo = adapt(IconBrandNpm)
+export const DocsIcon = adapt(IconBook2)
+export const ShopIcon = adapt(IconShoppingBag)
+export const KeyIcon = adapt(IconKey)
+export const GitMergeIcon = adapt(IconGitMerge)
+export const PullRequestClosedIcon = adapt(IconGitPullRequestClosed)
+export const CommentIcon = adapt(IconMessageCircle)
+export const ApprovedIcon = adapt(IconEyeCheck)
+export const ReviewRequestIcon = adapt(IconUserQuestion)

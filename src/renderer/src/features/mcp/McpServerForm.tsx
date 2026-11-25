@@ -12,6 +12,7 @@ import {
   type BindingDraft,
   type ServerDraft
 } from './mcp-logic'
+import { SURFACE } from '../../components/surface'
 
 /**
  * Formulário do servidor (Avançado): nome, comando + argumentos ou endereço, variáveis/cabeçalhos
@@ -24,9 +25,12 @@ export function McpServerForm({
   submitLabel,
   build,
   onSave,
-  onCancel
+  onCancel,
+  bare = false
 }: {
   title: string
+  /** Sem a moldura nem o título (dentro de um modal, que já tem os dois). */
+  bare?: boolean
   initial: ServerDraft
   secretNames: readonly string[]
   submitLabel: string
@@ -61,13 +65,13 @@ export function McpServerForm({
   return (
     <form
       aria-label={title}
-      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
+      className={bare ? 'flex flex-col gap-4' : SURFACE.section}
       onSubmit={(e) => {
         e.preventDefault()
         void submit()
       }}
     >
-      <h3 className="text-sm font-medium">{title}</h3>
+      {!bare && <h3 className="text-sm font-medium">{title}</h3>}
       <div className="grid gap-4 sm:grid-cols-2">
         <TextField
           label="Nome"

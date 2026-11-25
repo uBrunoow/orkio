@@ -10,6 +10,7 @@ import type {
   ProjectMutationResult,
   ProjectSelection
 } from '../../../../shared/projects'
+import { SURFACE } from '../../components/surface'
 
 const mono = 'font-mono text-xs text-muted-foreground'
 
@@ -56,10 +57,7 @@ export function AddProjectPanel({
   }
 
   return (
-    <section
-      aria-labelledby="add-project-title"
-      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
-    >
+    <section aria-labelledby="add-project-title" className={SURFACE.section}>
       <div className="flex flex-col gap-1">
         <h2 id="add-project-title" className="text-base font-medium">
           Adicionar projeto

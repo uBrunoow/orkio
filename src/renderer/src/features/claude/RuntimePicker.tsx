@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Command, CommandGroup, CommandItem, CommandList } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { SegmentedControl, TextField } from '@/components/form'
+import { TextField } from '@/components/form'
+import { EffortSlider } from '../../components/EffortSlider'
 import { cn } from '@/lib/utils'
 import {
   CLAUDE_MODELS,
@@ -13,7 +14,7 @@ import {
   runtimeLabel,
   type RuntimeChoice
 } from '../../../../shared/agent-runtime'
-import { BrainIcon, CheckIcon } from '../../components/icons'
+import { CheckIcon, ChevronDownIcon, ClaudeLogo } from '../../components/icons'
 import { useClaudeStatus } from './useClaudeStatus'
 
 const MODEL_ERROR = 'Use letras minúsculas, números, ponto e hífen.'
@@ -35,8 +36,11 @@ export function RuntimePicker({
   inheritLabel,
   title,
   describedBy,
+  variant = 'inline',
   className
 }: {
+  /** `inline` = discreto (campo da sessão); `pill` = destacado numa linha de ajuste (Configurações). */
+  variant?: 'inline' | 'pill'
   value: Partial<RuntimeChoice>
   onChange(value: Partial<RuntimeChoice>): void
   supportsEffort: boolean
@@ -100,15 +104,20 @@ export function RuntimePicker({
       <PopoverTrigger asChild>
         <Button
           type="button"
-          size="xs"
-          variant="ghost"
+          size={variant === 'pill' ? 'sm' : 'xs'}
+          variant={variant === 'pill' ? 'secondary' : 'ghost'}
           aria-label={`Modelo e raciocínio: ${label}`}
           title={title}
           aria-describedby={describedBy}
-          className={cn('max-w-56 min-w-0 text-muted-foreground', className)}
+          className={cn(
+            'max-w-56 min-w-0',
+            variant === 'pill' ? 'rounded-full px-3 text-foreground' : 'text-muted-foreground',
+            className
+          )}
         >
-          <BrainIcon className="size-3.5" />
+          <ClaudeLogo className="size-3.5 text-claude" />
           <span className="truncate">{label}</span>
+          {variant === 'pill' && <ChevronDownIcon className="size-3.5 text-subtle-foreground" />}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-80 p-0">
@@ -123,6 +132,7 @@ export function RuntimePicker({
               )}
               {suggested.map((m) => (
                 <CommandItem key={m.id} value={m.id} onSelect={() => setModel(m.value)}>
+                  <ClaudeLogo className="size-3.5 text-claude" />
                   <span className="flex-1 truncate">{m.label}</span>
                   {check(
                     value.model === m.value ||
@@ -170,12 +180,10 @@ export function RuntimePicker({
         )}
         {supportsEffort && (
           <div className="flex flex-col gap-1.5 border-t border-border-soft p-3">
-            <SegmentedControl
+            <EffortSlider
               label="Raciocínio"
-              size="sm"
-              className="grid w-full grid-cols-3"
               value={value.effort ?? ''}
-              options={[
+              stops={[
                 { value: '', label: 'Padrão' },
                 ...EFFORTS.map((e) => ({ value: e, label: EFFORT_LABELS[e] }))
               ]}

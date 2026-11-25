@@ -2,12 +2,12 @@ import { useState } from 'react'
 import { ipcResult } from '../../lib/ipc'
 import { useProjectFlows } from './useProjectFlows'
 import { Skeleton } from '@/components/ui/skeleton'
-import { CheckboxField } from '@/components/form'
+import { SettingRow, SettingsGroup, SwitchRow } from '../../components/SettingRows'
 import { Alert } from '../../components/Alert'
 
 /**
  * Entrega (5C) do projeto: "Exigir minha aprovação para push". É regra do projeto, não de um
- * fluxo, por isso fica em Etapas e automações (6E). Grava na hora, com histórico de configuração.
+ * fluxo, por isso fica em Quadro e automações › Entrega. Grava na hora, com histórico de configuração.
  */
 export function DeliverySection({ projectId }: { projectId: string }): React.JSX.Element {
   const flows = useProjectFlows(projectId)
@@ -16,32 +16,64 @@ export function DeliverySection({ projectId }: { projectId: string }): React.JSX
   const error = saveError ?? flows.error?.message ?? null
 
   return (
-    <section aria-label="Entrega" className="flex flex-col gap-3">
-      <h2 className="text-base font-medium">Entrega</h2>
-      <div className="rounded-xl border border-border-soft bg-card px-4 py-3.5">
-        {requireApproval === null ? (
-          error ? (
+    <SettingsGroup
+      title="Entrega"
+      description="Regra do projeto, vale para todos os fluxos. Grava na hora."
+    >
+      {requireApproval === null ? (
+        <div className="p-4">
+          {error ? (
             <Alert tone="danger">{error}</Alert>
           ) : (
             <Skeleton className="h-8" aria-label="Carregando ajustes de entrega" />
-          )
-        ) : (
-          <CheckboxField
-            label="Exigir minha aprovação para push"
-            description="Antes de cada push da branch da tarefa (pelo Orkio ou pelo Claude Code em modo entrega), o fluxo mostra commits, diff e destino e espera você. A branch padrão (main/master, develop, production, release) nunca recebe push, com ou sem este ajuste."
-            checked={requireApproval}
-            onChange={(on) =>
-              void ipcResult(() =>
-                window.orkio.taskFlows.setDelivery(projectId, { requirePushApproval: on })
-              ).then((r) => {
-                if (r.ok) flows.set(r.value)
-                setSaveError(r.ok ? null : r.error.message)
-              })
-            }
-          />
-        )}
-      </div>
-      {requireApproval !== null && error && <Alert tone="danger">{error}</Alert>}
-    </section>
+          )}
+        </div>
+      ) : (
+        <SwitchRow
+          label="Exigir minha aprovação para push"
+          description="Antes de cada push da branch da tarefa, o fluxo mostra commits, diff e destino e espera você."
+          help="Vale para o push pelo Orkio e pelo Claude Code em modo entrega."
+          checked={requireApproval}
+          onChange={(on) =>
+            void ipcResult(() =>
+              window.orkio.taskFlows.setDelivery(projectId, { requirePushApproval: on })
+            ).then((r) => {
+              if (r.ok) flows.set(r.value)
+              setSaveError(r.ok ? null : r.error.message)
+            })
+          }
+        />
+      )}
+      <SettingRow
+        label="Branches protegidas"
+        description="Nunca recebem push do Orkio, com ou sem aprovação. Só a branch da tarefa vai."
+        stack
+      >
+        <div className="flex flex-wrap gap-1">
+          {[
+            'main',
+            'master',
+            'develop',
+            'production',
+            'staging',
+            'trunk',
+            'release*',
+            'hotfix'
+          ].map((b) => (
+            <code
+              key={b}
+              className="rounded-md border border-border-soft bg-muted px-1.5 py-0.5 font-mono text-2xs text-muted-foreground"
+            >
+              {b}
+            </code>
+          ))}
+        </div>
+      </SettingRow>
+      {requireApproval !== null && error && (
+        <div className="p-4">
+          <Alert tone="danger">{error}</Alert>
+        </div>
+      )}
+    </SettingsGroup>
   )
 }

@@ -73,9 +73,9 @@ test('menu com três telas; Configurações reúne as telas do projeto e sai das
   const { page } = orkio
   await page.evaluate((t) => window.orkio.notion.connect({ kind: 'token', token: t }), TOKEN)
 
-  // O menu principal tem só Quadro, Agentes e Configurações.
-  await expect(telas(page).getByRole('button')).toHaveCount(3)
-  for (const name of ['Quadro', 'Agentes', 'Configurações']) {
+  // O menu principal tem Quadro, Agentes, Terminais e Configurações.
+  await expect(telas(page).getByRole('listitem')).toHaveCount(4)
+  for (const name of ['Quadro', 'Agentes', 'Terminais', 'Configurações']) {
     await expect(telas(page).getByRole('button', { name, exact: true })).toBeVisible()
   }
 
@@ -102,7 +102,7 @@ test('menu com três telas; Configurações reúne as telas do projeto e sai das
   await boardSettingsTab(page, 'Entrega')
   const approval = page
     .getByRole('region', { name: 'Entrega' })
-    .getByRole('checkbox', { name: 'Exigir minha aprovação para push' })
+    .getByRole('switch', { name: 'Exigir minha aprovação para push' })
   await expect(approval).toBeChecked()
   await approval.click()
   await expect(approval).not.toBeChecked()
@@ -115,6 +115,8 @@ test('menu com três telas; Configurações reúne as telas do projeto e sai das
   // Fluxos (com os modelos do alva-flow) também é uma aba.
   await boardSettingsTab(page, 'Fluxos')
   await expect(page.getByRole('region', { name: 'Fluxos do projeto' })).toBeVisible()
+  // Os modelos do alva-flow ficam numa aba própria.
+  await boardSettingsTab(page, 'alva-flow')
   await expect(page.getByRole('region', { name: 'Modelos do alva-flow' })).toBeVisible()
   // Contexto do Claude não existe mais.
   await expect(page.getByRole('button', { name: 'Contexto do Claude' })).toHaveCount(0)
@@ -195,14 +197,14 @@ test('Command Palette e atalhos: Ctrl+K acha a tarefa, Ctrl+número troca de tel
   await expect(palette.getByRole('option', { name: 'Modelos do alva-flow' })).toBeVisible()
   await page.keyboard.press('ArrowDown')
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('tab', { name: 'Fluxos', selected: true })).toBeVisible()
+  await expect(page.getByRole('tab', { name: 'alva-flow', selected: true })).toBeVisible()
   await page.keyboard.press('Control+4')
   await expect(h1(page, 'Integrações')).toBeVisible()
   await page.keyboard.press('Alt+ArrowLeft')
   await expect(h1(page, 'Quadro e automações')).toBeVisible()
-  await page.keyboard.press('Control+1')
-  await expect(h1(page, 'Quadro')).toBeVisible()
   await page.keyboard.press('Control+5')
+  await expect(page.getByRole('tablist', { name: 'Terminais do projeto' })).toBeAttached()
+  await page.keyboard.press('Control+1')
   await expect(h1(page, 'Quadro')).toBeVisible()
 
   // Quadro pelo teclado: menu do card e Ctrl+Enter abre a tela da tarefa.

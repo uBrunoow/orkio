@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SkillEntry } from '../../../../shared/preferences'
-import { groupSkills, nextDisabled } from './skills-logic'
+import { groupSkills, groupState, nextDisabled, nextDisabledMany } from './skills-logic'
 
 const skill = (name: string, origin: string, disabled = false): SkillEntry => ({
   name,
@@ -36,5 +36,25 @@ describe('nextDisabled', () => {
   })
   it('não repete', () => {
     expect(nextDisabled(list, [], 'a', false)).toEqual(['a'])
+  })
+})
+
+describe('origem inteira', () => {
+  const s = (name: string, disabled: boolean): SkillEntry => ({
+    name,
+    description: '',
+    source: 'user',
+    origin: 'Seu usuário',
+    disabled
+  })
+  it('estado da origem', () => {
+    expect(groupState({ origin: 'x', skills: [s('a', false), s('b', false)] })).toBe('on')
+    expect(groupState({ origin: 'x', skills: [s('a', true), s('b', false)] })).toBe('partial')
+    expect(groupState({ origin: 'x', skills: [s('a', true), s('b', true)] })).toBe('off')
+  })
+  it('desliga e liga todas, mantendo as outras e as que sumiram', () => {
+    const all = [s('a', false), s('b', true), s('c', false)]
+    expect(nextDisabledMany(all, ['z'], ['a', 'c'], false)).toEqual(['b', 'z', 'a', 'c'])
+    expect(nextDisabledMany(all, ['z'], ['a', 'b'], true)).toEqual(['z'])
   })
 })

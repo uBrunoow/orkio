@@ -2,7 +2,6 @@ import { useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { StatusTone } from '../../components/StatusToken'
 import {
-  AgentsIcon,
   ClaudeLogo,
   DatabaseIcon,
   GitHubLogo,
@@ -31,6 +30,7 @@ import {
 } from './integrations-logic'
 import { OrkioBotPanel, useOrkioBot } from './OrkioBotCard'
 import { PAGE_WIDTH } from '../../components/page-width'
+import { OrkioLogo } from '../../components/OrkioLogo/OrkioLogo'
 import {
   claudeStatusText,
   connectionStatusText,
@@ -134,8 +134,8 @@ export function IntegrationsPage({
     {
       id: 'orkio-bot',
       section: 'Código',
-      logo: AgentsIcon,
-      logoClassName: 'bg-brand text-primary-foreground',
+      logo: OrkioMark,
+      logoClassName: 'bg-brand',
       name: 'Orkio bot',
       category: 'github app · revisões',
       status: botStatus,
@@ -169,7 +169,7 @@ export function IntegrationsPage({
       id: 'claude',
       section: 'Agentes de código',
       logo: ClaudeLogo,
-      logoClassName: 'bg-brand text-primary-foreground',
+      logoClassName: 'bg-claude text-white',
       name: 'Claude Code',
       category: 'agente',
       status: claudeStatusText(claude),
@@ -224,10 +224,8 @@ export function IntegrationsPage({
         if (inSection.length === 0) return null
         return (
           <section key={section} aria-label={section} className="flex flex-col gap-2">
-            <h2 className="text-2xs tracking-[0.06em] text-subtle-foreground uppercase">
-              {section}
-            </h2>
-            <div className="grid grid-cols-1 gap-2 min-[900px]:grid-cols-2">
+            <h2 className="label-caps">{section}</h2>
+            <div className="flex flex-col gap-2">
               {inSection.map((c) => {
                 const target = c.opensId ?? c.id
                 return (
@@ -237,7 +235,6 @@ export function IntegrationsPage({
                     logo={c.logo}
                     {...(c.logoClassName ? { logoClassName: c.logoClassName } : {})}
                     name={c.name}
-                    category={c.category}
                     status={c.status}
                     action={c.action}
                     open={!c.opensId && openId === c.id}
@@ -263,6 +260,13 @@ export function IntegrationsPage({
     </div>
   )
 }
+
+/** Símbolo do Orkio no lugar do ícone (o nome da integração já diz o que é). */
+const OrkioMark: SvgIcon = () => (
+  <span aria-hidden="true" className="flex">
+    <OrkioLogo variant="simple" size={20} className="text-primary-foreground!" />
+  </span>
+)
 
 const SECTIONS = ['Tarefas', 'Código', 'Agentes de código'] as const
 

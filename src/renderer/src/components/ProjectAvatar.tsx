@@ -2,11 +2,11 @@ import { cn } from '@/lib/utils'
 
 /** Cor do quadradinho do projeto (inicial), estável pelo id: a mesma na lista lateral e em Projetos. */
 const PROJECT_TINTS = [
-  'bg-brand text-black',
-  'bg-info text-black',
-  'bg-ok text-black',
-  'bg-warn text-black',
-  'bg-danger text-black'
+  'bg-brand text-primary-foreground',
+  'bg-info text-on-tone',
+  'bg-ok text-on-tone',
+  'bg-warn text-on-tone',
+  'bg-danger text-on-tone'
 ]
 
 export function projectTint(id: string): string {

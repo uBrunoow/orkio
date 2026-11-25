@@ -176,7 +176,7 @@ function settingsCommands(): Command[] {
     id: 'go:settings:board:flows',
     label: 'Modelos do alva-flow',
     visible: (ctx) => ctx.hasProject,
-    run: (ctx) => ctx.navigate({ name: 'settings', section: 'board', tab: 'flows' })
+    run: (ctx) => ctx.navigate({ name: 'settings', section: 'board', tab: 'alva' })
   })
   return all
 }

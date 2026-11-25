@@ -57,6 +57,15 @@ export const SCREENS: readonly ScreenDef[] = [
     keys: 'mod+3'
   },
   {
+    name: 'terminals',
+    title: ROUTE_TITLES.terminals,
+    hint: 'Terminais abertos e abrir um na pasta de uma tarefa',
+    icon: TerminalIcon,
+    route: { name: 'terminals' },
+    dock: 'main',
+    keys: 'mod+5'
+  },
+  {
     name: 'settings',
     title: ROUTE_TITLES.settings,
     hint: 'Integrações, projetos, quadro e atualizações',

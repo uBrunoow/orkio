@@ -476,6 +476,33 @@ describe('ClaudeService', () => {
     expect(lastSpec().askEdits).toBeUndefined()
   })
 
+  it('"Só lê" das Configurações (sem agente) roda só de leitura; com agente, vale a dele', async () => {
+    const projects = [
+      {
+        id: 'p1',
+        name: 'app',
+        localPath: '/repo',
+        repo: { owner: 'o', name: 'app', remoteName: 'origin', defaultBranch: 'main' },
+        notionProject: null
+      }
+    ]
+    const { service, lastSpec } = setup({
+      config: { get: () => ({ projects, preferences: { autonomy: 'read_only' } }) as never }
+    })
+    await service.startRun(flowRequest({}))
+    expect(lastSpec().access.tools).toBe('read_only')
+    const agent = {
+      key: 'a',
+      name: 'A',
+      prompt: 'p',
+      model: null,
+      effort: null,
+      autonomy: 'edits' as const
+    }
+    await service.startRun(flowRequest({ agent }))
+    expect(lastSpec().access.tools).toBe('full')
+  })
+
   it('sessão "a mais recente": continua; sem sessão, começa com o briefing ou explica', async () => {
     const { service, runs, lastSpec } = setup()
     const fresh = { kind: 'new', briefing: '# Briefing ORK-7', includeBriefing: true } as const

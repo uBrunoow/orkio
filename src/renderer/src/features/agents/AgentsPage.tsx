@@ -16,22 +16,23 @@ import { useSlashFocus } from '../../lib/useSlashFocus'
 import { useOverview } from '../overview/useOverview'
 import { useProjects } from '../projects/useProjects'
 import { AgentCard, AgentRow, type AgentHandlers } from './AgentCards'
+import { AgentDetail, type AgentSetupPart } from './AgentDetail'
 import { AgentEditor, type Editing } from './AgentEditor'
+import { OrchestratorCard, OrchestratorDetail, OrchestratorRow } from './OrchestratorAgent'
 import { AgentMemory } from './AgentMemory'
 import { useAgentBadges } from './agent-badges'
 import { agentNow, type AgentFilter, type AgentNow } from './agent-state'
 import { useAgentsState, useCommandNames, useOrchestrator } from './useAgents'
 import { ipcResult } from '../../lib/ipc'
+import { SURFACE } from '../../components/surface'
 
 export function AgentsPage({
-  projectId: currentProjectId = null,
-  onOpenOrchestrator
+  projectId: currentProjectId = null
 }: {
   /** Projeto atual (as tarefas e a carga dos agentes são deste projeto). */
   projectId?: string | null
-  onOpenOrchestrator?: () => void
 } = {}): React.JSX.Element {
-  const projects = useProjects().projects
+  const projects = useProjects().projects?.filter((p) => !p.archived) ?? null
   const [chosen, setChosen] = useState<string | null>(null)
   const projectId =
     chosen ??
@@ -44,6 +45,10 @@ export function AgentsPage({
   const [reviewing, setReviewing] = useState<string | null>(null)
   /** Fase 3: agente com a Memória aberta (no lugar da lista). */
   const [memoryOf, setMemoryOf] = useState<string | null>(null)
+  /** Página aberta no lugar da lista: a chave do agente ou o orquestrador. */
+  const [detailOf, setDetailOf] = useState<string | null>(null)
+  /** O editor abre no Avançado quando a página pediu ferramentas, permissões ou limites. */
+  const [editAdvanced, setEditAdvanced] = useState(false)
   const commands = useCommandNames(projectId)
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
@@ -81,20 +86,18 @@ export function AgentsPage({
               onChange={(value) => {
                 setEditing(null)
                 setMemoryOf(null)
+                setDetailOf(null)
                 setChosen(value)
               }}
             />
-          )}
-          {projectId && onOpenOrchestrator && (
-            <Button variant="outline" onClick={onOpenOrchestrator}>
-              {`Orquestrador: ${orchestrator?.config.enabled ? 'ligado' : 'desligado'}`}
-            </Button>
           )}
           {projectId && (
             <Button
               onClick={() => {
                 setMessage(null)
                 setMemoryOf(null)
+                setDetailOf(null)
+                setEditAdvanced(false)
                 setEditing({ mode: 'new', scope: 'repo', draft: defaultAgent(), key: null })
               }}
             >
@@ -173,19 +176,29 @@ export function AgentsPage({
     .sort((a, b) => ORDER[allNow.get(a.key)!.filter] - ORDER[allNow.get(b.key)!.filter])
   const countOf = (f: Filter): number =>
     (state?.agents ?? []).filter((a) => matchesFilter(a, allNow.get(a.key)!, f)).length
+  const edit = (a: AgentView, part: AgentSetupPart): void => {
+    if (!a.profile || a.scope === 'builtin') return
+    setMessage(null)
+    setEditAdvanced(part === 'tools' || part === 'permissions' || part === 'limits')
+    setEditing({ mode: 'edit', scope: a.scope, draft: a.profile, key: a.key })
+  }
   const handlersFor = (a: AgentView): AgentHandlers => ({
     isReviewing: reviewing === a.key,
     busy,
     now: allNow.get(a.key)!,
     load: orchestrator?.agents.find((l) => l.key === a.key) ?? null,
-    onEdit: () => {
-      if (!a.profile) return
+    onEdit: () => edit(a, 'instructions'),
+    onOpen: () => {
       setMessage(null)
-      setEditing({ mode: 'edit', scope: a.scope, draft: a.profile, key: a.key })
+      setEditing(null)
+      setMemoryOf(null)
+      setDetailOf(a.key)
     },
     onDuplicate: () => {
       if (!a.profile) return
       setMessage(null)
+      setDetailOf(null)
+      setEditAdvanced(false)
       setEditing({
         mode: 'new',
         // Embutido não é gravável: a cópia vai para o repositório (dá para trocar no editor).
@@ -217,12 +230,22 @@ export function AgentsPage({
     }
   })
   const memoryAgent = memoryOf ? (state?.agents.find((a) => a.key === memoryOf) ?? null) : null
+  const detailAgent =
+    detailOf && detailOf !== ORCHESTRATOR
+      ? (state?.agents.find((a) => a.key === detailOf) ?? null)
+      : null
+  const showOrchestrator = detailOf === ORCHESTRATOR && state !== null
   const hasAgents = state !== null && state.agents.length > 0
+  // O orquestrador entra na lista com os agentes (some só quando a busca ou o filtro não casam).
+  const showOrchestratorCard =
+    (filter === 'all' || (filter === 'working' && (orchestrator?.status.working ?? 0) > 0)) &&
+    (!q || normalizeLabel('Orquestrador').includes(q))
+  const orchestratorWorking = (orchestrator?.status.working ?? 0) > 0
 
   return (
     <div role="region" aria-label="Agentes" className="-mx-6 -mt-5 flex flex-col">
       {header}
-      {hasAgents && (
+      {hasAgents && !detailOf && !memoryOf && !editing && (
         <div
           role="toolbar"
           aria-label="Filtros de agentes"
@@ -306,9 +329,38 @@ export function AgentsPage({
           />
         )}
 
+        {showOrchestrator && !editing && (
+          <OrchestratorDetail
+            projectId={projectId}
+            agents={state}
+            onBack={() => setDetailOf(null)}
+          />
+        )}
+
+        {detailAgent && !editing && !memoryAgent && (
+          <AgentDetail
+            key={detailAgent.key}
+            projectId={projectId}
+            view={detailAgent}
+            state={state!}
+            {...handlersFor(detailAgent)}
+            onBack={() => setDetailOf(null)}
+            onEdit={(part) => edit(detailAgent, part)}
+            onSaveProfile={(profile) =>
+              void save({
+                mode: 'edit',
+                scope: detailAgent.scope,
+                draft: profile,
+                key: detailAgent.key
+              })
+            }
+          />
+        )}
+
         {editing && (
           <AgentEditor
             key={editing.key ?? 'novo'}
+            initialAdvanced={editAdvanced}
             editing={editing}
             state={state}
             commands={commands}
@@ -319,7 +371,7 @@ export function AgentsPage({
           />
         )}
 
-        {memoryAgent ? null : state === null ? (
+        {memoryAgent || detailAgent || showOrchestrator ? null : state === null ? (
           <Skeleton className="h-30" aria-label="Carregando agentes" />
         ) : state.agents.length === 0 ? (
           !editing && (
@@ -328,13 +380,17 @@ export function AgentsPage({
               description="Crie um agente (ex.: Ana, implementadora) e atribua tarefas a ele no quadro."
             />
           )
-        ) : visibleAgents.length === 0 ? (
+        ) : visibleAgents.length === 0 && !showOrchestratorCard ? (
           <p className="text-xs text-muted-foreground">Nenhum agente com esse filtro.</p>
         ) : layout === 'rows' ? (
-          <ul
-            aria-label="Lista de agentes"
-            className="overflow-hidden rounded-xl border border-border-soft bg-card"
-          >
+          <ul aria-label="Lista de agentes" className={SURFACE.list}>
+            {showOrchestratorCard && (
+              <OrchestratorRow
+                state={orchestrator}
+                agents={state}
+                onOpen={() => setDetailOf(ORCHESTRATOR)}
+              />
+            )}
             {visibleAgents.map((a) => (
               <AgentRow key={a.key} view={a} state={state} {...handlersFor(a)} />
             ))}
@@ -344,24 +400,35 @@ export function AgentsPage({
             {[
               {
                 title: 'Trabalhando agora',
+                orchestrator: showOrchestratorCard && orchestratorWorking,
                 agents: visibleAgents.filter((a) => allNow.get(a.key)!.filter !== 'stopped')
               },
               {
                 title: filter === 'archived' ? 'Arquivados' : 'Disponíveis',
+                orchestrator: showOrchestratorCard && !orchestratorWorking,
                 agents: visibleAgents.filter((a) => allNow.get(a.key)!.filter === 'stopped')
               }
             ]
-              .filter((g) => g.agents.length > 0)
+              .filter((g) => g.agents.length > 0 || g.orchestrator)
               .map((g) => (
                 <div key={g.title} role="presentation" className="flex flex-col gap-3">
                   <p role="presentation" className="flex items-center gap-2 text-muted-foreground">
                     {g.title}
-                    <span className="tabular text-subtle-foreground">{g.agents.length}</span>
+                    <span className="tabular text-subtle-foreground">
+                      {g.agents.length + (g.orchestrator ? 1 : 0)}
+                    </span>
                   </p>
                   <div
                     role="presentation"
                     className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3"
                   >
+                    {g.orchestrator && (
+                      <OrchestratorCard
+                        state={orchestrator}
+                        agents={state}
+                        onOpen={() => setDetailOf(ORCHESTRATOR)}
+                      />
+                    )}
                     {g.agents.map((a) => (
                       <AgentCard key={a.key} view={a} state={state} {...handlersFor(a)} />
                     ))}
@@ -374,6 +441,9 @@ export function AgentsPage({
     </div>
   )
 }
+
+/** `detailOf` do orquestrador (não é chave de agente: as chaves têm `escopo:`). */
+const ORCHESTRATOR = 'orchestrator'
 
 const PILL =
   'h-7 gap-1.5 rounded-full px-2.5 text-xs font-normal text-muted-foreground hover:bg-muted hover:text-foreground data-[state=on]:bg-muted data-[state=on]:text-foreground'

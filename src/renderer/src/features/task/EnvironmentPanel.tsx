@@ -12,7 +12,7 @@ import { useTaskDiff, useTaskView } from './task-view'
 import { contextTone, folderName, latestContextPercent } from './environment'
 import { ipcResult } from '../../lib/ipc'
 
-const TITLE = 'text-2xs font-medium tracking-wider text-subtle-foreground uppercase'
+const TITLE = 'font-medium label-caps'
 const BAR: Record<'ok' | 'warn' | 'danger', string> = {
   ok: 'bg-ok',
   warn: 'bg-warn',

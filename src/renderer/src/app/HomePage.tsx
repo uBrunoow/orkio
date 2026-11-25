@@ -143,9 +143,7 @@ export function HomePage({
           aria-label="Agora"
           className="overflow-hidden rounded-xl border border-border-soft"
         >
-          <h2 className="border-b border-border-soft bg-surface px-3 py-2 text-2xs tracking-wider text-subtle-foreground uppercase">
-            Agora
-          </h2>
+          <h2 className="border-b border-border-soft bg-surface px-3 py-2 label-caps">Agora</h2>
           <ul className="divide-y divide-border-soft">
             {waiting.map((w) => (
               <TaskButton

@@ -21,8 +21,11 @@ export function SentenceDetail({
   executions,
   details,
   actions,
-  onEdit
+  onEdit,
+  compactSentence = false
 }: {
+  /** A frase vira um resumo pequeno (quando já há um "o que faz" em cima, ex.: Fluxos). */
+  compactSentence?: boolean
   label: string
   sentence: string
   starts: React.ReactNode
@@ -39,7 +42,14 @@ export function SentenceDetail({
       className="flex flex-col gap-5 rounded-xl border border-border-soft bg-card p-4"
     >
       <div className="flex items-start gap-3">
-        <h2 className="min-w-0 flex-1 text-base font-medium" data-testid="detail-sentence">
+        <h2
+          className={
+            compactSentence
+              ? 'min-w-0 flex-1 font-mono text-xs text-muted-foreground'
+              : 'min-w-0 flex-1 text-base font-medium'
+          }
+          data-testid="detail-sentence"
+        >
           {sentence}
         </h2>
         <div className="flex items-center gap-1">

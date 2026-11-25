@@ -5,7 +5,7 @@
 import { useMemo } from 'react'
 import { unwrap, useIpcResource, type IpcResource } from '../../lib/ipc'
 import { useAgentsState } from '../agents/useAgents'
-import { agentKey, isUsableAgent } from '../../../../shared/agent'
+import { agentKey, isUsableAgent, type AgentColor } from '../../../../shared/agent'
 import { BUILTIN_AGENTS } from '../../../../shared/agent-presets'
 import type { VaultView } from '../../../../shared/vault'
 import type { McpView } from '../../../../shared/mcp'
@@ -21,6 +21,9 @@ export function useMcp(): IpcResource<McpView> {
 export interface AgentOption {
   key: string
   name: string
+  /** Para o rosto (`AgentAvatar`); ausente = amarelo. */
+  color?: AgentColor
+  description?: string
 }
 
 /**
@@ -31,12 +34,17 @@ export function useAgentOptions(projectId: string | null): AgentOption[] {
   const state = useAgentsState(projectId)
   const agents = state.value?.agents
   return useMemo(() => {
-    const out: AgentOption[] = (agents ?? [])
-      .filter(isUsableAgent)
-      .map((a) => ({ key: a.key, name: a.profile.name }))
+    const out: AgentOption[] = (agents ?? []).filter(isUsableAgent).map((a) => ({
+      key: a.key,
+      name: a.profile.name,
+      color: a.profile.color,
+      description: a.profile.description
+    }))
     for (const b of BUILTIN_AGENTS) {
       const key = agentKey('builtin', b.id)
-      if (!out.some((o) => o.key === key)) out.push({ key, name: b.name })
+      if (!out.some((o) => o.key === key)) {
+        out.push({ key, name: b.name, color: b.color, description: b.description })
+      }
     }
     return out
   }, [agents])

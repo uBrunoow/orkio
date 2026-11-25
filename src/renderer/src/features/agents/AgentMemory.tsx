@@ -24,6 +24,7 @@ import { ipcResult, unwrap, useIpcResource } from '../../lib/ipc'
 import type { Result } from '../../../../shared/result'
 import { useProjects } from '../projects/useProjects'
 import { AgentAvatar } from './AgentAvatar'
+import { SURFACE } from '../../components/surface'
 
 /** "2026-11-24" → "24/11/2026". */
 function day(date: string): string {
@@ -137,10 +138,7 @@ export function AgentMemory({
   const percent = view ? memoryPercent(view) : 0
 
   return (
-    <section
-      aria-label={`Memória de ${name}`}
-      className="flex flex-col gap-4 rounded-xl border border-border-soft bg-card p-5"
-    >
+    <section aria-label={`Memória de ${name}`} className={SURFACE.section}>
       <div className="flex flex-wrap items-start gap-3">
         <Button size="icon-sm" variant="ghost" aria-label="Voltar para os agentes" onClick={onBack}>
           <BackIcon />

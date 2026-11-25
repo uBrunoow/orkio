@@ -289,6 +289,27 @@ export class ProjectsService {
   }
 
   /** Só remove do Orkio: nenhum arquivo é tocado. */
+  /** Arquiva ou desarquiva (nada é apagado; o quadro, os fluxos e o histórico ficam). */
+  async setArchived(projectId: string, archived: boolean): Promise<{ ok: boolean }> {
+    if (!this.findProject(projectId)) return { ok: false }
+    try {
+      await this.deps.store.update((config) => ({
+        ...config,
+        projects: config.projects.map((p) => {
+          if (p.id !== projectId) return p
+          const next = { ...p }
+          // Ativo = sem o campo (o formato antigo continua igual no disco).
+          if (archived) next.archived = true
+          else delete next.archived
+          return next
+        })
+      }))
+    } catch {
+      return { ok: false }
+    }
+    return { ok: true }
+  }
+
   async remove(projectId: string): Promise<{ ok: boolean }> {
     if (!this.findProject(projectId)) return { ok: false }
     try {
@@ -653,7 +674,8 @@ export class ProjectsService {
       local: local.local,
       health: local.health ?? remote ?? { state: 'checking' },
       notices: noticesFor(project.repo),
-      notionProject: project.notionProject
+      notionProject: project.notionProject,
+      archived: project.archived === true
     }
   }
 }

@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { TerminalIcon } from '../../components/icons'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScreenTitle } from '../../components/ScreenTitle'
 import { TaskFlowSection } from '../task-flows/TaskFlowSection'
@@ -177,6 +179,18 @@ export function TaskPanel({
             }
           />
           <StageSelector />
+          {view.openTerminal && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={view.openTerminal}
+              aria-keyshortcuts="Control+Shift+J"
+              title="Terminal na pasta da tarefa (Ctrl/⌘+Shift+J)"
+            >
+              <TerminalIcon />
+              Terminal
+            </Button>
+          )}
         </ScreenBarEnd>
         {layout === 'columns' ? (
           <div className="flex min-h-0 flex-1">

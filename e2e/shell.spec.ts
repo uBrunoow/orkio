@@ -101,11 +101,12 @@ test('menus da barra e dock vêm do registro; atalhos visíveis', async () => {
   await page.keyboard.press('Escape')
   await expect(help).toBeHidden()
 
-  // Dock: Quadro, Agentes e Configurações (e o botão da lista de tarefas fora do grupo).
+  // Dock: Quadro, Agentes, Terminais e Configurações (o tema e a lista de tarefas não são telas).
   const telas = page
     .getByRole('navigation', { name: 'Navegação principal' })
     .getByRole('group', { name: 'Telas' })
-  await expect(telas.getByRole('button')).toHaveCount(3)
+  await expect(telas.getByRole('listitem')).toHaveCount(4)
+  await expect(telas.getByRole('button', { name: /^Mudar para o tema/ })).toBeVisible()
   expect(await cspViolations(page)).toEqual([])
 })
 

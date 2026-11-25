@@ -41,7 +41,9 @@ import type { AutomationStatus } from '../automation'
 import {
   parseUsageHold,
   USAGE_HOLD_DEFAULT,
-  type ClaudeUsageView, type UsageHold } from '../claude-usage'
+  type ClaudeUsageView,
+  type UsageHold
+} from '../claude-usage'
 import type {
   BoardCard,
   BoardHistoryEntry,
@@ -612,6 +614,12 @@ export const ORKIO_API = {
           cancelled: false,
           error: { code: 'project_not_found', message: 'Projeto inválido.' }
         }
+      }),
+      /** Arquiva/desarquiva: guardado, sem automações nem lugar no quadro; nada é apagado. */
+      setArchived: call<(projectId: string, archived: boolean) => Promise<{ ok: boolean }>>()({
+        channel: 'projects:set-archived',
+        args: [projectId, bool],
+        fallback: { ok: false }
       }),
       /** Só remove do Orkio; nunca apaga arquivos. */
       remove: call<(projectId: string) => Promise<{ ok: boolean }>>()({
@@ -1238,6 +1246,16 @@ export const ORKIO_API = {
       list: call<(projectId: string, taskId: string) => Promise<Result<TaskTerminals>>>()({
         channel: 'terminal:list',
         args: [projectId, taskId]
+      }),
+      /** Terminais de todas as tarefas (tela Terminais). */
+      all: call<() => Promise<Result<TaskTerminals>>>()({
+        channel: 'terminal:all',
+        args: []
+      }),
+      /** Abre um shell na pasta do projeto (tela Terminais; tarefa = `PROJECT_TERMINAL_TASK`). */
+      openInProject: call<(projectId: string) => Promise<Result<TerminalView>>>()({
+        channel: 'terminal:open-project',
+        args: [projectId]
       }),
       /** Abre um shell na pasta de trabalho da tarefa. */
       open: call<(projectId: string, taskId: string) => Promise<Result<TerminalView>>>()({

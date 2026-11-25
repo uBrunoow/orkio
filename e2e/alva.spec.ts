@@ -160,7 +160,7 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
     .click()
   await expect(card(page)).toBeVisible()
 
-  await navTo(page, 'Fluxos')
+  await navTo(page, 'alva-flow')
   const check = page.getByRole('region', { name: 'Pronto para o alva-flow?' })
   await expect(check.getByTestId('alva-ready')).toHaveText('Falta configurar', { timeout: 30_000 })
   const items = check.getByRole('list', { name: 'Itens da pré-checagem' })
@@ -175,7 +175,7 @@ test('critério 1: a pré-checagem mostra o que falta e, completo, fica pronta',
   await close()
   const { page: p2 } = await open({ plugin: true, mcpBacklog: true, gh: 'ok' })
   await goToBoard(p2)
-  await navTo(p2, 'Fluxos')
+  await navTo(p2, 'alva-flow')
   const check2 = p2.getByRole('region', { name: 'Pronto para o alva-flow?' })
   await expect(check2.getByTestId('alva-ready')).toHaveText('Pronto', { timeout: 30_000 })
   await expect(p2.getByRole('region', { name: 'alva-flow', exact: true })).toContainText('v1.0.25')

@@ -1458,9 +1458,9 @@ export async function navTo(page: Page, name: string): Promise<void> {
       .click()
     return
   }
-  if (name === 'Fluxos') {
+  if (name === 'Fluxos' || name === 'alva-flow') {
     await openSettings(page, 'Quadro e automações')
-    await page.getByRole('tab', { name: 'Fluxos', exact: true }).click()
+    await page.getByRole('tab', { name, exact: true }).click()
     return
   }
   const section = name === 'Etapas e automações' ? 'Quadro e automações' : name

@@ -40,3 +40,22 @@ export function nextDisabled(
   const without = current.filter((n) => n !== name)
   return [...new Set(enabled ? without : [...without, name])]
 }
+
+/** Estado de uma origem inteira: todas ligadas, todas desligadas ou parte. */
+export function groupState(group: SkillGroup): 'on' | 'off' | 'partial' {
+  const off = group.skills.filter((s) => s.disabled).length
+  return off === 0 ? 'on' : off === group.skills.length ? 'off' : 'partial'
+}
+
+/** Lista completa de desligadas depois de ligar (`enabled`) ou desligar todas as `names`. */
+export function nextDisabledMany(
+  skills: readonly SkillEntry[],
+  missing: readonly string[],
+  names: readonly string[],
+  enabled: boolean
+): string[] {
+  const set = new Set(names)
+  const current = [...skills.filter((s) => s.disabled).map((s) => s.name), ...missing]
+  const without = current.filter((n) => !set.has(n))
+  return [...new Set(enabled ? without : [...without, ...names])]
+}

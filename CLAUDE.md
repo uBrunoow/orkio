@@ -44,7 +44,7 @@ Claude Code. Hoje existem:
   filas, conexões só pelo estado e versões de git/gh/claude. Nada de conta, token, título ou caminho
   (teste prova). Ver também `docs/adr/` (decisões de segurança).
 - **Interface (reestruturação, fase 9):** menu com Quadro, Agentes e Configurações
-  (Ctrl/Cmd+1 Quadro, 2 Quadro de todos os projetos, 3 Agentes, 4 Configurações), numa coluna larga
+  (Ctrl/Cmd+1 Quadro, 2 Quadro de todos os projetos, 3 Agentes, 4 Configurações, 5 Terminais), numa coluna larga
   com seletor de projeto, "Buscar tarefa" (Command Palette, Ctrl/Cmd+K), "Falta N passos ·
   continuar" e as listas "Esperando você", "Rodando" e "A fazer"
   (`app/task-groups.ts`); barra superior com o caminho, as fases da tarefa e o sino. A tarefa abre
@@ -499,6 +499,10 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - **Carga da config:** quem cria o `ConfigStore` carrega (`configReady` na composição; o IPC espera
   `ready`); o aviso de carga fica em `ConfigStore.loadWarning`.
 - **Remover** só tira do `orkio-config.json`; nunca toca em arquivos do usuário.
+- **Arquivar** (`projects.setArchived`, `StoredProject.archived` opcional, sem migração; ausente =
+  ativo): o projeto fica guardado com quadro, fluxos e histórico, mas sai das automações
+  (`automationProjectIds`), do seletor, do quadro e da lista lateral (o App filtra); Configurações ›
+  Projetos mostra Ativos e Arquivados com Arquivar/Desarquivar no menu.
 - **Config não secreta:** sempre via `ConfigStore` (nada de `fs.writeFile` direto). Mudou o
   formato? Suba `ORKIO_CONFIG_VERSION` e escreva a migração `v → v+1` com teste. Migração é
   obrigatória (faltou uma → o `ConfigStore` nem é criado; teste exige todas as chaves) e
@@ -513,8 +517,31 @@ Leia `brand/BRAND.md` antes de mexer em UI.
   (`docs/superpowers/specs/2026-11-23-orkio-ui-mockup.html`) como variáveis CSS ligadas ao Tailwind
   (`@theme inline`): `bg-background < bg-surface < bg-card < bg-muted`, `text-foreground /
 text-muted-foreground / text-subtle-foreground`, `border-border` (controles) e `border-border-soft`
-  (divisórias), `brand`/`brand-tint`, `ok`/`warn`/`danger` (+ `-tint`). Só escuro.
-- Cores: hex só no `globals.css`. Nos componentes, só as classes do tema (nada de `zinc-800`, hex
+  (divisórias), `brand`/`brand-tint`, `ok`/`warn`/`danger` (+ `-tint`), `on-tone` (texto sobre tom
+  cheio). Escuro (padrão, `:root`) e claro (`html[data-theme='light']`); componente novo confere os
+  dois. Aparência (`features/settings/appearance.ts`) e Layout (`layout-prefs.ts`) são só deste
+  computador (`createLocalPref`, `localStorage`) e viram atributos no `<html>` (`data-theme`,
+  `data-text-size`, `data-tracking`, `data-ui-font`, `data-code-font`, `data-wallpaper`,
+  `data-page-width`); a classe `dark` só no escuro. Fundos (`--wp-*`, `.orkio-wallpaper`) em
+  `brand.css`, feitos dos tokens.
+- Peças repetidas: `SURFACE.section`/`SURFACE.list` (`components/surface.ts`) para cartão de
+  seção e caixa de lista; rótulo em caixa-alta = utilitário `label-caps` (`globals.css`).
+- Agentes: o card abre a página do agente (`AgentDetail.tsx`: cabeçalho, "Como tem ido" e
+  Configuração em linhas: Instruções, Modelo (troca ali mesmo), Memória, Ferramentas, Permissões,
+  Limites; embutido = cadeado); o orquestrador entra na lista como um agente
+  (`OrchestratorAgent.tsx`, rosto fixo) com a página no mesmo formato.
+- Terminais (dock, Ctrl/⌘+5, `features/terminal/TerminalsPage.tsx`): shell na pasta do projeto
+  atual (`terminal.openInProject`, tarefa `PROJECT_TERMINAL_TASK`), abre um ao entrar; "Das
+  tarefas" leva aos terminais das tarefas (`terminal.all`). A tela da tarefa tem o botão "Terminal".
+- Configurações › Geral (`GeneralSection.tsx`): resumo do que roda, modelo padrão (seletor com o
+  logo do Claude, `--claude`), permissões sem agente em cartões (Só lê | Pergunta antes de editar |
+  Edita sozinho; `DEFAULT_AUTONOMIES`, "Só lê" = execução só de leitura no `ClaudeService`),
+  projetos, decisões lembradas, privacidade ("Sempre", sem switch falso) e atualizações/sobre.
+  Raciocínio do seletor de modelo = `EffortSlider` (régua de pontos, grupo de rádio).
+- Telas centralizadas: `PAGE_WIDTH` (`form`/`list`/`wide`, variáveis `--page-*`); só o Quadro e o
+  terminal usam a janela toda (`PageView.width`). Ajustes curtos em `SettingsGroup`/`SettingRow`/
+  `SwitchRow` (`components/SettingRows.tsx`); escolha por figura em `PictureChoices`.
+- Cores: hex só no `globals.css` (exceção: as cores ANSI do terminal, `TerminalView.tsx`). Nos componentes, só as classes do tema (nada de `zinc-800`, hex
   ou `rgb()`). Única exceção: `backgroundColor` do `BrowserWindow` no main (espelha o fundo do tema).
 - Inter = UI; **Jost só para logo e títulos de destaque** (`font-display`); mono (`font-mono`) para IDs, branches, comandos e caminhos.
 - Fontes vêm de `@fontsource` (`styles/fonts.css`). Nunca CDN. O

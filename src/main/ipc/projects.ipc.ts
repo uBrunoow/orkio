@@ -9,7 +9,7 @@ import type { Impl } from './register'
 export function projectsHandlers(
   service: Pick<
     ProjectsService,
-    'list' | 'revalidate' | 'pickFolder' | 'create' | 'relocate' | 'remove'
+    'list' | 'revalidate' | 'pickFolder' | 'create' | 'relocate' | 'remove' | 'setArchived'
   >
 ): Impl<typeof ORKIO_API.projects> {
   return {
@@ -18,6 +18,7 @@ export function projectsHandlers(
     pickFolder: () => service.pickFolder(),
     create: (input) => service.create(input),
     relocate: (projectId) => service.relocate(projectId),
-    remove: (projectId) => service.remove(projectId)
+    remove: (projectId) => service.remove(projectId),
+    setArchived: (projectId, archived) => service.setArchived(projectId, archived)
   }
 }

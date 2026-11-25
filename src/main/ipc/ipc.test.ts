@@ -439,7 +439,8 @@ function fakeProjects() {
     pickFolder: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
     create: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
     relocate: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
-    remove: vi.fn(async () => ({ ok: true }))
+    remove: vi.fn(async () => ({ ok: true })),
+    setArchived: vi.fn(async () => ({ ok: true }))
   }
 }
 

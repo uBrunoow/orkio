@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { McpServer } from '../../../../shared/mcp'
 import {
+  mcpBrand,
   argsFromText,
   bindingProblem,
   checkDraft,
@@ -107,5 +108,16 @@ describe('auxiliares', () => {
   it('toggleAgent', () => {
     expect(toggleAgent(['a'], 'b', true)).toEqual(['a', 'b'])
     expect(toggleAgent(['a', 'b'], 'a', false)).toEqual(['b'])
+  })
+})
+
+describe('mcpBrand', () => {
+  it('acha a marca pelo nome, endereço ou comando', () => {
+    expect(mcpBrand('GitHub', 'https://api.githubcopilot.com/mcp/')).toBe('github')
+    expect(mcpBrand('aws-knowledge-mcp-server', 'knowledge-mcp.global.api.aws')).toBe('aws')
+    expect(mcpBrand('plugin:alva-flow:chrome-devtools', 'npx')).toBe('browser')
+    expect(mcpBrand('context7', 'mcp.context7.com')).toBe('docs')
+    expect(mcpBrand('asaas', 'docs.asaas.com')).toBe('shop')
+    expect(mcpBrand('meu-servidor', 'npx -y @x/coisa')).toBeNull()
   })
 })

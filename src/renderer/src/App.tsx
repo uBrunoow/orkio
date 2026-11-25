@@ -38,11 +38,15 @@ import {
   MAX_DESKTOPS,
   activeDesktop,
   desktopsReducer,
+  type DesktopsAction,
   loadSavedDesktops,
   serializeDesktops,
   visiblePanels
 } from './app/desktops'
 import { DesktopPanels } from './app/DesktopPanels'
+import { PAGE_WIDTH } from './components/page-width'
+import { cn } from '@/lib/utils'
+import { layoutPref } from './features/settings/layout-prefs'
 import { ArrangementMenu, DesktopSwitcher, RenameDesktopDialog } from './app/DesktopBar'
 import { useSources } from './app/sources'
 import { useProjects } from './features/projects/useProjects'
@@ -75,12 +79,23 @@ function routeProjectId(route: Route | null): string | undefined {
 }
 
 export function App(): React.JSX.Element | null {
-  const [desktops, dispatchDesktops] = useReducer(desktopsReducer, EMPTY_DESKTOPS)
+  const [desktops, rawDispatchDesktops] = useReducer(desktopsReducer, EMPTY_DESKTOPS)
+  const layout = layoutPref.use()
+  // Desktop novo nasce no arranjo escolhido em Configurações › Layout.
+  const dispatchDesktops = useCallback(
+    (a: DesktopsAction) =>
+      rawDispatchDesktops(
+        a.type === 'create' && !a.arrangement
+          ? { ...a, arrangement: layoutPref.read().newDesktop }
+          : a
+      ),
+    []
+  )
   const desktop = activeDesktop(desktops)
   const tabs = desktop.tabs
   const dispatch = useCallback(
     (action: TabsAction) => dispatchDesktops({ type: 'tabs', action }),
-    []
+    [dispatchDesktops]
   )
   const [desktopsOpen, setDesktopsOpen] = useState(false)
   const [renaming, setRenaming] = useState(false)
@@ -92,7 +107,12 @@ export function App(): React.JSX.Element | null {
     [dispatch]
   )
   const isMac = detectMac()
-  const projects = useProjects().projects
+  const allProjects = useProjects().projects
+  // Arquivados ficam só em Configurações › Projetos: fora do seletor, do quadro e da lista lateral.
+  const projects = useMemo(
+    () => (allProjects ? allProjects.filter((p) => !p.archived) : null),
+    [allProjects]
+  )
   /** Projetos com página no Notion (onde há tarefas para buscar). */
   const linkedProjects = useMemo(() => (projects ?? []).filter((p) => p.notionProject), [projects])
   const [chosenProject, setChosenProject] = useState<string | null>(() =>
@@ -143,7 +163,7 @@ export function App(): React.JSX.Element | null {
         groups: sidebar.groups
       })
     })
-  }, [projects, linkedProject, sidebar.snapshot, sidebar.groups, dispatch])
+  }, [projects, linkedProject, sidebar.snapshot, sidebar.groups, dispatch, dispatchDesktops])
 
   useEffect(() => {
     if (!ready || tabs.tabs.length === 0) return
@@ -330,9 +350,21 @@ export function App(): React.JSX.Element | null {
       content: (
         <ScreenFrame key={`${desktop.id}:${tab.id}`} crumbs={view.crumbs}>
           {view.fullHeight ? (
-            <div className="h-full min-h-0">{keyed}</div>
+            <div
+              className={cn(
+                'h-full min-h-0',
+                view.width === 'wide' && cn(PAGE_WIDTH.wide, 'border-x border-border-soft'),
+                view.width === 'list' && PAGE_WIDTH.list
+              )}
+            >
+              {keyed}
+            </div>
           ) : (
-            <div className="h-full min-h-0 overflow-y-auto px-6 py-5">{keyed}</div>
+            <div className="h-full min-h-0 overflow-y-auto px-6 py-5">
+              <div className={view.width === 'full' ? undefined : PAGE_WIDTH[view.width ?? 'list']}>
+                {keyed}
+              </div>
+            </div>
           )}
         </ScreenFrame>
       )
@@ -438,8 +470,11 @@ export function App(): React.JSX.Element | null {
             end={<ArrangementMenu arrangement={desktop.arrangement} dispatch={dispatchDesktops} />}
           />
           <DesktopPanels
+            desktopId={desktop.id}
+            desktopIndex={desktops.desktops.findIndex((d) => d.id === desktop.id)}
             arrangement={desktop.arrangement}
             panels={panels}
+            layout={layout}
             onActivate={(id) => dispatch({ type: 'activate', id })}
           />
         </main>

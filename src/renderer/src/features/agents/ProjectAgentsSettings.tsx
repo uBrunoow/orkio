@@ -8,6 +8,8 @@ import { AssignRules } from './AssignRules'
 import { useAgentsState } from './useAgents'
 import { OrchestratorSection } from './OrchestratorSection'
 import { ipcResult } from '../../lib/ipc'
+import { plural } from '../../lib/format'
+import { isUsableAgent } from '../../../../shared/agent'
 
 /**
  * Configurações › Agentes do projeto: o orquestrador (quem puxa tarefas da fila e passa adiante) e
@@ -20,11 +22,26 @@ export function ProjectAgentsSettings({ projectId }: { projectId: string }): Rea
   const error = message?.tone === 'error' ? message.text : (agents.error?.message ?? null)
 
   return (
-    <section aria-label="Agentes" className={cn('flex flex-col gap-[18px]', PAGE_WIDTH.list)}>
-      <PageHeader
-        title="Agentes do projeto"
-        subtitle="Quem pega as tarefas do quadro e para quem elas vão a cada coluna."
-      />
+    <section aria-label="Agentes" className={cn('flex flex-col gap-6', PAGE_WIDTH.form)}>
+      <div className="flex flex-col gap-2">
+        <PageHeader
+          title="Agentes do projeto"
+          subtitle="Quem pega as tarefas do quadro e para quem elas vão a cada coluna. Os perfis ficam em Agentes."
+        />
+        {state && (
+          <p className="text-xs text-muted-foreground tabular-nums">
+            {plural(state.agents.filter(isUsableAgent).length, 'agente pronto', 'agentes prontos')}
+            <span aria-hidden="true" className="px-1.5 text-subtle-foreground">
+              ·
+            </span>
+            {plural(state.rules.length, 'regra de atribuição', 'regras de atribuição')}
+            <span aria-hidden="true" className="px-1.5 text-subtle-foreground">
+              ·
+            </span>
+            {plural(state.stages.length, 'coluna', 'colunas')} no quadro
+          </p>
+        )}
+      </div>
       {error && <Alert tone="danger">{error}</Alert>}
       {message?.tone === 'ok' && (
         <p role="status" className="text-xs text-muted-foreground">

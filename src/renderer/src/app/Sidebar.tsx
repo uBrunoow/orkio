@@ -56,10 +56,7 @@ function Section({
 }): React.JSX.Element {
   return (
     <div role="group" aria-label={title} className="flex flex-col">
-      <div
-        aria-hidden="true"
-        className="flex justify-between px-2 pt-3 pb-1 text-[10.5px] tracking-[0.08em] text-subtle-foreground uppercase"
-      >
+      <div aria-hidden="true" className="flex justify-between px-2 pt-3 pb-1 label-caps">
         <span>{title}</span>
         {count !== undefined && <span className="font-mono">{count}</span>}
       </div>

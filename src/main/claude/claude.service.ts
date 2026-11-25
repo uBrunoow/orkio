@@ -517,10 +517,17 @@ export class ClaudeService {
           return null
         }
       }
+      // Fase 4: padrão das sessões (Configurações › Geral) por último, antes do padrão do CLI.
+      const prefs = parsePreferences(this.deps.config.get().preferences)
       let access: RunSpec['access']
       // Agente que só lê (Fase 3): a execução roda como o passo só de leitura, venha de onde vier
       // (mensagem, "Rodar", passo de fluxo); a entrega some (o `checkAgentFlow` já recusa o fluxo).
-      if (request.access.tools === 'read_only' || request.agent?.autonomy === 'read_only') {
+      // Sem agente, o "Só lê" das Configurações › Geral faz o mesmo.
+      if (
+        request.access.tools === 'read_only' ||
+        request.agent?.autonomy === 'read_only' ||
+        (!request.agent && prefs.autonomy === 'read_only')
+      ) {
         access = { tools: 'read_only', github: read() }
       } else if (request.access.github === 'read') access = { tools: 'full', github: read() }
       else {
@@ -535,8 +542,6 @@ export class ClaudeService {
       }
       // Mensagem/passo > agente > padrão. No agente, `null` = sem preferência (não bloqueia).
       const agent = request.agent
-      // Fase 4: padrão das sessões (Configurações › Geral) por último, antes do padrão do CLI.
-      const prefs = parsePreferences(this.deps.config.get().preferences)
       const resolved = resolveRuntime(
         request.runtime,
         agent
