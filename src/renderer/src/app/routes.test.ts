@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { initialRouter, routeForTaskRef, routerReducer } from './routes'
+import {
+  boardRoute,
+  boardRouteAsIs,
+  initialRouter,
+  parseRoute,
+  routeForTaskRef,
+  routerReducer
+} from './routes'
 
 describe('routerReducer', () => {
   it('toda navegação gera chave nova, inclusive para a mesma rota (sai de subtelas)', () => {
@@ -60,5 +67,52 @@ describe('routeForTaskRef', () => {
     const route = routeForTaskRef({ projectId: 'p2', taskId: 't9' })
     expect(route).toEqual({ name: 'task', projectId: 'p2', taskId: 't9' })
     expect('section' in route).toBe(false)
+  })
+})
+
+describe('boardRoute / parseRoute do Quadro', () => {
+  it('normaliza o recorte', () => {
+    expect(boardRoute({ projectIds: ['a', 'a'] })).toEqual({ name: 'board', projectId: 'a' })
+    expect(boardRoute({ projectId: 'x', projectIds: ['a', 'b'] })).toEqual({
+      name: 'board',
+      projectIds: ['a', 'b']
+    })
+    expect(boardRoute({ projectIds: [] })).toEqual({ name: 'board' })
+    expect(boardRoute({ projectIds: 'all', view: 'list', filter: 'review' })).toEqual({
+      name: 'board',
+      projectIds: 'all',
+      view: 'list',
+      filter: 'review'
+    })
+  })
+  it('parseRoute aceita só o que o tipo aceita', () => {
+    expect(
+      parseRoute({ name: 'board', projectIds: ['a', 7, 'b'], view: 'grade', filter: 'x' })
+    ).toEqual({ name: 'board', projectIds: ['a', 'b'] })
+    expect(parseRoute({ name: 'board', projectIds: 'all', filter: 'attention' })).toEqual({
+      name: 'board',
+      projectIds: 'all',
+      filter: 'attention'
+    })
+  })
+})
+
+describe('boardRouteAsIs', () => {
+  it('Quadro sem recorte mantém o recorte da aba (não o projeto)', () => {
+    expect(
+      boardRouteAsIs(
+        { name: 'board', projectIds: 'all', view: 'list', filter: 'active' },
+        { name: 'board' }
+      )
+    ).toEqual({ name: 'board', projectIds: 'all', view: 'list', filter: 'active' })
+    expect(
+      boardRouteAsIs({ name: 'board', projectId: 'a', view: 'list' }, { name: 'board' })
+    ).toEqual({ name: 'board', view: 'list' })
+  })
+  it('rota com recorte ou outra tela não muda', () => {
+    expect(
+      boardRouteAsIs({ name: 'board', projectIds: 'all' }, { name: 'board', projectId: 'b' })
+    ).toEqual({ name: 'board', projectId: 'b' })
+    expect(boardRouteAsIs({ name: 'agents' }, { name: 'board' })).toEqual({ name: 'board' })
   })
 })

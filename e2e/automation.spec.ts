@@ -321,7 +321,10 @@ test('GraphQL recusado: o Quadro avisa e a PR continua com o estado da REST', as
   await expect(
     page.getByRole('status').filter({ hasText: 'não tem permissão para ler parte dos detalhes' })
   ).toBeVisible({ timeout: 15_000 })
-  await expect(card(page).getByTestId('card-status')).toBeVisible()
+  // Sem o GraphQL, os comentários da PR são desconhecidos: fica o estado da REST.
+  await expect(card(page).getByRole('button', { name: 'Abrir a PR #7 no GitHub' })).toContainText(
+    '#7 · Esperando review'
+  )
   expect(await cspViolations(page)).toEqual([])
 })
 

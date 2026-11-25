@@ -104,10 +104,10 @@ describe('registro de comandos', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('Ctrl+número segue o dock: Quadro, Tarefas, Agentes, Configurações; Ctrl+5 não faz nada', () => {
+  it('Ctrl+número: Quadro, Quadro de todos os projetos, Agentes, Configurações; Ctrl+5 nada', () => {
     const go = (n: string) => fire(key(n, { ctrlKey: true })).ctx.navigate.mock.calls[0]?.[0]
     expect(go('1')).toEqual({ name: 'board' })
-    expect(go('2')).toEqual({ name: 'tasks' })
+    expect(go('2')).toEqual({ name: 'board', projectIds: 'all' })
     expect(go('3')).toEqual({ name: 'agents' })
     expect(go('4')).toEqual({ name: 'settings' })
     expect(fire(key('5', { ctrlKey: true })).command).toBeNull()
@@ -151,8 +151,8 @@ describe('registro de comandos', () => {
     expect(
       fire(key('2', { ctrlKey: true, altKey: true }), { desktops }).ctx.desktop
     ).toHaveBeenCalledWith({ type: 'switch', id: 'd2' })
-    // Ctrl+2 continua sendo Tarefas (Alt faz diferença).
-    expect(fire(key('2', { ctrlKey: true }), { desktops }).command?.id).toBe('go:tasks')
+    // Ctrl+2 continua sendo o Quadro de todos os projetos (Alt faz diferença).
+    expect(fire(key('2', { ctrlKey: true }), { desktops }).command?.id).toBe('go:board:all')
     expect(fire(key('3', { ctrlKey: true, altKey: true }), { desktops }).command).toBeNull()
     expect(fire(key('1', { ctrlKey: true, altKey: true }), { desktops }).command).toBeNull() // já está
     expect(
@@ -199,6 +199,7 @@ describe('registro de comandos', () => {
     expect(ids(state())).not.toContain('connect-notion')
     expect(ids(state({ notionConnected: false }))).toContain('connect-notion')
     expect(ids(state({ hasProject: false }))).not.toContain('go:board')
+    expect(ids(state({ hasProject: false }))).not.toContain('go:board:all')
     expect(ids(state({ hasProject: false }))).not.toContain('go:settings:board')
     expect(ids(state())).not.toContain('palette') // a paleta não lista a si mesma
     expect(ids(state({ waiting: 2 }))).toContain('open-waiting')

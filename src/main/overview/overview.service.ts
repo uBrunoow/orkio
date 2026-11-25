@@ -167,7 +167,7 @@ export class OverviewService {
   }
 
   /**
-   * Fase 1: kanban derivado pessoal. As tarefas em que o Orkio mexeu (esperando você, rodando, com
+   * Fase 1: situação das tarefas (raias do Quadro). As tarefas em que o Orkio mexeu (esperando você, rodando, com
    * PR, fluxo terminado nos últimos 7 dias), cada uma na raia calculada do fluxo e da PR. Só dados
    * locais e caches (sem rede).
    */

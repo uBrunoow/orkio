@@ -6,6 +6,17 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Mudado
+
+- **Um Quadro só:** a tela Tarefas saiu e o Quadro ficou com o que ela tinha de bom. Cada card
+  mostra em que pé está (Precisa de você, Trabalhando, Aguardando, Em revisão) e a PR com o que
+  falta (CI falhando, mudanças pedidas, conflito, comentários). Os filtros Precisa de você, Em
+  andamento e Em revisão escondem cards sem sumir com as colunas, e a Lista agrupa por coluna.
+- **Vários projetos no Quadro:** escolha um, vários ou todos. Com mais de um, as colunas são o papel
+  da etapa (A fazer, Trabalhando, Em revisão…) e cada card mostra o projeto. Arrastar move a
+  tarefa para a etapa certa do projeto dela. Ctrl/⌘2 abre o Quadro com todos os projetos, e abas
+  antigas da tela Tarefas viram esse Quadro.
+
 ## [0.2.17] - 2026-11-25
 
 ### Adicionado

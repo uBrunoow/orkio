@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import {
   createUserDataDir,
   cspViolations,
@@ -16,9 +16,10 @@ import {
 } from './fixtures'
 
 /**
- * Fase 1 — Tarefas: "Como deve rodar?" (padrão da coluna pela tela Tarefas, troca por tarefa),
- * o fluxo nativo "Rodar uma vez" sem o alva-flow (implementa → revisão por outro agente → gate do
- * diff) e o kanban derivado (a tarefa aparece em "Precisa de você" calculada do fluxo).
+ * Quadro: badge "Precisa de você" e filtros pela situação; "Como deve rodar?" (padrão da coluna
+ * pelo menu do Quadro, troca por tarefa) e o fluxo nativo "Rodar uma vez" sem o alva-flow
+ * (implementa → revisão por outro agente → gate do diff). A tarefa aparece com o badge "Precisa de
+ * você" calculado do fluxo.
  */
 const NOTION_TOKEN = 'ntn_E2E_TASKS_TOKEN_abcdef123456'
 const PROJECT = 'proj-tasks'
@@ -44,13 +45,6 @@ function git(cwd: string, ...args: string[]): string {
   }).toString()
 }
 
-function lane(page: Page, name: string) {
-  return page.getByRole('list', { name: 'Raias das tarefas' }).getByRole('listitem', {
-    name,
-    exact: true
-  })
-}
-
 test.beforeAll(() => {
   userDataDir = createUserDataDir()
   work = realpathSync(createUserDataDir())
@@ -73,7 +67,7 @@ test.afterAll(async () => {
   removeDir(work)
 })
 
-test('Tarefas: modelo na coluna, "Rodar uma vez" nativo com revisor e o kanban derivado', async () => {
+test('Como deve rodar: modelo na coluna pelo Quadro, "Rodar uma vez" nativo com revisor e o badge no card', async () => {
   orkio = await launchOrkio(userDataDir, { validTokens: [NOTION_TOKEN] }, { startPage: 'projects' })
   const { page } = orkio
   await page.evaluate((t) => window.orkio.notion.connect({ kind: 'token', token: t }), NOTION_TOKEN)
@@ -84,20 +78,11 @@ test('Tarefas: modelo na coluna, "Rodar uma vez" nativo com revisor e o kanban d
     .click()
   await expect(page.getByRole('listitem', { name: ORK2, exact: true })).toBeVisible()
 
-  // Tarefas vazia = ponto de partida: escolher como a coluna de trabalho roda.
-  await navTo(page, 'Tarefas')
-  await expect(page.getByRole('heading', { name: 'Nada em andamento ainda' })).toBeVisible()
-  const start = page.getByRole('region', { name: 'Começar de um modelo' })
-  await expect(start.getByRole('radio', { name: /^Rodar uma vez/ })).toHaveAttribute(
-    'aria-checked',
-    'true'
-  )
-  await start.getByRole('button', { name: 'Usar em Em andamento' }).click()
-  await expect(start.getByRole('status')).toContainText('Rodar uma vez')
-
-  // "Como as colunas rodam" mostra o padrão salvo (Simples | Avançado).
-  await page.getByRole('button', { name: 'Como as colunas rodam' }).click()
+  // "Como as colunas rodam" pelo menu do Quadro: a coluna aberta é a de trabalho (Em andamento).
+  await page.getByRole('button', { name: 'Mais ações do quadro' }).click()
+  await page.getByRole('menuitem', { name: 'Como as colunas rodam' }).click()
   const dialog = page.getByTestId('column-setups')
+  await dialog.getByRole('radio', { name: /^Rodar uma vez/ }).click()
   await expect(dialog.getByRole('radio', { name: /^Rodar uma vez/ })).toHaveAttribute(
     'aria-checked',
     'true'
@@ -176,20 +161,23 @@ test('Tarefas: modelo na coluna, "Rodar uma vez" nativo com revisor e o kanban d
   // A memória do revisor entra no início da conversa dele.
   expect(String(review!['appendSystemPrompt'])).toContain('## Sua memória')
 
-  // Kanban derivado: a tarefa espera você (o gate do diff), sem estado manual.
-  await navTo(page, 'Tarefas')
-  const needsYou = lane(page, 'Precisa de você')
-  await expect(needsYou.getByRole('listitem', { name: 'ORK-2' })).toBeVisible({ timeout: 20_000 })
-  await expect(needsYou.getByRole('listitem', { name: 'ORK-2' })).toContainText('Conferir o diff')
-  await page.getByRole('button', { name: 'Precisa de atenção' }).click()
-  await expect(needsYou.getByRole('listitem', { name: 'ORK-2' })).toBeVisible()
-  // Lista: a mesma tarefa, com o estado.
+  // Badge no card: a tarefa espera você (o gate do diff), sem estado manual; os filtros a acham.
+  await navTo(page, 'Quadro')
+  const ork2 = page.getByRole('listitem', { name: ORK2, exact: true })
+  await expect(ork2.getByTestId('card-lane')).toHaveText('Precisa de você', { timeout: 20_000 })
+  await expect(ork2.getByTestId('card-detail')).toContainText('Conferir o diff')
+  await expect(page.getByTestId('attention-count')).toHaveText('1')
+  await page.getByRole('button', { name: /^Precisa de você/ }).click()
+  await expect(ork2).toBeVisible()
+  await page.getByRole('button', { name: 'Em revisão', exact: true }).click()
+  await expect(ork2).toHaveCount(0)
+  await page.getByRole('button', { name: 'Todas', exact: true }).click()
+  // Lista: a mesma tarefa, com o badge; clicar abre a tarefa.
   await page.getByRole('radio', { name: 'Lista' }).click()
-  await expect(page.getByRole('table', { name: 'Lista de tarefas' })).toContainText(
+  await expect(page.getByTestId('board-list').getByRole('listitem', { name: ORK2 })).toContainText(
     'Precisa de você'
   )
-  // Clicar abre a tarefa.
-  await page.getByRole('table', { name: 'Lista de tarefas' }).getByRole('button').first().click()
+  await page.getByTestId('board-list').getByRole('listitem', { name: ORK2 }).click()
   await expect(taskScreen(page, 'ORK-2')).toBeVisible()
 
   // A nota que o Revisor anotou aparece em Agentes › Memória.

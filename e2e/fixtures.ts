@@ -266,13 +266,24 @@ export const FAKE_REPO = {
   verified: true
 } as const
 
+/** Projeto da config inicial; sem `notionProject`, vinculado à página "Orkio Desktop". */
+export interface SeedProject {
+  id: string
+  name: string
+  localPath: string
+  repo: typeof FAKE_REPO | null
+  notionProject?: { id: string; name: string }
+}
+
 /**
  * Grava em `userDataDir` a config v2 (da 2C) com os bancos do Notion já escolhidos e um projeto
- * vinculado à página "Orkio Desktop": o ponto de partida dos specs a partir do quadro.
+ * vinculado à página "Orkio Desktop" (mais os `extra`, cada um com o seu vínculo): o ponto de
+ * partida dos specs a partir do quadro.
  */
 export function seedConfig(
   userDataDir: string,
-  project: { id: string; name: string; localPath: string; repo: typeof FAKE_REPO | null }
+  project: SeedProject,
+  extra: SeedProject[] = []
 ): void {
   writeFileSync(
     join(userDataDir, 'orkio-config.json'),
@@ -284,14 +295,12 @@ export function seedConfig(
         mapping: NOTION_MAPPING,
         updatedAt: '2026-11-19T00:00:00.000Z'
       },
-      projects: [
-        {
-          ...project,
-          createdAt: '2026-11-01T00:00:00.000Z',
-          updatedAt: '2026-11-01T00:00:00.000Z',
-          notionProject: { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
-        }
-      ]
+      projects: [project, ...extra].map(({ notionProject, ...p }) => ({
+        ...p,
+        createdAt: '2026-11-01T00:00:00.000Z',
+        updatedAt: '2026-11-01T00:00:00.000Z',
+        notionProject: notionProject ?? { id: NOTION_FAKE.orkioPage, name: 'Orkio Desktop' }
+      }))
     })
   )
 }
@@ -1441,7 +1450,7 @@ export function ghCalls(userDataDir: string): string[] {
 
 /** Telas do menu (Quadro, Agentes, Configurações) e seções de Configurações pelo nome antigo. */
 export async function navTo(page: Page, name: string): Promise<void> {
-  if (name === 'Quadro' || name === 'Tarefas' || name === 'Agentes' || name === 'Configurações') {
+  if (name === 'Quadro' || name === 'Agentes' || name === 'Configurações') {
     await page
       .getByRole('navigation', { name: 'Navegação principal' })
       .getByRole('group', { name: 'Telas' })

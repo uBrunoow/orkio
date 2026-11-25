@@ -126,12 +126,12 @@ describe('desktops', () => {
 
 describe('abas entre desktops (tabs.ts)', () => {
   it('replace com id troca a rota daquela aba, não da ativa', () => {
-    let t = tabsReducer(EMPTY_TABS, { type: 'navigate', route: { name: 'tasks' } })
+    let t = tabsReducer(EMPTY_TABS, { type: 'navigate', route: { name: 'board' } })
     const tasksId = t.activeId!
     t = tabsReducer(t, { type: 'open', route: { name: 'agents' } })
-    t = tabsReducer(t, { type: 'replace', id: tasksId, route: { name: 'tasks', view: 'list' } })
+    t = tabsReducer(t, { type: 'replace', id: tasksId, route: { name: 'board', view: 'list' } })
     expect(t.tabs.map((x) => x.router.route)).toEqual([
-      { name: 'tasks', view: 'list' },
+      { name: 'board', view: 'list' },
       { name: 'agents' }
     ])
     expect(currentRoute(t)).toEqual({ name: 'agents' })

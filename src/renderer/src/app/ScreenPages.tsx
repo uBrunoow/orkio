@@ -3,7 +3,6 @@ import { AgentsPage } from '../features/agents/AgentsPage'
 import { ProjectAgentsSettings } from '../features/agents/ProjectAgentsSettings'
 import { BoardSettingsPage } from '../features/board/ProjectPages'
 import { TaskScreen } from '../features/task/TaskScreen'
-import { TasksPage } from '../features/tasks/TasksPage'
 import { TerminalPage } from '../features/terminal/TerminalPage'
 import { IntegrationsPage } from '../features/integrations/IntegrationsPage'
 import { SetupPage } from '../features/setup/SetupPage'
@@ -144,16 +143,20 @@ function settingsPage(
  * que esquecer daqui não compila.
  */
 export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
-  board: (_route, ctx) => ({
+  board: (route, ctx) => ({
     node: (
       <BoardPage
+        route={route}
+        onRoute={ctx.replace}
         project={ctx.projects === null ? null : ctx.linkedProject}
+        linkedProjects={(ctx.projects ?? []).filter((p) => p.notionProject)}
+        chooseProject={ctx.chooseProject}
         onOpenIntegrations={() => ctx.navigate({ name: 'settings', section: 'integrations' })}
         onOpenProjects={() => ctx.navigate({ name: 'settings', section: 'projects' })}
-        onOpenTask={(taskId) =>
-          ctx.linkedProject &&
-          ctx.navigate({ name: 'task', projectId: ctx.linkedProject.id, taskId })
+        onOpenBoardSettings={(projectId) =>
+          ctx.navigate({ name: 'settings', section: 'board', tab: 'columns', projectId })
         }
+        onOpenTask={ctx.openTask}
       />
     ),
     crumbs: null,
@@ -186,19 +189,6 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
         onOpenTask={() =>
           ctx.navigate({ name: 'task', projectId: route.projectId, taskId: route.taskId })
         }
-      />
-    ),
-    crumbs: null,
-    fullHeight: true
-  }),
-  tasks: (route, ctx) => ({
-    node: (
-      <TasksPage
-        route={route}
-        projectId={ctx.linkedProject?.id ?? null}
-        onRoute={ctx.replace}
-        onOpenTask={ctx.openTask}
-        onOpenBoard={() => ctx.navigate({ name: 'board' })}
       />
     ),
     crumbs: null,

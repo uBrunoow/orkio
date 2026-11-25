@@ -7,7 +7,6 @@ import {
   AgentsIcon,
   BoardIcon,
   HomeIcon,
-  ListIcon,
   SettingsIcon,
   TasksIcon,
   TerminalIcon,
@@ -41,21 +40,12 @@ export const SCREENS: readonly ScreenDef[] = [
   {
     name: 'board',
     title: ROUTE_TITLES.board,
-    hint: 'As tarefas do projeto por etapa',
+    hint: 'As tarefas dos seus projetos por etapa',
     icon: BoardIcon,
     route: { name: 'board' },
     dock: 'main',
     keys: 'mod+1',
     needsProject: true
-  },
-  {
-    name: 'tasks',
-    title: ROUTE_TITLES.tasks,
-    hint: 'Em que pé está cada tarefa: precisa de você, trabalhando, em revisão',
-    icon: ListIcon,
-    route: { name: 'tasks' },
-    dock: 'main',
-    keys: 'mod+2'
   },
   {
     name: 'agents',

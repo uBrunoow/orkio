@@ -181,7 +181,7 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   // Mover para Revisando dispara o fluxo.
   await card(page).getByRole('button', { name: 'Ações de ORK-2' }).click()
   await page.getByRole('menuitem', { name: 'Mover para Revisando' }).click()
-  await expect(card(page).getByTestId('card-flow')).toHaveText('Esperando você', {
+  await expect(card(page).getByTestId('card-lane')).toHaveText('Precisa de você', {
     timeout: 30_000
   })
 
@@ -198,7 +198,7 @@ test('critérios 1–3: monta o fluxo (comandos, gate, salto), liga na coluna, d
   const timeline = flow.getByRole('list', { name: 'Linha do tempo do fluxo' })
   await expect(timeline.getByRole('listitem')).toHaveCount(4) // salto não executa nada
   await expect(timeline).toContainText('aprovado')
-  await expect(card(page).getByTestId('card-flow')).toHaveCount(0)
+  await expect(card(page).getByTestId('card-lane')).toHaveCount(0)
 
   // A sessão conta o fluxo (eventos e as execuções dos passos); o histórico completo também.
   const conversation = panel.getByRole('list', { name: 'Conversa da tarefa' })
@@ -291,7 +291,7 @@ test('critério 4: fechar o app no meio de um passo e retomar ao reabrir', async
   await close()
   ;({ page } = await open())
   await goToBoard(page)
-  await expect(card(page).getByTestId('card-flow')).toHaveText('Esperando você')
+  await expect(card(page).getByTestId('card-lane')).toHaveText('Precisa de você')
   panel = await openPanel(page)
   flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
   await expect(flow.getByTestId('flow-status')).toHaveText('Pausado')

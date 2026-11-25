@@ -68,14 +68,14 @@ function telas(page: Page) {
     .getByRole('group', { name: 'Telas' })
 }
 
-test('menu com quatro telas; Configurações reúne as telas do projeto e sai das subtelas', async () => {
+test('menu com três telas; Configurações reúne as telas do projeto e sai das subtelas', async () => {
   orkio = await launchOrkio(userDataDir, { validTokens: [TOKEN] }, { startPage: 'projects' })
   const { page } = orkio
   await page.evaluate((t) => window.orkio.notion.connect({ kind: 'token', token: t }), TOKEN)
 
-  // O menu principal tem só Quadro, Tarefas, Agentes e Configurações.
-  await expect(telas(page).getByRole('button')).toHaveCount(4)
-  for (const name of ['Quadro', 'Tarefas', 'Agentes', 'Configurações']) {
+  // O menu principal tem só Quadro, Agentes e Configurações.
+  await expect(telas(page).getByRole('button')).toHaveCount(3)
+  for (const name of ['Quadro', 'Agentes', 'Configurações']) {
     await expect(telas(page).getByRole('button', { name, exact: true })).toBeVisible()
   }
 

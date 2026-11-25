@@ -384,6 +384,8 @@ export function App(): React.JSX.Element | null {
               setupMissing={setupMissing}
               onChooseProject={(id) => {
                 chooseProject(id)
+                // Quadro com recorte de vários projetos: trocar o projeto atual não muda o recorte.
+                if (route.name === 'board' && route.projectIds) return
                 navigate(
                   route.name === 'board' || route.name === 'settings'
                     ? { ...route, projectId: id }

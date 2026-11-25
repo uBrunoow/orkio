@@ -1513,7 +1513,7 @@ export const ORKIO_API = {
         channel: 'overview:activity',
         args: [parseActivityQuery]
       }),
-      /** Fase 1: kanban derivado pessoal (raias calculadas do fluxo e da PR). */
+      /** Fase 1: situação das tarefas (raias calculadas do fluxo e da PR), usada no Quadro. */
       tasks: call<() => Promise<Result<PersonalTasksSnapshot>>>()({
         channel: 'overview:tasks',
         args: []

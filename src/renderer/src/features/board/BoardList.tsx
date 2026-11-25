@@ -1,86 +1,95 @@
 import { cn } from '@/lib/utils'
+import { EmptyState } from '../../components/PageState'
 import { StatusToken } from '../../components/StatusToken'
-import { useTaskActivity } from './task-activity'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
-import { CardActionsMenu, cardMenuItems, type CardActions } from './BoardCardView'
+import { CardActionsMenu, PrButton, cardMenuItems, type CardActions } from './BoardCardView'
 import { stageDotClass } from './stage-dot'
-import { cardStatus } from './card-status'
-import type { BoardCard, BoardStage } from '../../../../shared/board'
-import type { TaskSignals } from '../../../../shared/task-signals'
+import { cardSyncStatus, laneBadge } from './card-status'
+import type { BoardColumnDef, BoardEntry, BoardMode } from './board-model'
 
 /**
- * Visão em lista do quadro: uma linha por tarefa, na ordem das etapas. Mesmos dados do Kanban
- * (nada novo no main); sem arrasto, o menu "Mover para…" de cada linha troca a etapa.
+ * Visão em lista do quadro: as mesmas colunas do Kanban, uma seção por coluna com entradas
+ * visíveis e uma linha por tarefa. Sem arrasto: o menu "Mover para…" de cada linha troca a etapa.
  */
 export function BoardList({
-  stages,
-  cards,
-  signals,
-  actions
+  mode,
+  columns,
+  entries,
+  actionsFor
 }: {
-  stages: readonly BoardStage[]
-  cards: readonly BoardCard[]
-  signals: Record<string, TaskSignals>
-  actions: CardActions
+  mode: BoardMode
+  columns: readonly BoardColumnDef[]
+  /** Entradas visíveis (já filtradas). */
+  entries: readonly BoardEntry[]
+  actionsFor(projectId: string): CardActions
 }): React.JSX.Element {
-  const order = new Map(stages.map((s, i) => [s.id, i]))
-  const rows = [...cards].sort(
-    (a, b) =>
-      (order.get(a.stageId ?? '') ?? stages.length) - (order.get(b.stageId ?? '') ?? stages.length)
-  )
+  const showProject = mode === 'roles'
+  const groups = columns
+    .map((column) => ({ column, rows: entries.filter((e) => e.columnId === column.id) }))
+    .filter((g) => g.rows.length > 0)
   return (
-    <div className="h-full min-h-0 overflow-y-auto">
-      <div className="overflow-hidden rounded-xl border border-border-soft bg-card">
-        <div
-          aria-hidden="true"
-          className="flex items-center gap-3 border-b border-border-soft px-4 py-2 text-2xs tracking-wider text-subtle-foreground uppercase"
+    <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto" data-testid="board-list">
+      {groups.length === 0 && <EmptyState title="Nenhuma tarefa com esse filtro" />}
+      {groups.map(({ column, rows }) => (
+        <section
+          key={column.id}
+          aria-label={column.name}
+          className="overflow-hidden rounded-xl border border-border-soft bg-card"
         >
-          <span className="w-20 shrink-0">ID</span>
-          <span className="min-w-0 flex-1">Tarefa</span>
-          <span className="w-40 shrink-0">Estado</span>
-          <span className="w-32 shrink-0">Etapa</span>
-          <span className="w-6 shrink-0" />
-        </div>
-        <ul aria-label="Tarefas do quadro" data-testid="board-list">
-          {rows.map((card) => (
-            <BoardListRow
-              key={card.taskId}
-              card={card}
-              stages={stages}
-              signals={signals[card.taskId]}
-              actions={actions}
+          <div className="flex items-center gap-2 border-b border-border-soft px-4 py-2 text-muted-foreground">
+            <span
+              aria-hidden="true"
+              className={cn(
+                'size-[7px] shrink-0 rounded-full',
+                column.stage ? stageDotClass(column.stage) : 'bg-warn'
+              )}
             />
-          ))}
-        </ul>
-      </div>
+            <h3 className="text-sm font-normal" title={column.hint}>
+              {column.name}
+            </h3>
+            <span className="tabular text-sm text-subtle-foreground" data-testid="column-count">
+              {rows.length}
+            </span>
+          </div>
+          <ul aria-label={`Tarefas em ${column.name}`}>
+            {rows.map((entry) => (
+              <BoardListRow
+                key={entry.key}
+                entry={entry}
+                showProject={showProject}
+                actions={actionsFor(entry.projectId)}
+              />
+            ))}
+          </ul>
+        </section>
+      ))}
     </div>
   )
 }
 
 function BoardListRow({
-  card,
-  stages,
-  signals,
+  entry,
+  showProject,
   actions
 }: {
-  card: BoardCard
-  stages: readonly BoardStage[]
-  signals: TaskSignals | undefined
+  entry: BoardEntry
+  showProject: boolean
   actions: CardActions
 }): React.JSX.Element {
+  const { card } = entry
   const agent = useAgentBadge(card.taskId)
-  const status = cardStatus(card, useTaskActivity(card.taskId), signals)
-  const stage = stages.find((s) => s.id === card.stageId)
+  const badge = laneBadge(entry.personal)
+  const sync = cardSyncStatus(card)
+  const pr = entry.signals?.pr ?? null
   return (
     <li
       tabIndex={0}
       aria-label={`${card.displayId ?? ''} ${card.title}`.trim()}
       data-task-id={card.taskId}
+      data-project-id={entry.projectId}
       data-sync={card.sync.state}
-      className={cn(
-        'flex cursor-pointer items-center gap-3 border-b border-border-soft px-4 py-2.5 outline-none last:border-b-0 hover:bg-muted focus-visible:bg-muted'
-      )}
+      className="flex cursor-pointer items-center gap-3 border-b border-border-soft px-4 py-2.5 outline-none last:border-b-0 hover:bg-muted focus-visible:bg-muted"
       onClick={(e) => {
         if (!(e.target as HTMLElement).closest('button, a, [role="menu"]'))
           actions.onOpen(card.taskId)
@@ -99,22 +108,43 @@ function BoardListRow({
         <span className="truncate text-sm font-medium text-foreground">{card.title}</span>
         {agent && <AgentAvatar name={agent.name} color={agent.color} seed={agent.key} />}
       </span>
-      <span className="flex w-40 shrink-0 items-center">
-        {status && <StatusToken label={status.label} tone={status.tone} className="min-w-0" />}
+      <span className="flex w-40 shrink-0 items-center gap-2">
+        {badge && (
+          <span title={badge.what || undefined} data-testid="card-lane" className="flex min-w-0">
+            <StatusToken label={badge.label} tone={badge.tone} className="min-w-0" />
+          </span>
+        )}
+        {sync && (
+          <StatusToken
+            label={sync.label}
+            tone={sync.tone}
+            className="min-w-0"
+            data-testid="card-sync"
+          />
+        )}
       </span>
-      <span className="flex w-32 shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="flex w-44 shrink-0 items-center text-xs text-subtle-foreground">
+        {pr && <PrButton pr={pr} />}
+      </span>
+      {showProject && (
         <span
-          aria-hidden="true"
-          className={cn(
-            'size-[7px] shrink-0 rounded-full',
-            stage ? stageDotClass(stage) : 'bg-warn'
-          )}
-        />
-        <span className="truncate">{stage?.name ?? 'Sem etapa'}</span>
-      </span>
+          className="w-32 shrink-0 truncate text-xs text-muted-foreground"
+          data-testid="card-project"
+        >
+          {entry.projectName}
+        </span>
+      )}
+      {entry.stageName && (
+        <span
+          className="w-28 shrink-0 truncate text-xs text-muted-foreground"
+          data-testid="card-stage"
+        >
+          {entry.stageName}
+        </span>
+      )}
       <CardActionsMenu
         label={`Ações de ${card.displayId ?? card.title}`}
-        items={cardMenuItems(card, stages, actions)}
+        items={cardMenuItems(card, entry.stages, actions)}
       />
     </li>
   )

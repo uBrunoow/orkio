@@ -1,7 +1,7 @@
 /**
- * Kanban derivado pessoal (Fase 1): em que pé está cada tarefa em que o Orkio mexeu, calculado do
- * estado dos fluxos, das execuções e da PR. Não há estado manual: mover o card continua sendo no
- * quadro do Notion (o do time). Puro (main e renderer); o `OverviewService` junta as entradas.
+ * Situação da tarefa (raias) usada no Quadro: em que pé está cada tarefa em que o Orkio mexeu,
+ * calculada do estado dos fluxos, das execuções e da PR. Não há estado manual: a coluna do card
+ * continua sendo a etapa do quadro. Puro (main e renderer); o `OverviewService` junta as entradas.
  */
 import type { StageRole } from './board'
 import { finalText, isUnfinishedResult, type FlowResult } from './flow-final'
@@ -11,12 +11,12 @@ import type { TaskPullRequest } from './task-signals'
 export const TASK_LANES = ['needs_you', 'working', 'waiting', 'in_review', 'done'] as const
 export type TaskLane = (typeof TASK_LANES)[number]
 
-export const TASK_LANE_TEXT: Record<TaskLane, { label: string; empty: string }> = {
-  needs_you: { label: 'Precisa de você', empty: 'Nada espera você' },
-  working: { label: 'Trabalhando', empty: 'Nenhum agente trabalhando' },
-  waiting: { label: 'Aguardando', empty: 'Nada aguardando' },
-  in_review: { label: 'Em revisão', empty: 'Nenhuma PR aberta' },
-  done: { label: 'Concluído', empty: 'Nada concluído nos últimos 7 dias' }
+export const TASK_LANE_TEXT: Record<TaskLane, { label: string }> = {
+  needs_you: { label: 'Precisa de você' },
+  working: { label: 'Trabalhando' },
+  waiting: { label: 'Aguardando' },
+  in_review: { label: 'Em revisão' },
+  done: { label: 'Concluído' }
 }
 
 export type PrChip =
@@ -145,13 +145,14 @@ export function deriveLane(input: LaneInput): PersonalTask | null {
   return null
 }
 
-export const TASK_FILTERS = ['all', 'active', 'attention'] as const
+export const TASK_FILTERS = ['all', 'attention', 'active', 'review'] as const
 export type TaskFilter = (typeof TASK_FILTERS)[number]
 
 export const TASK_FILTER_TEXT: Record<TaskFilter, string> = {
   all: 'Todas',
+  attention: 'Precisa de você',
   active: 'Em andamento',
-  attention: 'Precisa de atenção'
+  review: 'Em revisão'
 }
 
 /** Precisa de atenção: espera você ou PR com CI falhando, mudanças pedidas ou conflito. */
@@ -159,35 +160,13 @@ export function needsAttention(t: PersonalTask): boolean {
   return t.lane === 'needs_you' || t.chips.some((c) => PR_CHIP_TEXT[c].attention)
 }
 
-export function filterTasks(
-  tasks: readonly PersonalTask[],
-  filter: TaskFilter,
-  query = ''
-): PersonalTask[] {
-  const q = query.trim().toLowerCase()
-  return tasks.filter((t) => {
-    if (filter === 'active' && t.lane === 'done') return false
-    if (filter === 'attention' && !needsAttention(t)) return false
-    if (!q) return true
-    return [t.task.displayId, t.task.title, t.task.projectName, t.what].some((x) =>
-      x?.toLowerCase().includes(q)
-    )
-  })
-}
-
-/** Por raia, na ordem das raias; dentro, o mais antigo primeiro (quem espera há mais tempo). */
-export function groupByLane(tasks: readonly PersonalTask[]): Record<TaskLane, PersonalTask[]> {
-  const out = Object.fromEntries(TASK_LANES.map((l) => [l, [] as PersonalTask[]])) as Record<
-    TaskLane,
-    PersonalTask[]
-  >
-  for (const t of tasks) out[t.lane].push(t)
-  for (const lane of TASK_LANES) {
-    out[lane].sort((a, b) =>
-      lane === 'done' ? b.since.localeCompare(a.since) : a.since.localeCompare(b.since)
-    )
-  }
-  return out
+/** `null` (card sem tarefa pessoal) só passa em "Todas". */
+export function matchesTaskFilter(t: PersonalTask | null, filter: TaskFilter): boolean {
+  if (filter === 'all') return true
+  if (!t) return false
+  if (filter === 'attention') return needsAttention(t)
+  if (filter === 'active') return t.lane === 'working' || t.lane === 'waiting'
+  return t.lane === 'in_review'
 }
 
 export interface PersonalTasksSnapshot {

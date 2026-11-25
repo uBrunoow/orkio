@@ -18,6 +18,17 @@ const task = (taskId: string): Route => ({ name: 'task', projectId: 'p1', taskId
 const nav = (route: Route): TabsAction => ({ type: 'navigate', route })
 
 describe('tabsReducer', () => {
+  it('Ctrl/⌘1 e o dock abrem o Quadro como estiver (recorte, visão e filtro)', () => {
+    let s = run(
+      nav({ name: 'board', projectIds: 'all', filter: 'review' }),
+      nav({ name: 'agents' })
+    )
+    s = tabsReducer(s, nav({ name: 'board' }))
+    expect(currentRoute(s)).toEqual({ name: 'board', projectIds: 'all', filter: 'review' })
+    s = tabsReducer(s, { type: 'reset', route: { name: 'board' } })
+    expect(currentRoute(s)).toEqual({ name: 'board', projectIds: 'all', filter: 'review' })
+  })
+
   it('um lugar = uma aba: navegar para um lugar que já tem aba ativa a aba', () => {
     const s = run(nav({ name: 'board' }), nav(task('a')), nav({ name: 'agents' }), nav(task('a')))
     expect(routes(s)).toEqual([{ name: 'board' }, task('a'), { name: 'agents' }])
@@ -127,16 +138,38 @@ describe('abas salvas e rotas', () => {
     expect(parseRoute({ name: 'terminal', projectId: 'p1' })).toBeNull()
   })
 
+  it('rota tasks antiga vira o Quadro com todos os projetos e o mesmo filtro', () => {
+    expect(parseRoute({ name: 'tasks', view: 'list', filter: 'attention', x: 1 })).toEqual({
+      name: 'board',
+      projectIds: 'all',
+      view: 'list',
+      filter: 'attention'
+    })
+    expect(parseRoute({ name: 'tasks', view: 'grade', filter: 1 })).toEqual({
+      name: 'board',
+      projectIds: 'all'
+    })
+  })
+
+  it('abas salvas: tasks + Quadro no mesmo desktop viram uma aba de Quadro', () => {
+    const saved = parseSavedTabs({
+      routes: [
+        { name: 'board', projectId: 'a' },
+        { name: 'agents' },
+        { name: 'tasks', filter: 'active' }
+      ],
+      active: 2
+    })
+    expect(saved).toEqual({
+      routes: [{ name: 'board', projectIds: 'all', filter: 'active' }, { name: 'agents' }],
+      active: 0
+    })
+  })
+
   it('parseRoute fica só com campos conhecidos', () => {
     expect(
       parseRoute({ name: 'settings', section: 'board', tab: 'nada', projectId: 'p', x: 1 })
     ).toEqual({ name: 'settings', section: 'board', projectId: 'p' })
-    expect(parseRoute({ name: 'tasks', view: 'list', filter: 'attention', x: 1 })).toEqual({
-      name: 'tasks',
-      view: 'list',
-      filter: 'attention'
-    })
-    expect(parseRoute({ name: 'tasks', view: 'grade', filter: 1 })).toEqual({ name: 'tasks' })
     expect(parseRoute({ name: 'task', projectId: 'p', taskId: 't', section: 'flow' })).toEqual({
       name: 'task',
       projectId: 'p',
