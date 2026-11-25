@@ -20,6 +20,10 @@ import { useTaskView } from './task-view'
 import { backlogDocumentOf } from '../../../../shared/alva'
 import { buildSession, tailSession, type SessionItem } from './task-session'
 import { ipcResult } from '../../lib/ipc'
+import { Alert } from '../../components/Alert'
+import type { HandoffView } from '../../../../shared/handoff'
+import { HandoffBar } from '../terminal/HandoffBar'
+import { useHandoffActions, useTaskTerminals } from '../terminal/useTaskTerminals'
 
 const TAIL = 30
 
@@ -50,6 +54,7 @@ export function TaskSession({
   const [initial, setInitial] = useState<RunInitial>(EMPTY_INITIAL)
   const [preparing, setPreparing] = useState(false)
   const state = runs.state
+  const handoff = useHandoffActions(projectId, taskId, runs.reload)
   const items = useMemo(
     () => (history && state ? buildSession(history, state.runs, new Date()) : null),
     [history, state]
@@ -215,7 +220,15 @@ export function TaskSession({
             {waitingSubagents}
           </p>
         )}
-        {newSession ? (
+        {state?.handoff ? (
+          <SessionHandoff
+            projectId={projectId}
+            taskId={taskId}
+            handoff={state.handoff}
+            actions={handoff}
+            onOpenTerminal={view.openTerminal}
+          />
+        ) : newSession ? (
           newSession.ok ? (
             <Composer
               prep={newSession.value}
@@ -249,10 +262,52 @@ export function TaskSession({
               void runs.select(s.activeRunId)
             }}
             onNewSession={() => void openNewSession()}
+            {...(view.openTerminal
+              ? {
+                  onContinueInClaude: () =>
+                    void handoff.start().then((v) => {
+                      if (v) view.openTerminal?.()
+                    }),
+                  continuing: handoff.busy === 'start'
+                }
+              : {})}
           />
+        )}
+        {!state?.handoff && handoff.error && (
+          <Alert tone="danger" className="mt-2">
+            {handoff.error}
+          </Alert>
         )}
       </div>
     </section>
+  )
+}
+
+/** No lugar do campo: a sessão está com você no terminal (e como devolver). */
+function SessionHandoff({
+  projectId,
+  taskId,
+  handoff,
+  actions,
+  onOpenTerminal
+}: {
+  projectId: string
+  taskId: string
+  handoff: HandoffView
+  actions: ReturnType<typeof useHandoffActions>
+  onOpenTerminal: (() => void) | undefined
+}): React.JSX.Element {
+  const terminals = useTaskTerminals(projectId, taskId)
+  return (
+    <HandoffBar
+      handoff={handoff}
+      busy={actions.busy}
+      error={actions.error}
+      terminalAvailable={terminals.value?.available ?? true}
+      onGiveBack={(mode) => void actions.giveBack(mode)}
+      onReopen={() => void actions.reopen().then((v) => v && onOpenTerminal?.())}
+      {...(onOpenTerminal ? { onOpenTerminal } : {})}
+    />
   )
 }
 

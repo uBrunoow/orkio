@@ -435,7 +435,13 @@ async function treatComments(mcp) {
   await tryCmd(`git push origin ${branch}`, ['git', 'push', '-q', 'origin', branch])
   const query =
     'mutation { resolveReviewThread(input: {threadId: "thread-7-0"}) { thread { isResolved } } }'
-  await tryCmd(`gh api graphql -f query='${query}'`, ['gh', 'api', 'graphql', '-f', `query=${query}`])
+  await tryCmd(`gh api graphql -f query='${query}'`, [
+    'gh',
+    'api',
+    'graphql',
+    '-f',
+    `query=${query}`
+  ])
 }
 
 /** Imitação mínima do plugin alva-flow para o E2E (nunca o plugin real). */
@@ -637,7 +643,45 @@ async function alvaCommand(cmd, argsText, mcp, prompt) {
   setTimeout(() => process.exit(0), 2000)
 }
 
-main().catch((e) => {
-  process.stderr.write(String(e && e.message) + '\n')
-  process.exit(1)
-})
+/**
+ * Fase 2 ("Continuar no Claude"): sem `-p`, o Orkio abriu `claude --resume <sessão>` no terminal
+ * embutido. Simula a tela interativa: registra cwd e argumentos em `.orkio/terminal-claude.log`,
+ * ecoa o que você digita e sai com "/exit".
+ */
+function interactive() {
+  const orkioDir = join(process.cwd(), '.orkio')
+  mkdirSync(orkioDir, { recursive: true })
+  require('node:fs').appendFileSync(
+    join(orkioDir, 'terminal-claude.log'),
+    JSON.stringify({ args, cwd: process.cwd(), tty: process.stdin.isTTY === true }) + '\n'
+  )
+  const resume = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : null
+  process.stdout.write(`Claude simulado no terminal. Sessão: ${resume}\r\n> `)
+  process.stdin.setEncoding('utf8')
+  if (process.stdin.isTTY) process.stdin.setRawMode(true)
+  let line = ''
+  process.stdin.on('data', (chunk) => {
+    for (const ch of chunk) {
+      if (ch === '\r' || ch === '\n') {
+        process.stdout.write(`\r\nVocê disse: ${line}\r\n`)
+        if (line.trim() === '/exit') process.exit(0)
+        line = ''
+        process.stdout.write('> ')
+      } else if (ch === '\u0003') {
+        process.exit(130)
+      } else {
+        line += ch
+        process.stdout.write(ch)
+      }
+    }
+  })
+}
+
+if (!args.includes('-p')) {
+  interactive()
+} else {
+  main().catch((e) => {
+    process.stderr.write(String(e && e.message) + '\n')
+    process.exit(1)
+  })
+}

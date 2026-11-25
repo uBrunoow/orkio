@@ -339,6 +339,10 @@ export async function launchOrkio(
   if (options.alva?.plugin) installFakeAlvaPlugin(home)
   env['HOME'] = home
   env['USERPROFILE'] = home
+  // Terminal embutido (Fase 2): shell simples, sem o perfil de quem roda o teste (zsh/zinit
+  // baixaria plugins no HOME de teste).
+  env['SHELL'] = '/bin/sh'
+  delete env['ZDOTDIR']
   // Simulado do alva-flow: quantos /review deixam blocker (não começa com ORKIO_: passa o filtro).
   env['FAKE_ALVA_BLOCKERS'] = String(options.alva?.blockers ?? 1)
   // Chave "vazada" no ambiente: o Orkio precisa filtrá-la antes de abrir o CLI.

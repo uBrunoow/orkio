@@ -10,6 +10,7 @@ import {
   ListIcon,
   SettingsIcon,
   TasksIcon,
+  TerminalIcon,
   type SvgIcon
 } from '../components/icons'
 import {
@@ -79,6 +80,13 @@ export const SCREENS: readonly ScreenDef[] = [
     title: ROUTE_TITLES.task,
     hint: 'Uma tarefa do Notion',
     icon: TasksIcon,
+    route: { name: 'board' }
+  },
+  {
+    name: 'terminal',
+    title: ROUTE_TITLES.terminal,
+    hint: 'Terminal na pasta da tarefa',
+    icon: TerminalIcon,
     route: { name: 'board' }
   },
   {

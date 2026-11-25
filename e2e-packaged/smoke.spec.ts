@@ -3,13 +3,14 @@
  * 1. o app abre e chega à tela inicial, sem violação de CSP, e fecha;
  * 2. a ponte MCP de permissões (out/main/permission-mcp.js, dentro do app.asar) roda com
  *    ELECTRON_RUN_AS_NODE=1 e faz initialize → tools/list → tools/call ida e volta. Isso também
- *    prova que o fuse RunAsNode continua ligado (desligado, o executável abriria o app).
+ *    prova que o fuse RunAsNode continua ligado (desligado, o executável abriria o app);
+ * 3. o node-pty (terminal embutido, Fase 2) carrega de dentro do pacote e roda um comando num PTY.
  *
  * Sem Playwright `_electron`: o fuse EnableNodeCliInspectArguments está desligado no pacote,
  * então abrimos o executável como o usuário abriria e conectamos pelo CDP do Chromium.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type AddressInfo, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -189,5 +190,37 @@ test('a ponte MCP de permissões roda de dentro do app.asar', async () => {
     child.kill()
     await waitExit(child, 5_000)
     orkio.server.close()
+  }
+})
+
+test('o terminal embutido (node-pty) carrega do pacote e roda num PTY', async () => {
+  test.skip(process.platform === 'win32', 'O smoke do pacote roda no Linux e no macOS.')
+  const pty = join(app.resources, 'app.asar', 'node_modules', 'node-pty')
+  const dir = mkdtempSync(join(tmpdir(), 'orkio-pty-'))
+  const script = join(dir, 'pty.js')
+  writeFileSync(
+    script,
+    `const pty = require(${JSON.stringify(pty)})
+const p = pty.spawn('/bin/sh', ['-c', 'echo pty-ok; tty'], { cols: 80, rows: 24, cwd: ${JSON.stringify(dir)}, env: { PATH: '/usr/bin:/bin' } })
+let out = ''
+p.onData((d) => (out += d))
+p.onExit(({ exitCode }) => { process.stdout.write(JSON.stringify({ out, exitCode })); process.exit(0) })
+`
+  )
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_OPTIONS: '', ELECTRON_RUN_AS_NODE: '1' }
+  const child = spawn(app.executable, [script], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+  let stdout = ''
+  let stderr = ''
+  child.stdout?.on('data', (d: Buffer) => (stdout += String(d)))
+  child.stderr?.on('data', (d: Buffer) => (stderr += String(d)))
+  try {
+    await waitExit(child, 20_000)
+    expect(stderr).toBe('')
+    const result = JSON.parse(stdout) as { out: string; exitCode: number }
+    expect(result.exitCode).toBe(0)
+    expect(result.out).toContain('pty-ok')
+    expect(result.out).toMatch(/\/dev\/(pts|ttys)/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })

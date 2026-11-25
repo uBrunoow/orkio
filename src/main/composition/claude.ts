@@ -8,6 +8,10 @@ import { ClaudeRun } from '../claude/runner'
 import { RunService } from '../claude/run.service'
 import { onPath, terminalCommand, TerminalError } from '../claude/terminal'
 import { WorktreeService } from '../claude/worktree.service'
+import { HandoffError, HandoffService } from '../claude/handoff.service'
+import { TerminalService, type SpawnPty } from '../terminal/terminal.service'
+import { errorName } from '../errors'
+import type * as NodePty from 'node-pty'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { ConfigStore } from '../storage/config-store'
 import { projectById } from '../config/queries'
@@ -26,6 +30,9 @@ export interface ClaudeParts {
   service: ClaudeService
   worktrees: WorktreeService
   delivery: DeliveryService
+  /** Fase 2: terminal embutido (PTY no main) e "Continuar no Claude". */
+  terminals: TerminalService
+  handoff: HandoffService
 }
 
 /** Worktrees por tarefa: existem antes do resto (os sinais leem as branches registradas). */
@@ -66,6 +73,16 @@ export function createClaude(deps: {
   })
   // O RunService avisa o ClaudeService de cada evento, e o ClaudeService usa o RunService.
   const service: Late<ClaudeService> = late('ClaudeService')
+  // Terminal embutido (Fase 2): o node-pty é nativo; se não carregar, o app segue sem ele.
+  const terminals = new TerminalService({
+    spawnPty: loadPty(),
+    env,
+    platform: process.platform,
+    isFile,
+    isDir: (p) => statSync(p, { throwIfNoEntry: false })?.isDirectory() === true,
+    emitData: (event) => deps.emit('terminalData', event),
+    emitChanged: (event) => deps.emit('terminalChanged', event)
+  })
   const runs = new RunService({
     db: deps.boardStore.db,
     store: deps.boardStore,
@@ -146,22 +163,64 @@ export function createClaude(deps: {
         notion: deps.notionInsert
       }),
       openTerminal: (path) => openTerminalAt(path, env),
+      handoff: (taskId) => handoff.get(taskId),
+      terminalsRunning: (taskId) => terminals.hasRunning(taskId),
       openEditor: (editor, path) => spawnDetached(editor, [path], { env, windowsHide: true })
     })
   )
+  // "Continuar no Claude" (Fase 2): a sessão da tarefa vai para o terminal, travada.
+  const handoff = new HandoffService({
+    db: deps.boardStore.db,
+    lastSession: (taskId) => runs.lastSession(taskId),
+    activeRun: (taskId) => service().activeRunId(taskId),
+    cancelAndWait: (runId) => service().cancelAndWait(runId),
+    flow: {
+      activeFor: (taskId) => deps.flowRunner().activeFor(taskId),
+      continueStep: (flowRunId, text) => deps.flowRunner().resumeWithReply(flowRunId, text),
+      completeStep: (flowRunId) => deps.flowRunner().completeByYou(flowRunId)
+    },
+    sendMessage: async (projectId, taskId, text) => {
+      const r = await service().send({ projectId, taskId, text })
+      if (!r.ok) throw new HandoffError(r.error.code, r.error.message)
+    },
+    worktreePath: (taskId) => worktrees.get(taskId)?.path ?? null,
+    terminals,
+    event: (ref, e) =>
+      deps.boardStore.addEvent({
+        taskPageId: ref.taskId,
+        projectId: ref.projectId,
+        at: new Date().toISOString(),
+        ...e
+      }),
+    // A tela da tarefa, o sino e a visão geral releem (o mesmo aviso de um fluxo que mudou).
+    changed: (ref) => deps.emit('taskFlowChanged', ref)
+  })
   void mkdir(deps.paths.runTmp, { recursive: true, mode: 0o700 }).catch(() => undefined)
-  return { runs, service: service(), worktrees, delivery }
+  return { runs, service: service(), worktrees, delivery, terminals, handoff }
+}
+
+/** Carrega o node-pty (módulo nativo). Falhou = sem terminal embutido, só o do sistema. */
+function loadPty(): SpawnPty | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pty = require('node-pty') as typeof NodePty
+    return (file, args, options) => pty.spawn(file, args, options)
+  } catch (error) {
+    console.error(`[orkio] terminal embutido indisponível: ${errorName(error)}`)
+    return null
+  }
+}
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile()
+  } catch {
+    return false
+  }
 }
 
 /** Abre o terminal do sistema na pasta (spawn sem shell; o primeiro terminal achado no PATH). */
 async function openTerminalAt(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
-  const isFile = (p: string): boolean => {
-    try {
-      return statSync(p).isFile()
-    } catch {
-      return false
-    }
-  }
   if (!statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
     throw new TerminalError('no_workspace')
   }

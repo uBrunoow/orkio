@@ -28,6 +28,14 @@ export type Route =
   | { name: 'setup'; projectId?: string }
   | { name: 'board'; projectId?: string }
   | { name: 'task'; projectId: string; taskId: string; section?: TaskSection }
+  /** Fase 2: terminais da tarefa (pasta de trabalho) e "Continuar no Claude". */
+  | {
+      name: 'terminal'
+      projectId: string
+      taskId: string
+      /** Ao abrir, já começa o "Continuar no Claude" (paleta/menu). Não volta ao restaurar. */
+      start?: 'claude'
+    }
   | { name: 'agents' }
   /** Fase 1: kanban derivado pessoal (raias calculadas do fluxo e da PR). */
   | { name: 'tasks'; view?: TasksView; filter?: TaskFilter }
@@ -41,6 +49,7 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
   setup: 'Primeiros passos',
   board: 'Quadro',
   task: 'Tarefa',
+  terminal: 'Terminal',
   tasks: 'Tarefas',
   agents: 'Agentes',
   settings: 'Configurações',
@@ -110,6 +119,8 @@ export function placeOf(route: Route): string | null {
   switch (route.name) {
     case 'task':
       return `task:${route.projectId}:${route.taskId}`
+    case 'terminal':
+      return `terminal:${route.projectId}:${route.taskId}`
     case 'home':
     case 'setup':
       return null
@@ -153,6 +164,9 @@ export function parseRoute(v: unknown): Route | null {
         ...(section ? { section } : {})
       }
     }
+    case 'terminal':
+      if (!str(v['projectId']) || !str(v['taskId'])) return null
+      return { name: 'terminal', projectId: v['projectId'], taskId: v['taskId'] }
     case 'settings': {
       const section = pick(SETTINGS_SECTIONS, v['section'])
       const tab = pick(BOARD_SETTINGS_TABS, v['tab'])

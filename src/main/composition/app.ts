@@ -76,6 +76,7 @@ import type { Handlers } from '../ipc/register'
 import { openExternalHandler, siteLinks, siteUrlRules } from '../ipc/shell.ipc'
 import { signalsHandlers } from '../ipc/signals.ipc'
 import { claudeHandlers } from '../ipc/claude.ipc'
+import { terminalHandlers } from '../ipc/terminal.ipc'
 import { updatesHandlers } from '../ipc/updates.ipc'
 import { NotionWorkspaceService } from '../notion/notion-workspace.service'
 import { authorizeViaLoopback } from '../oauth/loopback'
@@ -132,6 +133,7 @@ interface Work {
     | 'taskFlows'
     | 'taskSetup'
     | 'claude'
+    | 'terminal'
     | 'overview'
   >
 }
@@ -317,6 +319,7 @@ export function createApp(): OrkioApp {
     work: work && {
       flows: work.flows,
       runs: work.claude.runs,
+      terminals: work.claude.terminals,
       writes: work.board.writes,
       scheduler: work.scheduler,
       overview: work.overview
@@ -353,6 +356,7 @@ export function createApp(): OrkioApp {
     taskFlows: work?.handlers.taskFlows ?? null,
     taskSetup: work?.handlers.taskSetup ?? null,
     claude: work?.handlers.claude ?? null,
+    terminal: work?.handlers.terminal ?? null,
     overview: work?.handlers.overview ?? null,
     updates: updatesHandlers(
       updates,
@@ -695,6 +699,7 @@ function createWork(core: {
     projects: async () => (await core.projects.list()).projects,
     flows: () => runner.activeViews(),
     finishedFlows: (since) => runner.recentFinished(since),
+    handoffs: () => claude.handoff.all(),
     requests: () => claude.runs.waitingRequests(),
     runs: () => claude.runs.activeRuns(),
     cachedTasks: (projectId) => notionWorkspace.cachedTasks(projectId),
@@ -743,7 +748,12 @@ function createWork(core: {
       agents: agentsHandlers(agents, orchestrator),
       taskFlows: flows.handlers.taskFlows,
       taskSetup: taskSetupHandlers(taskSetup),
-      claude: claudeHandlers(claude.service, claude.runs),
+      claude: claudeHandlers(claude.service, claude.runs, claude.handoff),
+      terminal: terminalHandlers({
+        terminals: claude.terminals,
+        hasProject: (projectId) => projectById(configStore.get(), projectId) !== undefined,
+        worktreePath: (taskId) => core.worktrees.get(taskId)?.path ?? null
+      }),
       overview: overviewHandlers(overview)
     }
   }

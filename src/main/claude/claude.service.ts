@@ -59,6 +59,8 @@ import type { Result } from '../../shared/result'
 import type { NotionTask } from '../../shared/notion'
 import type { TaskSignalsResult } from '../../shared/task-signals'
 import { projectById } from '../config/queries'
+import type { HandoffView } from '../../shared/handoff'
+import { HANDOFF_MESSAGES } from './handoff.service'
 import { isApiError } from '../net/http'
 
 export const CLAUDE_MESSAGES = {
@@ -136,6 +138,13 @@ export interface ClaudeServiceDeps {
   openEditor(editor: EditorId, path: string): Promise<void>
   /** Abre o terminal do sistema na pasta (`TerminalError` se a pasta sumiu ou não há terminal). */
   openTerminal(path: string): Promise<void>
+  /**
+   * Fase 2: a sessão da tarefa está com você no terminal ("Continuar no Claude"). Com ela, toda
+   * execução da tarefa é recusada (mensagem, "Rodar", passo de fluxo).
+   */
+  handoff?(taskId: string): HandoffView | null
+  /** Fase 2: terminais embutidos rodando na tarefa (o worktree não sai por baixo deles). */
+  terminalsRunning?(taskId: string): boolean
   /**
    * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
    * pt-BR quando há agente, mas ele não pode rodar (sem aprovação, limite do dia, comando negado).
@@ -276,6 +285,7 @@ export class ClaudeService {
     return this.wrap(async () => {
       const text = req.text.trim()
       if (!text) return fail('invalid', CLAUDE_MESSAGES.emptyPrompt)
+      if (this.deps.handoff?.(req.taskId)) return fail('handoff', HANDOFF_MESSAGES.locked)
       // Anexos: validados pelo conteúdo antes de qualquer efeito; gravados no worktree da tarefa
       // só depois das recusas baratas (CLI, fluxo ocupado, briefing, agente) e apagados se a
       // mensagem acabar recusada. O fluxo ativo já tem worktree: lá gravamos antes de entregar.
@@ -428,6 +438,8 @@ export class ClaudeService {
   startRun(request: RunRequest): Promise<Result<string>> {
     return this.wrap(async () => {
       this.project(request.projectId)
+      // A sessão está com você no terminal: nada do Orkio roda na tarefa até você devolver.
+      if (this.deps.handoff?.(request.taskId)) return fail('handoff', HANDOFF_MESSAGES.locked)
       const cli = await this.readyCli()
       if (!cli.ok) return cli
       const { input } = request
@@ -501,8 +513,13 @@ export class ClaudeService {
     })
   }
 
+  /** Execução viva da tarefa (rodando ou na fila), ou `null`. */
+  activeRunId(taskId: string): string | null {
+    return this.deps.runs.list(taskId).find((r) => isRunLive(r.status))?.id ?? null
+  }
+
   /** Cancela e espera a execução terminar (até 15 s), para a próxima continuar a sessão. */
-  private cancelAndWait(runId: string): Promise<void> {
+  cancelAndWait(runId: string): Promise<void> {
     return new Promise((resolve) => {
       const timer = setTimeout(done, 15_000)
       const off = this.deps.runs.onFinished((info) => {
@@ -523,6 +540,10 @@ export class ClaudeService {
       const project = this.project(projectId)
       if (this.deps.runs.isRunning(taskId)) {
         return fail('busy', 'Cancele a execução em andamento antes de limpar o ambiente.')
+      }
+      if (this.deps.handoff?.(taskId)) return fail('handoff', HANDOFF_MESSAGES.locked)
+      if (this.deps.terminalsRunning?.(taskId)) {
+        return fail('busy', 'Feche os terminais desta tarefa antes de limpar o ambiente.')
       }
       await this.deps.worktrees.remove(this.worktreeProject(project), taskId, force)
       return ok(await this.taskState(taskId))
@@ -735,7 +756,12 @@ export class ClaudeService {
         .catch(() => null)
       workspace = { branch: wt.branch, path: wt.path, changes }
     }
-    return { runs, activeRunId: active?.id ?? null, workspace }
+    return {
+      runs,
+      activeRunId: active?.id ?? null,
+      workspace,
+      handoff: this.deps.handoff?.(taskId) ?? null
+    }
   }
 
   private async pageBlocks(pageId: string): Promise<NotionBlock[]> {

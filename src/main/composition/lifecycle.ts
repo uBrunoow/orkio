@@ -3,6 +3,8 @@ export interface StopParts {
   work: {
     flows: { dispose(): void }
     runs: { cancelAll(): void; activeRuns(): readonly { queued: boolean }[] }
+    /** Fase 2: terminais embutidos (PTY) saem junto. */
+    terminals: { stopAll(): void }
     writes: { stop(): void }
     scheduler: { stop(): void }
     overview: { dispose(): void }
@@ -34,6 +36,7 @@ export function createStop(
       const { work, projects, keepAwake, updates } = parts()
       work?.flows.dispose()
       work?.runs.cancelAll()
+      work?.terminals.stopAll()
       if (work && options.waitMs > 0) {
         const deadline = now() + options.waitMs
         while (work.runs.activeRuns().some((r) => !r.queued) && now() < deadline) await sleep(200)

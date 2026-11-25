@@ -36,6 +36,22 @@ export function isWinSigned(env: Env): boolean {
   )
 }
 
+/**
+ * O que o pacote não precisa do node-pty: fontes, dependências de compilação e símbolos de debug
+ * (os `.pdb` do Windows passam de 50 MB). Cada sistema leva só os próprios prebuilds.
+ */
+const NODE_PTY_TRIM = [
+  '!node_modules/node-pty/{src,deps,third_party,scripts,typings}/**',
+  '!node_modules/node-pty/binding.gyp',
+  '!node_modules/node-pty/build/{Makefile,*.mk,config.gypi,binding.Makefile}',
+  '!node_modules/node-pty/build/Release/{obj.target,.deps}/**',
+  '!node_modules/node-pty/prebuilds/**/*.pdb'
+]
+const PTY_PREBUILDS_EXCEPT = (keep: 'darwin' | 'win32' | null): string[] =>
+  (['darwin', 'win32'] as const)
+    .filter((os) => os !== keep)
+    .map((os) => `!node_modules/node-pty/prebuilds/${os}-*/**`)
+
 export function builderConfig(env: Env): Configuration {
   const macSigned = isMacSigned(env)
   return {
@@ -44,9 +60,12 @@ export function builderConfig(env: Env): Configuration {
     directories: { buildResources: 'build', output: 'dist' },
     // Sem dependências de runtime hoje (tudo vai no bundle do Vite). Não excluímos node_modules:
     // o electron-updater (6C) entra em "dependencies" e precisa ir no pacote.
-    files: ['out/**', 'resources/**', 'package.json'],
-    asarUnpack: ['resources/**'],
-    // node:sqlite é embutido no Electron: nada nativo para recompilar.
+    files: ['out/**', 'resources/**', 'package.json', ...NODE_PTY_TRIM],
+    // O node-pty (terminal embutido, Fase 2) é nativo: o `.node` e o `spawn-helper` rodam de fora
+    // do asar.
+    asarUnpack: ['resources/**', 'node_modules/node-pty/**'],
+    // node:sqlite é embutido no Electron. O node-pty usa N-API (ABI estável entre Node e
+    // Electron): o binário da instalação (prebuild no mac/Windows, compilado no Linux) já serve.
     npmRebuild: false,
     electronFuses: {
       // A ponte MCP de permissões (out/main/permission-mcp.js) roda com ELECTRON_RUN_AS_NODE=1.
@@ -66,6 +85,7 @@ export function builderConfig(env: Env): Configuration {
     },
     mac: {
       icon: 'build/icon.icns',
+      files: PTY_PREBUILDS_EXCEPT('darwin'),
       category: 'public.app-category.developer-tools',
       target: builderTargets('mac'),
       artifactName: ARTIFACT_NAME.mac,
@@ -79,6 +99,7 @@ export function builderConfig(env: Env): Configuration {
     dmg: { artifactName: ARTIFACT_NAME.mac },
     win: {
       icon: 'build/icon.ico',
+      files: PTY_PREBUILDS_EXCEPT('win32'),
       target: builderTargets('windows'),
       ...(isWinSigned(env)
         ? {
@@ -106,6 +127,7 @@ export function builderConfig(env: Env): Configuration {
       // Pasta com um PNG por tamanho (gerada por `pnpm icons`): o tema hicolor do GNOME só procura
       // até 512×512, então só o 1024 deixava o atalho sem ícone.
       icon: 'build/icons',
+      files: PTY_PREBUILDS_EXCEPT(null),
       category: 'Development',
       executableName: 'orkio',
       synopsis: 'Orquestração de desenvolvimento com IA (Notion, GitHub, Claude Code)',

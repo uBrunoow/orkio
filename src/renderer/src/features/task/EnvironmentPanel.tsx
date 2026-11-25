@@ -87,6 +87,12 @@ export function EnvironmentPanel(): React.JSX.Element {
               <EditorIcon />
               VS Code
             </Button>
+            {view.openTerminal && (
+              <Button size="sm" variant="outline" onClick={view.openTerminal}>
+                <TerminalIcon />
+                Terminal no Orkio
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={() => void open('terminal')}>
               <TerminalIcon />
               Abrir terminal aqui
