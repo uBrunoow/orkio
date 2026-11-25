@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.20] - 2026-11-25
+
+### Mudado
+
+- fix(release): spawn-helper do node-pty executável no pacote do macOS.
+
 ## [0.2.19] - 2026-11-25
 
 ### Mudado
