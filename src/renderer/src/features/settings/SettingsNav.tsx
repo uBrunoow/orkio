@@ -1,105 +1,163 @@
+import { useEffect, useRef, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { TextField } from '@/components/form'
 import { SETTINGS_TITLES, type SettingsSection } from '../../app/routes'
+import { isTextField } from '../../app/keys'
 import {
   AgentsIcon,
+  BellIcon,
   BoardIcon,
+  GaugeIcon,
+  GridIcon,
   InfoIcon,
   IntegrationsIcon,
+  KeyboardIcon,
+  LockIcon,
+  PermissionIcon,
+  PluginIcon,
   ProjectsIcon,
   RefreshIcon,
+  SettingsIcon,
+  TerminalIcon,
+  ToolIcon,
   type SvgIcon
 } from '../../components/icons'
+import { visibleSettingsGroups } from './settings-sections'
+import { ScopeNote } from './SettingsHeader'
 
-const GROUPS: { title: string; project?: true; items: [SettingsSection, SvgIcon][] }[] = [
-  {
-    title: 'Geral',
-    items: [
-      ['integrations', IntegrationsIcon],
-      ['projects', ProjectsIcon]
-    ]
-  },
-  {
-    title: 'Projeto',
-    project: true,
-    items: [
-      ['board', BoardIcon],
-      ['agents', AgentsIcon]
-    ]
-  },
-  {
-    title: 'App',
-    items: [
-      ['updates', RefreshIcon],
-      ['about', InfoIcon]
-    ]
-  }
-]
+const ICONS: Record<SettingsSection, SvgIcon> = {
+  general: SettingsIcon,
+  appearance: GridIcon,
+  notifications: BellIcon,
+  shortcuts: KeyboardIcon,
+  terminal: TerminalIcon,
+  integrations: IntegrationsIcon,
+  projects: ProjectsIcon,
+  providers: GaugeIcon,
+  board: BoardIcon,
+  agents: AgentsIcon,
+  skills: PluginIcon,
+  mcp: ToolIcon,
+  secrets: LockIcon,
+  diagnostics: PermissionIcon,
+  updates: RefreshIcon,
+  about: InfoIcon
+}
 
 /**
- * Configurações: coluna interna (Geral · Projeto · App) e a seção escolhida ao lado. As seções do
- * projeto só aparecem com um projeto vinculado ao Notion.
+ * "/" foca a busca da coluna fora de campo de texto. Ouve no `document` (antes do `window`): a
+ * tela que tem a própria busca (Integrações, Agentes) ouve no `window`, roda depois e fica com o
+ * foco.
+ */
+function useNavSlashFocus(target: React.RefObject<HTMLDivElement | null>): void {
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return
+      const input = target.current?.querySelector('input')
+      if (!input) return
+      e.preventDefault()
+      input.focus()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [target])
+}
+
+/**
+ * Configurações: coluna interna (Básico · Conexões · Agentes e ferramentas · Projeto · App) com
+ * busca, e a seção escolhida ao lado com a linha "Vale para". As seções do projeto só aparecem com
+ * um projeto vinculado ao Notion.
  */
 export function SettingsLayout({
   section,
   projectName,
+  scope,
   onSection,
   children
 }: {
   section: SettingsSection
   /** Projeto atual vinculado ao Notion; `null` esconde as seções do projeto. */
   projectName: string | null
+  /** A quem a seção vale; `null` = a própria tela diz. */
+  scope: string | null
   onSection(section: SettingsSection): void
   children: React.ReactNode
 }): React.JSX.Element {
+  const [query, setQuery] = useState('')
+  const searchBox = useRef<HTMLDivElement>(null)
+  useNavSlashFocus(searchBox)
+  const groups = visibleSettingsGroups(projectName, query)
+
   return (
     <div className="flex h-full min-h-0">
       <nav
         aria-label="Configurações"
         className="flex w-[220px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-border-soft px-2.5 py-3.5"
       >
-        {GROUPS.filter((g) => !g.project || projectName).map((g, i) => {
-          const title = g.project && projectName ? `Projeto · ${projectName}` : g.title
-          return (
-            <div key={g.title} className={cn('flex flex-col gap-0.5', i > 0 && 'pt-3.5')}>
-              <span
-                id={`settings-nav-${g.title}`}
-                className="truncate px-2 pt-1 pb-1 text-[10.5px] tracking-[0.08em] text-subtle-foreground uppercase"
-              >
-                {title}
-              </span>
-              <ul aria-labelledby={`settings-nav-${g.title}`} className="flex flex-col gap-0.5">
-                {g.items.map(([id, Icon]) => {
-                  const selected = section === id
-                  return (
-                    <li key={id}>
-                      <button
-                        type="button"
-                        aria-current={selected ? 'page' : undefined}
-                        onClick={() => onSection(id)}
+        <div ref={searchBox} className="px-0.5 pb-2.5">
+          <TextField
+            label="Buscar configuração"
+            labelHidden
+            type="search"
+            size="sm"
+            placeholder="Buscar configuração (/)"
+            value={query}
+            onChange={setQuery}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape' && query) {
+                e.preventDefault()
+                setQuery('')
+              }
+            }}
+          />
+        </div>
+        {groups.length === 0 && (
+          <p role="status" className="px-2 py-1 text-xs text-muted-foreground">
+            Nenhuma configuração com “{query.trim()}”.
+          </p>
+        )}
+        {groups.map((g, i) => (
+          <div key={g.id} className={cn('flex flex-col gap-0.5', i > 0 && 'pt-3.5')}>
+            <span
+              id={`settings-nav-${g.id}`}
+              className="truncate px-2 pt-1 pb-1 text-[10.5px] tracking-[0.08em] text-subtle-foreground uppercase"
+            >
+              {g.title}
+            </span>
+            <ul aria-labelledby={`settings-nav-${g.id}`} className="flex flex-col gap-0.5">
+              {g.items.map((id) => {
+                const selected = section === id
+                const Icon = ICONS[id]
+                return (
+                  <li key={id}>
+                    <button
+                      type="button"
+                      aria-current={selected ? 'page' : undefined}
+                      onClick={() => onSection(id)}
+                      className={cn(
+                        'flex w-full items-center gap-2.5 rounded-md px-2 py-[7px] text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60 motion-reduce:transition-none',
+                        selected
+                          ? 'bg-muted text-foreground'
+                          : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                      )}
+                    >
+                      <Icon
                         className={cn(
-                          'flex w-full items-center gap-2.5 rounded-md px-2 py-[7px] text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/60',
-                          selected
-                            ? 'bg-muted text-foreground'
-                            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                          'size-4',
+                          selected ? 'text-foreground' : 'text-subtle-foreground'
                         )}
-                      >
-                        <Icon
-                          className={cn(
-                            'size-4',
-                            selected ? 'text-foreground' : 'text-subtle-foreground'
-                          )}
-                        />
-                        <span className="truncate">{SETTINGS_TITLES[id]}</span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-          )
-        })}
+                      />
+                      <span className="truncate">{SETTINGS_TITLES[id]}</span>
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ))}
       </nav>
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-[18px] overflow-y-auto px-8 py-6">
+        {scope && <ScopeNote scope={scope} className="-mb-2.5" />}
         {children}
       </div>
     </div>

@@ -71,6 +71,9 @@ Claude Code. Hoje existem:
 - **Agentes (Fase 3):** editor Simples|Avançado com prévia do card, autonomia que vale nas
   execuções, memória por agente (ferramenta "lembrar"), revisão até ficar limpo e finais honestos
   dos fluxos. Ver "Agentes (Fase 3)" abaixo.
+- **Configurações, Segredos e MCPs (Fase 4):** menu agrupado com busca e "Vale para" no topo de
+  cada seção, Segredos (Vault), servidores MCP do Orkio (catálogo, cópia dos do seu Claude, por
+  agente) e skills desligadas por projeto. Ver "Configurações, Segredos e MCPs (Fase 4)" abaixo.
 - **Releases (6B):** electron-builder (`electron-builder.ts`) para macOS (dmg+zip, arm64/x64),
   Windows (nsis) e Linux (AppImage+deb, x64), publicados por CI (`release.yml` em tag `v*.*.*`) nos releases do próprio repo
   (público) `uBrunoow/orkio`; `pnpm release`, CHANGELOG e smoke test do app empacotado.
@@ -170,6 +173,9 @@ src/
   shared/task-lanes.ts     # Fase 1: kanban derivado (deriveLane, chips da PR, filtros)
   shared/terminal.ts       # Fase 2: terminal embutido (tipos, limites, validadores, `unseenPart`)
   shared/handoff.ts        # Fase 2: "Continuar no Claude" (HandoffView, textos, `resumeCommand`)
+  shared/vault.ts          # Fase 4: Segredos (nome/valor/usos, nomes reservados, `vaultStoreKey`)
+  shared/mcp.ts            # Fase 4: servidores MCP do Orkio (tipos, `parseMcpServer`, `MCP_CATALOG`)
+  shared/preferences.ts    # Fase 4: preferências aplicadas no main, skills, decisões lembradas
   main/                    # processo main (Node). Único lugar com rede, disco e segredos.
     index.ts               # janela, segurança, registro do IPC e chamar a composição
     composition/           # app.ts: cria os serviços → start() → stop({ waitMs }) (único desligamento);
@@ -1233,7 +1239,7 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   nunca guardado/logado/enviado ao renderer (só % e horários, `shared/claude-usage.ts`). Token
   vencido não é renovado. Falha = `usage: null` (some). Cache de 60 s no main; o renderer só
   consulta com a janela em foco. Config `usageMeter: false` desliga (IPC `usage.*`; Configurações ›
-  Atualizações e o próprio medidor). E2E: `writeClaudeCredentials` + `claudeUsage` no fixture.
+  Provedores e uso e o próprio medidor). E2E: `writeClaudeCredentials` + `claudeUsage` no fixture.
 
 ## Tarefas (Fase 1)
 
@@ -1388,6 +1394,50 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   final no texto. Gate: Aprovar / **Pedir mudanças** (volta ao passo com o comentário) / Recusar.
 - E2E `e2e/agent-memory.spec.ts` (editor + Memória) e `e2e/tasks.spec.ts` (o revisor lê o
   `diff.md`, `git diff` passa sem pedir, "lembrar" grava e a nota aparece na Memória do Revisor).
+
+## Configurações, Segredos e MCPs (Fase 4)
+
+- **Menu** (`features/settings/settings-sections.ts`): grupos Básico, Conexões, Agentes e
+  ferramentas, Projeto · X, App; "Buscar configuração" (`normalizeLabel`, palavras-chave, `/`
+  foca); "Vale para: …" (`settingsScope`, `data-testid settings-scope`) acima do h1 de toda seção.
+  Seção padrão continua Integrações. Seções em `SETTINGS_SECTIONS` (`app/routes.ts`); a paleta as
+  ganha sozinha. Aparência (movimento/tamanho do texto) fica no `localStorage` `orkio.appearance`.
+- **Preferências** (`shared/preferences.ts`, `main/settings/preferences.service.ts`, IPC `prefs.*`,
+  `orkio-config.preferences` opcional sem migração): modelo/raciocínio padrão (última camada do
+  `resolveRuntime`), autonomia sem agente (`ask` → `RunSpec.askEdits`: `--permission-mode manual` e
+  `askEdits` na política), avisos do sistema (`notificationAllowed`: desligado, som, projetos
+  silenciados; o sino continua) e atalho global (lista fechada `GLOBAL_SHORTCUTS`,
+  `platform/global-shortcut.ts`). Decisões lembradas = `permission_rules` (`RunService.
+  rememberedRules/revokeRule`). `prefs.storage` mede `runs/` e `agent-memory/` e conta worktrees.
+- **Segredos** (`main/vault/vault.service.ts`, IPC `vault.*`): valor no `SecureStore`
+  (`vault-<nome>`, `safeStorage`; sem criptografia não salva), metadados em `orkio-config.vault`
+  (nome, nota, datas, `uses`: `agent:<chave>`/`mcp:<id>`). O valor entra só em `save` e sai só em
+  `valuesFor` (main → execução): nunca volta ao renderer, nem em erro. Nome = variável de ambiente
+  sem os reservados (`PATH`, `NODE_OPTIONS`, `LD_*`, `ANTHROPIC_*`, `CLAUDE_*`, `GIT_*`...).
+- **Servidores MCP** (`main/mcp/mcp.service.ts`, IPC `mcp.*`, `orkio-config.mcpServers`): stdio
+  (comando simples no PATH ou absoluto, nunca linha de shell) ou http (https; http só localhost; sem
+  usuário/chave na URL). Variável/cabeçalho = texto ou `{secret, prefix}`; nome sensível só aceita
+  segredo. Todo servidor nasce **desligado** (catálogo, cópia, à mão); `save` só cria `manual` e não
+  deixa o renderer trocar origem/data. Escolher um segredo para o servidor libera o uso
+  (`vault.grant`); remover tira. `agents: 'all'` (inclusive sem agente) ou lista de chaves.
+- **Do seu Claude** (`main/mcp/claude-mcp.ts`): `~/.claude.json` (`mcpServers` + `projects[<pasta de
+  um projeto do Orkio>]`) e `.mcp.json` de cada projeto. Ao renderer vão nome, onde, tipo, resumo
+  (`summarize`: só o nome do comando, args sensíveis `•••`, URL sem query) e os **nomes** das
+  variáveis. "Copiar" relê no main: valores sensíveis viram referências; segredo nos args/URL recusa.
+- **Na execução** (`main/mcp/run-extras.ts`, `RunServiceDeps.extras`): servidores ligados para o
+  agente entram no mcp-config (0600, apagado no fim) com os segredos do servidor nas variáveis/
+  cabeçalhos dele; a ponte `orkio` vai por último e nunca é sobrescrita. Segredos do agente vão no
+  ambiente do processo depois do `sanitizeEnv`. Skills desligadas viram `Skill(nome)` no deny do
+  `--settings`. Os valores entram no filtro do log (`run.secrets`) antes do processo; as notas do
+  log têm só nomes. Segredo que falta/não liberado = o servidor não carrega e o log diz.
+- **Skills** (`main/settings/skills.service.ts`, IPC `skills.*`): o catálogo da 4B na pasta do projeto,
+  só `kind: 'skill'`; `orkio-config.skillsDisabled[projeto]`.
+- **Telas**: `features/secrets/`, `features/mcp/`, `features/skills/`; seções gerais em
+  `features/settings/`.
+- E2E `e2e/settings-config.spec.ts`: busca, segredo pela tela (valor fora da tela/IPC/config),
+  GitHub do catálogo desligado → ligado, `~/.claude.json` do HOME de teste só leitura e copiado,
+  skill desligada; o Claude simulado grava `mcp` (hash dos valores), `deny` e `secretEnv` (`E2E_*`)
+  no `agent-args.log`.
 
 ## Agentes (Etapa 8A)
 
@@ -1780,6 +1830,9 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
 | Terminal embutido com node-pty no main + xterm.js, sem rebuild (Fase 2)                                    | O processo sobrevive à troca de aba (só a ativa fica montada); N-API dispensa recompilar para o Electron e o smoke do pacote prova que carrega. |
 | xterm sob a CSP por folha construída, só com terminal montado (Fase 2)                                    | Relaxar `style-src` valeria para o app todo; o ajuste é contado e some ao desmontar o último terminal. |
 | "Continuar no Claude" trava a tarefa no SQLite e recusa no `ClaudeService` (Fase 2)                        | Duas instâncias do CLI na mesma sessão brigam; a recusa no ponto único de execução cobre mensagem, Rodar e passo de fluxo, e sobrevive a fechar o app. |
+| Segredos e servidores MCP: valor só no main, injetado na hora e só onde foi liberado (Fase 4)              | O mcp-config 0600 leva o segredo só ao servidor que o usa; o agente só recebe no ambiente o que você liberou para ele; nada volta à tela nem ao log. |
+| Servidor MCP nasce desligado, inclusive do catálogo e do `~/.claude.json` (Fase 4)                         | Adicionar não roda nada: o comando aparece antes e só roda depois que você liga. |
+| Skills desligadas por `Skill(nome)` no deny do `--settings` (Fase 4)                                       | Vale só nas execuções do Orkio no projeto, mesmo com "permitir" no `~/.claude`; o terminal do usuário não muda. |
 | Editar/ramificar por `--fork-session` (Fase 2)                                                             | A sessão antiga fica intacta (dá para voltar a ela pelo histórico); o Orkio só passa a continuar a sessão nova. Arquivos do worktree não voltam: avisado na tela. |
 
 ## shadcn/Radix e CSP (regra inegociável)

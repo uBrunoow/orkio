@@ -37,6 +37,7 @@ import { ArtifactError, type ArtifactsService } from './artifacts.service'
 import { buildCatalog } from './catalog'
 import { redactSecrets } from '../platform/redact'
 import { isEffort, isModelName, resolveRuntime } from '../../shared/agent-runtime'
+import { parsePreferences } from '../../shared/preferences'
 import { RunBusyError, type RunService } from './run.service'
 import type {
   GithubDeliver,
@@ -534,6 +535,8 @@ export class ClaudeService {
       }
       // Mensagem/passo > agente > padrão. No agente, `null` = sem preferência (não bloqueia).
       const agent = request.agent
+      // Fase 4: padrão das sessões (Configurações › Geral) por último, antes do padrão do CLI.
+      const prefs = parsePreferences(this.deps.config.get().preferences)
       const resolved = resolveRuntime(
         request.runtime,
         agent
@@ -541,7 +544,11 @@ export class ClaudeService {
               ...(agent.model !== null ? { model: agent.model } : {}),
               ...(agent.effort !== null ? { effort: agent.effort } : {})
             }
-          : undefined
+          : undefined,
+        {
+          ...(prefs.model !== null ? { model: prefs.model } : {}),
+          ...(prefs.effort !== null ? { effort: prefs.effort } : {})
+        }
       )
       const view = await this.deps.runs.start({
         project: { ...wtProject, name: project.name },
@@ -557,7 +564,9 @@ export class ClaudeService {
           model: isModelName(resolved.model) ? resolved.model : null,
           effort: cli.value.supportsEffort && isEffort(resolved.effort) ? resolved.effort : null
         },
-        timeoutMin: request.timeoutMin
+        timeoutMin: request.timeoutMin,
+        // Sem agente: "Pergunta antes de editar" das Configurações (com agente, a dele).
+        ...(!agent && prefs.autonomy === 'ask' ? { askEdits: true } : {})
       })
       return ok(view.id)
     })

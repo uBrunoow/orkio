@@ -667,6 +667,64 @@ describe('RunService', () => {
     })
   })
 
+  it('Fase 4: extras da execução vão ao processo; valores dos segredos nunca vão ao log', async () => {
+    const extras = vi.fn(async () => ({
+      mcpServers: {
+        github: { type: 'http', url: 'https://x', headers: { A: 'Bearer cofre-123-xyz' } }
+      },
+      env: { DEPLOY_KEY: 'deploy-999-abc' },
+      deny: ['Skill(alva:spec)'],
+      secretValues: ['cofre-123-xyz', 'deploy-999-abc'],
+      notes: ['Servidores MCP do Orkio nesta execução: GitHub.']
+    }))
+    service = new RunService({ ...deps, extras })
+    const view = await start(1, {
+      agent: {
+        key: 'local:ana',
+        name: 'Ana',
+        prompt: 'p',
+        model: null,
+        effort: null,
+        autonomy: 'edits'
+      }
+    })
+    await spawned(1)
+    const run = runs[0]!
+    expect(extras).toHaveBeenCalledWith({ projectId: 'p1', agentKey: 'local:ana' })
+    expect(run.opts.extras.env).toEqual({ DEPLOY_KEY: 'deploy-999-abc' })
+    run.emit({ kind: 'text', text: 'echo $DEPLOY_KEY → deploy-999-abc; header cofre-123-xyz' })
+    run.exit(0)
+    await finished(view.id)
+    const raw = JSON.stringify(await service.readLog(view.id))
+    expect(raw).toContain('Servidores MCP do Orkio nesta execução: GitHub.')
+    expect(raw).not.toContain('deploy-999-abc')
+    expect(raw).not.toContain('cofre-123-xyz')
+    expect(JSON.stringify(messages)).not.toContain('deploy-999-abc')
+  })
+
+  it('Fase 4: falha ao resolver os extras não impede a execução (avisa no log)', async () => {
+    service = new RunService({ ...deps, extras: async () => Promise.reject(new Error('x')) })
+    const view = await start(1)
+    await spawned(1)
+    expect(runs[0]!.opts.extras.mcpServers).toEqual({})
+    runs[0]!.exit(0)
+    await finished(view.id)
+    expect(JSON.stringify(await service.readLog(view.id))).toContain(
+      'Não deu para carregar os servidores MCP'
+    )
+  })
+
+  it('Fase 4: decisões lembradas listam e revogam', () => {
+    db.run(
+      `INSERT INTO permission_rules (project_id, tool, pattern, created_at) VALUES ('p1', 'Bash', 'npm test', 't')`
+    )
+    expect(service.rememberedRules()).toEqual([
+      { projectId: 'p1', tool: 'Bash', pattern: 'npm test', createdAt: 't' }
+    ])
+    service.revokeRule('p1', 'Bash', 'npm test')
+    expect(service.rememberedRules()).toEqual([])
+  })
+
   it('valores de .env do worktree nunca vão para o log (nem repetidos pelo agente)', async () => {
     const wt = join(dir, 'wt', 'ORK-1')
     await mkdir(wt, { recursive: true })

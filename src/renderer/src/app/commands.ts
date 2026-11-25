@@ -380,11 +380,19 @@ export const APP_COMMANDS: readonly Command[] = [
   },
   {
     id: 'about',
-    label: 'Sobre e diagnóstico',
+    label: 'Sobre o Orkio',
     menu: 'help',
     block: 1,
-    keywords: ['versão', 'diagnóstico'],
+    keywords: ['versão'],
     run: (ctx) => ctx.navigate({ name: 'settings', section: 'about' })
+  },
+  {
+    id: 'diagnostics',
+    label: 'Diagnóstico',
+    menu: 'help',
+    block: 1,
+    keywords: ['diagnóstico', 'logs', 'armazenamento', 'conferir'],
+    run: (ctx) => ctx.navigate({ name: 'settings', section: 'diagnostics' })
   }
 ]
 
