@@ -210,3 +210,74 @@ describe('ClaudeRun', () => {
     })
   })
 })
+
+describe('Fase 4: extras da execução', () => {
+  it('skills desligadas entram no deny; regra fora do formato não passa', () => {
+    const a = buildCliArgs(spec(), {
+      sessionId: 's1',
+      mcpConfig: '/tmp/x.mcp.json',
+      deny: ['Skill(alva-flow:spec)', 'Bash(rm -rf /)', 'Skill(x) --dangerously']
+    })
+    const deny = (settings(a) as { permissions: { deny: string[] } }).permissions.deny
+    expect(deny).toContain('Skill(alva-flow:spec)')
+    expect(deny).not.toContain('Bash(rm -rf /)')
+    expect(deny.some((d) => d.includes('dangerously'))).toBe(false)
+    expect(deny).toEqual([...RUN_SETTINGS.permissions.deny, 'Skill(alva-flow:spec)'])
+  })
+
+  it('sem agente, "Pergunta antes de editar" vira permission-mode manual', () => {
+    const a = buildCliArgs({ ...spec(), askEdits: true }, { sessionId: 's1', mcpConfig: '/x' })
+    expect(after(a, '--permission-mode')).toBe('manual')
+  })
+
+  it('servidores do Orkio no mcp-config (ponte por último, nunca sobrescrita) e segredos do agente no ambiente', async () => {
+    let captured: { args: string[]; env: NodeJS.ProcessEnv } | null = null
+    const spawn = ((_cmd: string, a: string[], options: { env: NodeJS.ProcessEnv }) => {
+      captured = { args: a, env: options.env }
+      const child = new EventEmitter() as EventEmitter & Record<string, unknown>
+      child['stdin'] = new PassThrough()
+      child['stdout'] = new PassThrough()
+      child['stderr'] = new PassThrough()
+      child['kill'] = () => true
+      return child
+    }) as unknown as SpawnFn
+    const run = new ClaudeRun({
+      claudeCommand: 'claude',
+      spec: spec() as RunSpec,
+      cwd: dir,
+      prompt: 'oi',
+      sessionId: 's2',
+      broker: { socketPath: join(dir, 's.sock'), token: 't' } as unknown as PermissionBroker,
+      nodePath: process.execPath,
+      bridgeScript: 'bridge.js',
+      tmpDir: dir,
+      env: { ANTHROPIC_API_KEY: 'x', HOME: '/h' },
+      extras: {
+        mcpServers: {
+          github: { type: 'http', url: 'https://x', headers: { Authorization: 'Bearer v1' } },
+          orkio: { type: 'stdio', command: 'malicioso' }
+        },
+        env: { DEPLOY_TOKEN: 'v2' },
+        deny: [],
+        secretValues: ['v1', 'v2'],
+        notes: []
+      },
+      onEvent: () => undefined,
+      onExit: () => undefined,
+      spawn
+    })
+    await run.start()
+    const c = captured as unknown as { args: string[]; env: NodeJS.ProcessEnv }
+    const file = after(c.args, '--mcp-config')!
+    const config = JSON.parse(await readFile(file, 'utf8')) as {
+      mcpServers: Record<string, Record<string, unknown>>
+    }
+    expect(Object.keys(config.mcpServers)).toEqual(['github', 'orkio'])
+    expect(config.mcpServers['orkio']!['command']).toBe(process.execPath)
+    expect(c.env['DEPLOY_TOKEN']).toBe('v2')
+    expect(c.env['ANTHROPIC_API_KEY']).toBeUndefined()
+    // O segredo do servidor vai só no arquivo do mcp-config (0600), nunca nos argumentos.
+    expect(c.args.join(' ')).not.toContain('v1')
+    expect(c.args.join(' ')).not.toContain('v2')
+  })
+})

@@ -443,6 +443,39 @@ describe('ClaudeService', () => {
     expect(old.lastSpec().runtime).toEqual({ model: 'sonnet', effort: null })
   })
 
+  it('Fase 4: padrão das sessões e "Pergunta antes de editar" (sem agente) das Configurações', async () => {
+    const projects = [
+      {
+        id: 'p1',
+        name: 'app',
+        localPath: '/repo',
+        repo: { owner: 'o', name: 'app', remoteName: 'origin', defaultBranch: 'main' },
+        notionProject: null
+      }
+    ]
+    const { service, lastSpec } = setup({
+      config: {
+        get: () =>
+          ({ projects, preferences: { autonomy: 'ask', model: 'haiku', effort: 'low' } }) as never
+      }
+    })
+    await service.startRun(flowRequest({}))
+    expect(lastSpec().runtime).toEqual({ model: 'haiku', effort: 'low' })
+    expect(lastSpec().askEdits).toBe(true)
+    // O passo/mensagem vence; com agente, a autonomia é a dele.
+    const agent = {
+      key: 'a',
+      name: 'A',
+      prompt: 'p',
+      model: null,
+      effort: null,
+      autonomy: 'edits' as const
+    }
+    await service.startRun(flowRequest({ agent, runtime: { model: 'opus' } }))
+    expect(lastSpec().runtime).toEqual({ model: 'opus', effort: 'low' })
+    expect(lastSpec().askEdits).toBeUndefined()
+  })
+
   it('sessão "a mais recente": continua; sem sessão, começa com o briefing ou explica', async () => {
     const { service, runs, lastSpec } = setup()
     const fresh = { kind: 'new', briefing: '# Briefing ORK-7', includeBriefing: true } as const

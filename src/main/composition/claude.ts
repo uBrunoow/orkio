@@ -5,6 +5,7 @@ import { ArtifactsService, type ArtifactsDeps } from '../claude/artifacts.servic
 import { ClaudeService, type ClaudeServiceDeps } from '../claude/claude.service'
 import { detectClaude } from '../claude/detect'
 import { ClaudeRun } from '../claude/runner'
+import type { RunExtras } from '../mcp/run-extras'
 import { BRIDGE_MEMORY_TOOL_NAME } from '../claude/bridge/protocol'
 import type { AgentMemoryStore } from '../agents/agent-memory.store'
 import { memoryPrompt } from '../../shared/agent-memory'
@@ -67,6 +68,8 @@ export function createClaude(deps: {
   /** O executor de fluxos nasce depois (ele usa o Claude Code). */
   flowRunner: Late<FlowRunner>
   notify: (title: string, body: string, ref: { projectId: string; taskId: string }) => void
+  /** Fase 4: servidores MCP, segredos do agente e skills negadas de cada execução. */
+  runExtras?: (run: { projectId: string; agentKey: string | null }) => Promise<RunExtras>
   emit: Emit
 }): ClaudeParts {
   const { env, worktrees } = deps
@@ -123,6 +126,7 @@ export function createClaude(deps: {
       deps.emit('runEvent', message)
     },
     notify: deps.notify,
+    ...(deps.runExtras ? { extras: deps.runExtras } : {}),
     remember: (agentKey, projectId, input) => deps.agentMemory.remember(agentKey, projectId, input)
   })
   service.set(

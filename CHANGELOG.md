@@ -6,6 +6,30 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Configurações reorganizadas: menu lateral em grupos (Básico, Conexões, Agentes e ferramentas,
+  Projeto, App) com "Buscar configuração", e cada seção diz no topo a quem a mudança vale. Seções
+  novas: Geral (modelo padrão das sessões, se o Claude Code edita sozinho ou pergunta antes quando
+  não há agente, decisões "sempre neste projeto" para revogar, privacidade), Aparência (reduzir
+  movimento, tamanho do texto), Notificações (aviso do sistema, som, projetos silenciados), Atalhos
+  (a lista e um atalho global para trazer o Orkio para a frente), Terminal, Provedores e uso (o
+  Claude Code e o medidor de uso) e Diagnóstico ("Conferir tudo", copiar o diagnóstico e o espaço
+  usado pelo Orkio).
+- **Segredos**: guarde tokens e chaves com a criptografia do sistema. Depois de salvo, o valor não
+  aparece de novo; você escolhe quais agentes e servidores MCP podem usar cada um, e o Orkio só o
+  põe como variável de ambiente deles na hora de rodar. Nunca vai para o log.
+- **Servidores MCP**: catálogo com GitHub, Notion, Linear, Sentry, Context7 e Playwright
+  ("Adicionar" em um clique, escolhendo o segredo), os servidores que o seu Claude Code já carrega
+  (só leitura, com "Copiar para o Orkio") e servidores feitos à mão. Todo servidor chega desligado:
+  o comando só roda depois que você liga, para todas as execuções ou só para os agentes escolhidos.
+- **Skills**: veja as skills que o Claude Code enxerga no projeto e desligue as que não quer nas
+  execuções do Orkio (no seu terminal continuam todas).
+
+### Alterado
+
+- O liga/desliga do medidor de uso do Claude mudou de Atualizações para Configurações › Provedores e uso.
+
 ## [0.2.15] - 2026-11-25
 
 ### Mudado
@@ -86,6 +110,7 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
   Bloqueios, Detalhes e Evidência; quem implementou corrige os bloqueios e o revisor olha de novo,
   até não sobrar bloqueio (no máximo 3 rodadas). Cada rodada fica em `.orkio/revisao/rodada-N.md`.
   Se os mesmos bloqueios voltam, o fluxo para como "Travado"; no limite de rodadas, "Esgotado".
+
 
 ### Alterado
 

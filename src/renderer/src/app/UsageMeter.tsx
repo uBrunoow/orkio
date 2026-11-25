@@ -87,6 +87,7 @@ export function UsageMeter({
         <div className="flex flex-col gap-2 border-t border-border-soft px-4 py-3">
           <p className="text-xs text-muted-foreground">
             Experimental: lido da sua conta do Claude Code. O Orkio não guarda o seu login.
+            Escondido, volta em Configurações › Provedores e uso.
           </p>
           <Button
             variant="ghost"

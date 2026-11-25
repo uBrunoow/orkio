@@ -165,6 +165,7 @@
   }
 }
 
+/* Movimento reduzido: o do sistema ou "Reduzir sempre" (Configurações › Aparência, `data-motion`). */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -172,4 +173,20 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+html[data-motion='reduce'] *,
+html[data-motion='reduce'] *::before,
+html[data-motion='reduce'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Tamanho do texto (Configurações › Aparência, `data-text-size`): escala o rem (texto e espaços). */
+html[data-text-size='large'] {
+  font-size: 112.5%;
+}
+html[data-text-size='larger'] {
+  font-size: 125%;
 }

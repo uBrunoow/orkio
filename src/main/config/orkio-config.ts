@@ -18,6 +18,9 @@ import { clampAlvaParallel } from '../../shared/alva'
 import { parseFlowDef, type Flow, type ProjectFlows, type StageFlow } from '../../shared/task-flow'
 import { parseColumnSetups, type RunSetup } from '../../shared/task-setup'
 import type { UpdateChannel } from '../../shared/updates'
+import { parseVault, type SecretMeta } from '../../shared/vault'
+import { parseMcpServers, type McpServer } from '../../shared/mcp'
+import { parsePreferences, parseSkillNames, type AppPreferences } from '../../shared/preferences'
 import type {
   NotionColor,
   NotionMapping,
@@ -61,6 +64,14 @@ export interface OrkioConfig {
    * nenhuma coluna com padrão (campo opcional, sem migração).
    */
   runSetup?: Record<string, Record<string, RunSetup>>
+  /** Fase 4: metadados dos segredos do Vault (os valores ficam no SecureStore). Opcional. */
+  vault?: SecretMeta[]
+  /** Fase 4: servidores MCP do Orkio (sem valores sensíveis: referências ao Vault). Opcional. */
+  mcpServers?: McpServer[]
+  /** Fase 4: skills desligadas por projeto (negadas nas execuções do Orkio). Opcional. */
+  skillsDisabled?: Record<string, string[]>
+  /** Fase 4: preferências que o main aplica (Geral, Notificações, Atalhos). Ausente = padrão. */
+  preferences?: AppPreferences
 }
 
 export interface UpdatesConfig {
@@ -233,9 +244,31 @@ export function validateConfig(
     updates: parseUpdates(data['updates']),
     ...(data['keepAwake'] === true ? { keepAwake: true } : {}),
     ...(data['usageMeter'] === false ? { usageMeter: false as const } : {}),
-    ...runSetupOf(data['runSetup'])
+    ...runSetupOf(data['runSetup']),
+    ...phase4Of(data)
   }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
+}
+
+/** Campos opcionais da Fase 4 (sem migração): inválido some, nunca derruba a config. */
+function phase4Of(
+  data: Record<string, unknown>
+): Pick<OrkioConfig, 'vault' | 'mcpServers' | 'skillsDisabled' | 'preferences'> {
+  const out: Pick<OrkioConfig, 'vault' | 'mcpServers' | 'skillsDisabled' | 'preferences'> = {}
+  const vault = parseVault(data['vault'])
+  if (vault.length > 0) out.vault = vault
+  const servers = parseMcpServers(data['mcpServers'])
+  if (servers.length > 0) out.mcpServers = servers
+  if (isRecord(data['skillsDisabled'])) {
+    const skills: Record<string, string[]> = {}
+    for (const [projectId, raw] of Object.entries(data['skillsDisabled'])) {
+      const names = parseSkillNames(raw)
+      if (projectId && names && names.length > 0) skills[projectId] = names
+    }
+    if (Object.keys(skills).length > 0) out.skillsDisabled = skills
+  }
+  if (isRecord(data['preferences'])) out.preferences = parsePreferences(data['preferences'])
+  return out
 }
 
 /** Padrões "Como deve rodar?" por coluna; coluna inválida some (nunca derruba a config). */

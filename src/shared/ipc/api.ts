@@ -81,6 +81,15 @@ import type {
   ProjectsListResult
 } from '../projects'
 import type { Result } from '../result'
+import { isSecretName, type SecretSaveInput, type SecretUse, type VaultView } from '../vault'
+import { isMcpId, type ClaudeMcpRef, type McpServer, type McpView } from '../mcp'
+import {
+  DEFAULT_PREFERENCES,
+  type AppPreferences,
+  type RememberedRule,
+  type SkillsView,
+  type StorageUsage
+} from '../preferences'
 import {
   MEMORY_ACTIONS,
   type AgentMemoryView,
@@ -135,7 +144,15 @@ import {
   parseSendMessageRequest,
   parseStartRunRequest,
   parseWorkspaceInput,
-  parseRunSetupPayload
+  parseRunSetupPayload,
+  parseCatalogSecrets,
+  parseClaudeMcpRef,
+  parseMcpServerPayload,
+  parsePreferencesPatch,
+  parseRuleRef,
+  parseSecretSaveInput,
+  parseSecretUsesPayload,
+  parseSkillNamesPayload
 } from './payloads'
 import {
   agentKey,
@@ -158,6 +175,9 @@ import {
   text,
   type ForceOption
 } from './validate'
+
+const secretName = guard(isSecretName)
+const mcpId = guard(isMcpId)
 
 const MEMORY_UNEXPECTED = 'Algo deu errado com a memória do agente. Tente novamente.'
 
@@ -1345,6 +1365,118 @@ export const ORKIO_API = {
         channel: 'usage:set-enabled',
         args: [bool],
         fallback: true
+      })
+    }
+  ),
+  /**
+   * Fase 4: Segredos (Vault). O valor vai do renderer ao main só ao salvar e nunca volta (a tela vê
+   * nome, nota, datas e quem usa). Criptografado com `safeStorage`; sem criptografia, nada é salvo.
+   */
+  vault: group(
+    { needs: 'config', unexpected: 'Não foi possível usar os segredos agora. Tente novamente.' },
+    {
+      get: call<() => Promise<VaultView>>()({
+        channel: 'vault:get',
+        args: [],
+        fallback: { available: false, secrets: [] }
+      }),
+      /** Novo (com valor) ou existente (nota; valor só se for trocar). */
+      save: call<(input: SecretSaveInput) => Promise<Result<VaultView>>>()({
+        channel: 'vault:save',
+        args: [parseSecretSaveInput]
+      }),
+      remove: call<(name: string) => Promise<Result<VaultView>>>()({
+        channel: 'vault:remove',
+        args: [secretName]
+      }),
+      /** Quem pode receber o segredo na hora de rodar (agentes e servidores MCP). */
+      setUses: call<(name: string, uses: SecretUse[]) => Promise<Result<VaultView>>>()({
+        channel: 'vault:set-uses',
+        args: [secretName, parseSecretUsesPayload]
+      })
+    }
+  ),
+  /**
+   * Fase 4: servidores MCP do Orkio (catálogo, os do seu Claude Code só para leitura e os seus).
+   * Nascem desligados; só entram no `--mcp-config` depois de ligados e para os agentes escolhidos.
+   */
+  mcp: group(
+    { needs: 'config', unexpected: 'Não foi possível mexer nos servidores MCP agora.' },
+    {
+      get: call<() => Promise<Result<McpView>>>()({
+        channel: 'mcp:get',
+        args: []
+      }),
+      /** Adiciona um item do catálogo (desligado) com os segredos escolhidos (campo → segredo). */
+      addFromCatalog: call<
+        (catalogId: string, secrets: Record<string, string>) => Promise<Result<McpView>>
+      >()({
+        channel: 'mcp:add-from-catalog',
+        args: [text(40, 1), parseCatalogSecrets]
+      }),
+      /** Copia um servidor do seu Claude Code (o main relê o arquivo; valores sensíveis viram referências). */
+      copyFromClaude: call<(ref: ClaudeMcpRef) => Promise<Result<McpView>>>()({
+        channel: 'mcp:copy-from-claude',
+        args: [parseClaudeMcpRef]
+      }),
+      /** Cria ou troca um servidor (ligar/desligar, agentes, comando...). */
+      save: call<(server: McpServer) => Promise<Result<McpView>>>()({
+        channel: 'mcp:save',
+        args: [parseMcpServerPayload]
+      }),
+      remove: call<(id: string) => Promise<Result<McpView>>>()({
+        channel: 'mcp:remove',
+        args: [mcpId]
+      })
+    }
+  ),
+  /** Fase 4: skills que o Claude Code enxerga no projeto e quais ficam desligadas nele. */
+  skills: group(
+    { needs: 'config', unexpected: 'Não foi possível ler as skills agora.' },
+    {
+      get: call<(projectId: string) => Promise<Result<SkillsView>>>()({
+        channel: 'skills:get',
+        args: [projectId]
+      }),
+      setDisabled: call<(projectId: string, names: string[]) => Promise<Result<SkillsView>>>()({
+        channel: 'skills:set-disabled',
+        args: [projectId, parseSkillNamesPayload]
+      })
+    }
+  ),
+  /** Fase 4: preferências que o main aplica (Geral, Notificações, Atalhos, Diagnóstico). */
+  prefs: group(
+    { needs: 'config', unexpected: 'Não foi possível salvar a preferência agora.' },
+    {
+      get: call<() => Promise<AppPreferences>>()({
+        channel: 'prefs:get',
+        args: [],
+        fallback: DEFAULT_PREFERENCES
+      }),
+      save: call<(patch: Partial<AppPreferences>) => Promise<Result<AppPreferences>>>()({
+        channel: 'prefs:save',
+        args: [parsePreferencesPatch]
+      }),
+      /** Decisões "sempre neste projeto" dos pedidos de permissão. */
+      rememberedRules: call<() => Promise<Result<RememberedRule[]>>>()({
+        channel: 'prefs:remembered-rules',
+        args: [],
+        needs: 'db'
+      }),
+      revokeRule: call<
+        (
+          projectId: string,
+          rule: { tool: string; pattern: string }
+        ) => Promise<Result<RememberedRule[]>>
+      >()({
+        channel: 'prefs:revoke-rule',
+        args: [projectId, parseRuleRef],
+        needs: 'db'
+      }),
+      /** Espaço usado pelo Orkio (execuções, ambientes, memória). */
+      storage: call<() => Promise<Result<StorageUsage>>>()({
+        channel: 'prefs:storage',
+        args: []
       })
     }
   ),

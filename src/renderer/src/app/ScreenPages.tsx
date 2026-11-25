@@ -8,19 +8,31 @@ import { TerminalPage } from '../features/terminal/TerminalPage'
 import { IntegrationsPage } from '../features/integrations/IntegrationsPage'
 import { SetupPage } from '../features/setup/SetupPage'
 import { ProjectsPage } from '../features/projects/ProjectsPage'
-import {
-  AboutSection,
-  PowerSection,
-  UpdatesSection,
-  UsageMeterSection
-} from '../features/settings/SettingsPage'
+import { AboutSection, PowerSection, UpdatesSection } from '../features/settings/SettingsPage'
 import { SettingsLayout } from '../features/settings/SettingsNav'
+import { settingsScope } from '../features/settings/settings-sections'
+import { GeneralSection } from '../features/settings/GeneralSection'
+import { AppearanceSection } from '../features/settings/AppearanceSection'
+import { NotificationsSection } from '../features/settings/NotificationsSection'
+import { ShortcutsSection } from '../features/settings/ShortcutsSection'
+import { TerminalSection } from '../features/settings/TerminalSection'
+import { ProvidersSection } from '../features/settings/ProvidersSection'
+import { DiagnosticsSection } from '../features/settings/DiagnosticsSection'
+import { SkillsPage } from '../features/skills/SkillsPage'
+import { McpPage } from '../features/mcp/McpPage'
+import { SecretsPage } from '../features/secrets/SecretsPage'
 import { PageHeader } from '../components/PageHeader'
 import { PAGE_WIDTH } from '../components/page-width'
 import type { BoardTaskRef, OverviewSnapshot } from '../../../shared/overview'
 import type { ProjectView } from '../../../shared/projects'
 import { HomePage } from './HomePage'
-import { ROUTE_TITLES, SETTINGS_TITLES, type Route, type RouteName } from './routes'
+import {
+  ROUTE_TITLES,
+  SETTINGS_TITLES,
+  type Route,
+  type RouteName,
+  type SettingsSection
+} from './routes'
 import type { Crumb } from './ScreenBar'
 
 /** O que as telas recebem do app (a casca). */
@@ -58,11 +70,31 @@ function settingsPage(
   ctx: PageContext
 ): React.ReactNode {
   const { linkedProject, project, navigate } = ctx
-  const toSettings = (section: 'integrations' | 'projects'): void =>
-    navigate({ name: 'settings', section })
+  const toSettings = (section: SettingsSection): void => navigate({ name: 'settings', section })
+  const projectId = project?.id ?? null
   switch (route.section ?? 'integrations') {
+    case 'general':
+      return <GeneralSection onOpenSection={toSettings} />
+    case 'appearance':
+      return <AppearanceSection />
+    case 'notifications':
+      return <NotificationsSection projects={ctx.projects} />
+    case 'shortcuts':
+      return <ShortcutsSection isMac={ctx.isMac} />
+    case 'terminal':
+      return <TerminalSection isMac={ctx.isMac} />
+    case 'providers':
+      return <ProvidersSection onOpenSection={toSettings} />
+    case 'skills':
+      return <SkillsPage projectId={projectId} />
+    case 'mcp':
+      return <McpPage projectId={projectId} />
+    case 'secrets':
+      return <SecretsPage projectId={projectId} />
+    case 'diagnostics':
+      return <DiagnosticsSection />
     case 'integrations':
-      return <IntegrationsPage projectId={project?.id ?? null} />
+      return <IntegrationsPage projectId={projectId} />
     case 'projects':
       return (
         <ProjectsPage
@@ -95,7 +127,6 @@ function settingsPage(
           <PageHeader title={SETTINGS_TITLES.updates} />
           <UpdatesSection />
           <PowerSection />
-          <UsageMeterSection />
         </div>
       )
     case 'about':
@@ -191,6 +222,7 @@ export const SCREEN_PAGES: { [K in RouteName]: Renderer<K> } = {
         <SettingsLayout
           section={section}
           projectName={linkedProject?.name ?? null}
+          scope={settingsScope(section, linkedProject?.name ?? null)}
           onSection={(next) => navigate({ name: 'settings', section: next })}
         >
           {settingsPage(route, ctx)}

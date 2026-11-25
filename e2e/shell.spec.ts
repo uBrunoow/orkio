@@ -9,6 +9,7 @@ import {
   externalCalls,
   launchOrkio,
   navTo,
+  openSettings,
   removeDir,
   seedConfig,
   taskScreen,
@@ -205,7 +206,8 @@ test('medidor de uso do Claude: % e quando renova; token só no main; dá para e
 
   await page.getByRole('button', { name: 'Esconder o medidor' }).click()
   await expect(meter).toBeHidden()
-  // Religa nas Configurações › Atualizações (a tela já está aberta).
+  // Religa nas Configurações › Provedores e uso.
+  await openSettings(page, 'Provedores e uso')
   const toggle = page.getByRole('switch', { name: /Mostrar o uso do Claude na barra/ })
   await expect(toggle).not.toBeChecked()
   await toggle.click()
