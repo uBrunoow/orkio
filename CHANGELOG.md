@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.17] - 2026-11-25
+
 ### Adicionado
 
 - **A PR acorda o fluxo:** depois de abrir a PR, "Rodar uma vez", "Com aprovação" e "Quebrar em
