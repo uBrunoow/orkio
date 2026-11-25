@@ -17,6 +17,15 @@ import { FolderPlusIcon } from '../../components/icons'
 
 const mono = 'font-mono text-xs text-muted-foreground'
 
+/** Erros do GitHub do Orkio em que dá para seguir só com o git e o `gh` desta máquina. */
+const GIT_ONLY_FALLBACK = new Set<ProjectError['code']>([
+  'github_disconnected',
+  'no_access',
+  'sso_required',
+  'oauth_restricted',
+  'github_error'
+])
+
 export function AddProjectPanel({
   selection,
   onCreate,
@@ -49,14 +58,15 @@ export function AddProjectPanel({
     if (!nameEdited) setName(chosen.name)
   }
 
-  async function submit(): Promise<void> {
+  async function submit(gitOnly = false): Promise<void> {
     setSaving(true)
     setError(null)
     const result = await onCreate({
       selectionId: selection.selectionId,
       remoteName,
       hostConfirmed: confirmed,
-      name
+      name,
+      ...(gitOnly ? { gitOnly: true } : {})
     })
     setSaving(false)
     if (!result.ok && !result.cancelled) setError(result.error)
@@ -172,6 +182,23 @@ export function AddProjectPanel({
         >
           {error.message}
         </Alert>
+      )}
+      {error && GIT_ONLY_FALLBACK.has(error.code) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border-soft bg-card px-3 py-2.5">
+          <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+            Sem o GitHub do Orkio, o projeto usa o seu git e o seu{' '}
+            <code className="font-mono">gh</code>: push e PR saem por eles. PRs e CI no quadro
+            chegam depois.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={saving || (needsConfirmation && !confirmed)}
+            onClick={() => void submit(true)}
+          >
+            Usar só o git desta máquina
+          </Button>
+        </div>
       )}
 
       <div className={cn('flex gap-2', bare && 'flex-row-reverse justify-start')}>

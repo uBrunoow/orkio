@@ -227,6 +227,32 @@ test('organização com restrição de OAuth Apps e com SSO → mensagem + link 
   await panel.getByRole('button', { name: 'Cancelar' }).click()
 })
 
+test('org sem o app aprovado → "Usar só o git desta máquina" cria o projeto; o modo troca pelo menu', async () => {
+  const app = orkio!
+  await setFakes(app.app, { githubRepos: { 'restrita-org/app': 'restricted' } })
+  const panel = app.page.getByRole('region', { name: 'Adicionar projeto' })
+  await pick(app, join(work, 'org-restrita'))
+  await panel.getByRole('button', { name: 'Adicionar projeto' }).click()
+  await expect(alerts(panel)).toContainText('Um admin da organização precisa aprovar o Orkio')
+  await panel.getByRole('button', { name: 'Usar só o git desta máquina' }).click()
+  await expect(panel).toHaveCount(0)
+  const row = projectRow(app.page, 'app')
+  await expect(row.getByText('Git local')).toBeVisible()
+  await shot(app.page, 'projects-4b-git-local')
+
+  // Voltar ao GitHub do Orkio com a org ainda restrita: recusa e continua só git.
+  await row.getByRole('button', { name: /^Mais ações de / }).click()
+  await app.page.getByRole('menuitem', { name: 'Voltar a usar o GitHub do Orkio' }).click()
+  await expect(alerts(app.page)).toContainText('Um admin da organização precisa aprovar o Orkio')
+  await expect(row.getByText('Git local')).toBeVisible()
+
+  // Tira do Orkio para não mudar os próximos testes.
+  await row.getByRole('button', { name: /^Mais ações de / }).click()
+  await app.page.getByRole('menuitem', { name: 'Remover do Orkio' }).click()
+  await row.getByRole('group').getByRole('button', { name: 'Remover' }).click()
+  await expect(row).toHaveCount(0)
+})
+
 test('repositório arquivado é salvo, com aviso', async () => {
   const app = orkio!
   await setFakes(app.app, { githubRepos: { 'ubrunoow/velho': 'archived' } })
