@@ -62,6 +62,31 @@ describe('buildCliArgs', () => {
     expect(resumed).not.toContain('--session-id')
   })
 
+  it('ramificar: --resume na origem, --resume-session-at no ponto, --fork-session e o id novo', () => {
+    const a = args({
+      session: {
+        kind: 'fork',
+        from: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc',
+        at: '1a2b3c4d-1b2c-4d5e-8f90-123456789abc',
+        reason: 'branch'
+      }
+    })
+    expect(after(a, '--resume')).toBe('0f8c2a3e-1b2c-4d5e-8f90-123456789abc')
+    expect(after(a, '--resume-session-at')).toBe('1a2b3c4d-1b2c-4d5e-8f90-123456789abc')
+    expect(a).toContain('--fork-session')
+    expect(after(a, '--session-id')).toBe('s1')
+    expect(() =>
+      args({
+        session: {
+          kind: 'fork',
+          from: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc',
+          at: '--x',
+          reason: 'edit'
+        }
+      })
+    ).toThrow()
+  })
+
   it('agente: instruções no --append-system-prompt; permissões iguais', () => {
     const base = args()
     const a = args({

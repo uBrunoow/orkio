@@ -46,6 +46,16 @@ describe('stream-json → uso do contexto', () => {
       contextWindow: 1_000_000
     })
   })
+  it('texto da conversa principal leva o id da mensagem (Ramificar daqui); id estranho não', () => {
+    const text = (over: Record<string, unknown>) =>
+      parseStreamLine(line(over), WT).find((e) => e.kind === 'text')
+    expect(text({ uuid: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc' })).toEqual({
+      kind: 'text',
+      text: 'oi',
+      uuid: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc'
+    })
+    expect(text({ uuid: '--fork-session' })).toEqual({ kind: 'text', text: 'oi' })
+  })
   it('mensagem de subagente e linha sem usage não emitem uso', () => {
     expect(
       parseStreamLine(line({ parent_tool_use_id: 'toolu_1' }), WT).some((e) => e.kind === 'usage')

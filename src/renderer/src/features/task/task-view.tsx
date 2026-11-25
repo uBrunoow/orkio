@@ -24,6 +24,7 @@ import {
   useSource
 } from '../../lib/ipc'
 import { useTaskRuns, type TaskRuns } from '../claude/useTaskRuns'
+import type { ComposerDraft } from '../claude/composer-draft'
 import { useProjectFlows } from '../task-flows/useProjectFlows'
 import {
   flowPlan,
@@ -104,6 +105,14 @@ export interface TaskView extends TaskViewInput {
   setComposer(el: HTMLTextAreaElement | null): void
   /** Leva ao campo de mensagem (o texto vai para o Claude): "Pedir ajuste…" do gate. */
   focusComposer(): void
+  /**
+   * Fase 2: "Editar mensagem"/"Ramificar daqui" põem um rascunho no campo; o campo o pega e limpa.
+   * `null` quando a conversa não pode ramificar agora (fluxo em andamento, sessão com você).
+   */
+  draft: ComposerDraft | null
+  setDraft: ((draft: ComposerDraft | null) => void) | null
+  /** O campo usou (mandou ou cancelou) o rascunho. */
+  clearDraft(): void
 }
 
 /** Evento de execução que muda o que a tarefa mostra além da conversa (histórico, spec, diff). */
@@ -248,6 +257,18 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
     field?.focus()
   }, [])
 
+  // Fase 2: rascunho de "Editar mensagem"/"Ramificar daqui" (só sem fluxo e sem a sessão com você).
+  const [draft, setDraftState] = useState<ComposerDraft | null>(null)
+  const canFork = !flowLive && !state?.handoff
+  const clearDraft = useCallback(() => setDraftState(null), [])
+  const setDraft = useCallback(
+    (next: ComposerDraft | null) => {
+      setDraftState(next)
+      if (next) focusComposer()
+    },
+    [focusComposer]
+  )
+
   const focused = useRef(false)
   const { focusSection } = input
   const sectionRef = useCallback(
@@ -281,7 +302,10 @@ export function useTaskViewState(input: TaskViewInput): TaskView {
     currentPhase: currentPhase(phases),
     sectionRef,
     setComposer,
-    focusComposer
+    focusComposer,
+    draft,
+    setDraft: canFork ? setDraft : null,
+    clearDraft
   }
 }
 

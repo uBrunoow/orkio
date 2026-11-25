@@ -46,7 +46,12 @@ export function isRunLive(status: RunStatus): boolean {
 export type RunLogEvent =
   | { kind: 'status'; status: RunStatus; message?: string }
   | { kind: 'init'; model: string | null; plugins: string[]; commands: string[] }
-  | { kind: 'text'; text: string }
+  | {
+      kind: 'text'
+      text: string
+      /** Id da mensagem do Claude na sessão (Fase 2: "Ramificar daqui"/"Editar mensagem"). */
+      uuid?: string
+    }
   /** Uso do contexto na mensagem principal (só números; ver `shared/context-usage.ts`). */
   | { kind: 'usage'; inputTokens: number; contextWindow: number }
   | {
@@ -225,6 +230,17 @@ export interface SendMessageRequest {
   runtime?: Partial<RuntimeChoice>
   /** Arquivos anexados (imagem, PDF, md, txt): o main valida pelo conteúdo e grava no worktree. */
   attachments?: { name: string; mime: string; data: Uint8Array }[]
+  /**
+   * Fase 2: a mensagem sai de outro ponto da conversa, numa sessão nova (`--fork-session`).
+   * `at` = id de uma resposta do Claude nesta execução ("Ramificar daqui"); `null` = logo antes do
+   * pedido desta execução ("Editar mensagem").
+   */
+  fork?: SessionFork
+}
+
+export interface SessionFork {
+  runId: string
+  at: string | null
 }
 
 export const EDITOR_IDS = ['cursor', 'code'] as const

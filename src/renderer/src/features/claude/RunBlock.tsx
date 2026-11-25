@@ -16,7 +16,8 @@ import { BacklogDocumentView } from '../alva/BacklogDocumentView'
 import { formatDuration, formatUsd, plural } from '../../lib/format'
 import { AgentAvatar } from '../agents/AgentAvatar'
 import { CollapsibleHeader } from '../../components/CollapsibleHeader'
-import { RunTranscript } from './RunTranscript'
+import { MessageActions, RunTranscript } from './RunTranscript'
+import { draftExcerpt } from './composer-draft'
 import { buildTranscript } from './run-transcript'
 import { RUN_STATUS } from '../../lib/status-text'
 import { backlogDocumentOf } from '../../../../shared/alva'
@@ -53,7 +54,10 @@ export function RunBlock({
   showDocument?: boolean | 'open'
   changesOpen?: boolean
 }): React.JSX.Element {
-  const canOpenPr = useTaskView().openPr.available
+  const view = useTaskView()
+  const canOpenPr = view.openPr.available
+  // Fase 2: ramificar/editar só com a sessão guardada, sem fluxo e com a execução terminada.
+  const setDraft = run.hasSession && !isRunLive(run.status) ? view.setDraft : null
   const [loaded, setLoaded] = useState<RunLogEvent[] | null>(null)
   const ref = useRef<HTMLElement>(null)
   useEffect(() => {
@@ -96,12 +100,28 @@ export function RunBlock({
       className="flex scroll-mt-4 flex-col gap-4"
     >
       {youSaid && (
-        <div className="ml-auto flex max-w-[70%] flex-col gap-1 rounded-[10px] border border-border bg-muted px-3 py-2.5">
-          <p className="text-sm break-words whitespace-pre-wrap">{youSaid}</p>
-          <p className="flex items-center gap-1 text-[11.5px] text-subtle-foreground">
-            <UserIcon className="size-3" />
-            Você · <Timestamp value={run.startedAt} />
-          </p>
+        <div className="group/message ml-auto flex max-w-[70%] flex-col items-end gap-1">
+          <div className="flex flex-col gap-1 rounded-[10px] border border-border bg-muted px-3 py-2.5">
+            <p className="text-sm break-words whitespace-pre-wrap">{youSaid}</p>
+            <p className="flex items-center gap-1 text-[11.5px] text-subtle-foreground">
+              <UserIcon className="size-3" />
+              Você · <Timestamp value={run.startedAt} />
+            </p>
+          </div>
+          <MessageActions
+            text={youSaid}
+            {...(setDraft
+              ? {
+                  onEdit: () =>
+                    setDraft({
+                      kind: 'edit',
+                      text: youSaid,
+                      fork: { runId: run.id, at: null },
+                      excerpt: draftExcerpt(youSaid)
+                    })
+                }
+              : {})}
+          />
         </div>
       )}
       {origin && (
@@ -148,7 +168,21 @@ export function RunBlock({
             </span>
           </div>
 
-          <RunTranscript items={items} openPr={canOpenPr} />
+          <RunTranscript
+            items={items}
+            openPr={canOpenPr}
+            {...(setDraft
+              ? {
+                  onBranch: (uuid: string, text: string) =>
+                    setDraft({
+                      kind: 'branch',
+                      text: '',
+                      fork: { runId: run.id, at: uuid },
+                      excerpt: draftExcerpt(text)
+                    })
+                }
+              : {})}
+          />
 
           {showDocument && !live && (
             <RunDocument command={run.command ?? ''} defaultOpen={showDocument === 'open'} />

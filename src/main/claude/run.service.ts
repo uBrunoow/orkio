@@ -10,6 +10,7 @@
  * - Nada do conteúdo da página vai para o SQLite: só ids, status, datas, custo e resumo técnico.
  */
 import type { TaskEventDetailInput } from '../../shared/task-events'
+import { isSessionUuid } from '../../shared/terminal'
 import { randomUUID } from 'node:crypto'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
@@ -293,12 +294,16 @@ export class RunService {
     const startedAt = this.now().toISOString()
     const resume = spec.session.kind === 'resume'
     const sessionId = spec.session.kind === 'resume' ? spec.session.id : randomUUID()
+    const fork =
+      spec.session.kind === 'fork'
+        ? JSON.stringify({ session: spec.session.from, at: spec.session.at })
+        : null
     const { runtime, agent } = spec
     const record = runInputRecord(spec.input)
     const delivery = deliveryOf(spec)
     this.deps.db.run(
-      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text, agent_key, session_id)
-       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`,
+      `INSERT INTO agent_runs (id, task_page_id, project_id, mode, command, status, started_at, input_text, agent_key, session_id, fork_json)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)`,
       id,
       spec.task.id,
       spec.project.id,
@@ -307,7 +312,8 @@ export class RunService {
       startedAt,
       redactSecrets(record.text).slice(0, 20_000),
       agent?.key ?? null,
-      sessionId
+      sessionId,
+      fork
     )
     await mkdir(this.deps.runsDir, { recursive: true })
 
@@ -357,6 +363,15 @@ export class RunService {
           this.log(run, {
             kind: 'text',
             text: `Modo entrega ligado neste passo: push só de ${t.branch} (${t.remote}) e GitHub CLI só em ${t.owner}/${t.repo}.`
+          })
+        }
+        if (spec.session.kind === 'fork') {
+          this.log(run, {
+            kind: 'info',
+            text:
+              spec.session.reason === 'edit'
+                ? 'Mensagem editada: a conversa voltou até antes dela (os arquivos da pasta de trabalho continuam como estão).'
+                : 'Ramificada de uma resposta anterior: conversa nova a partir dali (os arquivos da pasta de trabalho continuam como estão).'
           })
         }
         if (spec.access.tools === 'read_only') {
@@ -503,6 +518,50 @@ export class RunService {
         ...(excludeAgent ? [taskId, excludeAgent] : [taskId])
       )?.session_id ?? null
     )
+  }
+
+  /**
+   * Fase 2, "Ramificar daqui": a resposta `at` é desta execução? Devolve a sessão dela e o ponto.
+   */
+  async pointIn(runId: string, at: string): Promise<{ session: string; at: string } | null> {
+    const r = this.deps.db.get<{ session_id: string | null }>(
+      'SELECT session_id FROM agent_runs WHERE id = ?',
+      runId
+    )
+    if (!r?.session_id) return null
+    const log = await this.readLog(runId)
+    return log.some((e) => e.kind === 'text' && e.uuid === at)
+      ? { session: r.session_id, at }
+      : null
+  }
+
+  /**
+   * Fase 2, "Editar mensagem": onde a conversa estava logo antes do pedido desta execução: a última
+   * resposta das execuções anteriores da mesma sessão ou, na primeira de uma sessão ramificada, o
+   * ponto de onde ela saiu. `null` = o pedido abriu a sessão (editar = sessão nova).
+   */
+  async pointBefore(runId: string): Promise<{ session: string; at: string } | null> {
+    const r = this.deps.db.get<{ session_id: string | null; started_at: string }>(
+      'SELECT session_id, started_at FROM agent_runs WHERE id = ?',
+      runId
+    )
+    if (!r?.session_id) return null
+    const before = this.deps.db.all<{ id: string; fork_json: string | null }>(
+      'SELECT id, fork_json FROM agent_runs WHERE session_id = ? AND (started_at < ? OR id = ?) ORDER BY started_at DESC',
+      r.session_id,
+      r.started_at,
+      runId
+    )
+    for (const p of before) {
+      if (p.id === runId) continue
+      const last = (await this.readLog(p.id))
+        .filter((e): e is Extract<RunLogEvent, { kind: 'text' }> => e.kind === 'text')
+        .findLast((e) => e.uuid)
+      if (last?.uuid) return { session: r.session_id, at: last.uuid }
+    }
+    // A sessão começou ramificada: o ponto de antes é o de onde ela saiu.
+    const first = before.at(-1)
+    return first?.fork_json ? parseForkPoint(first.fork_json) : null
   }
 
   // ---------- Consultas de quem não é dono de `agent_runs` (visão geral, agentes, diagnóstico) ----------
@@ -1001,4 +1060,13 @@ function scrubEvent(event: RunLogEvent, secrets: ReadonlySet<string>): RunLogEve
 
 function scrubText(text: string, secrets: ReadonlySet<string>): string {
   return redactValues(redactSecrets(text), secrets)
+}
+
+function parseForkPoint(json: string): { session: string; at: string } | null {
+  try {
+    const v = JSON.parse(json) as { session?: unknown; at?: unknown }
+    return isSessionUuid(v.session) && isSessionUuid(v.at) ? { session: v.session, at: v.at } : null
+  } catch {
+    return null
+  }
 }

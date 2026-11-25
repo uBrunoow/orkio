@@ -212,6 +212,61 @@ describe('RunService', () => {
     expect(service.lastSession('task-2')).toBeNull()
   })
 
+  it('ramificar/editar: o ponto da resposta e o de antes do pedido, também numa sessão ramificada', async () => {
+    const first = await start(1)
+    await spawned(1)
+    const s1 = runs[0]!.opts.sessionId
+    runs[0]!.emit({
+      kind: 'text',
+      text: 'Primeira resposta',
+      uuid: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc'
+    })
+    runs[0]!.exit(0)
+    await finished(first.id)
+    // O pedido que abriu a sessão: editar = sessão nova.
+    expect(await service.pointBefore(first.id)).toBeNull()
+    expect(await service.pointIn(first.id, '0f8c2a3e-1b2c-4d5e-8f90-123456789abc')).toEqual({
+      session: s1,
+      at: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc'
+    })
+    expect(await service.pointIn(first.id, '1a2b3c4d-1b2c-4d5e-8f90-123456789abc')).toBeNull()
+
+    const second = await start(1, resumeWith('Continue', s1))
+    await spawned(2)
+    runs[1]!.exit(0)
+    await finished(second.id)
+    expect(await service.pointBefore(second.id)).toEqual({
+      session: s1,
+      at: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc'
+    })
+
+    const fork = await start(1, {
+      input: { kind: 'prompt', text: 'Editada' },
+      session: {
+        kind: 'fork',
+        from: s1,
+        at: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc',
+        reason: 'edit'
+      }
+    })
+    await spawned(3)
+    expect(runs[2]!.opts.sessionId).not.toBe(s1)
+    expect(runs[2]!.opts.prompt).toBe('Editada')
+    runs[2]!.exit(0)
+    await finished(fork.id)
+    expect(
+      (await service.readLog(fork.id)).some(
+        (e) => e.kind === 'info' && /Mensagem editada/.test(e.text)
+      )
+    ).toBe(true)
+    // Primeira execução da sessão ramificada: o ponto de antes é o de onde ela saiu.
+    expect(await service.pointBefore(fork.id)).toEqual({
+      session: s1,
+      at: '0f8c2a3e-1b2c-4d5e-8f90-123456789abc'
+    })
+    expect(service.lastSession('task-1')).toBe(runs[2]!.opts.sessionId)
+  })
+
   it('custo: sessão nova guarda o total; --resume guarda só a diferença; total menor = reinício', async () => {
     const costOf = (id: string) =>
       db.get<{ cost: number; session_cost_total: number }>(

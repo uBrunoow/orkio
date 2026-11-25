@@ -7,6 +7,7 @@
  * (`github-rules.ts`), e `--permission-prompt-tool` apontando para o servidor MCP do Orkio
  * (bridge/permission-mcp.ts), que pergunta ao main. Os argumentos saem de `buildCliArgs(spec)`.
  */
+import { isSessionUuid } from '../../shared/terminal'
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process'
 import { createServer, type Server, type Socket } from 'node:net'
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
@@ -123,6 +124,29 @@ export const DELIVERY_RUN_SETTINGS = {
   permissions: { blockWritesOutsideWorkingDirectories: true, deny: cliDenyInDelivery() }
 }
 
+/**
+ * Sessão no CLI: nova com o nosso id, retomada, ou ramificada de um ponto de outra (o id novo é
+ * nosso: `--session-id` com `--resume` exige `--fork-session`). Ids passam pelo formato exato.
+ */
+export function sessionArgs(session: RunSpec['session'], sessionId: string): string[] {
+  if (session.kind === 'resume') return ['--resume', session.id]
+  if (session.kind === 'fork') {
+    if (!isSessionUuid(session.from) || !isSessionUuid(session.at)) {
+      throw new Error('Sessão inválida para ramificar.')
+    }
+    return [
+      '--resume',
+      session.from,
+      '--resume-session-at',
+      session.at,
+      '--fork-session',
+      '--session-id',
+      sessionId
+    ]
+  }
+  return ['--session-id', sessionId]
+}
+
 /** Argumentos do `claude` para uma execução (puro). */
 export function buildCliArgs(
   spec: Pick<RunSpec, 'session' | 'access' | 'agent' | 'runtime'>,
@@ -137,9 +161,7 @@ export function buildCliArgs(
     '--verbose',
     '--input-format',
     'stream-json',
-    ...(spec.session.kind === 'resume'
-      ? ['--resume', spec.session.id]
-      : ['--session-id', run.sessionId]),
+    ...sessionArgs(spec.session, run.sessionId),
     // Lista num argumento só, separada por vírgula; a opção aceita vários valores, então vem
     // antes de outra flag (nada solto depois dela).
     ...(readOnly ? ['--disallowedTools', READ_ONLY_DENIED_TOOLS.join(',')] : []),

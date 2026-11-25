@@ -6,8 +6,17 @@ import type { AgentBadge } from '../../../../shared/agent'
 import type { CatalogCommand, TaskRunsState } from '../../../../shared/agent-run'
 import { runtimeLabel, type RuntimeChoice } from '../../../../shared/agent-runtime'
 import { Alert } from '../../components/Alert'
-import { ClaudeLogo, CloseIcon, PaperclipIcon, SendIcon, StopIcon } from '../../components/icons'
+import {
+  ClaudeLogo,
+  CloseIcon,
+  EditIcon,
+  ForkIcon,
+  PaperclipIcon,
+  SendIcon,
+  StopIcon
+} from '../../components/icons'
 import { HANDOFF_TEXT } from '../../../../shared/handoff'
+import { DRAFT_TEXT, type ComposerDraft } from './composer-draft'
 import { formatBytes } from '../../lib/format'
 import { ATTACHMENT_ACCEPT } from '../../../../shared/attachments'
 import { checkNewAttachments, type PendingAttachment } from './attachments-ui'
@@ -75,7 +84,17 @@ export function SessionComposer({
   const [dragging, setDragging] = useState(false)
   const ref = useRef<HTMLTextAreaElement>(null)
   // O campo é da tela da tarefa: "Pedir ajuste…" no gate leva até ele.
-  const { setComposer } = useTaskView()
+  const { setComposer, draft, clearDraft } = useTaskView()
+  // Fase 2: "Editar mensagem"/"Ramificar daqui": a próxima mensagem sai daquele ponto. Cada clique
+  // é um rascunho novo (outro objeto): o campo o adota uma vez, sem efeito (ajuste no render).
+  const [fork, setFork] = useState<ComposerDraft | null>(null)
+  const [adopted, setAdopted] = useState<ComposerDraft | null>(null)
+  if (draft && draft !== adopted) {
+    setAdopted(draft)
+    setFork(draft)
+    setText(draft.text)
+    setError(null)
+  }
   const fileInput = useRef<HTMLInputElement>(null)
   const nextKey = useRef(0)
 
@@ -140,7 +159,8 @@ export function SessionComposer({
         taskId,
         text: message,
         ...(Object.keys(runtime).length > 0 ? { runtime } : {}),
-        ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {})
+        ...(sentAttachments.length > 0 ? { attachments: sentAttachments } : {}),
+        ...(fork ? { fork: fork.fork } : {})
       })
     )
     setSending(false)
@@ -149,6 +169,8 @@ export function SessionComposer({
       setRuntime({})
       setAttachments([])
       setAttachError(null)
+      setFork(null)
+      clearDraft()
       onSent(r.value)
     } else {
       setError(r.error.message)
@@ -188,6 +210,34 @@ export function SessionComposer({
             </li>
           ))}
         </ul>
+      )}
+      {fork && (
+        <div
+          role="status"
+          data-testid="composer-fork"
+          className="flex min-w-0 items-center gap-2 rounded-lg border border-border-soft bg-surface px-3 py-1.5 text-xs"
+        >
+          {fork.kind === 'edit' ? (
+            <EditIcon aria-hidden="true" className="size-3.5 shrink-0 text-subtle-foreground" />
+          ) : (
+            <ForkIcon aria-hidden="true" className="size-3.5 shrink-0 text-subtle-foreground" />
+          )}
+          <span className="min-w-0 flex-1 truncate text-muted-foreground">
+            <span className="text-foreground">{DRAFT_TEXT[fork.kind]}</span>{' '}
+            <span title={fork.excerpt}>“{fork.excerpt}”</span> · {DRAFT_TEXT.files}
+          </span>
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={() => {
+              setFork(null)
+              clearDraft()
+              if (fork.kind === 'edit') setText('')
+            }}
+          >
+            Cancelar
+          </Button>
+        </div>
       )}
       <div
         className={cn(
