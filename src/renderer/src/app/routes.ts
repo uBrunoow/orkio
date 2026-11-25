@@ -3,11 +3,21 @@
  * uma rota, e toda navegação gera uma chave nova (clicar no item atual remonta a página e sai de
  * qualquer subtela). Pilha simples para "Voltar".
  */
-import type { TaskSection, BoardTaskRef } from '../../../shared/overview'
+import { TASK_SECTIONS, type TaskSection, type BoardTaskRef } from '../../../shared/overview'
+import { isRecord } from '../../../shared/guards'
 
-export type SettingsSection = 'integrations' | 'projects' | 'board' | 'agents' | 'updates' | 'about'
+export const SETTINGS_SECTIONS = [
+  'integrations',
+  'projects',
+  'board',
+  'agents',
+  'updates',
+  'about'
+] as const
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]
 
-export type BoardSettingsTab = 'columns' | 'rules' | 'flows' | 'delivery'
+export const BOARD_SETTINGS_TABS = ['columns', 'rules', 'flows', 'delivery'] as const
+export type BoardSettingsTab = (typeof BOARD_SETTINGS_TABS)[number]
 
 export type Route =
   /** Primeiros passos; com `projectId`, só os passos que faltam para aquele projeto. */
@@ -16,6 +26,8 @@ export type Route =
   | { name: 'task'; projectId: string; taskId: string; section?: TaskSection }
   | { name: 'agents' }
   | { name: 'settings'; section?: SettingsSection; tab?: BoardSettingsTab; projectId?: string }
+  /** Aba nova (Fase 0): ponto de partida com as telas e o que espera você. */
+  | { name: 'home' }
 
 export type RouteName = Route['name']
 
@@ -24,7 +36,8 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
   board: 'Quadro',
   task: 'Tarefa',
   agents: 'Agentes',
-  settings: 'Configurações'
+  settings: 'Configurações',
+  home: 'Nova aba'
 }
 
 export const SETTINGS_TITLES: Record<SettingsSection, string> = {
@@ -79,4 +92,66 @@ export function routerReducer(state: RouterState, action: RouterAction): RouterS
 
 export function initialRouter(route: Route, key = 0): RouterState {
   return { route, key, history: [] }
+}
+
+/**
+ * Lugar da rota (Fase 0): cada lugar tem no máximo uma aba. Navegar para um lugar que já tem aba
+ * ativa essa aba; `null` = nunca divide (cada "Nova aba" é uma). Tela nova com identidade própria
+ * (ex.: uma sessão) ganha um caso aqui.
+ */
+export function placeOf(route: Route): string | null {
+  switch (route.name) {
+    case 'task':
+      return `task:${route.projectId}:${route.taskId}`
+    case 'home':
+    case 'setup':
+      return null
+    default:
+      return route.name
+  }
+}
+
+const str = (v: unknown): v is string => typeof v === 'string' && v.length > 0 && v.length <= 200
+
+function pick<T extends string>(list: readonly T[], v: unknown): T | undefined {
+  return list.find((x) => x === v)
+}
+
+/**
+ * Rota salva (abas restauradas ao reabrir o app): só o que o tipo aceita; o resto = `null`.
+ * Primeiros passos nunca voltam como aba.
+ */
+export function parseRoute(v: unknown): Route | null {
+  if (!isRecord(v)) return null
+  const projectId = str(v['projectId']) ? { projectId: v['projectId'] } : {}
+  switch (v['name']) {
+    case 'board':
+      return { name: 'board', ...projectId }
+    case 'agents':
+      return { name: 'agents' }
+    case 'home':
+      return { name: 'home' }
+    case 'task': {
+      if (!str(v['projectId']) || !str(v['taskId'])) return null
+      const section = pick(TASK_SECTIONS, v['section'])
+      return {
+        name: 'task',
+        projectId: v['projectId'],
+        taskId: v['taskId'],
+        ...(section ? { section } : {})
+      }
+    }
+    case 'settings': {
+      const section = pick(SETTINGS_SECTIONS, v['section'])
+      const tab = pick(BOARD_SETTINGS_TABS, v['tab'])
+      return {
+        name: 'settings',
+        ...(section ? { section } : {}),
+        ...(tab ? { tab } : {}),
+        ...projectId
+      }
+    }
+    default:
+      return null
+  }
 }

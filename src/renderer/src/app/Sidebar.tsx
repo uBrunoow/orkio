@@ -5,29 +5,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
-import { Kbd } from '@/components/ui/kbd'
 import { cn } from '@/lib/utils'
 import { StatusDot } from '../components/StatusToken'
-import { formatKeys } from './CommandMenu'
-import { AgentsIcon, BoardIcon, SearchIcon, SettingsIcon, SwitchIcon } from '../components/icons'
-import { OrkioLogo } from '../components/OrkioLogo/OrkioLogo'
-import { ROUTE_TITLES, type Route } from './routes'
-import { SHORTCUTS } from './shortcuts'
+import { SearchIcon, SwitchIcon } from '../components/icons'
+import type { Route } from './routes'
 import type { SidebarTask, TaskGroups } from './task-groups'
 import type { ProjectView } from '../../../shared/projects'
-import { isMac } from '../lib/platform'
 import { ProjectAvatar } from '../components/ProjectAvatar'
-import { useUpdates } from '../features/settings/useUpdates'
-
-function shortcutOf(route: Route['name']): { aria: string; keys: string } | null {
-  const keys = SHORTCUTS.find((s) => s.route.name === route)?.keys
-  if (!keys) return null
-  return { aria: keys.replace('mod', isMac() ? 'Meta' : 'Control'), keys }
-}
-
-function useAppVersion(): string | null {
-  return useUpdates().status?.currentVersion ?? null
-}
 
 function TaskRow({
   task,
@@ -84,6 +68,10 @@ function Section({
   )
 }
 
+/**
+ * Coluna do projeto (ao lado do dock): projeto atual, "Buscar tarefa", o que falta configurar e as
+ * listas "Esperando você", "Rodando" e "A fazer"; a conta no pé. Mostrar/esconder: Ctrl/Cmd+B.
+ */
 export function Sidebar({
   route,
   project,
@@ -111,8 +99,6 @@ export function Sidebar({
   onNavigate(route: Route): void
   onContinueSetup(): void
 }): React.JSX.Element {
-  const version = useAppVersion()
-
   const section = (
     title: string,
     items: SidebarTask[],
@@ -132,46 +118,8 @@ export function Sidebar({
       </Section>
     )
 
-  const navItem = (
-    name: 'board' | 'agents' | 'settings',
-    Icon: typeof BoardIcon
-  ): React.ReactNode => {
-    const sc = shortcutOf(name)
-    const selected = route.name === name || (name === 'board' && route.name === 'task')
-    return (
-      <li>
-        <button
-          type="button"
-          aria-current={selected ? 'page' : undefined}
-          {...(sc ? { 'aria-keyshortcuts': sc.aria } : {})}
-          onClick={() => onNavigate({ name })}
-          className={cn(
-            'flex w-full items-center gap-2.5 rounded-[7px] px-2 py-1.5 text-left text-muted-foreground outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40',
-            selected && 'bg-sidebar-accent text-foreground'
-          )}
-        >
-          <Icon className={cn('size-4', selected ? 'text-foreground' : 'text-subtle-foreground')} />
-          <span className="flex-1">{ROUTE_TITLES[name]}</span>
-          {sc && <Kbd aria-hidden="true">{formatKeys(sc.keys)}</Kbd>}
-        </button>
-      </li>
-    )
-  }
-
   return (
-    <nav
-      aria-label="Navegação principal"
-      className="flex h-full w-[248px] shrink-0 flex-col gap-1 border-r border-sidebar-border bg-sidebar px-2.5 py-3"
-    >
-      <div className="flex items-center gap-2 px-1.5 pt-0.5 pb-2.5">
-        <OrkioLogo variant="simple" withWordmark size={18} />
-        {version && (
-          <span className="ml-auto rounded-sm border border-border px-1.5 py-px font-mono text-[10px] text-subtle-foreground">
-            v{version}
-          </span>
-        )}
-      </div>
-
+    <div className="flex h-full w-[248px] shrink-0 flex-col gap-1 border-r border-sidebar-border bg-sidebar px-2.5 py-3">
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label={`Projeto atual: ${project ? project.name : 'nenhum'}. Trocar projeto`}
@@ -246,14 +194,7 @@ export function Sidebar({
         )}
       </div>
 
-      <div role="group" aria-label="Telas">
-        <ul className="flex flex-col gap-px">
-          {navItem('board', BoardIcon)}
-          {navItem('agents', AgentsIcon)}
-          {navItem('settings', SettingsIcon)}
-        </ul>
-      </div>
       <div className="mt-1 border-t border-sidebar-border pt-2">{account}</div>
-    </nav>
+    </div>
   )
 }

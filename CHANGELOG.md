@@ -6,6 +6,31 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Barra do app com os menus Sessão, Ir, Janela e Ajuda: cada item mostra o atalho e fica apagado
+  quando não dá para usar agora.
+- Abas: cada tela e cada tarefa abre numa aba. Feche com Ctrl/⌘+W (ou o botão do meio), reabra com
+  Ctrl/⌘+Shift+T, passe de uma para outra com Ctrl+Tab e arraste para reordenar. As abas voltam
+  quando você reabre o Orkio. "Nova aba" (Ctrl/⌘+T) abre um ponto de partida com as telas e o que
+  espera você.
+- Dock à esquerda com as telas (Quadro, Agentes, Configurações) e o botão para mostrar ou esconder
+  a lista de tarefas (Ctrl/⌘+B).
+- A paleta (Ctrl/⌘+K) agora faz qualquer coisa: além de tarefas, telas e projetos, roda as ações
+  dos menus (nova aba, verificar agora, abrir o que espera você, conectar o Notion...). Ctrl/⌘+P
+  busca tarefas no Notion e Ctrl/⌘+Shift+O troca de projeto.
+- O sino separa "Precisa de você" de "Concluído" (fluxos e execuções que terminaram), com
+  "Limpar concluídos".
+- Medidor de uso do Claude na barra (experimental): quanto da janela de 5 horas e da semanal a sua
+  assinatura já usou e quando renovam. O Orkio lê do login do Claude Code neste computador, só na
+  hora e sem guardar nada; desligue em Configurações › Atualizações ou no próprio medidor.
+- Ajuda › Atalhos do teclado lista todos os atalhos.
+
+### Alterado
+
+- Ctrl/⌘+W fecha a aba, não mais a janela; o menu nativo do sistema saiu (no macOS ficam só o menu
+  do app e Editar).
+
 ## [0.2.11] - 2026-11-24
 
 ### Alterado

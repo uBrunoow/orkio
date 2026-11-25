@@ -9,7 +9,7 @@
  *   parametrizadas pelo nome do serviço. Cada cliente só mapeia o que é dele (404 por chamada,
  *   rate limit primário/secundário, SSO...).
  */
-export type ApiService = 'notion' | 'github' | 'site'
+export type ApiService = 'notion' | 'github' | 'site' | 'anthropic'
 
 export type ApiErrorCode =
   | 'unauthorized'
@@ -82,7 +82,8 @@ export function isTransientApiError(error: unknown, service?: ApiService): boole
 export const SERVICE_LABELS: Record<ApiService, string> = {
   notion: 'o Notion',
   github: 'o GitHub',
-  site: 'o site do Orkio'
+  site: 'o site do Orkio',
+  anthropic: 'a Anthropic'
 }
 
 const capitalize = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1)

@@ -242,3 +242,31 @@ export function updatePhaseText(s: UpdateStatus): StatusText | null {
   if (isUpdateDownloading(s)) return { label: 'Baixando', tone: 'running' }
   return null
 }
+
+// --- Medidor de uso do Claude (Fase 0) -------------------------------------------------------
+
+export const USAGE_WINDOW_TITLE = { session: 'Janela de 5 h', weekly: 'Semana' } as const
+
+const WEEKDAY_TIME = new Intl.DateTimeFormat('pt-BR', {
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit'
+})
+const DAY_TIME = new Intl.DateTimeFormat('pt-BR', {
+  day: '2-digit',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit'
+})
+const HOUR_MIN = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' })
+
+/** "renova às 14:30" (hoje), "renova sáb., 09:00" (na semana), "renova 03 de dez., 09:00". */
+export function usageResetText(resetsAt: string | null, now: Date): string {
+  if (!resetsAt) return 'sem horário de renovação'
+  const at = new Date(resetsAt)
+  if (Number.isNaN(at.getTime())) return 'sem horário de renovação'
+  if (at.getTime() <= now.getTime()) return 'renovando agora'
+  if (at.toDateString() === now.toDateString()) return `renova às ${HOUR_MIN.format(at)}`
+  const days = (at.getTime() - now.getTime()) / 86_400_000
+  return `renova ${(days < 6.5 ? WEEKDAY_TIME : DAY_TIME).format(at)}`
+}

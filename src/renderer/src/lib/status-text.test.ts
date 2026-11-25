@@ -7,6 +7,7 @@ import {
   prPills,
   NOTION_COLOR_TONE,
   updatePhaseText,
+  usageResetText,
   WORKSPACE_HEALTH
 } from './status-text'
 import type { UpdateStatus } from '../../../shared/updates'
@@ -98,5 +99,23 @@ describe('pílulas da PR', () => {
       checks: 'failure'
     })
     expect(merged.map((p) => p.kind)).toEqual(['state'])
+  })
+})
+
+describe('medidor de uso: quando renova', () => {
+  const now = new Date(2026, 10, 24, 10, 0) // terça, 24/11, 10:00 (hora local)
+  it('hoje = só o horário; na semana = dia da semana; depois = data', () => {
+    expect(usageResetText(new Date(2026, 10, 24, 14, 30).toISOString(), now)).toBe(
+      'renova às 14:30'
+    )
+    expect(usageResetText(new Date(2026, 10, 28, 9, 0).toISOString(), now)).toMatch(
+      /^renova sáb\.?,? 09:00$/
+    )
+    expect(usageResetText(new Date(2026, 11, 3, 9, 0).toISOString(), now)).toMatch(/^renova 03/)
+  })
+  it('sem horário, inválido ou já passou', () => {
+    expect(usageResetText(null, now)).toBe('sem horário de renovação')
+    expect(usageResetText('x', now)).toBe('sem horário de renovação')
+    expect(usageResetText(new Date(2026, 10, 24, 9).toISOString(), now)).toBe('renovando agora')
   })
 })

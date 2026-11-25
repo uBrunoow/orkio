@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 
 /**
  * Barra fina no topo de cada tela (48 px, mockup): à esquerda o caminho e o que a tela põe ali
- * (título, Kanban/Lista, fases da tarefa); à direita as ações da tela, o sino e a conta. A tela
+ * (título, Kanban/Lista, fases da tarefa); à direita as ações da tela (sino e conta ficam na barra
+ * do app, Fase 0). A tela
  * preenche os encaixes com `<ScreenBarStart>`/`<ScreenBarEnd>` (portal), sem conhecer o App.
  */
 interface Slots {
@@ -64,12 +65,10 @@ export function Crumbs({ parts }: { parts: readonly Crumb[] }): React.JSX.Elemen
 
 export function ScreenFrame({
   crumbs,
-  bell,
   children
 }: {
   /** Caminho padrão; uma tela que põe o próprio título no encaixe pode passar `null`. */
   crumbs: readonly Crumb[] | null
-  bell: React.ReactNode
   children: React.ReactNode
 }): React.JSX.Element {
   const [start, setStart] = useState<HTMLElement | null>(null)
@@ -86,7 +85,6 @@ export function ScreenFrame({
             <div ref={setStart} className="flex min-w-0 items-center gap-3" />
           </div>
           <div ref={setEnd} className="flex shrink-0 items-center gap-2" />
-          {bell}
         </div>
         <div className="min-h-0 flex-1">{children}</div>
       </div>
