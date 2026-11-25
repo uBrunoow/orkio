@@ -40,7 +40,7 @@ export const SCREENS: readonly ScreenDef[] = [
   {
     name: 'board',
     title: ROUTE_TITLES.board,
-    hint: 'As tarefas do projeto por etapa',
+    hint: 'As tarefas dos seus projetos por etapa',
     icon: BoardIcon,
     route: { name: 'board' },
     dock: 'main',

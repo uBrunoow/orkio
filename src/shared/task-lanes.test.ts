@@ -59,7 +59,7 @@ const RUNNING: RunningItem = {
   section: 'flow'
 }
 
-describe('kanban derivado', () => {
+describe('situação da tarefa (raias)', () => {
   it('ordem: espera você → trabalhando → fila → PR → concluído', () => {
     expect(deriveLane(input({ waiting: WAITING, running: RUNNING, pr: pr() }))).toMatchObject({
       lane: 'needs_you',

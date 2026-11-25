@@ -5,7 +5,7 @@ import { taskKey } from './board-model'
 import type { PersonalTask } from '../../../../shared/task-lanes'
 
 /**
- * Situação de cada tarefa (raia do kanban derivado) por `taskKey(projeto, tarefa)`, da fonte
+ * Situação de cada tarefa (raia) por `taskKey(projeto, tarefa)`, da fonte
  * compartilhada `personalTasks` (`app/sources.tsx`). Sem dados ainda, o mapa vem vazio.
  */
 export function usePersonalTasks(): {

@@ -12,6 +12,7 @@ import {
   attentionCount,
   boardEntries,
   boardSelection,
+  collapsedBoardProject,
   dropStageFor,
   roleBoardColumns,
   singleBoardColumns,
@@ -200,16 +201,29 @@ describe('board-model', () => {
     const none = { filter: 'all' as const, query: '', priority: null, onlyBlocked: false }
 
     it('filtra pela situação', () => {
-      expect(visibleEntries(entries, { ...none, filter: 'attention' }).map(k)).toEqual(['a1', 'b1'])
-      expect(visibleEntries(entries, { ...none, filter: 'active' }).map(k)).toEqual(['a2'])
-      expect(visibleEntries(entries, { ...none, filter: 'review' }).map(k)).toEqual(['b1'])
+      expect(visibleEntries(entries, 'roles', { ...none, filter: 'attention' }).map(k)).toEqual([
+        'a1',
+        'b1'
+      ])
+      expect(visibleEntries(entries, 'roles', { ...none, filter: 'active' }).map(k)).toEqual(['a2'])
+      expect(visibleEntries(entries, 'roles', { ...none, filter: 'review' }).map(k)).toEqual(['b1'])
     })
     it('busca no projeto, no título e no ID; prioridade e bloqueadas', () => {
-      expect(visibleEntries(entries, { ...none, query: 'SITE' }).map(k)).toEqual(['a1', 'a2'])
-      expect(visibleEntries(entries, { ...none, query: 'tarefa b2' }).map(k)).toEqual(['b2'])
-      expect(visibleEntries(entries, { ...none, query: 'a1' }).map(k)).toEqual(['a1'])
-      expect(visibleEntries(entries, { ...none, priority: 'Alta' }).map(k)).toEqual(['b1'])
-      expect(visibleEntries(entries, { ...none, onlyBlocked: true })).toEqual([])
+      expect(visibleEntries(entries, 'roles', { ...none, query: 'SITE' }).map(k)).toEqual([
+        'a1',
+        'a2'
+      ])
+      expect(visibleEntries(entries, 'roles', { ...none, query: 'tarefa b2' }).map(k)).toEqual([
+        'b2'
+      ])
+      expect(visibleEntries(entries, 'roles', { ...none, query: 'a1' }).map(k)).toEqual(['a1'])
+      expect(visibleEntries(entries, 'roles', { ...none, priority: 'Alta' }).map(k)).toEqual(['b1'])
+      expect(visibleEntries(entries, 'roles', { ...none, onlyBlocked: true })).toEqual([])
+    })
+    it('com um projeto, a busca não casa pelo nome do projeto', () => {
+      const single = boardEntries([site], 'single', P, new Map())
+      expect(visibleEntries(single, 'single', { ...none, query: 'SITE' })).toEqual([])
+      expect(visibleEntries(single, 'single', { ...none, query: 'a1' }).map(k)).toEqual(['a1'])
     })
     it('conta atenção sem filtro de busca', () => {
       expect(attentionCount(entries)).toBe(2)
@@ -238,5 +252,13 @@ describe('board-model', () => {
       projectId: 'a'
     })
     expect(boardSelection({}, ['a', 'b'], null)).toEqual({ kind: 'one', projectId: null })
+  })
+
+  it('collapsedBoardProject: lista que sobrou com um projeto vira o Quadro dele', () => {
+    expect(collapsedBoardProject({ projectIds: ['a', 'apagado'] }, ['a', 'b'])).toBe('a')
+    expect(collapsedBoardProject({ projectIds: ['a', 'b'] }, ['a', 'b'])).toBeNull()
+    expect(collapsedBoardProject({ projectIds: ['apagado'] }, ['a', 'b'])).toBeNull()
+    expect(collapsedBoardProject({ projectIds: 'all' }, ['a'])).toBeNull()
+    expect(collapsedBoardProject({}, ['a'])).toBeNull()
   })
 })

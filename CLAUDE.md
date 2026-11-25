@@ -1298,8 +1298,7 @@ A tela Tarefas não existe mais: o Quadro absorveu o que ela tinha (ver "Quadro 
   `ModeCards`, grupo de rádio; Avançado = quem implementa, revisor, modelo, evidência; "Rodar
   agora"); "Mover para X" no menu do card vira submenu quando a coluna tem modo (padrão ou outro modo
   só para a tarefa); "Como as colunas rodam" fica no menu "Mais ações do quadro"
-  (`ColumnSetupsDialog`, ainda em `features/tasks/`, ao lado de `ModeCards`/`TaskRunSetup`) e o
-  estado vazio com os três modelos ("Usar em <coluna de trabalho>").
+  (`ColumnSetupsDialog`, ainda em `features/tasks/`, ao lado de `ModeCards`/`TaskRunSetup`).
 - **Situação da tarefa** (`shared/task-lanes.ts`, `OverviewService.tasks()`, IPC
   `overview.tasks`): só
   dados locais. Raias, nesta ordem: Precisa de você (o mesmo `waiting` do sino) → Trabalhando →

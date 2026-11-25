@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -17,12 +17,15 @@ import { EmptyState, PageState } from '../../components/PageState'
 import { Spinner } from '../../components/Spinner'
 import { MoreIcon, RefreshIcon } from '../../components/icons'
 import { ColumnSetupsDialog } from '../tasks/ColumnSetupsDialog'
+import { SignalsMessages } from '../notion-workspace/SignalsMessages'
 import { BoardColumns } from './BoardColumns'
 import {
   BoardNoticeAlert,
   BoardViewControl,
   PendingWritesAlert,
-  PriorityFilter
+  PriorityFilter,
+  StageIssuesAlert,
+  TruncatedNote
 } from './BoardBarParts'
 import { BoardFilters } from './BoardFilters'
 import { BoardList } from './BoardList'
@@ -131,7 +134,7 @@ export function MultiBoard({
   const columns = useMemo(() => roleBoardColumns(inputs, entries), [inputs, entries])
   const attention = useMemo(() => attentionCount(entries), [entries])
   const visible = useMemo(
-    () => visibleEntries(entries, { filter, query, priority, onlyBlocked }),
+    () => visibleEntries(entries, 'roles', { filter, query, priority, onlyBlocked }),
     [entries, filter, query, priority, onlyBlocked]
   )
   const priorities = useMemo(
@@ -249,6 +252,7 @@ export function MultiBoard({
         </DropdownMenu>
       </ScreenBarEnd>
       <BoardFilters
+        mode="roles"
         filter={filter}
         attention={attention}
         onFilter={(f) => onRoute(boardRoute({ ...route, filter: f }))}
@@ -258,7 +262,11 @@ export function MultiBoard({
         <PriorityFilter priorities={priorities} value={priority} onChange={setPriority} />
         <CheckboxField label="Só bloqueadas" checked={onlyBlocked} onChange={setOnlyBlocked} />
       </BoardFilters>
-      <PendingWritesAlert count={pending} onRetry={() => void boards[0]?.controls.retryNow()} />
+      {/* A fila de escritas do Notion é uma só para todos os projetos: o IPC não leva projeto. */}
+      <PendingWritesAlert
+        count={pending}
+        onRetry={() => void ipcCall(() => window.orkio.board.retryNow(), undefined)}
+      />
       {boards.map(({ projectId, state }) =>
         state.error ? (
           <ErrorAlert
@@ -268,15 +276,25 @@ export function MultiBoard({
           />
         ) : null
       )}
-      {boards.map(({ projectId, state, controls }) => (
-        <BoardNoticeAlert
-          key={`notice-${projectId}`}
-          notice={state.value?.notice ?? null}
-          prefix={nameOf.get(projectId) ?? projectId}
-          onDismiss={controls.dismissNotice}
-          onOpenIntegrations={onOpenIntegrations}
-        />
-      ))}
+      {boards.map(({ projectId, state, controls }) => {
+        const prefix = nameOf.get(projectId) ?? projectId
+        return (
+          <Fragment key={projectId}>
+            <SignalsMessages
+              result={signalStates[ids.indexOf(projectId)]?.value ?? null}
+              prefix={prefix}
+            />
+            <BoardNoticeAlert
+              notice={state.value?.notice ?? null}
+              prefix={prefix}
+              onDismiss={controls.dismissNotice}
+              onOpenIntegrations={onOpenIntegrations}
+            />
+            <StageIssuesAlert issues={state.value?.view.issues ?? []} prefix={prefix} />
+            <TruncatedNote truncated={state.value?.view.truncated ?? false} prefix={prefix} />
+          </Fragment>
+        )
+      })}
       {withoutBoard.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted-foreground">
           <p>Sem quadro ainda: {withoutBoard.map((b) => nameOf.get(b.projectId)).join(', ')}</p>

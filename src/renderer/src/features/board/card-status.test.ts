@@ -43,8 +43,7 @@ describe('laneBadge', () => {
 describe('cardSyncStatus', () => {
   it('só a sincronização', () => {
     expect(cardSyncStatus({ sync: { state: 'synced' } })).toBeNull()
-    expect(cardSyncStatus({ sync: { state: 'failed' } })).toMatchObject({
-      kind: 'sync',
+    expect(cardSyncStatus({ sync: { state: 'failed' } })).toEqual({
       label: 'Não sincronizou',
       tone: 'danger'
     })

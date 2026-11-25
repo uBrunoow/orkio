@@ -10,7 +10,6 @@ import {
 import type { TaskPullRequest } from '../../../../shared/task-signals'
 
 export interface CardStatus {
-  kind: 'sync'
   label: string
   tone: StatusTone
 }
@@ -26,10 +25,8 @@ export function laneBadge(
 
 /** Só a sincronização com o Notion (o fluxo e a PR saem daqui). */
 export function cardSyncStatus(card: Pick<BoardCard, 'sync'>): CardStatus | null {
-  if (card.sync.state === 'failed')
-    return { kind: 'sync', label: 'Não sincronizou', tone: 'danger' }
-  if (card.sync.state === 'pending')
-    return { kind: 'sync', label: 'Sincronizando', tone: 'neutral' }
+  if (card.sync.state === 'failed') return { label: 'Não sincronizou', tone: 'danger' }
+  if (card.sync.state === 'pending') return { label: 'Sincronizando', tone: 'neutral' }
   return null
 }
 

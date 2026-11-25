@@ -37,7 +37,7 @@ const OVERVIEW_POLL_MS = 60_000
 const SIGNALS_POLL_MS = 60_000
 /** Estado das automações do projeto (próxima verificação, erro) enquanto o Quadro está aberto. */
 const AUTOMATION_POLL_MS = 15_000
-/** Situação das tarefas (raias do kanban derivado): só dados locais, com a janela visível. */
+/** Situação das tarefas (raias): só dados locais, com a janela visível. */
 const PERSONAL_TASKS_POLL_MS = 30_000
 /** Medidor de uso do Claude: só com a janela em foco (o main ainda guarda 60 s de cache). */
 const USAGE_POLL_MS = 60_000

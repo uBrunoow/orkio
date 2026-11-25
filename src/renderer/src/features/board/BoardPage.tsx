@@ -10,7 +10,6 @@ import { Toggle } from '@/components/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { CheckboxField } from '@/components/form'
 import { cn } from '@/lib/utils'
-import { Alert } from '../../components/Alert'
 import { ScreenTitle } from '../../components/ScreenTitle'
 import { ScreenBarEnd, ScreenBarStart } from '../../app/ScreenBar'
 import { EmptyState, PageState } from '../../components/PageState'
@@ -22,7 +21,9 @@ import {
   BoardNoticeAlert,
   BoardViewControl,
   PendingWritesAlert,
-  PriorityFilter
+  PriorityFilter,
+  StageIssuesAlert,
+  TruncatedNote
 } from './BoardBarParts'
 import { AgentBadgesProvider, useAgentBadges, type AgentBadges } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
@@ -35,6 +36,7 @@ import {
   attentionCount,
   boardEntries,
   boardSelection,
+  collapsedBoardProject,
   singleBoardColumns,
   visibleEntries
 } from './board-model'
@@ -87,6 +89,16 @@ export function BoardPage({
     chooseProject(id)
     onRoute(boardRoute({ projectId: id, ...keep }))
   }
+  // Rota salva com vários projetos que sobrou com um só (ex.: um apagado): vira o Quadro dele, como
+  // se tivesse sido escolhido no seletor. Depois do `replace` a rota não tem lista e o efeito para.
+  const collapsed = collapsedBoardProject(route, linkedIds)
+  useEffect(() => {
+    if (!collapsed) return
+    chooseProject(collapsed)
+    onRoute(
+      boardRoute({ projectId: collapsed, ...(view ? { view } : {}), ...(filter ? { filter } : {}) })
+    )
+  }, [collapsed, view, filter, chooseProject, onRoute])
   const manyIds = selection.kind === 'many' ? selection.projectIds : null
   const chosen = manyIds ? linkedProjects.filter((p) => manyIds.includes(p.id)) : []
   const picker = (
@@ -227,7 +239,7 @@ function Board({
   const attention = useMemo(() => attentionCount(entries), [entries])
   const visible = useMemo(
     () =>
-      visibleEntries(entries, { filter, query, priority, onlyBlocked }).filter(
+      visibleEntries(entries, 'single', { filter, query, priority, onlyBlocked }).filter(
         (e) => !agentKey || agentBadges[e.card.taskId]?.key === agentKey
       ),
     [entries, filter, query, priority, onlyBlocked, agentKey, agentBadges]
@@ -339,6 +351,7 @@ function Board({
         </DropdownMenu>
       </ScreenBarEnd>
       <BoardFilters
+        mode="single"
         filter={filter}
         attention={attention}
         onFilter={(f) => onRoute(boardRoute({ ...route, filter: f }))}
@@ -358,20 +371,8 @@ function Board({
         onDismiss={board.dismissNotice}
         onOpenIntegrations={onOpenIntegrations}
       />
-      {view.issues.length > 0 && (
-        <Alert tone={view.issues.some((i) => i.level === 'error') ? 'danger' : 'warning'}>
-          <div className="flex flex-col gap-1">
-            {view.issues.map((i) => (
-              <p key={`${i.stageId}-${i.message}`}>{i.message}</p>
-            ))}
-          </div>
-        </Alert>
-      )}
-      {view.truncated && (
-        <p className="px-1 text-xs text-muted-foreground">
-          Mostrando as 500 tarefas mais recentes deste projeto.
-        </p>
-      )}
+      <StageIssuesAlert issues={view.issues} />
+      <TruncatedNote truncated={view.truncated} />
 
       <div className="relative min-h-72 flex-1">
         {view.cards.length === 0 ? (

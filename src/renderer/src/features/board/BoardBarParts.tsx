@@ -4,6 +4,7 @@ import { SegmentedControl } from '@/components/form'
 import { Alert } from '../../components/Alert'
 import type { BoardLayout } from '../../app/routes'
 import type { BoardState } from '../../app/sources'
+import type { StageIssue } from '../../../../shared/board'
 
 /** Peças repetidas do Quadro de um projeto e do Quadro de vários projetos. */
 
@@ -110,5 +111,43 @@ export function BoardNoticeAlert({
     >
       {prefix ? `${prefix}: ${notice.message}` : notice.message}
     </Alert>
+  )
+}
+
+/** Problemas das etapas (ex.: etapa que aponta para um status que sumiu do Notion). */
+export function StageIssuesAlert({
+  issues,
+  prefix
+}: {
+  issues: readonly StageIssue[]
+  prefix?: string
+}): React.JSX.Element | null {
+  if (issues.length === 0) return null
+  return (
+    <Alert tone={issues.some((i) => i.level === 'error') ? 'danger' : 'warning'}>
+      <div className="flex flex-col gap-1">
+        {issues.map((i) => (
+          <p key={`${i.stageId}-${i.message}`}>{prefix ? `${prefix}: ${i.message}` : i.message}</p>
+        ))}
+      </div>
+    </Alert>
+  )
+}
+
+/** Nota de quadro cortado nas 500 tarefas mais recentes. */
+export function TruncatedNote({
+  truncated,
+  prefix
+}: {
+  truncated: boolean
+  prefix?: string
+}): React.JSX.Element | null {
+  if (!truncated) return null
+  return (
+    <p className="px-1 text-xs text-muted-foreground">
+      {prefix
+        ? `${prefix}: mostrando as 500 tarefas mais recentes.`
+        : 'Mostrando as 500 tarefas mais recentes deste projeto.'}
+    </p>
   )
 }

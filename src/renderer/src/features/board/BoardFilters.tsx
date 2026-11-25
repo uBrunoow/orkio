@@ -2,12 +2,14 @@ import { Input } from '@/components/ui/input'
 import { Toggle } from '@/components/ui/toggle'
 import { SearchIcon } from '../../components/icons'
 import { TASK_FILTERS, TASK_FILTER_TEXT, type TaskFilter } from '../../../../shared/task-lanes'
+import type { BoardMode } from './board-model'
 
 /**
  * Barra de filtros do quadro: situação (com a contagem de "Precisa de você"), busca e, em
  * `children`, os demais filtros (prioridade, "Só bloqueadas") e a linha das automações.
  */
 export function BoardFilters({
+  mode,
   filter,
   attention,
   onFilter,
@@ -15,6 +17,8 @@ export function BoardFilters({
   onQuery,
   children
 }: {
+  /** Com vários projetos (`roles`), a busca também casa pelo nome do projeto. */
+  mode: BoardMode
   filter: TaskFilter
   /** Quantas tarefas pedem atenção (antes da busca). */
   attention: number
@@ -52,7 +56,9 @@ export function BoardFilters({
         <Input
           type="search"
           aria-label="Buscar tarefas"
-          placeholder="Filtrar por ID, título ou projeto"
+          placeholder={
+            mode === 'roles' ? 'Filtrar por ID, título ou projeto' : 'Filtrar por ID ou título'
+          }
           value={query}
           onChange={(e) => onQuery(e.target.value)}
           className="h-7 pl-7 text-xs"

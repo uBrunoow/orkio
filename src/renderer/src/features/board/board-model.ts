@@ -160,8 +160,10 @@ export function dropStageFor(entry: BoardEntry, columnId: string, mode: BoardMod
   return stageWithRole(entry.stages, columnId as StageRole)
 }
 
+/** A busca casa pelo título e pelo ID; pelo nome do projeto, só no quadro de vários (`roles`). */
 export function visibleEntries(
   entries: readonly BoardEntry[],
+  mode: BoardMode,
   f: { filter: TaskFilter; query: string; priority: string | null; onlyBlocked: boolean }
 ): BoardEntry[] {
   const q = f.query.trim().toLowerCase()
@@ -171,7 +173,7 @@ export function visibleEntries(
       (!q ||
         e.card.title.toLowerCase().includes(q) ||
         (e.card.displayId ?? '').toLowerCase().includes(q) ||
-        e.projectName.toLowerCase().includes(q)) &&
+        (mode === 'roles' && e.projectName.toLowerCase().includes(q))) &&
       (!f.priority || e.card.priority?.name === f.priority) &&
       (!f.onlyBlocked || e.card.blocked)
   )
@@ -200,4 +202,17 @@ export function boardSelection(
     if (ids.length === 1) return { kind: 'one', projectId: ids[0]! }
   }
   return { kind: 'one', projectId: currentId }
+}
+
+/**
+ * Rota com lista de projetos que, filtrada pelos vinculados, sobrou com um só (ex.: um apagado): o
+ * id dele, para o Quadro virar o de um projeto. `null` = nada a corrigir.
+ */
+export function collapsedBoardProject(
+  route: { projectIds?: readonly string[] | 'all' },
+  linkedIds: readonly string[]
+): string | null {
+  if (route.projectIds === undefined || route.projectIds === 'all') return null
+  const selection = boardSelection(route, linkedIds, null)
+  return selection.kind === 'one' ? selection.projectId : null
 }
