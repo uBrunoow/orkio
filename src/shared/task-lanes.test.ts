@@ -1,14 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { OverviewTask, RunningItem, WaitingItem } from './overview'
 import type { TaskPullRequest } from './task-signals'
-import {
-  deriveLane,
-  filterTasks,
-  groupByLane,
-  matchesTaskFilter,
-  prChips,
-  type LaneInput
-} from './task-lanes'
+import { deriveLane, matchesTaskFilter, prChips, type LaneInput } from './task-lanes'
 
 const NOW = '2026-11-24T12:00:00.000Z'
 const TASK: OverviewTask = {
@@ -122,18 +115,15 @@ describe('kanban derivado', () => {
         input({ task: { ...TASK, taskId: 't6' }, running: { ...RUNNING, state: 'queued' } })
       )!
     ]
-    expect(filterTasks(tasks, 'all')).toHaveLength(6)
-    expect(filterTasks(tasks, 'attention').map((t) => t.task.taskId)).toEqual(['t1', 't2'])
-    expect(filterTasks(tasks, 'active').map((t) => t.task.taskId)).toEqual(['t5', 't6'])
-    expect(filterTasks(tasks, 'review').map((t) => t.task.taskId)).toEqual(['t2', 't3'])
-    expect(filterTasks(tasks, 'all', 'nada')).toHaveLength(0)
+    const filtered = (f: 'all' | 'attention' | 'active' | 'review') =>
+      tasks.filter((t) => matchesTaskFilter(t, f)).map((t) => t.task.taskId)
+    expect(filtered('all')).toHaveLength(6)
+    expect(filtered('attention')).toEqual(['t1', 't2'])
+    expect(filtered('active')).toEqual(['t5', 't6'])
+    expect(filtered('review')).toEqual(['t2', 't3'])
     expect(matchesTaskFilter(null, 'all')).toBe(true)
     for (const f of ['attention', 'active', 'review'] as const) {
       expect(matchesTaskFilter(null, f)).toBe(false)
     }
-    const lanes = groupByLane(tasks)
-    expect(lanes.needs_you).toHaveLength(1)
-    expect(lanes.in_review).toHaveLength(2)
-    expect(lanes.done).toHaveLength(1)
   })
 })

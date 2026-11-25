@@ -169,36 +169,6 @@ export function matchesTaskFilter(t: PersonalTask | null, filter: TaskFilter): b
   return t.lane === 'in_review'
 }
 
-export function filterTasks(
-  tasks: readonly PersonalTask[],
-  filter: TaskFilter,
-  query = ''
-): PersonalTask[] {
-  const q = query.trim().toLowerCase()
-  return tasks.filter((t) => {
-    if (!matchesTaskFilter(t, filter)) return false
-    if (!q) return true
-    return [t.task.displayId, t.task.title, t.task.projectName, t.what].some((x) =>
-      x?.toLowerCase().includes(q)
-    )
-  })
-}
-
-/** Por raia, na ordem das raias; dentro, o mais antigo primeiro (quem espera há mais tempo). */
-export function groupByLane(tasks: readonly PersonalTask[]): Record<TaskLane, PersonalTask[]> {
-  const out = Object.fromEntries(TASK_LANES.map((l) => [l, [] as PersonalTask[]])) as Record<
-    TaskLane,
-    PersonalTask[]
-  >
-  for (const t of tasks) out[t.lane].push(t)
-  for (const lane of TASK_LANES) {
-    out[lane].sort((a, b) =>
-      lane === 'done' ? b.since.localeCompare(a.since) : a.since.localeCompare(b.since)
-    )
-  }
-  return out
-}
-
 export interface PersonalTasksSnapshot {
   generatedAt: string
   tasks: PersonalTask[]

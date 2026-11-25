@@ -54,8 +54,6 @@ export type Route =
       start?: 'claude'
     }
   | { name: 'agents' }
-  /** Fase 1: kanban derivado pessoal (raias calculadas do fluxo e da PR). */
-  | { name: 'tasks'; view?: BoardLayout; filter?: TaskFilter }
   | { name: 'settings'; section?: SettingsSection; tab?: BoardSettingsTab; projectId?: string }
   /** Aba nova (Fase 0): ponto de partida com as telas e o que espera você. */
   | { name: 'home' }
@@ -67,7 +65,6 @@ export const ROUTE_TITLES: Record<RouteName, string> = {
   board: 'Quadro',
   task: 'Tarefa',
   terminal: 'Terminal',
-  tasks: 'Tarefas',
   agents: 'Agentes',
   settings: 'Configurações',
   home: 'Nova aba'
@@ -217,7 +214,7 @@ function pick<T extends string>(list: readonly T[], v: unknown): T | undefined {
 
 /**
  * Rota salva (abas restauradas ao reabrir o app): só o que o tipo aceita; o resto = `null`.
- * Primeiros passos nunca voltam como aba.
+ * Primeiros passos nunca voltam como aba. A antiga `tasks` vira o Quadro de todos os projetos.
  */
 export function parseRoute(v: unknown): Route | null {
   if (!isRecord(v)) return null
@@ -238,9 +235,14 @@ export function parseRoute(v: unknown): Route | null {
     case 'agents':
       return { name: 'agents' }
     case 'tasks': {
+      // A tela Tarefas saiu: a aba antiga vira o Quadro com todos os projetos e o mesmo filtro.
       const view = pick(BOARD_LAYOUTS, v['view'])
       const filter = pick(TASK_FILTERS, v['filter'])
-      return { name: 'tasks', ...(view ? { view } : {}), ...(filter ? { filter } : {}) }
+      return boardRoute({
+        projectIds: 'all',
+        ...(view ? { view } : {}),
+        ...(filter ? { filter } : {})
+      })
     }
     case 'home':
       return { name: 'home' }

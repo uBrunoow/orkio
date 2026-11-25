@@ -1441,7 +1441,7 @@ export function ghCalls(userDataDir: string): string[] {
 
 /** Telas do menu (Quadro, Agentes, Configurações) e seções de Configurações pelo nome antigo. */
 export async function navTo(page: Page, name: string): Promise<void> {
-  if (name === 'Quadro' || name === 'Tarefas' || name === 'Agentes' || name === 'Configurações') {
+  if (name === 'Quadro' || name === 'Agentes' || name === 'Configurações') {
     await page
       .getByRole('navigation', { name: 'Navegação principal' })
       .getByRole('group', { name: 'Telas' })

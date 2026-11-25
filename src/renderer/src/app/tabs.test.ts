@@ -138,16 +138,38 @@ describe('abas salvas e rotas', () => {
     expect(parseRoute({ name: 'terminal', projectId: 'p1' })).toBeNull()
   })
 
+  it('rota tasks antiga vira o Quadro com todos os projetos e o mesmo filtro', () => {
+    expect(parseRoute({ name: 'tasks', view: 'list', filter: 'attention', x: 1 })).toEqual({
+      name: 'board',
+      projectIds: 'all',
+      view: 'list',
+      filter: 'attention'
+    })
+    expect(parseRoute({ name: 'tasks', view: 'grade', filter: 1 })).toEqual({
+      name: 'board',
+      projectIds: 'all'
+    })
+  })
+
+  it('abas salvas: tasks + Quadro no mesmo desktop viram uma aba de Quadro', () => {
+    const saved = parseSavedTabs({
+      routes: [
+        { name: 'board', projectId: 'a' },
+        { name: 'agents' },
+        { name: 'tasks', filter: 'active' }
+      ],
+      active: 2
+    })
+    expect(saved).toEqual({
+      routes: [{ name: 'board', projectIds: 'all', filter: 'active' }, { name: 'agents' }],
+      active: 0
+    })
+  })
+
   it('parseRoute fica só com campos conhecidos', () => {
     expect(
       parseRoute({ name: 'settings', section: 'board', tab: 'nada', projectId: 'p', x: 1 })
     ).toEqual({ name: 'settings', section: 'board', projectId: 'p' })
-    expect(parseRoute({ name: 'tasks', view: 'list', filter: 'attention', x: 1 })).toEqual({
-      name: 'tasks',
-      view: 'list',
-      filter: 'attention'
-    })
-    expect(parseRoute({ name: 'tasks', view: 'grade', filter: 1 })).toEqual({ name: 'tasks' })
     expect(parseRoute({ name: 'task', projectId: 'p', taskId: 't', section: 'flow' })).toEqual({
       name: 'task',
       projectId: 'p',

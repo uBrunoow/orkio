@@ -157,7 +157,7 @@ test('com projeto configurado, o app abre direto no Quadro (sem Primeiros passos
   await page.reload()
   await expect(page.getByRole('heading', { level: 1, name: 'Quadro' })).toBeVisible()
   await expect(page.getByRole('list', { name: 'Primeiros passos' })).toHaveCount(0)
-  // Atalhos na ordem do menu: Quadro, Tarefas, Agentes, Configurações.
+  // Atalhos na ordem do menu: Quadro, Agentes, Configurações.
   await page.keyboard.press(`${MOD}+4`)
   await expect(page.getByRole('heading', { level: 1, name: 'Integrações' })).toBeVisible()
   await page.keyboard.press(`${MOD}+1`)

@@ -17,6 +17,7 @@ import {
   type Route,
   type RouterState
 } from './routes'
+import { isRecord } from '../../../shared/guards'
 
 export interface Tab {
   id: string
@@ -285,16 +286,38 @@ export function serializeTabs(state: TabsState): SavedTabs {
   }
 }
 
-/** Abas salvas, validadas rota a rota; nada aproveitável = `null`. */
+/**
+ * Abas salvas, validadas rota a rota; nada aproveitável = `null`. Um lugar = uma aba: rotas que
+ * caem no mesmo lugar (ex.: a antiga `tasks`, que agora é o Quadro, ao lado de uma aba de Quadro)
+ * viram uma só, na posição da primeira; se uma delas veio de `tasks`, fica a rota migrada (o
+ * filtro de antes). `active` aponta para a aba que ficou.
+ */
 export function parseSavedTabs(value: unknown): SavedTabs | null {
   if (typeof value !== 'object' || value === null) return null
   const v = value as { routes?: unknown; active?: unknown }
   if (!Array.isArray(v.routes)) return null
-  const routes = v.routes
-    .slice(0, MAX_TABS)
-    .map(parseRoute)
-    .filter((r): r is Route => r !== null)
+  const wanted = typeof v.active === 'number' && Number.isInteger(v.active) ? v.active : 0
+  const routes: Route[] = []
+  const fromTasks: boolean[] = []
+  let active = -1
+  v.routes.slice(0, MAX_TABS).forEach((raw: unknown, i) => {
+    const route = parseRoute(raw)
+    if (!route) return
+    const migrated = isRecord(raw) && raw['name'] === 'tasks'
+    const place = placeOf(route)
+    let at = place === null ? -1 : routes.findIndex((r) => placeOf(r) === place)
+    if (at === -1) {
+      at = routes.push(route) - 1
+      fromTasks.push(migrated)
+    } else if (migrated && !fromTasks[at]) {
+      routes[at] = route
+      fromTasks[at] = true
+    }
+    if (i === wanted) active = at
+  })
   if (routes.length === 0) return null
-  const active = typeof v.active === 'number' && Number.isInteger(v.active) ? v.active : 0
-  return { routes, active: Math.min(Math.max(0, active), routes.length - 1) }
+  return {
+    routes,
+    active: active !== -1 ? active : Math.min(Math.max(0, wanted), routes.length - 1)
+  }
 }

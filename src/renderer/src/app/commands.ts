@@ -18,6 +18,7 @@ import {
   SidebarIcon,
   SwitchIcon,
   BackIcon,
+  BoardIcon,
   CloseIcon,
   TerminalIcon,
   GridIcon,
@@ -144,6 +145,22 @@ function screenCommands(): Command[] {
     ...(s.needsProject ? { visible: (ctx: CommandState) => ctx.hasProject } : {}),
     run: (ctx: CommandContext) => ctx.navigate(s.route)
   }))
+}
+
+/**
+ * Quadro de todos os projetos (Ctrl/⌘2; antes era a tela Tarefas). A rota tem recorte, então
+ * `boardRouteAsIs` não a muda: numa aba de Quadro, troca o recorte dela.
+ */
+const BOARD_ALL: Command = {
+  id: 'go:board:all',
+  label: 'Quadro de todos os projetos',
+  menu: 'go',
+  block: 0,
+  icon: BoardIcon,
+  keys: 'mod+2',
+  keywords: ['tarefas', 'todos os projetos'],
+  visible: (ctx) => ctx.hasProject,
+  run: (ctx) => ctx.navigate({ name: 'board', projectIds: 'all' })
 }
 
 /** Seções de Configurações (só na paleta: o menu "Ir" fica curto). */
@@ -381,7 +398,8 @@ export const APP_COMMANDS: readonly Command[] = [
     run: (ctx) => ctx.navigate({ name: 'settings', section: 'integrations' })
   },
   // Ir
-  ...screenCommands(),
+  // O Quadro de todos os projetos fica logo depois do Quadro no menu "Ir".
+  ...screenCommands().flatMap((c) => (c.id === 'go:board' ? [c, BOARD_ALL] : [c])),
   {
     id: 'go:setup',
     label: 'Primeiros passos',
