@@ -16,7 +16,12 @@ import {
 } from '../../net/http'
 import { httpsUrlOrNull, isRecord, parseRetryAfterMs, stringOrNull } from '../../net/parse'
 import { notionPageIdsIn } from '../../../shared/slug'
-import { GITHUB_API_VERSION, isAuthorLogin, isBranchName, isLogin } from '../../../shared/github-names'
+import {
+  GITHUB_API_VERSION,
+  isAuthorLogin,
+  isBranchName,
+  isLogin
+} from '../../../shared/github-names'
 
 export const GITHUB_API_BASE_URL = 'https://api.github.com'
 export const GITHUB_REQUEST_TIMEOUT_MS = 10_000

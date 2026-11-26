@@ -32,6 +32,22 @@ export interface GitFlowConfig {
   backfilledAt?: string
 }
 
+/** O que a tela envia ao salvar o Fluxo Git: ids de propriedade e de opção. */
+export interface GitFlowInput {
+  stagePropertyId: string
+  options: Partial<Record<GitStageKey, string>>
+  prUrlPropertyId: string | null
+  mergedAtPropertyId: string | null
+}
+
+/** Estado para a tela: o que está salvo, a sugestão e as propriedades que servem ao Fluxo Git. */
+export interface GitFlowSetup {
+  config: GitFlowConfig | null
+  suggestion: GitFlowConfig | null
+  /** select/status/url/date do banco de Tarefas. */
+  properties: NotionPropertySummary[]
+}
+
 /** Valor atual da etapa; aceita campos a mais (ex.: `color`). */
 export interface GitFlowStageValue {
   id?: string | null

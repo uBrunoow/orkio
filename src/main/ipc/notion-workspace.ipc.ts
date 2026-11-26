@@ -11,6 +11,8 @@ export function notionWorkspaceHandlers(
     | 'listDataSources'
     | 'getTasksSchema'
     | 'saveConfig'
+    | 'getGitFlow'
+    | 'saveGitFlow'
     | 'listProjectChoices'
     | 'link'
     | 'unlink'
@@ -24,6 +26,8 @@ export function notionWorkspaceHandlers(
     listDataSources: (query) => service.listDataSources(query),
     getTasksSchema: (tasks, projects) => service.getTasksSchema(tasks, projects),
     save: (input) => service.saveConfig(input),
+    getGitFlow: () => service.getGitFlow(),
+    saveGitFlow: (input) => service.saveGitFlow(input),
     listProjectChoices: (projectId, options) => service.listProjectChoices(projectId, options),
     link: (projectId, pageId) => service.link(projectId, pageId),
     unlink: (projectId) => service.unlink(projectId),

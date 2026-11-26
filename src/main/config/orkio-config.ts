@@ -23,6 +23,7 @@ import { parseVault, type SecretMeta } from '../../shared/vault'
 import { parseMcpServers, type McpServer } from '../../shared/mcp'
 import { SERVER_LIMITS, parseServerDefs, type ServerDef } from '../../shared/servers'
 import { parsePreferences, parseSkillNames, type AppPreferences } from '../../shared/preferences'
+import { GIT_STAGE_KEYS, type GitFlowConfig } from '../../shared/git-flow'
 import type {
   NotionColor,
   NotionMapping,
@@ -360,7 +361,44 @@ export function parseNotionConfig(value: unknown): NotionWorkspaceConfig | null 
   if (priority) mapping.priority = priority
   if (assignee) mapping.assignee = assignee
 
-  return { projectsDataSource, tasksDataSource, mapping, updatedAt: value['updatedAt'] }
+  const gitFlow = parseGitFlowConfig(value['gitFlow'])
+  return {
+    projectsDataSource,
+    tasksDataSource,
+    mapping,
+    ...(gitFlow ? { gitFlow } : {}),
+    updatedAt: value['updatedAt']
+  }
+}
+
+/** Fluxo Git é opcional: forma inválida some (o resto da config segue). */
+function parseGitFlowConfig(value: unknown): GitFlowConfig | null {
+  if (!isRecord(value)) return null
+  const stage = nameRef(value['stage'])
+  const type = isRecord(value['stage']) ? value['stage']['type'] : undefined
+  if (!stage || (type !== 'select' && type !== 'status')) return null
+  const optionsRaw = value['options']
+  if (!isRecord(optionsRaw)) return null
+  const options: GitFlowConfig['options'] = {}
+  for (const key of GIT_STAGE_KEYS) {
+    if (optionsRaw[key] === undefined) continue
+    const ref = nameRef(optionsRaw[key])
+    if (!ref) return null
+    options[key] = ref
+  }
+  const config: GitFlowConfig = { stage: { ...stage, type }, options }
+  for (const key of ['prUrl', 'mergedAt'] as const) {
+    if (value[key] === undefined) continue
+    const ref = nameRef(value[key])
+    if (!ref) return null
+    config[key] = ref
+  }
+  const backfilledAt = value['backfilledAt']
+  if (backfilledAt !== undefined) {
+    if (typeof backfilledAt !== 'string') return null
+    config.backfilledAt = backfilledAt
+  }
+  return config
 }
 
 function parseProject(value: unknown): StoredProject | null {

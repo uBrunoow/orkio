@@ -6,6 +6,14 @@
  * que guarda o token). Salva no ConfigStore apenas ids e nomes, nunca conteúdo de páginas.
  */
 import type { StatusOption } from '../../shared/board'
+import {
+  GIT_STAGE_KEYS,
+  checkGitFlow,
+  suggestGitFlow,
+  type GitFlowConfig,
+  type GitFlowInput,
+  type GitFlowSetup
+} from '../../shared/git-flow'
 import type { OrkioConfig } from '../config/orkio-config'
 import { type NotionListPage, type NotionQueryOptions } from '../connectors/notion/notion.client'
 import {
@@ -93,6 +101,22 @@ export const WORKSPACE_MESSAGES = {
     'Não deu para saber quem é você no Notion: esta conexão é de uma integração do workspace. ' +
     'Conecte com “Entrar com Notion” para ver as suas tarefas.'
 } as const
+
+const GIT_FLOW_TYPES = ['select', 'status', 'url', 'date']
+
+function withGitFlow(
+  config: NotionWorkspaceConfig,
+  gitFlow: GitFlowConfig | null
+): NotionWorkspaceConfig {
+  const next = { ...config }
+  delete next.gitFlow
+  if (gitFlow) next.gitFlow = gitFlow
+  return next
+}
+
+function invalid(message: string): WorkspaceError {
+  return new WorkspaceError({ code: 'invalid', message })
+}
 
 type Err = Extract<Result<never>, { ok: false }>['error']
 
@@ -205,11 +229,29 @@ export class NotionWorkspaceService {
       }
     }
 
+    // Fluxo Git: renomeada atualiza; apagada/tipo mudou sai. Só avisa, nunca bloqueia as tarefas.
+    const gitWarnings: string[] = []
+    if (current.gitFlow) {
+      const git = checkGitFlow(current.gitFlow, schema.properties)
+      gitWarnings.push(...git.warnings)
+      if (JSON.stringify(git.config) !== JSON.stringify(current.gitFlow)) {
+        current = withGitFlow(current, git.config)
+        const saved = current
+        try {
+          await this.deps.store.update((c) =>
+            c.notion ? { ...c, notion: withGitFlow(c.notion, saved.gitFlow ?? null) } : c
+          )
+        } catch {
+          // Atualizar nomes é conveniência; o aviso continua valendo.
+        }
+      }
+    }
+
     const health = check.errors.length > 0 ? 'broken' : check.warnings.length > 0 ? 'warning' : 'ok'
     return this.setStatus({
       config: current,
       health,
-      messages: [...check.errors, ...check.warnings],
+      messages: [...check.errors, ...check.warnings, ...gitWarnings],
       connection
     })
   }
@@ -302,6 +344,9 @@ export class NotionWorkspaceService {
         projectsDataSource: { id: projectsSchema.id, name: projectsSchema.title },
         tasksDataSource: { id: tasksSchema.id, name: tasksSchema.title },
         mapping: check.mapping,
+        ...(previous?.gitFlow && sameId(previous.tasksDataSource.id, tasksSchema.id)
+          ? { gitFlow: previous.gitFlow }
+          : {}),
         updatedAt: this.now().toISOString()
       }
       const projectsChanged =
@@ -316,6 +361,79 @@ export class NotionWorkspaceService {
       this.invalidate()
       const connection = await this.deps.notion.connectionMethod().catch(() => null)
       return this.setStatus({ config, health: 'ok', messages: [], connection })
+    })
+  }
+
+  /** Mapeamento salvo do Fluxo Git, a sugestão e as propriedades do banco de Tarefas que servem. */
+  async getGitFlow(): Promise<Result<GitFlowSetup>> {
+    return this.wrap(async () => {
+      const config = this.requireConfig()
+      const schema = await this.loadSchema(config.tasksDataSource.id)
+      const properties = schema.properties.filter((p) => GIT_FLOW_TYPES.includes(p.type))
+      return {
+        config: config.gitFlow ?? null,
+        suggestion: suggestGitFlow(properties),
+        properties
+      }
+    })
+  }
+
+  /** Valida contra o schema atual e salva (ou, com `null`, desliga) o Fluxo Git. */
+  async saveGitFlow(input: GitFlowInput | null): Promise<Result<NotionWorkspaceStatus>> {
+    return this.wrap(async () => {
+      const config = this.requireConfig()
+      let gitFlow: GitFlowConfig | null = null
+      if (input) {
+        const schema = await this.loadSchema(config.tasksDataSource.id)
+        const find = (id: string) => schema.properties.find((p) => p.id === id)
+        const stage = find(input.stagePropertyId)
+        if (!stage || (stage.type !== 'select' && stage.type !== 'status')) {
+          throw invalid('Escolha uma propriedade de seleção ou status para a Etapa Git.')
+        }
+        const options: GitFlowConfig['options'] = {}
+        for (const key of GIT_STAGE_KEYS) {
+          const optionId = input.options[key]
+          if (!optionId) continue
+          const option = stage.options?.find((o) => o.id === optionId)
+          if (!option) throw invalid('Escolha opções da propriedade da Etapa Git.')
+          options[key] = { id: option.id, name: option.name }
+        }
+        if (Object.keys(options).length === 0) {
+          throw invalid('Escolha pelo menos uma opção da Etapa Git.')
+        }
+        const optional = (id: string | null, type: string, label: string) => {
+          if (!id) return undefined
+          const prop = find(id)
+          if (!prop || prop.type !== type) throw invalid(`Escolha uma propriedade ${label}.`)
+          return { id: prop.id, name: prop.name }
+        }
+        const prUrl = optional(input.prUrlPropertyId, 'url', 'de link (URL) para a PR')
+        const mergedAt = optional(input.mergedAtPropertyId, 'date', 'de data para o merge')
+        const used = [
+          stage.id,
+          ...(prUrl ? [prUrl.id] : []),
+          ...(mergedAt ? [mergedAt.id] : []),
+          ...Object.values(config.mapping).map((r) => r.id)
+        ]
+        const own = used.length - Object.keys(config.mapping).length
+        if (new Set(used).size !== used.length || own < 1) {
+          throw invalid('Use uma propriedade diferente para cada campo.')
+        }
+        gitFlow = {
+          stage: { id: stage.id, name: stage.name, type: stage.type },
+          options,
+          ...(prUrl ? { prUrl } : {}),
+          ...(mergedAt ? { mergedAt } : {})
+        }
+        const backfilledAt =
+          config.gitFlow?.stage.id === stage.id ? config.gitFlow.backfilledAt : undefined
+        if (backfilledAt !== undefined) gitFlow.backfilledAt = backfilledAt
+      }
+      const next = withGitFlow({ ...config, updatedAt: this.now().toISOString() }, gitFlow)
+      await this.save((c) => ({ ...c, notion: next }))
+      this.invalidate()
+      const connection = await this.deps.notion.connectionMethod().catch(() => null)
+      return this.setStatus({ config: next, health: 'ok', messages: [], connection })
     })
   }
 

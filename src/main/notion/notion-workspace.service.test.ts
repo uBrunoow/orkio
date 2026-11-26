@@ -172,6 +172,166 @@ describe('NotionWorkspaceService', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  describe('Fluxo Git', () => {
+    const gitProps = () => ({
+      'Etapa Git': {
+        id: 'git',
+        name: 'Etapa Git',
+        type: 'select',
+        select: {
+          options: [
+            { id: 'o1', name: 'Branch criada', color: 'gray' },
+            { id: 'o2', name: 'PR aguardando review', color: 'blue' },
+            { id: 'o4', name: 'Mergeada na dev', color: 'green' }
+          ]
+        }
+      },
+      Outro: {
+        id: 'other',
+        name: 'Outro',
+        type: 'select',
+        select: { options: [{ id: 'x1', name: 'Foo', color: 'gray' }] }
+      },
+      PR: { id: 'url', name: 'PR', type: 'url', url: {} },
+      'Data do merge': { id: 'dt', name: 'Data do merge', type: 'date', date: {} }
+    })
+    const INPUT = {
+      stagePropertyId: 'git',
+      options: { branch: 'o1', review: 'o2', merged: 'o4' },
+      prUrlPropertyId: 'url',
+      mergedAtPropertyId: 'dt'
+    }
+    const failure = (r: Awaited<ReturnType<NotionWorkspaceService['saveGitFlow']>>) =>
+      r.ok ? null : r.error.message
+
+    beforeEach(() => {
+      schema = tasksSchema(gitProps())
+    })
+
+    it('getGitFlow devolve só select/status/url/date, a sugestão e o que está salvo', async () => {
+      const service = await configured()
+      const result = await service.getGitFlow()
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.value.config).toBeNull()
+      expect(result.value.suggestion?.stage.id).toBe('git')
+      const types = new Set(result.value.properties.map((p) => p.type))
+      expect([...types].sort()).toEqual(['date', 'select', 'status', 'url'])
+      expect(result.value.properties.some((p) => p.id === 'title')).toBe(false)
+    })
+
+    it('salva só ids e nomes e preserva a data da carga inicial se a etapa não mudou', async () => {
+      const service = await configured()
+      expect(await service.saveGitFlow(INPUT)).toMatchObject({ ok: true })
+      const saved = store.get().notion?.gitFlow
+      expect(saved).toEqual({
+        stage: { id: 'git', name: 'Etapa Git', type: 'select' },
+        options: {
+          branch: { id: 'o1', name: 'Branch criada' },
+          review: { id: 'o2', name: 'PR aguardando review' },
+          merged: { id: 'o4', name: 'Mergeada na dev' }
+        },
+        prUrl: { id: 'url', name: 'PR' },
+        mergedAt: { id: 'dt', name: 'Data do merge' }
+      })
+      await store.update((c) => ({
+        ...c,
+        notion: { ...c.notion!, gitFlow: { ...c.notion!.gitFlow!, backfilledAt: 'agora' } }
+      }))
+      await service.saveGitFlow({ ...INPUT, mergedAtPropertyId: null })
+      expect(store.get().notion?.gitFlow?.backfilledAt).toBe('agora')
+      expect(store.get().notion?.gitFlow?.mergedAt).toBeUndefined()
+      await service.saveGitFlow({ ...INPUT, stagePropertyId: 'other', options: { branch: 'x1' } })
+      expect(store.get().notion?.gitFlow?.backfilledAt).toBeUndefined()
+    })
+
+    it('recusa opção de outro select, tipo errado, repetidas e nenhuma opção', async () => {
+      const service = await configured()
+      expect(failure(await service.saveGitFlow({ ...INPUT, options: { branch: 'x1' } }))).toBe(
+        'Escolha opções da propriedade da Etapa Git.'
+      )
+      expect(failure(await service.saveGitFlow({ ...INPUT, prUrlPropertyId: 'dt' }))).toMatch(
+        /link \(URL\)/
+      )
+      expect(failure(await service.saveGitFlow({ ...INPUT, mergedAtPropertyId: 'url' }))).toMatch(
+        /data/
+      )
+      expect(failure(await service.saveGitFlow({ ...INPUT, stagePropertyId: 'title' }))).toMatch(
+        /seleção ou status/
+      )
+      expect(failure(await service.saveGitFlow({ ...INPUT, options: {} }))).toMatch(/pelo menos/)
+      schema = tasksSchema({
+        ...gitProps(),
+        Prioridade: {
+          id: 'pri',
+          name: 'Prioridade',
+          type: 'select',
+          select: { options: [{ id: 'o1', name: 'Branch criada', color: 'gray' }] }
+        }
+      })
+      const same = 'Use uma propriedade diferente para cada campo.'
+      expect(
+        failure(
+          await service.saveGitFlow({
+            ...INPUT,
+            stagePropertyId: 'pri',
+            options: { branch: 'o1' }
+          })
+        )
+      ).toBe(same)
+      expect(store.get().notion?.gitFlow).toBeUndefined()
+    })
+
+    it('null apaga o Fluxo Git', async () => {
+      const service = await configured()
+      await service.saveGitFlow(INPUT)
+      const result = await service.saveGitFlow(null)
+      expect(result).toMatchObject({ ok: true, value: { health: 'ok' } })
+      expect(store.get().notion?.gitFlow).toBeUndefined()
+    })
+
+    it('saveConfig mantém o gitFlow com o mesmo banco de Tarefas e solta com outro', async () => {
+      const service = await configured()
+      await service.saveGitFlow(INPUT)
+      await service.saveConfig(MAPPING_INPUT)
+      expect(store.get().notion?.gitFlow?.stage.id).toBe('git')
+      const other = '33333333-3333-3333-3333-333333333333'
+      api.getDataSource.mockImplementation(async (id) =>
+        id === PROJECTS_DS ? projectsSchema : { ...schema, id: other }
+      )
+      await service.saveConfig({ ...MAPPING_INPUT, tasksDataSourceId: other })
+      expect(store.get().notion?.tasksDataSource.id).toBe(other)
+      expect(store.get().notion?.gitFlow).toBeUndefined()
+    })
+
+    it('revalidação: renomeada atualiza e apagada some, só com aviso (nunca broken)', async () => {
+      const service = await configured()
+      await service.saveGitFlow(INPUT)
+      const renamed = gitProps()
+      renamed['Etapa Git'] = { ...renamed['Etapa Git'], name: 'Etapa do Git' }
+      schema = tasksSchema(renamed)
+      const first = await service.revalidate()
+      expect(first.health).toBe('ok')
+      expect(first.config?.gitFlow?.stage.name).toBe('Etapa do Git')
+      expect(store.get().notion?.gitFlow?.stage.name).toBe('Etapa do Git')
+
+      const withoutPr: Record<string, unknown> = { ...renamed }
+      delete withoutPr['PR']
+      schema = tasksSchema(withoutPr)
+      const second = await service.revalidate()
+      expect(second.health).toBe('ok')
+      expect(second.messages.join(' ')).toContain('"PR"')
+      expect(store.get().notion?.gitFlow?.prUrl).toBeUndefined()
+
+      delete withoutPr['Etapa Git']
+      schema = tasksSchema(withoutPr)
+      const third = await service.revalidate()
+      expect(third.health).not.toBe('broken')
+      expect(third.messages.join(' ')).toContain('Etapa do Git')
+      expect(store.get().notion?.gitFlow).toBeUndefined()
+    })
+  })
+
   describe('assistente', () => {
     it('lista data sources paginando até o limite e informa truncamento', async () => {
       const service = await makeService()

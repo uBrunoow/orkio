@@ -60,6 +60,7 @@ import type {
 } from '../connection'
 import type { DeliverySettings } from '../delivery'
 import type { ConfigEvent, FlowDraft, FlowFileResult } from '../flow'
+import type { GitFlowInput, GitFlowSetup } from '../git-flow'
 import { isRecord } from '../guards'
 import type {
   NotionDataSourceList,
@@ -160,6 +161,7 @@ import {
   parseOrchestratorConfig,
   parseSendMessageRequest,
   parseStartRunRequest,
+  parseGitFlowInput,
   parseWorkspaceInput,
   parseRunSetupPayload,
   parseCatalogSecrets,
@@ -563,6 +565,15 @@ export const ORKIO_API = {
       save: call<(input: NotionWorkspaceInput) => Promise<Result<NotionWorkspaceStatus>>>()({
         channel: 'notion-workspace:save',
         args: [parseWorkspaceInput]
+      }),
+      getGitFlow: call<() => Promise<Result<GitFlowSetup>>>()({
+        channel: 'notion-workspace:get-git-flow',
+        args: []
+      }),
+      /** Salva o Fluxo Git (mapeamento da Etapa Git); `null` desliga. */
+      saveGitFlow: call<(input: GitFlowInput | null) => Promise<Result<NotionWorkspaceStatus>>>()({
+        channel: 'notion-workspace:save-git-flow',
+        args: [parseGitFlowInput]
       }),
       listProjectChoices: call<
         (

@@ -21,6 +21,7 @@ import { STAGE_LIMITS, isStageRole, type BoardSaveInput, type OrkioStageChoice }
 import type { FlowDraft, FlowStageDraft } from '../flow'
 import { isReviewer } from '../github-names'
 import { isRecord } from '../guards'
+import { GIT_STAGE_KEYS, type GitFlowInput, type GitStageKey } from '../git-flow'
 import type { NotionColor, NotionMappingField, NotionWorkspaceInput } from '../notion'
 import { MAPPING_FIELDS } from '../notion-mapping'
 import { ORCHESTRATOR_LIMITS, parseOrchestrator, type OrchestratorConfig } from '../orchestrator'
@@ -98,6 +99,27 @@ export function parseWorkspaceInput(value: unknown): Parsed<NotionWorkspaceInput
     out[key as NotionMappingField] = id
   }
   return { projectsDataSourceId, tasksDataSourceId, mapping: out }
+}
+
+export function parseGitFlowInput(value: unknown): Parsed<GitFlowInput | null> {
+  if (value === null) return null
+  if (!isRecord(value)) return INVALID
+  const { stagePropertyId, options, prUrlPropertyId, mergedAtPropertyId } = value
+  if (
+    !isNotionPropertyId(stagePropertyId) ||
+    !isRecord(options) ||
+    !(prUrlPropertyId === null || isNotionPropertyId(prUrlPropertyId)) ||
+    !(mergedAtPropertyId === null || isNotionPropertyId(mergedAtPropertyId))
+  ) {
+    return INVALID
+  }
+  const out: GitFlowInput['options'] = {}
+  for (const [key, id] of Object.entries(options)) {
+    if (!(GIT_STAGE_KEYS as readonly string[]).includes(key)) return INVALID
+    if (!isNotionPropertyId(id)) return INVALID
+    out[key as GitStageKey] = id
+  }
+  return { stagePropertyId, options: out, prUrlPropertyId, mergedAtPropertyId }
 }
 
 /** Busca de bancos: vazio/ausente = todos (`undefined`). */
