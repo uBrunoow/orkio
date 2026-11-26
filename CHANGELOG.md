@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.23] - 2026-11-26
+
+### Mudado
+
+- feat: servidores da tarefa, imagens na conversa e correções do Corretor da PR.
+
 ## [0.2.22] - 2026-11-26
 
 ### Adicionado
