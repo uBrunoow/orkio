@@ -21,7 +21,7 @@ export const SETTINGS_GROUPS: readonly SettingsGroup[] = [
   },
   { id: 'connections', title: 'Conexões', items: ['integrations', 'projects', 'providers'] },
   { id: 'tools', title: 'Agentes e ferramentas', items: ['skills', 'mcp', 'secrets'] },
-  { id: 'project', title: 'Por projeto', project: true, items: ['board', 'agents'] },
+  { id: 'project', title: 'Por projeto', project: true, items: ['board', 'agents', 'servers'] },
   { id: 'app', title: 'App', items: ['diagnostics', 'updates', 'about'] }
 ]
 
@@ -62,6 +62,7 @@ export const SETTINGS_KEYWORDS: Record<SettingsSection, readonly string[]> = {
   providers: ['claude', 'anthropic', 'uso', 'medidor', 'assinatura', 'login'],
   board: ['colunas', 'etapas', 'automações', 'fluxos', 'entrega', 'alva'],
   agents: ['orquestrador', 'atribuição', 'regras'],
+  servers: ['frontend', 'backend', 'porta', 'dev', 'localhost', 'subir'],
   skills: ['habilidades', 'comandos', 'plugins'],
   mcp: ['servidores', 'ferramentas', 'model context protocol'],
   secrets: ['senhas', 'chaves', 'api key', 'variáveis', 'cofre', 'tokens'],
@@ -124,6 +125,8 @@ export function settingsScope(section: SettingsSection, projectName: string | nu
       return projectName ? `o projeto ${projectName}` : 'o projeto atual'
     case 'agents':
       return projectName ? `o projeto ${projectName}` : 'todos os projetos'
+    case 'servers':
+      return projectName ? `as tarefas do projeto ${projectName}` : 'o projeto atual'
     case 'skills':
     case 'mcp':
     case 'secrets':

@@ -56,6 +56,41 @@ export function summarizeTool(
   return { summary: path ? displayPath(path, worktree) : '' }
 }
 
+export interface ToolImage {
+  toolId: string
+  data: Buffer
+}
+
+/**
+ * Imagens (base64) dentro dos `tool_result` de uma linha: print do navegador, `Read` de `.png`.
+ * Ficam fora do `parseStreamLine`: o base64 nunca vira evento do log.
+ */
+export function toolImages(line: string): ToolImage[] {
+  let msg: unknown
+  try {
+    msg = JSON.parse(line)
+  } catch {
+    return []
+  }
+  if (!isRecord(msg) || msg['type'] !== 'user' || !isRecord(msg['message'])) return []
+  const content = msg['message']['content']
+  if (!Array.isArray(content)) return []
+  const out: ToolImage[] = []
+  for (const block of content) {
+    if (!isRecord(block) || block['type'] !== 'tool_result') continue
+    const toolId = block['tool_use_id']
+    const inner = block['content']
+    if (typeof toolId !== 'string' || !Array.isArray(inner)) continue
+    for (const part of inner) {
+      if (!isRecord(part) || part['type'] !== 'image' || !isRecord(part['source'])) continue
+      const src = part['source']
+      if (src['type'] !== 'base64' || typeof src['data'] !== 'string') continue
+      out.push({ toolId, data: Buffer.from(src['data'], 'base64') })
+    }
+  }
+  return out
+}
+
 /** Uma linha do stream → zero ou mais eventos do log. Linha inválida vira `info`. */
 export function parseStreamLine(
   line: string,

@@ -218,6 +218,12 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
         : e.detail.mode === 'continue'
           ? 'Você devolveu a sessão: o Claude continua o passo'
           : 'Você devolveu a sessão ao Orkio'
+    case 'server_started':
+      return `Servidor ${e.detail.server} subiu na porta ${e.detail.port}${e.detail.by === 'agent' ? ' (pelo agente)' : ''}`
+    case 'server_stopped':
+      return e.detail.by === 'exit'
+        ? `Servidor ${e.detail.server} parou sozinho${typeof e.detail.exitCode === 'number' ? ` (código ${e.detail.exitCode})` : ''}`
+        : `Servidor ${e.detail.server} parado${e.detail.by === 'agent' ? ' pelo agente' : ''}`
     default:
       return unreachable(e)
   }

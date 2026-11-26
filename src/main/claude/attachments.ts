@@ -46,6 +46,12 @@ function matches(ext: AttachmentExt, d: Uint8Array): boolean {
   }
 }
 
+/** Tipo de uma imagem pelos bytes (o `media_type` declarado não decide). */
+export function sniffImage(data: Uint8Array): 'png' | 'jpg' | 'gif' | 'webp' | null {
+  for (const ext of ['png', 'jpg', 'gif', 'webp'] as const) if (matches(ext, data)) return ext
+  return null
+}
+
 export function sniffAttachment(
   name: string,
   data: Uint8Array

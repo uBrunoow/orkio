@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunLogEvent } from '../../shared/agent-run'
+import { IMAGE_LIMITS, type RunLogEvent } from '../../shared/agent-run'
 import { BoardStore } from '../board/board.store'
 import { openDatabase, type Db } from '../db/database'
 import { askOrkio } from './bridge/client'
@@ -18,6 +18,7 @@ interface FakeRun {
   cancel: ReturnType<typeof vi.fn<() => void>>
   ask(tool: string, input: Record<string, unknown>, id?: string): Promise<Record<string, unknown>>
   emit(event: RunLogEvent): void
+  image(toolId: string, data: Buffer): void
   exit(code?: number): void
 }
 
@@ -78,6 +79,7 @@ describe('RunService', () => {
           ask: (tool, input, id = `tu-${Math.random()}`) =>
             askOrkio(broker.socketPath, broker.token, { toolName: tool, input, toolUseId: id }),
           emit: (event) => opts.onEvent(event),
+          image: (toolId, data) => opts.onImage({ toolId, data }),
           exit: (code = 0) => opts.onExit({ code, signal: null, stderr: '' })
         }
         runs.push(run)
@@ -188,6 +190,52 @@ describe('RunService', () => {
     ])
     expect(log.at(-1)).toMatchObject({ kind: 'status', status: 'succeeded' })
     expect(store.events('task-1').map((e) => e.kind)).toEqual(['run_finished', 'run_started'])
+  })
+
+  it('imagens das ferramentas: grava pelo tipo real, loga sem o conteúdo, respeita o limite e sai na rotação', async () => {
+    const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7])
+    const view = await start(1)
+    await spawned(1)
+    const run = runs[0]!
+    run.emit({
+      kind: 'tool',
+      id: 't1',
+      tool: 'mcp__playwright__browser_take_screenshot',
+      summary: ''
+    })
+    run.image('t1', PNG)
+    run.image('t1', Buffer.from('não sou png'))
+    for (let i = 0; i < IMAGE_LIMITS.perRun + 2; i++) run.image('t1', PNG)
+    await vi.waitFor(async () =>
+      expect((await service.readLog(view.id)).filter((e) => e.kind === 'image')).toHaveLength(
+        IMAGE_LIMITS.perRun
+      )
+    )
+    run.exit(0)
+    await finished(view.id)
+    const log = await service.readLog(view.id)
+    expect(log.find((e) => e.kind === 'image')).toEqual({
+      kind: 'image',
+      toolId: 't1',
+      runId: view.id,
+      n: 1,
+      mime: 'image/png'
+    })
+    expect(JSON.stringify(log)).not.toContain(PNG.toString('base64'))
+    expect(log.filter((e) => e.kind === 'info' && /Limite de/.test(e.text))).toHaveLength(1)
+    const img = await service.readImage(view.id, 1)
+    expect(img?.mime).toBe('image/png')
+    expect(Buffer.compare(Buffer.from(img!.data), PNG)).toBe(0)
+    expect(await service.readImage(view.id, IMAGE_LIMITS.perRun + 1)).toBeNull()
+    expect(await service.readImage('../x', 1)).toBeNull()
+    // Rotação (keepPerTask = 2): a terceira execução apaga a pasta da primeira.
+    for (const n of [2, 3]) {
+      const v = await start(1)
+      await spawned(n)
+      runs[n - 1]!.exit(0)
+      await finished(v.id)
+    }
+    await vi.waitFor(async () => expect(await service.readImage(view.id, 1)).toBeNull())
   })
 
   it('guarda a sessão; continuar usa --resume com o mesmo id e manda só o texto', async () => {

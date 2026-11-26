@@ -20,6 +20,7 @@ export function claudeHandlers(
     answerPermission: (runId, requestId, answer) => runs.answerPermission(runId, requestId, answer),
     answerQuestion: (runId, requestId, answers) => runs.answerQuestion(runId, requestId, answers),
     readLog: (runId) => runs.readLog(runId),
+    runImage: (runId, n) => runs.readImage(runId, n),
     cleanup: (projectId, taskId, force) => service.cleanup(projectId, taskId, force),
     openEditor: (projectId, taskId, editor) => service.openEditor(projectId, taskId, editor),
     openTerminal: (projectId, taskId) => service.openTerminal(projectId, taskId),

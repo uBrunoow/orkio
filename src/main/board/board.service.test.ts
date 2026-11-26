@@ -497,6 +497,22 @@ describe('BoardService', () => {
     expect(outsideTransaction).toBeTypeOf('function')
   })
 
+  it('volta da revisão: só a automação de Revisado para Revisando marca a entrada', async () => {
+    const view = await createBoard()
+    const roleId = (role: string) => view.config!.stages.find((s) => s.role === role)?.id
+    const review = roleId('review')!
+    const reviewed = roleId('reviewed')!
+    expect(review && reviewed).toBeTruthy()
+    await service.move('p1', T1, reviewed)
+    store.transaction((tx) =>
+      service.applyAutomationMove(tx, 'p1', T1, review, { key: 'k-volta', detail: {} })
+    )
+    expect(changes.at(-1)).toMatchObject({ from: reviewed, to: review, reviewReturn: true })
+    await service.move('p1', T1, reviewed)
+    await service.move('p1', T1, review)
+    expect(changes.at(-1)!.reviewReturn).toBeUndefined()
+  })
+
   it('mover e voltar antes de sincronizar cancela a escrita', async () => {
     const view = await createBoard()
     notion.offline = true

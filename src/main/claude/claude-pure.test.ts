@@ -9,7 +9,7 @@ import {
 } from './policy'
 import { decidePermission, isGitRead } from './policy'
 import { isEnvFile, redactSecrets, sanitizeEnv } from '../platform/redact'
-import { parseStreamLine } from './stream'
+import { parseStreamLine, toolImages } from './stream'
 
 const WT = '/home/u/.config/orkio/worktrees/p1/ORK-7'
 const rt = (
@@ -266,7 +266,7 @@ describe('política: heredoc', () => {
   const bash = (command: string): string =>
     evaluatePermission({ tool: 'Bash', input: { command } }, ctx).decision
   it('mensagem de commit em heredoc com /api/... não é caminho fora do worktree', () => {
-    const msg = "feat: x\n\n- T4: campos em /api/home/kpis/\n- T5: /api/tv/b2b/"
+    const msg = 'feat: x\n\n- T4: campos em /api/home/kpis/\n- T5: /api/tv/b2b/'
     expect(bash(`cd ${WT}; git commit -q -F - <<'EOF'\n${msg}\nEOF`)).toBe('ask')
     expect(bash(`cat <<EOF > notas.md\nveja /etc/hosts\nEOF`)).toBe('ask')
   })
@@ -340,6 +340,66 @@ describe('política: só leitura e contexto pedido pela política', () => {
       evaluatePermission({ tool: 'mcp__orkio__lembrar', input: { texto: 'x' } }, ro).decision
     ).toBe('allow')
     expect(evaluatePermission({ tool: 'mcp__outro__lembrar', input: {} }, ro).decision).toBe('ask')
+  })
+
+  it('servidores da tarefa: servidor_* do Orkio passam sem perguntar; só leitura só status/log', () => {
+    const full = { worktree: WT, allowRules: rules }
+    const ro = { ...full, readOnly: true }
+    for (const tool of ['subir', 'parar', 'status', 'log']) {
+      expect(
+        evaluatePermission({ tool: `mcp__orkio__servidor_${tool}`, input: {} }, full).decision
+      ).toBe('allow')
+    }
+    expect(evaluatePermission({ tool: 'mcp__orkio__servidor_log', input: {} }, ro).decision).toBe(
+      'allow'
+    )
+    expect(evaluatePermission({ tool: 'mcp__orkio__servidor_subir', input: {} }, ro).decision).toBe(
+      'deny'
+    )
+    expect(evaluatePermission({ tool: 'mcp__orkio__servidor_rm', input: {} }, full).decision).toBe(
+      'ask'
+    )
+    expect(
+      evaluatePermission({ tool: 'mcp__outro__servidor_subir', input: {} }, full).decision
+    ).toBe('ask')
+  })
+
+  it('Playwright no localhost dos servidores da tarefa passa sem perguntar; o resto pergunta', () => {
+    const ctx = { worktree: WT, allowRules: rules, serverPorts: [4100, 4200] }
+    const pw = (
+      tool: string,
+      input: Record<string, unknown> = {},
+      c: Parameters<typeof evaluatePermission>[1] = ctx
+    ): string => evaluatePermission({ tool: `mcp__playwright__browser_${tool}`, input }, c).decision
+    expect(pw('navigate', { url: 'http://localhost:4100/login' })).toBe('allow')
+    expect(pw('navigate', { url: 'http://127.0.0.1:4200' })).toBe('allow')
+    expect(pw('navigate', { url: 'http://[::1]:4100/' })).toBe('allow')
+    for (const tool of ['click', 'type', 'snapshot', 'take_screenshot', 'wait_for', 'press_key']) {
+      expect(pw(tool, { element: 'Entrar', ref: 'e1' })).toBe('allow')
+    }
+    // Do plugin do seu Claude também.
+    expect(
+      evaluatePermission(
+        { tool: 'mcp__plugin_playwright_playwright__browser_click', input: {} },
+        ctx
+      ).decision
+    ).toBe('allow')
+    // Outra porta, outro host, outro esquema ou ferramenta que roda código: pergunta.
+    expect(pw('navigate', { url: 'http://localhost:5432' })).toBe('ask')
+    expect(pw('navigate', { url: 'https://exemplo.com' })).toBe('ask')
+    expect(pw('navigate', { url: 'http://localhost.evil.com:4100' })).toBe('ask')
+    expect(pw('navigate', { url: 'file:///etc/passwd' })).toBe('ask')
+    expect(pw('evaluate', { function: '() => 1' })).toBe('ask')
+    expect(pw('run_code_unsafe', { code: 'x' })).toBe('ask')
+    expect(pw('file_upload', { paths: ['/etc/passwd'] })).toBe('ask')
+    expect(pw('tabs', { action: 'new', url: 'https://exemplo.com' })).toBe('ask')
+    // Sem servidor rodando nesta tarefa, ou num passo só de leitura: pergunta como antes.
+    expect(pw('click', {}, { ...ctx, serverPorts: [] })).toBe('ask')
+    expect(pw('click', {}, { ...ctx, readOnly: true })).toBe('ask')
+    // Outro MCP com o mesmo nome de ferramenta: pergunta.
+    expect(evaluatePermission({ tool: 'mcp__outro__browser_click', input: {} }, ctx).decision).toBe(
+      'ask'
+    )
   })
 
   it('Fase 3: agente que pede antes de agir — editar pergunta (sem "sempre"), regra não libera', () => {
@@ -490,6 +550,17 @@ describe('política de permissões', () => {
     expect(bash('npm test && rm -rf build', rules).decision).toBe('ask')
     expect(bash('npm testing', rules).decision).toBe('ask')
     expect(shellSegments('a && b || c; d | e')).toEqual(['a', 'b', 'c', 'd', 'e'])
+  })
+
+  it('atribuição de variável sozinha não vira a sugestão nem trava o "sempre"', () => {
+    const cmd = `B=${WT}/backend; ls $B | grep -i req`
+    expect(bash(cmd)).toEqual({ decision: 'ask', suggestion: 'ls' })
+    const rules = [
+      { tool: 'Bash', pattern: 'ls' },
+      { tool: 'Bash', pattern: 'grep' }
+    ]
+    expect(bash(cmd, rules).decision).toBe('allow')
+    expect(bash('B=/etc; ls $B', rules).decision).toBe('deny')
   })
 
   it('pergunta do Claude, ferramentas inofensivas e desconhecidas', () => {
@@ -645,5 +716,55 @@ describe('briefing', () => {
 describe('POLICY_MESSAGES: o caminho para publicar', () => {
   it('push e gh dizem para usar “Abrir PR” (a tela decide o botão pelo código)', () => {
     for (const m of [POLICY_MESSAGES.push, POLICY_MESSAGES.gh]) expect(m).toContain('“Abrir PR”')
+  })
+})
+
+describe('stream-json → imagens das ferramentas', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+  const line = JSON.stringify({
+    type: 'user',
+    message: {
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'tu_1',
+          content: [
+            { type: 'text', text: 'print' },
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') }
+            }
+          ]
+        }
+      ]
+    }
+  })
+
+  it('toolImages devolve os bytes e o id da ferramenta; o evento do log fica sem o base64', () => {
+    const imgs = toolImages(line)
+    expect(imgs).toHaveLength(1)
+    expect(imgs[0]!.toolId).toBe('tu_1')
+    expect(Buffer.compare(imgs[0]!.data, PNG)).toBe(0)
+    expect(parseStreamLine(line, WT)).toEqual([{ kind: 'tool_result', id: 'tu_1', error: false }])
+    expect(JSON.stringify(parseStreamLine(line, WT))).not.toContain(PNG.toString('base64'))
+    expect(toolImages(JSON.stringify({ type: 'user', message: { content: [] } }))).toEqual([])
+    expect(toolImages('não é json')).toEqual([])
+  })
+})
+
+describe('ponte: ferramentas dos servidores', () => {
+  it('codifica e lê a ação; ação desconhecida não vira pedido de permissão', async () => {
+    const { decodeBridgeMessage, encodeBridgeServer, serverActionOfTool, parseServerReply } =
+      await import('./bridge/protocol')
+    expect(decodeBridgeMessage(encodeBridgeServer('tk', 'subir', { nome: 'web' }))).toEqual({
+      token: 'tk',
+      message: { kind: 'server', action: 'subir', input: { nome: 'web' } }
+    })
+    expect(
+      decodeBridgeMessage(JSON.stringify({ token: 'tk', kind: 'server', action: 'rm', input: {} }))
+    ).toBeNull()
+    expect(serverActionOfTool('mcp__orkio__servidor_log')).toBe('log')
+    expect(serverActionOfTool('mcp__orkio__servidor_x')).toBeNull()
+    expect(parseServerReply({ ok: true, message: 'x'.repeat(20_000) }).message).toHaveLength(12_000)
   })
 })

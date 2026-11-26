@@ -5,7 +5,7 @@
  * O renderer só manda ids (projeto, tarefa, execução); caminhos e nomes de branch são resolvidos
  * aqui. Conteúdo das páginas do Notion fica só em memória (briefing) e no log da execução.
  */
-import { isProtectedBranch, type DeliveryTarget } from '../../shared/delivery'
+import { isProtectedBranch, taskBaseBranch, type DeliveryTarget } from '../../shared/delivery'
 import { isBranchName } from '../../shared/github-names'
 import { isCommandName, isRunLive, parsePorcelainLine } from '../../shared/agent-run'
 import { isScratchPath } from '../../shared/orkio-scratch'
@@ -100,6 +100,9 @@ const MAX_DEPTH = 3
 const MAX_BLOCKS = 400
 const MAX_DIFF_CHARS = 400_000
 
+const withBase = (base: string | null): { baseBranch?: string } =>
+  base ? { baseBranch: base } : {}
+
 export interface ClaudeServiceDeps {
   /**
    * Modo entrega (5C): alvo da entrega (repositório + branch da tarefa) e o ajuste do projeto.
@@ -118,6 +121,8 @@ export interface ClaudeServiceDeps {
   >
   listTasks(projectId: string): Promise<Result<{ tasks: NotionTask[] }>>
   signals(projectId: string): Promise<Result<TaskSignalsResult>>
+  /** PR já mergeada da branch (sinais em cache): o worktree da tarefa começa numa branch nova. */
+  mergedPrFor?(projectId: string, branch: string): number | null
   /** Leitura dos blocos de uma página (o token fica no conector). */
   getBlockChildren(
     id: string,
@@ -152,6 +157,13 @@ export interface ClaudeServiceDeps {
   handoff?(taskId: string): HandoffView | null
   /** Fase 2: terminais embutidos rodando na tarefa (o worktree não sai por baixo deles). */
   terminalsRunning?(taskId: string): boolean
+  /**
+   * Servidores da tarefa: a linha do system prompt (estado de cada um e as ferramentas), ou `null`
+   * sem cadastro no projeto (aí as ferramentas `servidor_*` nem aparecem).
+   */
+  serversNote?(projectId: string, taskId: string, readOnly: boolean): string | null
+  /** Servidores da tarefa: param antes de o worktree sair ("Limpar ambiente"). */
+  stopServers?(taskId: string): Promise<void>
   /**
    * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
    * pt-BR quando há agente, mas ele não pode rodar (sem aprovação, limite do dia, comando negado).
@@ -654,10 +666,21 @@ export class ClaudeService {
         timeoutMin: request.timeoutMin,
         // Sem agente: "Pergunta antes de editar" das Configurações (com agente, a dele).
         ...(!agent && prefs.autonomy === 'ask' ? { askEdits: true } : {}),
-        ...(request.side ? { side: true } : {})
+        ...(request.side ? { side: true } : {}),
+        ...this.serversOf(request.projectId, request.taskId, access.tools === 'read_only')
       })
       return ok(view.id)
     })
+  }
+
+  /** Servidores da tarefa na execução (nota do prompt + ferramentas); sidechat também vê. */
+  private serversOf(
+    projectId: string,
+    taskId: string,
+    readOnly: boolean
+  ): { servers: { note: string } } | Record<string, never> {
+    const note = this.deps.serversNote?.(projectId, taskId, readOnly) ?? null
+    return note ? { servers: { note } } : {}
   }
 
   /** O agente com o bloco da memória no fim do prompt (lido do store pela chave + projeto). */
@@ -719,6 +742,7 @@ export class ClaudeService {
       if (this.deps.terminalsRunning?.(taskId)) {
         return fail('busy', 'Feche os terminais desta tarefa antes de limpar o ambiente.')
       }
+      await this.deps.stopServers?.(taskId)
       await this.deps.worktrees.remove(this.worktreeProject(project), taskId, force)
       return ok(await this.taskState(taskId))
     })
@@ -895,7 +919,11 @@ export class ClaudeService {
     const wtProject = this.worktreeProject(project)
     const t = await this.task(projectId, taskId)
     const task = { id: t.id, displayId: t.displayId, title: t.title }
-    const worktree = await this.deps.worktrees.ensure(wtProject, task, kind ? { kind } : {})
+    const mergedPrFor = this.deps.mergedPrFor
+    const worktree = await this.deps.worktrees.ensure(wtProject, task, {
+      ...(kind ? { kind } : {}),
+      ...(mergedPrFor ? { merged: (branch: string) => mergedPrFor(projectId, branch) } : {})
+    })
     return { project, wtProject, task, worktree }
   }
 
@@ -906,7 +934,8 @@ export class ClaudeService {
       id: project.id,
       localPath: project.localPath,
       remoteName: project.repo.remoteName,
-      defaultBranch: project.repo.defaultBranch ?? 'main'
+      defaultBranch: project.repo.defaultBranch ?? 'main',
+      ...withBase(taskBaseBranch(this.deps.config.get().delivery?.[project.id]))
     }
   }
 

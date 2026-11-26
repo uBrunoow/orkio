@@ -349,6 +349,41 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
     expect(changed.length).toBeGreaterThan(0)
   })
 
+  it('nova revisão pedida pelo Orkio com o revisor já pendente: aplica a regra de "review pedido" na hora', async () => {
+    await cycle()
+    world.local[T1] = ['ORK-1/x']
+    world.pr[T1] = { reviewRequests: [{ id: 'rr1', at: '2026-11-19T12:00:00Z' }] }
+    await cycle()
+    world.pr[T1] = {
+      reviewRequests: [{ id: 'rr1', at: '2026-11-19T12:00:00Z' }],
+      reviews: [{ id: 'rv1', state: 'changes_requested', at: '2026-11-19T12:30:00Z' }]
+    }
+    await cycle()
+    expect(await stageOf(T1)).toBe('Revisado')
+    // O GitHub não acusa pedido novo (o revisor continua pendente): sem o Orkio, ficaria em Revisado.
+    expect(automation.applyEvent('p1', T1, 'pr.review_requested', 5)).toBe(true)
+    expect(await stageOf(T1)).toBe('Revisando')
+    const h = await history(T1)
+    expect(h[0]).toMatchObject({
+      kind: 'moved',
+      detail: { ruleId: 'default-rerequest', event: 'pr.review_requested' }
+    })
+    // A próxima revisão com alterações volta para Revisado (e o corretor roda de novo).
+    world.pr[T1] = {
+      ...world.pr[T1],
+      reviews: [
+        { id: 'rv1', state: 'changes_requested', at: '2026-11-19T12:30:00Z' },
+        { id: 'rv2', state: 'changes_requested', at: '2026-11-19T13:30:00Z' }
+      ]
+    }
+    await cycle()
+    expect(await stageOf(T1)).toBe('Revisado')
+    // Fora da coluna da regra (ou pausada): não move, só registra.
+    await board.setAutomationPaused('p1', T1, true)
+    expect(automation.applyEvent('p1', T1, 'pr.review_requested', 5)).toBe(false)
+    expect(await stageOf(T1)).toBe('Revisado')
+  })
+
   it('idempotência: repetir o ciclo e reiniciar o app não repetem automações', async () => {
     await cycle()
     // A foto dos sinais antes da PR existir (para voltar a ela no fim).

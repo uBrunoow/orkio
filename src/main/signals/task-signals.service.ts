@@ -187,6 +187,16 @@ export class TaskSignalsService {
     )
   }
 
+  /**
+   * PR já mergeada desta branch (sem PR aberta nela), do último resultado remoto (sem rede):
+   * trabalho novo da tarefa vai numa branch nova (worktree).
+   */
+  mergedPrForBranch(projectId: string, branch: string): number | null {
+    const pulls = this.lastRemote(projectId)?.pulls.filter((p) => p.headRef === branch) ?? []
+    if (pulls.some((p) => p.state === 'open' || p.state === 'draft')) return null
+    return pulls.find((p) => p.state === 'merged')?.number ?? null
+  }
+
   /** Último resultado remoto do projeto, pela API do Orkio ou pelo `gh` (projeto só git). */
   private lastRemote(projectId: string): RemoteState['last'] {
     const target = readRepoOf(projectById(this.deps.store.get(), projectId))

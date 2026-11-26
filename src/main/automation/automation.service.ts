@@ -15,6 +15,8 @@ import {
   mergeSnapshot,
   toSnapshot,
   type AutomationDecision,
+  type AutomationEvent,
+  type EventKind,
   type TaskSnapshot
 } from '../../shared/automation'
 import type { BoardService } from '../board/board.service'
@@ -120,61 +122,17 @@ export class AutomationService {
         this.deps.store.saveSnapshot(taskId, projectId, mergeSnapshot(prev, fresh), at)
         if (events.length === 0) continue
 
-        const state = this.deps.store.state(taskId)
-        const decisions = evaluate(
-          events,
-          board.rules,
-          {
-            stageId: state?.stageId ?? null,
-            blocked: state?.blocked ?? false,
-            paused: state?.automationPaused ?? false,
-            lastManualMoveAt: this.deps.store.lastManualMoveAt(taskId)
-          },
+        const r = this.decideAndApply(tx, projectId, taskId, events, {
+          rules: board.rules,
           stages,
-          { globallyPaused: config.automation.paused }
-        )
-        for (const d of decisions) {
-          eventCount++
-          const detail: TaskEventDetailInput<'automation'> = {
-            event: d.event.kind,
-            ruleId: d.ruleId,
-            ruleName: d.ruleName,
-            outcome: d.outcome,
-            ...(d.reason ? { reason: d.reason } : {}),
-            ...(d.event.branch ? { branch: d.event.branch } : {}),
-            ...(d.event.pr ? { pr: pr(d.event.pr.number) } : {})
-          }
-          let moved = false
-          if (d.outcome === 'move' && d.to) {
-            try {
-              moved = this.deps.board.applyAutomationMove(tx, projectId, taskId, d.to, {
-                key: d.event.key,
-                detail
-              })
-            } catch {
-              // Etapa removida ou tarefa fora do quadro: registra como ignorada.
-              detail.outcome = 'skipped'
-              detail.reason = 'não foi possível mover a tarefa'
-            }
-          }
-          if (moved) {
-            moves++
-          } else {
-            this.deps.store.addEvent({
-              taskPageId: taskId,
-              projectId,
-              at,
-              kind: 'automation',
-              fromStage: d.from,
-              toStage: detail.outcome === 'skipped' ? d.to : null,
-              detail,
-              eventKey: d.event.key
-            })
-          }
-          if (d.notify && (moved || d.outcome === 'notify')) {
+          globallyPaused: config.automation.paused,
+          at,
+          pr,
+          onNotify: (d) =>
             notifications.push(this.notification(projectId, taskId, d, cards, stages))
-          }
-        }
+        })
+        eventCount += r.events
+        moves += r.moves
       }
     })
 
@@ -182,6 +140,115 @@ export class AutomationService {
     if (eventCount > 0) this.deps.onChanged(projectId)
     for (const n of notifications) this.deps.notify(n)
     return { github: result.github, events: eventCount, moves }
+  }
+
+  /**
+   * Um evento que o próprio Orkio causou e o GitHub não vai acusar (ex.: pedir de novo a revisão a
+   * quem já estava pendente): passa pelas mesmas regras, pausas e histórico de um ciclo. Devolve se
+   * moveu a tarefa.
+   */
+  applyEvent(projectId: string, taskId: string, kind: EventKind, prNumber: number): boolean {
+    const config = this.deps.config.get()
+    const board = config.boards[projectId]
+    if (!board) return false
+    const at = this.now().toISOString()
+    const repo = readRepoOf(projectById(config, projectId))
+    const pr = (n: number): EventPr =>
+      repo ? { number: n, owner: repo.owner, repo: repo.name } : { number: n }
+    const event: AutomationEvent = {
+      key: `orkio:${kind}:${taskId}:${at}`,
+      kind,
+      taskId,
+      at,
+      pr: { number: prNumber }
+    }
+    const r = this.deps.store.transaction((tx) =>
+      this.decideAndApply(tx, projectId, taskId, [event], {
+        rules: board.rules,
+        stages: board.stages,
+        globallyPaused: config.automation.paused,
+        at,
+        pr,
+        onNotify: (d) =>
+          this.deps.notify(this.notification(projectId, taskId, d, null, board.stages))
+      })
+    )
+    if (r.moves > 0) this.deps.board.flushWrites()
+    this.deps.onChanged(projectId)
+    return r.moves > 0
+  }
+
+  /** Regras → movimento (ou registro no histórico) de uma tarefa, dentro da transação de quem chama. */
+  private decideAndApply(
+    tx: Parameters<AutomationServiceDeps['board']['applyAutomationMove']>[0],
+    projectId: string,
+    taskId: string,
+    events: readonly AutomationEvent[],
+    ctx: {
+      rules: OrkioConfig['boards'][string]['rules']
+      stages: Parameters<typeof evaluate>[3]
+      globallyPaused: boolean
+      at: string
+      pr: (n: number) => EventPr
+      onNotify: (d: AutomationDecision) => void
+    }
+  ): { events: number; moves: number } {
+    let eventCount = 0
+    let moves = 0
+    const state = this.deps.store.state(taskId)
+    const decisions = evaluate(
+      events,
+      ctx.rules,
+      {
+        stageId: state?.stageId ?? null,
+        blocked: state?.blocked ?? false,
+        paused: state?.automationPaused ?? false,
+        lastManualMoveAt: this.deps.store.lastManualMoveAt(taskId)
+      },
+      ctx.stages,
+      { globallyPaused: ctx.globallyPaused }
+    )
+    for (const d of decisions) {
+      eventCount++
+      const detail: TaskEventDetailInput<'automation'> = {
+        event: d.event.kind,
+        ruleId: d.ruleId,
+        ruleName: d.ruleName,
+        outcome: d.outcome,
+        ...(d.reason ? { reason: d.reason } : {}),
+        ...(d.event.branch ? { branch: d.event.branch } : {}),
+        ...(d.event.pr ? { pr: ctx.pr(d.event.pr.number) } : {})
+      }
+      let moved = false
+      if (d.outcome === 'move' && d.to) {
+        try {
+          moved = this.deps.board.applyAutomationMove(tx, projectId, taskId, d.to, {
+            key: d.event.key,
+            detail
+          })
+        } catch {
+          // Etapa removida ou tarefa fora do quadro: registra como ignorada.
+          detail.outcome = 'skipped'
+          detail.reason = 'não foi possível mover a tarefa'
+        }
+      }
+      if (moved) {
+        moves++
+      } else {
+        this.deps.store.addEvent({
+          taskPageId: taskId,
+          projectId,
+          at: ctx.at,
+          kind: 'automation',
+          fromStage: d.from,
+          toStage: detail.outcome === 'skipped' ? d.to : null,
+          detail,
+          eventKey: d.event.key
+        })
+      }
+      if (d.notify && (moved || d.outcome === 'notify')) ctx.onNotify(d)
+    }
+    return { events: eventCount, moves }
   }
 
   private notification(

@@ -30,6 +30,8 @@ export interface DeliveryActionsDeps {
   store: Pick<BoardStore, 'addEvent'>
   /** Depois de pedir review: roda as automações já (a 3B move para Revisando). */
   runAutomation?(projectId: string): void
+  /** Review pedido com sucesso: o Orkio aplica as regras de "review pedido" já (o revisor pendente não gera evento novo no GitHub). */
+  onReviewRequested?(projectId: string, taskId: string, pr: number): void
   /** Projeto só com git local sem o `gh` disponível: não dá para pedir review. */
   gitOnly?(projectId: string): boolean | Promise<boolean>
   now?: () => Date
@@ -222,6 +224,8 @@ export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] 
             pr: { number: r.pr.number, owner: target.owner, repo: target.repo }
           }
         )
+        // Corretor da PR: o revisor já pendente não gera pedido novo no GitHub.
+        if (again) deps.onReviewRequested?.(projectId, taskId, r.pr.number)
         deps.runAutomation?.(projectId)
         return { ok: true }
       }

@@ -80,6 +80,8 @@ export type RunLogEvent =
       at: string
     }
   | { kind: 'tool_result'; id: string; error: boolean }
+  /** Imagem de uma ferramenta, gravada em `<runs>/<runId>/images/<n>.<ext>` (nunca o conteúdo). */
+  | { kind: 'image'; toolId: string; runId: string; n: number; mime: string }
   | {
       kind: 'permission'
       requestId: string
@@ -365,3 +367,6 @@ export interface ArtifactView {
 }
 
 export const CLAUDE_CODE_DOCS_URL = 'https://code.claude.com/docs/en/setup'
+
+/** Imagens das ferramentas por execução: tamanho de cada uma (decodificada) e quantidade. */
+export const IMAGE_LIMITS = { maxBytes: 5 * 1024 * 1024, perRun: 20 } as const

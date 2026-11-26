@@ -22,6 +22,7 @@ import {
 import {
   BOARD_SETUP_MESSAGES,
   ORKIO_STAGE_PROPERTY_NAME,
+  isReviewReturn,
   reconcile,
   stageMatchesStatus,
   suggestStages,
@@ -105,6 +106,8 @@ export interface StageChange {
   from: string | null
   to: string | null
   source: 'manual' | 'automation' | 'notion' | 'rollback' | 'stage_removed'
+  /** A automação devolveu de Revisado para Revisando (`isReviewReturn`): o fluxo da coluna não roda. */
+  reviewReturn?: boolean
 }
 
 export const BOARD_MESSAGES = {
@@ -397,12 +400,16 @@ export class BoardService {
       eventKey: options.eventKey ?? null
     })
     this.syncDesired(projectId, taskId, board, snapshot, before)
+    const source = options.stageRemoved ? 'stage_removed' : options.source
     this.deps.enterStage({
       projectId,
       taskId,
       from: before.stageId,
       to: stageId,
-      source: options.stageRemoved ? 'stage_removed' : options.source
+      source,
+      ...(isReviewReturn(board.stages, before.stageId, stageId, source)
+        ? { reviewReturn: true }
+        : {})
     })
     return true
   }

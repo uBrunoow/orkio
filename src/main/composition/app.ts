@@ -81,6 +81,7 @@ import { openExternalHandler, siteLinks, siteUrlRules } from '../ipc/shell.ipc'
 import { signalsHandlers } from '../ipc/signals.ipc'
 import { claudeHandlers } from '../ipc/claude.ipc'
 import { terminalHandlers } from '../ipc/terminal.ipc'
+import { serversHandlers } from '../ipc/servers.ipc'
 import { updatesHandlers } from '../ipc/updates.ipc'
 import { NotionWorkspaceService } from '../notion/notion-workspace.service'
 import { authorizeViaLoopback } from '../oauth/loopback'
@@ -159,6 +160,7 @@ interface Work {
     | 'taskSetup'
     | 'claude'
     | 'terminal'
+    | 'servers'
     | 'overview'
   >
 }
@@ -446,6 +448,7 @@ export function createApp(): OrkioApp {
     taskSetup: work?.handlers.taskSetup ?? null,
     claude: work?.handlers.claude ?? null,
     terminal: work?.handlers.terminal ?? null,
+    servers: work?.handlers.servers ?? null,
     overview: work?.handlers.overview ?? null,
     updates: updatesHandlers(
       updates,
@@ -661,6 +664,7 @@ function createWork(core: {
     listTasks: (projectId) => notionWorkspace.listTasks(projectId),
     signals: (projectId) => signals.get(projectId),
     prFor: (projectId, branch) => signals.prForBranch(projectId, branch)?.number ?? null,
+    mergedPrFor: (projectId, branch) => signals.mergedPrForBranch(projectId, branch),
     getBlockChildren: (id, cursor) => notion.getBlockChildren(id, cursor),
     notionInsert: {
       createChildPage: (parent, title, markdown) => notion.createChildPage(parent, title, markdown),
@@ -748,6 +752,9 @@ function createWork(core: {
       githubFor: (projectId) => (isGitOnly(projectId) ? gh : null),
       store: boardStore,
       runAutomation,
+      // Corretor da PR pediu de novo: aplica já a regra de "review pedido" (Revisado → Revisando).
+      onReviewRequested: (projectId, taskId, pr) =>
+        void automation.applyEvent(projectId, taskId, 'pr.review_requested', pr),
       gitOnly
     }).concat(
       // Revisão: o Orkio lê as threads da PR e grava .orkio/revisao.md no worktree.
@@ -917,6 +924,11 @@ function createWork(core: {
         hasProject: (projectId) => projectById(configStore.get(), projectId) !== undefined,
         worktreePath: (taskId) => core.worktrees.get(taskId)?.path ?? null,
         projectPath: (projectId) => projectById(configStore.get(), projectId)?.localPath ?? null
+      }),
+      servers: serversHandlers({
+        servers: claude.servers,
+        hasProject: (projectId) => projectById(configStore.get(), projectId) !== undefined,
+        openExternal: (url) => shell.openExternal(url)
       }),
       overview: overviewHandlers(overview)
     }

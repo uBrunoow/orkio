@@ -405,6 +405,21 @@ export class BoardStore {
   }
 
   /** Última entrada da tarefa nesta etapa (movida, reconciliada ou criada nela). */
+  /** Última entrada na etapa, com a origem (de onde veio e quem moveu). */
+  lastEntry(
+    taskPageId: string,
+    stageId: string
+  ): { at: string; fromStage: string | null; source: string } | null {
+    const row = this.db.get<{ at: string; from_stage: string | null; source: string }>(
+      `SELECT at, from_stage, source FROM task_events WHERE task_page_id = ? AND to_stage = ?
+       AND kind IN (${STAGE_ENTRY_KINDS.map(() => '?').join(', ')}) ORDER BY at DESC, id DESC LIMIT 1`,
+      taskPageId,
+      stageId,
+      ...STAGE_ENTRY_KINDS
+    )
+    return row ? { at: row.at, fromStage: row.from_stage, source: row.source } : null
+  }
+
   lastEntryAt(taskPageId: string, stageId: string): string | null {
     return (
       this.db.get<{ at: string | null }>(

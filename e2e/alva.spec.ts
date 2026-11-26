@@ -502,15 +502,16 @@ test('5C critério 3 + Task 16: alterações pedidas → Revisado → plano → 
   expect(log.at(-1)).toMatch(/^allow:gh api graphql -f query='mutation \{ resolveReviewThread/)
   // Pede nova revisão a quem revisou (Ana) sem outro gate: você já aprovou o resumo.
   await expect(flow.getByRole('group', { name: 'Pedir review da PR #7?' })).toHaveCount(0)
-  await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+  // O Orkio aplica na hora a regra "Novo pedido de review volta para revisão" (Ana já estava
+  // pendente, o GitHub não acusaria pedido novo): a tarefa volta para Revisando e a coluna começa
+  // o fluxo dela; uma nova revisão com alterações a traz de volta para Revisado.
+  await expectStage(panel, 'Revisando')
   expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(
     git(worktree(), 'rev-parse', 'HEAD').trim()
   )
   expect((await notionState(app)).reviewRequests).toEqual([
     { pull: 7, reviewers: ['ana'], teams: [] }
   ])
-  // O novo pedido de review leva a tarefa de volta para Revisando (3B), sozinho.
-  await expectStage(panel, 'Revisando')
   // A sessão mostra as entregas com o link da PR; o histórico completo também.
   const conversation = panel.getByRole('list', { name: 'Conversa da tarefa' })
   await expect(conversation).toContainText('Review pedido na PR #7 pelo Orkio')
@@ -533,8 +534,15 @@ test('Task 18: Revisando → revisão publicada (padrão da coluna) → gate →
   const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
   const pushedSha = git(origin(), 'rev-parse', taskBranch()).trim()
 
+  // A volta de Revisado para Revisando (o corretor pediu nova revisão) espera a revisão humana:
+  // a revisão do agente não roda de novo sozinha (senão revisor e corretor ficam num laço).
+  await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+  await expect(flow).toContainText('Fluxo: Alva: comentários da PR')
+  await page.waitForTimeout(1500)
+  await expect(flow).not.toContainText('Fluxo: Alva: revisão publicada')
   // Sem configurar nada: a coluna Revisando já tem o "Alva: revisão publicada" (padrão da tela
-  // alva-flow), que começou sozinho com a volta da tarefa para Revisando.
+  // alva-flow); você roda pelo botão.
+  await flow.getByRole('button', { name: 'Rodar fluxo de novo' }).click()
   await expect(flow).toContainText('Fluxo: Alva: revisão publicada', { timeout: 30_000 })
   // Threads resolvidas (para o fluxo do Revisado, que começa depois, terminar sem comentários).
   await setFakes(app, {

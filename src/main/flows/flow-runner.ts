@@ -477,6 +477,8 @@ export class FlowRunner {
         return
       }
       if (!isStageEntry(change) || active) return
+      // Volta da revisão (Revisado → Revisando pela automação): espera a revisão humana.
+      if (change.reviewReturn) return
       const plan =
         (await this.deps.nativePlan?.(change.projectId, change.taskId, change.to, false)) ?? null
       const binding = this.deps
@@ -1786,9 +1788,7 @@ export class FlowRunner {
               ...(step.effort !== undefined ? { effort: step.effort } : {})
             }
           : null
-      const before = await this.deps
-        .workState?.(row.task_page_id)
-        .catch(() => null)
+      const before = await this.deps.workState?.(row.task_page_id).catch(() => null)
       const runId = await this.deps.startClaude({
         projectId: row.project_id,
         taskId: row.task_page_id,

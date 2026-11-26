@@ -776,11 +776,15 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   (`parseSendMessageRequest`), no perfil do agente e na config do passo: nada vira argumento sem passar
   pela regex. O log da execução ganha uma linha `info` "Modelo: Opus · Raciocínio: Alto" (sem coluna
   nova em `agent_runs`).
-- **Worktree** (`worktree.service.ts`): `<userData>/worktrees/<projectId>/<ID>` (sem ID: 12
-  caracteres do id da página); reutiliza worktree registrado → branch local da tarefa → branch
+- **Worktree** (`worktree.service.ts`): `<userData>/worktrees/<projectId>/<ID>` (sem ID: o id
+  inteiro da página; páginas criadas juntas dividem o começo do id); reutiliza worktree registrado → branch local da tarefa → branch
   remota ("da tarefa" = registrada em `task_branches` ou com o ID no nome) → cria
   `<tipo>/<ID>-<slug>` (sem ID, `<tipo>/<slug>`; `-2` se o nome já existe) a partir de
-  `<remote>/<default>` (fetch antes) e registra a branch. Tipo `feat` por padrão; "Nova sessão…"
+  `<remote>/<base>` (fetch antes; base = primeiro destino das PRs com "Agentes enviam e abrem PR",
+  `taskBaseBranch`, senão a padrão) e registra a branch. Branch com PR já mergeada (sinais,
+  `mergedPrForBranch`) não recebe trabalho novo: o worktree limpo sai (a branch fica) e a tarefa
+  ganha branch nova; com mudança sem commit, `merged_dirty`. Falha do git ao listar os worktrees
+  tenta de novo e vira erro do git (nunca "remova a pasta"). Tipo `feat` por padrão; "Nova sessão…"
   deixa trocar para `fix`/`hotfix` quando a branch ainda não existe (`branchKind`). Branch já em checkout na pasta principal → erro claro.
   A pasta principal do usuário nunca é tocada. "Limpar ambiente" remove só o worktree (a branch
   fica); com mudanças pendentes exige confirmação (`force`).
@@ -814,7 +818,12 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   e tem ambiente.
 - **Execuções** (`run.service.ts`): no máximo 2 em paralelo, 1 por tarefa (fila). `agent_runs`
   (SQLite v4) + `<userData>/runs/<id>.jsonl` só com eventos normalizados (nunca o stream cru),
-  mantendo 10 por tarefa. Todo texto passa por `redactSecrets` + valores lidos dos `.env*` do
+  mantendo 10 por tarefa. Imagens dos `tool_result` (print do Playwright, `Read` de imagem):
+  `toolImages` (`stream.ts`) → `onImage` → tipo pelos bytes (`sniffImage`), até 5 MB e 20 por
+  execução, gravadas em `runs/<id>/images/<n>.<ext>` (0600, saem na rotação); o log tem só
+  `{ kind: 'image', toolId, runId, n, mime }`, nunca o base64. A tela lê por `claude.runImage`
+  e mostra por `blob:` (CSP `img-src … blob:`): miniatura no grupo de trabalho/passo do
+  subagente, clique abre num Dialog. Todo texto passa por `redactSecrets` + valores lidos dos `.env*` do
   worktree (só em memória). Ao abrir o app, execuções "em andamento" viram `failed`; ao fechar,
   todas são canceladas (SIGINT → SIGTERM 5 s → SIGKILL 10 s).
 - Briefing: blocos da página (até 3 níveis, 400 blocos) → markdown + campos + PR; editável antes
@@ -904,6 +913,35 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   janela do modelo, 1M com `[1m]` no nome, senão 200k; log antigo sem `usage` esconde a linha);
   mudanças `+N −M` (`git diff --numstat <base>`, `ClaudeDiff.shortstat`; não rastreados não contam)
   com o chip da PR (cartão no hover) ou "Abrir PR".
+- **Servidores da tarefa** (`shared/servers.ts` puro, `main/servers/servers.service.ts`,
+  `servers/ports.ts`, IPC `servers.*` + evento `servers:changed`; `orkio-config.servers[projectId]`
+  opcional, sem migração): cadastro por projeto (até 6; `name` minúsculo, `command` de uma linha,
+  `cwd` relativo, `portEnv` padrão `PORT` pela regra de nomes do Vault, `url` só
+  `http://localhost|127.0.0.1:{port}`, `env` com `{nome.url}`/`{nome.port}` de outro servidor;
+  `serverProblems` na tela e no main). Roda num terminal tipo `server` do `TerminalService`
+  (`shell -lc comando` no worktree, `ptyEnv` + porta/variáveis, saída por `redactSecrets` + valores
+  dos `.env*`, só leitura, fora do limite de 8 shells e fora da tela Terminais; parada = SIGTERM no
+  grupo → 5 s → SIGKILL, `killGroup`; o app saindo manda SIGTERM e SIGKILL no `exit`). Porta
+  estável por tarefa+servidor (faixa `4100 + 100 × posição`, livre = ninguém responde e dá para
+  escutar, lembrada em memória; nunca a de outro servidor lembrado); pronto = a porta responde em
+  até 120 s (`no_port` senão); até 8 rodando. "Limpar ambiente" para os servidores antes
+  (`stopServers`). Histórico `server_started`/`server_stopped` (`by`: you/agent/exit). Tela:
+  Configurações › Por projeto › Servidores (`features/servers/ServersSettings.tsx`, modal) e a seção
+  "Servidores" do Ambiente (`TaskServers.tsx`: estado, URL aberta pelo main com `servers.open`,
+  Subir/Parar, "Ver log" num Dialog com o `TerminalView` só leitura). Agente: com cadastro no projeto, a ponte
+  (`bridge/protocol.ts`: `BRIDGE_ENV.servers` = `all` | `read`, mensagem `{ kind: 'server', action,
+  input }`) lista `servidor_subir|parar|status|log` (só leitura = status/log), o `RunService`
+  repassa a `ServersService.agentTool` (só servidores cadastrados, pelo nome; `subir` espera o
+  `settled` e devolve o endereço ou o fim do log sem cores; `info` vira linha do log da execução) e
+  a política libera `mcp__orkio__servidor_*` sem perguntar (só leitura nega subir/parar). O
+  `--append-system-prompt` ganha `serversPromptNote` (estado de cada um + "não rode servidores no
+  Bash"), via `RunSpec.servers` (`ClaudeService.serversOf`). Navegador: com servidor de pé
+  (`ServersService.livePorts` → `PolicyContext.serverPorts`), o Playwright (`mcp__*playwright*__browser_*`,
+  catálogo ou plugin) passa sem perguntar ao navegar para `http(s)://localhost|127.0.0.1|[::1]:<porta>`
+  dele e nas ações na página aberta (`BROWSER_PAGE_ACTIONS`: clicar, digitar, print, snapshot…);
+  `evaluate`, `run_code_unsafe`, `file_upload` e outro endereço perguntam; só leitura pergunta. E2E `e2e/servers.spec.ts` (processo de verdade,
+  segredo do `.env` fora do log, sem órfão ao fechar; o Claude simulado `subir-servidor` chama a
+  ferramenta pela ponte).
 - **Manter acordado** (`main/power/keep-awake.ts`, IPC `power:get`/`power:set-keep-awake`,
   `orkio-config.keepAwake` opcional, sem migração): com a opção ligada (cartão "Energia" em
   Configurações › Atualizações) e execução do Claude Code ou fluxo rodando, `powerSaveBlocker`
@@ -1195,7 +1233,13 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   "## Resumo" + "## O que vou fazer") → gate em qualquer modo → `PR_COMMENTS_APPLY` (corrige, push,
   responde threads e revisões gerais com `gh pr comment` citando o revisor) → push do Orkio se
   faltar → `rerequest_review` (pede de novo a quem revisou, menos o autor da PR, sem gate; sem
-  ninguém conhecido pergunta como o `request_review`).
+  ninguém conhecido pergunta como o `request_review`). Depois, `onReviewRequested` →
+  `AutomationService.applyEvent(…, 'pr.review_requested')`: o revisor já pendente não gera evento
+  no GitHub, então o Orkio aplica as regras na hora (Revisado → Revisando). Essa volta
+  (`isReviewReturn`, `shared/board.ts`: automação de `reviewed` para `review`) marca o
+  `StageChange.reviewReturn`: o `FlowRunner` não começa o fluxo da coluna, o orquestrador não
+  atribui o agente da raia nem roda o "carried in" (senão revisor e corretor ficam num laço); a
+  tarefa espera a revisão humana. Movida à mão, roda normalmente.
 - **Revisão como orkio[bot]** (`delivery/review-publish.ts`, ação `publish_review`; não é entrega:
   o Revisor `delivery: false` roda, mas o `FlowRunner` a trata como passo que publica para a etapa
   mudar sem interromper): o `confirm` lê o texto final da execução mais recente do fluxo

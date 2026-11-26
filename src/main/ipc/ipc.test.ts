@@ -23,6 +23,7 @@ import { notionWorkspaceHandlers } from './notion-workspace.ipc'
 import { projectsHandlers } from './projects.ipc'
 import { registerGroup, registerHandlers, type Handlers, type RegisterOptions } from './register'
 import { isAllowedExternalUrl, openExternalHandler, siteUrlRules } from './shell.ipc'
+import { serversHandlers } from './servers.ipc'
 import { signalsHandlers } from './signals.ipc'
 import { taskFlowsHandlers } from './task-flows.ipc'
 import { createSenderGuard, isTrustedRendererUrl } from './trusted-sender'
@@ -1061,6 +1062,81 @@ describe('claude', () => {
       ['p1', null],
       ['p1', TASK]
     ])
+  })
+
+  it('imagem da execução: só id válido e n inteiro de 1 a 20', async () => {
+    const ipc = fakeIpc()
+    const readImage = vi.fn(async () => ({ mime: 'image/png', data: new Uint8Array([1]) }))
+    const ch = ORKIO_API.claude
+    registerGroup(
+      ipc,
+      options(),
+      ch,
+      claudeHandlers({} as never, { readImage } as never, {} as never)
+    )
+    expect(await ipc.invoke(ch.runImage.channel, 'r1', 1)).toEqual({
+      mime: 'image/png',
+      data: new Uint8Array([1])
+    })
+    for (const n of [0, 21, 1.5, '1'])
+      expect(await ipc.invoke(ch.runImage.channel, 'r1', n)).toBeNull()
+    expect(await ipc.invoke(ch.runImage.channel, '../x', 1)).toBeNull()
+    expect(readImage.mock.calls).toEqual([['r1', 1]])
+  })
+})
+
+describe('servers', () => {
+  const def = { id: 's-web', name: 'frontend', command: 'pnpm dev' }
+
+  it('cadastro: forma conferida no IPC (as regras ficam com o serviço)', async () => {
+    const ipc = fakeIpc()
+    const save = vi.fn(async (_p: string, defs: unknown[]) => defs)
+    const ch = ORKIO_API.servers
+    registerGroup(
+      ipc,
+      options(),
+      ch,
+      serversHandlers({
+        servers: { save } as never,
+        hasProject: () => true,
+        openExternal: async () => undefined
+      })
+    )
+    expect(await ipc.invoke(ch.save.channel, 'p1', [def])).toEqual({ ok: true, value: [def] })
+    for (const bad of [
+      'x',
+      [{ ...def, id: '../x' }],
+      [{ ...def, env: { A: 1 } }],
+      Array(7).fill(def)
+    ])
+      expect(await ipc.invoke(ch.save.channel, 'p1', bad)).toMatchObject(invalid)
+    expect(save).toHaveBeenCalledTimes(1)
+  })
+
+  it('subir/abrir: id do servidor validado; abrir só a URL local do servidor de pé', async () => {
+    const ipc = fakeIpc()
+    const start = vi.fn(async () => ({ id: 's-web' }))
+    const urlOf = vi.fn((_p: string, _t: string, id: string) =>
+      id === 's-web' ? 'http://localhost:4100' : id === 's-evil' ? 'https://evil.test' : null
+    )
+    const openExternal = vi.fn(async () => undefined)
+    const ch = ORKIO_API.servers
+    registerGroup(
+      ipc,
+      options(),
+      ch,
+      serversHandlers({ servers: { start, urlOf } as never, hasProject: () => true, openExternal })
+    )
+    await ipc.invoke(ch.start.channel, 'p1', TASK, 's-web')
+    expect(await ipc.invoke(ch.start.channel, 'p1', TASK, 'rm -rf')).toMatchObject(invalid)
+    expect(start.mock.calls).toEqual([['p1', TASK, 's-web', 'you']])
+    expect(await ipc.invoke(ch.open.channel, 'p1', TASK, 's-web')).toEqual({
+      ok: true,
+      value: null
+    })
+    expect(await ipc.invoke(ch.open.channel, 'p1', TASK, 's-evil')).toMatchObject({ ok: false })
+    expect(await ipc.invoke(ch.open.channel, 'p1', TASK, 's-api')).toMatchObject({ ok: false })
+    expect(openExternal.mock.calls).toEqual([['http://localhost:4100']])
   })
 })
 

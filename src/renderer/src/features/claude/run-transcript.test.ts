@@ -385,3 +385,47 @@ describe('subagentes', () => {
     expect(kinds(items)).toEqual(['work'])
   })
 })
+
+describe('imagens das ferramentas', () => {
+  const image = (toolId: string, n: number): RunLogEvent => ({
+    kind: 'image',
+    toolId,
+    runId: 'r1',
+    n,
+    mime: 'image/png'
+  })
+
+  it('a imagem fica no passo e no grupo da ferramenta, mesmo chegando depois de um texto', () => {
+    const items = buildTranscript(
+      [
+        tool('t1', 'mcp__playwright__browser_take_screenshot', 'print'),
+        ok('t1'),
+        text('Tirei o print'),
+        image('t1', 1)
+      ],
+      false
+    )
+    const work = items.find((i) => i.kind === 'work') as Extract<TranscriptItem, { kind: 'work' }>
+    expect(work.images).toEqual([{ runId: 'r1', n: 1 }])
+    expect(work.steps[0]!.images).toEqual([{ runId: 'r1', n: 1 }])
+    expect(items.map((i) => i.kind)).toEqual(['work', 'message'])
+  })
+
+  it('imagem de subagente vai para o passo dele; sem ferramenta conhecida, é ignorada', () => {
+    const items = buildTranscript(
+      [
+        { kind: 'subagent', id: 'a1', title: 'QA', agentType: null, background: false, at: 'x' },
+        { kind: 'tool', id: 't2', tool: 'Read', summary: 'shot.png', parent: 'a1' },
+        image('t2', 1),
+        image('desconhecida', 2)
+      ],
+      true
+    )
+    const subs = items.find((i) => i.kind === 'subagents') as Extract<
+      TranscriptItem,
+      { kind: 'subagents' }
+    >
+    expect(subs.agents[0]!.steps[0]!.images).toEqual([{ runId: 'r1', n: 1 }])
+    expect(items.some((i) => i.kind === 'work')).toBe(false)
+  })
+})

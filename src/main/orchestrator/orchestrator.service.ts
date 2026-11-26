@@ -39,7 +39,7 @@ import type { AgentRuntime, AgentsService } from '../agents/agents.service'
 import type { BoardView } from '../../shared/board'
 import type { Result } from '../../shared/result'
 import { projectById, projectFlows } from '../config/queries'
-import type { StageRole } from '../../shared/board'
+import { isReviewReturn, type BoardStage, type StageRole } from '../../shared/board'
 
 export const ORCHESTRATOR_MESSAGES = {
   projectNotFound: 'Projeto não encontrado. Atualize a lista.',
@@ -58,7 +58,7 @@ const STARTING_MS = 2 * 60_000
 
 export interface OrchestratorDeps {
   config: ConfigStore<OrkioConfig>
-  store: Pick<BoardStore, 'transaction' | 'addConfigEvent' | 'lastEntryAt'>
+  store: Pick<BoardStore, 'transaction' | 'addConfigEvent' | 'lastEntry'>
   board: Pick<BoardService, 'get' | 'applyAutomationMove' | 'flushWrites'>
   agents: Pick<
     AgentsService,
@@ -211,7 +211,8 @@ export class OrchestratorService {
    * numa etapa de trabalho por outro caminho ganha um agente da etapa.
    */
   onStageChanged(change: StageChange): void {
-    if (!isStageEntry(change)) return
+    // Volta da revisão: a tarefa espera a revisão humana, sem o agente da raia.
+    if (!isStageEntry(change) || change.reviewReturn) return
     const config = this.configFor(change.projectId)
     if (!config.enabled || this.deps.flows.hasActive(change.taskId)) return
     const agents = this.agentCache.get(change.projectId) ?? new Map()
@@ -268,11 +269,12 @@ export class OrchestratorService {
     const cards = toPlanCards(view)
     const busy = this.busyTasks(projectId)
     const lanes = new Set(config.lanes.map((l) => l.stageId))
+    const stages = this.deps.config.get().boards[projectId]?.stages ?? []
     const finishedHere = new Set<string>()
     const carriedIn = new Set<string>()
     for (const c of cards) {
       if (!c.stageId || !lanes.has(c.stageId) || busy.has(c.taskId)) continue
-      const where = this.lastFlowVsEntry(c.taskId, c.stageId, config.enabledSince)
+      const where = this.lastFlowVsEntry(c.taskId, c.stageId, config.enabledSince, stages)
       if (where === 'finished_here') finishedHere.add(c.taskId)
       else if (where === 'carried_in') carriedIn.add(c.taskId)
     }
@@ -397,16 +399,21 @@ export class OrchestratorService {
   private lastFlowVsEntry(
     taskId: string,
     stageId: string,
-    since: string | null
+    since: string | null,
+    stages: readonly BoardStage[]
   ): 'finished_here' | 'carried_in' | null {
-    const entry = this.deps.store.lastEntryAt(taskId, stageId)
-    if (!entry) return null
+    const entered = this.deps.store.lastEntry(taskId, stageId)
+    if (!entered) return null
+    const entry = entered.at
     const last = this.deps.flows.lastFlow(taskId)
     if (!last || last.status !== 'finished' || !isSuccessResult(last.result) || !last.endedAt)
       return null
     if (!since || last.endedAt < since) return null
     if (last.startedAt >= entry) return last.stageId === stageId ? 'finished_here' : null
-    return last.endedAt >= entry ? 'carried_in' : null
+    if (last.endedAt < entry) return null
+    // O corretor da PR terminou depois de a automação devolver a tarefa para Revisando: a coluna
+    // espera a revisão humana (senão revisor e corretor ficam num laço).
+    return isReviewReturn(stages, entered.fromStage, stageId, entered.source) ? null : 'carried_in'
   }
 
   private async context(projectId: string): Promise<{

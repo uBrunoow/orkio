@@ -10,6 +10,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Adicionado
 
+- Servidores da tarefa: cadastre por projeto o frontend, o backend… (Configurações › Servidores, com o comando, a pasta e a variável da porta). No painel Ambiente da tarefa, "Subir" roda o servidor na pasta dela, com uma porta só dela, e mostra quando ele responde, o endereço (abre no navegador), o log e "Parar". Eles ficam de pé entre as mensagens e param em "Limpar ambiente" ou ao fechar o Orkio. O agente também sobe, para e lê o log desses servidores sozinho (ferramentas do Orkio, sem pedir permissão; num passo só de leitura, só vê o estado e o log) e já começa sabendo quais estão rodando e em que endereço. Com um servidor da tarefa de pé, o Playwright navega até ele e clica, digita e tira print sem pedir permissão; outros endereços continuam perguntando.
+- Imagens na conversa: prints do navegador e imagens que o agente lê aparecem como miniatura na sessão da tarefa; clique para ver grande.
 - "Copiar de outro projeto…" no Fluxo do projeto: traz colunas, automações, o fluxo de cada coluna, os fluxos de tarefa usados e o "Como as colunas rodam" para o rascunho, reaproveitando as colunas com o mesmo papel (as tarefas ficam onde estão).
 - Projetos só com git local leem o GitHub pelo `gh` da sua máquina a cada 5 minutos (ou na hora, em "Atualizar"): PRs, CI, revisões e comentários aparecem e as automações do quadro andam (PR aberta → Revisando, alterações pedidas → Revisado, merge → Finalizada). Pedir review e publicar a revisão também saem pelo `gh`, com o seu usuário.
 - Aba "Notion" no painel da tarefa: título, status, prioridade, responsáveis e a descrição da página, com "Abrir no Notion".
@@ -18,6 +20,11 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Corrigido
 
+- Imagens da mesma execução entravam na conversa fora de ordem quando chegavam juntas.
+- Revisor e Corretor da PR não ficam mais num laço: quando a tarefa volta para Revisando depois das correções, a revisão do agente não roda de novo sozinha e a tarefa espera a revisão humana (movendo à mão, ou pelo botão "Rodar fluxo", ela roda).
+- Depois que o Corretor da PR pede nova revisão, a tarefa volta para Revisando na hora, pela regra "Novo pedido de review volta para revisão". Antes, quando o revisor já estava pendente, o GitHub não acusava pedido novo: a tarefa ficava em Revisado e a próxima revisão com alterações não acordava o Corretor.
+- Tarefas sem ID no Notion criadas juntas caíam na mesma pasta de trabalho (o nome usava só o começo do id da página) e o passo falhava pedindo para remover a pasta de outra tarefa. Agora a pasta usa o id inteiro.
+- Com "Agentes enviam e abrem PR", a branch nova da tarefa sai do destino das PRs (ex.: `dev`), não da branch padrão. Tarefa cuja PR já foi mergeada recomeça numa branch nova; uma falha do git ao listar os worktrees não manda mais apagar a pasta.
 - Corretor da PR (coluna Revisado): uma revisão que pede alterações só no texto, sem comentário em linha, agora conta; antes o fluxo terminava com "nada a fazer". O resumo do que fazer vem sempre para você aprovar (também no "Rodar uma vez"); aprovado, o agente corrige, faz o push, responde cada conversa e o revisor da revisão geral (comentário na PR citando-o) e o Orkio pede nova revisão a quem revisou, sem outra confirmação.
 - A aba Revisão mostra as revisões com texto (pedir alterações ou comentar) e o título diz quem pediu alterações; antes dizia "Nenhum comentário pendente" quando a revisão não tinha comentário em linha.
 - A branch de destino da PR passa a ser conferida (`gh pr create`/`edit --base`, `gh api` e GraphQL) quando o projeto restringe os destinos.

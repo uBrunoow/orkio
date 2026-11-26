@@ -68,6 +68,9 @@ const oneOf =
   (v: unknown): v is T =>
     typeof v === 'string' && (values as readonly string[]).includes(v)
 
+const SERVER_ACTORS = ['you', 'agent'] as const
+const SERVER_STOP_ACTORS = ['you', 'agent', 'exit'] as const
+
 /** PR citada no evento (owner/repo só quando o repositório é do github.com). */
 export interface EventPr {
   number: number
@@ -387,6 +390,28 @@ export const TASK_EVENTS = {
     groups: ['claude'],
     actor: 'you',
     detail: { mode: req(field(oneOf(['continue', 'done', 'release']))) }
+  }),
+  /** Servidor da tarefa subiu (por você ou pelo agente), na porta dele. */
+  server_started: meta({
+    source: 'varies',
+    groups: ['claude'],
+    actor: 'source',
+    detail: {
+      server: req(str),
+      port: req(num),
+      by: req(field(oneOf(SERVER_ACTORS)))
+    }
+  }),
+  /** Servidor parou: por você, pelo agente ou sozinho (`exit`, com o código). */
+  server_stopped: meta({
+    source: 'varies',
+    groups: ['claude'],
+    actor: 'source',
+    detail: {
+      server: req(str),
+      by: req(field(oneOf(SERVER_STOP_ACTORS))),
+      exitCode: numOrNull
+    }
   })
 } as const satisfies Record<string, KindMeta>
 

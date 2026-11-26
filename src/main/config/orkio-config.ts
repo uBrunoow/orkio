@@ -21,6 +21,7 @@ import { parseColumnSetups, type RunSetup } from '../../shared/task-setup'
 import type { UpdateChannel } from '../../shared/updates'
 import { parseVault, type SecretMeta } from '../../shared/vault'
 import { parseMcpServers, type McpServer } from '../../shared/mcp'
+import { SERVER_LIMITS, parseServerDefs, type ServerDef } from '../../shared/servers'
 import { parsePreferences, parseSkillNames, type AppPreferences } from '../../shared/preferences'
 import type {
   NotionColor,
@@ -83,6 +84,11 @@ export interface OrkioConfig {
   skillsDisabled?: Record<string, string[]>
   /** Fase 4: preferências que o main aplica (Geral, Notificações, Atalhos). Ausente = padrão. */
   preferences?: AppPreferences
+  /**
+   * Servidores da tarefa: o cadastro por projeto (frontend, backend…), rodado pelo Orkio no worktree.
+   * Opcional, sem migração: ausente = nenhum.
+   */
+  servers?: Record<string, ServerDef[]>
 }
 
 export interface UpdatesConfig {
@@ -256,7 +262,8 @@ export function validateConfig(
     ...(data['usageMeter'] === false ? { usageMeter: false as const } : {}),
     ...(parseUsageHold(data['usageHold']) ? { usageHold: parseUsageHold(data['usageHold'])! } : {}),
     ...runSetupOf(data['runSetup']),
-    ...phase4Of(data)
+    ...phase4Of(data),
+    ...serversOf(data['servers'])
   }
   return warnings.length > 0 ? { value, warning: warnings.join(' ') } : { value }
 }
@@ -280,6 +287,17 @@ function phase4Of(
   }
   if (isRecord(data['preferences'])) out.preferences = parsePreferences(data['preferences'])
   return out
+}
+
+/** Cadastro de servidores por projeto; servidor inválido some (nunca derruba a config). */
+function serversOf(value: unknown): Pick<OrkioConfig, 'servers'> {
+  if (!isRecord(value)) return {}
+  const out: Record<string, ServerDef[]> = {}
+  for (const [projectId, raw] of Object.entries(value)) {
+    const defs = parseServerDefs(raw).slice(0, SERVER_LIMITS.perProject)
+    if (projectId && defs.length > 0) out[projectId] = defs
+  }
+  return Object.keys(out).length > 0 ? { servers: out } : {}
 }
 
 /** Padrões "Como deve rodar?" por coluna; coluna inválida some (nunca derruba a config). */

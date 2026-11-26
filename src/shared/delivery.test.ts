@@ -5,6 +5,7 @@ import {
   isProtectedBranch,
   parseDeliverySettingsValue,
   parsePrBases,
+  taskBaseBranch,
   type DeliveryTarget
 } from './delivery'
 
@@ -88,5 +89,14 @@ describe('entrega: ajustes do projeto', () => {
     expect(parseDeliverySettingsValue({ requirePushApproval: true, agentsDeliver: 'x' })).toEqual({
       requirePushApproval: true
     })
+  })
+})
+
+describe('taskBaseBranch', () => {
+  it('agentes entregando: a branch nova sai do primeiro destino das PRs; desligado, da padrão', () => {
+    expect(taskBaseBranch({ agentsDeliver: true })).toBe('dev')
+    expect(taskBaseBranch({ agentsDeliver: true, prBases: ['homolog', 'dev'] })).toBe('homolog')
+    expect(taskBaseBranch({ agentsDeliver: false, prBases: ['dev'] })).toBeNull()
+    expect(taskBaseBranch(undefined)).toBeNull()
   })
 })

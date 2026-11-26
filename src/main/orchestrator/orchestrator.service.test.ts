@@ -17,7 +17,8 @@ import type { FlowRunStatus } from '../../shared/task-flow'
 import type { LastFlow } from '../flows/flow-runner'
 
 const P = 'p1'
-const STAGES = ['fila', 'dev', 'rev', 'ok']
+const STAGES = ['fila', 'dev', 'rev', 'ok', 'revd']
+const ROLES: Record<string, string> = { dev: 'work', rev: 'review', revd: 'reviewed' }
 const ENABLED: OrchestratorConfig = {
   enabled: true,
   enabledSince: null,
@@ -157,8 +158,9 @@ beforeEach(async () => {
           name: id,
           order,
           notionStatus: { id: null, name: id },
-          color: 'gray'
-        })),
+          color: 'gray',
+          ...(ROLES[id] ? { role: ROLES[id] } : {})
+        })) as never,
         orkioStageProperty: null,
         blockedProperty: null,
         rules: [],
@@ -298,6 +300,52 @@ describe('passar adiante', () => {
     await service.tick(P)
     expect(started).toEqual(['t:builtin:revisor'])
     expect(cards[0]?.stageId).toBe('rev')
+  })
+})
+
+describe('volta da revisão (Revisado → Revisando pela automação)', () => {
+  it('o corretor terminou depois da volta: a revisão do agente não roda de novo; à mão roda', async () => {
+    await enable()
+    flowRun('t', null, at(2), at(8))
+    place('t', 'revd', at(1))
+    const back = (source: 'automation' | 'manual', when: string): void => {
+      store.upsertState({
+        taskPageId: 't',
+        projectId: P,
+        stageId: 'rev',
+        blocked: false,
+        updatedAt: when,
+        source
+      })
+      store.addEvent({
+        taskPageId: 't',
+        projectId: P,
+        at: when,
+        kind: 'moved',
+        source,
+        fromStage: 'revd',
+        toStage: 'rev',
+        detail: {}
+      })
+      cards[0]!.stageId = 'rev'
+    }
+    back('automation', at(6))
+    await service.tick(P)
+    expect(started).toEqual([])
+    // Ao voltar, o Revisor não é atribuído (a tarefa espera a revisão humana).
+    service.onStageChanged({
+      projectId: P,
+      taskId: 't',
+      from: 'revd',
+      to: 'rev',
+      source: 'automation',
+      reviewReturn: true
+    })
+    expect(agents.assignment('t')).toBeNull()
+
+    back('manual', at(7))
+    await service.tick(P)
+    expect(started).toEqual(['t:builtin:revisor'])
   })
 })
 

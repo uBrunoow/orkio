@@ -17,6 +17,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import {
   ACTIVE_RUN_STATUSES,
+  IMAGE_LIMITS,
   type AgentRunView,
   type PermissionAnswer,
   type RunLogEvent,
@@ -31,6 +32,7 @@ import { DomainError } from '../errors'
 import type { Git } from '../git/git'
 import type { DeliveryEvent, DeliveryKind } from './delivery-policy'
 import { CLAUDE_MODELS, EFFORT_LABELS } from '../../shared/agent-runtime'
+import type { BridgeServerAction } from './bridge/protocol'
 import {
   DELIVERY_ALLOWED,
   decidePermission,
@@ -56,7 +58,8 @@ import {
   type BridgeRequest
 } from './runner'
 import { ensureScratch } from './scratch'
-import { summarizeTool } from './stream'
+import { summarizeTool, type ToolImage } from './stream'
+import { sniffImage } from './attachments'
 import type { WorktreeRecord, WorktreeService } from './worktree.service'
 
 export type { RunAgent, RunSpec } from './run-spec'
@@ -87,6 +90,8 @@ export interface RunServiceDeps {
     /** Fase 4: servidores MCP, segredos do agente e skills negadas desta execução. */
     extras: RunExtras
     onEvent(event: RunLogEvent): void
+    /** Imagem (bytes) de um `tool_result`: o serviço confere, grava e loga só a referência. */
+    onImage(image: ToolImage): void
     onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   }): RunHandle
   /**
@@ -113,6 +118,18 @@ export interface RunServiceDeps {
     projectId: string,
     input: Record<string, unknown>
   ): Promise<{ ok: true; text: string; message: string } | { ok: false; message: string }>
+  /**
+   * Servidores da tarefa: as ferramentas `servidor_*` (o `ServersService` sobe/para só os
+   * servidores cadastrados). `info` vira linha do log da execução.
+   */
+  serverTool?(
+    ref: { projectId: string; taskId: string },
+    action: BridgeServerAction,
+    input: Record<string, unknown>,
+    readOnly: boolean
+  ): Promise<{ ok: boolean; message: string; info?: string }>
+  /** Portas dos servidores de pé da tarefa (Playwright no localhost delas passa sem perguntar). */
+  serverPorts?(taskId: string): number[]
   maxParallel?: number
   keepPerTask?: number
   approvalTimeoutMs?: number
@@ -174,6 +191,11 @@ interface ActiveRun {
   timedOut: boolean
   /** Valores lidos de arquivos .env do worktree: escondidos em tudo que vai para o log. */
   secrets: Set<string>
+  /** Imagens das ferramentas já gravadas nesta execução e avisos já dados (uma vez cada). */
+  images: number
+  imageNotes: Set<string>
+  /** Gravações das imagens em fila: o log fica na ordem em que chegaram (1, 2, 3…). */
+  imageWrites: Promise<void>
   spec: RunSpec
   /** Categorias do modo entrega (5C) já aprovadas nesta execução. */
   granted: Set<DeliveryKind>
@@ -181,6 +203,13 @@ interface ActiveRun {
   pushDefault: string | null
   start: () => Promise<void>
 }
+
+const IMAGE_MIME = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp'
+} as const
 
 export class RunBusyError extends DomainError {
   constructor() {
@@ -371,6 +400,9 @@ export class RunService {
       timer: null,
       timedOut: false,
       secrets: new Set(),
+      images: 0,
+      imageNotes: new Set(),
+      imageWrites: Promise.resolve(),
       spec,
       granted: new Set(),
       aliases: {},
@@ -446,7 +478,8 @@ export class RunService {
         for (const text of extras.notes) this.log(run, { kind: 'info', text })
         const broker = new PermissionBroker(
           (req) => this.onPermission(run, req),
-          (input) => this.onRemember(run, input)
+          (input) => this.onRemember(run, input),
+          (action, input) => this.onServerTool(run, action, input)
         )
         await broker.open()
         run.handle = this.deps.createRun({
@@ -457,6 +490,7 @@ export class RunService {
           broker,
           extras,
           onEvent: (event) => this.onEvent(run, event),
+          onImage: (image) => this.onImage(run, image),
           onExit: (result) => void this.onExit(run, result)
         })
         await run.handle.start()
@@ -816,6 +850,26 @@ export class RunService {
     return { ok: r.ok, message: r.message }
   }
 
+  /** Ferramentas `servidor_*`: só com servidores na execução; a resposta volta ao agente. */
+  private async onServerTool(
+    run: ActiveRun,
+    action: BridgeServerAction,
+    input: Record<string, unknown>
+  ): Promise<BridgeRememberReply> {
+    if (!run.spec.servers || !this.deps.serverTool) {
+      return { ok: false, message: 'Esta execução não tem servidores.' }
+    }
+    if (run.cancelled) return { ok: false, message: RUN_MESSAGES.cancelled }
+    const r = await this.deps.serverTool(
+      { projectId: run.projectId, taskId: run.taskId },
+      action,
+      input,
+      run.spec.access.tools === 'read_only'
+    )
+    if (r.info) this.log(run, { kind: 'info', text: r.info })
+    return { ok: r.ok, message: scrubText(r.message, run.secrets) }
+  }
+
   private async onPermission(run: ActiveRun, req: BridgeRequest): Promise<BridgeDecision> {
     if (run.cancelled) return { behavior: 'deny', message: RUN_MESSAGES.cancelled }
     const delivery = deliveryOf(run.spec)
@@ -830,6 +884,7 @@ export class RunService {
         readOnly: run.spec.access.tools === 'read_only',
         askEdits:
           run.spec.agent?.autonomy === 'ask' || (!run.spec.agent && run.spec.askEdits === true),
+        serverPorts: this.deps.serverPorts?.(run.taskId) ?? [],
         delivery: delivery
           ? {
               target: delivery.target,
@@ -969,6 +1024,61 @@ export class RunService {
       run.resultText = event.text.slice(0, 20_000)
     }
     this.log(run, event)
+  }
+
+  private onImage(run: ActiveRun, image: ToolImage): void {
+    const note = (text: string): void => {
+      if (run.imageNotes.has(text)) return
+      run.imageNotes.add(text)
+      this.log(run, { kind: 'info', text })
+    }
+    if (run.images >= IMAGE_LIMITS.perRun) {
+      return note(
+        `Limite de ${IMAGE_LIMITS.perRun} imagens nesta execução: as próximas não aparecem na conversa.`
+      )
+    }
+    if (image.data.byteLength > IMAGE_LIMITS.maxBytes) {
+      return note('Imagem grande demais (mais de 5 MB): não aparece na conversa.')
+    }
+    const ext = sniffImage(image.data)
+    if (!ext) return
+    const n = ++run.images
+    const dir = this.imagesDir(run.id)
+    run.imageWrites = run.imageWrites
+      .then(() => mkdir(dir, { recursive: true }))
+      .then(() => writeFile(join(dir, `${n}.${ext}`), image.data, { mode: 0o600 }))
+      .then(
+        () =>
+          this.log(run, {
+            kind: 'image',
+            toolId: image.toolId,
+            runId: run.id,
+            n,
+            mime: IMAGE_MIME[ext]
+          }),
+        () => undefined
+      )
+  }
+
+  /** Bytes da n-ésima imagem de uma execução (`null` se não existe ou já saiu na rotação). */
+  async readImage(runId: string, n: number): Promise<{ mime: string; data: Uint8Array } | null> {
+    if (
+      !/^[A-Za-z0-9-]+$/.test(runId) ||
+      !Number.isInteger(n) ||
+      n < 1 ||
+      n > IMAGE_LIMITS.perRun
+    ) {
+      return null
+    }
+    for (const [ext, mime] of Object.entries(IMAGE_MIME)) {
+      const data = await readFile(join(this.imagesDir(runId), `${n}.${ext}`)).catch(() => null)
+      if (data) return { mime, data: new Uint8Array(data) }
+    }
+    return null
+  }
+
+  private imagesDir(runId: string): string {
+    return join(this.deps.runsDir, runId.replace(/[^A-Za-z0-9-]/g, ''), 'images')
   }
 
   private runCost(run: ActiveRun, raw: number): number {
@@ -1182,7 +1292,15 @@ export class RunService {
       taskId,
       this.keepPerTask
     )
-    for (const r of old) await rm(this.logPath(r.id), { force: true }).catch(() => undefined)
+    for (const r of old) {
+      await rm(this.logPath(r.id), { force: true }).catch(() => undefined)
+      const id = r.id.replace(/[^A-Za-z0-9-]/g, '')
+      // Nunca a própria pasta das execuções (id vazio).
+      if (id)
+        await rm(join(this.deps.runsDir, id), { recursive: true, force: true }).catch(
+          () => undefined
+        )
+    }
   }
 }
 

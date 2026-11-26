@@ -57,7 +57,17 @@ export interface TerminalServiceDeps {
   now?(): Date
   /** Intervalo dos lotes de saída (ms). */
   flushMs?: number
+  /**
+   * Sinal ao grupo do processo (servidores: o `pnpm dev` e os filhos dele). Sem isso (Windows),
+   * o servidor sai pelo `pty.kill`.
+   */
+  killGroup?(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void
+  /** Registra algo para a saída do processo do app (o SIGKILL final dos servidores). */
+  atExit?(fn: () => void): void
 }
+
+/** Quanto o servidor tem para sair depois do SIGTERM antes do SIGKILL. */
+const SERVER_GRACE_MS = 5_000
 
 export const TERMINAL_MESSAGES = {
   unavailable:
@@ -88,6 +98,9 @@ interface Live {
   pending: string
   timer: NodeJS.Timeout | null
   disposers: { dispose(): void }[]
+  /** Servidor: a saída passa por aqui antes da tela (segredos). */
+  filter?: (data: string) => string
+  onExit?: (exitCode: number) => void
 }
 
 /** Primeiro executável com esse nome no PATH (Windows: só `.exe`, chamado direto). */
@@ -186,6 +199,16 @@ export class TerminalService {
     kind: TerminalKind
     /** Obrigatório em `claude`: a sessão retomada. */
     sessionId?: string
+    /** `server`: a linha de shell do cadastro (rodada com `-lc`). */
+    command?: string
+    /** `server`: nome da aba (o nome do servidor). */
+    title?: string
+    /** `server`: variáveis a mais (porta, URLs dos outros servidores). */
+    env?: Record<string, string>
+    /** `server`: a saída passa por aqui antes de ir à tela. */
+    filter?: (data: string) => string
+    /** O processo saiu sozinho (não chamado ao fechar pelo Orkio). */
+    onExit?: (exitCode: number) => void
   }): TerminalView {
     const spawnPty = this.deps.spawnPty
     if (!spawnPty || this.stopped) {
@@ -194,16 +217,25 @@ export class TerminalService {
     if (!this.deps.isDir(input.cwd)) {
       throw new TerminalServiceError('no_workspace', TERMINAL_MESSAGES.noWorkspace)
     }
-    const running = [...this.live.values()].filter((t) => t.view.state === 'running').length
-    if (running >= TERMINAL_LIMITS.maxOpen) {
+    // Servidores têm o limite deles (no `ServersService`); aqui contam só shell e Claude.
+    const running = [...this.live.values()].filter(
+      (t) => t.view.state === 'running' && t.view.kind !== 'server'
+    ).length
+    if (input.kind !== 'server' && running >= TERMINAL_LIMITS.maxOpen) {
       throw new TerminalServiceError('too_many', TERMINAL_MESSAGES.tooMany)
     }
     const { platform, isFile } = this.deps
-    const env = ptyEnv(this.deps.env)
+    const env = { ...ptyEnv(this.deps.env), ...(input.env ?? {}) }
     let file: string
     let args: string[]
     let title: string
-    if (input.kind === 'claude') {
+    if (input.kind === 'server') {
+      const shell = userShell(env, platform, isFile)
+      if (!shell) throw new TerminalServiceError('no_shell', TERMINAL_MESSAGES.noShell)
+      file = shell.file
+      args = [...shell.args, ...shellCommandArgs(shell.file, input.command ?? '')]
+      title = input.title ?? 'servidor'
+    } else if (input.kind === 'claude') {
       args = claudeResumeArgs(input.sessionId ?? '')
       const claude = findExecutable('claude', env, platform, isFile)
       if (!claude) throw new TerminalServiceError('no_claude', TERMINAL_MESSAGES.noClaude)
@@ -240,7 +272,9 @@ export class TerminalService {
       emitted: 0,
       pending: '',
       timer: null,
-      disposers: []
+      disposers: [],
+      ...(input.filter ? { filter: input.filter } : {}),
+      ...(input.onExit ? { onExit: input.onExit } : {})
     }
     this.live.set(id, entry)
     entry.disposers.push(
@@ -261,7 +295,8 @@ export class TerminalService {
 
   write(id: string, data: string): void {
     const t = this.live.get(id)
-    if (!t?.pty || t.view.state !== 'running') return
+    // O terminal do servidor é só leitura: parar é pelo Orkio (Parar), nunca Ctrl+C solto.
+    if (!t?.pty || t.view.state !== 'running' || t.view.kind === 'server') return
     t.pty.write(data.slice(0, TERMINAL_LIMITS.maxInput))
   }
 
@@ -300,8 +335,12 @@ export class TerminalService {
   stopAll(): void {
     this.stopped = true
     for (const t of [...this.live.values()]) {
+      const pid = t.pty?.pid
+      const group = t.view.kind === 'server' && pid !== undefined && this.deps.killGroup
       void this.kill(t)
       this.forget(t)
+      // O app vai fechar sem esperar: o que não saiu com o SIGTERM sai com o SIGKILL no fim.
+      if (group) this.deps.atExit?.(() => this.signalGroup(pid, 'SIGKILL'))
     }
   }
 
@@ -316,7 +355,7 @@ export class TerminalService {
     if (t.timer) clearTimeout(t.timer)
     t.timer = null
     if (!t.pending) return
-    const data = t.pending
+    const data = t.filter ? t.filter(t.pending) : t.pending
     t.pending = ''
     const at = t.emitted
     t.buffer = trimScrollback(t.buffer + data)
@@ -330,6 +369,7 @@ export class TerminalService {
     t.pty = null
     for (const d of t.disposers.splice(0)) d.dispose()
     if (this.live.has(t.view.id)) this.changed(t.view)
+    t.onExit?.(exitCode)
   }
 
   private kill(t: Live): Promise<void> {
@@ -337,22 +377,38 @@ export class TerminalService {
     const pty = t.pty
     t.pty = null
     for (const d of t.disposers.splice(0)) d.dispose()
+    const group = t.view.kind === 'server' && this.deps.killGroup !== undefined
     const exited = new Promise<void>((resolve) => {
-      const timer = setTimeout(done, 3_000)
+      const timers = [setTimeout(done, group ? SERVER_GRACE_MS + 3_000 : 3_000)]
+      // Servidor: SIGTERM no grupo (o `pnpm dev` e os filhos); sem sair no prazo, SIGKILL.
+      if (group)
+        timers.push(setTimeout(() => this.signalGroup(pty.pid, 'SIGKILL'), SERVER_GRACE_MS))
       const sub = pty.onExit(done)
       function done(): void {
-        clearTimeout(timer)
+        for (const timer of timers) clearTimeout(timer)
         sub.dispose()
         resolve()
       }
     })
-    try {
-      pty.kill()
-    } catch {
-      // Já tinha saído.
+    if (group) {
+      this.signalGroup(pty.pid, 'SIGTERM')
+    } else {
+      try {
+        pty.kill()
+      } catch {
+        // Já tinha saído.
+      }
     }
     t.view = { ...t.view, state: 'exited' }
     return exited
+  }
+
+  private signalGroup(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void {
+    try {
+      this.deps.killGroup?.(pid, signal)
+    } catch {
+      // O grupo já saiu (ESRCH).
+    }
   }
 
   private forget(t: Live): void {
@@ -371,6 +427,16 @@ export class TerminalService {
   private changed(view: TerminalView): void {
     this.deps.emitChanged({ projectId: view.projectId, taskId: view.taskId })
   }
+}
+
+/** `-c <linha>` do shell (Windows: PowerShell `-Command`, cmd `/c`). */
+export function shellCommandArgs(shellFile: string, command: string): string[] {
+  const name = basename(shellFile)
+    .toLowerCase()
+    .replace(/\.exe$/, '')
+  if (name === 'powershell' || name === 'pwsh') return ['-Command', command]
+  if (name === 'cmd') return ['/d', '/s', '/c', command]
+  return ['-c', command]
 }
 
 /** Ambiente do PTY: o do app sem segredos, com cores de terminal de verdade. */

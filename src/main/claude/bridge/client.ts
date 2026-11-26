@@ -3,9 +3,13 @@ import { connect } from 'node:net'
 import {
   encodeBridgeRemember,
   encodeBridgeRequest,
+  encodeBridgeServer,
   parseRememberReply,
+  parseServerReply,
   type BridgeRememberReply,
-  type BridgeRequest
+  type BridgeRequest,
+  type BridgeServerAction,
+  type BridgeToolReply
 } from './protocol'
 
 /**
@@ -67,5 +71,23 @@ export function rememberInOrkio(
       unreachable: { ok: false, message: 'O Orkio não respondeu: a nota não foi anotada.' }
     },
     parseRememberReply
+  )
+}
+
+/** Ferramentas dos servidores da tarefa: a ação vai ao main, que roda o servidor cadastrado. */
+export function serverInOrkio(
+  socketPath: string,
+  token: string,
+  action: BridgeServerAction,
+  input: Record<string, unknown>
+): Promise<BridgeToolReply> {
+  return exchange<BridgeToolReply>(
+    socketPath,
+    encodeBridgeServer(token, action, input),
+    {
+      invalid: { ok: false, message: 'Resposta inválida do Orkio.' },
+      unreachable: { ok: false, message: 'O Orkio não respondeu.' }
+    },
+    parseServerReply
   )
 }

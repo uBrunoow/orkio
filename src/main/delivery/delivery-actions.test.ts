@@ -53,6 +53,7 @@ function setup(
 ) {
   const events: Record<string, unknown>[] = []
   const automation = vi.fn()
+  const reviewRequested = vi.fn()
   const requestReviewers = vi.fn(over.requestReviewers ?? (async () => undefined))
   const push = vi.fn(async () => ({ commits: 2, branchUrl: 'u', target: TARGET }))
   const delivery = {
@@ -99,12 +100,13 @@ function setup(
     github: { requestReviewers, listCollaborators: async () => ['bia', 'ana'] },
     store: { addEvent: (e) => events.push(e as unknown as Record<string, unknown>) },
     runAutomation: automation,
+    onReviewRequested: reviewRequested,
     gitOnly: async () => over.gitOnly ?? false,
     ...(over.gh ? { githubFor: () => over.gh! } : {})
   })
   const get = (id: string) => actions.find((a) => a.id === id)!
   const ctx = { projectId: 'p1', taskId: 't1', vars: {} }
-  return { get, ctx, events, automation, requestReviewers, push }
+  return { get, ctx, events, automation, reviewRequested, requestReviewers, push }
 }
 
 describe('ações de entrega', () => {
@@ -168,6 +170,8 @@ describe('ações de entrega', () => {
     await viaGh.get('request_review').run({ ...viaGh.ctx, input: ['caio'] })
     expect(ghRequest).toHaveBeenCalledWith('acme', 'app', 12, { users: ['caio'], teams: [] })
     expect(viaGh.requestReviewers).not.toHaveBeenCalled()
+    // Primeiro pedido: o GitHub acusa sozinho; o Orkio não aplica a regra por conta própria.
+    expect(viaGh.reviewRequested).not.toHaveBeenCalled()
     const none = setup({ pull: null })
     expect(await none.get('verify_pushed').run(none.ctx)).toMatchObject({
       vars: { 'pr.exists': 'nao', 'pr.pushed': 'nao' }
@@ -242,6 +246,18 @@ describe('ações de entrega', () => {
       users: ['ana'],
       teams: []
     })
+    // O revisor já estava pendente: o GitHub não acusa pedido novo, então o Orkio devolve a
+    // tarefa para Revisando (a próxima revisão com alterações volta para Revisado).
+    expect(s.reviewRequested).toHaveBeenCalledWith('p1', 't1', 12)
+    const failed = setup({
+      pull: pr({ reviews: [{ id: 'R1', state: 'changes_requested', at: 'x', author: 'ana' }] }),
+      requestReviewers: async () => {
+        throw new Error('rede')
+      }
+    })
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect((await failed.get('rerequest_review').run(failed.ctx)).ok).toBe(false)
+    expect(failed.reviewRequested).not.toHaveBeenCalled()
     // Ninguém revisou ainda: pergunta como o "Pedir review".
     const fresh = setup({ pull: pr({ reviews: [], reviewRequests: [] }) })
     expect(await fresh.get('rerequest_review').confirm!(fresh.ctx)).toMatchObject({

@@ -115,6 +115,16 @@ function bridge(config) {
       const res = await request('tools/call', { name: 'lembrar', arguments: input })
       return { ok: !res.result.isError, text: res.result.content[0].text }
     },
+    /** Servidores da tarefa: chama `servidor_<acao>`; `null` = a ferramenta não está no tools/list. */
+    async server(action, input) {
+      const list = await request('tools/list', {})
+      const name = `servidor_${action}`
+      if (!list.result.tools.some((t) => t.name === name)) return null
+      const approval = await this.approve(`mcp__orkio__${name}`, input, `toolu_srv_${action}`)
+      if (approval.behavior !== 'allow') return { ok: false, text: `negado: ${approval.message}` }
+      const res = await request('tools/call', { name, arguments: input })
+      return { ok: !res.result.isError, text: res.result.content[0].text }
+    },
     close: () => child.kill()
   }
 }
@@ -370,6 +380,64 @@ async function main() {
         ? Object.values(r.updatedInput.answers).join(',')
         : 'nenhuma'
     assistant([{ type: 'text', text: `resposta: ${answer}` }])
+  }
+
+  // Servidores da tarefa: sobe o "web" pela ferramenta do Orkio e conta o que viu no prompt.
+  if (prompt.includes('subir-servidor')) {
+    const system = args.includes('--append-system-prompt')
+      ? args[args.indexOf('--append-system-prompt') + 1]
+      : ''
+    const up = await mcp.server('subir', { nome: 'web' })
+    const status = await mcp.server('status', {})
+    assistant([
+      {
+        type: 'text',
+        text: [
+          `prompt: ${system.includes('Servidores desta tarefa') ? 'com servidores' : 'sem servidores'}`,
+          `subir: ${up ? up.text : 'sem-ferramenta'}`,
+          `status: ${status ? status.text : 'sem-ferramenta'}`
+        ].join('\n\n')
+      }
+    ])
+  }
+
+  // Testar no navegador: com o servidor de pé, navegar até ele e clicar passam sem perguntar.
+  if (prompt.includes('navegar-servidor')) {
+    const up = await mcp.server('subir', { nome: 'web' })
+    const url = /http:\/\/localhost:\d+/.exec(up ? up.text : '')?.[0] ?? 'sem-url'
+    const nav = await mcp.approve('mcp__playwright__browser_navigate', { url }, 'toolu_nav')
+    const click = await mcp.approve(
+      'mcp__playwright__browser_click',
+      { element: 'Entrar', ref: 'e1' },
+      'toolu_click'
+    )
+    assistant([{ type: 'text', text: `navegar: ${nav.behavior} · clicar: ${click.behavior}` }])
+  }
+
+  if (prompt.includes('tirar-print')) {
+    // PNG 1x1 de verdade: o Orkio confere o tipo pelos bytes.
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    assistant([
+      { type: 'tool_use', id: 'toolu_shot', name: 'mcp__playwright__browser_take_screenshot', input: {} }
+    ])
+    out({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_shot',
+            content: [
+              { type: 'text', text: 'Print da página' },
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }
+            ]
+          }
+        ]
+      }
+    })
+    assistant([{ type: 'text', text: 'Tirei o print da página.' }])
   }
 
   if (prompt.includes('subagentes')) {

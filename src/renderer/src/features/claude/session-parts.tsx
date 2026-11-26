@@ -220,8 +220,13 @@ export function PermissionCard({
           {request.delivery ? 'Permitir nesta execução' : 'Permitir uma vez'}
         </Button>
         {request.suggestion && !request.delivery && (
-          <Button variant="outline" onClick={() => answer('allow_always')}>
-            {`Sempre neste projeto: ${request.suggestion}`}
+          <Button
+            variant="outline"
+            className="max-w-full min-w-0 shrink"
+            title={request.suggestion}
+            onClick={() => answer('allow_always')}
+          >
+            <span className="truncate">{`Sempre neste projeto: ${request.suggestion}`}</span>
           </Button>
         )}
         <Button variant="ghost" onClick={() => answer('deny')}>
