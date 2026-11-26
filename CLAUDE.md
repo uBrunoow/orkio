@@ -499,6 +499,17 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
 - **Carga da config:** quem cria o `ConfigStore` carrega (`configReady` na composição; o IPC espera
   `ready`); o aviso de carga fica em `ConfigStore.loadWarning`.
 - **Remover** só tira do `orkio-config.json`; nunca toca em arquivos do usuário.
+- **Só git local** (`ProjectRepo.access: 'git'`, opcional, sem migração; ausente = `app`): para
+  repositórios de organização sem o OAuth App do Orkio aprovado. Criado pelo "Usar só o git desta
+  máquina" do painel Adicionar projeto (quando o GitHub do Orkio está desconectado ou recusa o repo;
+  `CreateProjectInput.gitOnly`) ou pelo menu do projeto (`projects.setAccess`; voltar a `app`
+  verifica pela API e, se recusar, continua `git`). Salvo sem a API (`verified: false`, branch
+  padrão do git local), sem aviso de Enterprise e com o badge "Git local". `gitRepoOf(project)` =
+  owner/repo de quem só precisa do nome (entrega e push, que já usam o git do usuário);
+  `githubRepoOf` continua sendo "verificado pela API do Orkio" (sinais, aba Revisão, revisão
+  publicada, bot) e devolve `null` em `git`. Sinais: estado `git_only` com aviso; pedir review e
+  publicar a revisão recusam com `GIT_ONLY_REVIEW_MESSAGE` (`shared/delivery.ts`). Leitura pelo
+  `gh` do usuário: próxima entrega (`docs/superpowers/specs/2026-11-25-git-local-e-puxar-tarefas-design.md`).
 - **Arquivar** (`projects.setArchived`, `StoredProject.archived` opcional, sem migração; ausente =
   ativo): o projeto fica guardado com quadro, fluxos e histórico, mas sai das automações
   (`automationProjectIds`), do seletor, do quadro e da lista lateral (o App filtra); Configurações ›

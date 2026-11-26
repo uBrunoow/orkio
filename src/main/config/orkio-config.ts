@@ -382,7 +382,9 @@ function parseRepo(value: unknown): ProjectRepo | undefined {
         : 'unknown',
     canPush: typeof value['canPush'] === 'boolean' ? value['canPush'] : null,
     archived: value['archived'] === true,
-    verified: value['verified'] === true
+    verified: value['verified'] === true,
+    // Só git local (sem a API do GitHub do Orkio); ausente = `app`, o formato antigo.
+    ...(value['access'] === 'git' ? { access: 'git' as const } : {})
   }
 }
 

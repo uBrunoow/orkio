@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { githubRepoOf, type ProjectRepo } from './projects'
+import { gitRepoOf, githubRepoOf, repoAccess, type ProjectRepo } from './projects'
 
 const repo = (over: Partial<ProjectRepo> = {}): ProjectRepo => ({
   host: 'github.com',
@@ -37,5 +37,28 @@ describe('githubRepoOf', () => {
   it('sem projeto ou sem repositório → null', () => {
     expect(githubRepoOf(null)).toBeNull()
     expect(githubRepoOf({ repo: null })).toBeNull()
+  })
+})
+
+describe('projeto só com git local (gitRepoOf / repoAccess)', () => {
+  it('projeto só git do github.com tem owner/repo para a entrega, mas não para a API', () => {
+    const git = repo({ verified: false, access: 'git' })
+    expect(gitRepoOf({ repo: git })).toEqual({ owner: 'acme', name: 'orkio' })
+    expect(githubRepoOf({ repo: git })).toBeNull()
+    expect(repoAccess(git)).toBe('git')
+  })
+
+  it('verificado pela API (sem access) vale nos dois; Enterprise e não verificado em nenhum', () => {
+    expect(repoAccess(repo())).toBe('app')
+    expect(gitRepoOf({ repo: repo() })).toEqual({ owner: 'acme', name: 'orkio' })
+    expect(gitRepoOf({ repo: repo({ host: 'ghe.acme.com', verified: false }) })).toBeNull()
+    expect(gitRepoOf({ repo: repo({ verified: false }) })).toBeNull()
+    expect(gitRepoOf(null)).toBeNull()
+  })
+
+  it('access "git" em host de Enterprise não vira github.com', () => {
+    expect(
+      gitRepoOf({ repo: repo({ host: 'ghe.acme.com', verified: false, access: 'git' }) })
+    ).toBeNull()
   })
 })

@@ -30,11 +30,13 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { AddProjectPanel } from './AddProjectPanel'
 import { useProjects } from './useProjects'
 import { PAGE_WIDTH } from '../../components/page-width'
-import type {
-  ProjectError,
-  ProjectMutationResult,
-  ProjectSelection,
-  ProjectView
+import {
+  repoAccess,
+  type ProjectError,
+  type ProjectMutationResult,
+  type ProjectSelection,
+  type ProjectView,
+  type RepoAccess
 } from '../../../../shared/projects'
 import { useIpcResource } from '../../lib/ipc'
 import { readBoard, useSources } from '../../app/sources'
@@ -82,6 +84,7 @@ export function ProjectsPage({
           onRelocate={() => projects.relocate(project.id)}
           onRemove={() => projects.remove(project.id)}
           onArchive={(archived) => projects.setArchived(project.id, archived)}
+          onSetAccess={(access) => projects.setAccess(project.id, access)}
           onOpenBoard={() => onOpenBoard(project.id)}
           onContinueSetup={() => onContinueSetup(project.id)}
           checks={projectChecks({
@@ -207,6 +210,7 @@ function ProjectRow({
   onRelocate,
   onRemove,
   onArchive,
+  onSetAccess,
   onOpenBoard,
   onContinueSetup,
   checks,
@@ -216,6 +220,7 @@ function ProjectRow({
   onRelocate(): Promise<ProjectMutationResult>
   onRemove(): Promise<boolean>
   onArchive(archived: boolean): Promise<boolean>
+  onSetAccess(access: RepoAccess): Promise<ProjectMutationResult>
   onOpenBoard(): void
   onContinueSetup(): void
   checks: ProjectCheck[]
@@ -226,6 +231,13 @@ function ProjectRow({
   const [relocateError, setRelocateError] = useState<ProjectError | null>(null)
   const health = PROJECT_HEALTH[project.health.state]
   const folderProblem = isFolderProblem(project.health.state)
+
+  const gitOnly = !!project.repo && repoAccess(project.repo) === 'git'
+  async function switchAccess(): Promise<void> {
+    setRelocateError(null)
+    const result = await onSetAccess(gitOnly ? 'app' : 'git')
+    if (!result.ok && !result.cancelled) setRelocateError(result.error)
+  }
 
   async function relocate(): Promise<void> {
     setBusy('relocate')
@@ -271,6 +283,9 @@ function ProjectRow({
                 <span className="truncate font-mono">
                   {project.repo.owner}/{project.repo.name}
                 </span>
+                {gitOnly && (
+                  <StatusBadge label="Git local" tone="neutral" data-testid="project-git-only" />
+                )}
               </span>
             ) : (
               <span>Sem repositório no GitHub</span>
@@ -355,6 +370,11 @@ function ProjectRow({
                 {!folderProblem && (
                   <DropdownMenuItem onSelect={() => void relocate()}>
                     Reapontar pasta
+                  </DropdownMenuItem>
+                )}
+                {project.repo?.host.toLowerCase() === 'github.com' && (
+                  <DropdownMenuItem onSelect={() => void switchAccess()}>
+                    {gitOnly ? 'Voltar a usar o GitHub do Orkio' : 'Usar só o git desta máquina'}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem onSelect={() => void onArchive(!project.archived)}>

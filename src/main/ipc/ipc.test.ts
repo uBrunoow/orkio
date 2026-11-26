@@ -440,7 +440,8 @@ function fakeProjects() {
     create: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
     relocate: vi.fn(async () => ({ ok: false as const, cancelled: true as const })),
     remove: vi.fn(async () => ({ ok: true })),
-    setArchived: vi.fn(async () => ({ ok: true }))
+    setArchived: vi.fn(async () => ({ ok: true })),
+    setAccess: vi.fn(async () => ({ ok: false as const, cancelled: true as const }))
   }
 }
 

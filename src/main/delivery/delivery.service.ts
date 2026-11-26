@@ -18,7 +18,7 @@ import type { Git } from '../git/git'
 import { GitError } from '../git/git'
 import { DomainError } from '../errors'
 import type { WorktreeRecord } from '../claude/worktree.service'
-import { githubRepoOf } from '../../shared/projects'
+import { gitRepoOf } from '../../shared/projects'
 
 export type DeliveryErrorCode =
   | 'no_project'
@@ -81,7 +81,8 @@ export class DeliveryService {
     const project = this.deps.project(projectId)
     if (!project) throw new DeliveryError('no_project', DELIVERY_SERVICE_MESSAGES.noProject)
     const repo = project.repo
-    if (!repo || !githubRepoOf(project)) {
+    // Só o nome do repositório: verificado pela API ou só com o git local (o push é do usuário).
+    if (!repo || !gitRepoOf(project)) {
       throw new DeliveryError('no_repo', DELIVERY_MESSAGES.noRepo)
     }
     const wt = this.deps.worktree(taskId)

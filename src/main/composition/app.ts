@@ -99,7 +99,7 @@ import { TaskSignalsService } from '../signals/task-signals.service'
 import type { ConfigStore } from '../storage/config-store'
 import { SecureStore } from '../storage/secure-store'
 import type { AutomationStatus } from '../../shared/automation'
-import { githubRepoOf } from '../../shared/projects'
+import { githubRepoOf, repoAccess } from '../../shared/projects'
 import { finalText } from '../../shared/review-publish'
 import { createClaude, createWorktrees, type ClaudeParts } from './claude'
 import { createFlows } from './flows'
@@ -686,6 +686,11 @@ function createWork(core: {
     hasActiveFlow: (taskId) => flowRunner().hasActive(taskId)
   })
 
+  // Projeto só com git local: pedir review e publicar revisão não passam pela API do Orkio.
+  const gitOnly = (projectId: string): boolean => {
+    const repo = projectById(configStore.get(), projectId)?.repo
+    return !!repo && repoAccess(repo) === 'git'
+  }
   const githubRepo = (projectId: string): { owner: string; repo: string } | null => {
     const repo = githubRepoOf(projectById(configStore.get(), projectId))
     return repo ? { owner: repo.owner, repo: repo.name } : null
@@ -710,7 +715,8 @@ function createWork(core: {
         listCollaborators: (owner, repo) => github.listCollaborators(owner, repo)
       },
       store: boardStore,
-      runAutomation
+      runAutomation,
+      gitOnly
     }).concat(
       // Revisão: o Orkio lê as threads da PR e grava .orkio/revisao.md no worktree.
       createReviewActions({
@@ -741,7 +747,8 @@ function createWork(core: {
         signals: (projectId, force) => signals.get(projectId, { force }),
         repo: githubRepo,
         store: boardStore,
-        runAutomation
+        runAutomation,
+        gitOnly
       })
     ),
     actor: core.actor,

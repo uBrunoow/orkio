@@ -214,6 +214,12 @@ describe('TaskSignalsService', () => {
     expect(
       await (await service(repo({ host: 'ghe.acme.com', verified: false }))).get('p1')
     ).toMatchObject({ value: { github: 'enterprise' } })
+    // Só git local: nada de API do Orkio, aviso próprio.
+    github.getConditional.mockClear()
+    const gitOnly = await (await service(repo({ verified: false, access: 'git' }))).get('p1')
+    expect(gitOnly).toMatchObject({ value: { github: 'git_only' } })
+    if (gitOnly.ok) expect(gitOnly.value.messages).toContain(SIGNALS_MESSAGES.gitOnly)
+    expect(github.getConditional).not.toHaveBeenCalled()
     localBranches.mockRejectedValueOnce(new GitError('folder_not_found', 'x'))
     const result = await (await service()).get('p1')
     expect(result).toMatchObject({ value: { local: false, github: 'ok' } })

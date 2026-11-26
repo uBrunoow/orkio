@@ -1,3 +1,5 @@
+import { branchTreeUrl } from './environment'
+import type { ProjectRepo } from '../../../../shared/projects'
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -65,12 +67,13 @@ const TAB_ICON: Record<PanelTab, SvgIcon> = {
  */
 export function TaskPanel({
   onOpenBoard,
-  githubRepo = null,
+  project = null,
   ...input
 }: TaskViewInput & {
   onOpenBoard(): void
   /** Repositório do projeto no github.com: a branch do topo vira link para ela lá. */
-  githubRepo?: { owner: string; name: string } | null
+  /** Projeto da tarefa: o link da branch sai do repositório (`branchTreeUrl`). */
+  project?: { repo: ProjectRepo | null } | null
 }): React.JSX.Element {
   const view = useTaskViewState(input)
   const { card, signals, backlog, flow } = view
@@ -272,7 +275,7 @@ export function TaskPanel({
             </div>
             {/* Janela estreita: a branch sai da barra (fica em PR & CI e no Ambiente). */}
             {branch && !compactPhaseBar(windowWidth) && (
-              <BranchBadge branch={branch} repo={githubRepo} />
+              <BranchBadge branch={branch} project={project} />
             )}
           </div>
         </ScreenBarStart>
@@ -339,10 +342,10 @@ export function TaskPanel({
  */
 function BranchBadge({
   branch,
-  repo
+  project
 }: {
   branch: string
-  repo: { owner: string; name: string } | null
+  project: { repo: ProjectRepo | null } | null
 }): React.JSX.Element {
   const cls =
     'inline-flex h-6 min-w-0 shrink-[4] items-center gap-1.5 rounded-full border border-border-soft bg-muted px-2 font-mono text-2xs text-muted-foreground'
@@ -352,16 +355,14 @@ function BranchBadge({
       <span className="truncate">{branch}</span>
     </>
   )
-  if (!repo) {
+  const url = project ? branchTreeUrl(project, branch) : null
+  if (!url) {
     return (
       <span className={cls} data-testid="task-branch">
         {content}
       </span>
     )
   }
-  const url = `https://github.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(
-    repo.name
-  )}/tree/${branch.split('/').map(encodeURIComponent).join('/')}`
   return (
     <button
       type="button"

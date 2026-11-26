@@ -6,6 +6,7 @@ import {
   parseAgentProfile,
   parseAgentRules,
   parseBoardSaveInput,
+  parseCreateProjectInput,
   parseFlowDraft,
   parseOrchestratorConfig,
   parseSendMessageRequest,
@@ -236,5 +237,14 @@ describe('parseOrchestratorConfig', () => {
     ]) {
       expect(parseOrchestratorConfig(bad)).toBe(INVALID)
     }
+  })
+})
+
+describe('parseCreateProjectInput', () => {
+  const base = { selectionId: 'sel-1', remoteName: 'origin', hostConfirmed: false }
+  it('aceita "só git local" como booleano e recusa outro tipo', () => {
+    expect(parseCreateProjectInput({ ...base, gitOnly: true })).toEqual({ ...base, gitOnly: true })
+    expect(parseCreateProjectInput(base)).toEqual(base)
+    expect(parseCreateProjectInput({ ...base, gitOnly: 'sim' })).toBe(INVALID)
   })
 })

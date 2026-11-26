@@ -1,3 +1,4 @@
+import { GIT_ONLY_REVIEW_MESSAGE } from '../../shared/delivery'
 import { describe, expect, it, vi } from 'vitest'
 import type { TaskPullRequest } from '../../shared/task-signals'
 import { ORKIO_ACTIONS } from '../../shared/orkio-actions'
@@ -42,6 +43,7 @@ function setup(
     pull?: TaskPullRequest | null
     signalsOk?: boolean
     requestReviewers?: () => Promise<void>
+    gitOnly?: boolean
   } = {}
 ) {
   const events: Record<string, unknown>[] = []
@@ -91,7 +93,8 @@ function setup(
           },
     github: { requestReviewers, listCollaborators: async () => ['bia', 'ana'] },
     store: { addEvent: (e) => events.push(e as unknown as Record<string, unknown>) },
-    runAutomation: automation
+    runAutomation: automation,
+    gitOnly: () => over.gitOnly ?? false
   })
   const get = (id: string) => actions.find((a) => a.id === id)!
   const ctx = { projectId: 'p1', taskId: 't1', vars: {} }
@@ -143,6 +146,11 @@ describe('ações de entrega', () => {
     const old = setup({ pull: pr({ headSha: 'b'.repeat(40) }) })
     expect(await old.get('verify_pushed').run(old.ctx)).toMatchObject({
       vars: { 'pr.pushed': 'nao' }
+    })
+    // Projeto só com git local: o Orkio não pede review pela API dele.
+    const gitOnly = setup({ gitOnly: true })
+    expect(await gitOnly.get('request_review').confirm!(gitOnly.ctx)).toEqual({
+      problem: { code: 'git_only', message: GIT_ONLY_REVIEW_MESSAGE }
     })
     const none = setup({ pull: null })
     expect(await none.get('verify_pushed').run(none.ctx)).toMatchObject({

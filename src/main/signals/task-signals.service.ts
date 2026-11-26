@@ -20,7 +20,7 @@ import type { Result } from '../../shared/result'
 import type { NotionTasksResult } from '../../shared/notion'
 import type { ProjectAction } from '../../shared/projects'
 import { projectById } from '../config/queries'
-import { githubRepoOf } from '../../shared/projects'
+import { githubRepoOf, repoAccess } from '../../shared/projects'
 import { isApiError } from '../net/http'
 
 export interface SignalsGitHub extends GitHubSignalsApi {
@@ -46,6 +46,7 @@ export const SIGNALS_MESSAGES = {
   noRepo: 'Este projeto não tem repositório do GitHub; só as branches locais aparecem.',
   enterprise:
     'Repositório do GitHub Enterprise: a conta conectada é do github.com, então só as branches locais aparecem.',
+  gitOnly: 'Projeto só com git local: PRs e CI aparecem quando o Orkio puder ler pelo `gh`.',
   local: 'Não foi possível ler as branches locais (a pasta do projeto está acessível?).',
   stale: 'Mostrando o último resultado conhecido do GitHub.',
   unknown: 'Algo deu errado ao ler o GitHub. Tente novamente.',
@@ -105,6 +106,9 @@ export class TaskSignalsService {
     if (!project.repo) {
       github = 'no_repo'
       messages.push(SIGNALS_MESSAGES.noRepo)
+    } else if (repoAccess(project.repo) === 'git') {
+      github = 'git_only'
+      messages.push(SIGNALS_MESSAGES.gitOnly)
     } else if (!repo) {
       github = 'enterprise'
       messages.push(SIGNALS_MESSAGES.enterprise)

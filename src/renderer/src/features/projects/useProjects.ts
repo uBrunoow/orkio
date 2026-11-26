@@ -5,7 +5,8 @@ import type {
   CreateProjectInput,
   PickFolderResult,
   ProjectMutationResult,
-  ProjectView
+  ProjectView,
+  RepoAccess
 } from '../../../../shared/projects'
 
 export interface UseProjects {
@@ -17,6 +18,8 @@ export interface UseProjects {
   pickFolder(): Promise<PickFolderResult>
   create(input: CreateProjectInput): Promise<ProjectMutationResult>
   relocate(projectId: string): Promise<ProjectMutationResult>
+  /** Só git desta máquina ou o GitHub do Orkio (que verifica de novo pela API). */
+  setAccess(projectId: string, access: RepoAccess): Promise<ProjectMutationResult>
   remove(projectId: string): Promise<boolean>
   /** Arquiva/desarquiva (nada é apagado). */
   setArchived(projectId: string, archived: boolean): Promise<boolean>
@@ -89,6 +92,8 @@ export function useProjects({ revalidate = false }: { revalidate?: boolean } = {
     pickFolder: () => ipcCall(() => window.orkio.projects.pickFolder(), MUTATION_FAILURE),
     create: (input) => mutate(() => window.orkio.projects.create(input)),
     relocate: (projectId) => mutate(() => window.orkio.projects.relocate(projectId)),
+    setAccess: (projectId, access) =>
+      mutate(() => window.orkio.projects.setAccess(projectId, access)),
     remove: async (projectId) => {
       const { ok } = await ipcCall(() => window.orkio.projects.remove(projectId), { ok: false })
       if (ok) {
