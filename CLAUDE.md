@@ -928,9 +928,16 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   (`stopServers`). Histórico `server_started`/`server_stopped` (`by`: you/agent/exit). Tela:
   Configurações › Por projeto › Servidores (`features/servers/ServersSettings.tsx`, modal) e a seção
   "Servidores" do Ambiente (`TaskServers.tsx`: estado, URL aberta pelo main com `servers.open`,
-  Subir/Parar, "Ver log" num Dialog com o `TerminalView` só leitura). `settled(taskId, serverId)`
-  fica para as ferramentas do agente (entrega 3). E2E `e2e/servers.spec.ts` (processo de verdade,
-  segredo do `.env` fora do log, sem órfão ao fechar).
+  Subir/Parar, "Ver log" num Dialog com o `TerminalView` só leitura). Agente: com cadastro no projeto, a ponte
+  (`bridge/protocol.ts`: `BRIDGE_ENV.servers` = `all` | `read`, mensagem `{ kind: 'server', action,
+  input }`) lista `servidor_subir|parar|status|log` (só leitura = status/log), o `RunService`
+  repassa a `ServersService.agentTool` (só servidores cadastrados, pelo nome; `subir` espera o
+  `settled` e devolve o endereço ou o fim do log sem cores; `info` vira linha do log da execução) e
+  a política libera `mcp__orkio__servidor_*` sem perguntar (só leitura nega subir/parar). O
+  `--append-system-prompt` ganha `serversPromptNote` (estado de cada um + "não rode servidores no
+  Bash"), via `RunSpec.servers` (`ClaudeService.serversOf`). E2E `e2e/servers.spec.ts` (processo de verdade,
+  segredo do `.env` fora do log, sem órfão ao fechar; o Claude simulado `subir-servidor` chama a
+  ferramenta pela ponte).
 - **Manter acordado** (`main/power/keep-awake.ts`, IPC `power:get`/`power:set-keep-awake`,
   `orkio-config.keepAwake` opcional, sem migração): com a opção ligada (cartão "Energia" em
   Configurações › Atualizações) e execução do Claude Code ou fluxo rodando, `powerSaveBlocker`

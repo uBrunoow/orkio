@@ -248,3 +248,35 @@ export interface ServersChangedEvent {
 export function isServerLive(state: ServerState): boolean {
   return state === 'starting' || state === 'ready' || state === 'no_port'
 }
+
+/** Estado em poucas palavras (prompt do agente e `servidor_status`). */
+export function serverStatePhrase(s: ServerView): string {
+  switch (s.state) {
+    case 'stopped':
+      return 'parado'
+    case 'starting':
+      return `subindo em ${s.url ?? `porta ${s.port}`}`
+    case 'ready':
+      return `rodando em ${s.url ?? `porta ${s.port}`}`
+    case 'no_port':
+      return `rodando sem responder na porta ${s.port}`
+    case 'exited':
+      return s.exitCode === null ? 'parou sozinho' : `parou sozinho (código ${s.exitCode})`
+  }
+}
+
+/**
+ * Linha do `--append-system-prompt` com os servidores da tarefa: o estado de cada um e como mexer
+ * neles. Passo só de leitura: só status e log.
+ */
+export function serversPromptNote(views: readonly ServerView[], readOnly: boolean): string {
+  const list = views.map((s) => `${s.name} (${serverStatePhrase(s)})`).join(', ')
+  const tools = readOnly
+    ? 'Para ver o estado ou a saída, use servidor_status e servidor_log (este passo só lê: subir e parar não estão disponíveis).'
+    : 'Para subir, parar, ver o estado ou a saída, use as ferramentas servidor_subir, servidor_parar, servidor_status e servidor_log.'
+  return [
+    `Servidores desta tarefa (rodados pelo Orkio, cada tarefa com a própria porta; ficam de pé entre as mensagens): ${list}.`,
+    tools,
+    'Não rode servidores de desenvolvimento (pnpm dev, npm run dev, uvicorn…) no Bash: o processo morre no fim da mensagem e a porta pode ser de outra tarefa.'
+  ].join(' ')
+}

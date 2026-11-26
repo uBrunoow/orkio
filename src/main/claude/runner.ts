@@ -25,7 +25,8 @@ import {
   decodeBridgeMessage,
   type BridgeDecision,
   type BridgeRememberReply,
-  type BridgeRequest
+  type BridgeRequest,
+  type BridgeServerAction
 } from './bridge/protocol'
 import { cliDenyInDelivery, cliDenyOutsideDelivery } from './github-rules'
 import { redactSecrets, sanitizeEnv } from '../platform/redact'
@@ -53,7 +54,12 @@ export class PermissionBroker {
 
   constructor(
     private readonly onRequest: (req: BridgeRequest) => Promise<BridgeDecision>,
-    private readonly onRemember?: (input: Record<string, unknown>) => Promise<BridgeRememberReply>
+    private readonly onRemember?: (input: Record<string, unknown>) => Promise<BridgeRememberReply>,
+    /** Ferramentas dos servidores da tarefa (`servidor_*`). */
+    private readonly onServer?: (
+      action: BridgeServerAction,
+      input: Record<string, unknown>
+    ) => Promise<BridgeRememberReply>
   ) {}
 
   async open(): Promise<void> {
@@ -90,6 +96,13 @@ export class PermissionBroker {
     const token = Buffer.from(msg.token)
     const expected = Buffer.from(this.token)
     const authorized = token.length === expected.length && timingSafeEqual(token, expected)
+    if (msg.message.kind === 'server') {
+      if (!authorized) return { ok: false, message: 'Pedido não autorizado.' }
+      if (!this.onServer) return { ok: false, message: 'Esta execução não tem servidores.' }
+      return this.onServer(msg.message.action, msg.message.input).catch(
+        (): BridgeRememberReply => ({ ok: false, message: 'Falha ao mexer no servidor.' })
+      )
+    }
     if (msg.message.kind === 'remember') {
       if (!authorized) return { ok: false, message: 'Pedido não autorizado.' }
       if (!this.onRemember)
@@ -228,7 +241,7 @@ const NOTION_PR_NOTE =
  * agentes entregarem (destinos de PR restritos), como enviar e para onde vai a PR. Vale mais que o
  * briefing antigo da sessão ("não faça push").
  */
-function appendPrompt(spec: Pick<RunSpec, 'access' | 'agent'>): string[] {
+function appendPrompt(spec: Pick<RunSpec, 'access' | 'agent' | 'servers'>): string[] {
   const deliver = deliveryOf(spec)
   const bases = deliver?.target.prBases
   const note =
@@ -240,7 +253,9 @@ function appendPrompt(spec: Pick<RunSpec, 'access' | 'agent'>): string[] {
           '- Nunca para main ou master; nada de merge, força ou apagar branch.'
         ].join('\n')
       : null
-  const text = [spec.agent?.prompt, note, NOTION_PR_NOTE].filter(Boolean).join('\n\n')
+  const text = [spec.agent?.prompt, note, spec.servers?.note, NOTION_PR_NOTE]
+    .filter(Boolean)
+    .join('\n\n')
   return ['--append-system-prompt', text]
 }
 
@@ -272,7 +287,13 @@ export class ClaudeRun {
               [BRIDGE_ENV.socket]: o.broker.socketPath,
               [BRIDGE_ENV.token]: o.broker.token,
               // Memória do agente (Fase 3): a ferramenta `lembrar` só existe com agente.
-              ...(o.spec.agent ? { [BRIDGE_ENV.memory]: '1' } : {})
+              ...(o.spec.agent ? { [BRIDGE_ENV.memory]: '1' } : {}),
+              // Servidores da tarefa: passo só de leitura só vê status e log.
+              ...(o.spec.servers
+                ? {
+                    [BRIDGE_ENV.servers]: o.spec.access.tools === 'read_only' ? 'read' : 'all'
+                  }
+                : {})
             }
           }
         }

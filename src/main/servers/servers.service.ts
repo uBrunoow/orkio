@@ -14,6 +14,7 @@ import {
   serverEnv,
   serverProblems,
   serverRefs,
+  serverStatePhrase,
   serverUrl,
   type ServerActor,
   type ServerDef,
@@ -61,6 +62,8 @@ export interface ServersServiceDeps {
     readonly available: boolean
     open(input: ServerTerminalInput): TerminalView
     close(id: string): Promise<void>
+    /** Saída guardada do terminal (já sem segredos), para o `servidor_log`. */
+    snapshot?(id: string): { data: string } | null
   }
   /** Dá para escutar nesta porta (ninguém usa). */
   portFree(port: number): Promise<boolean>
@@ -105,6 +108,29 @@ interface Entry {
 }
 
 const keyOf = (taskId: string, serverId: string): string => `${taskId}:${serverId}`
+
+export type ServerToolAction = 'subir' | 'parar' | 'status' | 'log'
+
+/** Resposta de uma ferramenta do agente; `info` = linha do log da execução (o que mudou). */
+export interface ServerToolReply {
+  ok: boolean
+  message: string
+  info?: string
+}
+
+const LOG_LINES = { default: 60, max: 300 } as const
+
+/** Texto do terminal sem cores/controles do terminal, com `\n` como quebra. */
+export function plainTerminalText(data: string): string {
+  /* eslint-disable no-control-regex -- sequências de controle do terminal (ESC, BEL) */
+  return data
+    .replace(/\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)/g, '')
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\u001b[@-_]/g, '')
+    /* eslint-enable no-control-regex */
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+}
 
 export class ServersService {
   private readonly entries = new Map<string, Entry>()
@@ -214,6 +240,109 @@ export class ServersService {
   async stopTask(taskId: string): Promise<void> {
     const mine = [...this.entries.values()].filter((e) => e.taskId === taskId)
     await Promise.all(mine.map((e) => this.stop(e.projectId, taskId, e.def.id, 'you')))
+  }
+
+  /**
+   * Ferramentas `servidor_*` do agente (pela ponte). Só os servidores cadastrados, pelo nome; num
+   * passo só de leitura, só status e log (a política já nega, aqui é a segunda trava).
+   */
+  async agentTool(
+    ref: { projectId: string; taskId: string },
+    action: ServerToolAction,
+    input: Record<string, unknown>,
+    readOnly: boolean
+  ): Promise<ServerToolReply> {
+    const { projectId, taskId } = ref
+    if (action === 'status') {
+      const views = this.list(projectId, taskId)
+      if (views.length === 0)
+        return { ok: true, message: 'Este projeto não tem servidores cadastrados.' }
+      return {
+        ok: true,
+        message: views.map((s) => `- ${s.name}: ${serverStatePhrase(s)}`).join('\n')
+      }
+    }
+    if (readOnly && (action === 'subir' || action === 'parar')) {
+      return {
+        ok: false,
+        message: 'Este passo só lê: subir e parar servidores não estão disponíveis.'
+      }
+    }
+    const defs = this.deps.defs(projectId)
+    const name = typeof input['nome'] === 'string' ? input['nome'].trim() : ''
+    const def = defs.find((d) => d.name === name)
+    if (!def) {
+      const names = defs.map((d) => d.name).join(', ')
+      return {
+        ok: false,
+        message: names
+          ? `Não há servidor "${name}" nesta tarefa. Cadastrados: ${names}.`
+          : 'Este projeto não tem servidores cadastrados.'
+      }
+    }
+    try {
+      if (action === 'subir') return await this.agentStart(projectId, taskId, def)
+      if (action === 'parar') {
+        const live = this.list(projectId, taskId).find((s) => s.id === def.id)
+        if (!live || !isServerLive(live.state)) {
+          return { ok: true, message: `${def.name} já estava parado.` }
+        }
+        await this.stop(projectId, taskId, def.id, 'agent')
+        return { ok: true, message: `${def.name} parado.`, info: `Parou o servidor ${def.name}` }
+      }
+      const raw =
+        typeof input['linhas'] === 'number' ? Math.floor(input['linhas']) : LOG_LINES.default
+      const lines = Math.min(Math.max(raw, 1), LOG_LINES.max)
+      const tail = this.tail(taskId, def.id, lines)
+      if (tail === null) return { ok: true, message: `${def.name} ainda não rodou nesta tarefa.` }
+      return { ok: true, message: `Últimas linhas de ${def.name}:\n\`\`\`\n${tail}\n\`\`\`` }
+    } catch (error) {
+      if (error instanceof ServerError) return { ok: false, message: error.message }
+      throw error
+    }
+  }
+
+  private async agentStart(
+    projectId: string,
+    taskId: string,
+    def: ServerDef
+  ): Promise<ServerToolReply> {
+    const started = await this.start(projectId, taskId, def.id, 'agent')
+    const view = (await this.settled(taskId, def.id)) ?? started
+    const tail = (): string => {
+      const t = this.tail(taskId, def.id, 40)
+      return t ? `\nFim do log:\n\`\`\`\n${t}\n\`\`\`` : ''
+    }
+    switch (view.state) {
+      case 'ready':
+        return {
+          ok: true,
+          message: `${def.name} está de pé em ${view.url} (porta ${view.port}). Fica rodando até alguém parar.`,
+          info: `Subiu o servidor ${def.name} (${view.url})`
+        }
+      case 'no_port':
+        return {
+          ok: false,
+          message: `${def.name} subiu, mas não respondeu na porta ${view.port} em ${SERVER_LIMITS.readyMs / 1000} s (continua rodando; use servidor_log para acompanhar).${tail()}`,
+          info: `Subiu o servidor ${def.name}, sem resposta na porta ${view.port}`
+        }
+      case 'exited':
+        return {
+          ok: false,
+          message: `${def.name} parou sozinho${view.exitCode === null ? '' : ` (código ${view.exitCode})`}.${tail()}`
+        }
+      default:
+        return { ok: false, message: `${def.name}: ${serverStatePhrase(view)}.` }
+    }
+  }
+
+  /** Últimas `lines` linhas da saída do servidor (sem cores), ou `null` sem terminal. */
+  private tail(taskId: string, serverId: string, lines: number): string | null {
+    const id = this.entries.get(keyOf(taskId, serverId))?.terminalId
+    const snap = id ? this.deps.terminals.snapshot?.(id) : null
+    if (!snap) return null
+    const all = plainTerminalText(snap.data).replace(/\n+$/, '').split('\n')
+    return all.slice(-lines).join('\n')
   }
 
   /** Algum servidor de pé (contagem do limite e da tela). */

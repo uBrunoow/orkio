@@ -176,3 +176,32 @@ test('cadastra o servidor, sobe na pasta da tarefa, abre, mostra o log e para', 
     )
     .toBe('fechada')
 })
+
+test('o agente sobe o servidor pela ferramenta do Orkio e sabe o endereço', async () => {
+  orkio = await launchOrkio(userDataDir, { validTokens: [NOTION_TOKEN] })
+  const { page } = orkio
+  await navTo(page, 'Quadro')
+  await page.getByRole('listitem', { name: ORK2, exact: true }).click()
+  const screen = taskScreen(page, 'ORK-2')
+  const session = screen.getByRole('region', { name: 'Sessão da tarefa' })
+  await session.getByRole('textbox', { name: 'Mensagem para o Claude Code' }).fill('subir-servidor')
+  await session.getByRole('button', { name: 'Enviar' }).click()
+  await expect(session.getByTestId('run-status').last()).toHaveText('Concluída', {
+    timeout: 60_000
+  })
+  // O prompt trouxe a linha dos servidores e a ferramenta subiu o "web" e devolveu o endereço.
+  await expect(session.getByText('prompt: com servidores')).toBeVisible()
+  await expect(session.getByText(/subir: web está de pé em http:\/\/localhost:\d+/)).toBeVisible()
+  await expect(session.getByText(/- web: rodando em http:\/\/localhost:\d+/)).toBeVisible()
+
+  // O servidor continua de pé depois do fim da mensagem, no painel e na porta.
+  const panel = await taskTab(screen, 'Detalhes')
+  const row = servers(panel).getByRole('listitem', { name: 'Servidor web' })
+  await expect(row.getByTestId('server-state')).toHaveText('Rodando')
+  const url = await row.getByRole('button', { name: /localhost:\d+/ }).textContent()
+  const port = Number(/:(\d+)/.exec(url ?? '')?.[1])
+  expect(await (await fetch(`http://localhost:${port}/`)).text()).toBe('ok')
+  await expectTaskHistory(screen, `Servidor web subiu na porta ${port}`)
+  await row.getByRole('button', { name: 'Parar web' }).click()
+  await expect(row.getByTestId('server-state')).toHaveText('Parado', { timeout: 15_000 })
+})

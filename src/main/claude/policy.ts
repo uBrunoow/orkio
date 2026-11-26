@@ -28,7 +28,11 @@ import {
   type DeliveryPolicyContext
 } from './delivery-policy'
 import { GH_READ_TEXT, GH_RULED } from './github-rules'
-import { BRIDGE_MEMORY_TOOL_NAME } from './bridge/protocol'
+import {
+  BRIDGE_MEMORY_TOOL_NAME,
+  BRIDGE_SERVER_READ_ACTIONS,
+  serverActionOfTool
+} from './bridge/protocol'
 
 export interface PermissionRequest {
   tool: string
@@ -519,6 +523,15 @@ function evaluate(
   // na rede (o main valida, redige segredos e grava na pasta do agente). Passa sem perguntar, até
   // em passo só de leitura. Só ela: qualquer outra MCP continua perguntando (fim da função).
   if (tool === BRIDGE_MEMORY_TOOL_NAME) return { decision: 'allow' }
+  // Servidores da tarefa: as ferramentas do Orkio só sobem/param os servidores que você cadastrou
+  // (o comando nunca vem do agente). Passo só de leitura: só status e log.
+  const serverAction = serverActionOfTool(tool)
+  if (serverAction) {
+    if (ctx.readOnly && !BRIDGE_SERVER_READ_ACTIONS.includes(serverAction)) {
+      return deny('read_only', POLICY_MESSAGES.readOnly)
+    }
+    return { decision: 'allow' }
+  }
 
   if (category === 'edit' || category === 'read' || category === 'search') {
     if (category === 'edit' && ctx.readOnly) return deny('read_only', POLICY_MESSAGES.readOnly)

@@ -137,6 +137,11 @@ export interface RunSpec {
   askEdits?: boolean
   /** Sidechat (ver `RunRequest.side`). */
   side?: boolean
+  /**
+   * Servidores da tarefa (o projeto tem cadastro): a linha do system prompt com o estado de cada um
+   * e as ferramentas `servidor_*` na ponte. Ausente = sem ferramentas.
+   */
+  servers?: { note: string }
 }
 
 /** Modo e comando como o histórico guarda (`agent_runs.mode/command/input_text`). */

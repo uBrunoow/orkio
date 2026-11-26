@@ -10,12 +10,60 @@
  * Roda com o Node do Electron (ELECTRON_RUN_AS_NODE=1). Sem dependências.
  */
 import { createInterface } from 'node:readline'
-import { askOrkio as ask, rememberInOrkio } from './client'
-import { BRIDGE_ENV, BRIDGE_MEMORY_TOOL, BRIDGE_SERVER, BRIDGE_TOOL } from './protocol'
+import { askOrkio as ask, rememberInOrkio, serverInOrkio } from './client'
+import {
+  BRIDGE_ENV,
+  BRIDGE_MEMORY_TOOL,
+  BRIDGE_SERVER,
+  BRIDGE_SERVER_ACTIONS,
+  BRIDGE_SERVER_READ_ACTIONS,
+  BRIDGE_TOOL,
+  serverToolName,
+  type BridgeServerAction
+} from './protocol'
 
 const SOCKET = process.env[BRIDGE_ENV.socket] ?? ''
 const TOKEN = process.env[BRIDGE_ENV.token] ?? ''
 const MEMORY = process.env[BRIDGE_ENV.memory] === '1'
+/** Ferramentas dos servidores: todas, só as de leitura (passo só de leitura) ou nenhuma. */
+const SERVERS_MODE = process.env[BRIDGE_ENV.servers]
+const SERVER_ACTIONS: readonly BridgeServerAction[] =
+  SERVERS_MODE === 'all'
+    ? BRIDGE_SERVER_ACTIONS
+    : SERVERS_MODE === 'read'
+      ? BRIDGE_SERVER_READ_ACTIONS
+      : []
+
+const NAME_ARG = {
+  nome: { type: 'string', description: 'Nome do servidor cadastrado (ex.: frontend).' }
+}
+/** Ferramentas dos servidores da tarefa (o main confere de novo o que é permitido). */
+const SERVER_TOOLS: Record<BridgeServerAction, Record<string, unknown>> = {
+  subir: {
+    description:
+      'Sobe um servidor cadastrado desta tarefa (o Orkio roda o comando do cadastro na pasta da tarefa, com a porta dela) e espera ele responder. Ele fica de pé entre as mensagens. Devolve o endereço ou o fim do log se falhar.',
+    inputSchema: { type: 'object', properties: NAME_ARG, required: ['nome'] }
+  },
+  parar: {
+    description: 'Para um servidor desta tarefa que está rodando.',
+    inputSchema: { type: 'object', properties: NAME_ARG, required: ['nome'] }
+  },
+  status: {
+    description: 'Lista os servidores desta tarefa: estado, porta e endereço.',
+    inputSchema: { type: 'object', properties: {} }
+  },
+  log: {
+    description: 'As últimas linhas da saída de um servidor desta tarefa (segredos escondidos).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...NAME_ARG,
+        linhas: { type: 'number', description: 'Quantas linhas do fim (padrão 60, até 300).' }
+      },
+      required: ['nome']
+    }
+  }
+}
 
 /** Ferramenta da memória (o texto da validação final é do main). */
 const MEMORY_TOOL = {
@@ -79,7 +127,11 @@ async function handle(msg: JsonRpc): Promise<void> {
               required: ['tool_name']
             }
           },
-          ...(MEMORY ? [MEMORY_TOOL] : [])
+          ...(MEMORY ? [MEMORY_TOOL] : []),
+          ...SERVER_ACTIONS.map((action) => ({
+            name: serverToolName(action),
+            ...SERVER_TOOLS[action]
+          }))
         ]
       })
       return
@@ -89,6 +141,12 @@ async function handle(msg: JsonRpc): Promise<void> {
         const r = MEMORY
           ? await rememberInOrkio(SOCKET, TOKEN, args)
           : { ok: false, message: 'A memória não está ligada nesta execução.' }
+        reply({ content: [{ type: 'text', text: r.message }], ...(r.ok ? {} : { isError: true }) })
+        return
+      }
+      const action = SERVER_ACTIONS.find((a) => serverToolName(a) === msg.params?.['name'])
+      if (action) {
+        const r = await serverInOrkio(SOCKET, TOKEN, action, args)
         reply({ content: [{ type: 'text', text: r.message }], ...(r.ok ? {} : { isError: true }) })
         return
       }

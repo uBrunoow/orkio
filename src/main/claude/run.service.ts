@@ -32,6 +32,7 @@ import { DomainError } from '../errors'
 import type { Git } from '../git/git'
 import type { DeliveryEvent, DeliveryKind } from './delivery-policy'
 import { CLAUDE_MODELS, EFFORT_LABELS } from '../../shared/agent-runtime'
+import type { BridgeServerAction } from './bridge/protocol'
 import {
   DELIVERY_ALLOWED,
   decidePermission,
@@ -117,6 +118,16 @@ export interface RunServiceDeps {
     projectId: string,
     input: Record<string, unknown>
   ): Promise<{ ok: true; text: string; message: string } | { ok: false; message: string }>
+  /**
+   * Servidores da tarefa: as ferramentas `servidor_*` (o `ServersService` sobe/para só os
+   * servidores cadastrados). `info` vira linha do log da execução.
+   */
+  serverTool?(
+    ref: { projectId: string; taskId: string },
+    action: BridgeServerAction,
+    input: Record<string, unknown>,
+    readOnly: boolean
+  ): Promise<{ ok: boolean; message: string; info?: string }>
   maxParallel?: number
   keepPerTask?: number
   approvalTimeoutMs?: number
@@ -181,6 +192,8 @@ interface ActiveRun {
   /** Imagens das ferramentas já gravadas nesta execução e avisos já dados (uma vez cada). */
   images: number
   imageNotes: Set<string>
+  /** Gravações das imagens em fila: o log fica na ordem em que chegaram (1, 2, 3…). */
+  imageWrites: Promise<void>
   spec: RunSpec
   /** Categorias do modo entrega (5C) já aprovadas nesta execução. */
   granted: Set<DeliveryKind>
@@ -387,6 +400,7 @@ export class RunService {
       secrets: new Set(),
       images: 0,
       imageNotes: new Set(),
+      imageWrites: Promise.resolve(),
       spec,
       granted: new Set(),
       aliases: {},
@@ -462,7 +476,8 @@ export class RunService {
         for (const text of extras.notes) this.log(run, { kind: 'info', text })
         const broker = new PermissionBroker(
           (req) => this.onPermission(run, req),
-          (input) => this.onRemember(run, input)
+          (input) => this.onRemember(run, input),
+          (action, input) => this.onServerTool(run, action, input)
         )
         await broker.open()
         run.handle = this.deps.createRun({
@@ -833,6 +848,26 @@ export class RunService {
     return { ok: r.ok, message: r.message }
   }
 
+  /** Ferramentas `servidor_*`: só com servidores na execução; a resposta volta ao agente. */
+  private async onServerTool(
+    run: ActiveRun,
+    action: BridgeServerAction,
+    input: Record<string, unknown>
+  ): Promise<BridgeRememberReply> {
+    if (!run.spec.servers || !this.deps.serverTool) {
+      return { ok: false, message: 'Esta execução não tem servidores.' }
+    }
+    if (run.cancelled) return { ok: false, message: RUN_MESSAGES.cancelled }
+    const r = await this.deps.serverTool(
+      { projectId: run.projectId, taskId: run.taskId },
+      action,
+      input,
+      run.spec.access.tools === 'read_only'
+    )
+    if (r.info) this.log(run, { kind: 'info', text: r.info })
+    return { ok: r.ok, message: scrubText(r.message, run.secrets) }
+  }
+
   private async onPermission(run: ActiveRun, req: BridgeRequest): Promise<BridgeDecision> {
     if (run.cancelled) return { behavior: 'deny', message: RUN_MESSAGES.cancelled }
     const delivery = deliveryOf(run.spec)
@@ -1006,7 +1041,8 @@ export class RunService {
     if (!ext) return
     const n = ++run.images
     const dir = this.imagesDir(run.id)
-    void mkdir(dir, { recursive: true })
+    run.imageWrites = run.imageWrites
+      .then(() => mkdir(dir, { recursive: true }))
       .then(() => writeFile(join(dir, `${n}.${ext}`), image.data, { mode: 0o600 }))
       .then(
         () =>

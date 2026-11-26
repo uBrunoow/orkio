@@ -157,6 +157,11 @@ export interface ClaudeServiceDeps {
   handoff?(taskId: string): HandoffView | null
   /** Fase 2: terminais embutidos rodando na tarefa (o worktree não sai por baixo deles). */
   terminalsRunning?(taskId: string): boolean
+  /**
+   * Servidores da tarefa: a linha do system prompt (estado de cada um e as ferramentas), ou `null`
+   * sem cadastro no projeto (aí as ferramentas `servidor_*` nem aparecem).
+   */
+  serversNote?(projectId: string, taskId: string, readOnly: boolean): string | null
   /** Servidores da tarefa: param antes de o worktree sair ("Limpar ambiente"). */
   stopServers?(taskId: string): Promise<void>
   /**
@@ -661,10 +666,21 @@ export class ClaudeService {
         timeoutMin: request.timeoutMin,
         // Sem agente: "Pergunta antes de editar" das Configurações (com agente, a dele).
         ...(!agent && prefs.autonomy === 'ask' ? { askEdits: true } : {}),
-        ...(request.side ? { side: true } : {})
+        ...(request.side ? { side: true } : {}),
+        ...this.serversOf(request.projectId, request.taskId, access.tools === 'read_only')
       })
       return ok(view.id)
     })
+  }
+
+  /** Servidores da tarefa na execução (nota do prompt + ferramentas); sidechat também vê. */
+  private serversOf(
+    projectId: string,
+    taskId: string,
+    readOnly: boolean
+  ): { servers: { note: string } } | Record<string, never> {
+    const note = this.deps.serversNote?.(projectId, taskId, readOnly) ?? null
+    return note ? { servers: { note } } : {}
   }
 
   /** O agente com o bloco da memória no fim do prompt (lido do store pela chave + projeto). */

@@ -66,7 +66,11 @@ function setup(over: Partial<ServersServiceDeps> = {}) {
           startedAt: '2026-11-26T12:00:00.000Z'
         }
       },
-      close: async (id) => void closed.push(id)
+      close: async (id) => void closed.push(id),
+      snapshot: (id) =>
+        id === 't-000001'
+          ? { data: '\u001b[32mVITE pronto\u001b[0m\r\nlinha 2\r\nlinha 3\r\n', end: 30 }
+          : null
     },
     portFree: async () => true,
     portOpen: async (port) => listening.has(port),
@@ -227,5 +231,62 @@ describe('ServersService', () => {
     await svc.start('p1', 't1', 's-web', 'you')
     expect(svc.urlOf('p1', 't1', 's-web')).toBe('http://localhost:4100')
     expect(svc.urlOf('p1', 't2', 's-web')).toBeNull()
+  })
+})
+
+describe('ferramentas do agente', () => {
+  const ref = { projectId: 'p1', taskId: 't1' }
+
+  it('subir espera ficar pronto e devolve o endereço; status lista todos', async () => {
+    // A porta só responde depois que o processo abriu.
+    const ctx: ReturnType<typeof setup> = setup({
+      portOpen: async (p) => p === 4100 && ctx.opened.length > 0
+    })
+    const { svc, events } = ctx
+    const r = await svc.agentTool(ref, 'subir', { nome: 'frontend' }, false)
+    expect(r).toMatchObject({ ok: true, info: 'Subiu o servidor frontend (http://localhost:4100)' })
+    expect(r.message).toContain('http://localhost:4100')
+    expect(events[0]).toMatchObject({ source: 'system', detail: { by: 'agent' } })
+    const st = await svc.agentTool(ref, 'status', {}, true)
+    expect(st.message).toContain('frontend: rodando em http://localhost:4100')
+    expect(st.message).toContain('backend: parado')
+  })
+
+  it('subir que não abre a porta devolve o fim do log, sem cores', async () => {
+    const { svc } = setup()
+    const pending = svc.agentTool(ref, 'subir', { nome: 'frontend' }, false)
+    await vi.advanceTimersByTimeAsync(121_000)
+    const r = await pending
+    expect(r.ok).toBe(false)
+    expect(r.message).toMatch(/não respondeu na porta 4100/)
+    expect(r.message).toContain('VITE pronto\nlinha 2\nlinha 3')
+    expect(r.message).not.toContain('\u001b')
+  })
+
+  it('log com as últimas linhas; nome desconhecido lista os cadastrados', async () => {
+    const { svc } = setup()
+    await svc.start('p1', 't1', 's-web', 'you')
+    const log = await svc.agentTool(ref, 'log', { nome: 'frontend', linhas: 2 }, true)
+    expect(log.ok).toBe(true)
+    expect(log.message).toContain('linha 2\nlinha 3')
+    expect(log.message).not.toContain('VITE pronto')
+    const bad = await svc.agentTool(ref, 'parar', { nome: 'nada' }, false)
+    expect(bad).toMatchObject({ ok: false })
+    expect(bad.message).toContain('frontend, backend')
+  })
+
+  it('passo só de leitura não sobe nem para', async () => {
+    const { svc, opened } = setup()
+    const r = await svc.agentTool(ref, 'subir', { nome: 'frontend' }, true)
+    expect(r.ok).toBe(false)
+    expect(opened).toHaveLength(0)
+  })
+
+  it('parar grava "pelo agente"', async () => {
+    const { svc, events } = setup()
+    await svc.start('p1', 't1', 's-api', 'you')
+    const r = await svc.agentTool(ref, 'parar', { nome: 'backend' }, false)
+    expect(r).toMatchObject({ ok: true, info: 'Parou o servidor backend' })
+    expect(events.at(-1)).toMatchObject({ source: 'system', detail: { by: 'agent' } })
   })
 })

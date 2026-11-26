@@ -342,6 +342,28 @@ describe('política: só leitura e contexto pedido pela política', () => {
     expect(evaluatePermission({ tool: 'mcp__outro__lembrar', input: {} }, ro).decision).toBe('ask')
   })
 
+  it('servidores da tarefa: servidor_* do Orkio passam sem perguntar; só leitura só status/log', () => {
+    const full = { worktree: WT, allowRules: rules }
+    const ro = { ...full, readOnly: true }
+    for (const tool of ['subir', 'parar', 'status', 'log']) {
+      expect(
+        evaluatePermission({ tool: `mcp__orkio__servidor_${tool}`, input: {} }, full).decision
+      ).toBe('allow')
+    }
+    expect(evaluatePermission({ tool: 'mcp__orkio__servidor_log', input: {} }, ro).decision).toBe(
+      'allow'
+    )
+    expect(evaluatePermission({ tool: 'mcp__orkio__servidor_subir', input: {} }, ro).decision).toBe(
+      'deny'
+    )
+    expect(evaluatePermission({ tool: 'mcp__orkio__servidor_rm', input: {} }, full).decision).toBe(
+      'ask'
+    )
+    expect(
+      evaluatePermission({ tool: 'mcp__outro__servidor_subir', input: {} }, full).decision
+    ).toBe('ask')
+  })
+
   it('Fase 3: agente que pede antes de agir — editar pergunta (sem "sempre"), regra não libera', () => {
     const ask = { worktree: WT, allowRules: rules, askEdits: true }
     const edit = (file: string, c: { worktree: string; allowRules: typeof rules }) =>
@@ -689,5 +711,22 @@ describe('stream-json → imagens das ferramentas', () => {
     expect(JSON.stringify(parseStreamLine(line, WT))).not.toContain(PNG.toString('base64'))
     expect(toolImages(JSON.stringify({ type: 'user', message: { content: [] } }))).toEqual([])
     expect(toolImages('não é json')).toEqual([])
+  })
+})
+
+describe('ponte: ferramentas dos servidores', () => {
+  it('codifica e lê a ação; ação desconhecida não vira pedido de permissão', async () => {
+    const { decodeBridgeMessage, encodeBridgeServer, serverActionOfTool, parseServerReply } =
+      await import('./bridge/protocol')
+    expect(decodeBridgeMessage(encodeBridgeServer('tk', 'subir', { nome: 'web' }))).toEqual({
+      token: 'tk',
+      message: { kind: 'server', action: 'subir', input: { nome: 'web' } }
+    })
+    expect(
+      decodeBridgeMessage(JSON.stringify({ token: 'tk', kind: 'server', action: 'rm', input: {} }))
+    ).toBeNull()
+    expect(serverActionOfTool('mcp__orkio__servidor_log')).toBe('log')
+    expect(serverActionOfTool('mcp__orkio__servidor_x')).toBeNull()
+    expect(parseServerReply({ ok: true, message: 'x'.repeat(20_000) }).message).toHaveLength(12_000)
   })
 })

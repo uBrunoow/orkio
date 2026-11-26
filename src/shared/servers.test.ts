@@ -6,7 +6,9 @@ import {
   serverProblems,
   serverRefs,
   serverUrl,
-  type ServerDef
+  serversPromptNote,
+  type ServerDef,
+  type ServerView
 } from './servers'
 
 const web: ServerDef = { id: 's-web', name: 'frontend', command: 'pnpm dev', cwd: 'apps/web' }
@@ -97,5 +99,35 @@ describe('parseServerDefs', () => {
     const parsed = parseServerDefs([web, { name: 'x' }, 'lixo', { ...api, env: { A: 1 } }, api])
     expect(parsed).toEqual([web, api])
     expect(parseServerDefs('nada')).toEqual([])
+  })
+})
+
+describe('serversPromptNote', () => {
+  const view = (name: string, over: Partial<ServerView> = {}): ServerView => ({
+    id: `s-${name}`,
+    name,
+    command: 'x',
+    state: 'stopped',
+    port: null,
+    url: null,
+    terminalId: null,
+    by: null,
+    exitCode: null,
+    startedAt: null,
+    ...over
+  })
+
+  it('estado de cada um e as ferramentas; só leitura cita só status e log', () => {
+    const views = [
+      view('frontend'),
+      view('backend', { state: 'ready', port: 4200, url: 'http://localhost:4200' })
+    ]
+    const note = serversPromptNote(views, false)
+    expect(note).toContain('frontend (parado), backend (rodando em http://localhost:4200)')
+    expect(note).toContain('servidor_subir')
+    expect(note).toMatch(/Não rode servidores .* no Bash/)
+    const ro = serversPromptNote(views, true)
+    expect(ro).not.toContain('servidor_subir')
+    expect(ro).toContain('servidor_status')
   })
 })

@@ -244,6 +244,53 @@ describe('ClaudeRun', () => {
     })
   })
 
+  it('servidores da tarefa: ferramentas ligadas na ponte (só leitura = read) e a nota no prompt', async () => {
+    async function configFor(s: RunSpec): Promise<{ env: Record<string, string>; args: string[] }> {
+      let captured: string[] = []
+      const spawn = ((_cmd: string, a: string[]) => {
+        captured = a
+        const child = new EventEmitter() as EventEmitter & Record<string, unknown>
+        child['stdin'] = new PassThrough()
+        child['stdout'] = new PassThrough()
+        child['stderr'] = new PassThrough()
+        child['kill'] = () => true
+        return child
+      }) as unknown as SpawnFn
+      await new ClaudeRun({
+        claudeCommand: 'claude',
+        spec: s,
+        cwd: dir,
+        prompt: 'oi',
+        sessionId: `s-${Math.random()}`,
+        broker: { socketPath: join(dir, 's.sock'), token: 't' } as unknown as PermissionBroker,
+        nodePath: process.execPath,
+        bridgeScript: 'bridge.js',
+        tmpDir: dir,
+        env: {},
+        onEvent: () => undefined,
+        onExit: () => undefined,
+        spawn
+      }).start()
+      const config = JSON.parse(await readFile(after(captured, '--mcp-config')!, 'utf8')) as {
+        mcpServers: Record<string, { env: Record<string, string> }>
+      }
+      return { env: config.mcpServers['orkio']!.env, args: captured }
+    }
+    const note = 'Servidores desta tarefa: frontend (parado).'
+    const full = await configFor({ ...(spec() as RunSpec), servers: { note } })
+    expect(full.env['ORKIO_BRIDGE_SERVERS']).toBe('all')
+    expect(after(full.args, '--append-system-prompt')).toContain(note)
+    const ro = await configFor({
+      ...(spec() as RunSpec),
+      access: { tools: 'read_only', github: null },
+      servers: { note }
+    } as RunSpec)
+    expect(ro.env['ORKIO_BRIDGE_SERVERS']).toBe('read')
+    const none = await configFor(spec() as RunSpec)
+    expect(none.env['ORKIO_BRIDGE_SERVERS']).toBeUndefined()
+    expect(after(none.args, '--append-system-prompt')).not.toContain('Servidores desta tarefa')
+  })
+
   it('imagem de um tool_result vai para onImage; o evento continua sem o base64', async () => {
     const stdout = new PassThrough()
     const spawn = (() => {

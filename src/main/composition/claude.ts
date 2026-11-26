@@ -17,6 +17,7 @@ import { HandoffError, HandoffService } from '../claude/handoff.service'
 import { TerminalService, type SpawnPty } from '../terminal/terminal.service'
 import { ServersService } from '../servers/servers.service'
 import { portFree, portOpen } from '../servers/ports'
+import { serversPromptNote } from '../../shared/servers'
 import { envFileValues, isEnvFile } from '../platform/redact'
 import { errorName } from '../errors'
 import type * as NodePty from 'node-pty'
@@ -119,7 +120,14 @@ export function createClaude(deps: {
     },
     workspace: (taskId) => worktrees.get(taskId)?.path ?? null,
     isDir: (p) => statSync(p, { throwIfNoEntry: false })?.isDirectory() === true,
-    terminals,
+    terminals: {
+      get available() {
+        return terminals.available
+      },
+      open: (input) => terminals.open(input),
+      close: (id) => terminals.close(id),
+      snapshot: (id) => terminals.snapshot(id)
+    },
     portFree,
     portOpen: (port) => portOpen(port),
     envSecrets: (dir) => {
@@ -184,7 +192,8 @@ export function createClaude(deps: {
     },
     notify: deps.notify,
     ...(deps.runExtras ? { extras: deps.runExtras } : {}),
-    remember: (agentKey, projectId, input) => deps.agentMemory.remember(agentKey, projectId, input)
+    remember: (agentKey, projectId, input) => deps.agentMemory.remember(agentKey, projectId, input),
+    serverTool: (ref, action, input, readOnly) => servers.agentTool(ref, action, input, readOnly)
   })
   service.set(
     new ClaudeService({
@@ -242,6 +251,10 @@ export function createClaude(deps: {
       terminalsRunning: (taskId) =>
         terminals.hasRunning(taskId, 'shell') || terminals.hasRunning(taskId, 'claude'),
       stopServers: (taskId) => servers.stopTask(taskId),
+      serversNote: (projectId, taskId, readOnly) =>
+        servers.defs(projectId).length > 0
+          ? serversPromptNote(servers.list(projectId, taskId), readOnly)
+          : null,
       openEditor: (editor, path) => spawnDetached(editor, [path], { env, windowsHide: true })
     })
   )

@@ -115,6 +115,16 @@ function bridge(config) {
       const res = await request('tools/call', { name: 'lembrar', arguments: input })
       return { ok: !res.result.isError, text: res.result.content[0].text }
     },
+    /** Servidores da tarefa: chama `servidor_<acao>`; `null` = a ferramenta não está no tools/list. */
+    async server(action, input) {
+      const list = await request('tools/list', {})
+      const name = `servidor_${action}`
+      if (!list.result.tools.some((t) => t.name === name)) return null
+      const approval = await this.approve(`mcp__orkio__${name}`, input, `toolu_srv_${action}`)
+      if (approval.behavior !== 'allow') return { ok: false, text: `negado: ${approval.message}` }
+      const res = await request('tools/call', { name, arguments: input })
+      return { ok: !res.result.isError, text: res.result.content[0].text }
+    },
     close: () => child.kill()
   }
 }
@@ -370,6 +380,25 @@ async function main() {
         ? Object.values(r.updatedInput.answers).join(',')
         : 'nenhuma'
     assistant([{ type: 'text', text: `resposta: ${answer}` }])
+  }
+
+  // Servidores da tarefa: sobe o "web" pela ferramenta do Orkio e conta o que viu no prompt.
+  if (prompt.includes('subir-servidor')) {
+    const system = args.includes('--append-system-prompt')
+      ? args[args.indexOf('--append-system-prompt') + 1]
+      : ''
+    const up = await mcp.server('subir', { nome: 'web' })
+    const status = await mcp.server('status', {})
+    assistant([
+      {
+        type: 'text',
+        text: [
+          `prompt: ${system.includes('Servidores desta tarefa') ? 'com servidores' : 'sem servidores'}`,
+          `subir: ${up ? up.text : 'sem-ferramenta'}`,
+          `status: ${status ? status.text : 'sem-ferramenta'}`
+        ].join('\n\n')
+      }
+    ])
   }
 
   if (prompt.includes('tirar-print')) {
