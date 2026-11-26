@@ -342,6 +342,19 @@ describe('NotionWorkspaceService', () => {
       )
     })
 
+    it('dois quadros com a mesma Etapa Orkio não impedem salvar outra propriedade', async () => {
+      const service = await configured()
+      const board = {
+        stages: [],
+        orkioStageProperty: { id: 'other', name: 'Outro', type: 'select' },
+        blockedProperty: null,
+        rules: [],
+        updatedAt: 'x'
+      }
+      await store.update((c) => ({ ...c, boards: { p1: board, p2: board } as never }))
+      expect(await service.saveGitFlow(INPUT)).toMatchObject({ ok: true })
+    })
+
     it('saveConfig mantém o gitFlow com o mesmo banco de Tarefas e solta com outro', async () => {
       const service = await configured()
       await service.saveGitFlow(INPUT)

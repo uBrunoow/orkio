@@ -420,13 +420,16 @@ export class NotionWorkspaceService {
           stage.id,
           ...(prUrl ? [prUrl.id] : []),
           ...(mergedAt ? [mergedAt.id] : []),
-          ...Object.values(config.mapping).map((r) => r.id),
-          ...Object.values(this.config().boards ?? {}).flatMap((b) => [
+          ...Object.values(config.mapping).map((r) => r.id)
+        ]
+        const boardIds = new Set(
+          Object.values(this.config().boards ?? {}).flatMap((b) => [
             ...(b.orkioStageProperty ? [b.orkioStageProperty.id] : []),
             ...(b.blockedProperty ? [b.blockedProperty.id] : [])
           ])
-        ]
-        if (new Set(used).size !== used.length) {
+        )
+        const own = [stage.id, ...(prUrl ? [prUrl.id] : []), ...(mergedAt ? [mergedAt.id] : [])]
+        if (new Set(used).size !== used.length || own.some((id) => boardIds.has(id))) {
           throw invalid('Use uma propriedade diferente para cada campo.')
         }
         gitFlow = {
