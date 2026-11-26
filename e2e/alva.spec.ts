@@ -502,15 +502,16 @@ test('5C critério 3 + Task 16: alterações pedidas → Revisado → plano → 
   expect(log.at(-1)).toMatch(/^allow:gh api graphql -f query='mutation \{ resolveReviewThread/)
   // Pede nova revisão a quem revisou (Ana) sem outro gate: você já aprovou o resumo.
   await expect(flow.getByRole('group', { name: 'Pedir review da PR #7?' })).toHaveCount(0)
-  await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+  // O Orkio aplica na hora a regra "Novo pedido de review volta para revisão" (Ana já estava
+  // pendente, o GitHub não acusaria pedido novo): a tarefa volta para Revisando e a coluna começa
+  // o fluxo dela; uma nova revisão com alterações a traz de volta para Revisado.
+  await expectStage(panel, 'Revisando')
   expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(
     git(worktree(), 'rev-parse', 'HEAD').trim()
   )
   expect((await notionState(app)).reviewRequests).toEqual([
     { pull: 7, reviewers: ['ana'], teams: [] }
   ])
-  // O novo pedido de review leva a tarefa de volta para Revisando (3B), sozinho.
-  await expectStage(panel, 'Revisando')
   // A sessão mostra as entregas com o link da PR; o histórico completo também.
   const conversation = panel.getByRole('list', { name: 'Conversa da tarefa' })
   await expect(conversation).toContainText('Review pedido na PR #7 pelo Orkio')

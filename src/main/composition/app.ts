@@ -749,6 +749,9 @@ function createWork(core: {
       githubFor: (projectId) => (isGitOnly(projectId) ? gh : null),
       store: boardStore,
       runAutomation,
+      // Corretor da PR pediu de novo: aplica já a regra de "review pedido" (Revisado → Revisando).
+      onReviewRequested: (projectId, taskId, pr) =>
+        void automation.applyEvent(projectId, taskId, 'pr.review_requested', pr),
       gitOnly
     }).concat(
       // Revisão: o Orkio lê as threads da PR e grava .orkio/revisao.md no worktree.

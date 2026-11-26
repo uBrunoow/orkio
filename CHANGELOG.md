@@ -17,6 +17,7 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Corrigido
 
+- Depois que o Corretor da PR pede nova revisão, a tarefa volta para Revisando na hora, pela regra "Novo pedido de review volta para revisão". Antes, quando o revisor já estava pendente, o GitHub não acusava pedido novo: a tarefa ficava em Revisado e a próxima revisão com alterações não acordava o Corretor.
 - Tarefas sem ID no Notion criadas juntas caíam na mesma pasta de trabalho (o nome usava só o começo do id da página) e o passo falhava pedindo para remover a pasta de outra tarefa. Agora a pasta usa o id inteiro.
 - Com "Agentes enviam e abrem PR", a branch nova da tarefa sai do destino das PRs (ex.: `dev`), não da branch padrão. Tarefa cuja PR já foi mergeada recomeça numa branch nova; uma falha do git ao listar os worktrees não manda mais apagar a pasta.
 - Corretor da PR (coluna Revisado): uma revisão que pede alterações só no texto, sem comentário em linha, agora conta; antes o fluxo terminava com "nada a fazer". O resumo do que fazer vem sempre para você aprovar (também no "Rodar uma vez"); aprovado, o agente corrige, faz o push, responde cada conversa e o revisor da revisão geral (comentário na PR citando-o) e o Orkio pede nova revisão a quem revisou, sem outra confirmação.
