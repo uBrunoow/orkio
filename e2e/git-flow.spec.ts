@@ -15,6 +15,7 @@ import {
   removeDir,
   seedConfig,
   setFakes,
+  setNotionStatus,
   type FakePull,
   type OrkioApp
 } from './fixtures'
@@ -22,6 +23,7 @@ import {
 const NOTION_TOKEN = 'ntn_E2E_GIT_FLOW_TOKEN_abcdef123456'
 const GITHUB_PAT = 'github_pat_E2E_GIT_FLOW_TOKEN_0123456789'
 const ORK2 = 'ORK-2 Listar tarefas do Notion'
+const ORK3 = 'ORK-3 Nova home do site'
 const PR5_URL = 'https://github.com/acme/orkio-app/pull/5'
 
 test.describe.configure({ mode: 'serial' })
@@ -133,6 +135,9 @@ test('Fluxo Git: configura pela tela e a Etapa Git segue a PR até o merge na de
     expect(s.state).toBe('connected')
   }
 
+  // ORK-3 em andamento: a PR #6 aberta a move para Revisando (prova de que o ciclo a viu).
+  await setNotionStatus(app, NOTION_TASK_IDS.ork3, 'Em andamento')
+
   // 1. Quadro dos dois projetos (o Fluxo Git só observa projetos com quadro e vínculo).
   await navTo(page, 'Projetos')
   await navTo(page, 'Quadro')
@@ -142,6 +147,9 @@ test('Fluxo Git: configura pela tela e a Etapa Git segue a PR até o merge na de
   await page.getByRole('menuitem', { name: 'site', exact: true }).click()
   await navTo(page, 'Quadro')
   await createBoard(page)
+  await expect(
+    column(page, 'Em andamento').getByRole('listitem', { name: ORK3, exact: true })
+  ).toBeVisible()
   await refresh(page)
 
   // 2. Fluxo Git pela tela: a sugestão vem pronta (Etapa Git, as quatro opções, PR e data).
@@ -256,7 +264,32 @@ test('Fluxo Git: configura pela tela e a Etapa Git segue a PR até o merge na de
     )
     .toContain('Mergeada na dev')
 
-  // 8. A PR #6 (para a main) nunca escreveu a Etapa Git da ORK-3.
+  // 7b. O mesmo selo na visão Lista.
+  await page.getByRole('radio', { name: 'Lista' }).click()
+  await expect(
+    page
+      .getByTestId('board-list')
+      .getByRole('listitem', { name: ORK2, exact: true })
+      .getByTestId('git-stage')
+  ).toContainText('Mergeada na dev')
+  await page.getByRole('radio', { name: 'Kanban' }).click()
+
+  // 8. A PR #6 (ORK-3 → main) foi vista pelo ciclo do site (a regra a levou para Revisando, com o
+  // #6 no card), mas nunca escreveu a Etapa Git da ORK-3.
+  await projectSwitcher(page, 'orkio-app').click()
+  await page.getByRole('menuitem', { name: 'site', exact: true }).click()
+  await navTo(page, 'Quadro')
+  const ork3 = column(page, 'Revisando').getByRole('listitem', { name: ORK3, exact: true })
+  await expect
+    .poll(
+      async () => {
+        await refresh(page)
+        return ork3.count()
+      },
+      { timeout: 15_000 }
+    )
+    .toBe(1)
+  await expect(ork3.getByRole('button', { name: 'Abrir a PR #6 no GitHub' })).toBeVisible()
   const writes = (await notionState(app)).writes
   expect(writes.some((w) => w.pageId === NOTION_TASK_IDS.ork2 && 'git' in w.properties)).toBe(true)
   expect(writes.filter((w) => w.pageId === NOTION_TASK_IDS.ork3 && 'git' in w.properties)).toEqual(

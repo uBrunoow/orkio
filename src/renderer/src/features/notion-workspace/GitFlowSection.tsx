@@ -19,6 +19,7 @@ import { ErrorAlert } from '../../components/ErrorAlert'
 import { StatusToken } from '../../components/StatusToken'
 import { ipcResult, unwrap, useIpcResource } from '../../lib/ipc'
 import { NOTION_COLOR_TONE } from '../../lib/status-text'
+import { gitFlowEntry, savedOptionColor, stageCandidates } from './git-flow-ui'
 
 const NONE = '__none__'
 const FIELD_WIDTH = 'max-w-md'
@@ -65,10 +66,12 @@ export function GitFlowSection({
   onSaved(status: NotionWorkspaceStatus): void
 }): React.JSX.Element {
   const saved = status.config?.gitFlow ?? null
-  const key = status.config
-    ? `${status.config.tasksDataSource.id}:${JSON.stringify(saved ?? null)}`
-    : null
-  const setup = useIpcResource(key, () => window.orkio.notionWorkspace.getGitFlow().then(unwrap))
+  // Por banco: depois de salvar, recarrega mantendo o valor anterior (sem piscar o resumo).
+  const key = status.config ? status.config.tasksDataSource.id : null
+  // Ao voltar para a janela (ex.: criou a propriedade no Notion), relê o schema.
+  const setup = useIpcResource(key, () => window.orkio.notionWorkspace.getGitFlow().then(unwrap), {
+    refreshOnFocus: true
+  })
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<ResultError | null>(null)
@@ -84,7 +87,9 @@ export function GitFlowSection({
     }
     setEditing(false)
     onSaved(result.value)
+    void setup.reload()
   }
+  const entry = gitFlowEntry(setup.value, saved)
 
   return (
     <section
@@ -125,9 +130,13 @@ export function GitFlowSection({
         )
       ) : saved ? (
         <GitFlowSummary config={saved} setup={setup.value} />
+      ) : entry === 'no_property' ? (
+        <NoStageProperty />
+      ) : setup.error ? (
+        <ErrorAlert error={setup.error} />
       ) : null}
 
-      {!editing && (
+      {!editing && entry === 'ready' && (
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => setEditing(true)}>
             {saved ? 'Revisar Fluxo Git' : 'Configurar Fluxo Git'}
@@ -151,8 +160,11 @@ function GitFlowSummary({
   config: GitFlowConfig
   setup: GitFlowSetup | null
 }): React.JSX.Element {
-  const stageProp = setup?.properties.find((p) => p.id === config.stage.id)
-  const colorOf = (id: string) => stageProp?.options?.find((o) => o.id === id)?.color ?? 'default'
+  // Cor ainda desconhecida (carregando) ou opção que sumiu: tom neutro.
+  const toneOf = (id: string) => {
+    const color = savedOptionColor(setup, config, id)
+    return color ? NOTION_COLOR_TONE[color] : 'neutral'
+  }
   return (
     <dl
       aria-label="Configuração do Fluxo Git"
@@ -164,7 +176,7 @@ function GitFlowSummary({
         return (
           <Row key={k} label={GIT_STAGE_LABEL[k]}>
             {opt ? (
-              <StatusToken label={opt.name} tone={NOTION_COLOR_TONE[colorOf(opt.id)]} />
+              <StatusToken label={opt.name} tone={toneOf(opt.id)} />
             ) : (
               <span className="text-muted-foreground">Não usar</span>
             )}
@@ -174,6 +186,15 @@ function GitFlowSummary({
       <Row label="Link da PR">{config.prUrl?.name ?? 'Não usar'}</Row>
       <Row label="Data do merge">{config.mergedAt?.name ?? 'Não usar'}</Row>
     </dl>
+  )
+}
+
+function NoStageProperty(): React.JSX.Element {
+  return (
+    <Alert tone="info">
+      O banco de Tarefas não tem uma propriedade de seleção ou status para a Etapa Git. Crie no
+      Notion (ex.: “Etapa Git” com as opções do seu fluxo) e volte para cá.
+    </Alert>
   )
 }
 
@@ -198,17 +219,22 @@ function GitFlowForm({
   onSave(input: GitFlowInput): void
 }): React.JSX.Element {
   const [draft, setDraft] = useState<Draft>(() => draftOf(setup.config ?? setup.suggestion))
-  const stageCandidates = setup.properties.filter((p) => p.type === 'select' || p.type === 'status')
+  const candidates = stageCandidates(setup)
   const urlCandidates = setup.properties.filter((p) => p.type === 'url')
   const dateCandidates = setup.properties.filter((p) => p.type === 'date')
-  const stageProp = stageCandidates.find((p) => p.id === draft.stage)
+  const stageProp = candidates.find((p) => p.id === draft.stage)
 
-  if (stageCandidates.length === 0) {
+  if (candidates.length === 0) {
+    // A propriedade sumiu depois de abrir a edição: o aviso e um jeito de sair.
     return (
-      <Alert tone="info">
-        O banco de Tarefas não tem uma propriedade de seleção ou status para a Etapa Git. Crie no
-        Notion (ex.: “Etapa Git” com as opções do seu fluxo) e volte aqui.
-      </Alert>
+      <div className="flex flex-col gap-3">
+        <NoStageProperty />
+        <div>
+          <Button variant="ghost" onClick={onCancel}>
+            Cancelar
+          </Button>
+        </div>
+      </div>
     )
   }
 
@@ -258,7 +284,7 @@ function GitFlowForm({
       <SelectField
         label="Propriedade da Etapa Git"
         description="Seleção ou status do banco de Tarefas. A ordem das opções no Notion é a ordem das etapas."
-        options={stageCandidates.map((p) => ({
+        options={candidates.map((p) => ({
           value: p.id,
           label: p.name,
           description: p.type === 'status' ? 'status' : 'seleção'
@@ -269,7 +295,7 @@ function GitFlowForm({
           setDraft((d) => ({
             ...d,
             stage: id,
-            options: optionsFor(stageCandidates.find((p) => p.id === id))
+            options: optionsFor(candidates.find((p) => p.id === id))
           }))
         }
         className={FIELD_WIDTH}
