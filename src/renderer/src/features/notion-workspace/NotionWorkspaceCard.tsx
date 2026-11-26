@@ -12,6 +12,7 @@ import {
   sameId
 } from '../../../../shared/notion-mapping'
 import { Alert } from '../../components/Alert'
+import { GitFlowSection } from './GitFlowSection'
 import { DatabaseIcon, RefreshIcon } from '../../components/icons'
 import { PanelHeader } from '../../components/PanelHeader'
 import type { UseNotionWorkspace } from './useNotionWorkspace'
@@ -114,6 +115,7 @@ export function NotionWorkspaceCard({
           revalidating={workspace.revalidating}
           onEdit={() => setEditing(true)}
           onRevalidate={() => void workspace.revalidate()}
+          onSaved={workspace.setStatus}
         />
       )}
     </section>
@@ -124,12 +126,14 @@ function Summary({
   status,
   revalidating,
   onEdit,
-  onRevalidate
+  onRevalidate,
+  onSaved
 }: {
   status: NotionWorkspaceStatus
   revalidating: boolean
   onEdit(): void
   onRevalidate(): void
+  onSaved(status: NotionWorkspaceStatus): void
 }): React.JSX.Element {
   const config = status.config!
   const tone = status.health === 'broken' ? 'danger' : 'warning'
@@ -165,6 +169,7 @@ function Summary({
           Verificar de novo
         </Button>
       </div>
+      {status.health !== 'broken' && <GitFlowSection status={status} onSaved={onSaved} />}
     </div>
   )
 }

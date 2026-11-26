@@ -15,6 +15,9 @@ Claude Code. Hoje existem:
 - **UI:** shadcn/ui (Radix) + Tailwind v4 com o tema Orkio (`styles/globals.css`), CSP estrita, pt-BR.
 - **Automações (3B):** eventos do git/GitHub (por diff de sinais) movem tarefas por regras
   declarativas, em segundo plano, com idempotência no SQLite.
+- **Fluxo Git:** opcional no "Bancos e campos": os eventos do GitHub preenchem no Notion a "Etapa
+  Git" (só para frente), o link da PR e a data do merge na dev; selo da etapa no card. Ver
+  "Fluxo Git" em "Automações (Etapa 3B)".
 - **Fluxo do projeto (3C):** tela para editar etapas e automações (frases, formulário),
   validação, simulação, restaurar padrão, exportar/importar e histórico de alterações.
 - **Claude Code (4A):** roda a tarefa com o CLI `claude` do usuário (login/assinatura dele) num
@@ -456,6 +459,16 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   sempre; 403 em OAuth só na leitura (na escrita falta **Update content**, reconectar não resolve).
 - Config de build: `MAIN_VITE_NOTION_OAUTH_CLIENT_ID` e `MAIN_VITE_SITE_URL` (o intermediário é
   `<site>/notion/*`; `.env.example`; `.env.e2e` só para o E2E). Sem elas, OAuth fica indisponível.
+- **Fluxo Git (opcional)** (`shared/git-flow.ts`, `notion.gitFlow` opcional em `orkio-config`, sem
+  migração; ausente = desligado): seção "Fluxo Git (opcional)" do cartão (`GitFlowSection.tsx`,
+  depois do mapeamento salvo; IPC `notionWorkspace.getGitFlow`/`saveGitFlow(input | null)`):
+  propriedade da etapa (select/status), a opção de cada etapa que o Orkio conhece (`GIT_STAGE_KEYS`:
+  Branch criada, PR aguardando review, Ajustes solicitados, Mergeada na dev; "Não usar" pula), o
+  link da PR (url) e a data do merge (date), com a sugestão de `suggestGitFlow` pelo nome. "PR
+  para main aberta"/"Em produção" ficam à mão no Notion. Só ids e nomes; o main revalida ao salvar
+  (propriedade usada duas vezes = recusa) e `checkGitFlow` na revalidação (apagada/tipo mudou =
+  aviso e o Fluxo Git desliga; opção apagada = aviso, nunca bloqueia as tarefas). `parseTaskPage`
+  lê `gitStage` (`{ id, name, color }`) e `prUrl` no `NotionTask` (memória).
 
 ## GitHub
 
@@ -694,7 +707,10 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   as colunas são os papéis (`roleBoardColumns`, `STAGE_ROLE_COLUMN`) mais "Outras etapas". Arrastar
   vai para a etapa do papel no projeto do card (`dropStageFor`); coluna sem destino fica
   desabilitada durante o arraste. Card: badge da situação (`laneBadge`, de `PersonalTask` pela
-  fonte `personalTasks`), sincronização, "Bloqueada" e a PR no "#n" com os chips (`prButtonText`).
+  fonte `personalTasks`), sincronização, "Bloqueada", a PR no "#n" com os chips (`prButtonText`) e
+  o selo da Etapa Git (`components/GitStageToken.tsx`: ponto com a cor da opção do Notion pelo
+  `NOTION_COLOR_TONE` + nome, `data-testid git-stage`; some sem valor; `BoardCard.gitStage`). O
+  mesmo selo na Lista (coluna só quando alguma tarefa tem valor) e em Detalhes › GitHub.
   Filtros `all/attention/active/review` (com a contagem de "Precisa de você"), Kanban | Lista
   (agrupada por coluna). "Mais ações do quadro": Configurar etapas e regras, Como as colunas rodam.
   Modelo puro em `features/board/board-model.ts`; peças da barra em
@@ -736,6 +752,20 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
 - Notificação de desktop (`Notification`) só em regras com `notify` (padrão: PR fechada sem
   merge). Clique → `board:open-task` abre a tarefa no quadro. Movimento automático →
   `board:changed` recarrega a tela.
+- **Fluxo Git** (`main/git-flow/git-flow.service.ts`, motor puro `gitFlowForEvents`/`nextGitStage`/
+  `gitFlowBackfill` em `shared/git-flow.ts`): no mesmo ciclo e transação das regras, cada evento
+  (`branch.created` → Branch criada; `pr.opened`/`ready_for_review` → PR aguardando review + link;
+  `pr.changes_requested` → Ajustes solicitados; `pr.review_requested` volta de Ajustes; `pr.merged`
+  → Mergeada na dev + `closed_at` como data) vira escrita no Notion. Só para frente na ordem das
+  opções do Notion (exceções: ir para Ajustes e voltar dele); etapa à mão mais adiante nunca volta.
+  Só PR para destino que conta (`countsAsTarget`: base fora de `NEVER_PR_BASES`; hotfix para a
+  main não mexe). Link só se vazio ou de outra PR do mesmo repositório. Pausa global/da tarefa
+  consome o evento; "Bloqueada" não impede. Idempotência `gitflow:<chave>` em `task_events`
+  (evento `git_flow` no histórico). Fila própria (SQLite v15 `git_flow_writes`, a mesma
+  `NotionWriteQueue`): não se mistura com a pendência do quadro; recusa permanente só descarta.
+  Ao ligar (ou trocar a propriedade), o próximo ciclo preenche pelo estado atual
+  (`gitFlow.backfilledAt`). A automação do próprio Notion pode reescrever a data com o horário da
+  mudança (diferença de minutos com o app aberto).
 
 ## Fluxo do projeto (Etapa 3C)
 
@@ -1926,6 +1956,12 @@ major|beta` escolhe; `release:none` não lança; só `site/`, `docs/`, `README.m
   simulado igual entre aberturas do app.
 - Notion simulado com escrita (3A): `notionNetwork: 'down'` (sem internet), `notionWrites:
 'reject'` (400); `setNotionStatus` muda o status "por fora"; `notionState` lê o estado.
+- Fluxo Git: o banco de Tarefas simulado tem "Etapa Git" (`git`, select com as seis opções da
+  Alva), "PR" (`prl`, url) e "Merge na dev" (`mrg`, date); o PATCH grava em
+  `notionState(app).git[página]` (lido de volta nas tarefas) e todo PATCH de página fica em
+  `notionState(app).writes`. `FakePull.base` (padrão `dev`). `e2e/git-flow.spec.ts`: configura
+  pela tela, PR #5 → dev passa por aberta → alterações → review pedida → merge (etapa, link, data
+  e o selo no card); PR #6 → main da ORK-3 não escreve a etapa.
 - GitHub simulado (2D): `githubBranches`, `githubPulls`, `githubPrDetails`; listas com ETag
   (304 quando `If-None-Match` bate) e GraphQL por alias. `__calls` registra `ifNoneMatch`/`status`.
 - Notion simulado: `notionTasks` (`ok`, `no_unique_id`, `renamed`, `status_deleted`) e ids fixos

@@ -180,6 +180,13 @@ interface FakeGlobals {
     status: Record<string, string>
     extra: Record<string, Record<string, unknown>>
     addedProperties: Record<string, unknown>
+    /**
+     * Fluxo Git: valores de "Etapa Git" (`git`, select), "PR" (`prl`, url) e "Merge na dev"
+     * (`mrg`, date) por página, como o PATCH os gravou.
+     */
+    git: Record<string, { stage?: string | null; prUrl?: string | null; mergedAt?: string | null }>
+    /** Todo PATCH de página recebido (propriedades como vieram), em ordem. */
+    writes: { pageId: string; properties: Record<string, Record<string, unknown>> }[]
     /** 5C: pedidos de review recebidos (POST requested_reviewers). */
     reviewRequests?: { pull: number; reviewers: string[]; teams: string[] }[]
     /**
@@ -274,7 +281,8 @@ export interface SeedProject {
   name: string
   localPath: string
   repo:
-    | (Omit<typeof FAKE_REPO, 'verified' | 'visibility' | 'canPush'> & {
+    | (Omit<typeof FAKE_REPO, 'name' | 'verified' | 'visibility' | 'canPush'> & {
+        name: string
         verified: boolean
         visibility: 'public' | 'private' | 'internal' | 'unknown'
         canPush: boolean | null
@@ -417,6 +425,8 @@ export async function launchOrkio(
         },
         extra: {},
         addedProperties: {},
+        git: {},
+        writes: [],
         published: []
       }
       const realFetch = globalThis.fetch
@@ -824,6 +834,15 @@ export async function launchOrkio(
             { id: 'o5', name: 'Finalizadas', color: 'green' },
             { id: 'o3', name: 'Concluída', color: 'green' }
           ]
+          // Fluxo Git: a "Etapa Git" da base da Alva (select), com as seis opções na ordem.
+          const GIT_OPTIONS = [
+            { id: 'g1', name: 'Branch criada', color: 'gray' },
+            { id: 'g2', name: 'PR aguardando review', color: 'yellow' },
+            { id: 'g3', name: 'Ajustes solicitados', color: 'red' },
+            { id: 'g4', name: 'Mergeada na dev', color: 'blue' },
+            { id: 'g5', name: 'PR para main aberta', color: 'purple' },
+            { id: 'g6', name: 'Em produção', color: 'green' }
+          ]
 
           if (path === '/pages' && init?.method === 'POST') {
             if (g.__fakes.notionWrites === 'reject') {
@@ -863,9 +882,23 @@ export async function launchOrkio(
             }
             const pageId = pagePatch[1]!
             const props = (body['properties'] ?? {}) as Record<string, Record<string, unknown>>
+            g.__notion.writes.push({ pageId, properties: props })
             for (const [propId, value] of Object.entries(props)) {
               const status = value['status'] as { name?: string } | undefined
-              if (propId === 'st%3A' && status?.name) {
+              if (propId === 'git' || propId === 'prl' || propId === 'mrg') {
+                const git = (g.__notion.git[pageId] ??= {})
+                if (propId === 'git') {
+                  const name = (value['select'] as { name?: string } | null)?.name ?? null
+                  if (name && !GIT_OPTIONS.some((o) => o.name === name)) {
+                    return json({ object: 'error', code: 'validation_error' }, 400)
+                  }
+                  git.stage = name
+                } else if (propId === 'prl') {
+                  git.prUrl = (value['url'] as string | null) ?? null
+                } else {
+                  git.mergedAt = (value['date'] as { start?: string } | null)?.start ?? null
+                }
+              } else if (propId === 'st%3A' && status?.name) {
                 if (!STATUS_OPTIONS.some((o) => o.name === status.name)) {
                   return json({ object: 'error', code: 'validation_error' }, 400)
                 }
@@ -948,6 +981,14 @@ export async function launchOrkio(
             },
             Responsável: { id: 'ppl', name: 'Responsável', type: 'people', people: {} },
             Bloqueada: { id: 'blk', name: 'Bloqueada', type: 'checkbox', checkbox: {} },
+            'Etapa Git': {
+              id: 'git',
+              name: 'Etapa Git',
+              type: 'select',
+              select: { options: GIT_OPTIONS }
+            },
+            PR: { id: 'prl', name: 'PR', type: 'url', url: {} },
+            'Merge na dev': { id: 'mrg', name: 'Merge na dev', type: 'date', date: {} },
             ...g.__notion.addedProperties
           }
 
@@ -1038,6 +1079,8 @@ export async function launchOrkio(
               const id = `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`
               const name = g.__notion.status[id] ?? _initial.name
               const option = STATUS_OPTIONS.find((o) => o.name === name)
+              const git = g.__notion.git[id] ?? {}
+              const gitOption = GIT_OPTIONS.find((o) => o.name === git.stage)
               const extras: Record<string, unknown> = {}
               for (const [propId, value] of Object.entries(g.__notion.extra[id] ?? {})) {
                 const v = value as { checkbox?: boolean; select?: { name: string } }
@@ -1073,6 +1116,19 @@ export async function launchOrkio(
                     people: owners.map((o) => ({ object: 'user', id: o }))
                   },
                   Bloqueada: { id: 'blk', type: 'checkbox', checkbox: false },
+                  'Etapa Git': {
+                    id: 'git',
+                    type: 'select',
+                    select: gitOption
+                      ? { id: gitOption.id, name: gitOption.name, color: gitOption.color }
+                      : null
+                  },
+                  PR: { id: 'prl', type: 'url', url: git.prUrl ?? null },
+                  'Merge na dev': {
+                    id: 'mrg',
+                    type: 'date',
+                    date: git.mergedAt ? { start: git.mergedAt, end: null } : null
+                  },
                   ...extras
                 }
               }

@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils'
 import { EmptyState } from '../../components/PageState'
+import { GitStageToken } from '../../components/GitStageToken'
 import { StatusToken } from '../../components/StatusToken'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
@@ -26,6 +27,8 @@ export function BoardList({
   actionsFor(projectId: string): CardActions
 }): React.JSX.Element {
   const showProject = mode === 'roles'
+  // Coluna da Etapa Git só quando alguma tarefa tem valor (Fluxo Git ligado).
+  const showGitStage = entries.some((e) => e.card.gitStage)
   const groups = columns
     .map((column) => ({ column, rows: entries.filter((e) => e.columnId === column.id) }))
     .filter((g) => g.rows.length > 0)
@@ -55,6 +58,7 @@ export function BoardList({
                 key={entry.key}
                 entry={entry}
                 showProject={showProject}
+                showGitStage={showGitStage}
                 actions={actionsFor(entry.projectId)}
               />
             ))}
@@ -68,10 +72,12 @@ export function BoardList({
 function BoardListRow({
   entry,
   showProject,
+  showGitStage,
   actions
 }: {
   entry: BoardEntry
   showProject: boolean
+  showGitStage: boolean
   actions: CardActions
 }): React.JSX.Element {
   const { card } = entry
@@ -123,6 +129,11 @@ function BoardListRow({
       <span className="flex w-44 shrink-0 items-center text-xs text-subtle-foreground">
         {pr && <PrButton pr={pr} />}
       </span>
+      {showGitStage && (
+        <span className="flex w-36 shrink-0 items-center text-xs">
+          <GitStageToken stage={card.gitStage} />
+        </span>
+      )}
       {showProject && (
         <span
           className="w-32 shrink-0 truncate text-xs text-muted-foreground"
