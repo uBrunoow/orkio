@@ -389,6 +389,14 @@ export function propertyWritesKey(writes: PropertyWrites): string {
   return JSON.stringify(encodePropertyWrites(writes))
 }
 
+/** Datas por instante (o Notion devolve `…:03:00.000+00:00` para `…:03:00Z`); texto se não parsear. */
+function sameInstant(a: string | null, b: string): boolean {
+  if (a === null) return false
+  const x = Date.parse(a)
+  const y = Date.parse(b)
+  return Number.isNaN(x) || Number.isNaN(y) ? a === b : x === y
+}
+
 /** O Notion já tem todos os valores escritos? */
 export function propertyWritesMatch(
   values: Readonly<Record<string, SimplePropertyValue>> | undefined,
@@ -399,7 +407,7 @@ export function propertyWritesMatch(
     const current = values[id]
     if (w.type === 'checkbox') return current?.type === 'checkbox' && current.checked === w.checked
     if (w.type === 'url') return current?.type === 'url' && current.url === w.url
-    if (w.type === 'date') return current?.type === 'date' && current.start === w.start
+    if (w.type === 'date') return current?.type === 'date' && sameInstant(current.start, w.start)
     return (
       current !== undefined &&
       (current.type === 'select' || current.type === 'status') &&

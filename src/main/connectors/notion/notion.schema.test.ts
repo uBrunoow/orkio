@@ -365,6 +365,18 @@ describe('páginas', () => {
     expect(propertyWritesMatch(known, writes)).toBe(true)
   })
 
+  it('date compara por instante e decode ignora url/date malformados', () => {
+    const values = simplePropertyValues({
+      properties: {
+        B: { id: 'dt', type: 'date', date: { start: '2026-11-26T14:03:00.000+00:00' } }
+      }
+    })
+    const w = (start: string) => ({ dt: { type: 'date', start } }) as const
+    expect(propertyWritesMatch(values, w('2026-11-26T14:03:00Z'))).toBe(true)
+    expect(propertyWritesMatch(values, w('2026-11-26T14:04:00Z'))).toBe(false)
+    expect(decodePropertyWrites({ a: { date: {} }, b: { url: 3 } })).toEqual({})
+  })
+
   it('valores vazios e páginas na lixeira', () => {
     const page = {
       object: 'page',
