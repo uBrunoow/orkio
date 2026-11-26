@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.22] - 2026-11-26
+
 ### Adicionado
 
 - "Copiar de outro projeto…" no Fluxo do projeto: traz colunas, automações, o fluxo de cada coluna, os fluxos de tarefa usados e o "Como as colunas rodam" para o rascunho, reaproveitando as colunas com o mesmo papel (as tarefas ficam onde estão).
