@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTaskEvent } from './task-events'
+import { activityGroup, parseTaskEvent } from './task-events'
 import { describeEvent, prUrl } from './task-history'
 
 /** Como lido do banco (o `detail` passa pelo parser do catálogo). */
@@ -51,5 +51,29 @@ describe('revisão pelo gh (projeto só com git local)', () => {
       detail: { flow: 'review_self' }
     })!
     expect(describeEvent(e, () => '')).toContain('Revisão com alterações (autor da PR, pelo gh)')
+  })
+})
+
+describe('Fluxo Git no histórico', () => {
+  const gitFlow = (detail: Record<string, unknown>) =>
+    parseTaskEvent({
+      kind: 'git_flow',
+      source: 'automation',
+      fromStage: null,
+      toStage: null,
+      detail
+    })!
+
+  it('etapa escrita, recusa e evento sem mudança', () => {
+    const wrote = gitFlow({ event: 'pr.merged', stage: 'Mergeada na dev', prNumber: 5 })
+    expect(describeEvent(wrote, () => '')).toBe('Etapa Git → Mergeada na dev')
+    expect(activityGroup(wrote)).toBe('automation')
+    const rejected = gitFlow({ stage: 'Mergeada na dev', rejected: 'o Notion recusou o valor' })
+    expect(describeEvent(rejected, () => '')).toBe(
+      'O Notion recusou a Etapa Git: o Notion recusou o valor'
+    )
+    const same = gitFlow({ event: 'pr.opened', reason: 'já estava assim' })
+    expect(describeEvent(same, () => '')).toContain('Etapa Git sem mudança (já estava assim)')
+    expect(activityGroup(same)).toBeNull()
   })
 })

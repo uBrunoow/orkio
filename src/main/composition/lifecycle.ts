@@ -6,6 +6,8 @@ export interface StopParts {
     /** Fase 2: terminais embutidos (PTY) saem junto. */
     terminals: { stopAll(): void }
     writes: { stop(): void }
+    /** Fila das escritas do Fluxo Git no Notion. */
+    gitFlowWrites?: { stop(): void }
     scheduler: { stop(): void }
     /** Fase 5: a conferência das PRs que acordam fluxos. */
     prWake?: { stop(): void }
@@ -44,6 +46,7 @@ export function createStop(
         while (work.runs.activeRuns().some((r) => !r.queued) && now() < deadline) await sleep(200)
       }
       work?.writes.stop()
+      work?.gitFlowWrites?.stop()
       work?.scheduler.stop()
       work?.prWake?.stop()
       work?.overview.dispose()

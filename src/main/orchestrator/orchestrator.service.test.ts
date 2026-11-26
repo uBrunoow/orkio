@@ -54,6 +54,7 @@ function makeCard(taskId: string, stageId: string, over: Partial<BoardCard> = {}
     stageId,
     blocked: false,
     automationPaused: false,
+    gitStage: null,
     sync: { state: 'synced' },
     ...over
   }

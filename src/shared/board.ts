@@ -366,6 +366,8 @@ export interface BoardCard {
   blocked: boolean
   /** Automações pausadas nesta tarefa (3B). */
   automationPaused: boolean
+  /** Etapa Git atual no Notion (Fluxo Git), com a cor da opção; `null` sem valor. */
+  gitStage: { name: string; color: NotionColor } | null
   sync: { state: CardSyncState; message?: string }
 }
 

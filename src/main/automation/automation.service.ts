@@ -20,6 +20,7 @@ import {
   type TaskSnapshot
 } from '../../shared/automation'
 import type { BoardService } from '../board/board.service'
+import type { GitFlowService } from '../git-flow/git-flow.service'
 import type { BoardStore } from '../board/board.store'
 import type { OrkioConfig } from '../config/orkio-config'
 import type { ConfigStore } from '../storage/config-store'
@@ -39,12 +40,17 @@ export interface AutomationNotification {
 export interface AutomationServiceDeps {
   config: ConfigStore<OrkioConfig>
   store: BoardStore
-  board: Pick<BoardService, 'get' | 'applyAutomationMove' | 'flushWrites' | 'hasSnapshot'>
+  board: Pick<
+    BoardService,
+    'get' | 'applyAutomationMove' | 'flushWrites' | 'hasSnapshot' | 'notionTasks'
+  >
   signals: {
     get(projectId: string, options?: { force?: boolean }): Promise<Result<TaskSignalsResult>>
   }
   notify(notification: AutomationNotification): void
   onChanged(projectId: string): void
+  /** Fluxo Git: a Etapa Git no Notion pelos mesmos eventos, na mesma transação do ciclo. */
+  gitFlow?: Pick<GitFlowService, 'apply' | 'backfill' | 'writes'>
   now?: () => Date
 }
 
@@ -111,15 +117,46 @@ export class AutomationService {
     const notifications: AutomationNotification[] = []
     let eventCount = 0
     let moves = 0
+    // Fluxo Git só com o mapeamento salvo; a carga inicial só com o GitHub lido (senão uma PR
+    // mergeada viraria "Branch criada" e o merge nunca mais geraria evento).
+    const gitFlowConfig = config.notion?.gitFlow
+    const gitFlow = gitFlowConfig ? this.deps.gitFlow : undefined
+    const notionTasks = gitFlow
+      ? new Map(this.deps.board.notionTasks(projectId).map((t) => [t.id, t]))
+      : null
+    let gitWrites = 0
 
     this.deps.store.transaction((tx) => {
+      if (
+        gitFlow &&
+        notionTasks &&
+        cards &&
+        !gitFlowConfig?.backfilledAt &&
+        result.github === 'ok'
+      ) {
+        gitWrites += gitFlow.backfill(tx, {
+          projectId,
+          tasks: [...notionTasks.values()],
+          signals: result.signals
+        })
+      }
       for (const taskId of taskIds) {
         const prev = (previous.get(taskId) as TaskSnapshot | undefined) ?? null
         const fresh = toSnapshot(result.signals[taskId], available)
-        const events = deriveEvents(taskId, prev, fresh).filter(
-          (e) => !this.deps.store.hasEventKey(projectId, taskId, e.key)
-        )
+        const derived = deriveEvents(taskId, prev, fresh)
+        const events = derived.filter((e) => !this.deps.store.hasEventKey(projectId, taskId, e.key))
         this.deps.store.saveSnapshot(taskId, projectId, mergeSnapshot(prev, fresh), at)
+        if (gitFlow && notionTasks && derived.length > 0) {
+          const wrote = gitFlow.apply(tx, {
+            projectId,
+            taskId,
+            events: derived,
+            task: notionTasks.get(taskId) ?? null,
+            signals: result.signals[taskId],
+            paused: config.automation.paused || (states.get(taskId)?.automationPaused ?? false)
+          })
+          if (wrote) gitWrites++
+        }
         if (events.length === 0) continue
 
         const r = this.decideAndApply(tx, projectId, taskId, events, {
@@ -137,6 +174,7 @@ export class AutomationService {
     })
 
     if (moves > 0) this.deps.board.flushWrites()
+    if (gitWrites > 0) void gitFlow?.writes.kick()
     if (eventCount > 0) this.deps.onChanged(projectId)
     for (const n of notifications) this.deps.notify(n)
     return { github: result.github, events: eventCount, moves }

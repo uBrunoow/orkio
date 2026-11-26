@@ -145,6 +145,8 @@ export class NotionWorkspaceService {
   private readonly now: () => Date
   private readonly ttl: number
   private status: NotionWorkspaceStatus | null = null
+  /** Último schema lido do banco de Tarefas (ordem das opções da Etapa Git, sem rede). */
+  private tasksSchema: NotionDataSourceSchema | null = null
   private checking: Promise<NotionWorkspaceStatus> | null = null
   private readonly tasksCache = new Map<string, CacheEntry<CachedTasks>>()
   private projectsCache: CacheEntry<{ pages: NotionProjectPage[]; truncated: boolean }> | null =
@@ -629,6 +631,17 @@ export class NotionWorkspaceService {
     return best?.value.tasks ?? null
   }
 
+  /**
+   * Opções da propriedade da Etapa Git na ordem do Notion, do último schema lido (o quadro relê a
+   * cada ciclo), sem rede. `null` = sem Fluxo Git ou schema ainda não lido.
+   */
+  gitStageOptions(): { id: string; name: string }[] | null {
+    const gitFlow = this.config().notion?.gitFlow
+    if (!gitFlow || !this.tasksSchema) return null
+    const prop = this.tasksSchema.properties.find((p) => p.id === gitFlow.stage.id)
+    return prop?.options ? prop.options.map((o) => ({ id: o.id, name: o.name })) : null
+  }
+
   /** Saúde do mapeamento já conhecida (sem revalidar); `null` = ainda não verificada. */
   cachedHealth(): NotionWorkspaceStatus['health'] | null {
     return this.status?.health ?? null
@@ -737,6 +750,7 @@ export class NotionWorkspaceService {
     if (!schema) {
       throw new WorkspaceError({ code: 'unexpected', message: WORKSPACE_MESSAGES.invalidSchema })
     }
+    if (sameId(id, this.config().notion?.tasksDataSource.id ?? '')) this.tasksSchema = schema
     return schema
   }
 

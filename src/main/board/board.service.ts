@@ -50,7 +50,7 @@ import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
 import type { BoardStore, PendingWrite } from './board.store'
 import { NotionWriteQueue, type WriteQueueDeps } from './write-queue'
 import type { Tx } from '../db/database'
-import type { NotionMapping, NotionPropertySummary } from '../../shared/notion'
+import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
 import type { Result } from '../../shared/result'
 import { isApiError } from '../net/http'
 import { canReconnect, type NotionConnectionMethod } from '../../shared/notion-errors'
@@ -934,6 +934,11 @@ export class BoardService {
       : { stageId: null, blocked: false }
   }
 
+  /** Tarefas do Notion da última leitura do quadro (sem rede); vazio se ainda não leu. */
+  notionTasks(projectId: string): readonly NotionTask[] {
+    return this.snapshots.get(projectId)?.data.tasks ?? []
+  }
+
   private card(projectId: string, taskId: string): BoardCard {
     const snapshot = this.snapshots.get(projectId)!
     const task = snapshot.data.tasks.find((t) => t.id === taskId)!
@@ -960,6 +965,7 @@ export class BoardService {
       stageId: local.stageId,
       blocked: local.blocked,
       automationPaused: local.automationPaused,
+      gitStage: task.gitStage ? { name: task.gitStage.name, color: task.gitStage.color } : null,
       sync: local.pending
         ? { state: 'pending', message: this.retryMessages.get(task.id) ?? BOARD_MESSAGES.pending }
         : { state: 'synced' }

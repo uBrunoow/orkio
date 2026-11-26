@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { StatusOption } from '../../shared/board'
 import type { TaskPullRequest, TaskSignals, TaskSignalsResult } from '../../shared/task-signals'
 import { BoardService, type BoardNotion } from '../board/board.service'
@@ -15,7 +15,11 @@ import {
 } from '../connectors/notion/notion.schema'
 import { openDatabase, type Db } from '../db/database'
 import type { ConfigStore } from '../storage/config-store'
-import { AutomationService, type AutomationNotification } from './automation.service'
+import {
+  AutomationService,
+  type AutomationNotification,
+  type AutomationServiceDeps
+} from './automation.service'
 import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
 import { ApiError } from '../net/http'
 
@@ -134,7 +138,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
   let clock: number
   const signalForces: boolean[] = []
 
-  function build(): void {
+  function build(gitFlow?: AutomationServiceDeps['gitFlow']): void {
     const store = new BoardStore(db)
     board = new BoardService({
       config,
@@ -189,6 +193,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
       },
       notify: (n) => notifications.push(n),
       onChanged: (id) => changed.push(id),
+      ...(gitFlow ? { gitFlow } : {}),
       now: () => new Date(clock)
     })
   }
@@ -562,6 +567,61 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
     await queue.kick()
     expect(notion.status[T2]).toBe('Finalizadas')
     expect(await cycle()).toMatchObject({ events: 0, moves: 0 })
+  })
+
+  function fakeGitFlow() {
+    return {
+      apply: vi.fn((): boolean => true),
+      backfill: vi.fn((): number => 0),
+      writes: { kick: vi.fn(async () => {}) } as unknown as NotionWriteQueue<never>
+    }
+  }
+
+  it('Fluxo Git: o merge move o card pela regra e chama o Fluxo Git com os mesmos eventos', async () => {
+    await config.update((c) => ({
+      ...c,
+      notion: {
+        ...c.notion!,
+        gitFlow: { stage: { id: 'eg', name: 'Etapa Git', type: 'select' }, options: {} }
+      }
+    }))
+    const gitFlow = fakeGitFlow()
+    build(gitFlow)
+    world.pr[T1] = { baseRef: 'dev' }
+    await cycle() // linha de base (com a carga inicial)
+    expect(gitFlow.backfill).toHaveBeenCalledTimes(1)
+    const backfillCall = gitFlow.backfill.mock.calls[0] as unknown as [
+      unknown,
+      { projectId: string }
+    ]
+    expect(backfillCall[1]).toMatchObject({ projectId: 'p1' })
+    expect(gitFlow.apply).not.toHaveBeenCalled()
+
+    world.pr[T1] = { baseRef: 'dev', state: 'merged', closedAt: '2026-11-19T12:30:00Z' }
+    await cycle()
+    expect(await stageOf(T1)).toBe('Finalizada')
+    expect(gitFlow.apply).toHaveBeenCalledTimes(1)
+    const input = (gitFlow.apply.mock.calls[0] as unknown as [unknown, Record<string, unknown>])[1]
+    expect(input).toMatchObject({
+      projectId: 'p1',
+      taskId: T1,
+      task: { id: T1 },
+      signals: { taskId: T1 },
+      paused: false
+    })
+    expect((input['events'] as { kind: string }[]).map((e) => e.kind)).toEqual(['pr.merged'])
+    expect(gitFlow.writes.kick).toHaveBeenCalled()
+  })
+
+  it('Fluxo Git: sem o mapeamento no Notion, não chama', async () => {
+    const gitFlow = fakeGitFlow()
+    build(gitFlow)
+    await cycle()
+    world.pr[T1] = { state: 'merged', closedAt: '2026-11-19T12:30:00Z' }
+    await cycle()
+    expect(await stageOf(T1)).toBe('Finalizada')
+    expect(gitFlow.apply).not.toHaveBeenCalled()
+    expect(gitFlow.backfill).not.toHaveBeenCalled()
   })
 
   it('PR fechada sem merge → Em andamento com notificação de desktop', async () => {

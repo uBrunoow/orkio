@@ -220,6 +220,18 @@ describe('NotionWorkspaceService', () => {
       expect(result.value.properties.some((p) => p.id === 'title')).toBe(false)
     })
 
+    it('gitStageOptions: opções da etapa na ordem do Notion, do último schema lido (sem rede)', async () => {
+      const service = await configured()
+      expect(service.gitStageOptions()).toBeNull()
+      await service.saveGitFlow(INPUT)
+      expect(await service.statusOptions()).toMatchObject({ ok: true })
+      expect(service.gitStageOptions()).toEqual([
+        { id: 'o1', name: 'Branch criada' },
+        { id: 'o2', name: 'PR aguardando review' },
+        { id: 'o4', name: 'Mergeada na dev' }
+      ])
+    })
+
     it('salva só ids e nomes e preserva a data da carga inicial se a etapa não mudou', async () => {
       const service = await configured()
       expect(await service.saveGitFlow(INPUT)).toMatchObject({ ok: true })

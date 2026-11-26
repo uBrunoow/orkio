@@ -100,6 +100,17 @@ function deliveryText(e: Extract<HistoryEvent, { kind: 'delivery' }>): string {
   }
 }
 
+function gitFlowText(e: Extract<HistoryEvent, { kind: 'git_flow' }>): string {
+  const { stage, rejected, reason, prNumber: n } = e.detail
+  if (rejected !== undefined) return `O Notion recusou a Etapa Git: ${rejected}`
+  if (stage !== undefined) return `Etapa Git → ${stage}`
+  if (reason !== undefined) {
+    const label = e.detail.event ? EVENT_META[e.detail.event].label : 'Evento'
+    return `${label}: Etapa Git sem mudança (${reason})`
+  }
+  return n !== undefined ? `Link da PR #${n} gravado no Notion` : 'Etapa Git atualizada'
+}
+
 function agentAssigned(e: Extract<HistoryEvent, { kind: 'agent_assigned' }>): string {
   const agent = e.detail.agent ?? ''
   switch (e.detail.by) {
@@ -148,6 +159,8 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
         default:
           return unreachable(e.detail.outcome)
       }
+    case 'git_flow':
+      return gitFlowText(e)
     case 'automation_paused':
       return 'Automações pausadas nesta tarefa'
     case 'automation_resumed':
