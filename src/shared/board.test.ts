@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   findOption,
+  isReviewReturn,
   priorityRank,
   queueStageOf,
   reconcile,
@@ -265,5 +266,20 @@ describe('queueStageOf (coluna "A fazer" da lista lateral)', () => {
     ).toBe('b')
     expect(queueStageOf({ stages })).toBe('a')
     expect(queueStageOf(null)).toBeNull()
+  })
+})
+
+describe('volta da revisão (Revisado → Revisando pela automação)', () => {
+  const STAGES = [
+    { id: 'work', role: 'work' as const },
+    { id: 'rev', role: 'review' as const },
+    { id: 'done-rev', role: 'reviewed' as const }
+  ]
+  it('só a automação de Revisado para Revisando conta; à mão ou da etapa de trabalho, não', () => {
+    expect(isReviewReturn(STAGES, 'done-rev', 'rev', 'automation')).toBe(true)
+    expect(isReviewReturn(STAGES, 'done-rev', 'rev', 'manual')).toBe(false)
+    expect(isReviewReturn(STAGES, 'work', 'rev', 'automation')).toBe(false)
+    expect(isReviewReturn(STAGES, null, 'rev', 'automation')).toBe(false)
+    expect(isReviewReturn(STAGES, 'rev', 'done-rev', 'automation')).toBe(false)
   })
 })

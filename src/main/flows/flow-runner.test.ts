@@ -196,6 +196,16 @@ describe('FlowRunner', () => {
       enter(runner, source)
       await flush()
     }
+    // Volta da revisão (Revisado → Revisando pela automação): espera a revisão humana.
+    runner.onStageChanged({
+      projectId: 'p1',
+      taskId: 't1',
+      from: 's-revd',
+      to: 's-rev',
+      source: 'automation',
+      reviewReturn: true
+    })
+    await flush()
     expect(runner.list('t1')).toEqual([])
     enter(runner, 'automation')
     await flush()

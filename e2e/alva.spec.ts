@@ -534,8 +534,15 @@ test('Task 18: Revisando → revisão publicada (padrão da coluna) → gate →
   const flow = panel.getByRole('region', { name: 'Fluxo da tarefa' })
   const pushedSha = git(origin(), 'rev-parse', taskBranch()).trim()
 
+  // A volta de Revisado para Revisando (o corretor pediu nova revisão) espera a revisão humana:
+  // a revisão do agente não roda de novo sozinha (senão revisor e corretor ficam num laço).
+  await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+  await expect(flow).toContainText('Fluxo: Alva: comentários da PR')
+  await page.waitForTimeout(1500)
+  await expect(flow).not.toContainText('Fluxo: Alva: revisão publicada')
   // Sem configurar nada: a coluna Revisando já tem o "Alva: revisão publicada" (padrão da tela
-  // alva-flow), que começou sozinho com a volta da tarefa para Revisando.
+  // alva-flow); você roda pelo botão.
+  await flow.getByRole('button', { name: 'Rodar fluxo de novo' }).click()
   await expect(flow).toContainText('Fluxo: Alva: revisão publicada', { timeout: 30_000 })
   // Threads resolvidas (para o fluxo do Revisado, que começa depois, terminar sem comentários).
   await setFakes(app, {

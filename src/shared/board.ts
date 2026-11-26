@@ -61,6 +61,22 @@ export interface BoardConfig {
   updatedAt: string
 }
 
+/**
+ * A automação devolveu a tarefa de Revisado (papel `reviewed`) para Revisando (`review`), depois
+ * das correções: ela espera a revisão humana, e o fluxo da coluna (a revisão do agente) não roda
+ * de novo, senão revisor e corretor ficam num laço. Movida à mão, roda normalmente.
+ */
+export function isReviewReturn(
+  stages: readonly { id: string; role?: StageRole | undefined }[],
+  from: string | null,
+  to: string | null,
+  source: string
+): boolean {
+  if (source !== 'automation' || !from || !to) return false
+  const role = (id: string): StageRole | undefined => stages.find((s) => s.id === id)?.role
+  return role(from) === 'reviewed' && role(to) === 'review'
+}
+
 export function stageWithRole(
   stages: readonly { id: string; role?: StageRole | undefined }[],
   role: StageRole

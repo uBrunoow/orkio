@@ -1204,7 +1204,13 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   "## Resumo" + "## O que vou fazer") → gate em qualquer modo → `PR_COMMENTS_APPLY` (corrige, push,
   responde threads e revisões gerais com `gh pr comment` citando o revisor) → push do Orkio se
   faltar → `rerequest_review` (pede de novo a quem revisou, menos o autor da PR, sem gate; sem
-  ninguém conhecido pergunta como o `request_review`).
+  ninguém conhecido pergunta como o `request_review`). Depois, `onReviewRequested` →
+  `AutomationService.applyEvent(…, 'pr.review_requested')`: o revisor já pendente não gera evento
+  no GitHub, então o Orkio aplica as regras na hora (Revisado → Revisando). Essa volta
+  (`isReviewReturn`, `shared/board.ts`: automação de `reviewed` para `review`) marca o
+  `StageChange.reviewReturn`: o `FlowRunner` não começa o fluxo da coluna, o orquestrador não
+  atribui o agente da raia nem roda o "carried in" (senão revisor e corretor ficam num laço); a
+  tarefa espera a revisão humana. Movida à mão, roda normalmente.
 - **Revisão como orkio[bot]** (`delivery/review-publish.ts`, ação `publish_review`; não é entrega:
   o Revisor `delivery: false` roda, mas o `FlowRunner` a trata como passo que publica para a etapa
   mudar sem interromper): o `confirm` lê o texto final da execução mais recente do fluxo
