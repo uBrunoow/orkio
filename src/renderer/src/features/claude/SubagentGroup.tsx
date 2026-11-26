@@ -6,6 +6,7 @@ import { StatusToken, type StatusTone } from '../../components/StatusToken'
 import { plural } from '../../lib/format'
 import { CollapsibleHeader } from '../../components/CollapsibleHeader'
 import type { SubagentRow, SubagentState } from './run-transcript'
+import { RunImages } from './RunImages'
 import { StepRow, TOOLS_LIST } from './WorkSteps'
 
 const STATE: Record<SubagentState, { tone: StatusTone; label: string }> = {
@@ -105,7 +106,10 @@ function SubagentItem({ agent: a }: { agent: SubagentRow }): React.JSX.Element {
                 </p>
               )}
               {a.steps.slice(-STEPS_SHOWN).map((step) => (
-                <StepRow key={step.id} step={step} />
+                <div key={step.id}>
+                  <StepRow step={step} />
+                  <RunImages images={step.images} />
+                </div>
               ))}
             </div>
           )}

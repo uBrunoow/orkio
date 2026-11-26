@@ -372,6 +372,32 @@ async function main() {
     assistant([{ type: 'text', text: `resposta: ${answer}` }])
   }
 
+  if (prompt.includes('tirar-print')) {
+    // PNG 1x1 de verdade: o Orkio confere o tipo pelos bytes.
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    assistant([
+      { type: 'tool_use', id: 'toolu_shot', name: 'mcp__playwright__browser_take_screenshot', input: {} }
+    ])
+    out({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_shot',
+            content: [
+              { type: 'text', text: 'Print da página' },
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }
+            ]
+          }
+        ]
+      }
+    })
+    assistant([{ type: 'text', text: 'Tirei o print da página.' }])
+  }
+
   if (prompt.includes('subagentes')) {
     const task = (id, description, subagent_type) => ({
       type: 'tool_use',

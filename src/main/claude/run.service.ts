@@ -17,6 +17,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import {
   ACTIVE_RUN_STATUSES,
+  IMAGE_LIMITS,
   type AgentRunView,
   type PermissionAnswer,
   type RunLogEvent,
@@ -56,7 +57,8 @@ import {
   type BridgeRequest
 } from './runner'
 import { ensureScratch } from './scratch'
-import { summarizeTool } from './stream'
+import { summarizeTool, type ToolImage } from './stream'
+import { sniffImage } from './attachments'
 import type { WorktreeRecord, WorktreeService } from './worktree.service'
 
 export type { RunAgent, RunSpec } from './run-spec'
@@ -87,6 +89,8 @@ export interface RunServiceDeps {
     /** Fase 4: servidores MCP, segredos do agente e skills negadas desta execução. */
     extras: RunExtras
     onEvent(event: RunLogEvent): void
+    /** Imagem (bytes) de um `tool_result`: o serviço confere, grava e loga só a referência. */
+    onImage(image: ToolImage): void
     onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   }): RunHandle
   /**
@@ -174,6 +178,9 @@ interface ActiveRun {
   timedOut: boolean
   /** Valores lidos de arquivos .env do worktree: escondidos em tudo que vai para o log. */
   secrets: Set<string>
+  /** Imagens das ferramentas já gravadas nesta execução e avisos já dados (uma vez cada). */
+  images: number
+  imageNotes: Set<string>
   spec: RunSpec
   /** Categorias do modo entrega (5C) já aprovadas nesta execução. */
   granted: Set<DeliveryKind>
@@ -181,6 +188,13 @@ interface ActiveRun {
   pushDefault: string | null
   start: () => Promise<void>
 }
+
+const IMAGE_MIME = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp'
+} as const
 
 export class RunBusyError extends DomainError {
   constructor() {
@@ -371,6 +385,8 @@ export class RunService {
       timer: null,
       timedOut: false,
       secrets: new Set(),
+      images: 0,
+      imageNotes: new Set(),
       spec,
       granted: new Set(),
       aliases: {},
@@ -457,6 +473,7 @@ export class RunService {
           broker,
           extras,
           onEvent: (event) => this.onEvent(run, event),
+          onImage: (image) => this.onImage(run, image),
           onExit: (result) => void this.onExit(run, result)
         })
         await run.handle.start()
@@ -971,6 +988,60 @@ export class RunService {
     this.log(run, event)
   }
 
+  private onImage(run: ActiveRun, image: ToolImage): void {
+    const note = (text: string): void => {
+      if (run.imageNotes.has(text)) return
+      run.imageNotes.add(text)
+      this.log(run, { kind: 'info', text })
+    }
+    if (run.images >= IMAGE_LIMITS.perRun) {
+      return note(
+        `Limite de ${IMAGE_LIMITS.perRun} imagens nesta execução: as próximas não aparecem na conversa.`
+      )
+    }
+    if (image.data.byteLength > IMAGE_LIMITS.maxBytes) {
+      return note('Imagem grande demais (mais de 5 MB): não aparece na conversa.')
+    }
+    const ext = sniffImage(image.data)
+    if (!ext) return
+    const n = ++run.images
+    const dir = this.imagesDir(run.id)
+    void mkdir(dir, { recursive: true })
+      .then(() => writeFile(join(dir, `${n}.${ext}`), image.data, { mode: 0o600 }))
+      .then(
+        () =>
+          this.log(run, {
+            kind: 'image',
+            toolId: image.toolId,
+            runId: run.id,
+            n,
+            mime: IMAGE_MIME[ext]
+          }),
+        () => undefined
+      )
+  }
+
+  /** Bytes da n-ésima imagem de uma execução (`null` se não existe ou já saiu na rotação). */
+  async readImage(runId: string, n: number): Promise<{ mime: string; data: Uint8Array } | null> {
+    if (
+      !/^[A-Za-z0-9-]+$/.test(runId) ||
+      !Number.isInteger(n) ||
+      n < 1 ||
+      n > IMAGE_LIMITS.perRun
+    ) {
+      return null
+    }
+    for (const [ext, mime] of Object.entries(IMAGE_MIME)) {
+      const data = await readFile(join(this.imagesDir(runId), `${n}.${ext}`)).catch(() => null)
+      if (data) return { mime, data: new Uint8Array(data) }
+    }
+    return null
+  }
+
+  private imagesDir(runId: string): string {
+    return join(this.deps.runsDir, runId.replace(/[^A-Za-z0-9-]/g, ''), 'images')
+  }
+
   private runCost(run: ActiveRun, raw: number): number {
     if (!run.resumedSession) return raw
     const prev = this.deps.db.get<{ total: number | null }>(
@@ -1182,7 +1253,15 @@ export class RunService {
       taskId,
       this.keepPerTask
     )
-    for (const r of old) await rm(this.logPath(r.id), { force: true }).catch(() => undefined)
+    for (const r of old) {
+      await rm(this.logPath(r.id), { force: true }).catch(() => undefined)
+      const id = r.id.replace(/[^A-Za-z0-9-]/g, '')
+      // Nunca a própria pasta das execuções (id vazio).
+      if (id)
+        await rm(join(this.deps.runsDir, id), { recursive: true, force: true }).catch(
+          () => undefined
+        )
+    }
   }
 }
 

@@ -8,6 +8,7 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Adicionado
 
+- Imagens na conversa: prints do navegador e imagens que o agente lê aparecem como miniatura na sessão da tarefa; clique para ver grande.
 - "Copiar de outro projeto…" no Fluxo do projeto: traz colunas, automações, o fluxo de cada coluna, os fluxos de tarefa usados e o "Como as colunas rodam" para o rascunho, reaproveitando as colunas com o mesmo papel (as tarefas ficam onde estão).
 - Projetos só com git local leem o GitHub pelo `gh` da sua máquina a cada 5 minutos (ou na hora, em "Atualizar"): PRs, CI, revisões e comentários aparecem e as automações do quadro andam (PR aberta → Revisando, alterações pedidas → Revisado, merge → Finalizada). Pedir review e publicar a revisão também saem pelo `gh`, com o seu usuário.
 - Aba "Notion" no painel da tarefa: título, status, prioridade, responsáveis e a descrição da página, com "Abrir no Notion".

@@ -3,7 +3,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RunLogEvent } from '../../shared/agent-run'
 import type { RuntimeChoice } from '../../shared/agent-runtime'
 import { READ_ONLY_DENIED_TOOLS } from '../../shared/task-flow'
 import { BRIDGE_PROMPT_TOOL } from './bridge/protocol'
@@ -241,6 +242,57 @@ describe('ClaudeRun', () => {
       ORKIO_BRIDGE_SOCKET: join(dir, 's.sock'),
       ORKIO_BRIDGE_TOKEN: 't'
     })
+  })
+
+  it('imagem de um tool_result vai para onImage; o evento continua sem o base64', async () => {
+    const stdout = new PassThrough()
+    const spawn = (() => {
+      const child = new EventEmitter() as EventEmitter & Record<string, unknown>
+      child['stdin'] = new PassThrough()
+      child['stdout'] = stdout
+      child['stderr'] = new PassThrough()
+      child['kill'] = () => true
+      return child
+    }) as unknown as SpawnFn
+    const events: RunLogEvent[] = []
+    const images: { toolId: string; data: Buffer }[] = []
+    const run = new ClaudeRun({
+      claudeCommand: 'claude',
+      spec: spec() as RunSpec,
+      cwd: dir,
+      prompt: 'oi',
+      sessionId: 's1',
+      broker: { socketPath: join(dir, 's.sock'), token: 't' } as unknown as PermissionBroker,
+      nodePath: process.execPath,
+      bridgeScript: 'bridge.js',
+      tmpDir: dir,
+      env: {},
+      onEvent: (e) => events.push(e),
+      onImage: (img) => images.push(img),
+      onExit: () => undefined,
+      spawn
+    })
+    await run.start()
+    const data = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64')
+    stdout.write(
+      `${JSON.stringify({
+        type: 'user',
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 'tu_9',
+              content: [
+                { type: 'image', source: { type: 'base64', media_type: 'image/png', data } }
+              ]
+            }
+          ]
+        }
+      })}\n`
+    )
+    await vi.waitFor(() => expect(images).toHaveLength(1))
+    expect(images[0]!.toolId).toBe('tu_9')
+    expect(events).toEqual([{ kind: 'tool_result', id: 'tu_9', error: false }])
   })
 })
 

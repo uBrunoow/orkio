@@ -818,7 +818,12 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   e tem ambiente.
 - **Execuções** (`run.service.ts`): no máximo 2 em paralelo, 1 por tarefa (fila). `agent_runs`
   (SQLite v4) + `<userData>/runs/<id>.jsonl` só com eventos normalizados (nunca o stream cru),
-  mantendo 10 por tarefa. Todo texto passa por `redactSecrets` + valores lidos dos `.env*` do
+  mantendo 10 por tarefa. Imagens dos `tool_result` (print do Playwright, `Read` de imagem):
+  `toolImages` (`stream.ts`) → `onImage` → tipo pelos bytes (`sniffImage`), até 5 MB e 20 por
+  execução, gravadas em `runs/<id>/images/<n>.<ext>` (0600, saem na rotação); o log tem só
+  `{ kind: 'image', toolId, runId, n, mime }`, nunca o base64. A tela lê por `claude.runImage`
+  e mostra por `blob:` (CSP `img-src … blob:`): miniatura no grupo de trabalho/passo do
+  subagente, clique abre num Dialog. Todo texto passa por `redactSecrets` + valores lidos dos `.env*` do
   worktree (só em memória). Ao abrir o app, execuções "em andamento" viram `failed`; ao fechar,
   todas são canceladas (SIGINT → SIGTERM 5 s → SIGKILL 10 s).
 - Briefing: blocos da página (até 3 níveis, 400 blocos) → markdown + campos + PR; editável antes

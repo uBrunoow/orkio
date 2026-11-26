@@ -9,7 +9,7 @@ import {
 } from './policy'
 import { decidePermission, isGitRead } from './policy'
 import { isEnvFile, redactSecrets, sanitizeEnv } from '../platform/redact'
-import { parseStreamLine } from './stream'
+import { parseStreamLine, toolImages } from './stream'
 
 const WT = '/home/u/.config/orkio/worktrees/p1/ORK-7'
 const rt = (
@@ -266,7 +266,7 @@ describe('política: heredoc', () => {
   const bash = (command: string): string =>
     evaluatePermission({ tool: 'Bash', input: { command } }, ctx).decision
   it('mensagem de commit em heredoc com /api/... não é caminho fora do worktree', () => {
-    const msg = "feat: x\n\n- T4: campos em /api/home/kpis/\n- T5: /api/tv/b2b/"
+    const msg = 'feat: x\n\n- T4: campos em /api/home/kpis/\n- T5: /api/tv/b2b/'
     expect(bash(`cd ${WT}; git commit -q -F - <<'EOF'\n${msg}\nEOF`)).toBe('ask')
     expect(bash(`cat <<EOF > notas.md\nveja /etc/hosts\nEOF`)).toBe('ask')
   })
@@ -656,5 +656,38 @@ describe('briefing', () => {
 describe('POLICY_MESSAGES: o caminho para publicar', () => {
   it('push e gh dizem para usar “Abrir PR” (a tela decide o botão pelo código)', () => {
     for (const m of [POLICY_MESSAGES.push, POLICY_MESSAGES.gh]) expect(m).toContain('“Abrir PR”')
+  })
+})
+
+describe('stream-json → imagens das ferramentas', () => {
+  const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+  const line = JSON.stringify({
+    type: 'user',
+    message: {
+      content: [
+        {
+          type: 'tool_result',
+          tool_use_id: 'tu_1',
+          content: [
+            { type: 'text', text: 'print' },
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') }
+            }
+          ]
+        }
+      ]
+    }
+  })
+
+  it('toolImages devolve os bytes e o id da ferramenta; o evento do log fica sem o base64', () => {
+    const imgs = toolImages(line)
+    expect(imgs).toHaveLength(1)
+    expect(imgs[0]!.toolId).toBe('tu_1')
+    expect(Buffer.compare(imgs[0]!.data, PNG)).toBe(0)
+    expect(parseStreamLine(line, WT)).toEqual([{ kind: 'tool_result', id: 'tu_1', error: false }])
+    expect(JSON.stringify(parseStreamLine(line, WT))).not.toContain(PNG.toString('base64'))
+    expect(toolImages(JSON.stringify({ type: 'user', message: { content: [] } }))).toEqual([])
+    expect(toolImages('não é json')).toEqual([])
   })
 })

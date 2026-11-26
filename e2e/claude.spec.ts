@@ -532,6 +532,24 @@ test('subagentes do Claude aparecem na conversa e a linha "Esperando" some ao te
   await expect(section.getByTestId('waiting-subagents')).toHaveCount(0)
 })
 
+test('print de uma ferramenta aparece como miniatura e abre grande', async () => {
+  const { page } = orkio!
+  const section = session(page)
+  const field = section.getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+  await field.fill('tirar-print')
+  await section.getByRole('button', { name: 'Enviar' }).click()
+  const run = lastRun(section)
+  await expect(run.getByTestId('run-status')).toHaveText('Concluída', { timeout: 30_000 })
+  const thumb = run.getByTestId('run-image')
+  await expect(thumb).toBeVisible({ timeout: 10_000 })
+  await expect(thumb.locator('img')).toHaveAttribute('src', /^blob:/)
+  await thumb.click()
+  const dialog = page.getByRole('dialog', { name: 'Imagem' })
+  await expect(dialog.locator('img')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+})
+
 test('ver diff e limpar ambiente (a branch fica)', async () => {
   const { page } = orkio!
   const changes = await tab(page, 'Mudanças')

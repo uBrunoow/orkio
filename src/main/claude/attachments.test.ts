@@ -8,7 +8,8 @@ import {
   checkAttachments,
   safeAttachmentName,
   saveAttachments,
-  sniffAttachment
+  sniffAttachment,
+  sniffImage
 } from './attachments'
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0])
@@ -91,5 +92,15 @@ describe('anexos', () => {
     expect(attachmentNote(['.orkio/attachments/a-b.md', '.orkio/attachments/c-d.png'])).toBe(
       '\n\nAnexos (leia com a ferramenta Read): .orkio/attachments/a-b.md, .orkio/attachments/c-d.png'
     )
+  })
+})
+
+describe('sniffImage', () => {
+  it('reconhece PNG, JPEG, GIF e WEBP pelos bytes; texto não é imagem', () => {
+    expect(sniffImage(PNG)).toBe('png')
+    expect(sniffImage(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe('jpg')
+    expect(sniffImage(enc('GIF89a...'))).toBe('gif')
+    expect(sniffImage(enc('RIFF0000WEBPVP8 '))).toBe('webp')
+    expect(sniffImage(enc('<svg>oi</svg>'))).toBeNull()
   })
 })

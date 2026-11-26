@@ -11,6 +11,12 @@ import { plural } from '../../lib/format'
 export type StepCategory = 'command' | 'edit' | 'read' | 'search' | 'subagent' | 'tool'
 export type StepState = 'running' | 'ok' | 'failed'
 
+/** Imagem de uma ferramenta (print, `Read` de imagem): os bytes vêm por `claude.runImage`. */
+export interface RunImageRef {
+  runId: string
+  n: number
+}
+
 export interface WorkStep {
   id: string
   tool: string
@@ -18,6 +24,7 @@ export interface WorkStep {
   category: StepCategory
   file: string | null
   state: StepState
+  images?: RunImageRef[]
 }
 
 export type SubagentState = 'running' | 'done' | 'failed' | 'background' | 'interrupted'
@@ -41,7 +48,15 @@ export type TranscriptItem =
   | { kind: 'started'; key: string; model: string | null }
   /** Texto do agente (inteiro); `uuid` = ponto da conversa para "Ramificar daqui". */
   | { kind: 'message'; key: string; text: string; uuid?: string }
-  | { kind: 'work'; key: string; steps: WorkStep[]; approvals: number; live: boolean }
+  | {
+      kind: 'work'
+      key: string
+      steps: WorkStep[]
+      approvals: number
+      live: boolean
+      /** Imagens das ferramentas do grupo, na ordem (miniaturas visíveis sem abrir o grupo). */
+      images?: RunImageRef[]
+    }
   | { kind: 'subagents'; key: string; agents: SubagentRow[] }
   | {
       kind: 'receipt'
@@ -177,6 +192,8 @@ export function buildTranscript(
 ): TranscriptItem[] {
   const items: TranscriptItem[] = []
   const byId = new Map<string, WorkStep>()
+  // A imagem é gravada depois do resultado: pode chegar com outro item no meio.
+  const groupOf = new Map<string, Extract<TranscriptItem, { kind: 'work' }>>()
   let group: Extract<TranscriptItem, { kind: 'work' }> | null = null
   let subs: Extract<TranscriptItem, { kind: 'subagents' }> | null = null
   const agentById = new Map<string, SubagentRow>()
@@ -274,6 +291,16 @@ export function buildTranscript(
           items.push(group)
         }
         group.steps.push(step)
+        groupOf.set(e.id, group)
+        break
+      }
+      case 'image': {
+        const step = byId.get(e.toolId)
+        if (!step) break
+        const ref: RunImageRef = { runId: e.runId, n: e.n }
+        step.images = [...(step.images ?? []), ref]
+        const owner = groupOf.get(e.toolId)
+        if (owner) owner.images = [...(owner.images ?? []), ref]
         break
       }
       case 'tool_result': {

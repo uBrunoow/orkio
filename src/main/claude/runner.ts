@@ -30,7 +30,7 @@ import {
 import { cliDenyInDelivery, cliDenyOutsideDelivery } from './github-rules'
 import { redactSecrets, sanitizeEnv } from '../platform/redact'
 import { deliveryOf, type RunSpec } from './run-spec'
-import { parseStreamLine } from './stream'
+import { parseStreamLine, toolImages, type ToolImage } from './stream'
 import type { RunExtras } from '../mcp/run-extras'
 
 export type SpawnFn = typeof nodeSpawn
@@ -128,6 +128,8 @@ export interface RunnerOptions {
    */
   extras?: RunExtras
   onEvent(event: RunLogEvent): void
+  /** Imagens dos `tool_result` (print, `Read` de imagem): bytes, fora do log. */
+  onImage?(image: ToolImage): void
   onExit(result: { code: number | null; signal: NodeJS.Signals | null; stderr: string }): void
   spawn?: SpawnFn
 }
@@ -309,6 +311,8 @@ export class ClaudeRun {
         // Terminou o turno: fecha a entrada para o processo encerrar.
         if (event.kind === 'result') child.stdin?.end()
       }
+      // Só relê a linha quando pode ter imagem (o JSON grande do print não passa duas vezes à toa).
+      if (o.onImage && line.includes('"image"')) for (const img of toolImages(line)) o.onImage(img)
     })
     child.on('error', () => {
       this.finish({ code: null, signal: null, stderr: 'Não foi possível iniciar o Claude Code.' })

@@ -18,6 +18,7 @@ import { StatusToken } from '../../components/StatusToken'
 import { formatDuration, formatUsd, plural } from '../../lib/format'
 import { CollapsibleHeader } from '../../components/CollapsibleHeader'
 import { OpenPrButton, OpenPrFeedback } from '../task/OpenPrButton'
+import { RunImages } from './RunImages'
 import { SubagentGroup } from './SubagentGroup'
 import { CATEGORY_ICON, StepRow, TOOLS_LIST } from './WorkSteps'
 import {
@@ -65,6 +66,7 @@ function WorkGroup({
     return (
       <div data-testid="work-step" className={TOOLS_LINE}>
         <StepRow step={only} />
+        <RunImages images={item.images} />
       </div>
     )
   }
@@ -94,6 +96,7 @@ function WorkGroup({
           ))}
         </div>
       </CollapsibleContent>
+      <RunImages images={item.images} />
     </Collapsible>
   )
 }

@@ -27,6 +27,7 @@ import {
   type ClaudeCodeStatus,
   type ClaudeDiff,
   type EditorId,
+  IMAGE_LIMITS,
   type PermissionAnswer,
   type RunEventMessage,
   type RunLogEvent,
@@ -336,6 +337,8 @@ const editorId = oneOf(EDITOR_IDS)
 const memoryAction = oneOf(MEMORY_ACTIONS)
 const repoPath = guard(isRepoPath)
 const localIdOrNull = nullable(localId)
+const imageIndex: Parser<number> = (v) =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= IMAGE_LIMITS.perRun ? v : INVALID
 const taskIdOrNull = nullable(taskId)
 const publishMode = oneOf(ARTIFACT_PUBLISH_MODES)
 const repoAccess = oneOf(['app', 'git'])
@@ -1149,6 +1152,14 @@ export const ORKIO_API = {
         channel: 'claude:read-log',
         args: [localId],
         fallback: []
+      }),
+      /** Bytes da n-ésima imagem de uma execução (print/`Read` de imagem); `null` se não há. */
+      runImage: call<
+        (runId: string, n: number) => Promise<{ mime: string; data: Uint8Array } | null>
+      >()({
+        channel: 'claude:run-image',
+        args: [localId, imageIndex],
+        fallback: null
       }),
       /** Remove o worktree (a branch fica). Com mudanças pendentes, exige `force`. */
       cleanup: call<

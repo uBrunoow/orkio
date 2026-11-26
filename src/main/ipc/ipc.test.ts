@@ -1062,6 +1062,26 @@ describe('claude', () => {
       ['p1', TASK]
     ])
   })
+
+  it('imagem da execução: só id válido e n inteiro de 1 a 20', async () => {
+    const ipc = fakeIpc()
+    const readImage = vi.fn(async () => ({ mime: 'image/png', data: new Uint8Array([1]) }))
+    const ch = ORKIO_API.claude
+    registerGroup(
+      ipc,
+      options(),
+      ch,
+      claudeHandlers({} as never, { readImage } as never, {} as never)
+    )
+    expect(await ipc.invoke(ch.runImage.channel, 'r1', 1)).toEqual({
+      mime: 'image/png',
+      data: new Uint8Array([1])
+    })
+    for (const n of [0, 21, 1.5, '1'])
+      expect(await ipc.invoke(ch.runImage.channel, 'r1', n)).toBeNull()
+    expect(await ipc.invoke(ch.runImage.channel, '../x', 1)).toBeNull()
+    expect(readImage.mock.calls).toEqual([['r1', 1]])
+  })
 })
 
 describe('updates', () => {
