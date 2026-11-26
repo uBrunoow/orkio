@@ -128,6 +128,8 @@ export interface RunServiceDeps {
     input: Record<string, unknown>,
     readOnly: boolean
   ): Promise<{ ok: boolean; message: string; info?: string }>
+  /** Portas dos servidores de pé da tarefa (Playwright no localhost delas passa sem perguntar). */
+  serverPorts?(taskId: string): number[]
   maxParallel?: number
   keepPerTask?: number
   approvalTimeoutMs?: number
@@ -882,6 +884,7 @@ export class RunService {
         readOnly: run.spec.access.tools === 'read_only',
         askEdits:
           run.spec.agent?.autonomy === 'ask' || (!run.spec.agent && run.spec.askEdits === true),
+        serverPorts: this.deps.serverPorts?.(run.taskId) ?? [],
         delivery: delivery
           ? {
               target: delivery.target,

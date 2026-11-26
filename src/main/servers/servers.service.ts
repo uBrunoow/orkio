@@ -123,13 +123,15 @@ const LOG_LINES = { default: 60, max: 300 } as const
 /** Texto do terminal sem cores/controles do terminal, com `\n` como quebra. */
 export function plainTerminalText(data: string): string {
   /* eslint-disable no-control-regex -- sequências de controle do terminal (ESC, BEL) */
-  return data
-    .replace(/\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)/g, '')
-    .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
-    .replace(/\u001b[@-_]/g, '')
-    /* eslint-enable no-control-regex */
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
+  return (
+    data
+      .replace(/\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)/g, '')
+      .replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+      .replace(/\u001b[@-_]/g, '')
+      /* eslint-enable no-control-regex */
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+  )
 }
 
 export class ServersService {
@@ -343,6 +345,13 @@ export class ServersService {
     if (!snap) return null
     const all = plainTerminalText(snap.data).replace(/\n+$/, '').split('\n')
     return all.slice(-lines).join('\n')
+  }
+
+  /** Portas dos servidores de pé desta tarefa (política: Playwright no localhost delas). */
+  livePorts(taskId: string): number[] {
+    return [...this.entries.values()]
+      .filter((e) => e.taskId === taskId && isServerLive(e.state))
+      .map((e) => e.port)
   }
 
   /** Algum servidor de pé (contagem do limite e da tela). */

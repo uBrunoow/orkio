@@ -205,3 +205,21 @@ test('o agente sobe o servidor pela ferramenta do Orkio e sabe o endereço', asy
   await row.getByRole('button', { name: 'Parar web' }).click()
   await expect(row.getByTestId('server-state')).toHaveText('Parado', { timeout: 15_000 })
 })
+
+test('com o servidor de pé, o Playwright navega até ele e clica sem pedir permissão', async () => {
+  const { page } = orkio!
+  const screen = taskScreen(page, 'ORK-2')
+  const session = screen.getByRole('region', { name: 'Sessão da tarefa' })
+  await session
+    .getByRole('textbox', { name: 'Mensagem para o Claude Code' })
+    .fill('navegar-servidor')
+  await session.getByRole('button', { name: 'Enviar' }).click()
+  await expect(session.getByTestId('run-status').last()).toHaveText('Concluída', {
+    timeout: 60_000
+  })
+  await expect(session.getByText('navegar: allow · clicar: allow')).toBeVisible()
+  const panel = await taskTab(screen, 'Detalhes')
+  const row = servers(panel).getByRole('listitem', { name: 'Servidor web' })
+  await row.getByRole('button', { name: 'Parar web' }).click()
+  await expect(row.getByTestId('server-state')).toHaveText('Parado', { timeout: 15_000 })
+})

@@ -401,6 +401,19 @@ async function main() {
     ])
   }
 
+  // Testar no navegador: com o servidor de pé, navegar até ele e clicar passam sem perguntar.
+  if (prompt.includes('navegar-servidor')) {
+    const up = await mcp.server('subir', { nome: 'web' })
+    const url = /http:\/\/localhost:\d+/.exec(up ? up.text : '')?.[0] ?? 'sem-url'
+    const nav = await mcp.approve('mcp__playwright__browser_navigate', { url }, 'toolu_nav')
+    const click = await mcp.approve(
+      'mcp__playwright__browser_click',
+      { element: 'Entrar', ref: 'e1' },
+      'toolu_click'
+    )
+    assistant([{ type: 'text', text: `navegar: ${nav.behavior} · clicar: ${click.behavior}` }])
+  }
+
   if (prompt.includes('tirar-print')) {
     // PNG 1x1 de verdade: o Orkio confere o tipo pelos bytes.
     const png =

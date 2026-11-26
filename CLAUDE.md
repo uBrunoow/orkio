@@ -935,7 +935,11 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   `settled` e devolve o endereço ou o fim do log sem cores; `info` vira linha do log da execução) e
   a política libera `mcp__orkio__servidor_*` sem perguntar (só leitura nega subir/parar). O
   `--append-system-prompt` ganha `serversPromptNote` (estado de cada um + "não rode servidores no
-  Bash"), via `RunSpec.servers` (`ClaudeService.serversOf`). E2E `e2e/servers.spec.ts` (processo de verdade,
+  Bash"), via `RunSpec.servers` (`ClaudeService.serversOf`). Navegador: com servidor de pé
+  (`ServersService.livePorts` → `PolicyContext.serverPorts`), o Playwright (`mcp__*playwright*__browser_*`,
+  catálogo ou plugin) passa sem perguntar ao navegar para `http(s)://localhost|127.0.0.1|[::1]:<porta>`
+  dele e nas ações na página aberta (`BROWSER_PAGE_ACTIONS`: clicar, digitar, print, snapshot…);
+  `evaluate`, `run_code_unsafe`, `file_upload` e outro endereço perguntam; só leitura pergunta. E2E `e2e/servers.spec.ts` (processo de verdade,
   segredo do `.env` fora do log, sem órfão ao fechar; o Claude simulado `subir-servidor` chama a
   ferramenta pela ponte).
 - **Manter acordado** (`main/power/keep-awake.ts`, IPC `power:get`/`power:set-keep-awake`,

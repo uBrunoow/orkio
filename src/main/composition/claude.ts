@@ -193,7 +193,8 @@ export function createClaude(deps: {
     notify: deps.notify,
     ...(deps.runExtras ? { extras: deps.runExtras } : {}),
     remember: (agentKey, projectId, input) => deps.agentMemory.remember(agentKey, projectId, input),
-    serverTool: (ref, action, input, readOnly) => servers.agentTool(ref, action, input, readOnly)
+    serverTool: (ref, action, input, readOnly) => servers.agentTool(ref, action, input, readOnly),
+    serverPorts: (taskId) => servers.livePorts(taskId)
   })
   service.set(
     new ClaudeService({

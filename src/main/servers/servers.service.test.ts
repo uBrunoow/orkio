@@ -225,6 +225,16 @@ describe('ServersService', () => {
     expect(svc.defs('p1')).toEqual([api])
   })
 
+  it('portas de pé da tarefa (para a política do navegador)', async () => {
+    const { svc, opened } = setup()
+    await svc.start('p1', 't1', 's-web', 'you')
+    await svc.start('p1', 't1', 's-api', 'you')
+    await svc.start('p1', 't2', 's-web', 'you')
+    opened[1]!.onExit(1)
+    expect(svc.livePorts('t1')).toEqual([4100])
+    expect(svc.livePorts('t2')).toEqual([4101])
+  })
+
   it('URL só do servidor de pé desta tarefa', async () => {
     const { svc } = setup()
     expect(svc.urlOf('p1', 't1', 's-web')).toBeNull()

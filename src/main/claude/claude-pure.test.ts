@@ -364,6 +364,44 @@ describe('política: só leitura e contexto pedido pela política', () => {
     ).toBe('ask')
   })
 
+  it('Playwright no localhost dos servidores da tarefa passa sem perguntar; o resto pergunta', () => {
+    const ctx = { worktree: WT, allowRules: rules, serverPorts: [4100, 4200] }
+    const pw = (
+      tool: string,
+      input: Record<string, unknown> = {},
+      c: Parameters<typeof evaluatePermission>[1] = ctx
+    ): string => evaluatePermission({ tool: `mcp__playwright__browser_${tool}`, input }, c).decision
+    expect(pw('navigate', { url: 'http://localhost:4100/login' })).toBe('allow')
+    expect(pw('navigate', { url: 'http://127.0.0.1:4200' })).toBe('allow')
+    expect(pw('navigate', { url: 'http://[::1]:4100/' })).toBe('allow')
+    for (const tool of ['click', 'type', 'snapshot', 'take_screenshot', 'wait_for', 'press_key']) {
+      expect(pw(tool, { element: 'Entrar', ref: 'e1' })).toBe('allow')
+    }
+    // Do plugin do seu Claude também.
+    expect(
+      evaluatePermission(
+        { tool: 'mcp__plugin_playwright_playwright__browser_click', input: {} },
+        ctx
+      ).decision
+    ).toBe('allow')
+    // Outra porta, outro host, outro esquema ou ferramenta que roda código: pergunta.
+    expect(pw('navigate', { url: 'http://localhost:5432' })).toBe('ask')
+    expect(pw('navigate', { url: 'https://exemplo.com' })).toBe('ask')
+    expect(pw('navigate', { url: 'http://localhost.evil.com:4100' })).toBe('ask')
+    expect(pw('navigate', { url: 'file:///etc/passwd' })).toBe('ask')
+    expect(pw('evaluate', { function: '() => 1' })).toBe('ask')
+    expect(pw('run_code_unsafe', { code: 'x' })).toBe('ask')
+    expect(pw('file_upload', { paths: ['/etc/passwd'] })).toBe('ask')
+    expect(pw('tabs', { action: 'new', url: 'https://exemplo.com' })).toBe('ask')
+    // Sem servidor rodando nesta tarefa, ou num passo só de leitura: pergunta como antes.
+    expect(pw('click', {}, { ...ctx, serverPorts: [] })).toBe('ask')
+    expect(pw('click', {}, { ...ctx, readOnly: true })).toBe('ask')
+    // Outro MCP com o mesmo nome de ferramenta: pergunta.
+    expect(evaluatePermission({ tool: 'mcp__outro__browser_click', input: {} }, ctx).decision).toBe(
+      'ask'
+    )
+  })
+
   it('Fase 3: agente que pede antes de agir — editar pergunta (sem "sempre"), regra não libera', () => {
     const ask = { worktree: WT, allowRules: rules, askEdits: true }
     const edit = (file: string, c: { worktree: string; allowRules: typeof rules }) =>

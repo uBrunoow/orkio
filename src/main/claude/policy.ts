@@ -272,6 +272,11 @@ export interface PolicyContext {
    * as regras "sempre neste projeto" não valem para os comandos dele (ler continua livre).
    */
   askEdits?: boolean
+  /**
+   * Portas dos servidores da tarefa de pé agora: o Playwright no localhost delas passa sem
+   * perguntar (`isTaskBrowserUse`). Vazio/ausente = pergunta como qualquer MCP.
+   */
+  serverPorts?: readonly number[]
 }
 
 /** Comando simples já resolvido (aliases expandidos). */
@@ -614,6 +619,72 @@ function evaluate(
     return { decision: 'ask', suggestion: suggestPattern(command) }
   }
 
+  // Testar no navegador: Playwright no localhost dos servidores de pé desta tarefa.
+  if (isTaskBrowserUse(tool, input, ctx)) return { decision: 'allow', reason: BROWSER_ALLOWED }
+
   // WebFetch, WebSearch, MCP (menos `mcp__orkio__lembrar`, acima) e ferramentas desconhecidas: perguntar.
   return { decision: 'ask', suggestion: tool }
+}
+
+/** Linha do log quando o Playwright passa sem perguntar. */
+export const BROWSER_ALLOWED = 'Liberado: navegador no servidor desta tarefa'
+
+/** Playwright do catálogo (`playwright…`) ou do plugin do seu Claude (`plugin_playwright_…`). */
+const PLAYWRIGHT_TOOL = /^mcp__[a-z0-9_-]*playwright[a-z0-9_-]*__browser_([a-z_]+)$/
+/**
+ * Ações do navegador sem endereço (agem na página aberta) ou só de leitura dela. Fora daqui (rodar
+ * código, enviar arquivo, instalar, salvar PDF…) continua perguntando.
+ */
+const BROWSER_PAGE_ACTIONS = new Set([
+  'navigate_back',
+  'snapshot',
+  'take_screenshot',
+  'click',
+  'type',
+  'fill_form',
+  'press_key',
+  'hover',
+  'select_option',
+  'drag',
+  'wait_for',
+  'resize',
+  'console_messages',
+  'network_requests',
+  'handle_dialog',
+  'close',
+  'tabs'
+])
+
+/** `http(s)://localhost|127.0.0.1|[::1]:<porta de servidor de pé desta tarefa>`. */
+export function isTaskServerUrl(value: unknown, ports: readonly number[]): boolean {
+  if (typeof value !== 'string') return false
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return false
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) return false
+  if (url.username || url.password) return false
+  return ports.includes(Number(url.port))
+}
+
+/**
+ * Servidores da tarefa de pé (`serverPorts`): navegar para um deles ou agir na página aberta passa
+ * sem perguntar. Passo só de leitura continua perguntando (nada passa sozinho nele).
+ */
+function isTaskBrowserUse(
+  tool: string,
+  input: Record<string, unknown>,
+  ctx: PolicyContext
+): boolean {
+  const ports = ctx.serverPorts ?? []
+  if (ctx.readOnly || ports.length === 0) return false
+  const action = PLAYWRIGHT_TOOL.exec(tool)?.[1]
+  if (!action) return false
+  if (action === 'navigate') return isTaskServerUrl(input['url'], ports)
+  if (!BROWSER_PAGE_ACTIONS.has(action)) return false
+  // Aba nova com endereço: só se for o servidor da tarefa.
+  return input['url'] === undefined || isTaskServerUrl(input['url'], ports)
 }
