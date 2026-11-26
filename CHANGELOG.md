@@ -6,6 +6,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.25] - 2026-11-26
+
 ### Corrigido
 
 - A conversa da tarefa não perde mais linhas da execução que acabou de começar (ex.: "Mensagem editada…" ao editar uma mensagem).
