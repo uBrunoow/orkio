@@ -49,6 +49,29 @@ export function pendingRequests(
   return out
 }
 
+/**
+ * Junta o log lido do disco com os eventos que chegaram ao vivo durante a leitura. O arquivo é um
+ * começo da sequência e `live` um fim dela; os dois podem se sobrepor (o evento chegou antes de o
+ * arquivo ser lido). Sem isso, um evento emitido entre a leitura e o `setLog` se perdia.
+ */
+export function mergeLiveLog(
+  file: readonly RunLogEvent[],
+  live: readonly RunLogEvent[]
+): RunLogEvent[] {
+  const key = (e: RunLogEvent): string => JSON.stringify(e)
+  for (let k = Math.min(file.length, live.length); k > 0; k--) {
+    let same = true
+    for (let i = 0; i < k; i++) {
+      if (key(file[file.length - k + i]!) !== key(live[i]!)) {
+        same = false
+        break
+      }
+    }
+    if (same) return [...file, ...live.slice(k)]
+  }
+  return [...file, ...live]
+}
+
 export type TaskRuns = ReturnType<typeof useTaskRuns>
 
 /**
@@ -65,6 +88,8 @@ export function useTaskRuns(
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
   const [log, setLog] = useState<RunLogEvent[]>([])
   const selected = useRef<string | null>(null)
+  // Eventos ao vivo da execução cujo log está sendo lido do disco (juntados ao fim da leitura).
+  const reading = useRef<{ runId: string; live: RunLogEvent[] } | null>(null)
   const listener = useRef(onEvent)
   useEffect(() => {
     listener.current = onEvent
@@ -81,11 +106,30 @@ export function useTaskRuns(
     return r.ok ? r.value : null
   }, [projectId, taskId])
 
-  const select = useCallback(async (runId: string | null) => {
-    selected.current = runId
-    setSelectedRunId(runId)
-    setLog(runId ? await ipcCall(() => window.orkio.claude.readLog(runId), []) : [])
+  /** Lê o log de `runId` sem perder os eventos que chegam ao vivo durante a leitura. */
+  const readMerged = useCallback(async (runId: string): Promise<RunLogEvent[] | null> => {
+    const pending = { runId, live: [] as RunLogEvent[] }
+    reading.current = pending
+    const file = await ipcCall(() => window.orkio.claude.readLog(runId), [])
+    if (reading.current !== pending) return null
+    reading.current = null
+    return mergeLiveLog(file, pending.live)
   }, [])
+
+  const select = useCallback(
+    async (runId: string | null) => {
+      selected.current = runId
+      setSelectedRunId(runId)
+      if (!runId) {
+        reading.current = null
+        setLog([])
+        return
+      }
+      const events = await readMerged(runId)
+      if (events && selected.current === runId) setLog(events)
+    },
+    [readMerged]
+  )
 
   useEffect(() => {
     let active = true
@@ -100,13 +144,13 @@ export function useTaskRuns(
       const runId = r.value.activeRunId ?? r.value.runs.find((x) => !x.side)?.id ?? null
       selected.current = runId
       setSelectedRunId(runId)
-      const events = runId ? await ipcCall(() => window.orkio.claude.readLog(runId), []) : []
-      if (active) setLog(events)
+      const events = runId ? await readMerged(runId) : []
+      if (active && events && selected.current === runId) setLog(events)
     })()
     return () => {
       active = false
     }
-  }, [projectId, taskId])
+  }, [projectId, taskId, readMerged])
 
   useEffect(
     () =>
@@ -118,6 +162,7 @@ export function useTaskRuns(
           listener.current?.(m)
           return
         }
+        if (reading.current?.runId === m.runId) reading.current.live.push(m.event)
         const isNew =
           m.runId !== selected.current && m.event.kind === 'status' && isRunLive(m.event.status)
         if (selected.current === null || isNew) {
