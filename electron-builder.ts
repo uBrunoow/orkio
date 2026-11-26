@@ -13,6 +13,8 @@
  * Alvos e nomes dos arquivos vêm do manifesto `src/shared/release-artifacts.mts`, o mesmo que o
  * release.yml, o auto-update (6C) e o site usam.
  */
+import { chmod, readdir } from 'node:fs/promises'
+import { join } from 'node:path'
 import type { Configuration } from 'electron-builder'
 import { ARTIFACT_NAME, PRODUCT_NAME, builderTargets } from './src/shared/release-artifacts.mjs'
 import { RELEASES_REPO } from './src/shared/updates'
@@ -52,6 +54,22 @@ const PTY_PREBUILDS_EXCEPT = (keep: 'darwin' | 'win32' | null): string[] =>
     .filter((os) => os !== keep)
     .map((os) => `!node_modules/node-pty/prebuilds/${os}-*/**`)
 
+/**
+ * O `spawn-helper` do node-pty (abre o PTY no macOS) chega da instalação sem permissão de execução:
+ * o pacote do mac falhava com `posix_spawnp failed` ao abrir o terminal. Depois de empacotar (antes
+ * da assinatura), todo `spawn-helper` dentro do `app.asar.unpacked` vira executável. Devolve os
+ * caminhos ajustados.
+ */
+export async function markPtyHelpersExecutable(appOutDir: string): Promise<string[]> {
+  const entries = await readdir(appOutDir, { recursive: true }).catch(() => [] as string[])
+  const helpers = entries
+    .filter((rel) => rel.split(/[\\/]/).at(-1) === 'spawn-helper')
+    .filter((rel) => rel.includes('app.asar.unpacked') && rel.includes('node-pty'))
+    .map((rel) => join(appOutDir, rel))
+  await Promise.all(helpers.map((file) => chmod(file, 0o755)))
+  return helpers
+}
+
 export function builderConfig(env: Env): Configuration {
   const macSigned = isMacSigned(env)
   return {
@@ -67,6 +85,9 @@ export function builderConfig(env: Env): Configuration {
     // node:sqlite é embutido no Electron. O node-pty usa N-API (ABI estável entre Node e
     // Electron): o binário da instalação (prebuild no mac/Windows, compilado no Linux) já serve.
     npmRebuild: false,
+    afterPack: async (context) => {
+      await markPtyHelpersExecutable(context.appOutDir)
+    },
     electronFuses: {
       // A ponte MCP de permissões (out/main/permission-mcp.js) roda com ELECTRON_RUN_AS_NODE=1.
       runAsNode: true,
