@@ -261,6 +261,14 @@ export function gitFlowForEvents(
       if (next === 'merged') mergedAt = pr.closedAt
     }
   }
+  // Mudança líquida: voltar ao valor de partida não escreve nada.
+  if (stageKey && task.stage) {
+    const start = indexOfOption(task.stage, order)
+    if (start >= 0 && start === optionIndex(config, stageKey, order)) {
+      stageKey = null
+      mergedAt = null
+    }
+  }
   if (!stageKey && !prUrl) return null
   return { stage: stageKey, prUrl, mergedAt: stageKey === 'merged' ? mergedAt : null }
 }
@@ -279,7 +287,12 @@ export function gitFlowBackfill(
   else if (counted?.state === 'open') target = counted.changesRequested ? 'changes' : 'review'
   else if (counted?.state === 'draft' || hasBranch) target = 'branch'
   if (!target) return null
-  const stage = nextGitStage(task.stage, target, config, order)
+  let stage = nextGitStage(task.stage, target, config, order)
+  // A carga inicial nunca anda para trás (a volta de "Ajustes" é só do evento de review pedida).
+  if (stage && task.stage) {
+    const cur = indexOfOption(task.stage, order)
+    if (cur >= 0 && optionIndex(config, stage, order) < cur) stage = null
+  }
   const prUrl =
     counted && target !== 'branch' && counted.state !== 'draft'
       ? prUrlChange(task, counted, repo)

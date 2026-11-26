@@ -153,4 +153,34 @@ describe('git-flow', () => {
     expect(b(null, false)).toBeNull()
     expect(b(null, true, task('PR aguardando review'))).toBeNull()
   })
+
+  it('net change, prUrl independente e bordas', () => {
+    const f = (events: EventKind[], t: ReturnType<typeof task>, p: GitFlowPr = pr()) =>
+      gitFlowForEvents(events.map(ev), t, p, repo, config, order)
+    const same = task('PR aguardando review', pr().url)
+    expect(f(['pr.changes_requested', 'pr.review_requested'], same)).toBeNull()
+    expect(f(['pr.opened'], task('Em produção'))).toEqual({
+      stage: null,
+      prUrl: pr().url,
+      mergedAt: null
+    })
+    expect(f(['pr.merged'], task('PR aguardando review', pr().url))).toEqual({
+      stage: 'merged',
+      prUrl: null,
+      mergedAt: null
+    })
+    expect(
+      gitFlowBackfill(task('Ajustes solicitados', pr().url), pr(), true, repo, config, order)
+    ).toBeNull()
+    expect(gitFlowBackfill(task(null), pr({ state: 'draft' }), true, repo, config, order)).toEqual({
+      stage: 'branch',
+      prUrl: null,
+      mergedAt: null
+    })
+    const noOptional = props.filter((p) => p.id !== 'pr' && p.id !== 'dt')
+    const r = checkGitFlow(config, noOptional)
+    expect(r.config?.prUrl).toBeUndefined()
+    expect(r.config?.mergedAt).toBeUndefined()
+    expect(r.warnings).toHaveLength(2)
+  })
 })
