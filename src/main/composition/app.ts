@@ -661,6 +661,7 @@ function createWork(core: {
     listTasks: (projectId) => notionWorkspace.listTasks(projectId),
     signals: (projectId) => signals.get(projectId),
     prFor: (projectId, branch) => signals.prForBranch(projectId, branch)?.number ?? null,
+    mergedPrFor: (projectId, branch) => signals.mergedPrForBranch(projectId, branch),
     getBlockChildren: (id, cursor) => notion.getBlockChildren(id, cursor),
     notionInsert: {
       createChildPage: (parent, title, markdown) => notion.createChildPage(parent, title, markdown),

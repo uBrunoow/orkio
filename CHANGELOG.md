@@ -16,6 +16,8 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Corrigido
 
+- Tarefas sem ID no Notion criadas juntas caíam na mesma pasta de trabalho (o nome usava só o começo do id da página) e o passo falhava pedindo para remover a pasta de outra tarefa. Agora a pasta usa o id inteiro.
+- Com "Agentes enviam e abrem PR", a branch nova da tarefa sai do destino das PRs (ex.: `dev`), não da branch padrão. Tarefa cuja PR já foi mergeada recomeça numa branch nova; uma falha do git ao listar os worktrees não manda mais apagar a pasta.
 - Corretor da PR (coluna Revisado): uma revisão que pede alterações só no texto, sem comentário em linha, agora conta; antes o fluxo terminava com "nada a fazer". O resumo do que fazer vem sempre para você aprovar (também no "Rodar uma vez"); aprovado, o agente corrige, faz o push, responde cada conversa e o revisor da revisão geral (comentário na PR citando-o) e o Orkio pede nova revisão a quem revisou, sem outra confirmação.
 - A aba Revisão mostra as revisões com texto (pedir alterações ou comentar) e o título diz quem pediu alterações; antes dizia "Nenhum comentário pendente" quando a revisão não tinha comentário em linha.
 - A branch de destino da PR passa a ser conferida (`gh pr create`/`edit --base`, `gh api` e GraphQL) quando o projeto restringe os destinos.

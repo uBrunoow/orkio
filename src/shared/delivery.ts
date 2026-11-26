@@ -54,6 +54,16 @@ export function prBasesOf(settings: Pick<DeliverySettings, 'prBases'>): string[]
   return settings.prBases?.length ? [...settings.prBases] : [...DEFAULT_PR_BASES]
 }
 
+/**
+ * De onde sai a branch nova da tarefa: com "Agentes enviam e abrem PR", o primeiro destino das PRs
+ * (ex.: `dev`), para a PR não trazer o que só está na padrão; senão `null` (a branch padrão).
+ */
+export function taskBaseBranch(
+  settings: Pick<DeliverySettings, 'agentsDeliver' | 'prBases'> | undefined
+): string | null {
+  return settings?.agentsDeliver ? (prBasesOf(settings)[0] ?? null) : null
+}
+
 const cleanRef = (b: string): string => b.trim().replace(/^refs\/heads\//, '')
 
 /**

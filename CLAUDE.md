@@ -776,11 +776,15 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   (`parseSendMessageRequest`), no perfil do agente e na config do passo: nada vira argumento sem passar
   pela regex. O log da execução ganha uma linha `info` "Modelo: Opus · Raciocínio: Alto" (sem coluna
   nova em `agent_runs`).
-- **Worktree** (`worktree.service.ts`): `<userData>/worktrees/<projectId>/<ID>` (sem ID: 12
-  caracteres do id da página); reutiliza worktree registrado → branch local da tarefa → branch
+- **Worktree** (`worktree.service.ts`): `<userData>/worktrees/<projectId>/<ID>` (sem ID: o id
+  inteiro da página; páginas criadas juntas dividem o começo do id); reutiliza worktree registrado → branch local da tarefa → branch
   remota ("da tarefa" = registrada em `task_branches` ou com o ID no nome) → cria
   `<tipo>/<ID>-<slug>` (sem ID, `<tipo>/<slug>`; `-2` se o nome já existe) a partir de
-  `<remote>/<default>` (fetch antes) e registra a branch. Tipo `feat` por padrão; "Nova sessão…"
+  `<remote>/<base>` (fetch antes; base = primeiro destino das PRs com "Agentes enviam e abrem PR",
+  `taskBaseBranch`, senão a padrão) e registra a branch. Branch com PR já mergeada (sinais,
+  `mergedPrForBranch`) não recebe trabalho novo: o worktree limpo sai (a branch fica) e a tarefa
+  ganha branch nova; com mudança sem commit, `merged_dirty`. Falha do git ao listar os worktrees
+  tenta de novo e vira erro do git (nunca "remova a pasta"). Tipo `feat` por padrão; "Nova sessão…"
   deixa trocar para `fix`/`hotfix` quando a branch ainda não existe (`branchKind`). Branch já em checkout na pasta principal → erro claro.
   A pasta principal do usuário nunca é tocada. "Limpar ambiente" remove só o worktree (a branch
   fica); com mudanças pendentes exige confirmação (`force`).

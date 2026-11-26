@@ -59,6 +59,7 @@ export function createClaude(deps: {
   listTasks: ClaudeServiceDeps['listTasks']
   signals: ClaudeServiceDeps['signals']
   prFor: (projectId: string, branch: string) => number | null
+  mergedPrFor: (projectId: string, branch: string) => number | null
   getBlockChildren: ClaudeServiceDeps['getBlockChildren']
   agentFor: ClaudeServiceDeps['agentFor']
   agentInfo: ClaudeServiceDeps['agentInfo']
@@ -157,6 +158,7 @@ export function createClaude(deps: {
       git: deps.git,
       listTasks: deps.listTasks,
       signals: deps.signals,
+      mergedPrFor: deps.mergedPrFor,
       getBlockChildren: deps.getBlockChildren,
       detect: () => detectClaude({ env }),
       agentFor: deps.agentFor,

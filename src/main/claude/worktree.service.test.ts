@@ -98,6 +98,101 @@ describe('WorktreeService (git real)', () => {
     ).toBe('worktree')
   })
 
+  it('bug: o git falhar ao listar os worktrees nunca vira "remova a pasta"; tenta de novo', async () => {
+    const task = { id: 't7', displayId: 'ORK-7', title: 'Listar tarefas' }
+    const first = await service.ensure(project, task)
+    const real = createGit()
+    let fails = 1
+    const flaky = new WorktreeService({
+      git: {
+        ...real,
+        worktreeList: async (root: string) => {
+          if (fails-- > 0) throw new Error('timeout')
+          return real.worktreeList(root)
+        }
+      },
+      db,
+      root: join(tmp, 'worktrees')
+    })
+    // Uma falha só: a segunda tentativa acha o worktree.
+    expect(await flaky.ensure(project, task)).toMatchObject({
+      reused: 'worktree',
+      path: first.path
+    })
+    // Falha sempre: erro do git, pasta intacta.
+    fails = 99
+    await expect(flaky.ensure(project, task)).rejects.toMatchObject({ code: 'git' })
+    expect(existsSync(first.path)).toBe(true)
+  })
+
+  it('PR da branch já mergeada: abre worktree novo numa branch nova a partir da base', async () => {
+    const task = { id: 't7', displayId: 'ORK-7', title: 'Listar tarefas' }
+    const first = await service.ensure(project, task)
+    const merged = (branch: string): number | null => (branch === first.branch ? 477 : null)
+    // Mudança sem commit no worktree antigo: não apaga nada, explica.
+    writeFileSync(join(first.path, 'README.md'), 'pendente\n')
+    await expect(service.ensure(project, task, { merged })).rejects.toMatchObject({
+      code: 'merged_dirty'
+    })
+    expect(readFileSync(join(first.path, 'README.md'), 'utf8')).toBe('pendente\n')
+    sh(first.path, 'checkout', '--', 'README.md')
+    // Limpo: o antigo sai (a branch fica) e o novo começa da base.
+    const next = await service.ensure(project, task, { merged })
+    expect(next).toMatchObject({
+      reused: 'new',
+      branch: 'feat/ORK-7-listar-tarefas-2',
+      path: first.path
+    })
+    expect(sh(main, 'branch', '--list', first.branch)).toContain(first.branch)
+    expect(sh(next.path, 'branch', '--show-current')).toBe('feat/ORK-7-listar-tarefas-2')
+    // Sem worktree registrado, a branch mergeada também não é reaproveitada.
+    await service.remove(project, 't7', false)
+    const again = await service.ensure(project, task, {
+      merged: (b) => (b === first.branch || b === next.branch ? 1 : null)
+    })
+    expect(again.branch).toBe('feat/ORK-7-listar-tarefas-3')
+    mainUntouched()
+  })
+
+  it('bug: sem ID, páginas do Notion com o mesmo começo de id não dividem a pasta', async () => {
+    const a = await service.ensure(project, {
+      id: '423a411e-ce3b-8190-a89f-ca1d8ce5e05f',
+      displayId: null,
+      title: 'Somar os pedidos'
+    })
+    const b = await service.ensure(project, {
+      id: '423a411e-ce3b-8167-bf2c-f391c19a94a3',
+      displayId: null,
+      title: 'Outra tarefa'
+    })
+    expect(a.path).not.toBe(b.path)
+    expect(b).toMatchObject({ reused: 'new', branch: 'feat/outra-tarefa' })
+  })
+
+  it('branch nova sai da base de entrega do projeto (ex.: dev), não da padrão', async () => {
+    const seed = join(tmp, 'seed')
+    sh(seed, 'checkout', '-q', 'main')
+    sh(seed, 'checkout', '-q', '-b', 'dev')
+    writeFileSync(join(seed, 'dev.txt'), 'dev\n')
+    sh(seed, 'add', '.')
+    sh(seed, 'commit', '-q', '-m', 'dev')
+    sh(seed, 'push', '-q', 'origin', 'dev')
+    const wt = await service.ensure(
+      { ...project, baseBranch: 'dev' },
+      { id: 't7', displayId: 'ORK-7', title: 'Listar' }
+    )
+    expect(wt).toMatchObject({ reused: 'new', baseRef: 'origin/dev' })
+    expect(existsSync(join(wt.path, 'dev.txt'))).toBe(true)
+    // Base que não existe no remoto: erro claro com o nome dela (nunca cai na main).
+    await expect(
+      service.ensure(
+        { ...project, baseBranch: 'homolog' },
+        { id: 't6', displayId: 'ORK-6', title: 'x' }
+      )
+    ).rejects.toMatchObject({ code: 'no_base', message: expect.stringContaining('origin/homolog') })
+    mainUntouched()
+  })
+
   it('reutiliza branch local e branch remota da tarefa (sem criar outra)', async () => {
     const local = await service.ensure(project, { id: 't8', displayId: 'ORK-8', title: 'Outro' })
     expect(local).toMatchObject({ reused: 'local_branch', branch: 'feat/ORK-8-local' })
@@ -150,7 +245,7 @@ describe('WorktreeService (git real)', () => {
     expect(wt).toMatchObject({
       reused: 'new',
       branch: 'fix/corrigir-login',
-      path: join(tmp, 'worktrees', 'p1', '1a2b3c4d5e6f')
+      path: join(tmp, 'worktrees', 'p1', '1a2b3c4d5e6f40718293a4b5c6d7e8f9')
     })
     expect(new TaskBranchesStore(db).forTask('p1', page).map((l) => l.branch)).toEqual([
       'fix/corrigir-login'

@@ -3,6 +3,7 @@
  * Nunca mexe nos arquivos da pasta principal do usuário: `git worktree add` só grava metadados no
  * `.git` do repositório; o código fica na pasta do worktree.
  */
+import { isScratchPath } from '../../shared/orkio-scratch'
 import { mkdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { mentionsTask, parseDisplayId } from '../../shared/task-id-match'
@@ -44,6 +45,8 @@ export interface WorktreeProject {
   localPath: string
   remoteName: string
   defaultBranch: string
+  /** De onde a branch nova da tarefa sai (o destino das PRs do projeto, ex.: `dev`); padrão: a padrão. */
+  baseBranch?: string
 }
 
 export interface WorktreeTask {
@@ -55,7 +58,14 @@ export interface WorktreeTask {
 
 export class WorktreeError extends Error {
   constructor(
-    readonly code: 'branch_checked_out' | 'no_base' | 'path_in_use' | 'dirty' | 'git' | 'not_found',
+    readonly code:
+      | 'branch_checked_out'
+      | 'no_base'
+      | 'path_in_use'
+      | 'dirty'
+      | 'git'
+      | 'not_found'
+      | 'merged_dirty',
     message: string,
     readonly files: string[] = []
   ) {
@@ -142,21 +152,28 @@ export class WorktreeService {
   async ensure(
     project: WorktreeProject,
     task: WorktreeTask,
-    options: { kind?: BranchKind } = {}
+    options: {
+      kind?: BranchKind
+      /** Número da PR já mergeada desta branch (sinais); branch mergeada não recebe trabalho novo. */
+      merged?: (branch: string) => number | null
+    } = {}
   ): Promise<WorktreeRecord & { reused: 'worktree' | 'local_branch' | 'remote_branch' | 'new' }> {
     const parsed = parseDisplayId(task.displayId)
     const { git } = this.deps
     const root = project.localPath
+    const isMerged = (branch: string): boolean => (options.merged?.(branch) ?? null) !== null
     const registered = this.get(task.id)
     if (registered && (await this.exists(registered.path))) {
-      const listed = await git.worktreeList(root).catch(() => [])
+      const listed = await this.listWorktrees(root)
       if (listed.some((w) => w.path === registered.path)) {
-        return { ...registered, reused: 'worktree' }
+        if (!isMerged(registered.branch)) return { ...registered, reused: 'worktree' }
+        await this.retireMerged(project, registered, options.merged!(registered.branch)!)
       }
     }
 
-    // Pasta: o ID do Notion quando há; senão um pedaço do id da página (estável e sem espaços).
-    const folder = parsed && task.displayId ? task.displayId : normalizePageId(task.id).slice(0, 12)
+    // Pasta: o ID do Notion quando há; senão o id inteiro da página (páginas criadas juntas no
+    // Notion dividem o começo do id: um pedaço dele juntava tarefas diferentes na mesma pasta).
+    const folder = parsed && task.displayId ? task.displayId : normalizePageId(task.id)
     const path = join(this.deps.root, project.id, folder)
     if (await this.exists(path)) {
       throw new WorktreeError(
@@ -168,15 +185,16 @@ export class WorktreeService {
 
     // Base atualizada (sem rede, segue com o que já existe localmente).
     const remote = project.remoteName
-    const base = `${remote}/${project.defaultBranch}`
-    await git.fetch(root, remote, project.defaultBranch).catch(() => undefined)
+    const baseBranch = project.baseBranch ?? project.defaultBranch
+    const base = `${remote}/${baseBranch}`
+    await git.fetch(root, remote, baseBranch).catch(() => undefined)
 
     const linked = this.branches.forTask(project.id, task.id).map((l) => l.branch)
-    const found = await this.findTaskBranch(project, task)
+    const found = await this.findTaskBranch(project, task, isMerged)
     const local = found?.where === 'local' ? found.branch : undefined
     // Branch já aberta em outro worktree (inclusive a pasta principal do usuário): o git recusaria.
     const inUse = local
-      ? (await git.worktreeList(root).catch(() => [])).find((w) => w.branch === local)
+      ? (await this.listWorktrees(root)).find((w) => w.branch === local)
       : undefined
     if (inUse) {
       throw new WorktreeError(
@@ -261,13 +279,19 @@ export class WorktreeService {
    */
   async findTaskBranch(
     project: WorktreeProject,
-    task: WorktreeTask
+    task: WorktreeTask,
+    /** Branches que não servem mais (PR mergeada): ficam de fora. */
+    skip: (branch: string) => boolean = () => false
   ): Promise<{ branch: string; where: 'local' | 'remote' } | null> {
     const parsed = parseDisplayId(task.displayId)
-    const linked = this.branches.forTask(project.id, task.id).map((l) => l.branch)
+    const linked = this.branches
+      .forTask(project.id, task.id)
+      .map((l) => l.branch)
+      .filter((b) => !skip(b))
     if (!parsed && linked.length === 0) return null
     const matches = (name: string): boolean =>
-      linked.includes(name) || (!!parsed && mentionsTask(name, parsed.prefix, parsed.number))
+      !skip(name) &&
+      (linked.includes(name) || (!!parsed && mentionsTask(name, parsed.prefix, parsed.number)))
     const { git } = this.deps
     const local = await git.localBranches(project.localPath)
     const hit = linked.find((b) => local.includes(b)) ?? local.find(matches)
@@ -276,6 +300,56 @@ export class WorktreeService {
     const remotes = await git.remoteBranches(project.localPath, project.remoteName)
     const remote = linked.find((b) => remotes.includes(b)) ?? remotes.find(matches)
     return remote ? { branch: remote, where: 'remote' } : null
+  }
+
+  /**
+   * Worktrees do projeto, com uma nova tentativa. Falha de novo → erro do git: nunca concluir que a
+   * pasta "não é um worktree" (a mensagem mandaria apagar o trabalho da tarefa).
+   */
+  private async listWorktrees(root: string): Promise<{ path: string; branch: string | null }[]> {
+    try {
+      return await this.deps.git.worktreeList(root)
+    } catch {
+      try {
+        return await this.deps.git.worktreeList(root)
+      } catch {
+        throw new WorktreeError(
+          'git',
+          'O git não respondeu ao listar os worktrees do projeto. Retome o passo para tentar de novo (nada foi apagado).'
+        )
+      }
+    }
+  }
+
+  /**
+   * A PR da branch do worktree já foi mergeada: trabalho novo vai numa branch nova a partir da base.
+   * O worktree antigo sai (a branch fica no git); com mudança sem commit, nada é apagado e explica.
+   */
+  private async retireMerged(
+    project: WorktreeProject,
+    record: WorktreeRecord,
+    pr: number
+  ): Promise<void> {
+    const changes = (await this.deps.git.statusPorcelain(record.path)).filter((l) => {
+      const path = parsePorcelainLine(l)?.path
+      return !path || !isScratchPath(path)
+    })
+    if (changes.length > 0) {
+      throw new WorktreeError(
+        'merged_dirty',
+        `A PR #${pr} desta tarefa já foi mergeada e o ambiente dela (${record.branch}) tem ${changes.length} mudança(s) sem commit. Commite ou limpe o ambiente para começar numa branch nova.`,
+        changes.flatMap((l) => parsePorcelainLine(l)?.path ?? [])
+      )
+    }
+    try {
+      await this.deps.git.worktreeRemove(project.localPath, record.path, false)
+    } catch {
+      throw new WorktreeError(
+        'git',
+        'O git não conseguiu remover o ambiente antigo (PR já mergeada). Tente de novo.'
+      )
+    }
+    this.deps.db.run('DELETE FROM worktrees WHERE task_page_id = ?', record.taskPageId)
   }
 
   /**
