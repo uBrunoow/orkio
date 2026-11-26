@@ -137,6 +137,26 @@ describe('ClaudeService', () => {
     expect(r.value.workspace).toBeNull()
   })
 
+  it('briefing com os agentes entregando: diz que pode enviar e o destino da PR', async () => {
+    const target = {
+      owner: 'o',
+      repo: 'app',
+      remote: 'origin',
+      branch: 'ORK-7/exportar',
+      defaultBranch: 'main',
+      displayId: 'ORK-7',
+      prBases: ['dev']
+    }
+    const { service } = setup({
+      deliveryTarget: () => ({ target, requirePushApproval: false, agentsDeliver: true })
+    })
+    const r = await service.prepare('p1', 'task-1')
+    expect(r.ok && r.value.briefing).toContain('gh pr create --base dev')
+    expect(r.ok && r.value.briefing).not.toContain('Não faça push')
+    const plain = await setup().service.prepare('p1', 'task-1')
+    expect(plain.ok && plain.value.briefing).toContain('Não faça push')
+  })
+
   it('diff: devolve o texto, os arquivos novos e o que ainda está fora de commit', async () => {
     const { service, deps, worktrees } = setup()
     worktrees.get.mockReturnValue({ path: '/wt', branch: 'ORK-7/x', baseRef: 'origin/main' })
@@ -205,6 +225,30 @@ describe('ClaudeService', () => {
     expect(r.value.diff).not.toContain('ghp_abcdef')
     expect(r.value.diff).toContain('TOKEN=[omitido]')
     expect(r.value.secrets).toEqual(['docs/x.md'])
+  })
+
+  it('página da tarefa: campos do Notion e a descrição em markdown, sem o contexto do Orkio', async () => {
+    const { service } = setup()
+    const r = await service.taskPage('p1', 'task-1')
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.value.task).toMatchObject({ title: 'Exportar CSV', priority: { name: 'Alta' } })
+    expect(r.value.markdown).toContain('Gera CSV')
+    expect(r.value.markdown).not.toContain('Branch de trabalho')
+    expect(r.value.warning).toBeNull()
+  })
+
+  it('página da tarefa ilegível: campos com aviso, sem descrição', async () => {
+    const { service } = setup({
+      getBlockChildren: async () => {
+        throw new Error('403')
+      }
+    })
+    const r = await service.taskPage('p1', 'task-1')
+    expect(r).toMatchObject({
+      ok: true,
+      value: { markdown: '', warning: CLAUDE_MESSAGES.taskPageUnavailable }
+    })
   })
 
   it('página ilegível: briefing só com os campos, com aviso', async () => {
@@ -526,6 +570,41 @@ describe('ClaudeService', () => {
         flowRequest({ input: prompt, session: { kind: 'latest', orNew: null } })
       )
     ).toMatchObject({ ok: false, error: { code: 'no_session' } })
+  })
+
+  it('projeto com os agentes entregando: toda execução (menos só leitura, sidechat e agente sem entrega) entrega', async () => {
+    const target = {
+      owner: 'o',
+      repo: 'app',
+      remote: 'origin',
+      branch: 'ORK-7/exportar',
+      defaultBranch: 'main',
+      displayId: 'ORK-7',
+      prBases: ['dev']
+    }
+    const { service, lastSpec } = setup({
+      deliveryTarget: () => ({ target, requirePushApproval: false, agentsDeliver: true })
+    })
+    await service.startRun(flowRequest())
+    expect(lastSpec().access).toEqual({
+      tools: 'full',
+      github: { mode: 'deliver', target, requirePushApproval: false }
+    })
+    await service.startRun(flowRequest({ access: { tools: 'read_only', github: 'read' } }))
+    expect(lastSpec().access).toEqual({ tools: 'read_only', github: { mode: 'read', target } })
+    const agent = {
+      key: 'builtin:revisor',
+      name: 'Revisor',
+      prompt: 'p',
+      model: null,
+      effort: null,
+      autonomy: 'edits' as const,
+      delivers: false
+    }
+    await service.startRun(flowRequest({ agent }))
+    expect(lastSpec().access).toEqual({ tools: 'full', github: { mode: 'read', target } })
+    await service.startRun(flowRequest({ side: true }))
+    expect(lastSpec().access.github).toMatchObject({ mode: 'read' })
   })
 
   it('GitHub: leitura com o repositório verificado; entrega com o alvo; só leitura nunca entrega', async () => {

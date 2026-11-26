@@ -1218,6 +1218,15 @@ production/staging/trunk/gh-pages`, `release*` e `hotfix`/`hotfix-x`/`hotfix_x` 
   (`{ started: false, mode: 'push', compareUrl }`). Botão em `task/OpenPrButton.tsx` (estado único por tarefa: `useOpenPr`
   em `task/open-pr.ts`, `canOpenPr`: sem PR aberta), também no painel Ambiente e no recibo do
   bloqueio de push; desabilitado com fluxo ativo ("Espere o fluxo atual terminar").
+- **Agentes entregando** (`DeliverySettings.agentsDeliver`/`prBases`, opcionais, sem migração;
+  leitor único `parseDeliverySettingsValue`): ligado, toda execução não só leitura (menos sidechat e
+  agente com `delivery: false`, `RunAgent.delivers`) entra no modo entrega (`ClaudeService.autoDeliver`)
+  e o alvo ganha `DeliveryTarget.prBases` (padrão `DEFAULT_PR_BASES` = `dev`; `NEVER_PR_BASES`
+  main/master recusadas até na lista). Com `prBases`, `checkPrBase` exige `--base` da lista em
+  `gh pr create`, confere `gh pr edit --base`, o campo `base` do `gh api …/pulls` e recusa
+  `baseRefName` no GraphQL. O briefing e o `--append-system-prompt` (`appendPrompt` no runner)
+  dizem como enviar e o destino; o "Abrir PR" compara contra o primeiro destino. Toda execução leva
+  ainda a regra "não grave o link da PR na tarefa do Notion" (`NOTION_PR_NOTE`).
 - **Ajuste por projeto:** `orkio-config` v8 → `delivery[projectId].requirePushApproval` (padrão
   sim), na aba "Entrega" de Quadro e automações (`DeliverySection`), com histórico de configuração.
 - **CI:** token do CI da PR no painel (sinais 2D) e "Rodar fluxo CI vermelho" (`startById`) quando

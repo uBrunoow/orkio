@@ -1498,7 +1498,16 @@ export async function expectTaskHistory(scope: Locator, ...texts: string[]): Pro
  */
 export async function taskTab(
   screen: Locator,
-  name: 'Sessão' | 'Spec' | 'Plano' | 'Mudanças' | 'PR & CI' | 'Revisão' | 'Contexto' | 'Detalhes'
+  name:
+    | 'Sessão'
+    | 'Spec'
+    | 'Plano'
+    | 'Mudanças'
+    | 'PR & CI'
+    | 'Revisão'
+    | 'Contexto'
+    | 'Detalhes'
+    | 'Notion'
 ): Promise<Locator> {
   if (name === 'Sessão') return screen
   // PR & CI, Revisão e Contexto são subtelas abertas pelas linhas de Detalhes (com "voltar").

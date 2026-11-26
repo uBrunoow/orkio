@@ -10,6 +10,37 @@ export function contextWindowFor(model: string | null | undefined): number {
     : DEFAULT_CONTEXT_WINDOW
 }
 
+/**
+ * A janela que cabe os tokens: o Claude Code compacta antes de encher, então uso acima da janela
+ * chutada quer dizer que o modelo tem a janela longa (ex.: Opus 5.5 = 1 milhão sem `[1m]`).
+ */
+export function fitWindow(inputTokens: number, contextWindow: number): number {
+  return inputTokens > contextWindow ? Math.max(contextWindow, LONG_CONTEXT_WINDOW) : contextWindow
+}
+
+/**
+ * Janela real informada pelo CLI no `result` (`modelUsage[<modelo>].contextWindow`): a do modelo da
+ * execução; sem ele, a maior (a conversa principal usa o modelo grande; subagentes, os menores).
+ */
+export function windowFromModelUsage(modelUsage: unknown, model: string | null): number | null {
+  if (typeof modelUsage !== 'object' || modelUsage === null) return null
+  const windowOf = (v: unknown): number | null => {
+    if (typeof v !== 'object' || v === null) return null
+    const w = (v as Record<string, unknown>)['contextWindow']
+    return typeof w === 'number' && Number.isFinite(w) && w > 0 ? w : null
+  }
+  const entries = modelUsage as Record<string, unknown>
+  if (model) {
+    const own = windowOf(entries[model])
+    if (own !== null) return own
+  }
+  const all = Object.values(entries).flatMap((v) => {
+    const w = windowOf(v)
+    return w === null ? [] : [w]
+  })
+  return all.length ? Math.max(...all) : null
+}
+
 /** Tokens de entrada do turno (entrada + cache lido + cache criado), do `usage` da mensagem. */
 export function inputTokensOf(usage: unknown): number | null {
   if (typeof usage !== 'object' || usage === null) return null

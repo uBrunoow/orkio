@@ -57,6 +57,8 @@ export interface RunAgent {
    * e `--permission-mode manual`). Só restringe.
    */
   autonomy: AgentAutonomy
+  /** Perfil com `delivery: false`: nunca entrega (nem com os agentes entregando no projeto). */
+  delivers?: boolean
 }
 
 /** O agente (perfil lido ou a cópia guardada no fluxo) como vai para a execução. */
@@ -68,7 +70,8 @@ export function toRunAgent(agent: { key: string; profile: AgentProfile }): RunAg
     model: agent.profile.model === 'default' ? null : agent.profile.model,
     effort: agent.profile.effort,
     // Cópia antiga guardada no fluxo (sem o campo) = `edits`.
-    autonomy: agentAutonomy(agent.profile)
+    autonomy: agentAutonomy(agent.profile),
+    delivers: agent.profile.delivery !== false
   }
 }
 

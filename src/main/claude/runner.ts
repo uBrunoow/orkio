@@ -34,6 +34,9 @@ import { parseStreamLine } from './stream'
 import type { RunExtras } from '../mcp/run-extras'
 
 export type SpawnFn = typeof nodeSpawn
+
+/** Janela de contexto que o CLI informou por modelo (no fim de cada turno), para as próximas execuções. */
+const LEARNED_WINDOWS = new Map<string, number>()
 export type { BridgeDecision, BridgeRememberReply, BridgeRequest }
 
 /**
@@ -207,11 +210,36 @@ export function buildCliArgs(
     run.mcpConfig,
     '--permission-prompt-tool',
     BRIDGE_PROMPT_TOOL,
-    ...(spec.agent?.prompt ? ['--append-system-prompt', spec.agent.prompt] : []),
+    ...appendPrompt(spec),
     // Nada que pareça outra flag chega ao CLI: valida aqui, de novo, antes de montar os args.
     ...(isModelName(model) ? ['--model', model] : []),
     ...(isEffort(effort) ? ['--effort', effort] : [])
   ]
+}
+
+/** O Orkio liga a PR à tarefa pela branch; o link na página do Notion só polui a tarefa. */
+const NOTION_PR_NOTE =
+  'Regra do Orkio: Não grave o link da PR na tarefa do Notion (nem em campo, nem no texto da página), mesmo que um comando peça; o Orkio já liga a PR à tarefa pela branch. Pule esse passo sem perguntar.'
+
+/**
+ * O que vai no `--append-system-prompt`: as instruções do agente e, quando o projeto deixa os
+ * agentes entregarem (destinos de PR restritos), como enviar e para onde vai a PR. Vale mais que o
+ * briefing antigo da sessão ("não faça push").
+ */
+function appendPrompt(spec: Pick<RunSpec, 'access' | 'agent'>): string[] {
+  const deliver = deliveryOf(spec)
+  const bases = deliver?.target.prBases
+  const note =
+    deliver && bases?.length
+      ? [
+          'Entrega nesta tarefa (regra do Orkio, vale mais que o briefing):',
+          `- Você PODE enviar a branch da tarefa: git push ${deliver.target.remote} ${deliver.target.branch}.`,
+          `- Você PODE abrir/atualizar a PR dela com gh pr create --base ${bases[0]} (destinos permitidos: ${bases.join(', ')}).`,
+          '- Nunca para main ou master; nada de merge, força ou apagar branch.'
+        ].join('\n')
+      : null
+  const text = [spec.agent?.prompt, note, NOTION_PR_NOTE].filter(Boolean).join('\n\n')
+  return ['--append-system-prompt', text]
 }
 
 export class ClaudeRun {
@@ -271,8 +299,12 @@ export class ClaudeRun {
     const lines = createInterface({ input: child.stdout! })
     let model: string | null = null
     lines.on('line', (line) => {
-      for (const event of parseStreamLine(line, o.cwd, undefined, model)) {
+      const known = model ? (LEARNED_WINDOWS.get(model) ?? null) : null
+      for (const event of parseStreamLine(line, o.cwd, undefined, model, known)) {
         if (event.kind === 'init') model = event.model
+        if (event.kind === 'result' && event.contextWindow && model) {
+          LEARNED_WINDOWS.set(model, event.contextWindow)
+        }
         o.onEvent(event)
         // Terminou o turno: fecha a entrada para o processo encerrar.
         if (event.kind === 'result') child.stdin?.end()

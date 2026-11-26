@@ -3,7 +3,7 @@
  * Nada de tokens aqui: segredos vão no SecureStore.
  */
 import { parseUsageHold, type UsageHold } from '../../shared/claude-usage'
-import type { DeliverySettings } from '../../shared/delivery'
+import { parseDeliverySettingsValue, type DeliverySettings } from '../../shared/delivery'
 import { parseProjectAgents, type ProjectAgents } from '../../shared/agent'
 import { parseOrchestrator, type OrchestratorConfig } from '../../shared/orchestrator'
 import { parseRule, type AutomationRule } from '../../shared/automation'
@@ -224,9 +224,8 @@ export function validateConfig(
   const delivery: Record<string, DeliverySettings> = {}
   if (isRecord(data['delivery'])) {
     for (const [projectId, raw] of Object.entries(data['delivery'])) {
-      if (isRecord(raw) && typeof raw['requirePushApproval'] === 'boolean') {
-        delivery[projectId] = { requirePushApproval: raw['requirePushApproval'] }
-      }
+      const parsed = parseDeliverySettingsValue(raw)
+      if (parsed) delivery[projectId] = parsed
     }
   }
   const agents: Record<string, ProjectAgents> = {}

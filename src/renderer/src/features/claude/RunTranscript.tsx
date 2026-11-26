@@ -5,7 +5,6 @@ import { cn } from '@/lib/utils'
 import { Alert } from '../../components/Alert'
 import { MarkdownText } from '../../components/MarkdownText'
 import {
-  AgentsIcon,
   CheckIcon,
   CopyIcon,
   EditIcon,
@@ -13,35 +12,21 @@ import {
   InfoIcon,
   PermissionIcon,
   PlayIcon,
-  ReadIcon,
-  RetryIcon,
-  SearchIcon,
-  TerminalIcon,
-  ToolIcon,
-  type SvgIcon
+  RetryIcon
 } from '../../components/icons'
 import { StatusToken } from '../../components/StatusToken'
 import { formatDuration, formatUsd, plural } from '../../lib/format'
 import { CollapsibleHeader } from '../../components/CollapsibleHeader'
 import { OpenPrButton, OpenPrFeedback } from '../task/OpenPrButton'
 import { SubagentGroup } from './SubagentGroup'
+import { CATEGORY_ICON, StepRow, TOOLS_LIST } from './WorkSteps'
 import {
   failedLabel,
   summarizeSteps,
-  verbOf,
   type StepCategory,
   type TranscriptItem,
   type WorkStep
 } from './run-transcript'
-
-const CATEGORY_ICON: Record<StepCategory, SvgIcon> = {
-  command: TerminalIcon,
-  edit: EditIcon,
-  read: ReadIcon,
-  search: SearchIcon,
-  subagent: AgentsIcon,
-  tool: ToolIcon
-}
 
 /** Mais recentes primeiro quando o log é longo; o resto abre em "Mostrar anteriores". */
 const TAIL = 40
@@ -51,28 +36,6 @@ const TAIL = 40
  * ferramenta") que abre a lista; o texto do agente fica inteiro, fora dela.
  */
 const TOOLS_LINE = 'font-mono text-xs text-muted-foreground'
-const TOOLS_LIST = 'mt-1.5 ml-[7px] flex flex-col gap-1 border-l border-border-soft py-0.5 pl-3'
-
-function StepRow({ step }: { step: WorkStep }): React.JSX.Element {
-  const failed = step.state === 'failed'
-  const verb = verbOf(step.tool)
-  const StepIcon = CATEGORY_ICON[step.category]
-  return (
-    <div className="flex min-w-0 items-start gap-2">
-      <StepIcon
-        className={cn('mt-0.5 size-3.5', failed ? 'text-danger' : 'text-subtle-foreground')}
-      />
-      <p className={cn('min-w-0 flex-1 break-words', failed && 'text-foreground')}>
-        <span className="font-sans">{verb}</span>
-        {step.summary && <> {step.summary}</>}
-      </p>
-      {failed && <StatusToken tone="danger" label="falhou" className="font-sans" />}
-      {step.state === 'running' && (
-        <StatusToken tone="running" label="rodando" className="font-sans" />
-      )}
-    </div>
-  )
-}
 
 function dominantCategory(steps: readonly WorkStep[]): StepCategory {
   const counts = new Map<StepCategory, number>()

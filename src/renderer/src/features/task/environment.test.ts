@@ -85,3 +85,30 @@ describe('branchTreeUrl', () => {
     expect(branchTreeUrl({ repo: { ...repo, host: 'ghe.acme.com', access: 'git' } }, 'x')).toBeNull()
   })
 })
+
+describe('medidor de contexto com a janela real do CLI', () => {
+  it('o resultado do turno corrige a janela do último uso', () => {
+    const log = [
+      { kind: 'usage', inputTokens: 150_000, contextWindow: 200_000 },
+      {
+        kind: 'result',
+        ok: true,
+        durationMs: 1,
+        costUsd: null,
+        turns: 1,
+        text: '',
+        contextWindow: 1_000_000
+      }
+    ] as const
+    expect(latestContextUsage(log)).toEqual({
+      percent: 15,
+      inputTokens: 150_000,
+      contextWindow: 1_000_000
+    })
+  })
+  it('trocar de modelo nunca mostra mais tokens do que a janela comporta', () => {
+    const usage = { percent: 22, inputTokens: 215_000, contextWindow: 1_000_000 }
+    expect(usageForModel(usage, 'opus').contextWindow).toBe(1_000_000)
+    expect(usageForModel({ ...usage, inputTokens: 50_000 }, 'haiku').percent).toBe(25)
+  })
+})

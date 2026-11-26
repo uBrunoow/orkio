@@ -63,6 +63,7 @@ import { isRecord } from '../guards'
 import type {
   NotionDataSourceList,
   NotionProjectChoice,
+  NotionTaskPage,
   NotionTaskSearchResult,
   NotionTasksResult,
   NotionTasksSchemaInfo,
@@ -1103,6 +1104,11 @@ export const ORKIO_API = {
       /** Execuções e ambiente da tarefa (local, sem rede). */
       state: call<(projectId: string, taskId: string) => Promise<Result<TaskRunsState>>>()({
         channel: 'claude:state',
+        args: [projectId, taskId]
+      }),
+      /** Página da tarefa no Notion (título, campos e descrição) para a aba "Notion". */
+      taskPage: call<(projectId: string, taskId: string) => Promise<Result<NotionTaskPage>>>()({
+        channel: 'claude:task-page',
         args: [projectId, taskId]
       }),
       /** Briefing do Notion (editável) e a branch que será usada. Não cria nada. */

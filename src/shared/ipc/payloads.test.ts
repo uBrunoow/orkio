@@ -5,6 +5,7 @@ import {
   parseActivityQuery,
   parseAgentProfile,
   parseAgentRules,
+  parseDeliverySettings,
   parseBoardSaveInput,
   parseCreateProjectInput,
   parseFlowDraft,
@@ -246,5 +247,19 @@ describe('parseCreateProjectInput', () => {
     expect(parseCreateProjectInput({ ...base, gitOnly: true })).toEqual({ ...base, gitOnly: true })
     expect(parseCreateProjectInput(base)).toEqual(base)
     expect(parseCreateProjectInput({ ...base, gitOnly: 'sim' })).toBe(INVALID)
+  })
+})
+
+describe('ajustes de entrega (IPC)', () => {
+  it('aceita a aprovação, os agentes entregando e destinos válidos; recusa main e lixo', () => {
+    expect(parseDeliverySettings({ requirePushApproval: true })).toEqual({
+      requirePushApproval: true
+    })
+    expect(
+      parseDeliverySettings({ requirePushApproval: true, agentsDeliver: true, prBases: [' dev '] })
+    ).toEqual({ requirePushApproval: true, agentsDeliver: true, prBases: ['dev'] })
+    expect(ok(parseDeliverySettings({ requirePushApproval: true, prBases: ['main'] }))).toBe(false)
+    expect(ok(parseDeliverySettings({ requirePushApproval: true, agentsDeliver: 1 }))).toBe(false)
+    expect(ok(parseDeliverySettings({ requirePushApproval: true, extra: 1 }))).toBe(false)
   })
 })

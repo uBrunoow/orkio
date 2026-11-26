@@ -325,6 +325,35 @@ describe('subagentes', () => {
     expect(runningSubagents(buildTranscript(events, false))).toEqual([])
   })
 
+  it('cada subagente guarda os passos dele (o que está fazendo), com o estado de cada um', () => {
+    const items = buildTranscript(
+      [
+        tool('A', 'Task', 'Plano técnico'),
+        sub('A', 'Plano técnico'),
+        child('c1', 'A'),
+        ok('c1'),
+        { kind: 'tool', id: 'c2', tool: 'Bash', summary: 'pnpm test', parent: 'A' }
+      ],
+      true
+    )
+    const g = items[0]
+    const agent = g?.kind === 'subagents' ? g.agents[0] : undefined
+    expect(agent?.steps.map((s) => [s.tool, s.summary, s.state])).toEqual([
+      ['Read', 'a.ts', 'ok'],
+      ['Bash', 'pnpm test', 'running']
+    ])
+    expect(agent?.tools).toBe(2)
+  })
+
+  it('subagente que terminou não deixa passo "rodando"', () => {
+    const items = buildTranscript(
+      [tool('A', 'Task', 'x'), sub('A', 'x'), child('c1', 'A'), ok('A')],
+      true
+    )
+    const g = items[0]
+    expect(g?.kind === 'subagents' && g.agents[0]?.steps.map((s) => s.state)).toEqual(['ok'])
+  })
+
   it('segundo plano, falha e texto entre lançamentos', () => {
     const items = buildTranscript(
       [sub('A', 'x', true), ok('A'), sub('B', 'y'), bad('B'), text('ok'), sub('C', 'z')],

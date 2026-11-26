@@ -113,6 +113,17 @@ export interface NotionTask {
   assignees: string[]
 }
 
+/** A página da tarefa como o Notion a mostra: campos e a descrição em markdown (só leitura). */
+export interface NotionTaskPage {
+  task: NotionTask
+  /** Blocos da página em markdown; vazio quando a página está vazia ou não pôde ser lida. */
+  markdown: string
+  /** Tipos de bloco do Notion não convertidos. */
+  unsupported: string[]
+  /** A página não pôde ser lida (os campos continuam). */
+  warning: string | null
+}
+
 /** Tarefa achada na busca (banco de Tarefas inteiro): com o projeto local, se vinculado. */
 export interface NotionTaskHit extends NotionTask {
   /** Projeto do Orkio vinculado à página de Projetos da tarefa; `null` se nenhum. */

@@ -114,6 +114,26 @@ test('menu com três telas; Configurações reúne as telas do projeto e sai das
   await approval.click()
   await expect(approval).toBeChecked()
 
+  // Agentes enviam e abrem PR sozinhos: só para os destinos da lista (dev por padrão), nunca main.
+  const entrega = page.getByRole('region', { name: 'Entrega' })
+  const agentsDeliver = entrega.getByRole('switch', { name: 'Agentes enviam e abrem PR sozinhos' })
+  await expect(agentsDeliver).not.toBeChecked()
+  await expect(entrega.getByLabel('PRs só para')).toHaveCount(0)
+  await agentsDeliver.click()
+  await expect(agentsDeliver).toBeChecked()
+  const bases = entrega.getByLabel('PRs só para')
+  await expect(bases).toHaveValue('dev')
+  await bases.fill('dev, main')
+  await expect(entrega).toContainText('PR de agente para “main” nunca é permitida.')
+  await expect(entrega.getByRole('button', { name: 'Salvar' })).toBeDisabled()
+  await bases.fill('dev, develop')
+  await entrega.getByRole('button', { name: 'Salvar' }).click()
+  await navTo(page, 'Quadro e automações')
+  await boardSettingsTab(page, 'Entrega')
+  await expect(entrega.getByLabel('PRs só para')).toHaveValue('dev, develop')
+  await agentsDeliver.click()
+  await expect(agentsDeliver).not.toBeChecked()
+
   // Fluxos (com os modelos do alva-flow) também é uma aba.
   await boardSettingsTab(page, 'Fluxos')
   await expect(page.getByRole('region', { name: 'Fluxos do projeto' })).toBeVisible()
@@ -146,8 +166,8 @@ test('tarefa: tela com fases, conversa e painel; janela estreita; tarefa que sum
   await expect(session.getByRole('textbox', { name: /^Mensagem para/ })).toBeVisible()
   const panel = task.getByRole('complementary', { name: 'Detalhes de ORK-2' })
   // Painel como no Claude Desktop: ícones no topo e as subtelas pelas linhas de Detalhes.
-  await expect(panel.getByRole('tab')).toHaveCount(4)
-  for (const name of ['Detalhes', 'Mudanças', 'Sidechat', 'Terminal']) {
+  await expect(panel.getByRole('tab')).toHaveCount(5)
+  for (const name of ['Detalhes', 'Notion', 'Mudanças', 'Sidechat', 'Terminal']) {
     await expect(panel.getByRole('tab', { name, exact: true })).toBeVisible()
   }
   await panel.getByRole('button', { name: 'PR & CI', exact: true }).click()

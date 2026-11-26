@@ -151,6 +151,20 @@ test('card do Claude Code: versão e login, sem e-mail nem credenciais', async (
   await expect(card(page)).toBeVisible()
 })
 
+test('aba Notion: título, campos e a descrição da página da tarefa', async () => {
+  const { page } = orkio!
+  await openPanel(page)
+  const notion = await taskTab(panelOf(page), 'Notion')
+  const region = notion.getByRole('region', { name: 'Tarefa no Notion' })
+  await expect(region).toContainText('Listar tarefas do Notion')
+  await expect(region).toContainText('Status')
+  await expect(region).toContainText('Exportar as tarefas em CSV.')
+  await expect(region).toContainText('Gera um arquivo .csv')
+  await expect(region.getByRole('button', { name: 'Abrir no Notion' })).toBeVisible()
+  // O contexto do Orkio (branch, worktree) é do briefing, não da página.
+  await expect(region).not.toContainText('Branch de trabalho')
+})
+
 test('roda numa branch isolada: briefing, aprovação, pergunta, bloqueios e resumo', async () => {
   const { page } = orkio!
   const section = await openPanel(page)
@@ -492,6 +506,12 @@ test('subagentes do Claude aparecem na conversa e a linha "Esperando" some ao te
   await expect(group).toContainText('review-agent')
   await expect(group).toContainText('2 ferramentas')
   await expect(group).toContainText('Concluído')
+  // O que trabalha mostra o passo atual; cada um abre a lista do que fez.
+  await expect(group.getByTestId('subagent-current')).toContainText('npm test')
+  await group.getByRole('button', { name: /Revisar API/ }).click()
+  const steps = group.getByRole('group', { name: 'Passos de Revisar API' })
+  await expect(steps).toContainText('src/api.ts')
+  await expect(steps).toContainText('export')
   await expect(section.getByTestId('waiting-subagents')).toHaveText(
     'Esperando 1 subagente: Escrever testes'
   )

@@ -8,7 +8,7 @@ import {
   type FlowRunView,
   type TaskFlowsProject
 } from '../../shared/task-flow'
-import { DEFAULT_DELIVERY_SETTINGS, type DeliverySettings } from '../../shared/delivery'
+import { DEFAULT_DELIVERY_SETTINGS, prBasesOf, type DeliverySettings } from '../../shared/delivery'
 import { DECLARED_FLOW_VARS } from '../../shared/flow-outputs'
 import type { BoardStore } from '../board/board.store'
 import type { ConfigStore } from '../storage/config-store'
@@ -61,23 +61,49 @@ export class FlowsService {
         ...c,
         delivery: {
           ...c.delivery,
-          [projectId]: { requirePushApproval: settings.requirePushApproval }
+          [projectId]: {
+            requirePushApproval: settings.requirePushApproval,
+            ...(settings.agentsDeliver !== undefined
+              ? { agentsDeliver: settings.agentsDeliver }
+              : before.agentsDeliver !== undefined
+                ? { agentsDeliver: before.agentsDeliver }
+                : {}),
+            ...(settings.prBases
+              ? { prBases: settings.prBases }
+              : before.prBases
+                ? { prBases: before.prBases }
+                : {})
+          }
         }
       }))
     } catch (error) {
       console.error(`[orkio] salvar entrega: ${errorName(error)}`)
       return fail('storage', 'Não foi possível salvar o ajuste. Tente novamente.')
     }
+    const changes: string[] = []
     if (before.requirePushApproval !== settings.requirePushApproval) {
+      changes.push(
+        settings.requirePushApproval
+          ? 'Entrega: aprovação antes de cada push ligada'
+          : 'Entrega: aprovação antes de cada push desligada (a branch padrão continua bloqueada)'
+      )
+    }
+    if (settings.agentsDeliver !== undefined && !!before.agentsDeliver !== settings.agentsDeliver) {
+      changes.push(
+        settings.agentsDeliver
+          ? 'Entrega: agentes enviam e abrem PR sozinhos'
+          : 'Entrega: só o Orkio envia e abre PR (botão "Abrir PR" e passos de entrega)'
+      )
+    }
+    if (settings.prBases && prBasesOf(before).join(',') !== settings.prBases.join(',')) {
+      changes.push(`Entrega: PRs dos agentes só para ${settings.prBases.join(', ')}`)
+    }
+    if (changes.length > 0) {
       this.deps.store.addConfigEvent(
         projectId,
         (this.deps.now?.() ?? new Date()).toISOString(),
         this.deps.actor(),
-        [
-          settings.requirePushApproval
-            ? 'Entrega: aprovação antes de cada push ligada'
-            : 'Entrega: aprovação antes de cada push desligada (a branch padrão continua bloqueada)'
-        ]
+        changes
       )
     }
     return this.getProject(projectId)

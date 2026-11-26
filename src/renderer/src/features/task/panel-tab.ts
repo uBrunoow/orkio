@@ -1,15 +1,25 @@
 import type { TaskPhaseId } from '../../../../shared/task-phase'
 
 /**
- * Painel ao lado da conversa (como no Claude Desktop): poucos ícones no topo (Detalhes, Mudanças,
+ * Painel ao lado da conversa (como no Claude Desktop): poucos ícones no topo (Detalhes, Notion, Mudanças,
  * Sidechat e, com a task do Backlog.md, Spec e Plano) e subtelas abertas pelas linhas de Detalhes
  * (PR & CI, Revisão, Contexto), com "voltar".
  */
 export type PanelTab =
-  'details' | 'changes' | 'sidechat' | 'terminal' | 'spec' | 'plan' | 'pr' | 'review' | 'context'
+  | 'details'
+  | 'notion'
+  | 'changes'
+  | 'sidechat'
+  | 'terminal'
+  | 'spec'
+  | 'plan'
+  | 'pr'
+  | 'review'
+  | 'context'
 
 export const PANEL_TAB_LABEL: Record<PanelTab, string> = {
   details: 'Detalhes',
+  notion: 'Notion',
   changes: 'Mudanças',
   sidechat: 'Sidechat',
   terminal: 'Terminal',
@@ -31,6 +41,7 @@ export function isSubview(tab: PanelTab): boolean {
 export function availableTabs(hasBacklogDoc: boolean): PanelTab[] {
   return [
     'details',
+    'notion',
     'changes',
     'sidechat',
     'terminal',

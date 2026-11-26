@@ -12,6 +12,7 @@ export function claudeHandlers(
   return {
     status: (options) => service.getStatus(options.force),
     state: (projectId, taskId) => service.state(projectId, taskId),
+    taskPage: (projectId, taskId) => service.taskPage(projectId, taskId),
     prepare: (projectId, taskId) => service.prepare(projectId, taskId),
     start: (request) => service.start(request),
     send: (request) => service.send(request),

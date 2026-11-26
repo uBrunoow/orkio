@@ -6,6 +6,19 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+### Adicionado
+
+- Aba "Notion" no painel da tarefa: título, status, prioridade, responsáveis e a descrição da página, com "Abrir no Notion".
+- Agentes enviam e abrem PR sozinhos (opção por projeto em Quadro e automações › Entrega), só para as branches de destino escolhidas (`dev` por padrão), nunca para main ou master.
+- Subagentes mostram o que estão fazendo: o passo atual de quem trabalha e, ao abrir, a lista de passos de cada um.
+
+### Corrigido
+
+- A branch de destino da PR passa a ser conferida (`gh pr create`/`edit --base`, `gh api` e GraphQL) quando o projeto restringe os destinos.
+- Os agentes não gravam mais o link da PR na página da tarefa no Notion (o Orkio liga a PR pela branch).
+- `git commit` com a mensagem num heredoc (`-F - <<'EOF'`) não é mais bloqueado como "fora do ambiente da tarefa" quando a mensagem cita caminhos como `/api/...`.
+- Medidor de contexto usa a janela real do modelo informada pelo Claude Code (Opus 5.5 tem 1 milhão; antes aparecia 100% com 215k de 200k).
+
 ## [0.2.21] - 2026-11-26
 
 ### Adicionado

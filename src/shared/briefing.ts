@@ -232,6 +232,8 @@ export interface BriefingInput {
   pageMarkdown: string
   unsupported: string[]
   project: { name: string; repo: string | null; branch: string; worktree: string }
+  /** Projeto com os agentes entregando: remote e destinos das PRs (senão o Orkio publica). */
+  delivery?: { remote: string; prBases: readonly string[] } | null
   pr: { number: number; state: string; url: string } | null
 }
 
@@ -246,7 +248,9 @@ export function buildBriefing(input: BriefingInput): string {
     '## Contexto',
     [
       `- Projeto: ${input.project.name}${input.project.repo ? ` (${input.project.repo})` : ''}`,
-      `- Branch de trabalho: ${input.project.branch} (worktree isolado). Não faça push nem abra PR: o Orkio faz isso pelo botão “Abrir PR” (ou pelo passo de entrega do fluxo). Se o usuário pedir, diga isso a ele.`,
+      input.delivery?.prBases.length
+        ? `- Branch de trabalho: ${input.project.branch} (worktree isolado). Você pode enviar esta branch (git push ${input.delivery.remote} ${input.project.branch}) e abrir a PR com gh pr create --base ${input.delivery.prBases[0]} (destinos: ${input.delivery.prBases.join(', ')}). Nunca para main ou master.`
+        : `- Branch de trabalho: ${input.project.branch} (worktree isolado). Não faça push nem abra PR: o Orkio faz isso pelo botão “Abrir PR” (ou pelo passo de entrega do fluxo). Se o usuário pedir, diga isso a ele.`,
       input.pr
         ? `- PR: #${input.pr.number} (${input.pr.state}) ${input.pr.url}`
         : '- PR: ainda não existe'

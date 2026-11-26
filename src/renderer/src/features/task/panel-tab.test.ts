@@ -3,9 +3,10 @@ import { availableTabs, canOpen, defaultPanelTab, isSubview } from './panel-tab'
 
 describe('painel da tarefa', () => {
   it('ícones do topo: Spec e Plano só com documento do Backlog.md', () => {
-    expect(availableTabs(false)).toEqual(['details', 'changes', 'sidechat', 'terminal'])
+    expect(availableTabs(false)).toEqual(['details', 'notion', 'changes', 'sidechat', 'terminal'])
     expect(availableTabs(true)).toEqual([
       'details',
+      'notion',
       'changes',
       'sidechat',
       'terminal',

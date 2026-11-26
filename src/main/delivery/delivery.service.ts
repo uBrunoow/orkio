@@ -10,6 +10,7 @@ import {
   DEFAULT_DELIVERY_SETTINGS,
   DELIVERY_MESSAGES,
   checkPushBranch,
+  prBasesOf,
   type DeliverySettings,
   type DeliveryTarget
 } from '../../shared/delivery'
@@ -124,7 +125,10 @@ export class DeliveryService {
           )
         )
         .join('/')
-    const range = t.defaultBranch ? `${enc(t.defaultBranch)}...${enc(t.branch)}` : enc(t.branch)
+    // Agentes entregando: a PR vai para o primeiro destino do projeto (ex.: dev), nunca a main.
+    const settings = this.settings(projectId)
+    const base = settings.agentsDeliver ? prBasesOf(settings)[0]! : t.defaultBranch
+    const range = base ? `${enc(base)}...${enc(t.branch)}` : enc(t.branch)
     return `https://github.com/${t.owner}/${t.repo}/compare/${range}?expand=1`
   }
 
