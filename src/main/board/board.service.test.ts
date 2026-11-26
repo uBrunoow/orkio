@@ -72,7 +72,9 @@ class FakeNotion implements BoardNotion {
       title: `Tarefa ${i + 1}`,
       status: { id: OPTIONS.find((o) => o.name === name)?.id ?? null, name, color: 'blue' },
       priority: null,
-      assignees: ['Ada']
+      assignees: ['Ada'],
+      gitStage: null,
+      prUrl: null
     }))
     const values: Record<string, Record<string, SimplePropertyValue>> = {}
     for (const t of tasks) {

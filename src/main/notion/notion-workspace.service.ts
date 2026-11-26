@@ -436,7 +436,7 @@ export class NotionWorkspaceService {
       const projects = this.config().projects
       const tasks: NotionTaskHit[] = []
       for (const item of page.results) {
-        const task = parseTaskPage(item, mapping)
+        const task = parseTaskPage(item, mapping, config.gitFlow ?? null)
         if (!task) continue
         const rel = relationIds(item, mapping.project.id)
         const local = projects.find(
@@ -580,7 +580,7 @@ export class NotionWorkspaceService {
     const tasks: NotionTask[] = []
     const values: Record<string, Record<string, SimplePropertyValue>> = {}
     for (const item of items) {
-      const task = parseTaskPage(item, mapping)
+      const task = parseTaskPage(item, mapping, config.gitFlow ?? null)
       if (!task) continue
       tasks.push(task)
       values[task.id] = simplePropertyValues(item)

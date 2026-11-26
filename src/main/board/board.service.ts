@@ -237,7 +237,8 @@ export class BoardService {
       return {
         id: t.id,
         status: t.status ? { id: t.status.id ?? null, name: t.status.name } : null,
-        orkioStage: orkio && orkio.type !== 'checkbox' ? orkio.name : null,
+        orkioStage:
+          orkio && (orkio.type === 'select' || orkio.type === 'status') ? orkio.name : null,
         blocked: blocked && blocked.type === 'checkbox' ? blocked.checked : null
       }
     })
@@ -971,7 +972,7 @@ export class BoardService {
     applyPropertyWrites((snapshot.data.values[write.taskPageId] ??= {}), write.properties)
     const task = snapshot.data.tasks.find((t) => t.id === write.taskPageId)
     const status = write.properties[snapshot.data.mapping.status.id]
-    if (task && status && status.type !== 'checkbox') {
+    if (task && status && (status.type === 'select' || status.type === 'status')) {
       task.status = { id: null, name: status.name, color: task.status?.color ?? 'default' }
     }
   }
