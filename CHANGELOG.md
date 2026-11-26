@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.24] - 2026-11-26
+
+### Mudado
+
+- feat(fluxo-git): Etapa Git, link da PR e merge na dev preenchidos no Notion.
+
 ## [0.2.23] - 2026-11-26
 
 ### Mudado
