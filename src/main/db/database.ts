@@ -292,6 +292,19 @@ export const MIGRATIONS: readonly string[] = [
   );
   -- "Ramificar daqui"/"Editar mensagem": de que sessão e de que resposta a sessão nova saiu.
   ALTER TABLE agent_runs ADD COLUMN fork_json TEXT;
+  `,
+  // v15 (Fluxo Git): fila própria das escritas do fluxo git no Notion (URL da PR, datas, status).
+  `
+  CREATE TABLE git_flow_writes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_page_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TEXT NOT NULL,
+    last_error_code TEXT,
+    created_at TEXT NOT NULL
+  );
   `
 ]
 
