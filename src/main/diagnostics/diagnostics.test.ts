@@ -17,6 +17,7 @@ function deps(overrides: Partial<DiagnosticsDeps> = {}): DiagnosticsDeps {
       counts: () => ({ events: 12, pendingWrites: 5 }),
       stuckWrites: (min) => (min === 3 ? [{}, {}] : [])
     },
+    gitFlow: { pendingCount: () => 3 },
     connections: async () => [
       {
         name: 'GitHub',
@@ -53,6 +54,7 @@ describe('collectDiagnostics', () => {
     expect(text).toContain('- Integridade do banco: ok')
     // Contagens pelos donos das tabelas (quadro e execuções).
     expect(text).toContain('- Escritas pendentes no Notion: 5')
+    expect(text).toContain('- Escritas pendentes da Etapa Git: 3')
     expect(text).toContain('- Escritas com 3+ tentativas: 2')
     expect(text).toContain('- Eventos de tarefas: 12')
     expect(text).toContain('- Execuções do Claude Code: 7')

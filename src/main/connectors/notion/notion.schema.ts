@@ -22,6 +22,7 @@ import type {
   NotionProjectPage,
   NotionTask
 } from '../../../shared/notion'
+import type { GitFlowConfig } from '../../../shared/git-flow'
 import { normalizeLabel } from '../../../shared/text'
 
 export { FIELD_TYPES, REQUIRED_FIELDS, candidatesFor, fieldLabel, sameId }
@@ -273,7 +274,11 @@ export function parseProjectPage(body: unknown): NotionProjectPage | null {
   return { id, title: titleOf(body) || 'Sem título', url: httpsUrlOrNull(body['url']) }
 }
 
-export function parseTaskPage(body: unknown, mapping: NotionMapping): NotionTask | null {
+export function parseTaskPage(
+  body: unknown,
+  mapping: NotionMapping,
+  gitFlow: GitFlowConfig | null = null
+): NotionTask | null {
   if (!isRecord(body) || body['object'] !== 'page' || body['in_trash'] === true) return null
   const id = stringOrNull(body['id'])
   if (!id) return null
@@ -295,8 +300,14 @@ export function parseTaskPage(body: unknown, mapping: NotionMapping): NotionTask
     title,
     status: optionValue(propertyValue(body, mapping.status.id), true),
     priority: mapping.priority ? optionValue(propertyValue(body, mapping.priority.id)) : null,
-    assignees: mapping.assignee ? peopleNames(propertyValue(body, mapping.assignee.id)) : []
+    assignees: mapping.assignee ? peopleNames(propertyValue(body, mapping.assignee.id)) : [],
+    gitStage: gitFlow ? optionValue(propertyValue(body, gitFlow.stage.id), true) : null,
+    prUrl: gitFlow?.prUrl ? urlValue(propertyValue(body, gitFlow.prUrl.id)) : null
   }
+}
+
+function urlValue(value: Record<string, unknown> | null): string | null {
+  return value?.['type'] === 'url' ? httpsUrlOrNull(value['url']) : null
 }
 
 function peopleNames(value: Record<string, unknown> | null): string[] {
@@ -311,6 +322,8 @@ function peopleNames(value: Record<string, unknown> | null): string[] {
 export type SimplePropertyValue =
   | { type: 'select' | 'status'; id: string | null; name: string | null }
   | { type: 'checkbox'; checked: boolean }
+  | { type: 'url'; url: string | null }
+  | { type: 'date'; start: string | null }
 
 /**
  * Valor que o Orkio escreve numa propriedade da página (por id da propriedade): status/select pelo
@@ -320,7 +333,10 @@ export type SimplePropertyValue =
  * (o Notion já tem?) e `applyPropertyWrites` (valores conhecidos depois de confirmar).
  */
 export type PropertyWrite =
-  { type: 'status' | 'select'; name: string } | { type: 'checkbox'; checked: boolean }
+  | { type: 'status' | 'select'; name: string }
+  | { type: 'checkbox'; checked: boolean }
+  | { type: 'url'; url: string }
+  | { type: 'date'; start: string }
 
 export type PropertyWrites = Record<string, PropertyWrite>
 
@@ -328,7 +344,14 @@ export function encodePropertyWrites(writes: PropertyWrites): Record<string, unk
   const payload: Record<string, unknown> = {}
   for (const id of Object.keys(writes).sort()) {
     const w = writes[id]!
-    payload[id] = w.type === 'checkbox' ? { checkbox: w.checked } : { [w.type]: { name: w.name } }
+    payload[id] =
+      w.type === 'checkbox'
+        ? { checkbox: w.checked }
+        : w.type === 'url'
+          ? { url: w.url }
+          : w.type === 'date'
+            ? { date: { start: w.start } }
+            : { [w.type]: { name: w.name } }
   }
   return payload
 }
@@ -341,6 +364,15 @@ export function decodePropertyWrites(payload: unknown): PropertyWrites {
     if (!isRecord(raw)) continue
     if (typeof raw['checkbox'] === 'boolean') {
       writes[id] = { type: 'checkbox', checked: raw['checkbox'] }
+      continue
+    }
+    if (typeof raw['url'] === 'string') {
+      writes[id] = { type: 'url', url: raw['url'] }
+      continue
+    }
+    const date = raw['date']
+    if (isRecord(date) && typeof date['start'] === 'string') {
+      writes[id] = { type: 'date', start: date['start'] }
       continue
     }
     for (const type of ['status', 'select'] as const) {
@@ -357,6 +389,14 @@ export function propertyWritesKey(writes: PropertyWrites): string {
   return JSON.stringify(encodePropertyWrites(writes))
 }
 
+/** Datas por instante (o Notion devolve `…:03:00.000+00:00` para `…:03:00Z`); texto se não parsear. */
+function sameInstant(a: string | null, b: string): boolean {
+  if (a === null) return false
+  const x = Date.parse(a)
+  const y = Date.parse(b)
+  return Number.isNaN(x) || Number.isNaN(y) ? a === b : x === y
+}
+
 /** O Notion já tem todos os valores escritos? */
 export function propertyWritesMatch(
   values: Readonly<Record<string, SimplePropertyValue>> | undefined,
@@ -366,7 +406,13 @@ export function propertyWritesMatch(
   return Object.entries(writes).every(([id, w]) => {
     const current = values[id]
     if (w.type === 'checkbox') return current?.type === 'checkbox' && current.checked === w.checked
-    return current !== undefined && current.type !== 'checkbox' && current.name === w.name
+    if (w.type === 'url') return current?.type === 'url' && current.url === w.url
+    if (w.type === 'date') return current?.type === 'date' && sameInstant(current.start, w.start)
+    return (
+      current !== undefined &&
+      (current.type === 'select' || current.type === 'status') &&
+      current.name === w.name
+    )
   })
 }
 
@@ -376,7 +422,10 @@ export function applyPropertyWrites(
   writes: PropertyWrites
 ): void {
   for (const [id, w] of Object.entries(writes)) {
-    values[id] = w.type === 'checkbox' ? w : { type: w.type, id: null, name: w.name }
+    values[id] =
+      w.type === 'checkbox' || w.type === 'url' || w.type === 'date'
+        ? w
+        : { type: w.type, id: null, name: w.name }
   }
 }
 
@@ -391,6 +440,11 @@ export function simplePropertyValues(body: unknown): Record<string, SimpleProper
     if (!id) continue
     if (type === 'checkbox') {
       result[id] = { type, checked: value['checkbox'] === true }
+    } else if (type === 'url') {
+      result[id] = { type, url: stringOrNull(value['url']) }
+    } else if (type === 'date') {
+      const date = value['date']
+      result[id] = { type, start: isRecord(date) ? stringOrNull(date['start']) : null }
     } else if (type === 'select' || type === 'status') {
       const option = value[type]
       result[id] = {

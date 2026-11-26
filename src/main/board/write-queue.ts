@@ -8,21 +8,39 @@
  * - O Notion recusou (400/403/404) → desfaz localmente (`onRejected`) e avisa.
  */
 import { backoffMs } from '../net/rate-queue'
-import type { BoardStore, PendingWrite } from './board.store'
+import type { PendingWrite } from './board.store'
 import { isApiError } from '../net/http'
 import { isPermanentNotionError } from '../../shared/notion-errors'
 import { propertyWritesKey, type PropertyWrites } from '../connectors/notion/notion.schema'
 
 export const WRITE_MAX_BACKOFF_MS = 5 * 60 * 1000
 
-export interface WriteQueueDeps {
-  store: BoardStore
+/** O que a fila precisa saber de cada escrita guardada. */
+export interface QueuedWrite {
+  taskPageId: string
+  properties: PropertyWrites
+  attempts: number
+  nextAttemptAt: string
+  lastErrorCode: string | null
+}
+
+/** O que a fila exige do armazenamento (o quadro e o Fluxo Git têm o seu cada um). */
+export interface WriteStore<W extends QueuedWrite> {
+  allPending(): W[]
+  pending(id: string): W | null
+  scheduleRetry(id: string, attempts: number, next: string, code: string): void
+  deletePending(id: string): void
+  deletePendingIfUnchanged(id: string, writes: PropertyWrites): boolean
+}
+
+export interface WriteQueueDeps<W extends QueuedWrite = PendingWrite> {
+  store: WriteStore<W>
   updatePage(pageId: string, writes: PropertyWrites): Promise<void>
-  onSynced(write: PendingWrite): void
+  onSynced(write: W): void
   /** Escrita recusada pelo Notion: desfazer localmente. */
-  onRejected(write: PendingWrite, error: { code: string; message: string }): void
+  onRejected(write: W, error: { code: string; message: string }): void
   /** Falha transitória: continua pendente. */
-  onRetry(write: PendingWrite, error: { code: string; message: string }): void
+  onRetry(write: W, error: { code: string; message: string }): void
   now?: () => Date
   random?: () => number
   schedule?: (fn: () => void, ms: number) => { cancel(): void }
@@ -32,14 +50,14 @@ export function isPermanentWriteError(e: unknown): boolean {
   return isApiError(e, 'notion') && isPermanentNotionError(e.code)
 }
 
-export class NotionWriteQueue {
+export class NotionWriteQueue<W extends QueuedWrite = PendingWrite> {
   private readonly now: () => Date
   private readonly random: () => number
   private timer: { cancel(): void } | null = null
   private running: Promise<void> | null = null
   private stopped = false
 
-  constructor(private readonly deps: WriteQueueDeps) {
+  constructor(private readonly deps: WriteQueueDeps<W>) {
     this.now = deps.now ?? (() => new Date())
     this.random = deps.random ?? Math.random
   }
@@ -102,7 +120,7 @@ export class NotionWriteQueue {
     }
   }
 
-  private async send(write: PendingWrite): Promise<void> {
+  private async send(write: W): Promise<void> {
     const key = propertyWritesKey(write.properties)
     try {
       await this.deps.updatePage(write.taskPageId, write.properties)

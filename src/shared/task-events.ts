@@ -213,6 +213,23 @@ export const TASK_EVENTS = {
       outcome: req(AUTOMATION_FIELDS.outcome)
     }
   }),
+  /**
+   * Fluxo Git: a Etapa Git (e o link/data da PR) escrita no Notion pelos eventos do GitHub, ou a
+   * recusa do Notion. `reason` = evento consumido sem escrita (pausa, já estava assim).
+   */
+  git_flow: meta({
+    source: 'automation',
+    groups: ['automation'],
+    inSession: false,
+    actor: 'source',
+    detail: {
+      event: AUTOMATION_FIELDS.event,
+      stage: str,
+      prNumber: num,
+      rejected: str,
+      reason: str
+    }
+  }),
   automation_paused: meta({ source: 'manual', groups: ['board'], actor: 'source', detail: {} }),
   automation_resumed: meta({ source: 'manual', groups: ['board'], actor: 'source', detail: {} }),
   run_started: meta({
@@ -537,6 +554,7 @@ export const SETTLES_REJECTION_KINDS = kindsWhere((m) => m.settlesRejection)
 export function activityGroup(e: TaskEvent): ActivityGroup | null {
   if (e.kind === 'moved') return e.source === 'automation' ? 'automation' : 'board'
   if (e.kind === 'automation' && e.detail.outcome === 'noop') return null
+  if (e.kind === 'git_flow' && e.detail.reason !== undefined) return null
   return TASK_EVENTS[e.kind].groups[0] ?? null
 }
 

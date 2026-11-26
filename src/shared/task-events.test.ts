@@ -78,6 +78,7 @@ describe('classificações derivadas do catálogo', () => {
   it('a sessão esconde o que a execução já conta', () => {
     expect(TASK_EVENT_KINDS.filter((kind) => !isSessionEvent({ kind }))).toEqual([
       'sync_ok',
+      'git_flow',
       'run_started',
       'run_finished',
       'run_cancelled',

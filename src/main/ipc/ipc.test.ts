@@ -600,6 +600,8 @@ describe('notionWorkspace', () => {
       ),
       getTasksSchema: vi.fn(async () => ok({} as never)),
       saveConfig: vi.fn(async () => ok({} as never)),
+      getGitFlow: vi.fn(async () => ok({ config: null, suggestion: null, properties: [] })),
+      saveGitFlow: vi.fn(async () => ok({} as never)),
       listProjectChoices: vi.fn(async () => ok({ choices: [], truncated: false })),
       link: vi.fn(async () => ok({ id: DS_A, name: 'X' })),
       unlink: vi.fn(async () => ok(null)),
@@ -648,6 +650,33 @@ describe('notionWorkspace', () => {
     expect(await ipc.invoke(ch.searchTasks.channel, { q: 1 })).toMatchObject(invalid)
     expect(await ipc.invoke(ch.searchTasks.channel, 'x'.repeat(201))).toMatchObject(invalid)
     expect(service.searchTasks).toHaveBeenCalledTimes(1)
+  })
+
+  it('Fluxo Git: valida a forma antes de chamar o serviço; null desliga', async () => {
+    const { ipc, service } = setup()
+    const input = {
+      stagePropertyId: 'git',
+      options: { branch: 'o1', merged: 'o4' },
+      prUrlPropertyId: null,
+      mergedAtPropertyId: 'dt'
+    }
+    await ipc.invoke(ch.saveGitFlow.channel, input)
+    expect(service.saveGitFlow).toHaveBeenCalledWith(input)
+    await ipc.invoke(ch.saveGitFlow.channel, null)
+    expect(service.saveGitFlow).toHaveBeenLastCalledWith(null)
+    for (const bad of [
+      { ...input, stagePropertyId: '' },
+      { ...input, options: { hacked: 'o1' } },
+      { ...input, options: { branch: 7 } },
+      { ...input, prUrlPropertyId: 5 },
+      { ...input, mergedAtPropertyId: undefined },
+      'x'
+    ]) {
+      expect(await ipc.invoke(ch.saveGitFlow.channel, bad)).toMatchObject(invalid)
+    }
+    expect(service.saveGitFlow).toHaveBeenCalledTimes(2)
+    await ipc.invoke(ch.getGitFlow.channel)
+    expect(service.getGitFlow).toHaveBeenCalled()
   })
 
   it('erro inesperado vira mensagem genérica; force é normalizado', async () => {

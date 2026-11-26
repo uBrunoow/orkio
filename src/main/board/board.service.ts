@@ -50,7 +50,7 @@ import { ConfigReadOnlyError, type ConfigStore } from '../storage/config-store'
 import type { BoardStore, PendingWrite } from './board.store'
 import { NotionWriteQueue, type WriteQueueDeps } from './write-queue'
 import type { Tx } from '../db/database'
-import type { NotionMapping, NotionPropertySummary } from '../../shared/notion'
+import type { NotionMapping, NotionPropertySummary, NotionTask } from '../../shared/notion'
 import type { Result } from '../../shared/result'
 import { isApiError } from '../net/http'
 import { canReconnect, type NotionConnectionMethod } from '../../shared/notion-errors'
@@ -237,7 +237,8 @@ export class BoardService {
       return {
         id: t.id,
         status: t.status ? { id: t.status.id ?? null, name: t.status.name } : null,
-        orkioStage: orkio && orkio.type !== 'checkbox' ? orkio.name : null,
+        orkioStage:
+          orkio && (orkio.type === 'select' || orkio.type === 'status') ? orkio.name : null,
         blocked: blocked && blocked.type === 'checkbox' ? blocked.checked : null
       }
     })
@@ -933,6 +934,11 @@ export class BoardService {
       : { stageId: null, blocked: false }
   }
 
+  /** Tarefas do Notion da última leitura do quadro (sem rede); vazio se ainda não leu. */
+  notionTasks(projectId: string): readonly NotionTask[] {
+    return this.snapshots.get(projectId)?.data.tasks ?? []
+  }
+
   private card(projectId: string, taskId: string): BoardCard {
     const snapshot = this.snapshots.get(projectId)!
     const task = snapshot.data.tasks.find((t) => t.id === taskId)!
@@ -959,6 +965,7 @@ export class BoardService {
       stageId: local.stageId,
       blocked: local.blocked,
       automationPaused: local.automationPaused,
+      gitStage: task.gitStage ? { name: task.gitStage.name, color: task.gitStage.color } : null,
       sync: local.pending
         ? { state: 'pending', message: this.retryMessages.get(task.id) ?? BOARD_MESSAGES.pending }
         : { state: 'synced' }
@@ -971,7 +978,7 @@ export class BoardService {
     applyPropertyWrites((snapshot.data.values[write.taskPageId] ??= {}), write.properties)
     const task = snapshot.data.tasks.find((t) => t.id === write.taskPageId)
     const status = write.properties[snapshot.data.mapping.status.id]
-    if (task && status && status.type !== 'checkbox') {
+    if (task && status && (status.type === 'select' || status.type === 'status')) {
       task.status = { id: null, name: status.name, color: task.status?.color ?? 'default' }
     }
   }

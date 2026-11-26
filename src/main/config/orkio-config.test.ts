@@ -69,6 +69,30 @@ describe('orkio-config v2/v3', () => {
     expect(saved['notion']).toBeNull()
   })
 
+  it('notion.gitFlow: lê o válido, descarta o inválido sem perder o resto e v15 sem ele lê igual', async () => {
+    const gitFlow = {
+      stage: { id: 'git', name: 'Etapa Git', type: 'select' },
+      options: { branch: { id: 'o1', name: 'Branch criada' } },
+      prUrl: { id: 'url', name: 'PR' },
+      backfilledAt: '2026-11-20T00:00:00.000Z'
+    }
+    const base = { schemaVersion: ORKIO_CONFIG_VERSION, projects: [] }
+    await writeFile(file, JSON.stringify({ ...base, notion: { ...NOTION, gitFlow } }))
+    expect((await createOrkioConfigStore(file).load()).data.notion?.gitFlow).toEqual(gitFlow)
+
+    await writeFile(file, JSON.stringify({ ...base, notion: NOTION }))
+    const plain = await createOrkioConfigStore(file).load()
+    expect(plain.data.notion).toEqual(NOTION)
+    expect(plain.data.notion).not.toHaveProperty('gitFlow')
+
+    await writeFile(
+      file,
+      JSON.stringify({ ...base, notion: { ...NOTION, gitFlow: { stage: 'x', options: 1 } } })
+    )
+    const bad = await createOrkioConfigStore(file).load()
+    expect(bad.data.notion).toEqual(NOTION)
+  })
+
   it('migra v2 → v3: acrescenta boards vazio sem mexer no resto', async () => {
     await writeFile(
       file,

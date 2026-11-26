@@ -3,6 +3,7 @@
  * Só ids, etapas, flags e nomes de opção. Nunca título/conteúdo de páginas.
  */
 import type { Db, Tx } from '../db/database'
+import type { WriteStore } from './write-queue'
 import type { SqlValue } from '../db/database'
 import {
   STAGE_ENTRY_KINDS,
@@ -137,7 +138,7 @@ function toHistoryEntry(r: EventDbRow): ProjectHistoryEntry | null {
     : null
 }
 
-export class BoardStore {
+export class BoardStore implements WriteStore<PendingWrite> {
   constructor(readonly db: Db) {}
 
   transaction<T>(fn: (tx: Tx) => T): T {

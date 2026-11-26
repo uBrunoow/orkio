@@ -15,6 +15,7 @@ import {
   simplePropertyValues,
   suggestMapping
 } from './notion.schema'
+import type { GitFlowConfig } from '../../../shared/git-flow'
 import type { NotionMapping } from '../../../shared/notion'
 
 const PROJECTS_DS = '11111111-1111-1111-1111-111111111111'
@@ -304,8 +305,76 @@ describe('páginas', () => {
       title: 'Sincronizar Notion',
       status: { id: 'o2', name: 'Em andamento', color: 'blue' },
       priority: { name: 'Alta', color: 'red' },
-      assignees: ['Ada Lovelace']
+      assignees: ['Ada Lovelace'],
+      gitStage: null,
+      prUrl: null
     })
+  })
+
+  it('parseTaskPage com gitFlow lê a Etapa Git (select e status) e a URL da PR', () => {
+    const base = { object: 'page', id: 'p', properties: {} as Record<string, unknown> }
+    const flow = (type: 'select' | 'status', withUrl = true): GitFlowConfig => ({
+      stage: { id: 'gs', name: 'Etapa Git', type },
+      options: {},
+      ...(withUrl ? { prUrl: { id: 'pr', name: 'PR' } } : {})
+    })
+    const props = (type: 'select' | 'status') => ({
+      N: { id: 'title', type: 'title', title: [] },
+      G: { id: 'gs', type, [type]: { id: 'g1', name: 'Branch criada', color: 'green' } },
+      P: { id: 'pr', type: 'url', url: 'https://github.com/a/b/pull/1' }
+    })
+    for (const type of ['select', 'status'] as const) {
+      const page = { ...base, properties: props(type) }
+      expect(parseTaskPage(page, mapping, flow(type))).toMatchObject({
+        gitStage: { id: 'g1', name: 'Branch criada', color: 'green' },
+        prUrl: 'https://github.com/a/b/pull/1'
+      })
+      expect(parseTaskPage(page, mapping, flow(type, false))?.prUrl).toBeNull()
+      expect(parseTaskPage(page, mapping)).toMatchObject({ gitStage: null, prUrl: null })
+    }
+    const bad = { ...base, properties: { P: { id: 'pr', type: 'url', url: 'http://x.com' } } }
+    expect(parseTaskPage(bad, mapping, flow('select'))).toMatchObject({
+      gitStage: null,
+      prUrl: null
+    })
+  })
+
+  it('url e date: ida e volta, chave estável, match e apply', () => {
+    const writes = {
+      pr: { type: 'url', url: 'https://github.com/a/b/pull/1' },
+      dt: { type: 'date', start: '2026-11-26T14:03:00Z' }
+    } as const
+    const payload = encodePropertyWrites(writes)
+    expect(payload).toEqual({
+      dt: { date: { start: '2026-11-26T14:03:00Z' } },
+      pr: { url: 'https://github.com/a/b/pull/1' }
+    })
+    expect(decodePropertyWrites(payload)).toEqual(writes)
+    expect(propertyWritesKey(writes)).toBe(propertyWritesKey({ dt: writes.dt, pr: writes.pr }))
+    const values = simplePropertyValues({
+      properties: {
+        A: { id: 'pr', type: 'url', url: 'https://github.com/a/b/pull/1' },
+        B: { id: 'dt', type: 'date', date: { start: '2026-11-26T14:03:00Z' } }
+      }
+    })
+    expect(propertyWritesMatch(values, writes)).toBe(true)
+    expect(propertyWritesMatch(values, { pr: { type: 'url', url: 'https://x.com/' } })).toBe(false)
+    expect(propertyWritesMatch(values, { dt: { type: 'date', start: '2026-11-27' } })).toBe(false)
+    const known: typeof values = {}
+    applyPropertyWrites(known, writes)
+    expect(propertyWritesMatch(known, writes)).toBe(true)
+  })
+
+  it('date compara por instante e decode ignora url/date malformados', () => {
+    const values = simplePropertyValues({
+      properties: {
+        B: { id: 'dt', type: 'date', date: { start: '2026-11-26T14:03:00.000+00:00' } }
+      }
+    })
+    const w = (start: string) => ({ dt: { type: 'date', start } }) as const
+    expect(propertyWritesMatch(values, w('2026-11-26T14:03:00Z'))).toBe(true)
+    expect(propertyWritesMatch(values, w('2026-11-26T14:04:00Z'))).toBe(false)
+    expect(decodePropertyWrites({ a: { date: {} }, b: { url: 3 } })).toEqual({})
   })
 
   it('valores vazios e páginas na lixeira', () => {

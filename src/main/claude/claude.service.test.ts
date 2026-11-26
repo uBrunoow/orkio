@@ -17,7 +17,9 @@ const TASK: NotionTask = {
   title: 'Exportar CSV',
   status: { name: 'Em andamento', color: 'blue' },
   priority: { name: 'Alta', color: 'red' },
-  assignees: ['Ana']
+  assignees: ['Ana'],
+  gitStage: null,
+  prUrl: null
 }
 const READY: ClaudeCodeStatus = {
   installed: true,

@@ -60,6 +60,7 @@ class FakeNotion implements BoardNotion {
   dataSourceUpdates: Record<string, unknown>[] = []
   reject: string | null = null
   invalidated = 0
+  gitStage: Record<string, NotionTask['gitStage']> = {}
 
   async boardTasks() {
     if (this.offline) {
@@ -72,7 +73,9 @@ class FakeNotion implements BoardNotion {
       title: `Tarefa ${i + 1}`,
       status: { id: OPTIONS.find((o) => o.name === name)?.id ?? null, name, color: 'blue' },
       priority: null,
-      assignees: ['Ada']
+      assignees: ['Ada'],
+      gitStage: this.gitStage[id] ?? null,
+      prUrl: null
     }))
     const values: Record<string, Record<string, SimplePropertyValue>> = {}
     for (const t of tasks) {
@@ -344,6 +347,18 @@ describe('BoardService', () => {
     ])
     const history = await service.history('p1', T1)
     expect(history).toMatchObject({ ok: true, value: [{ kind: 'added', source: 'notion' }] })
+  })
+
+  it('o card traz a Etapa Git do Notion (nome e cor) e o quadro guarda as tarefas lidas', async () => {
+    notion.gitStage[T1] = { id: 'g4', name: 'Mergeada na dev', color: 'green' }
+    const view = await createBoard()
+    expect(view.cards.find((c) => c.taskId === T1)!.gitStage).toEqual({
+      name: 'Mergeada na dev',
+      color: 'green'
+    })
+    expect(view.cards.find((c) => c.taskId === T2)!.gitStage).toBeNull()
+    expect(service.notionTasks('p1').map((t) => t.id)).toEqual([T1, T2])
+    expect(service.notionTasks('outro')).toEqual([])
   })
 
   it('critério 2: mover para Revisando grava a etapa fina e NÃO escreve status no Notion', async () => {

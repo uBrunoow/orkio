@@ -67,6 +67,7 @@ const card = (taskId: string, stageId: string, priority: string | null = null): 
   stageId,
   blocked: false,
   automationPaused: false,
+  gitStage: null,
   sync: { state: 'synced' }
 })
 

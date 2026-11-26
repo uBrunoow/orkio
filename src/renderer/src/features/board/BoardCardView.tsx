@@ -22,6 +22,7 @@ import {
 } from '../../components/icons'
 import { useAgentBadge } from '../agents/agent-badges'
 import { AgentAvatar } from '../agents/AgentAvatar'
+import { GitStageToken } from '../../components/GitStageToken'
 import { StatusToken } from '../../components/StatusToken'
 import { cardSyncStatus, laneBadge, prButtonText } from './card-status'
 import type { BoardEntry } from './board-model'
@@ -164,6 +165,7 @@ export function BoardCardBody({
     card.automationPaused ||
     Boolean(branches[0]) ||
     Boolean(pr) ||
+    Boolean(card.gitStage) ||
     Boolean(card.priority) ||
     card.assignees.length > 0 ||
     showProject ||
@@ -245,6 +247,7 @@ export function BoardCardBody({
             </span>
           )}
           {pr && <PrButton pr={pr} />}
+          <GitStageToken stage={card.gitStage} className="max-w-full" />
           {card.priority && <span data-testid="card-priority">{card.priority.name}</span>}
           {card.assignees.length > 0 && <span>{card.assignees.join(', ')}</span>}
         </div>

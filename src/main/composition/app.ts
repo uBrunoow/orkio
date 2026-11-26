@@ -30,6 +30,8 @@ import { redactSecrets } from '../platform/redact'
 import { TaskSetupService } from '../task-setup/task-setup.service'
 import { taskSetupHandlers } from '../ipc/task-setup.ipc'
 import { AutomationService, type AutomationNotification } from '../automation/automation.service'
+import { GitFlowService } from '../git-flow/git-flow.service'
+import { GitFlowStore } from '../git-flow/git-flow.store'
 import { AutomationScheduler } from '../automation/scheduler'
 import { BoardService } from '../board/board.service'
 import { BoardStore } from '../board/board.store'
@@ -144,6 +146,8 @@ export interface OrkioApp {
 /** Peças que só existem com o banco local. */
 interface Work {
   board: BoardService
+  /** Fluxo Git: a Etapa Git no Notion pela fila própria. */
+  gitFlow: GitFlowService
   claude: ClaudeParts
   flows: FlowRunner
   prWake: PrWakeService
@@ -279,7 +283,8 @@ export function createApp(): OrkioApp {
       getDataSource: (id) => notion.getDataSource(id),
       queryDataSource: (id, options) => notion.queryDataSource(id, options),
       currentPersonId: () => notion.currentPersonId()
-    }
+    },
+    onGitFlowReset: () => gitFlowStore?.clear()
   })
   const orkioBot = new OrkioBotService({
     isConnected: () => github.isConnected(),
@@ -288,6 +293,7 @@ export function createApp(): OrkioApp {
   })
 
   const boardStore = openBoardStore(paths.db)
+  const gitFlowStore = boardStore ? new GitFlowStore(boardStore.db) : null
   // Branches registradas por tarefa (banco sem ID no Notion): os sinais leem daqui.
   const worktrees = boardStore ? createWorktrees({ db: boardStore.db, git, paths }) : null
   // Projeto só com git local: o GitHub vem pelo `gh` do usuário (o token dele nunca entra aqui).
@@ -349,6 +355,7 @@ export function createApp(): OrkioApp {
     boardStore && worktrees
       ? createWork({
           boardStore,
+          gitFlowStore: gitFlowStore!,
           worktrees,
           configStore,
           paths,
@@ -396,7 +403,8 @@ export function createApp(): OrkioApp {
     busy: () => ({
       runs: work?.claude.runs.activeRuns() ?? [],
       flows: work?.flows.runningList() ?? [],
-      pendingWrites: work?.board.writes.pendingCount() ?? 0
+      pendingWrites:
+        (work?.board.writes.pendingCount() ?? 0) + (work?.gitFlow.writes.pendingCount() ?? 0)
     }),
     taskLabel: async (projectId, taskId) => {
       const r = await notionWorkspace.listTasks(projectId)
@@ -411,6 +419,7 @@ export function createApp(): OrkioApp {
       runs: work.claude.runs,
       terminals: work.claude.terminals,
       writes: work.board.writes,
+      gitFlowWrites: work.gitFlow.writes,
       scheduler: work.scheduler,
       prWake: work.prWake,
       overview: work.overview
@@ -468,6 +477,7 @@ export function createApp(): OrkioApp {
           flows: work?.flows ?? null,
           runs: work?.claude.runs ?? null,
           board: boardStore,
+          gitFlow: work?.gitFlow.writes ?? null,
           connections: async () => [
             { name: 'Notion', status: await notion.getStatus() },
             { name: 'GitHub', status: await github.getStatus() }
@@ -550,6 +560,7 @@ export function createApp(): OrkioApp {
     work?.overview.touch()
     // Retoma as escritas no Notion que ficaram pendentes quando o app fechou.
     work?.board.writes.start()
+    work?.gitFlow.writes.start()
     keepAwake.start()
     updates.start()
     applyGlobalShortcut(preferences.get().globalShortcut)
@@ -568,6 +579,7 @@ export function createApp(): OrkioApp {
 /** Quadro, automações, agentes, orquestrador, Claude Code, fluxos e visão geral (banco local). */
 function createWork(core: {
   boardStore: BoardStore
+  gitFlowStore: GitFlowStore
   worktrees: ReturnType<typeof createWorktrees>
   configStore: ConfigStore<OrkioConfig>
   paths: UserDataPaths
@@ -824,11 +836,24 @@ function createWork(core: {
   orchestratorRef.set(orchestrator)
   enterStage.set(createEnterStage({ orchestrator, agents, flows: runner }))
 
+  // Fluxo Git (Etapa Git no Notion): escrita própria, mesmo conector do quadro (o token fica lá).
+  const gitFlow = new GitFlowService({
+    config: configStore,
+    store: boardStore,
+    gitStore: core.gitFlowStore,
+    stageOptions: () => notionWorkspace.gitStageOptions(),
+    writes: { updatePage: (pageId, properties) => notion.updatePage(pageId, properties) },
+    onChanged: (projectId) => {
+      notionWorkspace.invalidateTasks(projectId)
+      emit('boardChanged', { projectId })
+    }
+  })
   const automation = new AutomationService({
     config: configStore,
     store: boardStore,
     board,
     signals,
+    gitFlow,
     notify: (n) => showNotification(n, emit, core.notifyPrefs()),
     onChanged: (projectId) => emit('boardChanged', { projectId })
   })
@@ -895,13 +920,20 @@ function createWork(core: {
 
   return {
     board,
+    gitFlow,
     claude,
     flows: runner,
     prWake: flows.prWake,
     scheduler: scheduler(),
     overview,
     handlers: {
-      board: boardHandlers(board),
+      board: {
+        ...boardHandlers(board),
+        retryNow: () => {
+          board.retryNow()
+          gitFlow.writes.retryAllNow()
+        }
+      },
       flow: flowHandlers(board, flowFiles),
       automation: {
         status: (projectId) => automationStatus(projectId),

@@ -3,6 +3,8 @@
  * salvo em disco (`orkio-config.json`): mudar aqui pede migração.
  */
 
+import type { GitFlowConfig } from './git-flow'
+
 export type NotionColor =
   'default' | 'gray' | 'brown' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'pink' | 'red'
 
@@ -52,6 +54,8 @@ export interface NotionWorkspaceConfig {
   projectsDataSource: { id: string; name: string }
   tasksDataSource: { id: string; name: string }
   mapping: NotionMapping
+  /** Fluxo Git: a "Etapa Git" (e campos de PR) que o Orkio escreve no Notion. */
+  gitFlow?: GitFlowConfig
   updatedAt: string
 }
 
@@ -111,6 +115,10 @@ export interface NotionTask {
   priority: { name: string; color: NotionColor } | null
   /** Nomes dos responsáveis (se mapeado). */
   assignees: string[]
+  /** Etapa Git (fluxo Git); `null` sem fluxo configurado ou sem valor. */
+  gitStage: { id?: string | null; name: string; color: NotionColor } | null
+  /** Link da PR gravado no Notion (fluxo Git); `null` sem campo mapeado ou sem valor. */
+  prUrl: string | null
 }
 
 /** A página da tarefa como o Notion a mostra: campos e a descrição em markdown (só leitura). */

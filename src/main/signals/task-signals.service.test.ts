@@ -24,7 +24,9 @@ const task = (id: string, displayId: string | null): NotionTask => ({
   title: id,
   status: null,
   priority: null,
-  assignees: []
+  assignees: [],
+  gitStage: null,
+  prUrl: null
 })
 const TASKS = [task('t142', 'ORK-142'), task('t14', 'ORK-14'), task('t7', '7')]
 

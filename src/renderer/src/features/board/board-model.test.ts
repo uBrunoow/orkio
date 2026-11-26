@@ -37,6 +37,7 @@ const card = (
   stageId,
   blocked: false,
   automationPaused: false,
+  gitStage: null,
   sync: { state: 'synced' },
   ...extra
 })

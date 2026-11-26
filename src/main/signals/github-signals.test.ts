@@ -103,6 +103,12 @@ describe('client: GET condicional, Link e GraphQL', () => {
     expect(parsePullItem(pull(6, { html_url: 'https://github.com/acme/app/issues/6' }))).toBeNull()
     expect(parsePullItem({ title: 'x' })).toBeNull()
   })
+
+  it('parsePullItem: destino da PR (base.ref) validado', () => {
+    expect(parsePullItem(pull(1, { base: { ref: 'dev' } }))?.baseRef).toBe('dev')
+    expect(parsePullItem(pull(2))?.baseRef).toBeNull()
+    expect(parsePullItem(pull(3, { base: { ref: '../x' } }))?.baseRef).toBeNull()
+  })
 })
 
 function fakeApi() {

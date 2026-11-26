@@ -200,7 +200,9 @@ beforeEach(() => {
         title: 'Exportar CSV',
         status: null,
         priority: null,
-        assignees: []
+        assignees: [],
+        gitStage: null,
+        prUrl: null
       }
     ]
   }

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CheckboxField, SelectField } from '@/components/form'
+import { GitStageToken } from '../../components/GitStageToken'
 import { StatusToken } from '../../components/StatusToken'
 import { ExternalLinkIcon } from '../../components/icons'
 import { plural } from '../../lib/format'
@@ -100,9 +101,10 @@ export function TaskChanges(): React.JSX.Element {
 }
 
 export function TaskGitHub(): React.JSX.Element {
-  const { projectId, taskId, signals, refreshSignals } = useTaskView()
+  const { projectId, taskId, card, signals, refreshSignals } = useTaskView()
   return (
     <Section title="GitHub">
+      <GitStageToken stage={card.gitStage} className="text-xs" />
       {signals &&
       (signals.localBranches.length > 0 || signals.remoteBranches.length > 0 || signals.pr) ? (
         <TaskSignalsLine signals={signals} />

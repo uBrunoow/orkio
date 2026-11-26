@@ -16,7 +16,7 @@ import {
 } from '../../net/http'
 import { httpsUrlOrNull, isRecord, parseRetryAfterMs, stringOrNull } from '../../net/parse'
 import { notionPageIdsIn } from '../../../shared/slug'
-import { GITHUB_API_VERSION, isAuthorLogin, isLogin } from '../../../shared/github-names'
+import { GITHUB_API_VERSION, isAuthorLogin, isBranchName, isLogin } from '../../../shared/github-names'
 
 export const GITHUB_API_BASE_URL = 'https://api.github.com'
 export const GITHUB_REQUEST_TIMEOUT_MS = 10_000
@@ -413,6 +413,8 @@ export interface GitHubPullItem {
   state: 'draft' | 'open' | 'merged' | 'closed'
   merged: boolean
   headRef: string
+  /** Branch de destino da PR (REST `base.ref`); `null` se ausente ou inválida. */
+  baseRef: string | null
   /** Commit no topo da branch da PR (para conferir se o push chegou). */
   headSha: string | null
   updatedAt: string
@@ -436,6 +438,7 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
   const htmlUrl = httpsUrlOrNull(value['html_url'])
   const updatedAt = stringOrNull(value['updated_at'])
   const head = isRecord(value['head']) ? stringOrNull(value['head']['ref']) : null
+  const base = isRecord(value['base']) ? value['base']['ref'] : null
   const sha = isRecord(value['head']) ? stringOrNull(value['head']['sha']) : null
   if (typeof number !== 'number' || !htmlUrl || !updatedAt) return null
   let url: string
@@ -464,6 +467,7 @@ export function parsePullItem(value: unknown): GitHubPullItem | null {
     state,
     merged,
     headRef: head ?? '',
+    baseRef: isBranchName(base) ? base : null,
     headSha: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : null,
     updatedAt,
     createdAt: stringOrNull(value['created_at']),
