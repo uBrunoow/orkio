@@ -283,7 +283,8 @@ export function createApp(): OrkioApp {
       getDataSource: (id) => notion.getDataSource(id),
       queryDataSource: (id, options) => notion.queryDataSource(id, options),
       currentPersonId: () => notion.currentPersonId()
-    }
+    },
+    onGitFlowReset: () => gitFlowStore?.clear()
   })
   const orkioBot = new OrkioBotService({
     isConnected: () => github.isConnected(),
@@ -292,6 +293,7 @@ export function createApp(): OrkioApp {
   })
 
   const boardStore = openBoardStore(paths.db)
+  const gitFlowStore = boardStore ? new GitFlowStore(boardStore.db) : null
   // Branches registradas por tarefa (banco sem ID no Notion): os sinais leem daqui.
   const worktrees = boardStore ? createWorktrees({ db: boardStore.db, git, paths }) : null
   // Projeto só com git local: o GitHub vem pelo `gh` do usuário (o token dele nunca entra aqui).
@@ -353,6 +355,7 @@ export function createApp(): OrkioApp {
     boardStore && worktrees
       ? createWork({
           boardStore,
+          gitFlowStore: gitFlowStore!,
           worktrees,
           configStore,
           paths,
@@ -474,6 +477,7 @@ export function createApp(): OrkioApp {
           flows: work?.flows ?? null,
           runs: work?.claude.runs ?? null,
           board: boardStore,
+          gitFlow: work?.gitFlow.writes ?? null,
           connections: async () => [
             { name: 'Notion', status: await notion.getStatus() },
             { name: 'GitHub', status: await github.getStatus() }
@@ -575,6 +579,7 @@ export function createApp(): OrkioApp {
 /** Quadro, automações, agentes, orquestrador, Claude Code, fluxos e visão geral (banco local). */
 function createWork(core: {
   boardStore: BoardStore
+  gitFlowStore: GitFlowStore
   worktrees: ReturnType<typeof createWorktrees>
   configStore: ConfigStore<OrkioConfig>
   paths: UserDataPaths
@@ -835,7 +840,7 @@ function createWork(core: {
   const gitFlow = new GitFlowService({
     config: configStore,
     store: boardStore,
-    gitStore: new GitFlowStore(boardStore.db),
+    gitStore: core.gitFlowStore,
     stageOptions: () => notionWorkspace.gitStageOptions(),
     writes: { updatePage: (pageId, properties) => notion.updatePage(pageId, properties) },
     onChanged: (projectId) => {
@@ -922,7 +927,13 @@ function createWork(core: {
     scheduler: scheduler(),
     overview,
     handlers: {
-      board: boardHandlers(board),
+      board: {
+        ...boardHandlers(board),
+        retryNow: () => {
+          board.retryNow()
+          gitFlow.writes.retryAllNow()
+        }
+      },
       flow: flowHandlers(board, flowFiles),
       automation: {
         status: (projectId) => automationStatus(projectId),

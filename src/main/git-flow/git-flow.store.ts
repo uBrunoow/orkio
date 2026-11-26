@@ -85,6 +85,11 @@ export class GitFlowStore implements WriteStore<GitFlowWrite> {
     })
   }
 
+  /** Descarta toda a fila (Fluxo Git desligado ou propriedade trocada). */
+  clear(): void {
+    this.db.run('DELETE FROM git_flow_writes')
+  }
+
   deletePending(taskPageId: string): void {
     this.db.run('DELETE FROM git_flow_writes WHERE task_page_id = ?', taskPageId)
   }

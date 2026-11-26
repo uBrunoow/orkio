@@ -27,6 +27,8 @@ export interface DiagnosticsDeps {
     counts(): { events: number; pendingWrites: number }
     stuckWrites(minAttempts: number): readonly unknown[]
   } | null
+  /** Fila da Etapa Git (só a contagem). */
+  gitFlow?: { pendingCount(): number } | null
   connections: () => Promise<{ name: string; status: ConnectionStatus }[]>
   /** `<cmd> --version` (primeira linha) ou `null` se não estiver instalado. */
   toolVersion: (cmd: 'git' | 'gh' | 'claude') => Promise<string | null>
@@ -96,6 +98,7 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string>
   const flowCounts = safe(() => deps.flows?.counts() ?? null)
   const runCounts = safe(() => deps.runs?.counts() ?? null)
   const boardCounts = safe(() => deps.board?.counts() ?? null)
+  const gitCount = safe(() => deps.gitFlow?.pendingCount() ?? null)
   const stuck = safe(() => deps.board?.stuckWrites(STUCK_ATTEMPTS).length ?? null)
 
   const sections: DiagnosticSection[] = [
@@ -130,6 +133,7 @@ export async function collectDiagnostics(deps: DiagnosticsDeps): Promise<string>
         ['Claude Code rodando ou na fila', runCounts?.active ?? null],
         ['Fluxos em andamento', flowCounts?.active ?? null],
         ['Escritas pendentes no Notion', boardCounts?.pendingWrites ?? null],
+        ['Escritas pendentes da Etapa Git', gitCount],
         [`Escritas com ${STUCK_ATTEMPTS}+ tentativas`, stuck],
         ['Projetos', projects.total],
         ['Projetos com quadro', projects.withBoard],

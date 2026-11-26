@@ -107,10 +107,19 @@ describe('NotionWorkspaceService', () => {
   let schema: ReturnType<typeof tasksSchema>
   let clock: number
   let tasksByProject: Map<string, unknown[]>
+  let resets = 0
 
   async function makeService(): Promise<NotionWorkspaceService> {
     await store.load()
-    return new NotionWorkspaceService({ store, notion: api, now: () => new Date(clock) })
+    resets = 0
+    return new NotionWorkspaceService({
+      store,
+      notion: api,
+      now: () => new Date(clock),
+      onGitFlowReset: () => {
+        resets++
+      }
+    })
   }
 
   async function configured(): Promise<NotionWorkspaceService> {
@@ -300,6 +309,37 @@ describe('NotionWorkspaceService', () => {
       const result = await service.saveGitFlow(null)
       expect(result).toMatchObject({ ok: true, value: { health: 'ok' } })
       expect(store.get().notion?.gitFlow).toBeUndefined()
+    })
+
+    it('desligar ou trocar a propriedade da etapa descarta a fila; o mesmo id não', async () => {
+      const service = await configured()
+      await service.saveGitFlow(INPUT)
+      const first = resets
+      await service.saveGitFlow({ ...INPUT, mergedAtPropertyId: null })
+      expect(resets).toBe(first)
+      await service.saveGitFlow({ ...INPUT, stagePropertyId: 'other', options: { branch: 'x1' } })
+      expect(resets).toBe(first + 1)
+      await service.saveGitFlow(null)
+      expect(resets).toBe(first + 2)
+    })
+
+    it('recusa propriedade usada como Etapa Orkio ou Bloqueada de um quadro', async () => {
+      const service = await configured()
+      await store.update((c) => ({
+        ...c,
+        boards: {
+          p1: {
+            stages: [],
+            orkioStageProperty: { id: 'git', name: 'Etapa Git', type: 'select' },
+            blockedProperty: null,
+            rules: [],
+            updatedAt: 'x'
+          }
+        } as never
+      }))
+      expect(failure(await service.saveGitFlow(INPUT))).toBe(
+        'Use uma propriedade diferente para cada campo.'
+      )
     })
 
     it('saveConfig mantém o gitFlow com o mesmo banco de Tarefas e solta com outro', async () => {

@@ -466,9 +466,13 @@ Todo serviço externo implementa `Connector` (`src/main/connectors/types.ts`):
   Branch criada, PR aguardando review, Ajustes solicitados, Mergeada na dev; "Não usar" pula), o
   link da PR (url) e a data do merge (date), com a sugestão de `suggestGitFlow` pelo nome. "PR
   para main aberta"/"Em produção" ficam à mão no Notion. Só ids e nomes; o main revalida ao salvar
-  (propriedade usada duas vezes = recusa) e `checkGitFlow` na revalidação (apagada/tipo mudou =
-  aviso e o Fluxo Git desliga; opção apagada = aviso, nunca bloqueia as tarefas). `parseTaskPage`
-  lê `gitStage` (`{ id, name, color }`) e `prUrl` no `NotionTask` (memória).
+  (propriedade usada duas vezes, ou como "Etapa Orkio"/"Bloqueada" de algum quadro = recusa) e
+  `checkGitFlow` na revalidação (propriedade da etapa apagada ou de outro tipo = aviso e o Fluxo
+  Git desliga, e é preciso configurá-lo de novo; opção apagada = aviso, nunca bloqueia as
+  tarefas). Desligar o Fluxo Git, trocar a propriedade da etapa ou ele se desligar sozinho
+  **descarta as escritas pendentes da Etapa Git** (`GitFlowStore.clear`). "Tentar agora" também
+  tenta de novo a fila da Etapa Git. `parseTaskPage` lê `gitStage` (`{ id, name, color }`) e
+  `prUrl` no `NotionTask` (memória).
 
 ## GitHub
 

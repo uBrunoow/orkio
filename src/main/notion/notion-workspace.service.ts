@@ -76,6 +76,8 @@ export interface NotionWorkspaceDeps {
   now?: () => Date
   /** TTL do cache em memória de tarefas e projetos do Notion. */
   cacheTtlMs?: number
+  /** Fluxo Git desligado/trocado: as escritas pendentes da Etapa Git perdem o sentido. */
+  onGitFlowReset?: () => void
 }
 
 /** Limite de leitura (itens) por lista: 5 páginas de 100. */
@@ -238,6 +240,7 @@ export class NotionWorkspaceService {
       const git = checkGitFlow(current.gitFlow, schema.properties)
       gitWarnings.push(...git.warnings)
       if (!isDeepStrictEqual(git.config, current.gitFlow)) {
+        if (git.config?.stage.id !== current.gitFlow.stage.id) this.deps.onGitFlowReset?.()
         current = withGitFlow(current, git.config)
         const saved = current
         try {
@@ -352,6 +355,7 @@ export class NotionWorkspaceService {
           : {}),
         updatedAt: this.now().toISOString()
       }
+      if (previous?.gitFlow && !config.gitFlow) this.deps.onGitFlowReset?.()
       const projectsChanged =
         !previous || !sameId(previous.projectsDataSource.id, config.projectsDataSource.id)
       await this.save((c) => ({
@@ -416,7 +420,11 @@ export class NotionWorkspaceService {
           stage.id,
           ...(prUrl ? [prUrl.id] : []),
           ...(mergedAt ? [mergedAt.id] : []),
-          ...Object.values(config.mapping).map((r) => r.id)
+          ...Object.values(config.mapping).map((r) => r.id),
+          ...Object.values(this.config().boards ?? {}).flatMap((b) => [
+            ...(b.orkioStageProperty ? [b.orkioStageProperty.id] : []),
+            ...(b.blockedProperty ? [b.blockedProperty.id] : [])
+          ])
         ]
         if (new Set(used).size !== used.length) {
           throw invalid('Use uma propriedade diferente para cada campo.')
@@ -433,6 +441,7 @@ export class NotionWorkspaceService {
       }
       const next = withGitFlow({ ...config, updatedAt: this.now().toISOString() }, gitFlow)
       await this.save((c) => ({ ...c, notion: next }))
+      if (!gitFlow || config.gitFlow?.stage.id !== gitFlow.stage.id) this.deps.onGitFlowReset?.()
       this.invalidate()
       const connection = await this.deps.notion.connectionMethod().catch(() => null)
       return this.setStatus({ config: next, health: 'ok', messages: [], connection })

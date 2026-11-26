@@ -105,6 +105,19 @@ describe('GitFlowStore', () => {
     expect(store.allPending()).toEqual([])
   })
 
+  it('clear apaga a fila inteira', () => {
+    for (const id of ['t1', 't2']) {
+      store.merge({
+        taskPageId: id,
+        projectId: 'p',
+        properties: { a: { type: 'url', url: 'u' } },
+        now: T1
+      })
+    }
+    store.clear()
+    expect(store.allPending()).toEqual([])
+  })
+
   it('a migração v15 sobe um banco v14', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'orkio-gf-'))
     try {
