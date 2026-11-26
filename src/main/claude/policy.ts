@@ -455,16 +455,20 @@ function escapesWorktree(segment: string, worktree: string): boolean {
 
 /** Prefixo sugerido para "sempre neste projeto": programa + subcomando (ex.: "npm test"). */
 export function suggestPattern(command: string): string {
-  const first = shellSegments(command)[0] ?? command
+  // Trecho só de atribuição (`B=/caminho;`) não roda nada: a sugestão é o primeiro programa.
+  const segments = shellSegments(command)
+  const first = segments.find((s) => program(shellWords(s))) ?? segments[0] ?? command
   const p = program(shellWords(first))
   if (!p) return first.trim()
+  // Subcomando é palavra (`test`, `lint`); variável (`$B`) e caminho não entram no padrão.
   const sub = p.args.find((a) => !a.startsWith('-'))
-  return sub ? `${p.name} ${sub}` : p.name
+  return sub && /^[A-Za-z][\w:.-]*$/.test(sub) ? `${p.name} ${sub}` : p.name
 }
 
 function matchesRule(segment: string, pattern: string): boolean {
   const p = program(shellWords(segment))
-  if (!p) return false
+  // Só atribuição (`B=…`): não roda programa; o caminho já passou pela checagem do worktree.
+  if (!p) return shellWords(segment).length > 0
   const normalized = [p.name, ...p.args].join(' ')
   return normalized === pattern || normalized.startsWith(`${pattern} `)
 }

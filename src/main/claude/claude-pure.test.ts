@@ -492,6 +492,17 @@ describe('política de permissões', () => {
     expect(shellSegments('a && b || c; d | e')).toEqual(['a', 'b', 'c', 'd', 'e'])
   })
 
+  it('atribuição de variável sozinha não vira a sugestão nem trava o "sempre"', () => {
+    const cmd = `B=${WT}/backend; ls $B | grep -i req`
+    expect(bash(cmd)).toEqual({ decision: 'ask', suggestion: 'ls' })
+    const rules = [
+      { tool: 'Bash', pattern: 'ls' },
+      { tool: 'Bash', pattern: 'grep' }
+    ]
+    expect(bash(cmd, rules).decision).toBe('allow')
+    expect(bash('B=/etc; ls $B', rules).decision).toBe('deny')
+  })
+
   it('pergunta do Claude, ferramentas inofensivas e desconhecidas', () => {
     expect(evaluatePermission({ tool: 'AskUserQuestion', input: {} }, ctx)).toEqual({
       decision: 'question'
