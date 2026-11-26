@@ -1,6 +1,6 @@
 {
   "name": "orkio",
-  "version": "0.2.20",
+  "version": "0.2.21",
   "private": true,
   "description": "Orkio — orquestração de desenvolvimento com IA (Notion, GitHub, Claude Code).",
   "author": "Orkio",
