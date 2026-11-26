@@ -43,16 +43,7 @@ describe('fatias: dependências e ondas (puro)', () => {
     expect(sliceWaves(4, deps)).toEqual([[1, 4], [2], [3]])
     expect(sliceWaves(4, deps, 1)).toEqual([[1], [2], [3], [4]])
     // Ciclo não trava: vale a de menor número.
-    expect(
-      nextSlices(
-        2,
-        [],
-        new Map([
-          [1, [2]],
-          [2, [1]]
-        ])
-      )
-    ).toEqual([1])
+    expect(nextSlices(2, [], new Map([[1, [2]], [2, [1]]]))).toEqual([1])
   })
 })
 

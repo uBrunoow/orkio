@@ -5,6 +5,7 @@
  * Roda no main. Fala com o Notion só via `NotionWorkspaceApi` (fornecida pelo NotionConnector,
  * que guarda o token). Salva no ConfigStore apenas ids e nomes, nunca conteúdo de páginas.
  */
+import { isDeepStrictEqual } from 'node:util'
 import type { StatusOption } from '../../shared/board'
 import {
   GIT_STAGE_KEYS,
@@ -234,7 +235,7 @@ export class NotionWorkspaceService {
     if (current.gitFlow) {
       const git = checkGitFlow(current.gitFlow, schema.properties)
       gitWarnings.push(...git.warnings)
-      if (JSON.stringify(git.config) !== JSON.stringify(current.gitFlow)) {
+      if (!isDeepStrictEqual(git.config, current.gitFlow)) {
         current = withGitFlow(current, git.config)
         const saved = current
         try {
@@ -415,8 +416,7 @@ export class NotionWorkspaceService {
           ...(mergedAt ? [mergedAt.id] : []),
           ...Object.values(config.mapping).map((r) => r.id)
         ]
-        const own = used.length - Object.keys(config.mapping).length
-        if (new Set(used).size !== used.length || own < 1) {
+        if (new Set(used).size !== used.length) {
           throw invalid('Use uma propriedade diferente para cada campo.')
         }
         gitFlow = {

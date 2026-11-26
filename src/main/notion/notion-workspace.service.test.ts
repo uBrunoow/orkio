@@ -304,6 +304,19 @@ describe('NotionWorkspaceService', () => {
       expect(store.get().notion?.gitFlow).toBeUndefined()
     })
 
+    it('revalidação de um Fluxo Git sem mudança não regrava a config', async () => {
+      const service = await configured()
+      await service.saveGitFlow(INPUT)
+      await store.update((c) => ({
+        ...c,
+        notion: { ...c.notion!, gitFlow: { ...c.notion!.gitFlow!, backfilledAt: 'agora' } }
+      }))
+      const update = vi.spyOn(store, 'update')
+      const status = await service.revalidate()
+      expect(status.messages).toEqual([])
+      expect(update).not.toHaveBeenCalled()
+    })
+
     it('revalidação: renomeada atualiza e apagada some, só com aviso (nunca broken)', async () => {
       const service = await configured()
       await service.saveGitFlow(INPUT)

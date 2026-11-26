@@ -154,7 +154,6 @@ export function checkGitFlow(
     stage: { id: stageProp.id, name: stageProp.name, type: config.stage.type },
     options
   }
-  if (config.backfilledAt !== undefined) next.backfilledAt = config.backfilledAt
   const optional = (ref: PropRef | undefined, type: string, label: string): PropRef | undefined => {
     if (!ref) return undefined
     const prop = properties.find((p) => p.id === ref.id)
@@ -168,6 +167,7 @@ export function checkGitFlow(
   if (prUrl) next.prUrl = prUrl
   const mergedAt = optional(config.mergedAt, 'date', 'data do merge')
   if (mergedAt) next.mergedAt = mergedAt
+  if (config.backfilledAt !== undefined) next.backfilledAt = config.backfilledAt
   return { config: next, warnings }
 }
 
