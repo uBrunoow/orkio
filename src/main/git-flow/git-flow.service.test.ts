@@ -102,6 +102,7 @@ describe('GitFlowService', () => {
   let sent: { pageId: string; writes: PropertyWrites }[]
   let reject: ApiError | null
   let changed: string[]
+  let options: typeof ORDER | null
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'orkio-gitflow-'))
@@ -155,11 +156,12 @@ describe('GitFlowService', () => {
     sent = []
     reject = null
     changed = []
+    options = ORDER
     service = new GitFlowService({
       config,
       store: board,
       gitStore,
-      stageOptions: () => ORDER,
+      stageOptions: () => options,
       writes: {
         updatePage: async (pageId, writes) => {
           if (reject) throw reject
@@ -313,7 +315,9 @@ describe('GitFlowService', () => {
       [T3]: signals(T3, pr({ state: 'merged', closedAt: MERGED_AT }))
     }
     expect(
-      board.transaction((tx) => service.backfill(tx, { projectId: 'p1', tasks, signals: all }))
+      board.transaction((tx) =>
+        service.backfill(tx, { projectId: 'p1', tasks, signals: all, githubOk: true })
+      )
     ).toBe(1)
     expect(gitStore.allPending().map((w) => w.taskPageId)).toEqual([T1])
     expect(gitStore.pending(T1)!.properties).toEqual({
@@ -325,10 +329,105 @@ describe('GitFlowService', () => {
     )
     gitStore.deletePending(T1)
     expect(
-      board.transaction((tx) => service.backfill(tx, { projectId: 'p1', tasks, signals: all }))
+      board.transaction((tx) =>
+        service.backfill(tx, { projectId: 'p1', tasks, signals: all, githubOk: true })
+      )
     ).toBe(0)
     expect(gitStore.allPending()).toEqual([])
     // A gravação da config termina antes de apagar a pasta do teste.
     await config.update((c) => c)
+  })
+
+  const backfillOnce = (githubOk: boolean) =>
+    board.transaction((tx) =>
+      service.backfill(tx, {
+        projectId: 'p1',
+        tasks: [task(T1)],
+        signals: { [T1]: signals(T1, pr()) },
+        githubOk
+      })
+    )
+
+  it('carga inicial sem o GitHub lido: não escreve, mas conta como tentativa e marca backfilledAt', async () => {
+    expect(backfillOnce(false)).toBe(0)
+    expect(gitStore.allPending()).toEqual([])
+    await vi.waitFor(() => expect(config.get().notion!.gitFlow!.backfilledAt).toBeDefined())
+    expect(backfillOnce(true)).toBe(0)
+    await config.update((c) => c)
+  })
+
+  it('carga inicial: desligar e religar na mesma sessão (sem backfilledAt) carrega de novo', async () => {
+    expect(backfillOnce(true)).toBe(1)
+    await vi.waitFor(() => expect(config.get().notion!.gitFlow!.backfilledAt).toBeDefined())
+    expect(backfillOnce(true)).toBe(0) // marcada: o serviço esquece os projetos feitos
+    gitStore.deletePending(T1)
+    await config.update((c) => ({ ...c, notion: { ...c.notion!, gitFlow: GIT_FLOW } }))
+    expect(backfillOnce(true)).toBe(1)
+    await config.update((c) => c)
+  })
+
+  it('carga inicial: mapeamento mudou no meio (sem marcar) → recomeça', async () => {
+    await config.update((c) => ({ ...c, boards: { p1: c.boards['p1']!, p2: c.boards['p1']! } }))
+    await config.update((c) => ({
+      ...c,
+      projects: [...c.projects, { ...c.projects[0]!, id: 'p2' }]
+    }))
+    expect(backfillOnce(true)).toBe(1)
+    expect(backfillOnce(true)).toBe(0) // p1 já tentou; p2 ainda não
+    gitStore.deletePending(T1)
+    const { mergedAt: _m, ...withoutDate } = GIT_FLOW
+    void _m
+    await config.update((c) => ({ ...c, notion: { ...c.notion!, gitFlow: withoutDate } }))
+    expect(backfillOnce(true)).toBe(1)
+    expect(config.get().notion!.gitFlow!.backfilledAt).toBeUndefined()
+  })
+
+  it('sem a ordem das opções ou sem a tarefa: consome os eventos com o motivo', () => {
+    options = null
+    expect(apply({})).toBe(false)
+    expect(gitEvents().map((r) => JSON.parse(r.detail_json!))).toEqual([
+      { event: 'pr.opened', reason: 'sem os dados do Notion' },
+      { event: 'pr.merged', reason: 'sem os dados do Notion' }
+    ])
+    options = ORDER
+    expect(apply({})).toBe(false)
+    expect(apply({ events: [prEvent('pr.ready_for_review', 'ready')], task: null })).toBe(false)
+    expect(JSON.parse(gitEvents().at(-1)!.detail_json!)).toEqual({
+      event: 'pr.ready_for_review',
+      reason: 'sem os dados do Notion'
+    })
+    expect(gitStore.pending(T1)).toBeNull()
+  })
+
+  it('a etapa no histórico só com a opção nomeada (nada de "Etapa Git → " vazio)', () => {
+    const nameless: GitFlowConfig = {
+      ...GIT_FLOW,
+      options: { ...GIT_FLOW.options, merged: { id: 'o4', name: '' } }
+    }
+    return config
+      .update((c) => ({ ...c, notion: { ...c.notion!, gitFlow: nameless } }))
+      .then(() => {
+        expect(apply({ events: [MERGED] })).toBe(true)
+        expect(gitStore.pending(T1)!.properties).toEqual({ pr: { type: 'url', url: PR_URL } })
+        expect(JSON.parse(gitEvents().at(-1)!.detail_json!)).toEqual({
+          event: 'pr.merged',
+          prNumber: 5
+        })
+      })
+  })
+
+  it('a linha com a etapa é a do último evento da PR principal, não de outra PR', () => {
+    const other: AutomationEvent = {
+      key: 'pr#9:review:rv9',
+      kind: 'pr.changes_requested',
+      taskId: T1,
+      at: null,
+      pr: { number: 9 }
+    }
+    expect(apply({ events: [OPENED, other], signals: signals(T1, pr()) })).toBe(true)
+    expect(gitEvents().map((r) => [r.event_key, JSON.parse(r.detail_json!)])).toEqual([
+      ['gitflow:pr#9:review:rv9', { event: 'pr.changes_requested', reason: 'outra PR da tarefa' }],
+      ['gitflow:pr#5:opened', { event: 'pr.opened', stage: 'PR aguardando review', prNumber: 5 }]
+    ])
   })
 })

@@ -117,8 +117,8 @@ export class AutomationService {
     const notifications: AutomationNotification[] = []
     let eventCount = 0
     let moves = 0
-    // Fluxo Git só com o mapeamento salvo; a carga inicial só com o GitHub lido (senão uma PR
-    // mergeada viraria "Branch criada" e o merge nunca mais geraria evento).
+    // Fluxo Git só com o mapeamento salvo; a carga inicial escreve só com o GitHub lido (senão uma
+    // PR mergeada viraria "Branch criada" e o merge nunca mais geraria evento).
     const gitFlowConfig = config.notion?.gitFlow
     const gitFlow = gitFlowConfig ? this.deps.gitFlow : undefined
     const notionTasks = gitFlow
@@ -127,17 +127,12 @@ export class AutomationService {
     let gitWrites = 0
 
     this.deps.store.transaction((tx) => {
-      if (
-        gitFlow &&
-        notionTasks &&
-        cards &&
-        !gitFlowConfig?.backfilledAt &&
-        result.github === 'ok'
-      ) {
+      if (gitFlow && notionTasks && cards && !gitFlowConfig?.backfilledAt) {
         gitWrites += gitFlow.backfill(tx, {
           projectId,
           tasks: [...notionTasks.values()],
-          signals: result.signals
+          signals: result.signals,
+          githubOk: result.github === 'ok'
         })
       }
       for (const taskId of taskIds) {

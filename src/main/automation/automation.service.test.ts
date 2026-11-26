@@ -594,7 +594,7 @@ describe('AutomationService (regras padrão ponta a ponta)', () => {
       unknown,
       { projectId: string }
     ]
-    expect(backfillCall[1]).toMatchObject({ projectId: 'p1' })
+    expect(backfillCall[1]).toMatchObject({ projectId: 'p1', githubOk: true })
     expect(gitFlow.apply).not.toHaveBeenCalled()
 
     world.pr[T1] = { baseRef: 'dev', state: 'merged', closedAt: '2026-11-19T12:30:00Z' }

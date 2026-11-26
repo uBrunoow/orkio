@@ -45,7 +45,9 @@ const GIT_FLOW_EVENTS: ReadonlySet<EventKind> = new Set<EventKind>([
 const REASON = {
   paused: 'automações pausadas',
   same: 'já estava assim',
-  joined: 'junto com o evento seguinte'
+  joined: 'junto com o evento seguinte',
+  noData: 'sem os dados do Notion',
+  otherPr: 'outra PR da tarefa'
 } as const
 
 export interface GitFlowServiceDeps {
@@ -75,8 +77,12 @@ export class GitFlowService {
   private readonly now: () => Date
   /** Valores confirmados há pouco (o cache do Notion ainda pode trazer o anterior). */
   private readonly synced = new Map<string, { value: GitFlowTaskValue; until: number }>()
-  /** Carga inicial: projetos já feitos para a propriedade da etapa (`stage.id`). */
-  private backfilled = { stageId: '', projects: new Set<string>() }
+  /**
+   * Carga inicial nesta sessão: projetos que já tentaram (com o GitHub lido ou não), para o
+   * mapeamento em `key` (o Fluxo Git sem `backfilledAt`). Mudou o mapeamento ou a carga foi
+   * marcada → recomeça.
+   */
+  private backfilled = { key: '', projects: new Set<string>() }
 
   constructor(private readonly deps: GitFlowServiceDeps) {
     this.now = deps.now ?? (() => new Date())
@@ -96,8 +102,7 @@ export class GitFlowService {
   apply(_tx: Tx, input: ApplyInput): boolean {
     const config = this.deps.config.get()
     const gitFlow = config.notion?.gitFlow
-    const order = this.deps.stageOptions()
-    if (!gitFlow || !order || !input.task) return false
+    if (!gitFlow) return false
     const events = input.events.filter(
       (e) =>
         GIT_FLOW_EVENTS.has(e.kind) &&
@@ -122,9 +127,16 @@ export class GitFlowService {
       for (const e of events) consume(e, { reason: REASON.paused })
       return false
     }
+    const order = this.deps.stageOptions()
+    if (!order || !input.task) {
+      for (const e of events) consume(e, { reason: REASON.noData })
+      return false
+    }
     const pr = toGitFlowPr(input.signals?.pr ?? null)
     // Eventos de outra PR que não a principal: sem os dados dela, não decidem nada.
-    const usable = events.filter((e) => !e.pr || (pr !== null && e.pr.number === pr.number))
+    const isUsable = (e: AutomationEvent): boolean =>
+      !e.pr || (pr !== null && e.pr.number === pr.number)
+    const usable = events.filter(isUsable)
     const repo = readRepoOf(projectById(config, input.projectId))
     const change = gitFlowForEvents(
       usable,
@@ -145,32 +157,54 @@ export class GitFlowService {
       properties: writes,
       now: at
     })
-    const last = events.at(-1)!
-    for (const e of events.slice(0, -1)) consume(e, { reason: REASON.joined })
-    consume(last, {
-      ...(change.stage ? { stage: gitFlow.options[change.stage]?.name ?? '' } : {}),
-      ...(pr && (change.prUrl || last.pr) ? { prNumber: pr.number } : {})
-    })
+    const last = usable.at(-1)
+    for (const e of events) {
+      if (e === last) continue
+      consume(e, { reason: isUsable(e) ? REASON.joined : REASON.otherPr })
+    }
+    if (last) {
+      const stage = stageName(change, gitFlow)
+      consume(last, {
+        ...(stage ? { stage } : {}),
+        ...(pr && (change.prUrl || last.pr) ? { prNumber: pr.number } : {})
+      })
+    }
     return true
   }
 
   /**
    * Carga inicial ao ligar o Fluxo Git (ou trocar a propriedade da etapa): a etapa de cada tarefa
    * pelo estado atual de branch/PR, com as mesmas regras. Devolve quantas tarefas entraram na
-   * fila. `backfilledAt` é gravado quando todos os projetos das automações passaram por aqui.
+   * fila. Sem o GitHub lido (`githubOk: false`) a tentativa conta, mas nada é escrito (uma PR
+   * mergeada viraria "Branch criada"). `backfilledAt` é gravado quando todos os projetos das
+   * automações tentaram nesta sessão: projeto sem GitHub naquela hora fica sem a carga, e um valor
+   * que você apagou não volta a cada abertura.
    */
   backfill(
     _tx: Tx,
-    input: { projectId: string; tasks: readonly NotionTask[]; signals: Record<string, TaskSignals> }
+    input: {
+      projectId: string
+      tasks: readonly NotionTask[]
+      signals: Record<string, TaskSignals>
+      githubOk: boolean
+    }
   ): number {
     const config = this.deps.config.get()
     const gitFlow = config.notion?.gitFlow
-    const order = this.deps.stageOptions()
-    if (!gitFlow || gitFlow.backfilledAt !== undefined || !order) return 0
-    if (this.backfilled.stageId !== gitFlow.stage.id) {
-      this.backfilled = { stageId: gitFlow.stage.id, projects: new Set() }
+    if (!gitFlow) return 0
+    if (gitFlow.backfilledAt !== undefined) {
+      this.backfilled = { key: '', projects: new Set() }
+      return 0
     }
+    const order = this.deps.stageOptions()
+    if (!order) return 0
+    const key = backfillKey(gitFlow)
+    if (this.backfilled.key !== key) this.backfilled = { key, projects: new Set() }
     if (this.backfilled.projects.has(input.projectId)) return 0
+    if (!input.githubOk) {
+      this.attempted(input.projectId, config, gitFlow)
+      return 0
+    }
 
     const repo = readRepoOf(projectById(config, input.projectId))
     const at = this.now().toISOString()
@@ -201,25 +235,33 @@ export class GitFlowService {
         at,
         kind: 'git_flow',
         detail: {
-          ...(change.stage ? { stage: gitFlow.options[change.stage]?.name ?? '' } : {}),
+          ...(stageName(change, gitFlow) ? { stage: stageName(change, gitFlow)! } : {}),
           ...(pr && change.prUrl ? { prNumber: pr.number } : {})
         }
       })
       count++
     }
-    this.backfilled.projects.add(input.projectId)
-    const all = automationProjectIds(config)
-    if (all.every((id) => this.backfilled.projects.has(id))) this.markBackfilled(gitFlow.stage.id)
+    this.attempted(input.projectId, config, gitFlow)
     return count
   }
 
-  /** Grava `backfilledAt` (só se a propriedade da etapa ainda for a mesma). */
-  private markBackfilled(stageId: string): void {
+  /** Este projeto tentou a carga; todos tentaram → grava `backfilledAt`. */
+  private attempted(projectId: string, config: OrkioConfig, gitFlow: GitFlowConfig): void {
+    this.backfilled.projects.add(projectId)
+    const all = automationProjectIds(config)
+    if (all.every((id) => this.backfilled.projects.has(id))) {
+      this.backfilled = { key: '', projects: new Set() }
+      this.markBackfilled(backfillKey(gitFlow))
+    }
+  }
+
+  /** Grava `backfilledAt` (só se o mapeamento ainda for o mesmo). */
+  private markBackfilled(key: string): void {
     const at = this.now().toISOString()
     this.deps.config
       .update((c) => {
         const gitFlow = c.notion?.gitFlow
-        if (!c.notion || !gitFlow || gitFlow.stage.id !== stageId) return c
+        if (!c.notion || !gitFlow || backfillKey(gitFlow) !== key) return c
         return { ...c, notion: { ...c.notion, gitFlow: { ...gitFlow, backfilledAt: at } } }
       })
       .catch((error: unknown) => {
@@ -267,6 +309,18 @@ export class GitFlowService {
   }
 }
 
+/** Mapeamento sem a marca da carga inicial: mudou → a carga recomeça. */
+function backfillKey(gitFlow: GitFlowConfig): string {
+  const rest: Partial<GitFlowConfig> = { ...gitFlow }
+  delete rest.backfilledAt
+  return JSON.stringify(rest)
+}
+
+/** Nome da opção da etapa nova; `undefined` sem etapa ou com a opção fora do mapeamento. */
+function stageName(change: GitFlowChange, gitFlow: GitFlowConfig): string | undefined {
+  return change.stage ? gitFlow.options[change.stage]?.name : undefined
+}
+
 function gitFlowKey(e: AutomationEvent): string {
   return `gitflow:${e.key}`
 }
@@ -287,9 +341,9 @@ function toGitFlowPr(pr: TaskPullRequest | null): GitFlowPr | null {
 function toWrites(change: GitFlowChange, gitFlow: GitFlowConfig): PropertyWrites | null {
   const writes: PropertyWrites = {}
   const option = change.stage ? gitFlow.options[change.stage] : undefined
-  if (option) writes[gitFlow.stage.id] = { type: gitFlow.stage.type, name: option.name }
+  if (option?.name) writes[gitFlow.stage.id] = { type: gitFlow.stage.type, name: option.name }
   if (change.prUrl && gitFlow.prUrl) writes[gitFlow.prUrl.id] = { type: 'url', url: change.prUrl }
-  if (option && change.mergedAt && gitFlow.mergedAt) {
+  if (option?.name && change.mergedAt && gitFlow.mergedAt) {
     writes[gitFlow.mergedAt.id] = { type: 'date', start: change.mergedAt }
   }
   return Object.keys(writes).length > 0 ? writes : null
