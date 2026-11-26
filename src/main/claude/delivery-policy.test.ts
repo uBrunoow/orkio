@@ -365,3 +365,42 @@ describe('modo entrega: GitHub CLI', () => {
     ).toEqual(['addComment', 'resolveReviewThread'])
   })
 })
+
+describe('modo entrega: branch de destino da PR', () => {
+  const dev = (): PolicyContext => {
+    const c = ctx()
+    return { ...c, delivery: { ...c.delivery!, target: { ...target, prBases: ['dev'] } } }
+  }
+  it('PR para a branch da lista: liberada', () => {
+    for (const cmd of [
+      'gh pr create --base dev --fill',
+      'gh pr create -B dev --title x',
+      'gh pr create --base=dev --fill',
+      'gh pr edit 12 --add-label bug',
+      'gh pr edit 12 --base dev',
+      `gh api -X POST repos/acme/app/pulls -f base=dev -f head=${BRANCH} -f title=x`
+    ]) {
+      expect(allowed(cmd, dev()).decision, cmd).toBe('allow')
+    }
+  })
+  it('sem --base, para main/master ou trocando a base: bloqueada', () => {
+    expect(denied('gh pr create --fill', dev())).toMatch(/--base dev/)
+    expect(denied('gh pr create --fill --base main', dev())).toMatch(/main/)
+    expect(denied('gh pr edit 12 --base main', dev())).toMatch(/main/)
+    expect(denied('gh pr edit 12 -B master', dev())).toMatch(/master/)
+    expect(denied(`gh api -X POST repos/acme/app/pulls -f head=${BRANCH}`, dev())).toMatch(/dev/)
+    expect(denied('gh api -X POST repos/acme/app/pulls -f base=main', dev())).toMatch(/main/)
+    expect(denied('gh api --method PATCH repos/acme/app/pulls/12 -f base=main', dev())).toMatch(
+      /main/
+    )
+    const q =
+      'query=mutation { updatePullRequest(input: {pullRequestId: "x", baseRefName: "main"}) { clientMutationId } }'
+    expect(denied(`gh api graphql -f '${q}'`, dev())).toMatch(/base/)
+    const v =
+      'query=mutation($b: String!) { updatePullRequest(input: {pullRequestId: "x", baseRefName: $b}) { clientMutationId } }'
+    expect(denied(`gh api graphql -f '${v}' -f baseRefName=main`, dev())).toMatch(/base/)
+  })
+  it('projeto sem a lista: como antes (o passo de entrega escolhe a base)', () => {
+    expect(allowed('gh pr create --fill --base main').decision).toBe('allow')
+  })
+})

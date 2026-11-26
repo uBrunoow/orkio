@@ -28,6 +28,8 @@ export interface SubagentRow {
   type: string | null
   /** Ferramentas que o subagente chamou (eventos com `parent`). */
   tools: number
+  /** As chamadas dele, em ordem (o que está fazendo), com o estado de cada uma. */
+  steps: WorkStep[]
   state: SubagentState
   at: string
 }
@@ -222,6 +224,7 @@ export function buildTranscript(
           title: e.title || 'Subagente',
           type: e.agentType,
           tools: 0,
+          steps: [],
           state: e.background ? 'background' : 'running',
           at: e.at
         }
@@ -241,7 +244,19 @@ export function buildTranscript(
       case 'tool': {
         if (e.parent) {
           const owner = agentById.get(e.parent)
-          if (owner) owner.tools += 1
+          if (owner) {
+            const step: WorkStep = {
+              id: e.id,
+              tool: e.tool,
+              summary: e.summary,
+              category: categoryOf(e.tool),
+              file: e.file ?? null,
+              state: 'running'
+            }
+            byId.set(e.id, step)
+            owner.steps.push(step)
+            owner.tools += 1
+          }
           break
         }
         if (spawned.has(e.id)) break
@@ -266,6 +281,8 @@ export function buildTranscript(
         if (agent) {
           if (e.error) agent.state = 'failed'
           else if (agent.state === 'running') agent.state = 'done'
+          // Terminou: o que ficou sem resposta não está mais rodando.
+          for (const st of agent.steps) if (st.state === 'running') st.state = 'ok'
           break
         }
         const step = byId.get(e.id)
@@ -328,6 +345,7 @@ export function buildTranscript(
     const stopped = finalStatus === 'cancelled' || finalStatus === 'failed'
     for (const row of agentById.values()) {
       if (row.state === 'running') row.state = stopped ? 'interrupted' : 'done'
+      for (const st of row.steps) if (st.state === 'running') st.state = 'ok'
     }
   }
   return items

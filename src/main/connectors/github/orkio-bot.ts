@@ -58,7 +58,8 @@ export function reposOf(projects: readonly ProjectView[]): Omit<OrkioBotRepo, 's
   const byKey = new Map<string, Omit<OrkioBotRepo, 'status'>>()
   for (const p of projects) {
     const r = p.repo
-    if (!r || r.host !== 'github.com') continue
+    // Só git local publica pelo `gh` do usuário: o bot não é usado ali.
+    if (!r || r.host !== 'github.com' || r.access === 'git') continue
     const key = `${r.owner}/${r.name}`.toLowerCase()
     const found = byKey.get(key)
     if (found) found.projects.push(p.name)

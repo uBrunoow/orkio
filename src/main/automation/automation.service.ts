@@ -25,7 +25,7 @@ import type { BoardView } from '../../shared/board'
 import type { Result } from '../../shared/result'
 import type { TaskSignalsResult } from '../../shared/task-signals'
 import { projectById } from '../config/queries'
-import { githubRepoOf } from '../../shared/projects'
+import { readRepoOf } from '../../shared/projects'
 
 export interface AutomationNotification {
   projectId: string
@@ -103,7 +103,7 @@ export class AutomationService {
     const stages = (view.ok ? view.value.config?.stages : null) ?? board.stages
     const taskIds = cards ? cards.map((c) => c.taskId) : [...states.keys()]
     const at = this.now().toISOString()
-    const repo = githubRepoOf(projectById(config, projectId))
+    const repo = readRepoOf(projectById(config, projectId))
     const pr = (n: number): EventPr =>
       repo ? { number: n, owner: repo.owner, repo: repo.name } : { number: n }
     const notifications: AutomationNotification[] = []

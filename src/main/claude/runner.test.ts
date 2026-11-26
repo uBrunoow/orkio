@@ -100,15 +100,48 @@ describe('buildCliArgs', () => {
       },
       runtime: { model: 'sonnet' }
     })
-    expect(after(a, '--append-system-prompt')).toBe('Você é Ana.')
+    expect(after(a, '--append-system-prompt')).toMatch(/^Você é Ana\./)
     expect(after(a, '--model')).toBe('sonnet')
     const perm = (x: string[]): string[] =>
       x.filter((_, i) =>
         ['--permission-mode', '--settings', '--permission-prompt-tool'].includes(x[i - 1] ?? '')
       )
     expect(perm(a)).toEqual(perm(base))
-    expect(base).not.toContain('--append-system-prompt')
+    expect(after(base, '--append-system-prompt')).not.toContain('Você é Ana.')
     expect(base).not.toContain('--model')
+  })
+
+  it('entrega com destinos restritos: o agente sabe que pode enviar e para onde vai a PR', () => {
+    const deliver = (prBases?: string[]) =>
+      args({
+        access: {
+          tools: 'full',
+          github: {
+            mode: 'deliver',
+            target: { ...target, ...(prBases ? { prBases } : {}) },
+            requirePushApproval: false
+          }
+        },
+        agent: {
+          key: 'k',
+          name: 'Ana',
+          prompt: 'Você é Ana.',
+          model: null,
+          effort: null,
+          autonomy: 'edits'
+        }
+      })
+    const note = after(deliver(['dev']), '--append-system-prompt') ?? ''
+    expect(note).toContain('Você é Ana.')
+    expect(note).toContain('git push origin feat/ORK-1')
+    expect(note).toContain('--base dev')
+    expect(note).toMatch(/main.*master/)
+    // Passo de entrega sem a opção do projeto: sem o aviso de destinos.
+    expect(after(deliver(), '--append-system-prompt')).not.toContain('--base')
+  })
+
+  it('toda execução: o link da PR não vai para a tarefa do Notion (o Orkio liga pela branch)', () => {
+    expect(after(args(), '--append-system-prompt')).toMatch(/Não grave o link da PR .*Notion/)
   })
 
   it('modelo e raciocínio válidos viram flag; o que parece outra flag não', () => {

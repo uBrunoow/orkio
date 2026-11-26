@@ -107,6 +107,8 @@ export type RunLogEvent =
       costUsd: number | null
       turns: number | null
       text: string
+      /** Janela de contexto real do modelo, informada pelo CLI (`modelUsage`); logs antigos sem. */
+      contextWindow?: number
     }
   | { kind: 'info'; text: string }
 

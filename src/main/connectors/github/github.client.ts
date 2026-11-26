@@ -291,7 +291,7 @@ function repoNotFound(status: number): ApiError {
   )
 }
 
-function errorForResponse(response: HttpResponse, body: string, path: string): ApiError {
+export function errorForResponse(response: HttpResponse, body: string, path: string): ApiError {
   const { status } = response
   const org = /^\/repos\/([^/]+)\//.exec(path)?.[1]
   const orgName = org ? decodeURIComponent(org) : undefined

@@ -41,7 +41,9 @@ export function prWatchOf(pr: TaskPullRequest | null | undefined): PrWatch | nul
     headSha: pr.headSha ?? null,
     checks: pr.checks ?? null,
     reviewDecision: pr.reviewDecision ?? null,
-    changeRequests: (pr.reviews ?? []).filter((r) => r.state === 'changes_requested').map((r) => r.id),
+    changeRequests: (pr.reviews ?? [])
+      .filter((r) => r.state === 'changes_requested')
+      .map((r) => r.id),
     threadIds: [...(pr.unresolvedThreadIds ?? [])],
     unresolved: pr.unresolvedComments ?? null
   }
@@ -125,8 +127,7 @@ export interface PrWakeSeen {
 }
 
 export type PrWakeDecision =
-  | { kind: 'sleep'; seen: PrWakeSeen | null }
-  | { kind: 'wake'; event: PrWakeEvent }
+  { kind: 'sleep'; seen: PrWakeSeen | null } | { kind: 'wake'; event: PrWakeEvent }
 
 /**
  * Acorda agora? Merge acorda na hora; o resto espera a PR ficar `debounceMs` sem mudar (CI

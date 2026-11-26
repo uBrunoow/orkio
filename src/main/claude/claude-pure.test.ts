@@ -46,6 +46,35 @@ describe('stream-json → uso do contexto', () => {
       contextWindow: 1_000_000
     })
   })
+  it('janela conhecida (aprendida do CLI) vence o chute pelo nome; uso acima de 200 mil = 1 milhão', () => {
+    expect(parseStreamLine(line({}), WT, undefined, 'claude-opus-5-5', 1_000_000)[0]).toEqual({
+      kind: 'usage',
+      inputTokens: 82_000,
+      contextWindow: 1_000_000
+    })
+    const big = line({
+      message: {
+        content: [{ type: 'text', text: 'oi' }],
+        usage: { input_tokens: 2, cache_read_input_tokens: 215_000 }
+      }
+    })
+    expect(parseStreamLine(big, WT, undefined, 'claude-opus-5-5')[0]).toMatchObject({
+      contextWindow: 1_000_000
+    })
+  })
+  it('resultado traz a janela real do modelo (modelUsage.contextWindow)', () => {
+    const result = JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: 'feito',
+      modelUsage: { 'claude-opus-5-5': { contextWindow: 1_000_000 } }
+    })
+    expect(parseStreamLine(result, WT, undefined, 'claude-opus-5-5')[0]).toMatchObject({
+      kind: 'result',
+      contextWindow: 1_000_000
+    })
+  })
   it('texto da conversa principal leva o id da mensagem (Ramificar daqui); id estranho não', () => {
     const text = (over: Record<string, unknown>) =>
       parseStreamLine(line(over), WT).find((e) => e.kind === 'text')
@@ -229,6 +258,24 @@ describe('stream-json → log', () => {
         WT
       )[0]
     ).toMatchObject({ kind: 'result', ok: false, costUsd: null })
+  })
+})
+
+describe('política: heredoc', () => {
+  const ctx = { worktree: WT, allowRules: [] as { tool: string; pattern: string }[] }
+  const bash = (command: string): string =>
+    evaluatePermission({ tool: 'Bash', input: { command } }, ctx).decision
+  it('mensagem de commit em heredoc com /api/... não é caminho fora do worktree', () => {
+    const msg = "feat: x\n\n- T4: campos em /api/home/kpis/\n- T5: /api/tv/b2b/"
+    expect(bash(`cd ${WT}; git commit -q -F - <<'EOF'\n${msg}\nEOF`)).toBe('ask')
+    expect(bash(`cat <<EOF > notas.md\nveja /etc/hosts\nEOF`)).toBe('ask')
+  })
+  it('heredoc executado por um shell continua conferido; caminho fora na linha do comando também', () => {
+    expect(bash(`bash <<'EOF'\ncat /etc/passwd\nEOF`)).toBe('deny')
+    expect(bash(`git commit -F /tmp/msg <<'EOF'\nx\nEOF`)).toBe('deny')
+    expect(bash(`cat <<EOF > /etc/x\nx\nEOF`)).toBe('deny')
+    // Depois do fim do heredoc, a próxima linha é comando de novo.
+    expect(bash(`git commit -F - <<'EOF'\nx\nEOF\ncat /etc/passwd`)).toBe('deny')
   })
 })
 

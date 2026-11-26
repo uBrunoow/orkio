@@ -409,6 +409,33 @@ export function isGitRead(cmd: { name: string; args: readonly string[] }): boole
 }
 
 /** Caminhos absolutos/relativos que saem do worktree (heurística sobre as palavras). */
+/** Quem recebe um heredoc como dado (não executa o texto): a mensagem do `git commit -F -`, `cat`. */
+const HEREDOC_DATA_RECEIVERS = new Set(['git', 'cat'])
+
+/**
+ * O comando sem o corpo dos heredocs que são só dado (`git commit -F - <<'EOF' … EOF`), para a
+ * checagem de caminhos: `/api/home` numa mensagem de commit não é arquivo fora do worktree. Corpo
+ * que vai para um shell (`bash <<EOF`) ou outro programa continua conferido linha a linha.
+ */
+function withoutDataHeredocs(command: string): string {
+  const lines = command.split('\n')
+  const kept: string[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    kept.push(line)
+    const start = /(?<!<)<<(?!<)-?\s*(['"]?)([A-Za-z_][\w-]*)\1/.exec(line)
+    if (!start) continue
+    const before = shellSegments(line.slice(0, start.index)).at(-1) ?? ''
+    const receiver = program(shellWords(before))?.name
+    const delimiter = start[2]!
+    let end = i + 1
+    while (end < lines.length && lines[end]!.trim() !== delimiter) end++
+    if (!receiver || !HEREDOC_DATA_RECEIVERS.has(receiver)) continue
+    i = end // pula o corpo e a linha do delimitador
+  }
+  return kept.join('\n')
+}
+
 function escapesWorktree(segment: string, worktree: string): boolean {
   const words = shellWords(segment)
   const p = program(words)
@@ -526,7 +553,7 @@ function evaluate(
         return deny('delivery', v.reason)
       } else delivery.push({ kind: v.kind, event: v.event })
     }
-    if (segments.some((s) => escapesWorktree(s, ctx.worktree))) {
+    if (shellSegments(withoutDataHeredocs(command)).some((s) => escapesWorktree(s, ctx.worktree))) {
       return deny('outside', POLICY_MESSAGES.outside)
     }
     const rules =

@@ -95,6 +95,18 @@ export const ORKIO_ACTIONS = {
     phase: 'pr',
     outputs: []
   },
+  /**
+   * Corretor da PR: pede revisão de novo a quem já revisou (menos o autor da PR) sem outro gate;
+   * você já aprovou o resumo. Sem ninguém conhecido, pergunta como o `request_review`.
+   */
+  rerequest_review: {
+    id: 'rerequest_review',
+    label: 'Pedir nova revisão',
+    delivers: true,
+    onStageMoved: 'detach',
+    phase: 'pr',
+    outputs: []
+  },
   review_snapshot: {
     id: 'review_snapshot',
     label: 'Ler os comentários da PR',
@@ -102,7 +114,10 @@ export const ORKIO_ACTIONS = {
     onStageMoved: 'ask',
     phase: 'review',
     outputs: [
-      { key: ACTION_VARS.reviewCount, about: 'comentários pendentes (abertos + não lidos)' },
+      {
+        key: ACTION_VARS.reviewCount,
+        about: 'o que tratar (conversas abertas + não lidas + quem pede alterações)'
+      },
       { key: ACTION_VARS.reviewPr, about: 'número da PR' }
     ]
   },
@@ -170,7 +185,10 @@ export const ORKIO_ACTIONS = {
     onStageMoved: 'ask',
     phase: null,
     outputs: [
-      { key: 'fatias.feitas', about: 'fatias já no git (trailer Spec-Slice), ex.: "1, 3" ou "nenhuma"' },
+      {
+        key: 'fatias.feitas',
+        about: 'fatias já no git (trailer Spec-Slice), ex.: "1, 3" ou "nenhuma"'
+      },
       { key: 'fatias.proximas', about: 'fatias que podem entrar agora (dependências feitas)' },
       { key: 'restam', about: 'quantas fatias faltam (pelo git)' }
     ]

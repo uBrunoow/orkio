@@ -314,6 +314,58 @@ test('filtro e visão na rota sobrevivem a reabrir; Ctrl/⌘1 mantém, Ctrl/⌘2
   expect(await cspViolations(page)).toEqual([])
 })
 
+test('copiar de outro projeto: colunas e automações do orkio-app vão para o site', async () => {
+  const { page } = orkio!
+  // Uma coluna a mais no orkio-app ("QA"), pelo mesmo salvar da tela do fluxo.
+  const added = await page.evaluate(async () => {
+    const b = await window.orkio.board.get('proj-a')
+    if (!b.ok || !b.value.config) return false
+    const stages = b.value.config.stages
+    const status = stages[1]!.notionStatus.id
+    const draft = {
+      stages: [
+        ...stages.map((st) => ({
+          id: st.id,
+          name: st.name,
+          ...(st.color ? { color: st.color } : {}),
+          ...(st.role ? { role: st.role } : {}),
+          notionStatusId: st.notionStatus.id
+        })),
+        { id: 'stage-qa-e2e', name: 'QA', notionStatusId: status }
+      ],
+      rules: b.value.config.rules,
+      removals: {}
+    }
+    return (await window.orkio.flow.save('proj-a', draft as never)).ok
+  })
+  expect(added).toBe(true)
+
+  await navTo(page, 'Quadro')
+  await page.getByRole('button', { name: 'Todas', exact: true }).click()
+  if (await projectSwitcher(page, 'orkio-app').isVisible()) {
+    await projectSwitcher(page, 'orkio-app').click()
+    await page.getByRole('menuitem', { name: 'site', exact: true }).click()
+  }
+  await expect(projectSwitcher(page, 'site')).toBeVisible()
+  await navTo(page, 'Quadro e automações')
+  await page.getByRole('button', { name: 'Mais ações do fluxo' }).click()
+  await page.getByRole('menuitem', { name: 'Copiar de outro projeto…' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Copiar de outro projeto' })
+  await dialog.getByRole('radio', { name: 'orkio-app' }).click()
+  await expect(dialog.getByTestId('copy-flow-summary')).toContainText('reaproveitada')
+  await dialog.getByRole('button', { name: 'Copiar para o rascunho' }).click()
+  await expect(page.getByText(/Fluxo de orkio-app no rascunho/)).toBeVisible()
+  const accept = page.getByRole('checkbox', { name: /Entendi os avisos/ })
+  if (await accept.isVisible()) await accept.check()
+  await page.getByRole('button', { name: 'Salvar fluxo' }).click()
+  await expect(page.getByText(/Fluxo de orkio-app no rascunho/)).toHaveCount(0)
+  const saved = await page.evaluate(async () => {
+    const b = await window.orkio.board.get('proj-b')
+    return b.ok ? (b.value.config?.stages.map((st) => st.name) ?? []) : []
+  })
+  expect(saved).toContain('QA')
+})
+
 test('nenhum token nos logs', async () => {
   await close()
   const logs = allLogs.join('\n')

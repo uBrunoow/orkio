@@ -58,7 +58,7 @@ import {
   type WorktreeService
 } from './worktree.service'
 import type { Result } from '../../shared/result'
-import type { NotionTask } from '../../shared/notion'
+import type { NotionTask, NotionTaskPage } from '../../shared/notion'
 import type { TaskSignalsResult } from '../../shared/task-signals'
 import { projectById } from '../config/queries'
 import type { HandoffView } from '../../shared/handoff'
@@ -89,6 +89,8 @@ export const CLAUDE_MESSAGES = {
   flowRunning:
     'O fluxo está rodando um passo agora. Espere ele parar ou pedir algo para mandar a mensagem.',
   pageUnavailable: 'Não deu para ler a página da tarefa no Notion; o briefing usa só os campos.',
+  taskPageUnavailable:
+    'Não deu para ler a página da tarefa no Notion. Tente Atualizar ou abra no Notion.',
   noDescription:
     'A tarefa está sem descrição no Notion. Escreva o que precisa ser feito na página da tarefa e retome o fluxo.',
   generic: 'Algo deu errado. Tente novamente.'
@@ -106,7 +108,7 @@ export interface ClaudeServiceDeps {
   deliveryTarget(
     projectId: string,
     taskId: string
-  ): { target: DeliveryTarget; requirePushApproval: boolean }
+  ): { target: DeliveryTarget; requirePushApproval: boolean; agentsDeliver?: boolean }
   config: { get(): OrkioConfig }
   worktrees: WorktreeService
   runs: RunService
@@ -189,6 +191,31 @@ export class ClaudeService {
     })
   }
 
+  /** Título, campos e descrição da página da tarefa no Notion (aba "Notion"); não cria nada. */
+  taskPage(projectId: string, taskId: string): Promise<Result<NotionTaskPage>> {
+    return this.wrap(async () => {
+      this.project(projectId)
+      const task = await this.task(projectId, taskId)
+      try {
+        const md = blocksToMarkdown(await this.pageBlocks(task.id))
+        return ok<NotionTaskPage>({
+          task,
+          markdown: md.markdown,
+          unsupported: [...new Set(md.unsupported)],
+          warning: null
+        })
+      } catch (error) {
+        console.error(`[orkio] página da tarefa indisponível: ${errorName(error)}`)
+        return ok<NotionTaskPage>({
+          task,
+          markdown: '',
+          unsupported: [],
+          warning: CLAUDE_MESSAGES.taskPageUnavailable
+        })
+      }
+    })
+  }
+
   prepare(projectId: string, taskId: string): Promise<Result<RunPreparation>> {
     return this.wrap(async () => {
       const project = this.project(projectId)
@@ -241,6 +268,7 @@ export class ClaudeService {
           branch,
           worktree: state.workspace?.path ?? '(será criado ao rodar)'
         },
+        delivery: this.deliveryNote(projectId, taskId),
         pr
       })
       const agent = await this.deps.agentInfo(projectId, taskId).catch(() => null)
@@ -578,8 +606,13 @@ export class ClaudeService {
         (!request.agent && prefs.autonomy === 'read_only')
       ) {
         access = { tools: 'read_only', github: read() }
-      } else if (request.access.github === 'read') access = { tools: 'full', github: read() }
-      else {
+      } else if (request.access.github === 'read') {
+        // Projeto com os agentes entregando: a execução entrega (push da branch da tarefa, PR só
+        // para os destinos do projeto), menos o sidechat e o agente sem entrega no perfil.
+        const auto =
+          !request.side && request.agent?.delivers !== false ? this.autoDeliver(request) : null
+        access = { tools: 'full', github: auto ?? read() }
+      } else {
         let deliver: GithubDeliver
         try {
           const t = this.deps.deliveryTarget(request.projectId, request.taskId)
@@ -628,6 +661,27 @@ export class ClaudeService {
   }
 
   /** O agente com o bloco da memória no fim do prompt (lido do store pela chave + projeto). */
+  /** Destinos para o briefing quando os agentes entregam; `null` = o Orkio publica. */
+  private deliveryNote(
+    projectId: string,
+    taskId: string
+  ): { remote: string; prBases: readonly string[] } | null {
+    const auto = this.autoDeliver({ projectId, taskId })
+    const bases = auto?.target.prBases
+    return auto && bases?.length ? { remote: auto.target.remote, prBases: bases } : null
+  }
+
+  /** Entrega automática do projeto (Quadro e automações › Entrega), ou `null`. */
+  private autoDeliver(request: { projectId: string; taskId: string }): GithubDeliver | null {
+    try {
+      const t = this.deps.deliveryTarget(request.projectId, request.taskId)
+      if (!t.agentsDeliver) return null
+      return { mode: 'deliver', target: t.target, requirePushApproval: t.requirePushApproval }
+    } catch {
+      return null
+    }
+  }
+
   private async withMemory(agent: RunAgent, projectId: string): Promise<RunAgent> {
     const memory = await this.deps.agentMemory?.(agent.key, projectId).catch(() => '')
     return memory ? { ...agent, prompt: `${agent.prompt}\n\n${memory}` } : agent

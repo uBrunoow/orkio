@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { gitRepoOf, githubRepoOf, repoAccess, type ProjectRepo } from './projects'
+import { gitRepoOf, githubRepoOf, readRepoOf, repoAccess, type ProjectRepo } from './projects'
 
 const repo = (over: Partial<ProjectRepo> = {}): ProjectRepo => ({
   host: 'github.com',
@@ -16,6 +16,31 @@ const repo = (over: Partial<ProjectRepo> = {}): ProjectRepo => ({
 
 // Bug: sinais aceitavam outro host se `verified`, a entrega exigia `verified` com host exato, e
 // histórico/aba Revisão/revisão publicada só olhavam o host. Agora todos perguntam aqui.
+describe('readRepoOf: de onde o projeto lê o GitHub', () => {
+  const base = {
+    host: 'github.com',
+    owner: 'acme',
+    name: 'api',
+    remoteName: 'origin',
+    defaultBranch: 'main',
+    visibility: 'unknown',
+    canPush: null,
+    archived: false,
+    verified: true
+  } as const
+  it('verificado = API do Orkio; só git = gh; Enterprise ou não verificado = nada', () => {
+    expect(readRepoOf({ repo: base })).toEqual({ via: 'app', owner: 'acme', name: 'api' })
+    expect(readRepoOf({ repo: { ...base, verified: false, access: 'git' } })).toEqual({
+      via: 'gh',
+      owner: 'acme',
+      name: 'api'
+    })
+    expect(readRepoOf({ repo: { ...base, verified: false } })).toBeNull()
+    expect(readRepoOf({ repo: { ...base, host: 'ghe.x.com', access: 'git' } })).toBeNull()
+    expect(readRepoOf({ repo: null })).toBeNull()
+  })
+})
+
 describe('githubRepoOf', () => {
   it('github.com verificado → coordenadas da API', () => {
     expect(githubRepoOf({ repo: repo() })).toEqual({ owner: 'acme', name: 'orkio' })

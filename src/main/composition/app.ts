@@ -39,6 +39,9 @@ import { GitHubConnector } from '../connectors/github/github.connector'
 import { createGitHubDeviceApi, readGitHubOAuthConfig } from '../connectors/github/github.oauth'
 import { OrkioBotService } from '../connectors/github/orkio-bot'
 import { GitHubReviewPoster } from '../connectors/github/review-poster'
+import { GhCli } from '../connectors/github/gh-cli'
+import { GhReviewPoster } from '../connectors/github/gh-review-poster'
+import { moveToReviewedIfReviewing } from '../delivery/review-self'
 import { createNotionClient } from '../connectors/notion/notion.client'
 import { NotionConnector, type NotionOAuthDeps } from '../connectors/notion/notion.connector'
 import {
@@ -99,7 +102,7 @@ import { TaskSignalsService } from '../signals/task-signals.service'
 import type { ConfigStore } from '../storage/config-store'
 import { SecureStore } from '../storage/secure-store'
 import type { AutomationStatus } from '../../shared/automation'
-import { githubRepoOf, repoAccess } from '../../shared/projects'
+import { readRepoOf, repoAccess } from '../../shared/projects'
 import { finalText } from '../../shared/review-publish'
 import { createClaude, createWorktrees, type ClaudeParts } from './claude'
 import { createFlows } from './flows'
@@ -285,9 +288,16 @@ export function createApp(): OrkioApp {
   const boardStore = openBoardStore(paths.db)
   // Branches registradas por tarefa (banco sem ID no Notion): os sinais leem daqui.
   const worktrees = boardStore ? createWorktrees({ db: boardStore.db, git, paths }) : null
+  // Projeto só com git local: o GitHub vem pelo `gh` do usuário (o token dele nunca entra aqui).
+  const gh = new GhCli()
   const signals = new TaskSignalsService({
     store: configStore,
     git,
+    gh: {
+      status: () => gh.status(),
+      getConditional: (path, etag) => gh.getConditional(path, etag),
+      graphql: (query, variables) => gh.graphql(query, variables)
+    },
     // O token fica no conector; o serviço só faz leituras de repositório.
     github: {
       isConnected: () => github.isConnected(),
@@ -299,15 +309,17 @@ export function createApp(): OrkioApp {
     linkedBranches: (projectId) => worktrees?.linkedBranchesByTask(projectId) ?? new Map()
   })
   const reviewThreads = new ReviewThreadsService({
-    graphql: (query, variables) => github.graphql(query, variables),
-    isConnected: () => github.isConnected(),
+    graphql: (query, variables, via) =>
+      via === 'gh' ? gh.graphql(query, variables) : github.graphql(query, variables),
+    isConnected: (via) => (via === 'gh' ? gh.status().then((s) => s.ok) : github.isConnected()),
     locate: (projectId, taskId) => {
-      const repo = githubRepoOf(projectById(configStore.get(), projectId))
+      const repo = readRepoOf(projectById(configStore.get(), projectId))
       if (!repo) return null
       const pr = signals.cached(projectId)?.signals[taskId]?.pr ?? null
       return {
         owner: repo.owner,
         repo: repo.name,
+        via: repo.via,
         pr: pr ? { number: pr.number, url: pr.url } : null
       }
     },
@@ -351,6 +363,7 @@ export function createApp(): OrkioApp {
           notionWorkspace,
           signals,
           reviewThreads,
+          gh,
           usageHold
         })
       : null
@@ -568,9 +581,11 @@ function createWork(core: {
   notionWorkspace: NotionWorkspaceService
   signals: TaskSignalsService
   reviewThreads: ReviewThreadsService
+  /** GitHub pelo `gh` do usuário (projetos só com git local). */
+  gh: GhCli
   usageHold: () => Promise<string | null>
 }): Work {
-  const { boardStore, configStore, emit, notion, github, notionWorkspace, signals } = core
+  const { boardStore, configStore, emit, notion, github, gh, notionWorkspace, signals } = core
   // Ciclos: o quadro avisa a entrada na etapa (orquestrador, agentes, fluxos), que usam o quadro;
   // agentes e Claude Code perguntam ao executor de fluxos, que usa os dois; as ações de entrega
   // pedem um ciclo ao agendador, que roda o orquestrador.
@@ -686,15 +701,31 @@ function createWork(core: {
     hasActiveFlow: (taskId) => flowRunner().hasActive(taskId)
   })
 
-  // Projeto só com git local: pedir review e publicar revisão não passam pela API do Orkio.
-  const gitOnly = (projectId: string): boolean => {
+  // Projeto só com git local: pedir review e publicar revisão vão pelo `gh` do usuário; sem o
+  // `gh` instalado e logado, recusam com o motivo.
+  const isGitOnly = (projectId: string): boolean => {
     const repo = projectById(configStore.get(), projectId)?.repo
     return !!repo && repoAccess(repo) === 'git'
   }
+  const gitOnly = async (projectId: string): Promise<boolean> =>
+    isGitOnly(projectId) && !(await gh.status().then((s) => s.ok))
   const githubRepo = (projectId: string): { owner: string; repo: string } | null => {
-    const repo = githubRepoOf(projectById(configStore.get(), projectId))
+    const repo = readRepoOf(projectById(configStore.get(), projectId))
     return repo ? { owner: repo.owner, repo: repo.name } : null
   }
+  const ghPoster = new GhReviewPoster(gh)
+  // Autor da PR pelo `gh`: a revisão vai como comentário; em Revisando (e não bloqueada) a tarefa
+  // vai para Revisado, como o "alterações pedidas" faria.
+  const moveToReviewed = (projectId: string, taskId: string): void =>
+    void moveToReviewedIfReviewing(
+      {
+        store: boardStore,
+        board,
+        stages: (id) => configStore.get().boards[id]?.stages ?? []
+      },
+      projectId,
+      taskId
+    )
   const orchestratorRef = late<OrchestratorService>('Orquestrador')
   const flows = createFlows({
     boardStore,
@@ -714,6 +745,7 @@ function createWork(core: {
           github.requestReviewers(owner, repo, pull, reviewers),
         listCollaborators: (owner, repo) => github.listCollaborators(owner, repo)
       },
+      githubFor: (projectId) => (isGitOnly(projectId) ? gh : null),
       store: boardStore,
       runAutomation,
       gitOnly
@@ -745,6 +777,8 @@ function createWork(core: {
         poster: new GitHubReviewPoster({ github }),
         finalText: async (runId) => finalText(await claude.runs.readLog(runId)),
         signals: (projectId, force) => signals.get(projectId, { force }),
+        posterFor: (projectId) => (isGitOnly(projectId) ? ghPoster : null),
+        onSelfChangesRequested: moveToReviewed,
         repo: githubRepo,
         store: boardStore,
         runAutomation,

@@ -47,6 +47,15 @@ const v = (key: string): string => `{{${key}}}`
 const EVIDENCE_LINE =
   'Termine com a seção **Evidência**: os comandos de teste/lint que rodou com o resultado resumido e, para cada critério do briefing, como verificou.'
 
+/** Corretor da PR: o resumo para você aprovar (só leitura). Também no modelo "Alva: comentários da PR". */
+export const PR_COMMENTS_PLAN = `Leia ${REVIEW_PATH} (comentários e revisões da PR #${v(ACTION_VARS.reviewPr)}). Comece com "## Resumo": em 2 a 4 linhas, o que o revisor pede. Depois "## O que vou fazer": para cada comentário ou revisão, numerado na ordem do arquivo, o que vai mudar e onde, ou por que não vai mudar, e o que vai responder a quem comentou. Não altere arquivos. Responda só com isso, em pt-BR.`
+
+const PR_COMMENTS_REPLY =
+  'Depois responda no GitHub: em cada thread, o que foi feito (resolva as corrigidas); para cada revisão geral (sem thread), um comentário na PR com gh pr comment citando o revisor (@login) e o que foi feito em cada ponto. Não peça review: o Orkio pede de novo a quem revisou.'
+
+/** Corretor da PR, depois que você aprova o resumo (modo entrega). */
+export const PR_COMMENTS_APPLY = `Plano aprovado. Aplique as correções, rode os testes do projeto, faça o commit e o push da branch da tarefa. ${PR_COMMENTS_REPLY}`
+
 export const NATIVE_PROMPTS = {
   implement: `Implemente a tarefa descrita em ${BRIEFING_PATH}, de ponta a ponta: código, testes e a suíte verde. Mudanças focadas no que a tarefa pede. Faça commits pequenos com mensagens claras. Não faça push nem abra PR: o Orkio cuida disso depois.`,
   spec: `Escreva a spec da tarefa descrita em ${BRIEFING_PATH}: o problema, o comportamento esperado, critérios de aceite verificáveis e o que fica de fora. Leia o código relacionado antes. Não altere arquivos. Responda só com a spec, em pt-BR.`,
@@ -71,12 +80,11 @@ O que você conferiu (arquivos, testes, critérios do pedido) e o que não deu p
 Cada achado tem um ID estável: numa rodada seguinte, o mesmo problema mantém o mesmo ID e problema novo ganha número novo. Seção sem achados: escreva "- Nenhum". Só é bloqueio o que impede entregar (bug, quebra, falta algo pedido); o resto é detalhe.`,
   fix: `O revisor apontou bloqueios na rodada ${v(REVIEW_VARS.round)} (estão em ${v(REVIEW_VARS.file)}). Corrija cada bloqueio, com testes, rode a suíte e faça o commit. Os detalhes são opcionais. Não faça push.`,
   pr: `Abra a pull request desta branch com gh pr create: título curto no padrão do repositório, descrição com o que mudou, como testar e o link da tarefa (${v('notion_url')}). Se a PR já existir, atualize a descrição com gh pr edit. Não faça merge.`,
-  prCommentsPlan: `Leia ${REVIEW_PATH} (comentários de revisão não resolvidos da PR #${v(ACTION_VARS.reviewPr)}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.`,
+  prCommentsPlan: PR_COMMENTS_PLAN,
   ciFix:
     'O CI da PR desta branch falhou. Veja quais checks falharam com gh pr checks e o log com gh run view --log-failed, corrija a causa, rode os testes e faça o commit. Não faça push e não espere o CI no shell (nada de --watch, sleep longo ou tail -f): o Orkio acompanha a PR e chama você de novo se precisar.',
-  prCommentsApply: `Corrija os comentários de revisão não resolvidos da PR (estão em ${REVIEW_PATH}), rode os testes, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).`,
-  prCommentsApplyApproved:
-    'Plano aprovado. Aplique as correções, rode os testes do projeto, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).'
+  prCommentsApply: `Corrija o que a revisão da PR pede (comentários e revisões em ${REVIEW_PATH}), rode os testes, faça o commit e o push da branch da tarefa. ${PR_COMMENTS_REPLY}`,
+  prCommentsApplyApproved: PR_COMMENTS_APPLY
 } as const
 
 function prompt(
@@ -418,11 +426,11 @@ export function nativeStepsFlow(opts: NativeFlowOptions): Flow {
 
 /**
  * Comentários da PR, nativo (o mesmo caminho do modelo Alva, sem o plugin): lê as threads abertas
- * para `.orkio/revisao.md`; sem nada pendente termina. "Rodar uma vez" corrige direto; os outros
- * modos mostram o plano de correção para você aprovar antes.
+ * (e as revisões) para `.orkio/revisao.md`; sem nada pendente termina. Em qualquer modo, o resumo do
+ * que fazer vem antes para você aprovar; aprovado, corrige, responde quem comentou e pede nova revisão.
  */
-export function nativePrCommentsFlow(mode: RunMode): Flow {
-  const approve = mode !== 'quick'
+export function nativePrCommentsFlow(): Flow {
+  const approve = true
   return {
     id: NATIVE_FLOW_IDS.prComments,
     name: 'Corrigir comentários da PR',
@@ -486,9 +494,9 @@ export function nativePrCommentsFlow(mode: RunMode): Flow {
       },
       {
         id: 'pedir-review',
-        name: 'Pedir review',
+        name: 'Pedir nova revisão a quem revisou',
         type: 'orkio_action',
-        action: ORKIO_ACTIONS.request_review.id
+        action: ORKIO_ACTIONS.rerequest_review.id
       }
     ]
   }
@@ -510,7 +518,7 @@ export function nativeFlow(
     case 'done':
       return null
     case 'reviewed':
-      return nativePrCommentsFlow(mode)
+      return nativePrCommentsFlow()
     default:
       break
   }

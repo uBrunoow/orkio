@@ -5,7 +5,12 @@
 import { isAbsolute, relative } from 'node:path'
 import type { RunLogEvent } from '../../shared/agent-run'
 import { toolInfo, toolPath } from '../../shared/claude-tools'
-import { contextWindowFor, inputTokensOf } from '../../shared/context-usage'
+import {
+  contextWindowFor,
+  fitWindow,
+  inputTokensOf,
+  windowFromModelUsage
+} from '../../shared/context-usage'
 import { redactSecrets } from '../platform/redact'
 import { isSessionUuid } from '../../shared/terminal'
 
@@ -57,7 +62,9 @@ export function parseStreamLine(
   worktree: string,
   now: () => Date = () => new Date(),
   /** Modelo do `init` da execução (define a janela do contexto). */
-  model: string | null = null
+  model: string | null = null,
+  /** Janela já informada pelo CLI para este modelo (vence o chute pelo nome). */
+  knownWindow: number | null = null
 ): RunLogEvent[] {
   const trimmed = line.trim()
   if (!trimmed) return []
@@ -93,7 +100,11 @@ export function parseStreamLine(
     // Id da mensagem na sessão: o ponto de "Ramificar daqui"/"Editar mensagem" (`--resume-session-at`).
     const uuid = main && isSessionUuid(msg['uuid']) ? msg['uuid'] : null
     if (inputTokens !== null) {
-      events.push({ kind: 'usage', inputTokens, contextWindow: contextWindowFor(model) })
+      events.push({
+        kind: 'usage',
+        inputTokens,
+        contextWindow: fitWindow(inputTokens, knownWindow ?? contextWindowFor(model))
+      })
     }
     for (const block of content) {
       if (!isRecord(block)) continue
@@ -150,6 +161,7 @@ export function parseStreamLine(
   if (type === 'result') {
     const num = (v: unknown): number | null =>
       typeof v === 'number' && Number.isFinite(v) ? v : null
+    const contextWindow = windowFromModelUsage(msg['modelUsage'], model)
     return [
       {
         kind: 'result',
@@ -157,7 +169,8 @@ export function parseStreamLine(
         durationMs: num(msg['duration_ms']),
         costUsd: num(msg['total_cost_usd']),
         turns: num(msg['num_turns']),
-        text: redactSecrets(str(msg['result']) ?? '')
+        text: redactSecrets(str(msg['result']) ?? ''),
+        ...(contextWindow !== null ? { contextWindow } : {})
       }
     ]
   }

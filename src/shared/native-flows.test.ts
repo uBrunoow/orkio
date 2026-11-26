@@ -237,8 +237,11 @@ describe('fluxos nativos', () => {
     expect(flow.steps.find((s) => s.id === 'corrigir-comentarios')).toMatchObject({
       delivery: true
     })
-    const closed = walk(flow, () => '', 80, (id) =>
-      id === 'esperar-pr' ? { [ACTION_VARS.prEvent]: 'fechada' } : {}
+    const closed = walk(
+      flow,
+      () => '',
+      80,
+      (id) => (id === 'esperar-pr' ? { [ACTION_VARS.prEvent]: 'fechada' } : {})
     )
     expect(closed.at(-1)).toBe('fim:nothing')
     // Trava: o executor zera a contagem de passos a cada despertar (evento de fora, não laço);
@@ -250,9 +253,16 @@ describe('fluxos nativos', () => {
     })
   })
 
-  it('comentários da PR: "Rodar uma vez" corrige direto; os outros pedem sua aprovação', () => {
-    const ids = (f: Flow): string[] => f.steps.map((s) => s.id)
-    expect(ids(nativePrCommentsFlow('quick'))).not.toContain('aprovar-correcoes')
-    expect(ids(nativePrCommentsFlow('approval'))).toContain('aprovar-correcoes')
+  it('comentários da PR: o resumo vem antes para aprovar, em qualquer modo, e pede nova revisão sem outro gate', () => {
+    const flow = nativePrCommentsFlow()
+    const ids = flow.steps.map((s) => s.id)
+    expect(ids.indexOf('plano-correcoes')).toBeLessThan(ids.indexOf('aprovar-correcoes'))
+    expect(ids.indexOf('aprovar-correcoes')).toBeLessThan(ids.indexOf('aplicar-correcoes'))
+    expect(flow.steps.at(-1)).toMatchObject({ action: 'rerequest_review' })
+    for (const mode of ['quick', 'approval', 'steps'] as const) {
+      expect(
+        nativeFlow(mode, { review: false, evidence: false }, 'reviewed')?.steps.map((s) => s.id)
+      ).toContain('aprovar-correcoes')
+    }
   })
 })

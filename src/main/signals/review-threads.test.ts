@@ -212,6 +212,9 @@ describe('buildReviewMarkdown', () => {
     expect(md).toContain('> Refaça a lista')
     expect(md).not.toContain('ana')
     expect(md).not.toContain('cris')
+    // Só revisão de topo: não diz "nenhum comentário" e pede a resposta citando o revisor.
+    expect(md).not.toContain('Nenhum comentário pendente.')
+    expect(md).toContain('citando o revisor')
   })
 
   it('sem pendências avisa', () => {
@@ -220,7 +223,13 @@ describe('buildReviewMarkdown', () => {
 })
 
 function service(
-  over: { pr?: boolean; graphql?: ReturnType<typeof vi.fn>; now?: () => number } = {}
+  over: {
+    pr?: boolean
+    graphql?: ReturnType<typeof vi.fn>
+    now?: () => number
+    via?: 'app' | 'gh'
+    isConnected?: (via: 'app' | 'gh') => Promise<boolean>
+  } = {}
 ) {
   const graphql =
     over.graphql ??
@@ -230,10 +239,11 @@ function service(
     }))
   const svc = new ReviewThreadsService({
     graphql: graphql as never,
-    isConnected: async () => true,
+    isConnected: over.isConnected ?? (async () => true),
     locate: () => ({
       owner: 'acme',
       repo: 'app',
+      ...(over.via ? { via: over.via } : {}),
       pr: over.pr === false ? null : { number: 13, url: 'https://github.com/acme/app/pull/13' }
     }),
     ...(over.now ? { now: over.now } : {})
@@ -242,12 +252,29 @@ function service(
 }
 
 describe('ReviewThreadsService', () => {
+  it('projeto só git: lê as threads pelo gh (a API e a conexão certas por projeto)', async () => {
+    const isConnected = vi.fn(async (via: 'app' | 'gh') => via === 'gh')
+    const { svc, graphql } = service({ via: 'gh', isConnected })
+    const r = await svc.get('p', 'task')
+    expect(r.ok).toBe(true)
+    expect(isConnected).toHaveBeenCalledWith('gh')
+    expect(graphql).toHaveBeenCalledWith(
+      REVIEW_QUERY,
+      { owner: 'acme', name: 'app', number: 13 },
+      'gh'
+    )
+  })
+
   it('chama o GraphQL com owner/repo/número e guarda 60 s (force ignora)', async () => {
     let t = 1_000
     const { svc, graphql } = service({ now: () => t })
     const a = await svc.get('p', 'task')
     expect(a.ok && a.value.threads).toHaveLength(2)
-    expect(graphql).toHaveBeenCalledWith(REVIEW_QUERY, { owner: 'acme', name: 'app', number: 13 })
+    expect(graphql).toHaveBeenCalledWith(
+      REVIEW_QUERY,
+      { owner: 'acme', name: 'app', number: 13 },
+      'app'
+    )
     t += 30_000
     await svc.get('p', 'task')
     expect(graphql).toHaveBeenCalledTimes(1)
@@ -276,6 +303,32 @@ describe('ReviewThreadsService', () => {
 })
 
 describe('ação review_snapshot', () => {
+  it('revisão que pede alterações só no texto (sem thread) conta em review.count', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'orkio-review-'))
+    try {
+      const reviews = {
+        get: async () => ({
+          ok: true as const,
+          value: {
+            pr: { number: 477, url: 'https://github.com/acme/app/pull/477' },
+            threads: [],
+            reviews: [
+              { state: 'CHANGES_REQUESTED', author: 'oalexandre', body: 'Ajuste X', at: null }
+            ],
+            truncated: false,
+            unreadThreads: 0
+          }
+        })
+      }
+      const [action] = createReviewActions({ reviews, ensureWorktree: async () => dir })
+      const r = await action!.run({ projectId: 'p', taskId: 't', vars: {} })
+      expect(r).toEqual({ ok: true, vars: { 'review.count': '1', 'review.pr': '477' } })
+      expect(await readFile(join(dir, '.orkio', 'revisao.md'), 'utf8')).toContain('> Ajuste X')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('grava .orkio/revisao.md e as variáveis', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'orkio-review-'))
     try {

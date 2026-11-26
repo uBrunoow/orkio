@@ -68,6 +68,21 @@ export function gitRepoOf(
   return { owner: repo.owner, name: repo.name }
 }
 
+/**
+ * De onde o projeto lê o GitHub (sinais, aba Revisão, automações, revisão publicada): `app` = API
+ * do Orkio (verificado, `githubRepoOf`); `gh` = o GitHub CLI do usuário (só git local no
+ * github.com). `null` = só local (sem repositório, Enterprise, não verificado).
+ */
+export function readRepoOf(
+  project: { repo: ProjectRepo | null } | null | undefined
+): (GitHubRepoRef & { via: 'app' | 'gh' }) | null {
+  const app = githubRepoOf(project)
+  if (app) return { via: 'app', ...app }
+  const repo = project?.repo
+  const git = repo && repoAccess(repo) === 'git' ? gitRepoOf(project) : null
+  return git ? { via: 'gh', ...git } : null
+}
+
 /** Link externo oferecido junto de um erro/estado (sempre dentro da allowlist do main). */
 export interface ProjectAction {
   label: string

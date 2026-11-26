@@ -3,6 +3,7 @@
  * cópia só com os campos conhecidos (campo estranho nunca chega ao serviço). As regras de negócio
  * (nomes repetidos, ciclos, etc.) continuam nos serviços. Puro: sem Node nem DOM.
  */
+import { parseDeliverySettingsValue, parsePrBases, type DeliverySettings } from '../delivery'
 import { MODEL_NAME_MAX, EFFORT_NAME_MAX, isEffort, isModelName } from '../agent-runtime'
 import {
   BRIEFING_MAX,
@@ -510,10 +511,16 @@ export function parseRunSetupPayload(value: unknown): Parsed<RunSetup> {
   return parseRunSetup(value) ?? INVALID
 }
 
-export function parseDeliverySettings(value: unknown): Parsed<{ requirePushApproval: boolean }> {
-  return isRecord(value) && typeof value['requirePushApproval'] === 'boolean'
-    ? { requirePushApproval: value['requirePushApproval'] }
-    : INVALID
+/** Ajustes de entrega da tela: estrito (campo desconhecido, tipo errado ou destino ruim recusa). */
+export function parseDeliverySettings(value: unknown): Parsed<DeliverySettings> {
+  if (!isRecord(value)) return INVALID
+  const known = ['requirePushApproval', 'agentsDeliver', 'prBases']
+  if (Object.keys(value).some((k) => !known.includes(k))) return INVALID
+  if (value['agentsDeliver'] !== undefined && typeof value['agentsDeliver'] !== 'boolean') {
+    return INVALID
+  }
+  if (value['prBases'] !== undefined && !parsePrBases(value['prBases']).ok) return INVALID
+  return parseDeliverySettingsValue(value) ?? INVALID
 }
 
 interface AlvaBindings {

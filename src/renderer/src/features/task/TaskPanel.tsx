@@ -11,6 +11,7 @@ import {
   GaugeIcon,
   GitBranchIcon,
   ListIcon,
+  NotionLogo,
   PanelRightIcon,
   PullRequestIcon,
   ReviewRequestIcon,
@@ -45,11 +46,13 @@ import { EnvironmentPanel } from './EnvironmentPanel'
 import { SessionContextPanel } from './SessionContextPanel'
 import { SidechatPanel } from './SidechatPanel'
 import { TerminalPage } from '../terminal/TerminalPage'
+import { NotionTaskPanel } from './NotionTaskPanel'
 import { TaskSession } from './TaskSession'
 import { TaskViewProvider, useTaskViewState, type TaskViewInput } from './task-view'
 
 const TAB_ICON: Record<PanelTab, SvgIcon> = {
   details: ListIcon,
+  notion: NotionLogo,
   changes: DiffIcon,
   sidechat: CommentIcon,
   terminal: TerminalIcon,
@@ -149,6 +152,7 @@ export function TaskPanel({
         </div>
       </div>
     ),
+    notion: <NotionTaskPanel projectId={input.projectId} taskId={card.taskId} />,
     changes: <TaskChanges />,
     sidechat: <SidechatPanel />,
     terminal:

@@ -10,7 +10,13 @@
  *
  * `null` = o comando não é de GitHub/push (segue a política normal).
  */
-import { checkPushBranch, sameRepo, type DeliveryTarget } from '../../shared/delivery'
+import {
+  PR_BASE_MESSAGES,
+  checkPrBase,
+  checkPushBranch,
+  sameRepo,
+  type DeliveryTarget
+} from '../../shared/delivery'
 import {
   GH_API_MUTATIONS,
   GH_API_NEVER_METHODS,
@@ -282,6 +288,15 @@ export function ghVerdict(args: readonly string[], target: DeliveryTarget): Deli
           return { ok: false, reason: DELIVERY_POLICY_MESSAGES.ghHead(target.branch) }
       }
     }
+    // Destino da PR (projeto com os agentes entregando): criar exige um da lista; trocar também.
+    if (target.prBases && (action === 'create' || action === 'edit')) {
+      const bases = optionValues(args, '-B', '--base')
+      const reason =
+        action === 'create' && bases.length === 0
+          ? checkPrBase(null, target.prBases)
+          : bases.map((b) => checkPrBase(b, target.prBases!)).find((r) => r !== null)
+      if (reason) return { ok: false, reason }
+    }
     if (action === 'comment' && args.includes('--delete-last')) {
       return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiDelete }
     }
@@ -431,6 +446,13 @@ function ghApiVerdict(args: readonly string[], target: DeliveryTarget): Delivery
           return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiMutation(f) }
         event = event ?? GH_API_MUTATIONS[f] ?? null
       }
+      // A base vem num campo do input ou numa variável: com destinos restritos, não passa.
+      if (
+        target.prBases &&
+        /\bbaseRefName\b/.test(call.fields.map(([k, v]) => `${k}=${v}`).join(' '))
+      ) {
+        return { ok: false, reason: PR_BASE_MESSAGES.graphqlBase }
+      }
       return { ok: true, kind: 'github', access: 'write', event }
     }
     return { ok: true, kind: 'github', access: 'read', event: null }
@@ -463,6 +485,15 @@ function ghApiVerdict(args: readonly string[], target: DeliveryTarget): Delivery
   }
   if (field('event').some((v) => /^(APPROVE|REQUEST_CHANGES)$/i.test(v))) {
     return { ok: false, reason: DELIVERY_POLICY_MESSAGES.apiField('event') }
+  }
+  if (target.prBases && /^\/pulls(\/\d+)?\/?$/.test(rest)) {
+    const bases = field('base')
+    const creating = /^\/pulls\/?$/.test(rest)
+    const reason =
+      creating && bases.length === 0
+        ? checkPrBase(null, target.prBases)
+        : bases.map((b) => checkPrBase(b, target.prBases!)).find((r) => r !== null)
+    if (reason) return { ok: false, reason }
   }
   if (rule.event === 'pr_create') {
     for (const h of field('head')) {

@@ -1,12 +1,15 @@
 import type { RunLogEvent } from '../../../../shared/agent-run'
-import { contextPercent, contextWindowFor } from '../../../../shared/context-usage'
+import { contextPercent, contextWindowFor, fitWindow } from '../../../../shared/context-usage'
 import { gitRepoOf, type ProjectRepo } from '../../../../shared/projects'
 
 /**
  * Link da branch no github.com (`gitRepoOf`: verificado pela API ou só git local), ou `null`
  * (sem repositório, Enterprise, não verificado).
  */
-export function branchTreeUrl(project: { repo: ProjectRepo | null }, branch: string): string | null {
+export function branchTreeUrl(
+  project: { repo: ProjectRepo | null },
+  branch: string
+): string | null {
   const repo = gitRepoOf(project)
   if (!repo) return null
   return `https://github.com/${encodeURIComponent(repo.owner)}/${encodeURIComponent(
@@ -37,13 +40,15 @@ export interface ContextUsage {
 
 /** Último `usage` do log com os números (medidor do campo da sessão); `null` = sem uso ainda. */
 export function latestContextUsage(log: readonly RunLogEvent[]): ContextUsage | null {
+  // O `result` do turno (depois do último uso) traz a janela real do modelo, informada pelo CLI.
+  let real: number | null = null
   for (let i = log.length - 1; i >= 0; i--) {
     const e = log[i]
+    if (e && e.kind === 'result' && e.contextWindow && real === null) real = e.contextWindow
     if (e && e.kind === 'usage') {
-      const percent = contextPercent(e.inputTokens, e.contextWindow)
-      return percent === null
-        ? null
-        : { percent, inputTokens: e.inputTokens, contextWindow: e.contextWindow }
+      const contextWindow = fitWindow(e.inputTokens, real ?? e.contextWindow)
+      const percent = contextPercent(e.inputTokens, contextWindow)
+      return percent === null ? null : { percent, inputTokens: e.inputTokens, contextWindow }
     }
   }
   return null
@@ -51,7 +56,7 @@ export function latestContextUsage(log: readonly RunLogEvent[]): ContextUsage | 
 
 /** O mesmo uso medido na janela de outro modelo (o escolhido para a próxima mensagem). */
 export function usageForModel(usage: ContextUsage, model: string): ContextUsage {
-  const contextWindow = contextWindowFor(model)
+  const contextWindow = fitWindow(usage.inputTokens, contextWindowFor(model))
   const percent = contextPercent(usage.inputTokens, contextWindow) ?? usage.percent
   return { ...usage, contextWindow, percent }
 }

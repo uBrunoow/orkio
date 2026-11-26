@@ -6,7 +6,12 @@ import { createOrkioConfigStore, type OrkioConfig } from '../config/orkio-config
 import { type ConditionalPage } from '../connectors/github/github.client'
 import { GitError } from '../git/git'
 import type { ConfigStore } from '../storage/config-store'
-import { SIGNALS_MESSAGES, TaskSignalsService, type SignalsGitHub } from './task-signals.service'
+import {
+  SIGNALS_MESSAGES,
+  TaskSignalsService,
+  type SignalsGh,
+  type SignalsGitHub
+} from './task-signals.service'
 import type { NotionTask } from '../../shared/notion'
 import { ApiError } from '../net/http'
 
@@ -43,7 +48,11 @@ describe('TaskSignalsService', () => {
   let localBranches: ReturnType<typeof vi.fn<(root: string) => Promise<string[]>>>
   let pages: Record<string, unknown[]>
 
-  async function service(projectRepo: unknown = repo()): Promise<TaskSignalsService> {
+  let clock = NOW.getTime()
+  async function service(
+    projectRepo: unknown = repo(),
+    gh?: SignalsGh
+  ): Promise<TaskSignalsService> {
     await writeFile(
       join(dir, 'c.json'),
       JSON.stringify({
@@ -68,11 +77,12 @@ describe('TaskSignalsService', () => {
       store,
       git: { localBranches },
       github,
+      ...(gh ? { gh } : {}),
       listTasks: async () => ({
         ok: true,
         value: { tasks: TASKS, truncated: false, fetchedAt: NOW.toISOString(), fromCache: true }
       }),
-      now: () => NOW
+      now: () => new Date(clock)
     })
   }
 
@@ -224,6 +234,54 @@ describe('TaskSignalsService', () => {
     const result = await (await service()).get('p1')
     expect(result).toMatchObject({ value: { local: false, github: 'ok' } })
     if (result.ok) expect(result.value.messages).toContain(SIGNALS_MESSAGES.local)
+  })
+
+  it('só git local com o gh logado: PRs pelo gh (a cada 5 min), sem a API do Orkio', async () => {
+    clock = NOW.getTime()
+    const gh = {
+      status: vi.fn(async () => ({ ok: true as const, login: 'ana' })),
+      getConditional: vi.fn(github.getConditional.getMockImplementation()!),
+      graphql: vi.fn(github.graphql.getMockImplementation()!)
+    }
+    github.getConditional.mockClear()
+    const s = await service(repo({ verified: false, access: 'git' }), gh)
+    const first = await s.get('p1')
+    expect(first).toMatchObject({ value: { github: 'ok' } })
+    if (first.ok) expect(first.value.signals['t142']?.pr).toMatchObject({ number: 12 })
+    expect(github.getConditional).not.toHaveBeenCalled()
+    expect(github.isConnected).not.toHaveBeenCalled()
+    const reads = gh.getConditional.mock.calls.length
+    expect(reads).toBeGreaterThan(0)
+    // Antes de 5 min: reaproveita (o agendador roda a cada minuto).
+    clock += 4 * 60_000
+    await s.get('p1')
+    expect(gh.getConditional.mock.calls.length).toBe(reads)
+    clock += 2 * 60_000
+    await s.get('p1')
+    expect(gh.getConditional.mock.calls.length).toBeGreaterThan(reads)
+    // "Atualizar" força na hora.
+    const before = gh.getConditional.mock.calls.length
+    await s.get('p1', { force: true })
+    expect(gh.getConditional.mock.calls.length).toBeGreaterThan(before)
+    // Sem rede: a PR do último resultado continua (Visão geral, entrega, aba Revisão).
+    expect(s.prForBranch('p1', 'feat/ORK-142-sync')).toMatchObject({ number: 12 })
+    expect(s.cachedPulls('p1')).toHaveLength(1)
+  })
+
+  it('só git local sem o gh (ou sem login): só local, com o motivo', async () => {
+    const gh = {
+      status: vi.fn(async () => ({
+        ok: false as const,
+        code: 'logged_out' as const,
+        message: 'Entre no GitHub CLI: rode gh auth login.'
+      })),
+      getConditional: vi.fn(github.getConditional.getMockImplementation()!),
+      graphql: vi.fn(github.graphql.getMockImplementation()!)
+    }
+    const r = await (await service(repo({ verified: false, access: 'git' }), gh)).get('p1')
+    expect(r).toMatchObject({ value: { github: 'git_only' } })
+    if (r.ok) expect(r.value.messages).toContain('Entre no GitHub CLI: rode gh auth login.')
+    expect(gh.getConditional).not.toHaveBeenCalled()
   })
 
   it('erro das tarefas (ex.: projeto sem vínculo) é repassado; projeto inexistente', async () => {

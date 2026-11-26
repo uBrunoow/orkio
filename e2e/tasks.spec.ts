@@ -123,7 +123,9 @@ test('Como deve rodar: modelo na coluna pelo Quadro, "Rodar uma vez" nativo com 
     )
     .toBe(2)
   const [implement, review] = agentArgs()
-  expect(implement!['appendSystemPrompt']).toBeNull()
+  // Sem agente: só as regras do Orkio (nada de "Você é …").
+  expect(String(implement!['appendSystemPrompt'])).not.toContain('Você é')
+  expect(String(implement!['appendSystemPrompt'])).toContain('Não grave o link da PR')
   expect(String(review!['appendSystemPrompt'])).toContain('Revisor')
   expect(review!['disallowedTools']).toContain('Write')
   expect(review!['resume']).toBeNull()

@@ -271,7 +271,15 @@ export interface SeedProject {
   id: string
   name: string
   localPath: string
-  repo: typeof FAKE_REPO | null
+  repo:
+    | (Omit<typeof FAKE_REPO, 'verified' | 'visibility' | 'canPush'> & {
+        verified: boolean
+        visibility: 'public' | 'private' | 'internal' | 'unknown'
+        canPush: boolean | null
+        /** Só git local (entrega 1): o GitHub vem pelo `gh` do usuário. */
+        access?: 'git'
+      })
+    | null
   notionProject?: { id: string; name: string }
 }
 
@@ -329,6 +337,8 @@ export async function launchOrkio(
       gh?: 'ok' | 'logged_out' | 'missing'
       blockers?: number
     }
+    /** GitHub CLI simulado com API (projeto só com git local): estado inicial do `gh api`. */
+    ghApi?: FakeGhState
   } = {}
 ): Promise<OrkioApp> {
   const env = { ...process.env } as Record<string, string>
@@ -338,6 +348,11 @@ export async function launchOrkio(
   delete env['NODE_OPTIONS']
   // Claude Code SIMULADO sempre primeiro no PATH: o E2E nunca chama o CLI real (4A).
   const fakeBin = fakeClaudeBin(userDataDir, options.claude ?? { loggedIn: true }, options.alva)
+  if (options.ghApi) {
+    copyFileSync(join(ROOT, 'e2e', 'fake-gh', 'gh'), join(fakeBin, 'gh'))
+    chmodSync(join(fakeBin, 'gh'), 0o755)
+    setGhState(userDataDir, options.ghApi)
+  }
   env['PATH'] = `${fakeBin}${delimiter}${env['PATH'] ?? ''}`
   // HOME isolado: o catálogo de comandos nunca lê o ~/.claude de verdade no E2E.
   const home = `${userDataDir}-home`
@@ -1366,6 +1381,26 @@ export const FAKE_CLAUDE = {
   }
 } as const
 
+/** Estado do `gh` simulado (e2e/fake-gh): login e o que o `gh api` devolve. */
+export interface FakeGhState {
+  loggedIn: boolean
+  login: string
+  branches: string[]
+  pulls: {
+    number: number
+    title: string
+    head: string
+    state: 'open' | 'closed' | 'merged'
+    updatedAt: string
+    author?: string
+  }[]
+}
+
+/** Troca o que o `gh` simulado responde (lido a cada chamada). */
+export function setGhState(userDataDir: string, state: FakeGhState): void {
+  writeFileSync(join(`${userDataDir}-bin`, 'gh-state.json'), JSON.stringify(state))
+}
+
 /** Pasta com o `claude` simulado (e2e/fake-claude) e o estado de login dele. */
 function fakeClaudeBin(
   userDataDir: string,
@@ -1498,7 +1533,16 @@ export async function expectTaskHistory(scope: Locator, ...texts: string[]): Pro
  */
 export async function taskTab(
   screen: Locator,
-  name: 'Sessão' | 'Spec' | 'Plano' | 'Mudanças' | 'PR & CI' | 'Revisão' | 'Contexto' | 'Detalhes'
+  name:
+    | 'Sessão'
+    | 'Spec'
+    | 'Plano'
+    | 'Mudanças'
+    | 'PR & CI'
+    | 'Revisão'
+    | 'Contexto'
+    | 'Detalhes'
+    | 'Notion'
 ): Promise<Locator> {
   if (name === 'Sessão') return screen
   // PR & CI, Revisão e Contexto são subtelas abertas pelas linhas de Detalhes (com "voltar").

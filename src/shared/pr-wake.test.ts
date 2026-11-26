@@ -80,12 +80,12 @@ describe('a PR acorda o fluxo (puro)', () => {
     const moved = w({ checks: 'failure', unresolvedComments: 0, headSha: 'ccc' })
     const again = prWakeDecision({ baseline: base, now: moved, seen, at: 90_000 })
     expect(again).toMatchObject({ kind: 'sleep', seen: { since: 90_000 } })
-    expect(
-      prWakeDecision({ baseline: base, now: failing, seen, at: PR_WAKE_DEBOUNCE_MS })
-    ).toEqual({ kind: 'wake', event: 'ci_falhou' })
-    expect(
-      prWakeDecision({ baseline: base, now: w({ merged: true }), seen: null, at: 0 })
-    ).toEqual({ kind: 'wake', event: 'merge' })
+    expect(prWakeDecision({ baseline: base, now: failing, seen, at: PR_WAKE_DEBOUNCE_MS })).toEqual(
+      { kind: 'wake', event: 'ci_falhou' }
+    )
+    expect(prWakeDecision({ baseline: base, now: w({ merged: true }), seen: null, at: 0 })).toEqual(
+      { kind: 'wake', event: 'merge' }
+    )
   })
 
   it('comentários com o CI rodando esperam o CI terminar', () => {

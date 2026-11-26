@@ -163,6 +163,18 @@ describe('DeliveryService com git real', () => {
     )
   })
 
+  it('compareUrl com os agentes entregando: a comparação abre contra o primeiro destino (dev)', () => {
+    const withBases = new DeliveryService({
+      git: createGit(),
+      project: (id) => (id === 'p1' ? project : null),
+      worktree: (id) => (id === 't1' ? record : null),
+      settings: () => ({ requirePushApproval: true, agentsDeliver: true, prBases: ['dev'] })
+    })
+    expect(withBases.compareUrl('p1', 't1')).toBe(
+      'https://github.com/acme/app/compare/dev...ORK-7/exportar-csv?expand=1'
+    )
+  })
+
   it('alreadyPushed: só com a branch remota igual ao HEAD', async () => {
     expect(await service.alreadyPushed('p1', 't1')).toBe(false) // nunca enviada
     await commit('a.txt', 'feat: a')

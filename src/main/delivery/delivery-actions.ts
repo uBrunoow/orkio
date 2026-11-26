@@ -7,6 +7,7 @@
  *   grava as saídas declaradas em `ORKIO_ACTIONS.verify_pushed`.
  * - `request_review`: gate com os revisores (quem já revisou ou foi pedido; senão, você escolhe)
  *   → POST requested_reviewers pelo conector → a 3B vê o pedido e move a tarefa para Revisando.
+ * - `rerequest_review` (corretor da PR): o mesmo, sem gate quando há quem já revisou.
  *
  * Cada ação feita vira um evento `delivery` no histórico, com link (branch ou PR).
  */
@@ -23,21 +24,25 @@ import { GIT_ONLY_REVIEW_MESSAGE } from '../../shared/delivery'
 export interface DeliveryActionsDeps {
   delivery: DeliveryService
   signals: SignalsFetch
-  github: {
-    requestReviewers(
-      owner: string,
-      repo: string,
-      pull: number,
-      reviewers: { users: string[]; teams: string[] }
-    ): Promise<void>
-    listCollaborators(owner: string, repo: string): Promise<string[]>
-  }
+  github: DeliveryGitHub
+  /** Projeto só com git local e o `gh` logado: a API do `gh` (pede review com o teu usuário). */
+  githubFor?(projectId: string): DeliveryGitHub | null
   store: Pick<BoardStore, 'addEvent'>
   /** Depois de pedir review: roda as automações já (a 3B move para Revisando). */
   runAutomation?(projectId: string): void
-  /** Projeto só com git local: nada de pedir review pela API do Orkio. */
-  gitOnly?(projectId: string): boolean
+  /** Projeto só com git local sem o `gh` disponível: não dá para pedir review. */
+  gitOnly?(projectId: string): boolean | Promise<boolean>
   now?: () => Date
+}
+
+export interface DeliveryGitHub {
+  requestReviewers(
+    owner: string,
+    repo: string,
+    pull: number,
+    reviewers: { users: string[]; teams: string[] }
+  ): Promise<void>
+  listCollaborators(owner: string, repo: string): Promise<string[]>
 }
 
 export const DELIVERY_ACTION_MESSAGES = {
@@ -136,86 +141,92 @@ export function createDeliveryActions(deps: DeliveryActionsDeps): OrkioAction[] 
     const known = [
       ...(pr.reviews ?? []).map((r) => r.author ?? null),
       ...(pr.reviewRequests ?? []).map((r) => r.reviewer ?? null)
-    ].filter((x): x is string => !!x)
+    ].filter((x): x is string => !!x && x !== pr.author)
     return { pr, known: [...new Set(known)] } as const
   }
 
-  const requestReview: OrkioAction = {
-    ...ORKIO_ACTIONS.request_review,
-    async confirm({ projectId, taskId }) {
-      if (deps.gitOnly?.(projectId)) {
-        return { problem: { code: 'git_only', message: GIT_ONLY_REVIEW_MESSAGE } }
-      }
-      const r = await reviewers(projectId, taskId)
-      if ('problem' in r) return { problem: r.problem }
-      let target
-      try {
-        target = deps.delivery.target(projectId, taskId)
-      } catch (error) {
-        if (error instanceof DeliveryError) return { problem: failure(error) }
-        throw error
-      }
-      const collaborators = await deps.github
-        .listCollaborators(target.owner, target.repo)
-        .catch(() => [] as string[])
-      const options = [...new Set([...r.known, ...collaborators])].slice(0, 30)
-      const info: ActionConfirm = {
-        title: `Pedir review da PR #${r.pr.number}?`,
-        message: r.known.length
-          ? 'O Orkio vai pedir review de novo a quem já revisou ou foi pedido nesta PR.'
-          : 'Ninguém revisou nem foi pedido nesta PR ainda: escolha quem deve revisar.',
-        details: [
-          { label: 'PR', value: `#${r.pr.number}` },
-          { label: 'Repositório', value: `${target.owner}/${target.repo}` }
-        ],
-        input: { label: 'Revisores', options, selected: [...r.known], allowOther: true },
-        approveLabel: 'Pedir review',
-        link: { label: `Abrir a PR #${r.pr.number} no GitHub`, url: r.pr.url }
-      }
-      return info
-    },
-    async run({ projectId, taskId, input }) {
-      const r = await reviewers(projectId, taskId)
-      if ('problem' in r) return { ok: false, ...r.problem }
-      const chosen = [...new Set(input ?? r.known)]
-      if (chosen.length === 0) {
-        return { ok: false, code: 'no_reviewers', message: DELIVERY_ACTION_MESSAGES.noReviewers }
-      }
-      let target
-      try {
-        target = deps.delivery.target(projectId, taskId)
-      } catch (error) {
-        if (error instanceof DeliveryError) return { ok: false, ...failure(error) }
-        throw error
-      }
-      try {
-        await deps.github.requestReviewers(target.owner, target.repo, r.pr.number, {
-          users: chosen.filter((c) => !c.startsWith('team:')),
-          teams: chosen.filter((c) => c.startsWith('team:')).map((c) => c.slice(5))
-        })
-      } catch (error) {
-        if (isApiError(error, 'github')) {
-          return { ok: false, code: `github_${error.code}`, message: error.message }
+  function reviewAction(again: boolean): OrkioAction {
+    return {
+      ...(again ? ORKIO_ACTIONS.rerequest_review : ORKIO_ACTIONS.request_review),
+      async confirm({ projectId, taskId }) {
+        if (await deps.gitOnly?.(projectId)) {
+          return { problem: { code: 'git_only', message: GIT_ONLY_REVIEW_MESSAGE } }
         }
-        console.error(`[orkio] pedir review: ${errorName(error)}`)
-        return { ok: false, code: 'github', message: DELIVERY_ACTION_MESSAGES.github }
-      }
-      deliveryEvent(
-        deps,
-        { projectId, taskId },
-        {
-          action: 'review_request',
-          owner: target.owner,
-          repo: target.repo,
-          branch: target.branch,
-          reviewers: chosen.length,
-          pr: { number: r.pr.number, owner: target.owner, repo: target.repo }
+        const r = await reviewers(projectId, taskId)
+        if ('problem' in r) return { problem: r.problem }
+        // Corretor da PR: você já aprovou o resumo; com quem revisou conhecido, pede sem outro gate.
+        if (again && r.known.length > 0) return null
+        let target
+        try {
+          target = deps.delivery.target(projectId, taskId)
+        } catch (error) {
+          if (error instanceof DeliveryError) return { problem: failure(error) }
+          throw error
         }
-      )
-      deps.runAutomation?.(projectId)
-      return { ok: true }
+        const github = deps.githubFor?.(projectId) ?? deps.github
+        const collaborators = await github
+          .listCollaborators(target.owner, target.repo)
+          .catch(() => [] as string[])
+        const options = [...new Set([...r.known, ...collaborators])].slice(0, 30)
+        const info: ActionConfirm = {
+          title: `Pedir review da PR #${r.pr.number}?`,
+          message: r.known.length
+            ? 'O Orkio vai pedir review de novo a quem já revisou ou foi pedido nesta PR.'
+            : 'Ninguém revisou nem foi pedido nesta PR ainda: escolha quem deve revisar.',
+          details: [
+            { label: 'PR', value: `#${r.pr.number}` },
+            { label: 'Repositório', value: `${target.owner}/${target.repo}` }
+          ],
+          input: { label: 'Revisores', options, selected: [...r.known], allowOther: true },
+          approveLabel: 'Pedir review',
+          link: { label: `Abrir a PR #${r.pr.number} no GitHub`, url: r.pr.url }
+        }
+        return info
+      },
+      async run({ projectId, taskId, input }) {
+        const r = await reviewers(projectId, taskId)
+        if ('problem' in r) return { ok: false, ...r.problem }
+        const chosen = [...new Set(input ?? r.known)]
+        if (chosen.length === 0) {
+          return { ok: false, code: 'no_reviewers', message: DELIVERY_ACTION_MESSAGES.noReviewers }
+        }
+        let target
+        try {
+          target = deps.delivery.target(projectId, taskId)
+        } catch (error) {
+          if (error instanceof DeliveryError) return { ok: false, ...failure(error) }
+          throw error
+        }
+        try {
+          const github = deps.githubFor?.(projectId) ?? deps.github
+          await github.requestReviewers(target.owner, target.repo, r.pr.number, {
+            users: chosen.filter((c) => !c.startsWith('team:')),
+            teams: chosen.filter((c) => c.startsWith('team:')).map((c) => c.slice(5))
+          })
+        } catch (error) {
+          if (isApiError(error, 'github')) {
+            return { ok: false, code: `github_${error.code}`, message: error.message }
+          }
+          console.error(`[orkio] pedir review: ${errorName(error)}`)
+          return { ok: false, code: 'github', message: DELIVERY_ACTION_MESSAGES.github }
+        }
+        deliveryEvent(
+          deps,
+          { projectId, taskId },
+          {
+            action: 'review_request',
+            owner: target.owner,
+            repo: target.repo,
+            branch: target.branch,
+            reviewers: chosen.length,
+            pr: { number: r.pr.number, owner: target.owner, repo: target.repo }
+          }
+        )
+        deps.runAutomation?.(projectId)
+        return { ok: true }
+      }
     }
   }
 
-  return [push, verify, requestReview]
+  return [push, verify, reviewAction(false), reviewAction(true)]
 }

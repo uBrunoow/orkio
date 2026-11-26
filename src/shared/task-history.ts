@@ -90,9 +90,9 @@ function deliveryText(e: Extract<HistoryEvent, { kind: 'delivery' }>): string {
     case 'review_request':
       return `Review pedido${pr} pelo ${who}`
     case 'review_post':
-      return `Revisão publicada${pr} como orkio[bot] (${
-        e.detail.reviewEvent === 'REQUEST_CHANGES' ? 'pedir alterações' : 'comentário'
-      })`
+      return `Revisão publicada${pr} ${
+        e.detail.via === 'gh' ? 'com o seu usuário do GitHub (gh)' : 'como orkio[bot]'
+      } (${e.detail.reviewEvent === 'REQUEST_CHANGES' ? 'pedir alterações' : 'comentário'})`
     case undefined:
       return `Entrega pelo ${who}`
     default:
@@ -128,6 +128,9 @@ export function describeEvent(e: HistoryEvent, stageName: (id: string | null) =>
         return `Orquestrador (${reason}): ${path}${by(e)}`
       }
       if (e.detail.flow === 'pr_merged') return `Fluxo (PR mergeada): ${path}`
+      if (e.detail.flow === 'review_self') {
+        return `Revisão com alterações (autor da PR, pelo gh): ${path}`
+      }
       return `${automationEvent(e)} → regra ${rule(e.detail.ruleName)}: ${path}`
     }
     case 'automation':

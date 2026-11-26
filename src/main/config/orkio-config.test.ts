@@ -379,11 +379,21 @@ describe('orkio-config v2/v3', () => {
       file,
       JSON.stringify({
         ...saved,
-        delivery: { p1: { requirePushApproval: false }, p2: { requirePushApproval: 'nao' } }
+        delivery: {
+          p1: { requirePushApproval: false },
+          p2: { requirePushApproval: 'nao' },
+          p3: { requirePushApproval: true, agentsDeliver: true, prBases: ['dev', 'main'] },
+          p4: { requirePushApproval: true, agentsDeliver: true, prBases: ['develop'] }
+        }
       })
     )
     const again = await createOrkioConfigStore(file).load()
-    expect(again.data.delivery).toEqual({ p1: { requirePushApproval: false } })
+    expect(again.data.delivery).toEqual({
+      p1: { requirePushApproval: false },
+      // main na lista: a lista inteira cai (volta ao padrão, dev), a opção fica.
+      p3: { requirePushApproval: true, agentsDeliver: true },
+      p4: { requirePushApproval: true, agentsDeliver: true, prBases: ['develop'] }
+    })
   })
 
   it('v8 → v9: canal Estável e nenhuma versão vista ainda', async () => {

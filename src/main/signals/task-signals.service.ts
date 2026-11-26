@@ -8,6 +8,7 @@
 import { parseDisplayId } from '../../shared/task-id-match'
 import {
   buildTaskSignals,
+  type PullRequestDetails,
   type PullRequestSummary,
   type SignalsGitHubState,
   type TaskSignalsResult
@@ -20,7 +21,7 @@ import type { Result } from '../../shared/result'
 import type { NotionTasksResult } from '../../shared/notion'
 import type { ProjectAction } from '../../shared/projects'
 import { projectById } from '../config/queries'
-import { githubRepoOf, repoAccess } from '../../shared/projects'
+import { gitRepoOf, githubRepoOf, readRepoOf, repoAccess } from '../../shared/projects'
 import { isApiError } from '../net/http'
 
 export interface SignalsGitHub extends GitHubSignalsApi {
@@ -28,10 +29,20 @@ export interface SignalsGitHub extends GitHubSignalsApi {
   accessSettingsUrl(): Promise<string>
 }
 
+/** GitHub pelo `gh` do usuário (projeto só com git local): as mesmas leituras, e se está logado. */
+export interface SignalsGh extends GitHubSignalsApi {
+  status(): Promise<{ ok: true; login: string } | { ok: false; message: string }>
+}
+
+/** Projeto só com git local lê pelo `gh` a cada 5 min ("Atualizar" força na hora). */
+export const GH_SIGNALS_INTERVAL_MS = 5 * 60_000
+
 export interface TaskSignalsDeps {
   store: ConfigStore<OrkioConfig>
   git: Pick<Git, 'localBranches'>
   github: SignalsGitHub
+  /** Leitura pelo `gh` dos projetos só com git local; ausente = esses projetos ficam só locais. */
+  gh?: SignalsGh
   /** Tarefas do projeto (NotionWorkspaceService.listTasks, com o cache da 2C). */
   listTasks(projectId: string): Promise<Result<NotionTasksResult>>
   /** Branches registradas para cada tarefa do projeto (`task_branches`): ligam sem o ID no nome. */
@@ -39,6 +50,8 @@ export interface TaskSignalsDeps {
   now?: () => Date
   /** Sem `force`, reaproveita o resultado remoto mais recente se tiver menos que isto. */
   minRemoteIntervalMs?: number
+  /** O mesmo para a leitura pelo `gh` (padrão `GH_SIGNALS_INTERVAL_MS`). */
+  ghIntervalMs?: number
 }
 
 export const SIGNALS_MESSAGES = {
@@ -101,14 +114,35 @@ export class TaskSignalsService {
     let github: SignalsGitHubState = 'ok'
     let remoteBranches: string[] | null = null
     let pulls: PullRequestSummary[] | null = null
-    let details = new Map()
+    let details = new Map<number, PullRequestDetails>()
+    const read = async (
+      api: GitHubSignalsApi,
+      via: 'app' | 'gh',
+      owner: string,
+      name: string
+    ): Promise<void> => {
+      const r = await this.readRemote(projectId, tasks, api, via, owner, name, options.force)
+      github = r.github
+      messages.push(...r.messages)
+      if (r.action) action = r.action
+      remoteBranches = r.remoteBranches
+      pulls = r.pulls
+      details = r.details
+    }
     const repo = githubRepoOf(project)
     if (!project.repo) {
       github = 'no_repo'
       messages.push(SIGNALS_MESSAGES.noRepo)
     } else if (repoAccess(project.repo) === 'git') {
-      github = 'git_only'
-      messages.push(SIGNALS_MESSAGES.gitOnly)
+      // Só git local: o GitHub vem pelo `gh` do usuário (se instalado e logado).
+      const gitRepo = gitRepoOf(project)
+      const gh = this.deps.gh
+      const status = gh && gitRepo ? await gh.status().catch(() => null) : null
+      if (gh && gitRepo && status?.ok) await read(gh, 'gh', gitRepo.owner, gitRepo.name)
+      else {
+        github = 'git_only'
+        messages.push(status && !status.ok ? status.message : SIGNALS_MESSAGES.gitOnly)
+      }
     } else if (!repo) {
       github = 'enterprise'
       messages.push(SIGNALS_MESSAGES.enterprise)
@@ -116,45 +150,7 @@ export class TaskSignalsService {
       github = 'disconnected'
       messages.push(SIGNALS_MESSAGES.disconnected)
     } else {
-      const state = this.remoteFor(projectId, repo.owner, repo.name)
-      const fresh =
-        !options.force && state.last && this.now().getTime() - state.last.at < this.minInterval
-      try {
-        if (!fresh) {
-          const snapshot = await state.repo.snapshot()
-          state.last = {
-            branches: snapshot.branches,
-            pulls: snapshot.pulls,
-            at: this.now().getTime()
-          }
-          if (snapshot.branchesTruncated) {
-            messages.push('O repositório tem muitas branches; mostramos as 1000 primeiras.')
-          }
-        }
-        remoteBranches = state.last!.branches
-        pulls = state.last!.pulls
-      } catch (e) {
-        const failure = await this.failure(e)
-        github = failure.state
-        messages.push(failure.message)
-        if (failure.action) action = failure.action
-        if (state.last) {
-          remoteBranches = state.last.branches
-          pulls = state.last.pulls
-          messages.push(SIGNALS_MESSAGES.stale)
-        }
-      }
-      if (pulls) {
-        const linked = buildTaskSignals(tasks, {
-          localBranches: [],
-          remoteBranches: [],
-          pulls,
-          details: new Map()
-        })
-        const numbers = new Set(Object.values(linked).flatMap((s) => (s.pr ? [s.pr.number] : [])))
-        details = await state.repo.pullDetails(pulls.filter((p) => numbers.has(p.number)))
-        if (state.repo.detailsWarning) messages.push(state.repo.detailsWarning)
-      }
+      await read(this.deps.github, 'app', repo.owner, repo.name)
     }
 
     const signals = buildTaskSignals(tasks, { localBranches, remoteBranches, pulls, details })
@@ -179,45 +175,111 @@ export class TaskSignalsService {
 
   /** PRs do repositório no último resultado do GitHub (abertas e fechadas há até 30 dias). */
   cachedPulls(projectId: string): PullRequestSummary[] | null {
-    const repo = githubRepoOf(projectById(this.deps.store.get(), projectId))
-    if (!repo) return null
-    return (
-      this.remotes.get(`${projectId}:${repo.owner}/${repo.name}`.toLowerCase())?.last?.pulls ?? null
-    )
+    return this.lastRemote(projectId)?.pulls ?? null
   }
 
   /** PR aberta (ou rascunho) mais recente da branch, pelo último resultado conhecido (sem rede). */
   prForBranch(projectId: string, branch: string): PullRequestSummary | null {
-    const repo = githubRepoOf(projectById(this.deps.store.get(), projectId))
-    if (!repo) return null
-    const last = this.remotes.get(`${projectId}:${repo.owner}/${repo.name}`.toLowerCase())?.last
     return (
-      last?.pulls
-        .filter((p) => p.headRef === branch && (p.state === 'open' || p.state === 'draft'))
+      this.lastRemote(projectId)
+        ?.pulls.filter((p) => p.headRef === branch && (p.state === 'open' || p.state === 'draft'))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0] ?? null
     )
   }
 
-  private remoteFor(projectId: string, owner: string, name: string): RemoteState {
-    const key = `${projectId}:${owner}/${name}`.toLowerCase()
+  /** Último resultado remoto do projeto, pela API do Orkio ou pelo `gh` (projeto só git). */
+  private lastRemote(projectId: string): RemoteState['last'] {
+    const target = readRepoOf(projectById(this.deps.store.get(), projectId))
+    if (!target) return null
+    return (
+      this.remotes.get(remoteKey(projectId, target.via, target.owner, target.name))?.last ?? null
+    )
+  }
+
+  private async readRemote(
+    projectId: string,
+    tasks: Parameters<typeof buildTaskSignals>[0],
+    api: GitHubSignalsApi,
+    via: 'app' | 'gh',
+    owner: string,
+    name: string,
+    force: boolean | undefined
+  ): Promise<{
+    github: SignalsGitHubState
+    messages: string[]
+    action?: ProjectAction
+    remoteBranches: string[] | null
+    pulls: PullRequestSummary[] | null
+    details: Map<number, PullRequestDetails>
+  }> {
+    const key = remoteKey(projectId, via, owner, name)
     let state = this.remotes.get(key)
     if (!state) {
       state = {
-        repo: new GitHubRepoSignals(this.deps.github, owner, name, () => this.now().getTime()),
+        repo: new GitHubRepoSignals(api, owner, name, () => this.now().getTime()),
         last: null
       }
       this.remotes.set(key, state)
     }
-    return state
+    const interval =
+      via === 'gh' ? (this.deps.ghIntervalMs ?? GH_SIGNALS_INTERVAL_MS) : this.minInterval
+    const fresh = !force && state.last && this.now().getTime() - state.last.at < interval
+    const messages: string[] = []
+    let github: SignalsGitHubState = 'ok'
+    let action: ProjectAction | undefined
+    let remoteBranches: string[] | null = null
+    let pulls: PullRequestSummary[] | null = null
+    let details = new Map<number, PullRequestDetails>()
+    try {
+      if (!fresh) {
+        const snapshot = await state.repo.snapshot()
+        state.last = {
+          branches: snapshot.branches,
+          pulls: snapshot.pulls,
+          at: this.now().getTime()
+        }
+        if (snapshot.branchesTruncated) {
+          messages.push('O repositório tem muitas branches; mostramos as 1000 primeiras.')
+        }
+      }
+      remoteBranches = state.last!.branches
+      pulls = state.last!.pulls
+    } catch (e) {
+      const failure = await this.failure(e, via)
+      github = failure.state
+      messages.push(failure.message)
+      if (failure.action) action = failure.action
+      if (state.last) {
+        remoteBranches = state.last.branches
+        pulls = state.last.pulls
+        messages.push(SIGNALS_MESSAGES.stale)
+      }
+    }
+    if (pulls) {
+      const linked = buildTaskSignals(tasks, {
+        localBranches: [],
+        remoteBranches: [],
+        pulls,
+        details: new Map()
+      })
+      const numbers = new Set(Object.values(linked).flatMap((s) => (s.pr ? [s.pr.number] : [])))
+      details = new Map(await state.repo.pullDetails(pulls.filter((p) => numbers.has(p.number))))
+      if (state.repo.detailsWarning) messages.push(state.repo.detailsWarning)
+    }
+    return { github, messages, ...(action ? { action } : {}), remoteBranches, pulls, details }
   }
 
   private async failure(
-    e: unknown
+    e: unknown,
+    via: 'app' | 'gh' = 'app'
   ): Promise<{ state: SignalsGitHubState; message: string; action?: ProjectAction }> {
     if (!isApiError(e, 'github')) return { state: 'unverified', message: SIGNALS_MESSAGES.unknown }
     switch (e.code) {
       case 'not_connected':
-        return { state: 'disconnected', message: SIGNALS_MESSAGES.disconnected }
+        // Pelo `gh`: o motivo dele (não instalado, sem login), não "conecte em Integrações".
+        return via === 'gh'
+          ? { state: 'git_only', message: e.message }
+          : { state: 'disconnected', message: SIGNALS_MESSAGES.disconnected }
       case 'not_found':
       case 'forbidden':
       case 'unauthorized':
@@ -246,3 +308,6 @@ export class TaskSignalsService {
     }
   }
 }
+
+const remoteKey = (projectId: string, via: 'app' | 'gh', owner: string, name: string): string =>
+  `${projectId}:${via}:${owner}/${name}`.toLowerCase()

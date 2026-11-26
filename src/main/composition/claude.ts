@@ -8,6 +8,7 @@ import { ClaudeRun } from '../claude/runner'
 import type { RunExtras } from '../mcp/run-extras'
 import { BRIDGE_MEMORY_TOOL_NAME } from '../claude/bridge/protocol'
 import type { AgentMemoryStore } from '../agents/agent-memory.store'
+import { prBasesOf } from '../../shared/delivery'
 import { memoryPrompt } from '../../shared/agent-memory'
 import { RunService } from '../claude/run.service'
 import { onPath, terminalCommand, TerminalError } from '../claude/terminal'
@@ -133,6 +134,8 @@ export function createClaude(deps: {
     new ClaudeService({
       deliveryTarget: (projectId, taskId) => {
         const t = delivery.target(projectId, taskId)
+        const settings = delivery.settings(projectId)
+        const agentsDeliver = settings.agentsDeliver === true
         return {
           target: {
             owner: t.owner,
@@ -140,9 +143,12 @@ export function createClaude(deps: {
             remote: t.remote,
             branch: t.branch,
             defaultBranch: t.defaultBranch,
-            displayId: t.displayId
+            displayId: t.displayId,
+            // Agentes entregando: as PRs (de qualquer passo) só vão para os destinos do projeto.
+            ...(agentsDeliver ? { prBases: prBasesOf(settings) } : {})
           },
-          requirePushApproval: delivery.settings(projectId).requirePushApproval
+          requirePushApproval: settings.requirePushApproval,
+          agentsDeliver
         }
       },
       config: deps.configStore,
