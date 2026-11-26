@@ -157,6 +157,8 @@ export interface ClaudeServiceDeps {
   handoff?(taskId: string): HandoffView | null
   /** Fase 2: terminais embutidos rodando na tarefa (o worktree não sai por baixo deles). */
   terminalsRunning?(taskId: string): boolean
+  /** Servidores da tarefa: param antes de o worktree sair ("Limpar ambiente"). */
+  stopServers?(taskId: string): Promise<void>
   /**
    * 8A: agente da tarefa para o "Rodar" manual. `null` = sem agente. Lança `Error` com mensagem
    * pt-BR quando há agente, mas ele não pode rodar (sem aprovação, limite do dia, comando negado).
@@ -724,6 +726,7 @@ export class ClaudeService {
       if (this.deps.terminalsRunning?.(taskId)) {
         return fail('busy', 'Feche os terminais desta tarefa antes de limpar o ambiente.')
       }
+      await this.deps.stopServers?.(taskId)
       await this.deps.worktrees.remove(this.worktreeProject(project), taskId, force)
       return ok(await this.taskState(taskId))
     })

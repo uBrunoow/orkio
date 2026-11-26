@@ -252,3 +252,100 @@ describe('shell e executáveis', () => {
     })
   })
 })
+
+describe('terminal de servidor', () => {
+  function serverService(onSignal: (pty: FakePty, signal: string) => void) {
+    const signals: [number, string][] = []
+    const atExit: (() => void)[] = []
+    let ptysRef: FakePty[] = []
+    const s = service({
+      killGroup: (pid, signal) => {
+        signals.push([pid, signal])
+        const pty = ptysRef.find((p) => p.pid === pid)
+        if (pty) onSignal(pty, signal)
+      },
+      atExit: (fn) => void atExit.push(fn)
+    })
+    ptysRef = s.ptys
+    return { ...s, signals, atExit }
+  }
+  const open = (
+    svc: TerminalService,
+    extra: Partial<Parameters<TerminalService['open']>[0]> = {}
+  ) =>
+    svc.open({
+      projectId: 'p1',
+      taskId: 't1',
+      cwd: '/wt/ORK-1/apps/web',
+      kind: 'server',
+      command: 'pnpm dev --port $PORT',
+      title: 'frontend',
+      env: { PORT: '4100', VITE_API_URL: 'http://localhost:4200' },
+      ...extra
+    })
+
+  it('roda a linha com o shell do usuário (-lc), com a porta no ambiente e o nome do servidor', () => {
+    const { svc, ptys } = serverService(() => undefined)
+    const view = open(svc)
+    expect(view).toMatchObject({ kind: 'server', title: 'frontend', state: 'running' })
+    expect(ptys[0]!.file).toBe('/bin/zsh')
+    expect(ptys[0]!.args).toEqual(['-l', '-c', 'pnpm dev --port $PORT'])
+    expect(ptys[0]!.options.env['PORT']).toBe('4100')
+    expect(ptys[0]!.options.env['VITE_API_URL']).toBe('http://localhost:4200')
+    expect(ptys[0]!.options.env['ANTHROPIC_API_KEY']).toBeUndefined()
+  })
+
+  it('a saída passa pelo filtro, as teclas não chegam e a saída avisa quem abriu', () => {
+    const exits: number[] = []
+    const { svc, ptys, data } = serverService(() => undefined)
+    const view = open(svc, {
+      filter: (s) => s.replaceAll('segredo123', '[segredo omitido]'),
+      onExit: (code) => void exits.push(code)
+    })
+    ptys[0]!.emit('DB=segredo123 pronto\n')
+    vi.advanceTimersByTime(10)
+    expect(data.map((d) => d.data).join('')).toBe('DB=[segredo omitido] pronto\n')
+    expect(svc.snapshot(view.id)?.data).not.toContain('segredo123')
+    svc.write(view.id, 'q')
+    expect(ptys[0]!.written).toEqual([])
+    ptys[0]!.exit(1)
+    expect(exits).toEqual([1])
+    expect(svc.list('t1')[0]).toMatchObject({ state: 'exited', exitCode: 1 })
+  })
+
+  it('servidores não contam no limite dos terminais', () => {
+    const { svc } = serverService(() => undefined)
+    for (let i = 0; i < TERMINAL_LIMITS.maxOpen; i++) open(svc, { taskId: `t${i}` })
+    expect(() =>
+      svc.open({ projectId: 'p1', taskId: 'tx', cwd: '/wt/ORK-1', kind: 'shell' })
+    ).not.toThrow()
+  })
+
+  it('fechar manda SIGTERM ao grupo e, sem sair em 5 s, SIGKILL', async () => {
+    const { svc, ptys, signals } = serverService((pty, signal) => {
+      if (signal === 'SIGKILL') pty.exit(137)
+    })
+    const view = open(svc)
+    const closed = svc.close(view.id)
+    expect(signals).toEqual([[ptys[0]!.pid, 'SIGTERM']])
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(signals).toEqual([
+      [ptys[0]!.pid, 'SIGTERM'],
+      [ptys[0]!.pid, 'SIGKILL']
+    ])
+    await closed
+    expect(ptys[0]!.killed).toBe(false)
+  })
+
+  it('o app saindo manda SIGTERM agora e SIGKILL na saída do processo', () => {
+    const { svc, ptys, signals, atExit } = serverService(() => undefined)
+    open(svc)
+    svc.stopAll()
+    expect(signals).toEqual([[ptys[0]!.pid, 'SIGTERM']])
+    atExit.forEach((fn) => fn())
+    expect(signals).toEqual([
+      [ptys[0]!.pid, 'SIGTERM'],
+      [ptys[0]!.pid, 'SIGKILL']
+    ])
+  })
+})

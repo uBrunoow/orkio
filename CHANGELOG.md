@@ -8,6 +8,7 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Adicionado
 
+- Servidores da tarefa: cadastre por projeto o frontend, o backend… (Configurações › Servidores, com o comando, a pasta e a variável da porta). No painel Ambiente da tarefa, "Subir" roda o servidor na pasta dela, com uma porta só dela, e mostra quando ele responde, o endereço (abre no navegador), o log e "Parar". Eles ficam de pé entre as mensagens e param em "Limpar ambiente" ou ao fechar o Orkio.
 - Imagens na conversa: prints do navegador e imagens que o agente lê aparecem como miniatura na sessão da tarefa; clique para ver grande.
 - "Copiar de outro projeto…" no Fluxo do projeto: traz colunas, automações, o fluxo de cada coluna, os fluxos de tarefa usados e o "Como as colunas rodam" para o rascunho, reaproveitando as colunas com o mesmo papel (as tarefas ficam onde estão).
 - Projetos só com git local leem o GitHub pelo `gh` da sua máquina a cada 5 minutos (ou na hora, em "Atualizar"): PRs, CI, revisões e comentários aparecem e as automações do quadro andam (PR aberta → Revisando, alterações pedidas → Revisado, merge → Finalizada). Pedir review e publicar a revisão também saem pelo `gh`, com o seu usuário.

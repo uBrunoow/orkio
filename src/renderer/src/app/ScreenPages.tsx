@@ -20,6 +20,7 @@ import { ShortcutsSection } from '../features/settings/ShortcutsSection'
 import { TerminalSection } from '../features/settings/TerminalSection'
 import { ProvidersSection } from '../features/settings/ProvidersSection'
 import { DiagnosticsSection } from '../features/settings/DiagnosticsSection'
+import { ServersSettings } from '../features/servers/ServersSettings'
 import { SkillsPage } from '../features/skills/SkillsPage'
 import { McpPage } from '../features/mcp/McpPage'
 import { SecretsPage } from '../features/secrets/SecretsPage'
@@ -174,6 +175,10 @@ function settingsPage(
         <ProjectAgentsSettings key={linkedProject.id} projectId={linkedProject.id} />
       ) : (
         <AgentsPage />
+      )
+    case 'servers':
+      return (
+        <ServersSettings key={linkedProject?.id ?? 'none'} projectId={linkedProject?.id ?? null} />
       )
     case 'updates':
       return (

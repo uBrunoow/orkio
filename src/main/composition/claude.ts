@@ -1,6 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { statSync } from 'node:fs'
+import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { ArtifactsService, type ArtifactsDeps } from '../claude/artifacts.service'
 import { ClaudeService, type ClaudeServiceDeps } from '../claude/claude.service'
 import { detectClaude } from '../claude/detect'
@@ -15,6 +15,9 @@ import { onPath, terminalCommand, TerminalError } from '../claude/terminal'
 import { WorktreeService } from '../claude/worktree.service'
 import { HandoffError, HandoffService } from '../claude/handoff.service'
 import { TerminalService, type SpawnPty } from '../terminal/terminal.service'
+import { ServersService } from '../servers/servers.service'
+import { portFree, portOpen } from '../servers/ports'
+import { envFileValues, isEnvFile } from '../platform/redact'
 import { errorName } from '../errors'
 import type * as NodePty from 'node-pty'
 import type { OrkioConfig } from '../config/orkio-config'
@@ -38,6 +41,8 @@ export interface ClaudeParts {
   /** Fase 2: terminal embutido (PTY no main) e "Continuar no Claude". */
   terminals: TerminalService
   handoff: HandoffService
+  /** Servidores da tarefa (frontend, backend…) rodando nos worktrees. */
+  servers: ServersService
 }
 
 /** Worktrees por tarefa: existem antes do resto (os sinais leem as branches registradas). */
@@ -91,7 +96,57 @@ export function createClaude(deps: {
     isFile,
     isDir: (p) => statSync(p, { throwIfNoEntry: false })?.isDirectory() === true,
     emitData: (event) => deps.emit('terminalData', event),
-    emitChanged: (event) => deps.emit('terminalChanged', event)
+    emitChanged: (event) => deps.emit('terminalChanged', event),
+    // Servidores: o `pnpm dev` e os filhos saem juntos (grupo = pid do PTY, que faz `setsid`).
+    ...(process.platform === 'win32'
+      ? {}
+      : {
+          killGroup: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => process.kill(-pid, signal),
+          atExit: (fn: () => void) => void process.once('exit', fn)
+        })
+  })
+  const servers = new ServersService({
+    defs: (projectId) => deps.configStore.get().servers?.[projectId] ?? [],
+    saveDefs: async (projectId, defs) => {
+      await deps.configStore.update((c) => {
+        const all = { ...(c.servers ?? {}) }
+        if (defs.length > 0) all[projectId] = defs
+        else delete all[projectId]
+        const next: OrkioConfig = { ...c, servers: all }
+        if (Object.keys(all).length === 0) delete next.servers
+        return next
+      })
+    },
+    workspace: (taskId) => worktrees.get(taskId)?.path ?? null,
+    isDir: (p) => statSync(p, { throwIfNoEntry: false })?.isDirectory() === true,
+    terminals,
+    portFree,
+    portOpen: (port) => portOpen(port),
+    envSecrets: (dir) => {
+      const out: string[] = []
+      try {
+        for (const name of readdirSync(dir)) {
+          if (!isEnvFile(name)) continue
+          const path = join(dir, name)
+          if ((statSync(path, { throwIfNoEntry: false })?.size ?? 0) > 64 * 1024) continue
+          out.push(...envFileValues(readFileSync(path, 'utf8')))
+        }
+      } catch {
+        // Sem acesso: nada a esconder além do `redactSecrets`.
+      }
+      return out
+    },
+    event: (ref, e) => {
+      deps.boardStore.addEvent({
+        taskPageId: ref.taskId,
+        projectId: ref.projectId,
+        at: new Date().toISOString(),
+        ...e
+      })
+      // O histórico da tarefa relê (o mesmo aviso do "Continuar no Claude").
+      deps.emit('taskFlowChanged', ref)
+    },
+    changed: (ref) => deps.emit('serversChanged', ref)
   })
   const runs = new RunService({
     db: deps.boardStore.db,
@@ -184,7 +239,9 @@ export function createClaude(deps: {
       }),
       openTerminal: (path) => openTerminalAt(path, env),
       handoff: (taskId) => handoff.get(taskId),
-      terminalsRunning: (taskId) => terminals.hasRunning(taskId),
+      terminalsRunning: (taskId) =>
+        terminals.hasRunning(taskId, 'shell') || terminals.hasRunning(taskId, 'claude'),
+      stopServers: (taskId) => servers.stopTask(taskId),
       openEditor: (editor, path) => spawnDetached(editor, [path], { env, windowsHide: true })
     })
   )
@@ -216,7 +273,7 @@ export function createClaude(deps: {
     changed: (ref) => deps.emit('taskFlowChanged', ref)
   })
   void mkdir(deps.paths.runTmp, { recursive: true, mode: 0o700 }).catch(() => undefined)
-  return { runs, service: service(), worktrees, delivery, terminals, handoff }
+  return { runs, service: service(), worktrees, delivery, terminals, handoff, servers }
 }
 
 /** Carrega o node-pty (módulo nativo). Falhou = sem terminal embutido, só o do sistema. */

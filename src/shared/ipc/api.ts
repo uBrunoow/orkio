@@ -92,6 +92,15 @@ import type { Result } from '../result'
 import { isSecretName, type SecretSaveInput, type SecretUse, type VaultView } from '../vault'
 import { isMcpId, type ClaudeMcpRef, type McpServer, type McpView } from '../mcp'
 import {
+  SERVER_LIMITS,
+  isServerId,
+  parseServerDef,
+  type ServerDef,
+  type ServersChangedEvent,
+  type ServerView,
+  type TaskServers
+} from '../servers'
+import {
   DEFAULT_PREFERENCES,
   type AppPreferences,
   type RememberedRule,
@@ -305,6 +314,11 @@ export const IPC_EVENTS = {
     channel: 'terminal:changed',
     parse: taskRef
   }),
+  /** Os servidores de uma tarefa mudaram (subiu, ficou pronto, saiu, parou). */
+  serversChanged: event<ServersChangedEvent>({
+    channel: 'servers:changed',
+    parse: taskRef
+  }),
   /** Algo relevante mudou, com o total de "Esperando você". */
   overviewChanged: event<{ waiting: number }>({
     channel: 'overview:changed',
@@ -351,6 +365,13 @@ const choiceValue = text(200)
 const branchName = text(250)
 const url = text(2048)
 const terminalId = guard(isTerminalId)
+const serverId = guard(isServerId)
+/** Cadastro inteiro (forma); as regras ficam com `serverProblems` no serviço. */
+const serverDefs: Parser<ServerDef[]> = (v) => {
+  if (!Array.isArray(v) || v.length > SERVER_LIMITS.perProject) return INVALID
+  const defs = v.map(parseServerDef)
+  return defs.every((d): d is ServerDef => d !== null) ? defs : INVALID
+}
 const terminalInput = text(TERMINAL_LIMITS.maxInput)
 const terminalSize: Parser<{ cols: number; rows: number }> = (v) => parseTerminalSize(v) ?? INVALID
 const handoffReturn = oneOf(HANDOFF_RETURNS)
@@ -1318,6 +1339,42 @@ export const ORKIO_API = {
       }),
       onData: IPC_EVENTS.terminalData,
       onChanged: IPC_EVENTS.terminalChanged
+    }
+  ),
+  /** Servidores da tarefa: o cadastro do projeto e os que rodam nos worktrees. */
+  servers: group(
+    { needs: 'db', unexpected: 'Não foi possível mexer nos servidores agora. Tente novamente.' },
+    {
+      defs: call<(projectId: string) => Promise<Result<ServerDef[]>>>()({
+        channel: 'servers:defs',
+        args: [projectId]
+      }),
+      save: call<(projectId: string, defs: ServerDef[]) => Promise<Result<ServerDef[]>>>()({
+        channel: 'servers:save',
+        args: [projectId, serverDefs]
+      }),
+      list: call<(projectId: string, taskId: string) => Promise<Result<TaskServers>>>()({
+        channel: 'servers:list',
+        args: [projectId, taskId]
+      }),
+      start: call<
+        (projectId: string, taskId: string, serverId: string) => Promise<Result<ServerView>>
+      >()({
+        channel: 'servers:start',
+        args: [projectId, taskId, serverId]
+      }),
+      stop: call<
+        (projectId: string, taskId: string, serverId: string) => Promise<Result<ServerView | null>>
+      >()({
+        channel: 'servers:stop',
+        args: [projectId, taskId, serverId]
+      }),
+      /** Abre a URL do servidor de pé desta tarefa no navegador (montada e conferida no main). */
+      open: call<(projectId: string, taskId: string, serverId: string) => Promise<Result<null>>>()({
+        channel: 'servers:open',
+        args: [projectId, taskId, serverId]
+      }),
+      onChanged: IPC_EVENTS.serversChanged
     }
   ),
   /** Atualizações automáticas (6C). Tudo roda no main; o renderer só vê o status. */

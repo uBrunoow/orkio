@@ -9,6 +9,7 @@ import {
   IconCircleCheck,
   IconCircleDashed,
   IconSend,
+  IconServer,
   IconPaperclip,
   IconBrain,
   IconCheck,
@@ -148,6 +149,7 @@ export const PullRequestIcon = adapt(IconGitPullRequest)
 export const BoardIcon = adapt(IconLayoutKanban)
 export const LockIcon = adapt(IconLock)
 export const SettingsIcon = adapt(IconSettings)
+export const ServerIcon = adapt(IconServer)
 export const ArrowUpIcon = adapt(IconArrowUp)
 export const ArrowDownIcon = adapt(IconArrowDown)
 export const PlusIcon = adapt(IconPlus)

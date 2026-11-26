@@ -24,6 +24,7 @@ import { contextTone, folderName, latestContextUsage } from './environment'
 import type { PanelTab } from './panel-tab'
 import { useTaskDiff, useTaskView } from './task-view'
 import { StageSelector } from './TaskDetails'
+import { TaskServers } from '../servers/TaskServers'
 
 const TITLE = 'px-2 text-xs font-medium text-muted-foreground'
 const ROW = 'flex min-h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1 text-sm'
@@ -183,6 +184,8 @@ export function EnvironmentPanel({ onOpen }: { onOpen(tab: PanelTab): void }): R
         )}
         {error && <Alert tone="danger">{error}</Alert>}
       </section>
+
+      <TaskServers projectId={projectId} taskId={taskId} hasWorkspace={workspace !== null} />
 
       <section
         aria-label="Contexto e mudanças"

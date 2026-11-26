@@ -913,6 +913,24 @@ blockedProperty, rules, updatedAt }`. Template: Prioridades→"Prioridades", Em 
   janela do modelo, 1M com `[1m]` no nome, senão 200k; log antigo sem `usage` esconde a linha);
   mudanças `+N −M` (`git diff --numstat <base>`, `ClaudeDiff.shortstat`; não rastreados não contam)
   com o chip da PR (cartão no hover) ou "Abrir PR".
+- **Servidores da tarefa** (`shared/servers.ts` puro, `main/servers/servers.service.ts`,
+  `servers/ports.ts`, IPC `servers.*` + evento `servers:changed`; `orkio-config.servers[projectId]`
+  opcional, sem migração): cadastro por projeto (até 6; `name` minúsculo, `command` de uma linha,
+  `cwd` relativo, `portEnv` padrão `PORT` pela regra de nomes do Vault, `url` só
+  `http://localhost|127.0.0.1:{port}`, `env` com `{nome.url}`/`{nome.port}` de outro servidor;
+  `serverProblems` na tela e no main). Roda num terminal tipo `server` do `TerminalService`
+  (`shell -lc comando` no worktree, `ptyEnv` + porta/variáveis, saída por `redactSecrets` + valores
+  dos `.env*`, só leitura, fora do limite de 8 shells e fora da tela Terminais; parada = SIGTERM no
+  grupo → 5 s → SIGKILL, `killGroup`; o app saindo manda SIGTERM e SIGKILL no `exit`). Porta
+  estável por tarefa+servidor (faixa `4100 + 100 × posição`, livre = ninguém responde e dá para
+  escutar, lembrada em memória; nunca a de outro servidor lembrado); pronto = a porta responde em
+  até 120 s (`no_port` senão); até 8 rodando. "Limpar ambiente" para os servidores antes
+  (`stopServers`). Histórico `server_started`/`server_stopped` (`by`: you/agent/exit). Tela:
+  Configurações › Por projeto › Servidores (`features/servers/ServersSettings.tsx`, modal) e a seção
+  "Servidores" do Ambiente (`TaskServers.tsx`: estado, URL aberta pelo main com `servers.open`,
+  Subir/Parar, "Ver log" num Dialog com o `TerminalView` só leitura). `settled(taskId, serverId)`
+  fica para as ferramentas do agente (entrega 3). E2E `e2e/servers.spec.ts` (processo de verdade,
+  segredo do `.env` fora do log, sem órfão ao fechar).
 - **Manter acordado** (`main/power/keep-awake.ts`, IPC `power:get`/`power:set-keep-awake`,
   `orkio-config.keepAwake` opcional, sem migração): com a opção ligada (cartão "Energia" em
   Configurações › Atualizações) e execução do Claude Code ou fluxo rodando, `powerSaveBlocker`

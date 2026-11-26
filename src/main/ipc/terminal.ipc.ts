@@ -21,7 +21,11 @@ export function terminalHandlers(deps: {
         ok: true,
         value: {
           available: terminals.available,
-          terminals: terminals.list(taskId).filter((t) => t.projectId === projectId)
+          // Servidores têm a tela deles (Ambiente › Servidores): fechar aqui mataria o servidor
+          // sem o `ServersService` saber.
+          terminals: terminals
+            .list(taskId)
+            .filter((t) => t.projectId === projectId && t.kind !== 'server')
         }
       }
     },
@@ -29,7 +33,9 @@ export function terminalHandlers(deps: {
       ok: true,
       value: {
         available: terminals.available,
-        terminals: terminals.all().filter((t) => deps.hasProject(t.projectId))
+        terminals: terminals
+          .all()
+          .filter((t) => deps.hasProject(t.projectId) && t.kind !== 'server')
       }
     }),
     openInProject: async (projectId) => {
