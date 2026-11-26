@@ -18,6 +18,8 @@ export interface PullRequestSummary {
   state: PullRequestState
   merged: boolean
   headRef: string
+  /** Branch de destino da PR (REST `base.ref`); ausente/inválido = `null`. */
+  baseRef?: string | null
   /** Commit no topo da branch da PR (REST `head.sha`); para conferir o push (5C). */
   headSha?: string | null
   updatedAt: string

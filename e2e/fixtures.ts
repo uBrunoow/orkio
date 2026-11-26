@@ -119,6 +119,8 @@ export interface FakePull {
   number: number
   title: string
   head: string
+  /** Branch de destino (`base.ref`); padrão `dev`. */
+  base?: string
   state: 'open' | 'draft' | 'merged' | 'closed'
   updatedDaysAgo?: number
   /** `updated_at` exato (o GitHub muda a cada review/pedido; o Orkio relê os detalhes). */
@@ -580,6 +582,7 @@ export async function launchOrkio(
                 closed_at:
                   p.state === 'merged' || p.state === 'closed' ? '2026-01-01T00:00:00Z' : null,
                 head: { ref: p.head, ...(p.sha ? { sha: p.sha } : {}) },
+                base: { ref: p.base ?? 'dev' },
                 ...(p.author ? { user: { login: p.author } } : {}),
                 ...(p.createdAt ? { created_at: p.createdAt } : {})
               }))
