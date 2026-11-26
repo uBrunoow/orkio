@@ -496,21 +496,16 @@ test('5C critério 3 + Task 16: alterações pedidas → Revisado → plano → 
   expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(pushedSha) // nada enviado ainda
   await push.getByRole('button', { name: 'Fazer push' }).click()
 
-  // Pedir review de novo a quem revisou (Ana), depois de confirmar.
-  const review = flow.getByRole('group', { name: 'Pedir review da PR #7?' })
-  await expect(review).toBeVisible({ timeout: 30_000 })
-  expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(
-    git(worktree(), 'rev-parse', 'HEAD').trim()
-  )
-  await expect(review.getByRole('checkbox', { name: 'ana' })).toBeChecked()
-  await expect(review.getByRole('checkbox', { name: 'bia' })).not.toBeChecked()
-  // Antes de voltar a Revisando (onde a "revisão publicada" começa sozinha e roda o /review).
+  // O agente negou o push e resolveu a conversa (antes do push do Orkio).
   const log = argsLog()
   expect(log.at(-2)).toBe(`deny:git push origin ${taskBranch()}`)
   expect(log.at(-1)).toMatch(/^allow:gh api graphql -f query='mutation \{ resolveReviewThread/)
-  expect(ghCalls(userDataDir).at(-1)).toMatch(/^api graphql -f query=mutation/)
-  await review.getByRole('button', { name: 'Pedir review' }).click()
+  // Pede nova revisão a quem revisou (Ana) sem outro gate: você já aprovou o resumo.
+  await expect(flow.getByRole('group', { name: 'Pedir review da PR #7?' })).toHaveCount(0)
   await expect(flow.getByTestId('flow-status')).toHaveText('Concluído', { timeout: 30_000 })
+  expect(git(origin(), 'rev-parse', taskBranch()).trim()).toBe(
+    git(worktree(), 'rev-parse', 'HEAD').trim()
+  )
   expect((await notionState(app)).reviewRequests).toEqual([
     { pull: 7, reviewers: ['ana'], teams: [] }
   ])

@@ -3,7 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import type { TaskPullRequest } from '../../shared/task-signals'
 import { ORKIO_ACTIONS } from '../../shared/orkio-actions'
 import { SIGNALS_FAILURE } from './action-helpers'
-import { createDeliveryActions, DELIVERY_ACTION_MESSAGES } from './delivery-actions'
+import {
+  createDeliveryActions,
+  DELIVERY_ACTION_MESSAGES,
+  type DeliveryGitHub
+} from './delivery-actions'
 import { DeliveryError, type DeliveryService, type PushPreview } from './delivery.service'
 import { ApiError } from '../net/http'
 
@@ -44,6 +48,7 @@ function setup(
     signalsOk?: boolean
     requestReviewers?: () => Promise<void>
     gitOnly?: boolean
+    gh?: DeliveryGitHub
   } = {}
 ) {
   const events: Record<string, unknown>[] = []
@@ -94,7 +99,8 @@ function setup(
     github: { requestReviewers, listCollaborators: async () => ['bia', 'ana'] },
     store: { addEvent: (e) => events.push(e as unknown as Record<string, unknown>) },
     runAutomation: automation,
-    gitOnly: () => over.gitOnly ?? false
+    gitOnly: async () => over.gitOnly ?? false,
+    ...(over.gh ? { githubFor: () => over.gh! } : {})
   })
   const get = (id: string) => actions.find((a) => a.id === id)!
   const ctx = { projectId: 'p1', taskId: 't1', vars: {} }
@@ -152,6 +158,16 @@ describe('ações de entrega', () => {
     expect(await gitOnly.get('request_review').confirm!(gitOnly.ctx)).toEqual({
       problem: { code: 'git_only', message: GIT_ONLY_REVIEW_MESSAGE }
     })
+    // Só git local com o gh logado: pede review pelo gh (com o teu usuário).
+    const ghRequest = vi.fn(async () => undefined)
+    const viaGh = setup({
+      gh: { requestReviewers: ghRequest, listCollaborators: async () => ['caio'] }
+    })
+    const ghInfo = await viaGh.get('request_review').confirm!(viaGh.ctx)
+    expect(ghInfo).toMatchObject({ input: { options: expect.arrayContaining(['caio']) } })
+    await viaGh.get('request_review').run({ ...viaGh.ctx, input: ['caio'] })
+    expect(ghRequest).toHaveBeenCalledWith('acme', 'app', 12, { users: ['caio'], teams: [] })
+    expect(viaGh.requestReviewers).not.toHaveBeenCalled()
     const none = setup({ pull: null })
     expect(await none.get('verify_pushed').run(none.ctx)).toMatchObject({
       vars: { 'pr.exists': 'nao', 'pr.pushed': 'nao' }
@@ -207,6 +223,30 @@ describe('ações de entrega', () => {
       message: 'O GitHub recusou o pedido de review.'
     })
     expect(refused.automation).not.toHaveBeenCalled()
+  })
+
+  it('pedir nova revisão (corretor da PR): sem gate a quem já revisou, nunca o autor da PR', async () => {
+    const s = setup({
+      pull: pr({
+        author: 'eu',
+        reviews: [
+          { id: 'R1', state: 'changes_requested', at: 'x', author: 'ana' },
+          { id: 'R2', state: 'changes_requested', at: 'x', author: 'eu' }
+        ],
+        reviewRequests: []
+      })
+    })
+    expect(await s.get('rerequest_review').confirm!(s.ctx)).toBeNull()
+    expect(await s.get('rerequest_review').run(s.ctx)).toEqual({ ok: true })
+    expect(s.requestReviewers).toHaveBeenCalledWith('acme', 'app', 12, {
+      users: ['ana'],
+      teams: []
+    })
+    // Ninguém revisou ainda: pergunta como o "Pedir review".
+    const fresh = setup({ pull: pr({ reviews: [], reviewRequests: [] }) })
+    expect(await fresh.get('rerequest_review').confirm!(fresh.ctx)).toMatchObject({
+      input: { selected: [] }
+    })
   })
 
   it('as variáveis gravadas são só as saídas declaradas da ação (o validador e os modelos usam)', async () => {

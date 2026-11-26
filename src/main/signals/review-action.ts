@@ -11,7 +11,7 @@ import { ensureScratch } from '../claude/scratch'
 import { REVIEW_PATH } from '../../shared/orkio-scratch'
 import type { OrkioAction } from '../flows/flow-runner'
 import { DomainError, errorName } from '../errors'
-import { pendingCount } from '../../shared/review'
+import { actionableCount } from '../../shared/review'
 import { buildReviewMarkdown, REVIEW_MESSAGES, type ReviewThreadsService } from './review-threads'
 
 export interface ReviewActionDeps {
@@ -57,7 +57,7 @@ export function createReviewActions(deps: ReviewActionDeps): OrkioAction[] {
       return {
         ok: true,
         vars: {
-          [ACTION_VARS.reviewCount]: String(pendingCount(result.value)),
+          [ACTION_VARS.reviewCount]: String(actionableCount(result.value)),
           [ACTION_VARS.reviewPr]: String(pr.number)
         }
       }

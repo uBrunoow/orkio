@@ -30,8 +30,24 @@ import { deliveryEvent, openPullFor, type SignalsFetch } from './action-helpers'
 
 import { GIT_ONLY_REVIEW_MESSAGE } from '../../shared/delivery'
 
+/** Quem publica: o site (orkio[bot]) ou o `gh` do usuário (projeto só com git local). */
+export type PublishPoster = Pick<
+  GitHubReviewPoster,
+  'isConfigured' | 'diffLines' | 'postReview'
+> & {
+  /** Pelo `gh`: o login que vai publicar e se ele é o autor da PR. Ausente = orkio[bot]. */
+  who?(owner: string, repo: string, number: number): Promise<{ login: string; author: boolean }>
+}
+
 export interface PublishReviewDeps {
-  poster: Pick<GitHubReviewPoster, 'isConfigured' | 'diffLines' | 'postReview'>
+  poster: PublishPoster
+  /** Projeto só com git local e o `gh` logado: publica pelo `gh` (com o usuário dele). */
+  posterFor?(projectId: string): PublishPoster | null
+  /**
+   * Pelo `gh`, o autor da PR não pode pedir alterações nela: a revisão vai como comentário e
+   * quem chama faz o que o "Alterações pedidas" faria (mover a tarefa para Revisado).
+   */
+  onSelfChangesRequested?(projectId: string, taskId: string): void
   /** Texto final de uma execução do Claude Code (log normalizado e redigido). */
   finalText(runId: string): Promise<string | null>
   signals: SignalsFetch
@@ -40,8 +56,8 @@ export interface PublishReviewDeps {
   store: Pick<BoardStore, 'addEvent'>
   /** Depois de publicar: roda as automações já (REQUEST_CHANGES → "Alterações pedidas"). */
   runAutomation?(projectId: string): void
-  /** Projeto só com git local: não publica pela API do Orkio. */
-  gitOnly?(projectId: string): boolean
+  /** Projeto só com git local sem o `gh` disponível: não dá para publicar. */
+  gitOnly?(projectId: string): boolean | Promise<boolean>
   now?: () => Date
 }
 
@@ -59,6 +75,8 @@ export const PUBLISH_ACTION_MESSAGES = {
   maybePosted:
     'A tentativa anterior demorou para responder: a revisão pode já estar na PR. Abra a PR e confira antes de publicar de novo.',
   installHint: 'Instale o App pelo link e retome.',
+  selfAuthor:
+    'Você é o autor da PR: o GitHub não deixa pedir alterações na própria PR. A revisão vai como comentário e o Orkio move a tarefa para Revisado.',
   networkMaybePosted:
     'A conexão com o site do Orkio caiu durante a publicação. Confira a PR antes de tentar de novo: a revisão pode ter sido publicada.'
 } as const
@@ -117,7 +135,8 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
   return {
     ...ORKIO_ACTIONS.publish_review,
     async confirm({ projectId, taskId, lastRunId }) {
-      if (!deps.poster.isConfigured()) {
+      const poster = deps.posterFor?.(projectId) ?? deps.poster
+      if (!poster.isConfigured()) {
         return { problem: fail(PUBLISH_FAILURES.noSite, PUBLISH_ACTION_MESSAGES.noSite) }
       }
       const text = lastRunId ? await deps.finalText(lastRunId) : null
@@ -141,7 +160,7 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
         }
         throw error
       }
-      if (deps.gitOnly?.(projectId)) {
+      if (await deps.gitOnly?.(projectId)) {
         return { problem: fail(PUBLISH_FAILURES.gitOnly, GIT_ONLY_REVIEW_MESSAGE) }
       }
       const target = deps.repo(projectId)
@@ -154,7 +173,7 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
       try {
         files =
           prepared.comments.length > 0
-            ? await deps.poster.diffLines(target.owner, target.repo, pr.number)
+            ? await poster.diffLines(target.owner, target.repo, pr.number)
             : new Map()
       } catch (error) {
         if (error instanceof ReviewPostError) return { problem: postFailure(error, taskId) }
@@ -172,10 +191,19 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
         pr: { owner: target.owner, repo: target.repo, number: pr.number }
       }
       const outside = review.comments.filter((c) => !c.inDiff).length
+      const who = poster.who
+        ? await poster.who(target.owner, target.repo, pr.number).catch(() => null)
+        : null
+      const selfAuthor = !!who?.author && prepared.event === 'REQUEST_CHANGES'
+      const warnings = [
+        ...(selfAuthor ? [PUBLISH_ACTION_MESSAGES.selfAuthor] : []),
+        ...(maybePosted.has(taskId) ? [PUBLISH_ACTION_MESSAGES.maybePosted] : [])
+      ]
       const info: ActionConfirm = {
         title: `Publicar a revisão na PR #${pr.number}?`,
-        message:
-          'O Orkio vai publicar esta revisão na PR como orkio[bot], pelo site do Orkio (com a sua conta do GitHub). O Orkio nunca aprova PRs.',
+        message: who
+          ? `O Orkio vai publicar esta revisão na PR com o seu usuário do GitHub (@${who.login}, pelo gh). O Orkio nunca aprova PRs.`
+          : 'O Orkio vai publicar esta revisão na PR como orkio[bot], pelo site do Orkio (com a sua conta do GitHub). O Orkio nunca aprova PRs.',
         details: [
           { label: 'PR', value: `#${pr.number}` },
           { label: 'Repositório', value: `${target.owner}/${target.repo}` },
@@ -187,7 +215,7 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
         review,
         approveLabel: 'Publicar revisão',
         link: { label: `Abrir a PR #${pr.number} no GitHub`, url: pr.url },
-        ...(maybePosted.has(taskId) ? { warning: PUBLISH_ACTION_MESSAGES.maybePosted } : {})
+        ...(warnings.length ? { warning: warnings.join(' ') } : {})
       }
       return info
     },
@@ -199,11 +227,17 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
       const comments = r.comments
         .filter((c) => c.inDiff)
         .map(({ path, line, body }) => ({ path, line, body }))
+      const poster = deps.posterFor?.(projectId) ?? deps.poster
+      // Pelo `gh`, o autor da PR só pode comentar (o GitHub recusa pedir alterações na própria PR).
+      const who = poster.who
+        ? await poster.who(r.pr.owner, r.pr.repo, r.pr.number).catch(() => null)
+        : null
+      const selfAuthor = !!who?.author && r.event === 'REQUEST_CHANGES'
       let url: string | null
       try {
         url = (
-          await deps.poster.postReview(r.pr.owner, r.pr.repo, r.pr.number, {
-            event: r.event,
+          await poster.postReview(r.pr.owner, r.pr.repo, r.pr.number, {
+            event: selfAuthor ? 'COMMENT' : r.event,
             body: r.summary,
             comments
           })
@@ -228,6 +262,7 @@ export function createPublishReviewAction(deps: PublishReviewDeps): OrkioAction 
           ...(Number.isSafeInteger(reviewId) && reviewId > 0 ? { reviewId } : {})
         }
       )
+      if (selfAuthor) deps.onSelfChangesRequested?.(projectId, taskId)
       deps.runAutomation?.(projectId)
       return { ok: true }
     }

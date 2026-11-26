@@ -22,6 +22,7 @@ const KNOWN: Record<string, string> = {
 const ACTION_TEXT: Record<string, string> = {
   push: 'envia a branch',
   request_review: 'pede revisão',
+  rerequest_review: 'pede nova revisão',
   publish_review: 'publica a revisão',
   review_snapshot: 'lê os comentários da PR',
   verify_pushed: 'confere o envio'

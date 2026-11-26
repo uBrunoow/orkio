@@ -1,0 +1,84 @@
+#!/usr/bin/env node
+/**
+ * GitHub CLI SIMULADO para o E2E do projeto só com git local (entrega 2): responde ao `gh api`
+ * que o Orkio usa (login, branches, PRs, GraphQL, POST de revisores/revisão) a partir de
+ * `gh-state.json` ao lado deste arquivo, que o teste reescreve. Cada chamada vai para
+ * `gh-calls.log`. Nunca fala com a rede.
+ */
+const { appendFileSync, readFileSync, existsSync } = require('node:fs')
+const { join } = require('node:path')
+
+const args = process.argv.slice(2)
+const dir = __dirname
+appendFileSync(join(dir, 'gh-calls.log'), args.join(' ') + '\n')
+const stateFile = join(dir, 'gh-state.json')
+const state = existsSync(stateFile)
+  ? JSON.parse(readFileSync(stateFile, 'utf8'))
+  : { loggedIn: true, login: 'e2e-user', branches: ['main'], pulls: [] }
+
+const http = (status, body) => {
+  process.stdout.write(`HTTP/2.0 ${status}\r\nContent-Type: application/json\r\n\r\n`)
+  process.stdout.write(JSON.stringify(body))
+  process.exit(status >= 400 ? 1 : 0)
+}
+
+if (args[0] === '--version') {
+  process.stdout.write('gh version 2.60.0 (simulado)\n')
+  process.exit(0)
+}
+if (args[0] === 'auth' && args[1] === 'status') process.exit(state.loggedIn ? 0 : 1)
+if (args[0] === 'alias' && args[1] === 'list') process.exit(0)
+if (args[0] !== 'api') process.exit(1)
+if (!state.loggedIn) {
+  process.stderr.write('To get started with GitHub CLI, please run:  gh auth login\n')
+  process.exit(4)
+}
+if (args.includes('user') && args.includes('--jq')) {
+  process.stdout.write(`${state.login}\n`)
+  process.exit(0)
+}
+
+const path = args.find((a) => a.startsWith('/repos/')) ?? ''
+const pull = (p) => ({
+  number: p.number,
+  title: p.title,
+  html_url: `https://github.com/acme/orkio-app/pull/${p.number}`,
+  state: p.state === 'merged' ? 'closed' : p.state,
+  draft: false,
+  merged_at: p.state === 'merged' ? p.updatedAt : null,
+  closed_at: p.state === 'open' ? null : p.updatedAt,
+  created_at: p.updatedAt,
+  updated_at: p.updatedAt,
+  head: { ref: p.head, sha: null },
+  user: { login: p.author ?? state.login }
+})
+
+if (args.includes('graphql')) {
+  let input = ''
+  process.stdin.on('data', (c) => (input += c))
+  process.stdin.on('end', () => http(200, { data: { repository: {} } }))
+} else if (args.includes('POST')) {
+  let input = ''
+  process.stdin.on('data', (c) => (input += c))
+  process.stdin.on('end', () => {
+    appendFileSync(join(dir, 'gh-posts.log'), `${path} ${input}\n`)
+    const review = /\/pulls\/(\d+)\/reviews$/.exec(path)
+    http(review ? 200 : 201, review
+      ? { id: 99, html_url: `https://github.com/acme/orkio-app/pull/${review[1]}#pullrequestreview-99` }
+      : {})
+  })
+} else if (/\/branches\?/.test(path)) {
+  http(200, state.branches.map((name) => ({ name })))
+} else if (/\/pulls\?state=open/.test(path)) {
+  http(200, state.pulls.filter((p) => p.state === 'open').map(pull))
+} else if (/\/pulls\?state=closed/.test(path)) {
+  http(200, state.pulls.filter((p) => p.state !== 'open').map(pull))
+} else if (/\/pulls\/(\d+)$/.test(path)) {
+  const n = Number(/\/pulls\/(\d+)$/.exec(path)[1])
+  const p = state.pulls.find((x) => x.number === n)
+  p ? http(200, pull(p)) : http(404, { message: 'Not Found' })
+} else if (/\/collaborators\?/.test(path)) {
+  http(200, [{ login: 'revisora' }])
+} else {
+  http(404, { message: 'Not Found' })
+}

@@ -34,3 +34,22 @@ describe('revisão publicada como orkio[bot] no histórico (Task 18)', () => {
     expect(prUrl(e)).toBe('https://github.com/acme/app/pull/7')
   })
 })
+
+describe('revisão pelo gh (projeto só com git local)', () => {
+  it('a revisão aparece com o usuário do gh, não como orkio[bot]', () => {
+    const e = review({ reviewEvent: 'COMMENT', via: 'gh' })
+    expect(describeEvent(e, () => '')).toBe(
+      'Revisão publicada na PR #7 com o seu usuário do GitHub (gh) (comentário)'
+    )
+  })
+  it('autor da PR: o Orkio move para Revisado e diz por quê', () => {
+    const e = parseTaskEvent({
+      kind: 'moved',
+      source: 'automation',
+      fromStage: 'Revisando',
+      toStage: 'Revisado',
+      detail: { flow: 'review_self' }
+    })!
+    expect(describeEvent(e, () => '')).toContain('Revisão com alterações (autor da PR, pelo gh)')
+  })
+})

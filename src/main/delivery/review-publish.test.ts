@@ -200,6 +200,35 @@ describe('publish_review: aprovar', () => {
     expect(automation).toEqual(['p1'])
   })
 
+  it('só git local: publica pelo gh com o teu usuário; autor da PR vai como comentário e a tarefa vai para Revisado', async () => {
+    const ghPosted: unknown[] = []
+    const selfReviewed: string[] = []
+    const gh = {
+      isConfigured: () => true,
+      diffLines: async () => new Map([['src/a.ts', new Set([1, 2, 3])]]),
+      who: async () => ({ login: 'ana', author: true }),
+      postReview: async (...args: unknown[]) => {
+        ghPosted.push(args)
+        return { url: 'https://github.com/acme/app/pull/7#pullrequestreview-43' }
+      }
+    }
+    const { action, ctx, info, posted, automation } = await confirmed({
+      posterFor: () => gh,
+      onSelfChangesRequested: (projectId, taskId) =>
+        void selfReviewed.push(`${projectId}/${taskId}`)
+    })
+    expect(info.message).toContain('@ana')
+    expect(info.message).not.toContain('orkio[bot]')
+    expect(info.warning).toMatch(/autor da PR/)
+    const r = await action.run({ ...ctx, confirmed: info })
+    expect(r).toEqual({ ok: true })
+    expect(posted).toEqual([])
+    expect(ghPosted).toHaveLength(1)
+    expect((ghPosted[0] as unknown[])[3]).toMatchObject({ event: 'COMMENT' })
+    expect(selfReviewed).toEqual(['p1/t1'])
+    expect(automation).toEqual(['p1'])
+  })
+
   it('o gate guarda o texto limpo (sem HTML/imagens) e é exatamente esse texto que vai', async () => {
     const answer = JSON.stringify({
       event: 'COMMENT',

@@ -168,7 +168,12 @@ export function buildReviewMarkdown(
     ].filter(Boolean)
     parts.push(`Atenção: ${what.join(' e ')} (limite de tamanho). Veja o restante na PR.`, '')
   }
-  if (open.length === 0 && unread === 0) parts.push('Nenhum comentário pendente.', '')
+  const withBody = (extra.reviews ?? []).filter(
+    (r) => r.body.trim() && (r.state === 'CHANGES_REQUESTED' || r.state === 'COMMENTED')
+  )
+  if (open.length === 0 && unread === 0 && withBody.length === 0) {
+    parts.push('Nenhum comentário pendente.', '')
+  }
   for (const t of open) {
     const where = t.path ? `${t.path}${t.line ? `:${t.line}` : ''}` : 'geral'
     parts.push(`## ${where}${t.outdated ? ' (desatualizado)' : ''}`, '')
@@ -178,11 +183,13 @@ export function buildReviewMarkdown(
     const link = t.comments.find((c) => c.url)?.url
     if (link) parts.push(`Link: ${link}`, '')
   }
-  const withBody = (extra.reviews ?? []).filter(
-    (r) => r.body.trim() && (r.state === 'CHANGES_REQUESTED' || r.state === 'COMMENTED')
-  )
   if (withBody.length > 0) {
-    parts.push('## Revisões', '')
+    parts.push(
+      '## Revisões',
+      '',
+      'Revisões gerais (sem thread): responda com um comentário na PR citando o revisor.',
+      ''
+    )
     for (const r of withBody) {
       parts.push(`**${r.author ?? 'alguém'}** (${r.state}):`, '', quote(r.body), '')
     }
@@ -191,16 +198,18 @@ export function buildReviewMarkdown(
 }
 
 export interface ReviewThreadsDeps {
+  /** `via`: a API do Orkio (`app`) ou o `gh` do usuário (projeto só com git local). */
   graphql(
     query: string,
-    variables: Record<string, unknown>
+    variables: Record<string, unknown>,
+    via: 'app' | 'gh'
   ): Promise<{ data: unknown; errors: { type: string | null; path: string[] }[] }>
-  isConnected(): Promise<boolean>
+  isConnected(via: 'app' | 'gh'): Promise<boolean>
   /** Repositório do projeto (owner/name no github.com) e a PR da tarefa, pelos sinais em cache. */
   locate(
     projectId: string,
     taskId: string
-  ): { owner: string; repo: string; pr: PrRef | null } | null
+  ): { owner: string; repo: string; pr: PrRef | null; via?: 'app' | 'gh' } | null
   /** Relê os sinais quando a PR não está no cache (app recém-aberto). */
   refresh?(projectId: string): Promise<void>
   now?: () => number
@@ -224,15 +233,16 @@ export class ReviewThreadsService {
     }
     if (!found || !found.pr) return { ok: false, code: 'no_pr', message: REVIEW_MESSAGES.noPr }
     const { owner, repo, pr } = found
+    const via = found.via ?? 'app'
     const now = this.deps.now?.() ?? Date.now()
     const key = `${owner}/${repo}#${pr.number}`.toLowerCase()
     const hit = this.cache.get(key)
     if (!force && hit && now - hit.at < REVIEW_LIMITS.cacheMs) return { ok: true, value: hit.value }
-    if (!(await this.deps.isConnected().catch(() => false))) {
+    if (!(await this.deps.isConnected(via).catch(() => false))) {
       return { ok: false, code: 'no_github', message: REVIEW_MESSAGES.noGitHub }
     }
     try {
-      const r = await this.deps.graphql(REVIEW_QUERY, { owner, name: repo, number: pr.number })
+      const r = await this.deps.graphql(REVIEW_QUERY, { owner, name: repo, number: pr.number }, via)
       const parsed = r.data ? parseReviewData(r.data) : null
       if (!parsed) return { ok: false, code: 'failed', message: REVIEW_MESSAGES.failed }
       const value: ReviewThreadsResult = {

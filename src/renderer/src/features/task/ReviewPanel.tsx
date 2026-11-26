@@ -4,13 +4,16 @@ import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   reviewHeadline,
+  reviewsWithText,
+  type ReviewSummary,
   type ReviewThread,
   type ReviewThreadsResult
 } from '../../../../shared/review'
 import { Alert } from '../../components/Alert'
 import { ExternalLinkIcon } from '../../components/icons'
 import { MarkdownText } from '../../components/MarkdownText'
-import { plural } from '../../lib/format'
+import { formatDateTime, plural } from '../../lib/format'
+import { StatusToken, type StatusTone } from '../../components/StatusToken'
 import { CollapsibleHeader } from '../../components/CollapsibleHeader'
 import { useTaskView } from './task-view'
 import { ipcResult } from '../../lib/ipc'
@@ -23,6 +26,43 @@ type State =
 /** Texto de onde o comentário está: `arquivo:linha` ou "geral". */
 function threadWhere(t: Pick<ReviewThread, 'path' | 'line'>): string {
   return t.path ? `${t.path}${t.line ? `:${t.line}` : ''}` : 'geral'
+}
+
+const REVIEW_STATE: Record<string, { label: string; tone: StatusTone }> = {
+  CHANGES_REQUESTED: { label: 'Pediu alterações', tone: 'warning' },
+  COMMENTED: { label: 'Comentou', tone: 'neutral' }
+}
+
+/** Revisão de topo (o resumo, sem comentário em linha): quem, o que pediu e o texto. */
+function ReviewCard({
+  review,
+  defaultOpen
+}: {
+  review: ReviewSummary
+  defaultOpen: boolean
+}): React.JSX.Element {
+  const [open, setOpen] = useState(defaultOpen)
+  const state = REVIEW_STATE[review.state] ?? REVIEW_STATE['COMMENTED']!
+  return (
+    <li className="flex min-w-0 flex-col rounded-xl border border-border p-3">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleHeader open={open} className="gap-2 text-xs">
+          <span className="font-medium text-foreground">{review.author ?? 'alguém'}</span>
+          <StatusToken tone={state.tone} label={state.label} />
+          {review.at && (
+            <span className="ml-auto shrink-0 text-2xs text-subtle-foreground">
+              {formatDateTime(review.at)}
+            </span>
+          )}
+        </CollapsibleHeader>
+        <CollapsibleContent>
+          <div className="mt-2 text-[13px]">
+            <MarkdownText text={review.body} />
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </li>
+  )
 }
 
 function ThreadCard({ thread }: { thread: ReviewThread }): React.JSX.Element {
@@ -103,6 +143,13 @@ export function ReviewPanel({ active }: { active: boolean }): React.JSX.Element 
         </Alert>
       )}
       {data.truncated && <Alert tone="warning">Alguns textos longos foram cortados.</Alert>}
+      {reviewsWithText(data.reviews).length > 0 && (
+        <ul aria-label="Revisões" className="flex flex-col gap-2.5">
+          {reviewsWithText(data.reviews).map((r, i) => (
+            <ReviewCard key={`${r.author}-${r.at}-${i}`} review={r} defaultOpen={i === 0} />
+          ))}
+        </ul>
+      )}
       {open.length > 0 && (
         <ul aria-label="Comentários não resolvidos" className="flex flex-col gap-2.5">
           {open.map((t) => (

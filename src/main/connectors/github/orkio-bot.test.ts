@@ -97,6 +97,10 @@ describe('reposOf', () => {
       ])
     ).toEqual([{ owner: 'Acme', repo: 'orkio', projects: ['a', 'b'] }])
   })
+  it('projeto só com git local publica pelo gh: o bot não é usado (nem consultado)', () => {
+    const gitOnly = project('g', 'acme', 'painel')
+    expect(reposOf([{ ...gitOnly, repo: { ...gitOnly.repo!, access: 'git' } }])).toEqual([])
+  })
 })
 
 describe('OrkioBotService', () => {

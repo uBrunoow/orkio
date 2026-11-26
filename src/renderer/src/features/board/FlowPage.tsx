@@ -66,6 +66,7 @@ import {
 import { useProjectActivity } from '../overview/useProjectActivity'
 import { useProjectFlows } from '../task-flows/useProjectFlows'
 import { RuleDetail } from './RuleDetail'
+import { CopyFlowDialog, type FlowCopyOk } from './CopyFlowDialog'
 import type { BoardSettingsTab } from '../../app/routes'
 import {
   ORKIO_STAGE_PROPERTY_NAME,
@@ -288,6 +289,8 @@ export function FlowPage({
   const [stageOpen, setStageOpen] = useState(false)
   const [showAllEvents, setShowAllEvents] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [copyOpen, setCopyOpen] = useState(false)
+  const [pendingSetups, setPendingSetups] = useState<FlowCopyOk['setups']>([])
   const [viewingRule, setViewingRule] = useState<string | null>(null)
   const automationActivity = useProjectActivity(view.projectId, 'automation')
 
@@ -419,6 +422,30 @@ export function FlowPage({
       return { ...d, rules }
     })
 
+  /** Copiado de outro projeto: fluxos de tarefa novos já (as ligações dependem deles); o resto
+   * entra no rascunho e o "Como as colunas rodam" vale depois de salvar. */
+  async function applyCopy(copied: FlowCopyOk, sourceName: string): Promise<void> {
+    if (copied.flowsToAdd.length > 0) {
+      const saved = await ipcResult(() =>
+        window.orkio.taskFlows.saveFlows(view.projectId, [
+          ...(taskFlows?.flows ?? []),
+          ...copied.flowsToAdd
+        ])
+      )
+      if (!saved.ok) {
+        setMessage({ tone: 'danger', text: saved.error.message })
+        return
+      }
+      projectFlows.set(saved.value)
+    }
+    update((d) => ({ ...d, ...copied.draft }))
+    setPendingSetups(copied.setups)
+    setMessage({
+      tone: 'warning',
+      text: `Fluxo de ${sourceName} no rascunho. ${copied.warnings.join(' ')} Revise e salve para aplicar.`.trim()
+    })
+  }
+
   async function save(): Promise<void> {
     setSaving(true)
     setMessage(null)
@@ -427,6 +454,13 @@ export function FlowPage({
     if (!result.ok) {
       setMessage({ tone: 'danger', text: result.error.message })
       return
+    }
+    // Copiado de outro projeto: o modo de cada coluna, agora que as colunas existem.
+    if (pendingSetups.length > 0) {
+      for (const s of pendingSetups) {
+        await ipcResult(() => window.orkio.taskSetup.saveColumn(view.projectId, s.stageId, s.setup))
+      }
+      setPendingSetups([])
     }
     setEventsKey((n) => n + 1)
     // A tela continua aberta depois de salvar: o salvo vira o novo rascunho (e as ligações salvas
@@ -692,9 +726,24 @@ export function FlowPage({
             <DropdownMenuItem onSelect={restoreDefault}>Restaurar padrão</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void doExport()}>Exportar JSON</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void doImport()}>Importar JSON</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setCopyOpen(true)}>
+              Copiar de outro projeto…
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
+      <CopyFlowDialog
+        open={copyOpen}
+        onOpenChange={setCopyOpen}
+        target={{
+          projectId: view.projectId,
+          stages: initialDraft(view).stages,
+          options,
+          flows: taskFlows?.flows ?? []
+        }}
+        newId={() => newId('stage')}
+        onApply={(copied, sourceName) => void applyCopy(copied, sourceName)}
+      />
 
       <p className="-mt-2 text-xs text-muted-foreground tabular-nums" data-testid="flow-summary">
         {plural(draft.stages.length, 'coluna', 'colunas')}

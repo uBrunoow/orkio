@@ -12,7 +12,7 @@ import {
   type AlvaCommand
 } from './alva'
 import { ACTION_VARS, ORKIO_ACTIONS } from './orkio-actions'
-import { REVIEW_PATH } from './orkio-scratch'
+import { PR_COMMENTS_APPLY, PR_COMMENTS_PLAN } from './native-flows'
 import { REVIEW_COMMENTS_MAX } from './review-publish'
 import {
   FLOW_END,
@@ -220,11 +220,10 @@ export function alvaDeliverFlow(): Flow {
 }
 
 /** Pedido do passo de plano (só leitura): o agente lê os comentários e diz o que vai fazer. */
-export const REVIEW_PLAN_PROMPT = `Leia ${REVIEW_PATH} (comentários de revisão não resolvidos da PR #${v(ACTION_VARS.reviewPr)}). Para cada um, diga o que vai mudar e onde, ou por que não vai mudar. Não altere arquivos. Responda só com o plano, em pt-BR, numerado na ordem dos comentários.`
+export const REVIEW_PLAN_PROMPT = PR_COMMENTS_PLAN
 
 /** Pedido do passo de correção (modo entrega), depois que você aprova o plano. */
-export const REVIEW_APPLY_PROMPT =
-  'Plano aprovado. Aplique as correções, rode os testes do projeto, faça o commit e responda cada thread no GitHub dizendo o que foi feito (resolva as que foram corrigidas).'
+export const REVIEW_APPLY_PROMPT = PR_COMMENTS_APPLY
 
 export function alvaReviewedFlow(): Flow {
   return {
@@ -291,9 +290,9 @@ export function alvaReviewedFlow(): Flow {
       PUSH(),
       {
         id: 'pedir-review',
-        name: 'Pedir review',
+        name: 'Pedir nova revisão a quem revisou',
         type: 'orkio_action',
-        action: ORKIO_ACTIONS.request_review.id
+        action: ORKIO_ACTIONS.rerequest_review.id
       }
     ]
   }

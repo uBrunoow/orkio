@@ -170,7 +170,7 @@ export const TASK_EVENTS = {
       orchestrator: field(oneOf(['pull', 'handoff'])),
       agent: str,
       agentKey: str,
-      flow: field(oneOf(['stage_removed', 'pr_merged'])),
+      flow: field(oneOf(['stage_removed', 'pr_merged', 'review_self'])),
       removedStage: str,
       notionStatus: str
     }
@@ -346,6 +346,8 @@ export const TASK_EVENTS = {
       command: str,
       reviewers: num,
       reviewEvent: str,
+      /** Revisão publicada pelo `gh` do usuário (projeto só com git local), não como orkio[bot]. */
+      via: field(oneOf(['gh'])),
       comments: num,
       reviewId: num,
       pr

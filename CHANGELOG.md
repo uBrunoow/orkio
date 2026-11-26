@@ -8,12 +8,16 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ### Adicionado
 
+- "Copiar de outro projeto…" no Fluxo do projeto: traz colunas, automações, o fluxo de cada coluna, os fluxos de tarefa usados e o "Como as colunas rodam" para o rascunho, reaproveitando as colunas com o mesmo papel (as tarefas ficam onde estão).
+- Projetos só com git local leem o GitHub pelo `gh` da sua máquina a cada 5 minutos (ou na hora, em "Atualizar"): PRs, CI, revisões e comentários aparecem e as automações do quadro andam (PR aberta → Revisando, alterações pedidas → Revisado, merge → Finalizada). Pedir review e publicar a revisão também saem pelo `gh`, com o seu usuário.
 - Aba "Notion" no painel da tarefa: título, status, prioridade, responsáveis e a descrição da página, com "Abrir no Notion".
 - Agentes enviam e abrem PR sozinhos (opção por projeto em Quadro e automações › Entrega), só para as branches de destino escolhidas (`dev` por padrão), nunca para main ou master.
 - Subagentes mostram o que estão fazendo: o passo atual de quem trabalha e, ao abrir, a lista de passos de cada um.
 
 ### Corrigido
 
+- Corretor da PR (coluna Revisado): uma revisão que pede alterações só no texto, sem comentário em linha, agora conta; antes o fluxo terminava com "nada a fazer". O resumo do que fazer vem sempre para você aprovar (também no "Rodar uma vez"); aprovado, o agente corrige, faz o push, responde cada conversa e o revisor da revisão geral (comentário na PR citando-o) e o Orkio pede nova revisão a quem revisou, sem outra confirmação.
+- A aba Revisão mostra as revisões com texto (pedir alterações ou comentar) e o título diz quem pediu alterações; antes dizia "Nenhum comentário pendente" quando a revisão não tinha comentário em linha.
 - A branch de destino da PR passa a ser conferida (`gh pr create`/`edit --base`, `gh api` e GraphQL) quando o projeto restringe os destinos.
 - Os agentes não gravam mais o link da PR na página da tarefa no Notion (o Orkio liga a PR pela branch).
 - `git commit` com a mensagem num heredoc (`-F - <<'EOF'`) não é mais bloqueado como "fora do ambiente da tarefa" quando a mensagem cita caminhos como `/api/...`.
