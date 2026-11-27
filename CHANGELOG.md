@@ -6,6 +6,12 @@ visível; o `pnpm release` move a seção para a versão nova e as notas do rele
 
 ## [Não lançado]
 
+## [0.2.26] - 2026-11-27
+
+### Mudado
+
+- fix(permissões): "sempre" funciona com cd para a pasta e com heredoc.
+
 ## [0.2.25] - 2026-11-26
 
 ### Corrigido
