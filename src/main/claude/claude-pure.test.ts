@@ -563,6 +563,30 @@ describe('política de permissões', () => {
     expect(bash('B=/etc; ls $B', rules).decision).toBe('deny')
   })
 
+  it('cd para uma pasta do worktree não vira a sugestão nem trava o "sempre"', () => {
+    const cmd = `cd ${WT}/frontend && pnpm test -- --run`
+    expect(bash(cmd)).toEqual({ decision: 'ask', suggestion: 'pnpm test' })
+    const rules = [{ tool: 'Bash', pattern: 'pnpm test' }]
+    expect(bash(cmd, rules).decision).toBe('allow')
+    expect(bash('cd frontend; pnpm test', rules).decision).toBe('allow')
+    // Só o cd não basta: o comando depois dele precisa da regra.
+    expect(bash(`cd ${WT}/frontend && rm -rf build`, rules).decision).toBe('ask')
+    // cd sozinho (HOME), cd -, variável e caminho de fora continuam fora da regra.
+    expect(bash('cd && pnpm test', rules).decision).toBe('ask')
+    expect(bash('cd - && pnpm test', rules).decision).toBe('ask')
+    expect(bash('cd $D && pnpm test', rules).decision).toBe('ask')
+    expect(bash('cd /tmp && pnpm test', rules).decision).toBe('deny')
+    // Uma regra `cd` salva antes da correção não libera o resto.
+    expect(bash(`cd ${WT} && rm -rf src`, [{ tool: 'Bash', pattern: 'cd' }]).decision).toBe('ask')
+  })
+
+  it('corpo do heredoc é entrada do programa: a regra vale pelo programa', () => {
+    const cmd = `cd ${WT}/frontend; python3 - <<'EOF'\ndef sub(p, old, new): s=open(p).read(); assert old in s\nEOF`
+    expect(bash(cmd)).toEqual({ decision: 'ask', suggestion: 'python3' })
+    expect(bash(cmd, [{ tool: 'Bash', pattern: 'python3' }]).decision).toBe('allow')
+    expect(bash(`${cmd}\nrm -rf x`, [{ tool: 'Bash', pattern: 'python3' }]).decision).toBe('ask')
+  })
+
   it('pergunta do Claude, ferramentas inofensivas e desconhecidas', () => {
     expect(evaluatePermission({ tool: 'AskUserQuestion', input: {} }, ctx)).toEqual({
       decision: 'question'

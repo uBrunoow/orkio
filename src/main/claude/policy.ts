@@ -427,6 +427,18 @@ const HEREDOC_DATA_RECEIVERS = new Set(['git', 'cat'])
  * que vai para um shell (`bash <<EOF`) ou outro programa continua conferido linha a linha.
  */
 function withoutDataHeredocs(command: string): string {
+  return withoutHeredocBodies(command, (receiver) => HEREDOC_DATA_RECEIVERS.has(receiver))
+}
+
+/**
+ * O comando sem o corpo dos heredocs aceitos por `skip` (todos, por padrão). Para casar com as
+ * regras "sempre", o corpo é a entrada do programa (`python3 - <<'EOF'`), não outros comandos: a
+ * regra vale pelo programa que o recebe.
+ */
+function withoutHeredocBodies(
+  command: string,
+  skip: (receiver: string) => boolean = () => true
+): string {
   const lines = command.split('\n')
   const kept: string[] = []
   for (let i = 0; i < lines.length; i++) {
@@ -439,7 +451,7 @@ function withoutDataHeredocs(command: string): string {
     const delimiter = start[2]!
     let end = i + 1
     while (end < lines.length && lines[end]!.trim() !== delimiter) end++
-    if (!receiver || !HEREDOC_DATA_RECEIVERS.has(receiver)) continue
+    if (!receiver || !skip(receiver)) continue
     i = end // pula o corpo e a linha do delimitador
   }
   return kept.join('\n')
@@ -462,10 +474,29 @@ function escapesWorktree(segment: string, worktree: string): boolean {
   return false
 }
 
+/**
+ * `cd`/`pushd` para uma pasta escrita por extenso (sem variável, sem `-`): só muda a pasta. Depois
+ * da checagem do worktree (que recusa caminho de fora), o trecho não precisa de regra "sempre":
+ * senão `cd <pasta> && pnpm test` pediria uma regra `cd` que nunca libera o `pnpm test`.
+ * `cd` sozinho (vai para o HOME) e `cd -` continuam pedindo.
+ */
+function isPlainCd(segment: string): boolean {
+  const p = program(shellWords(segment))
+  if (!p || (p.name !== 'cd' && p.name !== 'pushd')) return false
+  const [dir, ...rest] = p.args
+  return rest.length === 0 && dir !== undefined && !/^[-~]|[$`]/.test(dir)
+}
+
+/** Trechos que casam com as regras "sempre": sem corpo de heredoc e sem `cd` para dentro. */
+function ruleSegments(command: string): string[] {
+  return shellSegments(withoutHeredocBodies(command)).filter((s) => !isPlainCd(s))
+}
+
 /** Prefixo sugerido para "sempre neste projeto": programa + subcomando (ex.: "npm test"). */
 export function suggestPattern(command: string): string {
   // Trecho só de atribuição (`B=/caminho;`) não roda nada: a sugestão é o primeiro programa.
-  const segments = shellSegments(command)
+  // `cd` para uma pasta também não: a regra útil é a do comando que vem depois.
+  const segments = ruleSegments(command)
   const first = segments.find((s) => program(shellWords(s))) ?? segments[0] ?? command
   const p = program(shellWords(first))
   if (!p) return first.trim()
@@ -600,10 +631,8 @@ function evaluate(
       // "Sempre neste projeto" nunca vale para comandos de entrega (sugestão vazia).
       return { decision: 'ask', suggestion: '', delivery }
     }
-    if (
-      segments.length > 0 &&
-      segments.every((s) => rules.some((r) => matchesRule(s, r.pattern)))
-    ) {
+    const ruled = ruleSegments(command)
+    if (ruled.length > 0 && ruled.every((s) => rules.some((r) => matchesRule(s, r.pattern)))) {
       return { decision: 'allow', reason: 'aprovado sempre neste projeto' }
     }
     // Fase 3: num passo só de leitura (ex.: o revisor), ler o git dentro da pasta não pergunta.
